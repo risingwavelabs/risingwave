@@ -12,6 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![feature(lint_reasons)]
+#![feature(let_chains)]
+#![feature(lazy_cell)]
+#![feature(impl_trait_in_assoc_type)]
+#![cfg_attr(coverage, feature(no_coverage))]
+
+use risingwave_meta::*;
+
 pub mod backup_service;
 pub mod cloud_service;
 pub mod cluster_service;
@@ -57,5 +65,27 @@ impl<S> Stream for RwReceiverStream<S> {
         self.inner
             .poll_recv(cx)
             .map(|opt| opt.map(|res| res.map_err(Into::into)))
+    }
+}
+
+use std::net::SocketAddr;
+
+#[derive(Clone)]
+pub struct AddressInfo {
+    pub advertise_addr: String,
+    pub listen_addr: SocketAddr,
+    pub prometheus_addr: Option<SocketAddr>,
+    pub dashboard_addr: Option<SocketAddr>,
+    pub ui_path: Option<String>,
+}
+impl Default for AddressInfo {
+    fn default() -> Self {
+        Self {
+            advertise_addr: "".to_string(),
+            listen_addr: SocketAddr::V4("127.0.0.1:0000".parse().unwrap()),
+            prometheus_addr: None,
+            dashboard_addr: None,
+            ui_path: None,
+        }
     }
 }

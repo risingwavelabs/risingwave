@@ -46,7 +46,7 @@ macro_rules! send_await_with_err_check {
     };
 }
 
-pub(crate) struct CoordinatorWorker {
+pub struct CoordinatorWorker {
     param: SinkParam,
     request_streams: Vec<SinkWriterRequestStream>,
     response_senders: Vec<SinkCoordinatorResponseSender>,
@@ -60,7 +60,7 @@ extern "Rust" {
 }
 
 impl CoordinatorWorker {
-    pub(crate) async fn run(
+    pub async fn run(
         first_writer_request: NewSinkWriterRequest,
         request_rx: UnboundedReceiver<NewSinkWriterRequest>,
     ) {
@@ -83,7 +83,7 @@ impl CoordinatorWorker {
         Self::execute_coordinator(first_writer_request, request_rx, coordinator).await
     }
 
-    pub(crate) async fn execute_coordinator(
+    pub async fn execute_coordinator(
         first_writer_request: NewSinkWriterRequest,
         request_rx: UnboundedReceiver<NewSinkWriterRequest>,
         coordinator: impl SinkCommitCoordinator,

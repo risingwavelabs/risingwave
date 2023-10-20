@@ -24,7 +24,6 @@ use super::generic::{self};
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
 use crate::expr::{Expr, ExprRewriter};
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::Distribution;

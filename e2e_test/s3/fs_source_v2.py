@@ -39,10 +39,7 @@ def format_csv(data, with_header):
             writer.writeheader()
         for item_data in file_data:
             writer.writerow(item_data)
-        # For now paser can only handle \n line seperator,
-        # and tailing white spaces are not allowed.
-        # TODO: remove replace and rstrip later
-        csv_files.append(ostream.getvalue().replace('\r', '').rstrip())
+        csv_files.append(ostream.getvalue())
     return csv_files
 
 def do_test(config, file_num, item_num_per_file, prefix, fmt):

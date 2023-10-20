@@ -17,7 +17,6 @@ use risingwave_pb::stream_plan::expand_node::Subset;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ExpandNode;
 
-use super::stream::StreamPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Distribution;
