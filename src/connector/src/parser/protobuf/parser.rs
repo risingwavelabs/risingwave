@@ -83,19 +83,21 @@ impl ProtobufParserConfig {
         let message_name = &protobuf_config.message_name;
         let url = handle_sr_list(location.as_str())?;
 
+        if let Some(name) = protobuf_config.key_message_name {
+            // https://docs.confluent.io/platform/7.5/control-center/topics/schema.html#c3-schemas-best-practices-key-value-pairs
+            return Err(RwError::from(ProtocolError(format!(
+                "key.message = {name} not used. Protobuf key unsupported."
+            ))));
+        }
         let schema_bytes = if protobuf_config.use_schema_registry {
-            let (schema_key, schema_value) = get_subject_by_strategy(
+            let schema_value = get_subject_by_strategy(
                 &protobuf_config.name_strategy,
                 protobuf_config.topic.as_str(),
-                protobuf_config.key_message_name.as_deref(),
                 Some(message_name.as_ref()),
-                protobuf_config.enable_upsert,
+                false,
             )?;
-            tracing::debug!(
-                "infer key subject {}, value subject {}",
-                schema_key,
-                schema_value,
-            );
+            tracing::debug!("infer value subject {schema_value}");
+
             let client = Client::new(url, &protobuf_config.client_config)?;
             compile_file_descriptor_from_schema_registry(schema_value.as_str(), &client).await?
         } else {

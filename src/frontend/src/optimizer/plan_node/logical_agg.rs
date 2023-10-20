@@ -31,7 +31,6 @@ use crate::expr::{
     WindowFunction,
 };
 use crate::optimizer::plan_node::generic::GenericPlanNode;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalDedup, LogicalProject,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
