@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
@@ -138,8 +138,9 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     epoch_set: BTreeSet<u64>,
     memory_limiter: Option<Arc<MemoryLimiter>>,
 
-    vnode_bitmap_builder: Option<BitmapBuilder>,
+    vnode_bitmap_mapping: HashMap<u32, BitmapBuilder>,
     last_vnode: usize,
+    enable_vnode_bitmap: bool,
 }
 
 impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
@@ -166,12 +167,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         memory_limiter: Option<Arc<MemoryLimiter>>,
         enable_vnode_bitmap: bool,
     ) -> Self {
-        let vnode_bitmap_builder = if enable_vnode_bitmap {
-            Some(BitmapBuilder::zeroed(VirtualNode::COUNT))
-        } else {
-            None
-        };
-
         Self {
             options: options.clone(),
             writer,
@@ -195,8 +190,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             range_tombstone_size: 0,
             epoch_set: BTreeSet::default(),
             memory_limiter,
-            vnode_bitmap_builder,
+            vnode_bitmap_mapping: HashMap::default(),
             last_vnode: usize::MAX,
+            enable_vnode_bitmap,
         }
     }
 
@@ -333,6 +329,13 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             if !self.block_builder.is_empty() {
                 self.build_block().await?;
             }
+
+            // init vnode bitmap builder
+            if self.enable_vnode_bitmap {
+                self.last_vnode = usize::MAX;
+                self.vnode_bitmap_mapping
+                    .insert(table_id, BitmapBuilder::zeroed(VirtualNode::COUNT));
+            }
         } else if is_new_user_key
             && self.block_builder.approximate_len() >= self.options.block_capacity
             && could_switch_block
@@ -357,7 +360,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let table_id = full_key.user_key.table_id.table_id();
         let vnode_id = full_key.user_key.get_vnode_id();
 
-        if let Some(vnode_bitmap_builder) = self.vnode_bitmap_builder.as_mut() && vnode_id != self.last_vnode {
+        if self.enable_vnode_bitmap && vnode_id != self.last_vnode {
+            let vnode_bitmap_builder = self.vnode_bitmap_mapping.get_mut(&table_id).unwrap();
             vnode_bitmap_builder.set(vnode_id, true);
             self.last_vnode = vnode_id;
         }
@@ -559,9 +563,16 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }
         };
 
-        let vnode_bitmap = self
-            .vnode_bitmap_builder
-            .map(|vnode_bitmap_builder| vnode_bitmap_builder.finish().to_protobuf());
+        let vnode_bitmap_mapping = {
+            let mut mapping = HashMap::default();
+
+            for (table_id, vnode_bitmap_builder) in self.vnode_bitmap_mapping {
+                let buf = vnode_bitmap_builder.finish().to_protobuf();
+                mapping.insert(table_id, buf);
+            }
+
+            mapping
+        };
 
         let sst_info = SstableInfo {
             object_id: self.sstable_id,
@@ -581,7 +592,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             min_epoch: cmp::min(min_epoch, tombstone_min_epoch),
             max_epoch: cmp::max(max_epoch, tombstone_max_epoch),
             range_tombstone_count: meta.monotonic_tombstone_events.len() as u64,
-            vnode_bitmap,
+            vnode_bitmap_mapping,
         };
         tracing::trace!(
             "meta_size {} bloom_filter_size {}  add_key_counts {} stale_key_count {} min_epoch {} max_epoch {} epoch_count {}",
