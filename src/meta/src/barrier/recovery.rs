@@ -141,7 +141,9 @@ impl GlobalBarrierManager {
 
         // Mview progress needs to be recovered.
         tracing::info!("recovering mview progress");
-        self.recover_mview_progress().await.expect("recover mview progress should not fail");
+        self.recover_mview_progress()
+            .await
+            .expect("recover mview progress should not fail");
         tracing::info!("recovered mview progress");
 
         // We take retry into consideration because this is the latency user sees for a cluster to
