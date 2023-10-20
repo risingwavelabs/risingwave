@@ -25,7 +25,9 @@ When a user needs to make a prediction using these features, they can provide th
 
 1. Build docker. Kafka RisingWave and Feature Store.
 
-```docker compose up --build```
+```
+docker compose up --build
+```
 
 
 The Feature Store system performs several tasks in sequence:
@@ -40,7 +42,9 @@ The Feature Store system performs several tasks in sequence:
 
 2. Then we can get the simulation results for Feature store in `.log`.
 
-```cat .log/simulator_log```
+```
+cat .log/simulator_log
+```
 
 # Account change feature store
 #### Case Description
@@ -53,8 +57,12 @@ In this case, we need to calculate the frequency and count of user account chang
 
 1. Build docker. Kafka RisingWave and Feature Store.
 
-```docker compose build --build-arg BUILD_ARG=mfa```
+```
+docker compose build --build-arg BUILD_ARG=mfa
+```
 
 2. Then we can get the simulation results for Feature store in `.log`.
 
-```cat .log/simulator_log```
+```
+cat .log/simulator_log
+```

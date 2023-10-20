@@ -59,7 +59,6 @@ use risingwave_pb::batch_plan::ExchangeInfo;
 use super::super::plan_node::*;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::FragmentId;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
@@ -311,23 +310,6 @@ impl RequiredDist {
         match plan.convention() {
             Convention::Stream => StreamExchange::new_no_shuffle(plan).into(),
             Convention::Logical | Convention::Batch => unreachable!(),
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn enforce_stream_if_not_satisfies(
-        &self,
-        plan: stream::PlanRef,
-    ) -> Result<stream::PlanRef> {
-        if !plan.distribution().satisfies(self) {
-            // FIXME(st1page);
-            Ok(stream::Exchange {
-                dist: self.to_dist(),
-                input: plan,
-            }
-            .into())
-        } else {
-            Ok(plan)
         }
     }
 

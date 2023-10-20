@@ -107,7 +107,7 @@ impl GlobalBarrierManager {
     /// the cluster or `risectl` command. Used for debugging purpose.
     ///
     /// Returns the new state of the barrier manager after recovery.
-    pub(crate) async fn recovery(
+    pub async fn recovery(
         &self,
         prev_epoch: TracedEpoch,
         paused_reason: Option<PausedReason>,

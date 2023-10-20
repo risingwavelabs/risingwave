@@ -31,7 +31,7 @@ pub enum StreamingJob {
 }
 
 impl StreamingJob {
-    pub(crate) fn mark_created(&mut self) {
+    pub fn mark_created(&mut self) {
         let created_at_epoch = Some(Epoch::now().0);
         match self {
             StreamingJob::MaterializedView(table) => table.created_at_epoch = created_at_epoch,
@@ -48,7 +48,7 @@ impl StreamingJob {
         }
     }
 
-    pub(crate) fn mark_initialized(&mut self) {
+    pub fn mark_initialized(&mut self) {
         let initialized_at_epoch = Some(Epoch::now().0);
         match self {
             StreamingJob::MaterializedView(table) => {

@@ -255,7 +255,7 @@ impl Cluster {
 
         // meta node
         for i in 1..=conf.meta_nodes {
-            let opts = risingwave_meta::MetaNodeOpts::parse_from([
+            let opts = risingwave_meta_node::MetaNodeOpts::parse_from([
                 "meta-node",
                 "--config-path",
                 conf.config_path.as_str(),
@@ -276,7 +276,7 @@ impl Cluster {
                 .create_node()
                 .name(format!("meta-{i}"))
                 .ip([192, 168, 1, i as u8].into())
-                .init(move || risingwave_meta::start(opts.clone()))
+                .init(move || risingwave_meta_node::start(opts.clone()))
                 .build();
         }
 

@@ -14,7 +14,7 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::model_v2::I32Array;
+use crate::model_v2::{ConnectionId, I32Array, SinkId};
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
@@ -31,10 +31,8 @@ pub enum SinkType {
 #[sea_orm(table_name = "sink")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub sink_id: i32,
+    pub sink_id: SinkId,
     pub name: String,
-    pub schema_id: i32,
-    pub database_id: i32,
     pub columns: Option<Json>,
     pub pk_column_ids: Option<Json>,
     pub distribution_key: Option<I32Array>,
@@ -42,7 +40,7 @@ pub struct Model {
     pub sink_type: SinkType,
     pub properties: Option<Json>,
     pub definition: String,
-    pub connection_id: Option<i32>,
+    pub connection_id: Option<ConnectionId>,
     pub db_name: String,
     pub sink_from_name: String,
 }
@@ -58,14 +56,6 @@ pub enum Relation {
     )]
     Connection,
     #[sea_orm(
-        belongs_to = "super::database::Entity",
-        from = "Column::DatabaseId",
-        to = "super::database::Column::DatabaseId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Database,
-    #[sea_orm(
         belongs_to = "super::object::Entity",
         from = "Column::SinkId",
         to = "super::object::Column::Oid",
@@ -73,14 +63,6 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Object,
-    #[sea_orm(
-        belongs_to = "super::schema::Entity",
-        from = "Column::SchemaId",
-        to = "super::schema::Column::SchemaId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Schema,
 }
 
 impl Related<super::connection::Entity> for Entity {
@@ -89,21 +71,9 @@ impl Related<super::connection::Entity> for Entity {
     }
 }
 
-impl Related<super::database::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Database.def()
-    }
-}
-
 impl Related<super::object::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Object.def()
-    }
-}
-
-impl Related<super::schema::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Schema.def()
     }
 }
 

@@ -22,7 +22,9 @@ pub struct InputRefCounter {
     pub counter: HashMap<usize, usize>,
 }
 
-impl ExprVisitor<()> for InputRefCounter {
+impl ExprVisitor for InputRefCounter {
+    type Result = ();
+
     fn merge(_: (), _: ()) {}
 
     fn visit_input_ref(&mut self, input_ref: &InputRef) {
