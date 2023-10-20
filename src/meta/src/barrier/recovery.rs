@@ -119,7 +119,7 @@ impl GlobalBarrierManager {
         &self,
         prev_epoch: TracedEpoch,
         paused_reason: Option<PausedReason>,
-        clean_dirty_tables: bool,
+        bootstrap_recovery: bool,
     ) -> BarrierManagerState {
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
@@ -127,7 +127,7 @@ impl GlobalBarrierManager {
             .await;
 
         tracing::info!("recovery start!");
-        if clean_dirty_tables {
+        if bootstrap_recovery {
             self.clean_dirty_tables()
                 .await
                 .expect("clean dirty tables should not fail");
@@ -146,9 +146,18 @@ impl GlobalBarrierManager {
         let state = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
                 let recovery_result: MetaResult<_> = try {
-                    tracing::info!("recovering mview progress");
-                    self.recover_mview_progress().await?;
-                    tracing::info!("recovered mview progress");
+                    if bootstrap_recovery {
+                        // Bootstrap recovery is a special case for recovering background ddl.
+                        // If some CN fails,
+                        // background ddl should still be managed by stream manager.
+                        // Only if the meta node restarts, then stream manager's in-memory state
+                        // would be erased.
+                        // In that case, we need to recover the progress, so that barrier manager
+                        // can handle it.
+                        tracing::info!("recovering mview progress");
+                        self.recover_mview_progress().await?;
+                        tracing::info!("recovered mview progress");
+                    }
 
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.

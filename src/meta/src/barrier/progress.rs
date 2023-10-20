@@ -140,9 +140,15 @@ impl Progress {
     }
 }
 
+/// There are 2 kinds of `TrackingJobs`:
+/// 1. `New`. This refers to the "New" type of tracking job.
+///    It is instantiated and managed by the stream manager.
+///    On recovery, the stream manager will stop managing the job.
+/// 2. `Recovered`. This refers to the "Recovered" type of tracking job.
+///    On recovery, the barrier manager will recover and start managing the job.
 pub enum TrackingJob {
-    Recovered(RecoveredTrackingJob),
     New(TrackingCommand),
+    Recovered(RecoveredTrackingJob),
 }
 
 impl TrackingJob {
