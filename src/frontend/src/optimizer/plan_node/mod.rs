@@ -57,6 +57,58 @@ pub trait PlanNodeMeta {
     fn convention(&self) -> Convention;
 }
 
+pub trait ConventionMarker {
+    fn value() -> Convention;
+}
+pub trait PhysicalConventionMarker: ConventionMarker {}
+
+pub struct Logical;
+impl ConventionMarker for Logical {
+    fn value() -> Convention {
+        Convention::Logical
+    }
+}
+
+pub struct Batch;
+impl ConventionMarker for Batch {
+    fn value() -> Convention {
+        Convention::Batch
+    }
+}
+impl PhysicalConventionMarker for Batch {}
+
+pub struct Stream;
+impl ConventionMarker for Stream {
+    fn value() -> Convention {
+        Convention::Stream
+    }
+}
+impl PhysicalConventionMarker for Stream {}
+
+pub trait StaticPlanNodeMeta {
+    type Convention: ConventionMarker;
+
+    fn node_type(&self) -> PlanNodeType;
+    fn plan_base(&self) -> &PlanBase;
+}
+
+impl<P> PlanNodeMeta for P
+where
+    P: StaticPlanNodeMeta,
+{
+    fn node_type(&self) -> PlanNodeType {
+        P::node_type(self)
+    }
+
+    fn plan_base(&self) -> &PlanBase {
+        P::plan_base(self)
+    }
+
+    fn convention(&self) -> Convention {
+        P::Convention::value()
+    }
+}
+
 /// The common trait over all plan nodes. Used by optimizer framework which will treat all node as
 /// `dyn PlanNode`
 ///
@@ -194,7 +246,7 @@ pub trait VisitPlan: Visit<PlanRef> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Convention {
     Logical,
     Batch,
@@ -436,7 +488,7 @@ impl PlanNodeMeta for PlanRef {
 /// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
 impl<P> GenericPlanRef for P
 where
-    P: PlanNodeMeta + Eq + Hash,
+    P: StaticPlanNodeMeta + Eq + Hash,
 {
     fn id(&self) -> PlanNodeId {
         self.plan_base().id()
@@ -459,22 +511,49 @@ where
     }
 }
 
-/// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
-// TODO: further constrain the convention to be `Stream` or `Batch`.
+impl GenericPlanRef for PlanRef {
+    fn id(&self) -> PlanNodeId {
+        self.plan_base().id()
+    }
+
+    fn schema(&self) -> &Schema {
+        self.plan_base().schema()
+    }
+
+    fn stream_key(&self) -> Option<&[usize]> {
+        self.plan_base().stream_key()
+    }
+
+    fn ctx(&self) -> OptimizerContextRef {
+        self.plan_base().ctx()
+    }
+
+    fn functional_dependency(&self) -> &FunctionalDependencySet {
+        self.plan_base().functional_dependency()
+    }
+}
+
 impl<P> PhysicalPlanRef for P
 where
-    P: PlanNodeMeta + Eq + Hash,
+    P: Eq + Hash,
+    P: StaticPlanNodeMeta,
+    P::Convention: PhysicalConventionMarker,
 {
     fn distribution(&self) -> &Distribution {
         self.plan_base().distribution()
     }
 }
 
-/// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
-// TODO: further constrain the convention to be `Stream`.
+impl PhysicalPlanRef for PlanRef {
+    fn distribution(&self) -> &Distribution {
+        self.plan_base().distribution()
+    }
+}
+
 impl<P> StreamPlanRef for P
 where
-    P: PlanNodeMeta + Eq + Hash,
+    P: Eq + Hash,
+    P: StaticPlanNodeMeta<Convention = Stream>,
 {
     fn append_only(&self) -> bool {
         self.plan_base().append_only()
@@ -489,12 +568,31 @@ where
     }
 }
 
-/// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
-// TODO: further constrain the convention to be `Batch`.
+impl StreamPlanRef for PlanRef {
+    fn append_only(&self) -> bool {
+        self.plan_base().append_only()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.plan_base().emit_on_window_close()
+    }
+
+    fn watermark_columns(&self) -> &FixedBitSet {
+        self.plan_base().watermark_columns()
+    }
+}
+
 impl<P> BatchPlanRef for P
 where
-    P: PlanNodeMeta + Eq + Hash,
+    P: Eq + Hash,
+    P: StaticPlanNodeMeta<Convention = Batch>,
 {
+    fn order(&self) -> &Order {
+        self.plan_base().order()
+    }
+}
+
+impl BatchPlanRef for PlanRef {
     fn order(&self) -> &Order {
         self.plan_base().order()
     }
@@ -1078,15 +1176,14 @@ macro_rules! impl_plan_node_meta {
                 $( [<$convention $name>] ),*
             }
 
-            $(impl PlanNodeMeta for [<$convention $name>] {
-                fn node_type(&self) -> PlanNodeType{
+            $(impl StaticPlanNodeMeta for [<$convention $name>] {
+                type Convention = $convention;
+
+                fn node_type(&self) -> PlanNodeType {
                     PlanNodeType::[<$convention $name>]
                 }
                 fn plan_base(&self) -> &PlanBase {
                     &self.base
-                }
-                fn convention(&self) -> Convention {
-                    Convention::$convention
                 }
             })*
         }
