@@ -15,12 +15,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow};
+use anyhow::anyhow;
 use sea_orm::{
     ConnectionTrait, DatabaseBackend, DatabaseConnection, FromQueryResult, Statement,
     TransactionTrait, Value,
 };
-
 use tokio::sync::watch;
 use tokio::sync::watch::Receiver;
 use tokio::time;
