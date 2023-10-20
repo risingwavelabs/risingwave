@@ -49,7 +49,7 @@ hyper = "0.14"
 hytra = { workspace = true }
 itertools = "0.11"
 itoa = "1.0"
-jsonbb = { git = "https://github.com/risingwavelabs/jsonbb.git", rev = "45f7b53" }
+jsonbb = { git = "https://github.com/risingwavelabs/jsonbb.git", rev = "d48c3e9" }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"

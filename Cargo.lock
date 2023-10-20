@@ -4115,7 +4115,7 @@ dependencies = [
 [[package]]
 name = "jsonbb"
 version = "0.1.0"
-source = "git+https://github.com/risingwavelabs/jsonbb.git?rev=45f7b53#45f7b53f44c859168aec27dbc4062ff609f72675"
+source = "git+https://github.com/risingwavelabs/jsonbb.git?rev=d48c3e9#d48c3e9cfd19bc106c1df8df3de096c1f8e5dab0"
 dependencies = [
  "bytes",
  "serde",
