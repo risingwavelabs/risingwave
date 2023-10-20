@@ -83,7 +83,6 @@ use crate::rpc::election::etcd::EtcdElectionClient;
 use crate::rpc::election::sql::{
     MySqlDriver, PostgresDriver, SqlBackendElectionClient, SqliteDriver,
 };
-use crate::rpc::election::ElectionClient;
 use crate::rpc::metrics::{
     start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
 };

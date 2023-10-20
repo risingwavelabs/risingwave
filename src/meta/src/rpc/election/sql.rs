@@ -45,13 +45,13 @@ impl<T: SqlDriver> SqlBackendElectionClient<T> {
 }
 
 #[derive(sqlx::FromRow, Debug, FromQueryResult)]
-pub(crate) struct ElectionRow {
+pub struct ElectionRow {
     service: String,
     id: String,
 }
 
 #[async_trait::async_trait]
-pub(crate) trait SqlDriver: Send + Sync + 'static {
+pub trait SqlDriver: Send + Sync + 'static {
     async fn init_database(&self) -> MetaResult<()>;
 
     async fn update_heartbeat(&self, service_name: &str, id: &str) -> MetaResult<()>;
