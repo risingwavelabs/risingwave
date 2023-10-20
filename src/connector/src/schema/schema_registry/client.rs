@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -33,6 +33,18 @@ pub struct SchemaRegistryAuth {
 
 impl From<&HashMap<String, String>> for SchemaRegistryAuth {
     fn from(props: &HashMap<String, String>) -> Self {
+        const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
+        const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
+
+        SchemaRegistryAuth {
+            username: props.get(SCHEMA_REGISTRY_USERNAME).cloned(),
+            password: props.get(SCHEMA_REGISTRY_PASSWORD).cloned(),
+        }
+    }
+}
+
+impl From<&BTreeMap<String, String>> for SchemaRegistryAuth {
+    fn from(props: &BTreeMap<String, String>) -> Self {
         const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
         const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
 
