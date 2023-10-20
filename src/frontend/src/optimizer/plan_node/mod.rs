@@ -617,8 +617,6 @@ impl dyn PlanNode {
 }
 
 mod plan_base;
-#[macro_use]
-mod plan_tree_node_v2;
 pub use plan_base::*;
 #[macro_use]
 mod plan_tree_node;
