@@ -896,7 +896,7 @@ impl Dispatcher for CdcTableNameDispatcher {
             .zip_eq_fast(chunk.data_chunk().rows_with_holes())
         {
             // Build visibility map for every output chunk.
-            for vis_map in vis_maps.iter_mut() {
+            for vis_map in &mut vis_maps {
                 let should_emit = if let Some(row) = row && let Some(full_table_name) = self.downstream_table_name.as_ref() {
                     let table_name_datum = row.datum_at(self.table_name_indices[0]).unwrap();
                     tracing::trace!(target: "events::stream::dispatch::hash::cdc", "keys: {:?}, table: {}", self.table_name_indices, full_table_name);
@@ -939,7 +939,7 @@ impl Dispatcher for CdcTableNameDispatcher {
     async fn dispatch_watermark(&mut self, watermark: Watermark) -> StreamResult<()> {
         if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
             // always broadcast watermark
-            for output in self.outputs.iter_mut() {
+            for output in &mut self.outputs {
                 output.send(Message::Watermark(watermark.clone())).await?;
             }
         }
