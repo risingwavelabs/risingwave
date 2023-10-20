@@ -51,7 +51,9 @@ pub(crate) struct ElectionRow {
 }
 
 #[async_trait::async_trait]
-pub trait SqlDriver: Send + Sync + 'static {
+pub(crate) trait SqlDriver: Send + Sync + 'static {
+    async fn init_database(&self) -> MetaResult<()>;
+
     async fn update_heartbeat(&self, service_name: &str, id: &str) -> MetaResult<()>;
 
     async fn try_campaign(&self, service_name: &str, id: &str, ttl: i64)
@@ -65,7 +67,7 @@ pub trait SqlDriver: Send + Sync + 'static {
 
 pub trait SqlDriverCommon {
     const ELECTION_LEADER_TABLE_NAME: &'static str = "election_leader";
-    const ELECTION_MEMBER_TABLE_NAME: &'static str = "election_members";
+    const ELECTION_MEMBER_TABLE_NAME: &'static str = "election_member";
 
     fn election_table_name() -> &'static str {
         Self::ELECTION_LEADER_TABLE_NAME
@@ -82,7 +84,7 @@ impl SqlDriverCommon for PostgresDriver {}
 impl SqlDriverCommon for SqliteDriver {}
 
 pub struct MySqlDriver {
-    pub(crate) conn: sea_orm::DatabaseConnection,
+    pub(crate) conn: DatabaseConnection,
 }
 
 impl MySqlDriver {
@@ -92,7 +94,7 @@ impl MySqlDriver {
 }
 
 pub struct PostgresDriver {
-    pub(crate) conn: sea_orm::DatabaseConnection,
+    pub(crate) conn: DatabaseConnection,
 }
 
 impl PostgresDriver {
@@ -102,7 +104,7 @@ impl PostgresDriver {
 }
 
 pub struct SqliteDriver {
-    pub(crate) conn: sea_orm::DatabaseConnection,
+    pub(crate) conn: DatabaseConnection,
 }
 
 impl SqliteDriver {
@@ -113,6 +115,22 @@ impl SqliteDriver {
 
 #[async_trait::async_trait]
 impl SqlDriver for SqliteDriver {
+    async fn init_database(&self) -> MetaResult<()> {
+        self.conn.execute(
+            Statement::from_string(DatabaseBackend::Sqlite, format!(
+                r#"CREATE TABLE IF NOT EXISTS {table} (service VARCHAR(256), id VARCHAR(256), last_heartbeat DATETIME, PRIMARY KEY (service, id));"#,
+                table = Self::member_table_name()
+            ))).await?;
+
+        self.conn.execute(
+            Statement::from_string(DatabaseBackend::Sqlite, format!(
+                r#"CREATE TABLE IF NOT EXISTS {table} (service VARCHAR(256), id VARCHAR(256), last_heartbeat DATETIME, PRIMARY KEY (service));"#,
+                table = Self::election_table_name()
+            ))).await?;
+
+        Ok(())
+    }
+
     async fn update_heartbeat(&self, service_name: &str, id: &str) -> MetaResult<()> {
         self.conn
             .execute(Statement::from_sql_and_values(
@@ -247,8 +265,25 @@ DO
         Ok(())
     }
 }
+
 #[async_trait::async_trait]
 impl SqlDriver for MySqlDriver {
+    async fn init_database(&self) -> MetaResult<()> {
+        self.conn.execute(
+            Statement::from_string(DatabaseBackend::MySql, format!(
+                r#"CREATE TABLE IF NOT EXISTS {table} (service VARCHAR(256), id VARCHAR(256), last_heartbeat DATETIME, PRIMARY KEY (service, id));"#,
+                table = Self::member_table_name()
+            ))).await?;
+
+        self.conn.execute(
+            Statement::from_string(DatabaseBackend::MySql, format!(
+                r#"CREATE TABLE IF NOT EXISTS {table} (service VARCHAR(256), id VARCHAR(256), last_heartbeat DATETIME, PRIMARY KEY (service));"#,
+                table = Self::election_table_name()
+            ))).await?;
+
+        Ok(())
+    }
+
     async fn update_heartbeat(&self, service_name: &str, id: &str) -> MetaResult<()> {
         let string = format!(
             r#"INSERT INTO {table} (id, service, last_heartbeat)
@@ -399,6 +434,22 @@ ON duplicate KEY
 
 #[async_trait::async_trait]
 impl SqlDriver for PostgresDriver {
+    async fn init_database(&self) -> MetaResult<()> {
+        self.conn.execute(
+            Statement::from_string(DatabaseBackend::Postgres, format!(
+                r#"CREATE TABLE IF NOT EXISTS {table} (service VARCHAR, id VARCHAR, last_heartbeat TIMESTAMPTZ, PRIMARY KEY (service, id));"#,
+                table = Self::member_table_name()
+            ))).await?;
+
+        self.conn.execute(
+            Statement::from_string(DatabaseBackend::Postgres, format!(
+                r#"CREATE TABLE IF NOT EXISTS {table} (service VARCHAR, id VARCHAR, last_heartbeat TIMESTAMPTZ, PRIMARY KEY (service));"#,
+                table = Self::election_table_name()
+            ))).await?;
+
+        Ok(())
+    }
+
     async fn update_heartbeat(&self, service_name: &str, id: &str) -> MetaResult<()> {
         let string = format!(
             r#"INSERT INTO {table} (id, service, last_heartbeat)
@@ -552,6 +603,11 @@ impl<T> ElectionClient for SqlBackendElectionClient<T>
 where
     T: SqlDriver + Send + Sync + 'static,
 {
+    async fn init(&self) -> MetaResult<()> {
+        tracing::info!("initializing database for Sql backend election client");
+        self.driver.init_database().await
+    }
+
     fn id(&self) -> MetaResult<String> {
         Ok(self.id.clone())
     }
@@ -698,15 +754,15 @@ mod tests {
         db.execute(Statement::from_sql_and_values(
             DbBackend::Sqlite,
             format!("CREATE TABLE {table} (service VARCHAR(256) PRIMARY KEY, id VARCHAR(256), last_heartbeat DATETIME)",
-                                 table = SqliteDriver::election_table_name()),
+                    table = SqliteDriver::election_table_name()),
             vec![],
         ))
-        .await?;
+            .await?;
 
         db.execute(Statement::from_sql_and_values(
             DbBackend::Sqlite,
             format!("CREATE TABLE {table} (service VARCHAR(256), id VARCHAR(256), last_heartbeat DATETIME, PRIMARY KEY (service, id))",
-                                 table = SqliteDriver::member_table_name()),
+                    table = SqliteDriver::member_table_name()),
             vec![],
         ))
             .await?;

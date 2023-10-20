@@ -138,6 +138,8 @@ pub async fn rpc_serve(
             DbBackend::MySql => Arc::new(SqlBackendElectionClient::new(id, MySqlDriver::new(conn))),
         };
 
+        election_client.init().await?;
+
         Some(election_client)
     } else {
         None
@@ -193,7 +195,7 @@ pub async fn rpc_serve(
             let meta_store = MemStore::new().into_ref();
             rpc_serve_with_store(
                 meta_store,
-                None,
+                election_client,
                 meta_store_sql,
                 address_info,
                 max_cluster_heartbeat_interval,
