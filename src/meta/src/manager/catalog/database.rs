@@ -20,7 +20,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::TableOption;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::{
-    Connection, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source,
+    Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source,
     StreamJobStatus, Table, View,
 };
 
@@ -264,12 +264,13 @@ impl DatabaseManager {
         self.databases.values().cloned().collect_vec()
     }
 
-    pub fn list_creating_mviews(&self) -> Vec<Table> {
+    pub fn list_creating_background_mvs(&self) -> Vec<Table> {
         self.tables
             .values()
             .filter(|&t| {
                 t.stream_job_status == PbStreamJobStatus::Creating as i32
                     && t.table_type == TableType::MaterializedView as i32
+                    && t.create_type == CreateType::Background as i32
             })
             .cloned()
             .collect_vec()

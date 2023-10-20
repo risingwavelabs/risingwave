@@ -141,7 +141,7 @@ impl GlobalBarrierManager {
 
         // Mview progress needs to be recovered.
         tracing::info!("recovering mview progress");
-        self.recover_mview_progress()
+        self.recover_background_mv_progress()
             .await
             .expect("recover mview progress should not fail");
         tracing::info!("recovered mview progress");
