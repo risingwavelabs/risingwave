@@ -29,38 +29,34 @@ use crate::optimizer::property::{Order, RequiredDist};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchTopN {
     pub base: PlanBase,
-    logical: generic::TopN<PlanRef>,
+    core: generic::TopN<PlanRef>,
 }
 
 impl BatchTopN {
-    pub fn new(logical: generic::TopN<PlanRef>) -> Self {
-        assert!(logical.group_key.is_empty());
+    pub fn new(core: generic::TopN<PlanRef>) -> Self {
+        assert!(core.group_key.is_empty());
         let base = PlanBase::new_batch_from_logical(
-            &logical,
-            logical.input.distribution().clone(),
+            &core,
+            core.input.distribution().clone(),
             // BatchTopN outputs data in the order of specified order
-            logical.order.clone(),
+            core.order.clone(),
         );
-        BatchTopN { base, logical }
+        BatchTopN { base, core }
     }
 
     fn two_phase_topn(&self, input: PlanRef) -> Result<PlanRef> {
         let new_limit = TopNLimit::new(
-            self.logical.limit_attr.limit() + self.logical.offset,
-            self.logical.limit_attr.with_ties(),
+            self.core.limit_attr.limit() + self.core.offset,
+            self.core.limit_attr.with_ties(),
         );
         let new_offset = 0;
-        let partial_input: PlanRef = if input.order().satisfies(&self.logical.order) {
+        let partial_input: PlanRef = if input.order().satisfies(&self.core.order) {
             let logical_partial_limit = generic::Limit::new(input, new_limit.limit(), new_offset);
             let batch_partial_limit = BatchLimit::new(logical_partial_limit);
             batch_partial_limit.into()
         } else {
-            let logical_partial_topn = generic::TopN::without_group(
-                input,
-                new_limit,
-                new_offset,
-                self.logical.order.clone(),
-            );
+            let logical_partial_topn =
+                generic::TopN::without_group(input, new_limit, new_offset, self.core.order.clone());
             let batch_partial_topn = Self::new(logical_partial_topn);
             batch_partial_topn.into()
         };
@@ -78,15 +74,15 @@ impl BatchTopN {
     }
 }
 
-impl_distill_by_unit!(BatchTopN, logical, "BatchTopN");
+impl_distill_by_unit!(BatchTopN, core, "BatchTopN");
 
 impl PlanTreeNodeUnary for BatchTopN {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
+        let mut logical = self.core.clone();
         logical.input = input;
         Self::new(logical)
     }
@@ -102,12 +98,12 @@ impl ToDistributedBatch for BatchTopN {
 
 impl ToBatchPb for BatchTopN {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let column_orders = self.logical.order.to_protobuf();
+        let column_orders = self.core.order.to_protobuf();
         NodeBody::TopN(TopNNode {
-            limit: self.logical.limit_attr.limit(),
-            offset: self.logical.offset,
+            limit: self.core.limit_attr.limit(),
+            offset: self.core.offset,
             column_orders,
-            with_ties: self.logical.limit_attr.with_ties(),
+            with_ties: self.core.limit_attr.with_ties(),
         })
     }
 }

@@ -28,27 +28,26 @@ use crate::optimizer::property::{Order, RequiredDist};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchOverWindow {
     pub base: PlanBase,
-    logical: generic::OverWindow<PlanRef>,
+    core: generic::OverWindow<PlanRef>,
 }
 
 impl BatchOverWindow {
-    pub fn new(logical: generic::OverWindow<PlanRef>) -> Self {
-        assert!(logical.funcs_have_same_partition_and_order());
+    pub fn new(core: generic::OverWindow<PlanRef>) -> Self {
+        assert!(core.funcs_have_same_partition_and_order());
 
-        let input = &logical.input;
+        let input = &core.input;
         let input_dist = input.distribution().clone();
 
         let order = Order::new(
-            logical
-                .partition_key_indices()
+            core.partition_key_indices()
                 .into_iter()
                 .map(|idx| ColumnOrder::new(idx, OrderType::default()))
-                .chain(logical.order_key().iter().cloned())
+                .chain(core.order_key().iter().cloned())
                 .collect(),
         );
 
-        let base = PlanBase::new_batch_from_logical(&logical, input_dist, order);
-        BatchOverWindow { base, logical }
+        let base = PlanBase::new_batch_from_logical(&core, input_dist, order);
+        BatchOverWindow { base, core }
     }
 
     fn expected_input_order(&self) -> Order {
@@ -56,15 +55,15 @@ impl BatchOverWindow {
     }
 }
 
-impl_distill_by_unit!(BatchOverWindow, logical, "BatchOverWindow");
+impl_distill_by_unit!(BatchOverWindow, core, "BatchOverWindow");
 
 impl PlanTreeNodeUnary for BatchOverWindow {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
+        let mut logical = self.core.clone();
         logical.input = input;
         Self::new(logical)
     }
@@ -78,7 +77,7 @@ impl ToDistributedBatch for BatchOverWindow {
             &self.expected_input_order(),
             &RequiredDist::shard_by_key(
                 self.input().schema().len(),
-                &self.logical.partition_key_indices(),
+                &self.core.partition_key_indices(),
             ),
         )?;
         Ok(self.clone_with_input(new_input).into())
@@ -98,13 +97,13 @@ impl ToBatchPb for BatchOverWindow {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::SortOverWindow(SortOverWindowNode {
             calls: self
-                .logical
+                .core
                 .window_functions()
                 .iter()
                 .map(PlanWindowFunction::to_protobuf)
                 .collect(),
             partition_by: self
-                .logical
+                .core
                 .partition_key_indices()
                 .into_iter()
                 .map(|idx| idx as _)

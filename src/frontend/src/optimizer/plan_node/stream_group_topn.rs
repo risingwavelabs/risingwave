@@ -27,24 +27,24 @@ use crate::PlanRef;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamGroupTopN {
     pub base: PlanBase,
-    logical: generic::TopN<PlanRef>,
+    core: generic::TopN<PlanRef>,
     /// an optional column index which is the vnode of each row computed by the input's consistent
     /// hash distribution
     vnode_col_idx: Option<usize>,
 }
 
 impl StreamGroupTopN {
-    pub fn new(logical: generic::TopN<PlanRef>, vnode_col_idx: Option<usize>) -> Self {
-        assert!(!logical.group_key.is_empty());
-        assert!(logical.limit_attr.limit() > 0);
-        let input = &logical.input;
+    pub fn new(core: generic::TopN<PlanRef>, vnode_col_idx: Option<usize>) -> Self {
+        assert!(!core.group_key.is_empty());
+        assert!(core.limit_attr.limit() > 0);
+        let input = &core.input;
         let schema = input.schema().clone();
 
         let watermark_columns = if input.append_only() {
             input.watermark_columns().clone()
         } else {
             let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
-            for &idx in &logical.group_key {
+            for &idx in &core.group_key {
                 if input.watermark_columns().contains(idx) {
                     watermark_columns.insert(idx);
                 }
@@ -52,7 +52,7 @@ impl StreamGroupTopN {
             watermark_columns
         };
 
-        let mut stream_key = logical
+        let mut stream_key = core
             .stream_key()
             .expect("logical node should have stream key here");
         if let Some(vnode_col_idx) = vnode_col_idx && stream_key.len() > 1 {
@@ -64,10 +64,10 @@ impl StreamGroupTopN {
         }
 
         let base = PlanBase::new_stream(
-            logical.ctx(),
-            logical.schema(),
+            core.ctx(),
+            core.schema(),
             Some(stream_key),
-            logical.functional_dependency(),
+            core.functional_dependency(),
             input.distribution().clone(),
             false,
             // TODO: https://github.com/risingwavelabs/risingwave/issues/8348
@@ -76,25 +76,25 @@ impl StreamGroupTopN {
         );
         StreamGroupTopN {
             base,
-            logical,
+            core,
             vnode_col_idx,
         }
     }
 
     pub fn limit_attr(&self) -> TopNLimit {
-        self.logical.limit_attr
+        self.core.limit_attr
     }
 
     pub fn offset(&self) -> u64 {
-        self.logical.offset
+        self.core.offset
     }
 
     pub fn topn_order(&self) -> &Order {
-        &self.logical.order
+        &self.core.order
     }
 
     pub fn group_key(&self) -> &[usize] {
-        &self.logical.group_key
+        &self.core.group_key
     }
 }
 
@@ -104,7 +104,7 @@ impl StreamNode for StreamGroupTopN {
 
         let input = self.input();
         let table = self
-            .logical
+            .core
             .infer_internal_table_catalog(
                 input.schema(),
                 input.ctx(),
@@ -134,7 +134,7 @@ impl Distill for StreamGroupTopN {
         let name = plan_node_name!("StreamGroupTopN",
             { "append_only", self.input().append_only() },
         );
-        let mut node = self.logical.distill_with_name(name);
+        let mut node = self.core.distill_with_name(name);
         if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
             node.fields.push(("output_watermarks".into(), ow));
         }
@@ -146,11 +146,11 @@ impl_plan_tree_node_for_unary! { StreamGroupTopN }
 
 impl PlanTreeNodeUnary for StreamGroupTopN {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
+        let mut logical = self.core.clone();
         logical.input = input;
         Self::new(logical, self.vnode_col_idx)
     }

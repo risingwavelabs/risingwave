@@ -26,35 +26,34 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTopN {
     pub base: PlanBase,
-    logical: generic::TopN<PlanRef>,
+    core: generic::TopN<PlanRef>,
 }
 
 impl StreamTopN {
-    pub fn new(logical: generic::TopN<PlanRef>) -> Self {
-        assert!(logical.group_key.is_empty());
-        assert!(logical.limit_attr.limit() > 0);
-        let input = &logical.input;
+    pub fn new(core: generic::TopN<PlanRef>) -> Self {
+        assert!(core.group_key.is_empty());
+        assert!(core.limit_attr.limit() > 0);
+        let input = &core.input;
         let dist = match input.distribution() {
             Distribution::Single => Distribution::Single,
             _ => panic!(),
         };
         let watermark_columns = FixedBitSet::with_capacity(input.schema().len());
 
-        let base =
-            PlanBase::new_stream_with_logical(&logical, dist, false, false, watermark_columns);
-        StreamTopN { base, logical }
+        let base = PlanBase::new_stream_with_logical(&core, dist, false, false, watermark_columns);
+        StreamTopN { base, core }
     }
 
     pub fn limit_attr(&self) -> TopNLimit {
-        self.logical.limit_attr
+        self.core.limit_attr
     }
 
     pub fn offset(&self) -> u64 {
-        self.logical.offset
+        self.core.offset
     }
 
     pub fn topn_order(&self) -> &Order {
-        &self.logical.order
+        &self.core.order
     }
 }
 
@@ -63,17 +62,17 @@ impl Distill for StreamTopN {
         let name = plan_node_name!("StreamTopN",
             { "append_only", self.input().append_only() },
         );
-        self.logical.distill_with_name(name)
+        self.core.distill_with_name(name)
     }
 }
 
 impl PlanTreeNodeUnary for StreamTopN {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
+        let mut logical = self.core.clone();
         logical.input = input;
         Self::new(logical)
     }
@@ -91,7 +90,7 @@ impl StreamNode for StreamTopN {
             offset: self.offset(),
             with_ties: self.limit_attr().with_ties(),
             table: Some(
-                self.logical
+                self.core
                     .infer_internal_table_catalog(
                         input.schema(),
                         input.ctx(),

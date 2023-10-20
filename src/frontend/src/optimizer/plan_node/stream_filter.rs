@@ -27,43 +27,43 @@ use crate::utils::Condition;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamFilter {
     pub base: PlanBase,
-    logical: generic::Filter<PlanRef>,
+    core: generic::Filter<PlanRef>,
 }
 
 impl StreamFilter {
-    pub fn new(logical: generic::Filter<PlanRef>) -> Self {
-        let input = logical.input.clone();
+    pub fn new(core: generic::Filter<PlanRef>) -> Self {
+        let input = core.input.clone();
         let dist = input.distribution().clone();
         // Filter executor won't change the append-only behavior of the stream.
         let base = PlanBase::new_stream_with_logical(
-            &logical,
+            &core,
             dist,
             input.append_only(),
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
         );
-        StreamFilter { base, logical }
+        StreamFilter { base, core }
     }
 
     pub fn predicate(&self) -> &Condition {
-        &self.logical.predicate
+        &self.core.predicate
     }
 }
 
 impl PlanTreeNodeUnary for StreamFilter {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
+        let mut logical = self.core.clone();
         logical.input = input;
         Self::new(logical)
     }
 }
 
 impl_plan_tree_node_for_unary! { StreamFilter }
-impl_distill_by_unit!(StreamFilter, logical, "StreamFilter");
+impl_distill_by_unit!(StreamFilter, core, "StreamFilter");
 
 impl StreamNode for StreamFilter {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -79,7 +79,7 @@ impl ExprRewritable for StreamFilter {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.logical.clone();
+        let mut logical = self.core.clone();
         logical.rewrite_exprs(r);
         Self::new(logical).into()
     }
