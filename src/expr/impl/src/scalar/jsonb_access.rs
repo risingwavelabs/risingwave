@@ -42,7 +42,7 @@ pub fn jsonb_array_element(v: JsonbRef<'_>, p: i32) -> Option<JsonbRef<'_>> {
 #[function("jsonb_access_str(jsonb, varchar) -> varchar")]
 pub fn jsonb_object_field_str(v: JsonbRef<'_>, p: &str, writer: &mut impl Write) -> Option<()> {
     let jsonb = jsonb_object_field(v, p)?;
-    if jsonb.is_null() {
+    if jsonb.is_jsonb_null() {
         return None;
     }
     jsonb.force_str(writer).unwrap();
@@ -52,7 +52,7 @@ pub fn jsonb_object_field_str(v: JsonbRef<'_>, p: &str, writer: &mut impl Write)
 #[function("jsonb_access_str(jsonb, int4) -> varchar")]
 pub fn jsonb_array_element_str(v: JsonbRef<'_>, p: i32, writer: &mut impl Write) -> Option<()> {
     let jsonb = jsonb_array_element(v, p)?;
-    if jsonb.is_null() {
+    if jsonb.is_jsonb_null() {
         return None;
     }
     jsonb.force_str(writer).unwrap();

@@ -416,7 +416,7 @@ impl DataType {
             DataType::Timestamptz => ScalarImpl::Timestamptz(Timestamptz::MIN),
             DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),
             DataType::Interval => ScalarImpl::Interval(Interval::MIN),
-            DataType::Jsonb => ScalarImpl::Jsonb(JsonbVal::null()), // NOT `min` #7981
+            DataType::Jsonb => ScalarImpl::Jsonb(JsonbVal::null()),
             DataType::Struct(data_types) => ScalarImpl::Struct(StructValue::new(
                 data_types
                     .types()

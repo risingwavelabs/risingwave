@@ -222,13 +222,30 @@ impl From<i64> for JsonbVal {
 
 impl From<F32> for JsonbVal {
     fn from(v: F32) -> Self {
-        Self(v.0.into())
+        if v.0 == f32::INFINITY {
+            Self("Infinity".into())
+        } else if v.0 == f32::NEG_INFINITY {
+            Self("-Infinity".into())
+        } else if v.0.is_nan() {
+            Self("NaN".into())
+        } else {
+            Self(v.0.into())
+        }
     }
 }
 
+// NOTE: Infinite or NaN values are not JSON numbers. They are stored as strings in Postgres.
 impl From<F64> for JsonbVal {
     fn from(v: F64) -> Self {
-        Self(v.0.into())
+        if v.0 == f64::INFINITY {
+            Self("Infinity".into())
+        } else if v.0 == f64::NEG_INFINITY {
+            Self("-Infinity".into())
+        } else if v.0.is_nan() {
+            Self("NaN".into())
+        } else {
+            Self(v.0.into())
+        }
     }
 }
 
@@ -269,7 +286,7 @@ impl<'a> JsonbRef<'a> {
     }
 
     /// Returns true if this is a jsonb `null`.
-    pub fn is_null(&self) -> bool {
+    pub fn is_jsonb_null(&self) -> bool {
         self.0.as_null().is_some()
     }
 

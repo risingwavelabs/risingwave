@@ -28,7 +28,7 @@ pub struct JsonbArrayBuilder {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsonbArray {
     bitmap: Bitmap,
-    // A JSON array.
+    /// Elements are stored as a single JSONB array value.
     data: jsonbb::Value,
 }
 
