@@ -76,8 +76,9 @@ impl ArrayBuilder for JsonbArrayBuilder {
     }
 
     fn pop(&mut self) -> Option<()> {
-        self.bitmap.pop();
-        todo!("pop from jsonb builder");
+        self.bitmap.pop()?;
+        self.builder.pop();
+        Some(())
     }
 
     fn len(&self) -> usize {
