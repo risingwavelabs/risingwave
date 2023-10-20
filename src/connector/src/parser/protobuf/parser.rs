@@ -350,6 +350,65 @@ fn recursive_parse_json(fields: &[Datum], full_name_vec: Option<Vec<String>>) ->
     serde_json::Value::Object(ret)
 }
 
+fn is_any_message(dyn_msg: &DynamicMessage, field_desc: &FieldDescriptor) -> bool {
+    let any_flag = if let Kind::Message(msg_desc) = field_desc.kind() {
+        msg_desc.full_name() == "google.protobuf.Any"
+    } else {
+        false
+    };
+    dyn_msg.has_field_by_name("type_url") && dyn_msg.has_field_by_name("value") && any_flag
+}
+
+fn decode_any_message(
+    dyn_msg: &DynamicMessage,
+    field_desc: &FieldDescriptor,
+    descriptor_pool: &Arc<DescriptorPool>,
+    type_expected: Option<&DataType>,
+) -> Result<(DynamicMessage, Vec<String>)> {
+    let mut field_names;
+    let mut decoded_msg = dyn_msg.to_owned();
+    loop {
+        let (type_url, payload) = extract_any_info(&decoded_msg);
+
+        let payload_field_desc = decoded_msg.descriptor().get_field_by_name("value").unwrap();
+
+        let Some(ScalarImpl::Bytea(payload)) = from_protobuf_value(
+            &payload_field_desc,
+            &payload,
+            descriptor_pool,
+            type_expected,
+        )?
+        else {
+            panic!("Expected ScalarImpl::Bytea for payload");
+        };
+
+        // Get the corresponding schema from the descriptor pool
+        let msg_desc = descriptor_pool
+            .get_message_by_name(&type_url)
+            .ok_or_else(|| {
+                ProtocolError(format!(
+                    "Cannot find message {} in from_protobuf_value.\nDescriptor pool is {:#?}",
+                    type_url, descriptor_pool
+                ))
+            })?;
+
+        field_names = msg_desc
+            .clone()
+            .fields()
+            .map(|f| f.full_name().to_string())
+            .collect::<Vec<String>>();
+
+        // Decode the payload based on the `msg_desc`
+        decoded_msg = DynamicMessage::decode(msg_desc, payload.as_ref()).unwrap();
+
+        if !is_any_message(&decoded_msg, field_desc) {
+            break;
+        }
+    }
+
+    Ok((decoded_msg, field_names))
+}
+
 pub fn from_protobuf_value(
     field_desc: &FieldDescriptor,
     value: &Value,
@@ -381,50 +440,10 @@ pub fn from_protobuf_value(
             ScalarImpl::Utf8(enum_symbol.name().into())
         }
         Value::Message(dyn_msg) => {
-            let any_flag;
-            if let Some(&DataType::Jsonb) = type_expected {
-                any_flag = true;
-            } else {
-                any_flag = false;
-            }
-
-            if dyn_msg.has_field_by_name("type_url")
-                && dyn_msg.has_field_by_name("value")
-                && any_flag
-            {
-                // The message is of type `Any`
-                let (type_url, payload) = extract_any_info(dyn_msg);
-
-                let payload_field_desc = dyn_msg.descriptor().get_field_by_name("value").unwrap();
-
-                let Some(ScalarImpl::Bytea(payload)) = from_protobuf_value(
-                    &payload_field_desc,
-                    &payload,
-                    descriptor_pool,
-                    type_expected,
-                )?
-                else {
-                    panic!("Expected ScalarImpl::Bytea for payload");
-                };
-
-                // Get the corresponding schema from the descriptor pool
-                let msg_desc = descriptor_pool
-                    .get_message_by_name(&type_url)
-                    .ok_or_else(|| {
-                        ProtocolError(format!(
-                        "Cannot find message {} in from_protobuf_value.\nDescriptor pool is {:#?}",
-                        type_url, descriptor_pool
-                    ))
-                    })?;
-
-                let f = msg_desc
-                    .clone()
-                    .fields()
-                    .map(|f| f.full_name().to_string())
-                    .collect::<Vec<String>>();
-
+            if is_any_message(dyn_msg, field_desc) {
                 // Decode the payload based on the `msg_desc`
-                let decoded_value = DynamicMessage::decode(msg_desc, payload.as_ref()).unwrap();
+                let (decoded_value, field_names) =
+                    decode_any_message(dyn_msg, field_desc, descriptor_pool, type_expected)?;
                 let decoded_value = from_protobuf_value(
                     field_desc,
                     &Value::Message(decoded_value),
@@ -439,7 +458,7 @@ pub fn from_protobuf_value(
                 };
 
                 ScalarImpl::Jsonb(JsonbVal::from(
-                    serde_json::json!({"value": recursive_parse_json(v.fields(), Some(f))}),
+                    serde_json::json!({"value": recursive_parse_json(v.fields(), Some(field_names))}),
                 ))
             } else {
                 let mut rw_values = Vec::with_capacity(dyn_msg.descriptor().fields().len());
