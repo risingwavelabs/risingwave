@@ -50,8 +50,7 @@ impl StreamSimpleAgg {
         let watermark_columns = FixedBitSet::with_capacity(logical.output_len());
 
         // Simple agg executor might change the append-only behavior of the stream.
-        let base =
-            PlanBase::new_stream_with_core(&logical, dist, false, false, watermark_columns);
+        let base = PlanBase::new_stream_with_core(&logical, dist, false, false, watermark_columns);
         StreamSimpleAgg {
             base,
             logical,

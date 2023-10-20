@@ -419,7 +419,28 @@ impl PlanTreeNode for PlanRef {
     }
 }
 
-impl GenericPlanRef for PlanRef {
+impl PlanNodeMeta for PlanRef {
+    fn node_type(&self) -> PlanNodeType {
+        self.0.node_type()
+    }
+
+    fn plan_base(&self) -> &PlanBase {
+        self.0.plan_base()
+    }
+
+    fn convention(&self) -> Convention {
+        self.0.convention()
+    }
+}
+
+impl<P> GenericPlanRef for P
+where
+    P: PlanNodeMeta + Eq + Hash,
+{
+    fn id(&self) -> PlanNodeId {
+        self.plan_base().id()
+    }
+
     fn schema(&self) -> &Schema {
         self.plan_base().schema()
     }
@@ -437,13 +458,19 @@ impl GenericPlanRef for PlanRef {
     }
 }
 
-impl PhysicalPlanRef for PlanRef {
+impl<P> PhysicalPlanRef for P
+where
+    P: PlanNodeMeta + Eq + Hash,
+{
     fn distribution(&self) -> &Distribution {
         self.plan_base().distribution()
     }
 }
 
-impl StreamPlanRef for PlanRef {
+impl<P> StreamPlanRef for P
+where
+    P: PlanNodeMeta + Eq + Hash,
+{
     fn append_only(&self) -> bool {
         self.plan_base().append_only()
     }
@@ -457,7 +484,10 @@ impl StreamPlanRef for PlanRef {
     }
 }
 
-impl BatchPlanRef for PlanRef {
+impl<P> BatchPlanRef for P
+where
+    P: PlanNodeMeta + Eq + Hash,
+{
     fn order(&self) -> &Order {
         self.plan_base().order()
     }

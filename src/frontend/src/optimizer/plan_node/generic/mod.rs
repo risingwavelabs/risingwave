@@ -18,7 +18,7 @@ use std::hash::Hash;
 use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::Schema;
 
-use super::{stream, EqJoinPredicate};
+use super::{stream, EqJoinPredicate, PlanNodeId};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 
@@ -85,6 +85,7 @@ macro_rules! impl_distill_unit_from_fields {
 pub(super) use impl_distill_unit_from_fields;
 
 pub trait GenericPlanRef: Eq + Hash {
+    fn id(&self) -> PlanNodeId;
     fn schema(&self) -> &Schema;
     fn stream_key(&self) -> Option<&[usize]>;
     fn functional_dependency(&self) -> &FunctionalDependencySet;

@@ -18,6 +18,7 @@ use risingwave_common::bail;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
+use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
     generic, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,

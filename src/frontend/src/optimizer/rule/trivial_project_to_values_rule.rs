@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::{BoxedRule, Rule};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::{LogicalCardinalityExt, SideEffectVisitor};
 use crate::optimizer::{PlanRef, PlanVisitor};

@@ -18,7 +18,9 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
-use super::generic::{self, push_down_into_join, push_down_join_condition, GenericPlanNode};
+use super::generic::{
+    self, push_down_into_join, push_down_join_condition, GenericPlanNode, GenericPlanRef,
+};
 use super::utils::{childless_record, Distill};
 use super::{
     ColPrunable, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,

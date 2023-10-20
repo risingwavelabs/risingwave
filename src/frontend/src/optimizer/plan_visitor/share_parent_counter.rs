@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use super::{DefaultBehavior, DefaultValue};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalShare, PlanNodeId, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::PlanVisitor;
 

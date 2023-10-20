@@ -15,6 +15,7 @@
 use risingwave_common::types::ScalarImpl;
 
 use super::Rule;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalValues};
 use crate::PlanRef;
 

@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::types::Interval;
 
-use super::generic::GenericPlanNode;
+use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, ExprRewritable, LogicalFilter,

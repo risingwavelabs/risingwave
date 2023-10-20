@@ -24,7 +24,8 @@ use risingwave_pb::batch_plan::row_seq_scan_node::ChunkSize;
 use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
 use risingwave_pb::plan_common::PbColumnDesc;
 
-use super::generic::GenericPlanRef;
+use super::batch::BatchPlanRef;
+use super::generic::{GenericPlanRef, PhysicalPlanRef};
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
 use crate::catalog::ColumnId;

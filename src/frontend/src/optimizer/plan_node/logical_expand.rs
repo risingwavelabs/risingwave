@@ -15,6 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::error::Result;
 
+use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, PlanBase, PlanRef,

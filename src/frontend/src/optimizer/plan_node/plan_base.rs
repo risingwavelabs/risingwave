@@ -14,14 +14,62 @@
 
 use educe::Educe;
 use fixedbitset::FixedBitSet;
-use paste::paste;
 use risingwave_common::catalog::Schema;
 
 use super::generic::GenericPlanNode;
 use super::*;
-use crate::for_all_plan_nodes;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct StreamExtra {
+    /// The append-only property of the PlanNode's output is a stream-only property. Append-only
+    /// means the stream contains only insert operation.
+    append_only: bool,
+    /// Whether the output is emitted on window close.
+    emit_on_window_close: bool,
+    /// The watermark column indices of the PlanNode's output. There could be watermark output from
+    /// this stream operator.
+    watermark_columns: FixedBitSet,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct BatchExtra {
+    /// The order property of the PlanNode's output, store an `&Order::any()` here will not affect
+    /// correctness, but insert unnecessary sort in plan
+    order: Order,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum PhysicalExtraInner {
+    Stream(StreamExtra),
+    Batch(BatchExtra),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct PhysicalExtra {
+    /// The distribution property of the PlanNode's output, store an `Distribution::any()` here
+    /// will not affect correctness, but insert unnecessary exchange in plan
+    dist: Distribution,
+
+    inner: PhysicalExtraInner,
+}
+
+impl PhysicalExtra {
+    fn stream(&self) -> &StreamExtra {
+        match &self.inner {
+            PhysicalExtraInner::Stream(extra) => extra,
+            _ => panic!("access stream properties from batch plan node"),
+        }
+    }
+
+    fn batch(&self) -> &BatchExtra {
+        match &self.inner {
+            PhysicalExtraInner::Batch(extra) => extra,
+            _ => panic!("access batch properties from stream plan node"),
+        }
+    }
+}
 
 /// the common fields of all nodes, please make a field named `base` in
 /// every planNode and correctly value it when construct the planNode.
@@ -47,35 +95,28 @@ pub struct PlanBase {
     stream_key: Option<Vec<usize>>,
     functional_dependency: FunctionalDependencySet,
 
-    // -- physical-only fields --
-    /// The distribution property of the PlanNode's output, store an `Distribution::any()` here
-    /// will not affect correctness, but insert unnecessary exchange in plan
-    dist: Distribution,
-
-    // -- batch-only fields --
-    /// The order property of the PlanNode's output, store an `&Order::any()` here will not affect
-    /// correctness, but insert unnecessary sort in plan
-    order: Order,
-
-    // -- stream-only fields --
-    /// The append-only property of the PlanNode's output is a stream-only property. Append-only
-    /// means the stream contains only insert operation.
-    append_only: bool,
-    /// Whether the output is emitted on window close.
-    emit_on_window_close: bool,
-    /// The watermark column indices of the PlanNode's output. There could be watermark output from
-    /// this stream operator.
-    watermark_columns: FixedBitSet,
+    physical_extra: Option<PhysicalExtra>,
 }
 
 impl PlanBase {
-    /// The unique id of the `PlanNode` in this optimizer context.
-    pub fn id(&self) -> PlanNodeId {
-        self.id
+    fn physical_extra(&self) -> &PhysicalExtra {
+        self.physical_extra
+            .as_ref()
+            .expect("access physical properties from logical plan node")
+    }
+
+    fn physical_extra_mut(&mut self) -> &mut PhysicalExtra {
+        self.physical_extra
+            .as_mut()
+            .expect("access physical properties from logical plan node")
     }
 }
 
 impl generic::GenericPlanRef for PlanBase {
+    fn id(&self) -> PlanNodeId {
+        self.id
+    }
+
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -95,27 +136,27 @@ impl generic::GenericPlanRef for PlanBase {
 
 impl generic::PhysicalPlanRef for PlanBase {
     fn distribution(&self) -> &Distribution {
-        &self.dist
+        &self.physical_extra().dist
     }
 }
 
 impl stream::StreamPlanRef for PlanBase {
     fn append_only(&self) -> bool {
-        self.append_only
+        self.physical_extra().stream().append_only
     }
 
     fn emit_on_window_close(&self) -> bool {
-        self.emit_on_window_close
+        self.physical_extra().stream().emit_on_window_close
     }
 
     fn watermark_columns(&self) -> &FixedBitSet {
-        &self.watermark_columns
+        &self.physical_extra().stream().watermark_columns
     }
 }
 
 impl batch::BatchPlanRef for PlanBase {
     fn order(&self) -> &Order {
-        &self.order
+        &self.physical_extra().batch().order
     }
 }
 
@@ -127,19 +168,13 @@ impl PlanBase {
         functional_dependency: FunctionalDependencySet,
     ) -> Self {
         let id = ctx.next_plan_node_id();
-        let watermark_columns = FixedBitSet::with_capacity(schema.len());
         Self {
             id,
             ctx,
             schema,
             stream_key,
-            dist: Distribution::Single,
-            order: Order::any(),
-            // Logical plan node won't touch `append_only` field
-            append_only: true,
-            emit_on_window_close: false,
             functional_dependency,
-            watermark_columns,
+            physical_extra: None,
         }
     }
 
@@ -168,13 +203,16 @@ impl PlanBase {
             id,
             ctx,
             schema,
-            dist,
-            order: Order::any(),
             stream_key,
-            append_only,
-            emit_on_window_close,
             functional_dependency,
-            watermark_columns,
+            physical_extra: Some(PhysicalExtra {
+                dist,
+                inner: PhysicalExtraInner::Stream(StreamExtra {
+                    append_only,
+                    emit_on_window_close,
+                    watermark_columns,
+                }),
+            }),
         }
     }
 
@@ -205,19 +243,16 @@ impl PlanBase {
     ) -> Self {
         let id = ctx.next_plan_node_id();
         let functional_dependency = FunctionalDependencySet::new(schema.len());
-        let watermark_columns = FixedBitSet::with_capacity(schema.len());
         Self {
             id,
             ctx,
             schema,
-            dist,
-            order,
             stream_key: None,
-            // Batch plan node won't touch `append_only` field
-            append_only: true,
-            emit_on_window_close: false, // TODO(rc): batch EOWC support?
             functional_dependency,
-            watermark_columns,
+            physical_extra: Some(PhysicalExtra {
+                dist,
+                inner: PhysicalExtraInner::Batch(BatchExtra { order }),
+            }),
         }
     }
 
@@ -237,7 +272,7 @@ impl PlanBase {
 
     pub fn clone_with_new_distribution(&self, dist: Distribution) -> Self {
         let mut new = self.clone();
-        new.dist = dist;
+        new.physical_extra_mut().dist = dist;
         new
     }
 }
@@ -249,40 +284,3 @@ impl PlanBase {
         &mut self.functional_dependency
     }
 }
-
-macro_rules! impl_base_delegate {
-    ($( { $convention:ident, $name:ident }),*) => {
-        $(paste! {
-            impl [<$convention $name>] {
-                pub fn id(&self) -> PlanNodeId {
-                    self.plan_base().id
-                }
-                 pub fn ctx(&self) -> OptimizerContextRef {
-                    self.plan_base().ctx()
-                }
-                pub fn schema(&self) -> &Schema {
-                    &self.plan_base().schema
-                }
-                pub fn stream_key(&self) -> Option<&[usize]> {
-                    self.plan_base().stream_key()
-                }
-                pub fn order(&self) -> &Order {
-                    &self.plan_base().order
-                }
-                pub fn distribution(&self) -> &Distribution {
-                    &self.plan_base().dist
-                }
-                pub fn append_only(&self) -> bool {
-                    self.plan_base().append_only
-                }
-                pub fn emit_on_window_close(&self) -> bool {
-                    self.plan_base().emit_on_window_close
-                }
-                pub fn functional_dependency(&self) -> &FunctionalDependencySet {
-                    &self.plan_base().functional_dependency
-                }
-            }
-        })*
-    }
-}
-for_all_plan_nodes! { impl_base_delegate }
