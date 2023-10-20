@@ -35,7 +35,7 @@ pub struct BatchInsert {
 impl BatchInsert {
     pub fn new(logical: generic::Insert<PlanRef>) -> Self {
         assert_eq!(logical.input.distribution(), &Distribution::Single);
-        let base: PlanBase = PlanBase::new_batch_from_logical(
+        let base: PlanBase = PlanBase::new_batch_with_core(
             &logical,
             logical.input.distribution().clone(),
             Order::any(),

@@ -86,7 +86,7 @@ impl StreamHashAgg {
         }
 
         // Hash agg executor might change the append-only behavior of the stream.
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &logical,
             dist,
             emit_on_window_close, // in EOWC mode, we produce append only output

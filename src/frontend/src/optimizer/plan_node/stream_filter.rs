@@ -34,7 +34,7 @@ impl StreamFilter {
         let input = logical.input.clone();
         let dist = input.distribution().clone();
         // Filter executor won't change the append-only behavior of the stream.
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &logical,
             dist,
             input.append_only(),

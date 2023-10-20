@@ -50,7 +50,7 @@ impl StreamEowcOverWindow {
         // ancient rows in some rarely updated partitions that are emitted at the end of time.
         let watermark_columns = FixedBitSet::with_capacity(logical.output_len());
 
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &logical,
             input.distribution().clone(),
             true,

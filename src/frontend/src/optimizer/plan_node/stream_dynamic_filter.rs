@@ -38,7 +38,7 @@ impl StreamDynamicFilter {
         let watermark_columns = core.watermark_columns(core.right().watermark_columns()[0]);
 
         // TODO: derive from input
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             core.left().distribution().clone(),
             false, /* we can have a new abstraction for append only and monotonically increasing

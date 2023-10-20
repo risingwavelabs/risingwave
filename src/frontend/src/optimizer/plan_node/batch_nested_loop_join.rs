@@ -37,7 +37,7 @@ pub struct BatchNestedLoopJoin {
 impl BatchNestedLoopJoin {
     pub fn new(logical: generic::Join<PlanRef>) -> Self {
         let dist = Self::derive_dist(logical.left.distribution(), logical.right.distribution());
-        let base = PlanBase::new_batch_from_logical(&logical, dist, Order::any());
+        let base = PlanBase::new_batch_with_core(&logical, dist, Order::any());
         Self { base, logical }
     }
 

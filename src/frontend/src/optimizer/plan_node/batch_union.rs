@@ -40,7 +40,7 @@ impl BatchUnion {
             Distribution::SomeShard
         };
 
-        let base = PlanBase::new_batch_from_logical(&logical, dist, Order::any());
+        let base = PlanBase::new_batch_with_core(&logical, dist, Order::any());
         BatchUnion { base, logical }
     }
 }

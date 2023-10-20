@@ -43,8 +43,14 @@ pub struct PlanBase {
 
     schema: Schema,
     /// the pk indices of the PlanNode's output, a empty stream key vec means there is no stream key
+    // TODO: this is actually a logical and stream only property
     stream_key: Option<Vec<usize>>,
     functional_dependency: FunctionalDependencySet,
+
+    // -- physical-only fields --
+    /// The distribution property of the PlanNode's output, store an `Distribution::any()` here
+    /// will not affect correctness, but insert unnecessary exchange in plan
+    dist: Distribution,
 
     // -- batch-only fields --
     /// The order property of the PlanNode's output, store an `&Order::any()` here will not affect
@@ -52,9 +58,6 @@ pub struct PlanBase {
     order: Order,
 
     // -- stream-only fields --
-    /// The distribution property of the PlanNode's output, store an `Distribution::any()` here
-    /// will not affect correctness, but insert unnecessary exchange in plan
-    dist: Distribution,
     /// The append-only property of the PlanNode's output is a stream-only property. Append-only
     /// means the stream contains only insert operation.
     append_only: bool,
@@ -140,31 +143,12 @@ impl PlanBase {
         }
     }
 
-    pub fn new_logical_with_core(node: &impl GenericPlanNode) -> Self {
+    pub fn new_logical_with_core(core: &impl GenericPlanNode) -> Self {
         Self::new_logical(
-            node.ctx(),
-            node.schema(),
-            node.stream_key(),
-            node.functional_dependency(),
-        )
-    }
-
-    pub fn new_stream_with_logical(
-        logical: &impl GenericPlanNode,
-        dist: Distribution,
-        append_only: bool,
-        emit_on_window_close: bool,
-        watermark_columns: FixedBitSet,
-    ) -> Self {
-        Self::new_stream(
-            logical.ctx(),
-            logical.schema(),
-            logical.stream_key(),
-            logical.functional_dependency(),
-            dist,
-            append_only,
-            emit_on_window_close,
-            watermark_columns,
+            core.ctx(),
+            core.schema(),
+            core.stream_key(),
+            core.functional_dependency(),
         )
     }
 
@@ -194,12 +178,23 @@ impl PlanBase {
         }
     }
 
-    pub fn new_batch_from_logical(
-        logical: &impl GenericPlanNode,
+    pub fn new_stream_with_core(
+        core: &impl GenericPlanNode,
         dist: Distribution,
-        order: Order,
+        append_only: bool,
+        emit_on_window_close: bool,
+        watermark_columns: FixedBitSet,
     ) -> Self {
-        Self::new_batch(logical.ctx(), logical.schema(), dist, order)
+        Self::new_stream(
+            core.ctx(),
+            core.schema(),
+            core.stream_key(),
+            core.functional_dependency(),
+            dist,
+            append_only,
+            emit_on_window_close,
+            watermark_columns,
+        )
     }
 
     pub fn new_batch(
@@ -224,6 +219,14 @@ impl PlanBase {
             functional_dependency,
             watermark_columns,
         }
+    }
+
+    pub fn new_batch_with_core(
+        core: &impl GenericPlanNode,
+        dist: Distribution,
+        order: Order,
+    ) -> Self {
+        Self::new_batch(core.ctx(), core.schema(), dist, order)
     }
 
     pub fn clone_with_new_plan_id(&self) -> Self {

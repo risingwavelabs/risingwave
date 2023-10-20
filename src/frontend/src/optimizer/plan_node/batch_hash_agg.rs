@@ -42,7 +42,7 @@ impl BatchHashAgg {
         let dist = logical
             .i2o_col_mapping()
             .rewrite_provided_distribution(input_dist);
-        let base = PlanBase::new_batch_from_logical(&logical, dist, Order::any());
+        let base = PlanBase::new_batch_with_core(&logical, dist, Order::any());
         BatchHashAgg { base, logical }
     }
 

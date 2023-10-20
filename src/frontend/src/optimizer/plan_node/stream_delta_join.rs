@@ -67,7 +67,7 @@ impl StreamDeltaJoin {
             logical.i2o_col_mapping().rewrite_bitset(&watermark_columns)
         };
         // TODO: derive from input
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &logical,
             dist,
             append_only,
