@@ -134,6 +134,11 @@ impl LevelCompactionPicker {
         level_handlers: &[LevelHandler],
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
+        if l0.sub_levels.len() < 1 || l0.sub_levels[0].vnode_partition_count < vnode_partition_count
+        {
+            return None;
+        }
+
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
         let min_compaction_bytes = self.config.sub_level_max_compaction_bytes;
         let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(

@@ -100,6 +100,9 @@ impl IntraCompactionPicker {
         partition_count: u32,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
+        if partition_count == 0 {
+            return None;
+        }
         for (idx, level) in l0.sub_levels.iter().enumerate() {
             if level.level_type() != LevelType::Nonoverlapping
                 || level.total_file_size > self.config.sub_level_max_compaction_bytes
@@ -120,8 +123,7 @@ impl IntraCompactionPicker {
             let mut select_level_inputs = vec![];
             let mut total_file_count = 0;
             for next_level in l0.sub_levels.iter().skip(idx) {
-                if next_level.level_type() != LevelType::Nonoverlapping
-                    || select_input_size > max_compaction_bytes
+                if select_input_size > max_compaction_bytes
                     || level_handler.is_level_pending_compact(next_level)
                 {
                     break;
@@ -375,7 +377,6 @@ pub mod tests {
     fn test_l0_to_l1_compact_conflict() {
         // When picking L0->L1, L0's selecting_key_range should not be overlapped with L0's
         // compacting_key_range.
-        let mut picker = create_compaction_picker_for_test();
         let levels = vec![Level {
             level_idx: 1,
             level_type: LevelType::Nonoverlapping as i32,
@@ -399,14 +400,9 @@ pub mod tests {
                 generate_table(2, 1, 350, 500, 2),
             ],
         );
-        let mut levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let levels_handler = vec![LevelHandler::new(0), LevelHandler::new(1)];
 
         let mut local_stats = LocalPickerStatistic::default();
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        // trivial_move
-        ret.add_pending_task(0, &mut levels_handler); // pending only for test
         push_tables_level0_nonoverlapping(&mut levels, vec![generate_table(3, 1, 250, 300, 3)]);
         let config: CompactionConfig = CompactionConfigBuilder::new()
             .level0_tier_compact_file_number(2)
