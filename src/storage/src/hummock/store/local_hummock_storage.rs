@@ -58,7 +58,6 @@ const MEM_TABLE_SPILL_THRESHOLD: usize = 64 << 20;
 pub struct LocalHummockStorage {
     mem_table: MemTable,
 
-    gap_epoch: Option<u64>,
     spill_offset: u64,
     epoch: Option<u64>,
 
@@ -105,10 +104,6 @@ impl LocalHummockStorage {
     /// See `HummockReadVersion::update` for more details.
     pub fn update(&self, info: VersionUpdate) {
         self.read_version.write().update(info)
-    }
-
-    fn gap_epoch(&self) -> u64 {
-        self.gap_epoch.expect("should have set the prev epoch")
     }
 
     pub async fn get_inner(
@@ -343,7 +338,6 @@ impl LocalStateStore for LocalHummockStorage {
                 epoch: self.epoch(),
                 table_id: self.table_id,
             },
-            self.gap_epoch(),
         )
         .await
     }
@@ -358,12 +352,7 @@ impl LocalStateStore for LocalHummockStorage {
 
             if self.spill_offset < AVAILABLE {
                 self.spill_offset += 1;
-                let gap_epoch = self.epoch() + self.spill_offset;
 
-                self.gap_epoch
-                    .replace(gap_epoch)
-                    .expect("should have init epoch before seal the gap epoch");
-                tracing::info!("gap epoch = {}", self.gap_epoch());
                 self.flush(vec![]).await?;
             } else {
                 tracing::warn!("No mem table spill occurs, the gap epoch exceeds available range.");
@@ -392,12 +381,6 @@ impl LocalStateStore for LocalHummockStorage {
             self.table_id
         );
 
-        assert!(
-            self.gap_epoch.replace(epoch.curr).is_none(),
-            "local state store of table id {:?} is init for more than once",
-            self.table_id
-        );
-
         Ok(())
     }
 
@@ -405,9 +388,6 @@ impl LocalStateStore for LocalHummockStorage {
         assert!(!self.is_dirty());
         let prev_epoch = self
             .epoch
-            .replace(next_epoch)
-            .expect("should have init epoch before seal the first epoch");
-        self.gap_epoch
             .replace(next_epoch)
             .expect("should have init epoch before seal the first epoch");
         self.spill_offset = 0;
@@ -426,7 +406,6 @@ impl LocalHummockStorage {
         kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         write_options: WriteOptions,
-        gap_epoch: u64,
     ) -> StorageResult<usize> {
         let epoch = write_options.epoch;
         let table_id = write_options.table_id;
@@ -474,7 +453,7 @@ impl LocalHummockStorage {
             let instance_id = self.instance_guard.instance_id;
             let imm = SharedBufferBatch::build_shared_buffer_batch(
                 epoch,
-                gap_epoch,
+                self.spill_offset,
                 sorted_items,
                 size,
                 delete_ranges,
@@ -529,7 +508,6 @@ impl LocalHummockStorage {
         ]);
         Self {
             mem_table: MemTable::new(option.is_consistent_op),
-            gap_epoch: None,
             spill_offset: 0,
             epoch: None,
             table_id: option.table_id,

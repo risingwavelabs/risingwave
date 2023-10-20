@@ -92,7 +92,7 @@ impl SharedBufferBatchInner {
     pub(crate) fn new(
         table_id: TableId,
         epoch: HummockEpoch,
-        gap_epoch: HummockEpoch,
+        spill_offset: u64,
         payload: Vec<SharedBufferItem>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         size: usize,
@@ -153,9 +153,10 @@ impl SharedBufferBatchInner {
             }
         }
         let kv_count = payload.len();
+        let epoch_with_gap = epoch + spill_offset;
         let items = payload
             .into_iter()
-            .map(|(k, v)| (k, vec![(gap_epoch, v)]))
+            .map(|(k, v)| (k, vec![(epoch_with_gap, v)]))
             .collect_vec();
 
         let mut monotonic_tombstone_events = Vec::with_capacity(point_range_pairs.len() * 2);
@@ -366,7 +367,7 @@ impl SharedBufferBatch {
             inner: Arc::new(SharedBufferBatchInner::new(
                 table_id,
                 epoch,
-                epoch,
+                0,
                 sorted_items,
                 vec![],
                 size,
@@ -574,7 +575,7 @@ impl SharedBufferBatch {
 
     pub fn build_shared_buffer_batch(
         epoch: HummockEpoch,
-        gap_epoch: HummockEpoch,
+        spill_offset: u64,
         sorted_items: Vec<SharedBufferItem>,
         size: usize,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
@@ -585,7 +586,7 @@ impl SharedBufferBatch {
         let inner = SharedBufferBatchInner::new(
             table_id,
             epoch,
-            gap_epoch,
+            spill_offset,
             sorted_items,
             delete_ranges,
             size,
@@ -998,7 +999,7 @@ mod tests {
 
         let batch = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
-            epoch,
+            0,
             vec![],
             1,
             vec![
@@ -1181,7 +1182,7 @@ mod tests {
         ];
         let shared_buffer_batch = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
-            epoch,
+            0,
             vec![],
             0,
             delete_ranges,
@@ -1474,7 +1475,7 @@ mod tests {
         let size = SharedBufferBatch::measure_batch_size(&sorted_items1);
         let imm1 = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
-            epoch,
+            0,
             sorted_items1,
             size,
             delete_ranges,
@@ -1520,7 +1521,7 @@ mod tests {
         let size = SharedBufferBatch::measure_batch_size(&sorted_items2);
         let imm2 = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
-            epoch,
+            0,
             sorted_items2,
             size,
             delete_ranges,
