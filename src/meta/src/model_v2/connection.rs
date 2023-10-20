@@ -12,29 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::catalog::connection::{PbInfo, PbPrivateLinkService};
+use risingwave_pb::catalog::PbConnection;
 use sea_orm::entity::prelude::*;
+use sea_orm::{ActiveValue, FromJsonQueryResult};
+use serde::{Deserialize, Serialize};
+
+use crate::model_v2::ConnectionId;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "connection")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub connection_id: i32,
+    pub connection_id: ConnectionId,
     pub name: String,
-    pub schema_id: i32,
-    pub database_id: i32,
-    pub info: Option<Json>,
+    pub info: PrivateLinkService,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::database::Entity",
-        from = "Column::DatabaseId",
-        to = "super::database::Column::DatabaseId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Database,
     #[sea_orm(
         belongs_to = "super::object::Entity",
         from = "Column::ConnectionId",
@@ -43,35 +39,15 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Object,
-    #[sea_orm(
-        belongs_to = "super::schema::Entity",
-        from = "Column::SchemaId",
-        to = "super::schema::Column::SchemaId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Schema,
     #[sea_orm(has_many = "super::sink::Entity")]
     Sink,
     #[sea_orm(has_many = "super::source::Entity")]
     Source,
 }
 
-impl Related<super::database::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Database.def()
-    }
-}
-
 impl Related<super::object::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Object.def()
-    }
-}
-
-impl Related<super::schema::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Schema.def()
     }
 }
 
@@ -88,3 +64,22 @@ impl Related<super::source::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+#[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize, Default)]
+pub struct PrivateLinkService(pub PbPrivateLinkService);
+
+impl Eq for PrivateLinkService {}
+
+impl From<PbConnection> for ActiveModel {
+    fn from(conn: PbConnection) -> Self {
+        let Some(PbInfo::PrivateLinkService(private_link_srv)) = conn.info else {
+            unreachable!("private link not provided.")
+        };
+
+        Self {
+            connection_id: ActiveValue::Set(conn.id as _),
+            name: ActiveValue::Set(conn.name),
+            info: ActiveValue::Set(PrivateLinkService(private_link_srv)),
+        }
+    }
+}

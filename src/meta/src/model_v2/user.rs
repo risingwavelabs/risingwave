@@ -14,11 +14,13 @@
 
 use sea_orm::entity::prelude::*;
 
+use crate::model_v2::UserId;
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "user")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub user_id: i32,
+    pub user_id: UserId,
     pub name: String,
     pub is_super: bool,
     pub can_create_db: bool,
