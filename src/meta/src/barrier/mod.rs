@@ -254,7 +254,7 @@ impl CheckpointControl {
                 self.remove_changes(cancelled_command.context.command.changes());
             }
         } else {
-            // Recovered jobs do not need to be cancelled
+            // Recovered jobs do not need to be cancelled since only `RUNNING` actors will get recovered.
         }
     }
 
