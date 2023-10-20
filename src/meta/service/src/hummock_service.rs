@@ -18,6 +18,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::{TableId, NON_RESERVED_SYS_CATALOG_ID};
+use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Event as RequestEvent;
 use risingwave_pb::hummock::version_update_payload::Payload;
@@ -601,6 +602,29 @@ impl HummockManagerService for HummockServiceImpl {
     ) -> Result<Response<RiseCtlRebuildTableStatsResponse>, Status> {
         self.hummock_manager.rebuild_table_stats().await?;
         Ok(Response::new(RiseCtlRebuildTableStatsResponse {}))
+    }
+
+    async fn get_compaction_score(
+        &self,
+        request: Request<GetCompactionScoreRequest>,
+    ) -> Result<Response<GetCompactionScoreResponse>, Status> {
+        let compaction_group_id = request.into_inner().compaction_group_id;
+        let scores = self
+            .hummock_manager
+            .get_compaction_scores(compaction_group_id)
+            .await
+            .into_iter()
+            .map(|s| PickerInfo {
+                score: s.score,
+                select_level: s.select_level as _,
+                target_level: s.target_level as _,
+                picker_type: s.picker_type.to_string(),
+            })
+            .collect();
+        Ok(Response::new(GetCompactionScoreResponse {
+            compaction_group_id,
+            scores,
+        }))
     }
 }
 

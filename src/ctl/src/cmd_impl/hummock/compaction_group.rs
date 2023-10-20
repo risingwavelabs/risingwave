@@ -229,3 +229,36 @@ pub async fn list_compaction_status(context: &CtlContext, verbose: bool) -> anyh
     }
     Ok(())
 }
+
+pub async fn get_compaction_score(
+    context: &CtlContext,
+    id: CompactionGroupId,
+) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    let scores = meta_client.get_compaction_score(id).await?;
+    let mut table = Table::new();
+    table.set_header({
+        let mut row = Row::new();
+        row.add_cell("Select Level".into());
+        row.add_cell("Target Level".into());
+        row.add_cell("Type".into());
+        row.add_cell("Score".into());
+        row
+    });
+    for s in scores.into_iter().sorted_by(|a, b| {
+        if a.select_level == b.select_level {
+            a.target_level.cmp(&b.target_level)
+        } else {
+            a.select_level.cmp(&b.select_level)
+        }
+    }) {
+        let mut row = Row::new();
+        row.add_cell(s.select_level.into());
+        row.add_cell(s.target_level.into());
+        row.add_cell(s.picker_type.into());
+        row.add_cell(s.score.into());
+        table.add_row(row);
+    }
+    println!("{table}");
+    Ok(())
+}
