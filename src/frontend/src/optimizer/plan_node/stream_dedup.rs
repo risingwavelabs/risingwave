@@ -18,9 +18,9 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::DedupNode;
 
 use super::generic::{self, GenericPlanNode, GenericPlanRef};
+use super::stream::StreamPlanRef;
 use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;

@@ -7220,6 +7220,7 @@ dependencies = [
  "risingwave_common_service",
  "risingwave_connector",
  "risingwave_hummock_sdk",
+ "risingwave_jni_core",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_source",

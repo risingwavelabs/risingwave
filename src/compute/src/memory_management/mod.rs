@@ -49,6 +49,8 @@ pub const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 70;
 pub struct MemoryControlStats {
     pub jemalloc_allocated_bytes: usize,
     pub jemalloc_active_bytes: usize,
+    pub jvm_allocated_bytes: usize,
+    pub jvm_active_bytes: usize,
     pub lru_watermark_step: u64,
     pub lru_watermark_time_ms: u64,
     pub lru_physical_now_ms: u64,
@@ -68,9 +70,9 @@ pub trait MemoryControl: Send + Sync + std::fmt::Debug {
 }
 
 pub fn build_memory_control_policy(total_memory_bytes: usize) -> MemoryControlRef {
-    use self::policy::JemallocMemoryControl;
+    use self::policy::JemallocAndJvmMemoryControl;
 
-    Box::new(JemallocMemoryControl::new(total_memory_bytes))
+    Box::new(JemallocAndJvmMemoryControl::new(total_memory_bytes))
 }
 
 /// `DummyPolicy` is used for operarting systems other than Linux. It does nothing as memory control
