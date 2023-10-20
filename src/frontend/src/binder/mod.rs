@@ -389,9 +389,7 @@ pub mod test_utils {
         // We don't know why their require the tokio runtime during binding. Just make them happy.
         let rt = tokio::runtime::Runtime::new().unwrap();
         let _guard = rt.enter();
-        let expr = mock_binder().bind_expr(expr).unwrap();
-
-        expr
+        mock_binder().bind_expr(expr).unwrap()
     }
 }
 

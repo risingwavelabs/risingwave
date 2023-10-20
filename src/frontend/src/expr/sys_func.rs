@@ -35,7 +35,7 @@ impl ExprVisitor for SysFuncAnalyzer {
 }
 
 impl ExprImpl {
-    #[expect(dead_code)]
+    #[allow(dead_code)]
     pub(crate) fn has_sys_func(&self) -> bool {
         let mut analyzer = SysFuncAnalyzer;
         analyzer.visit_expr(self)
