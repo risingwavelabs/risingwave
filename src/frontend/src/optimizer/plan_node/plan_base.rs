@@ -66,7 +66,7 @@ pub struct PlanBase {
 }
 
 impl PlanBase {
-    /// The unique id of the PlanNode in this optimizer context.
+    /// The unique id of the `PlanNode` in this optimizer context.
     pub fn id(&self) -> PlanNodeId {
         self.id
     }
@@ -128,8 +128,8 @@ impl PlanBase {
         Self {
             id,
             ctx,
-            schema: schema,
-            stream_key: stream_key,
+            schema,
+            stream_key,
             dist: Distribution::Single,
             order: Order::any(),
             // Logical plan node won't touch `append_only` field
@@ -183,12 +183,12 @@ impl PlanBase {
         Self {
             id,
             ctx,
-            schema: schema,
-            dist: dist,
+            schema,
+            dist,
             order: Order::any(),
-            stream_key: stream_key,
-            append_only: append_only,
-            emit_on_window_close: emit_on_window_close,
+            stream_key,
+            append_only,
+            emit_on_window_close,
             functional_dependency,
             watermark_columns,
         }
@@ -214,9 +214,9 @@ impl PlanBase {
         Self {
             id,
             ctx,
-            schema: schema,
-            dist: dist,
-            order: order,
+            schema,
+            dist,
+            order,
             stream_key: None,
             // Batch plan node won't touch `append_only` field
             append_only: true,

@@ -390,7 +390,7 @@ impl Distill for StreamSink {
                     .iter()
                     .map(|k| k.column_index)
                     .collect_vec(),
-                schema: &self.base.schema(),
+                schema: self.base.schema(),
             };
             vec.push(("pk", pk.distill()));
         }

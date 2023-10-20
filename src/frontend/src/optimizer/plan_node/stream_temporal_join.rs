@@ -105,7 +105,7 @@ impl Distill for StreamTemporalJoin {
             }),
         ));
 
-        if let Some(ow) = watermark_pretty(&self.base.watermark_columns(), self.schema()) {
+        if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             vec.push(("output_watermarks", ow));
         }
 

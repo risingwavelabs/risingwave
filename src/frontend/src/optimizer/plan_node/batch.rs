@@ -19,7 +19,7 @@ use crate::optimizer::property::Order;
 ///
 /// Due to the lack of refactoring, all plan nodes currently implement this trait
 /// through [`super::PlanBase`]. One may still use this trait as a bound for
-/// expecting a batch plan, in contrast to [`GenericPlanRef`] or
+/// accessing a batch plan, in contrast to [`GenericPlanRef`] or
 /// [`PhysicalPlanRef`].
 ///
 /// [`GenericPlanRef`]: super::generic::GenericPlanRef

@@ -136,7 +136,7 @@ impl Distill for StreamGroupTopN {
             { "append_only", self.input().append_only() },
         );
         let mut node = self.logical.distill_with_name(name);
-        if let Some(ow) = watermark_pretty(&self.base.watermark_columns(), self.schema()) {
+        if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             node.fields.push(("output_watermarks".into(), ow));
         }
         node

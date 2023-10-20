@@ -61,7 +61,7 @@ impl StreamUnion {
 impl Distill for StreamUnion {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let mut vec = self.logical.fields_pretty();
-        if let Some(ow) = watermark_pretty(&self.base.watermark_columns(), self.schema()) {
+        if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             vec.push(("output_watermarks", ow));
         }
         childless_record("StreamUnion", vec)

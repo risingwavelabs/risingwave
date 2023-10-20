@@ -20,7 +20,7 @@ use super::generic::PhysicalPlanRef;
 ///
 /// Due to the lack of refactoring, all plan nodes currently implement this trait
 /// through [`super::PlanBase`]. One may still use this trait as a bound for
-/// expecting a stream plan, in contrast to [`GenericPlanRef`] or
+/// accessing a stream plan, in contrast to [`GenericPlanRef`] or
 /// [`PhysicalPlanRef`].
 ///
 /// [`GenericPlanRef`]: super::generic::GenericPlanRef

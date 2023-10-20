@@ -197,7 +197,7 @@ impl Distill for BatchSeqScan {
         if verbose {
             let dist = Pretty::display(&DistributionDisplay {
                 distribution: self.distribution(),
-                input_schema: &self.base.schema(),
+                input_schema: self.base.schema(),
             });
             vec.push(("distribution", dist));
         }

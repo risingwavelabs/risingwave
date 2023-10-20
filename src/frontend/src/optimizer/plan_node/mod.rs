@@ -421,7 +421,7 @@ impl PlanTreeNode for PlanRef {
 
 impl GenericPlanRef for PlanRef {
     fn schema(&self) -> &Schema {
-        &self.plan_base().schema()
+        self.plan_base().schema()
     }
 
     fn stream_key(&self) -> Option<&[usize]> {
@@ -439,7 +439,7 @@ impl GenericPlanRef for PlanRef {
 
 impl PhysicalPlanRef for PlanRef {
     fn distribution(&self) -> &Distribution {
-        &self.plan_base().distribution()
+        self.plan_base().distribution()
     }
 }
 
@@ -453,13 +453,13 @@ impl StreamPlanRef for PlanRef {
     }
 
     fn watermark_columns(&self) -> &FixedBitSet {
-        &self.plan_base().watermark_columns()
+        self.plan_base().watermark_columns()
     }
 }
 
 impl BatchPlanRef for PlanRef {
     fn order(&self) -> &Order {
-        &self.plan_base().order()
+        self.plan_base().order()
     }
 }
 
@@ -526,7 +526,7 @@ impl dyn PlanNode {
     }
 
     pub fn schema(&self) -> &Schema {
-        &self.plan_base().schema()
+        self.plan_base().schema()
     }
 
     pub fn stream_key(&self) -> Option<&[usize]> {
@@ -534,11 +534,11 @@ impl dyn PlanNode {
     }
 
     pub fn order(&self) -> &Order {
-        &self.plan_base().order()
+        self.plan_base().order()
     }
 
     pub fn distribution(&self) -> &Distribution {
-        &self.plan_base().distribution()
+        self.plan_base().distribution()
     }
 
     pub fn append_only(&self) -> bool {
@@ -550,11 +550,11 @@ impl dyn PlanNode {
     }
 
     pub fn functional_dependency(&self) -> &FunctionalDependencySet {
-        &self.plan_base().functional_dependency()
+        self.plan_base().functional_dependency()
     }
 
     pub fn watermark_columns(&self) -> &FixedBitSet {
-        &self.plan_base().watermark_columns()
+        self.plan_base().watermark_columns()
     }
 
     /// Serialize the plan node and its children to a stream plan proto.

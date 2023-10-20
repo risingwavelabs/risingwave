@@ -86,7 +86,7 @@ impl Distill for StreamWatermarkFilter {
             })
             .collect();
         let display_output_watermarks =
-            watermark_pretty(&self.base.watermark_columns(), input_schema).unwrap();
+            watermark_pretty(self.base.watermark_columns(), input_schema).unwrap();
         let fields = vec![
             ("watermark_descs", Pretty::Array(display_watermark_descs)),
             ("output_watermarks", display_output_watermarks),

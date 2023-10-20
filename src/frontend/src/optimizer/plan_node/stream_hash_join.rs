@@ -327,7 +327,7 @@ impl Distill for StreamHashJoin {
         if let Some(i) = self.clean_right_state_conjunction_idx {
             vec.push(("conditions_to_clean_right_state_table", get_cond(i)));
         }
-        if let Some(ow) = watermark_pretty(&self.base.watermark_columns(), self.schema()) {
+        if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             vec.push(("output_watermarks", ow));
         }
 

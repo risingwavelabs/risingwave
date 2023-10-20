@@ -80,7 +80,7 @@ impl StreamExchange {
 impl Distill for StreamExchange {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let distribution_display = DistributionDisplay {
-            distribution: &self.base.distribution(),
+            distribution: self.base.distribution(),
             input_schema: self.input.schema(),
         };
         childless_record(

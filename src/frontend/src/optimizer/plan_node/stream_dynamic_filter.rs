@@ -83,7 +83,7 @@ impl Distill for StreamDynamicFilter {
         let pred = self.core.pretty_field();
         let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
         vec.push(("predicate", pred));
-        if let Some(ow) = watermark_pretty(&self.base.watermark_columns(), self.schema()) {
+        if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             vec.push(("output_watermarks", ow));
         }
         vec.push(("output", column_names_pretty(self.schema())));

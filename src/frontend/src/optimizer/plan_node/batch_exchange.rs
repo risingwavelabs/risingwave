@@ -45,12 +45,12 @@ impl Distill for BatchExchange {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let input_schema = self.input.schema();
         let order = OrderDisplay {
-            order: &self.base.order(),
+            order: self.base.order(),
             input_schema,
         }
         .distill();
         let dist = Pretty::display(&DistributionDisplay {
-            distribution: &self.base.distribution(),
+            distribution: self.base.distribution(),
             input_schema,
         });
         childless_record("BatchExchange", vec![("order", order), ("dist", dist)])
