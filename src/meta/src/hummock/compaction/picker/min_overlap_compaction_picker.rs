@@ -145,6 +145,7 @@ impl CompactionPicker for MinOverlappingPicker {
                 },
             ],
             target_level: self.target_level,
+            vnode_partition_count: levels.vnode_partition_count,
             ..Default::default()
         })
     }

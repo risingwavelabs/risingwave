@@ -60,12 +60,13 @@ impl CompactionPicker for LevelCompactionPicker {
             return None;
         }
 
-        if let Some(ret) = self.pick_base_trivial_move(
+        if let Some(mut ret) = self.pick_base_trivial_move(
             l0,
             levels.get_level(self.target_level),
             level_handlers,
             stats,
         ) {
+            ret.vnode_partition_count = levels.vnode_partition_count;
             return Some(ret);
         }
 

@@ -224,53 +224,51 @@ impl DynamicLevelSelectorCore {
             // range at each level, so the number of levels is the most important factor affecting
             // the read performance. At the same time, the size factor is also added to the score
             // calculation rule to avoid unbalanced compact task due to large size.
-            let non_overlapping_score = {
-                let total_size = levels.l0.as_ref().unwrap().total_file_size
-                    - handlers[0].get_pending_output_file_size(ctx.base_level as u32);
-                let base_level_size = levels.get_level(ctx.base_level).total_file_size;
-                let base_level_sst_count =
-                    levels.get_level(ctx.base_level).table_infos.len() as u64;
+            let total_size = levels.l0.as_ref().unwrap().total_file_size
+                - handlers[0].get_pending_output_file_size(ctx.base_level as u32);
+            let base_level_size = levels.get_level(ctx.base_level).total_file_size;
+            let base_level_sst_count = levels.get_level(ctx.base_level).table_infos.len() as u64;
 
-                // size limit
-                let non_overlapping_size_score = total_size * SCORE_BASE
-                    / std::cmp::max(self.config.max_bytes_for_level_base, base_level_size);
-                // level count limit
-                let non_overlapping_level_count = levels
-                    .l0
-                    .as_ref()
-                    .unwrap()
-                    .sub_levels
-                    .iter()
-                    .filter(|level| level.level_type() == LevelType::Nonoverlapping)
-                    .count() as u64;
-                let non_overlapping_level_score = non_overlapping_level_count * SCORE_BASE
-                    / std::cmp::max(
-                        base_level_sst_count / 16,
-                        self.config.level0_sub_level_compact_level_count as u64,
-                    );
+            // size limit
+            let non_overlapping_size_score = total_size * SCORE_BASE
+                / std::cmp::max(self.config.max_bytes_for_level_base, base_level_size);
+            // level count limit
+            let non_overlapping_level_count = levels
+                .l0
+                .as_ref()
+                .unwrap()
+                .sub_levels
+                .iter()
+                .filter(|level| level.level_type() == LevelType::Nonoverlapping)
+                .count() as u64;
+            let non_overlapping_level_score = non_overlapping_level_count * SCORE_BASE
+                / std::cmp::max(
+                    base_level_sst_count / 16,
+                    self.config.level0_sub_level_compact_level_count as u64,
+                );
 
-                std::cmp::max(non_overlapping_size_score, non_overlapping_level_score)
-            };
+            let non_overlapping_score =
+                std::cmp::max(non_overlapping_size_score, non_overlapping_level_score);
 
             // Reduce the level num of l0 non-overlapping sub_level
-            ctx.score_levels.push({
-                PickerInfo {
+            if non_overlapping_size_score > SCORE_BASE {
+                ctx.score_levels.push(PickerInfo {
                     score: non_overlapping_score + 1,
                     select_level: 0,
                     target_level: ctx.base_level,
                     picker_type: PickerType::ToBase,
-                }
-            });
+                });
+            }
 
-            // FIXME: more accurate score calculation algorithm will be introduced (#11903)
-            ctx.score_levels.push({
-                PickerInfo {
+            if non_overlapping_level_score > SCORE_BASE {
+                // FIXME: more accurate score calculation algorithm will be introduced (#11903)
+                ctx.score_levels.push(PickerInfo {
                     score: non_overlapping_score,
                     select_level: 0,
                     target_level: 0,
                     picker_type: PickerType::Intra,
-                }
-            });
+                });
+            }
         }
 
         // The bottommost level can not be input level.
