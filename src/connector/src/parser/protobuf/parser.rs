@@ -364,7 +364,7 @@ fn decode_any_message(
     field_desc: &FieldDescriptor,
     descriptor_pool: &Arc<DescriptorPool>,
     type_expected: Option<&DataType>,
-) -> Result<(DynamicMessage, Vec<String>)> {
+) -> Result<ScalarImpl> {
     let mut field_names;
     let mut decoded_msg = dyn_msg.to_owned();
     loop {
@@ -406,7 +406,22 @@ fn decode_any_message(
         }
     }
 
-    Ok((decoded_msg, field_names))
+    let decoded_value = from_protobuf_value(
+        field_desc,
+        &Value::Message(decoded_msg),
+        descriptor_pool,
+        type_expected,
+    )?
+    .unwrap();
+
+    // Extract the struct value
+    let ScalarImpl::Struct(v) = decoded_value else {
+        panic!("Expect ScalarImpl::Struct");
+    };
+
+    Ok(ScalarImpl::Jsonb(JsonbVal::from(
+        serde_json::json!({"value": recursive_parse_json(v.fields(), Some(field_names))}),
+    )))
 }
 
 pub fn from_protobuf_value(
@@ -441,25 +456,7 @@ pub fn from_protobuf_value(
         }
         Value::Message(dyn_msg) => {
             if is_any_message(dyn_msg, field_desc) {
-                // Decode the payload based on the `msg_desc`
-                let (decoded_value, field_names) =
-                    decode_any_message(dyn_msg, field_desc, descriptor_pool, type_expected)?;
-                let decoded_value = from_protobuf_value(
-                    field_desc,
-                    &Value::Message(decoded_value),
-                    descriptor_pool,
-                    type_expected,
-                )?
-                .unwrap();
-
-                // Extract the struct value
-                let ScalarImpl::Struct(v) = decoded_value else {
-                    panic!("Expect ScalarImpl::Struct");
-                };
-
-                ScalarImpl::Jsonb(JsonbVal::from(
-                    serde_json::json!({"value": recursive_parse_json(v.fields(), Some(field_names))}),
-                ))
+                decode_any_message(dyn_msg, field_desc, descriptor_pool, type_expected)?
             } else {
                 let mut rw_values = Vec::with_capacity(dyn_msg.descriptor().fields().len());
                 // fields is a btree map in descriptor
