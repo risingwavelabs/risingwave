@@ -421,27 +421,27 @@ impl PlanTreeNode for PlanRef {
 
 impl StreamPlanRef for PlanRef {
     fn distribution(&self) -> &Distribution {
-        &self.plan_base().dist
+        &self.plan_base().distribution()
     }
 
     fn append_only(&self) -> bool {
-        self.plan_base().append_only
+        self.plan_base().append_only()
     }
 
     fn emit_on_window_close(&self) -> bool {
-        self.plan_base().emit_on_window_close
+        self.plan_base().emit_on_window_close()
     }
 }
 
 impl BatchPlanRef for PlanRef {
     fn order(&self) -> &Order {
-        &self.plan_base().order
+        &self.plan_base().order()
     }
 }
 
 impl GenericPlanRef for PlanRef {
     fn schema(&self) -> &Schema {
-        &self.plan_base().schema
+        &self.plan_base().schema()
     }
 
     fn stream_key(&self) -> Option<&[usize]> {
@@ -512,7 +512,7 @@ pub(crate) fn pretty_config() -> PrettyConfig {
 
 impl dyn PlanNode {
     pub fn id(&self) -> PlanNodeId {
-        self.plan_base().id
+        self.plan_base().id()
     }
 
     pub fn ctx(&self) -> OptimizerContextRef {
@@ -520,7 +520,7 @@ impl dyn PlanNode {
     }
 
     pub fn schema(&self) -> &Schema {
-        &self.plan_base().schema
+        &self.plan_base().schema()
     }
 
     pub fn stream_key(&self) -> Option<&[usize]> {
@@ -528,23 +528,23 @@ impl dyn PlanNode {
     }
 
     pub fn order(&self) -> &Order {
-        &self.plan_base().order
+        &self.plan_base().order()
     }
 
     pub fn distribution(&self) -> &Distribution {
-        &self.plan_base().dist
+        &self.plan_base().distribution()
     }
 
     pub fn append_only(&self) -> bool {
-        self.plan_base().append_only
+        self.plan_base().append_only()
     }
 
     pub fn emit_on_window_close(&self) -> bool {
-        self.plan_base().emit_on_window_close
+        self.plan_base().emit_on_window_close()
     }
 
     pub fn functional_dependency(&self) -> &FunctionalDependencySet {
-        &self.plan_base().functional_dependency
+        &self.plan_base().functional_dependency()
     }
 
     pub fn watermark_columns(&self) -> &FixedBitSet {

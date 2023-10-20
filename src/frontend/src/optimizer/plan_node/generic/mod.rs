@@ -92,14 +92,6 @@ pub trait GenericPlanRef: Eq + Hash {
 }
 
 pub trait GenericPlanNode {
-    /// return (schema, `stream_key`, fds)
-    fn logical_properties(&self) -> (Schema, Option<Vec<usize>>, FunctionalDependencySet) {
-        (
-            self.schema(),
-            self.stream_key(),
-            self.functional_dependency(),
-        )
-    }
     fn functional_dependency(&self) -> FunctionalDependencySet;
     fn schema(&self) -> Schema;
     fn stream_key(&self) -> Option<Vec<usize>>;

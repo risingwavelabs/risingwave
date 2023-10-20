@@ -58,8 +58,9 @@ impl BatchSource {
     }
 
     pub fn clone_with_dist(&self) -> Self {
-        let mut base = self.base.clone();
-        base.dist = Distribution::SomeShard;
+        let base = self
+            .base
+            .clone_with_new_distribution(Distribution::SomeShard);
         Self {
             base,
             logical: self.logical.clone(),

@@ -203,12 +203,12 @@ impl Distill for StreamTableScan {
         if verbose {
             let pk = IndicesDisplay {
                 indices: self.stream_key().unwrap_or_default(),
-                schema: &self.base.schema,
+                schema: &self.base.schema(),
             };
             vec.push(("pk", pk.distill()));
             let dist = Pretty::display(&DistributionDisplay {
                 distribution: self.distribution(),
-                input_schema: &self.base.schema,
+                input_schema: &self.base.schema(),
             });
             vec.push(("dist", dist));
         }
@@ -328,7 +328,7 @@ impl StreamTableScan {
                 ..Default::default()
             })),
             stream_key,
-            operator_id: self.base.id.0 as u64,
+            operator_id: self.base.id().0 as u64,
             identity: {
                 let s = self.distill_to_string();
                 s.replace("StreamTableScan", "Chain")

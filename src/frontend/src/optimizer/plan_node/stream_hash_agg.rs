@@ -22,6 +22,7 @@ use super::generic::{self, PlanAggCall};
 use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, IndexSet};
 
@@ -214,7 +215,7 @@ impl StreamNode for StreamHashAgg {
                 })
                 .collect(),
             row_count_index: self.row_count_idx as u32,
-            emit_on_window_close: self.base.emit_on_window_close,
+            emit_on_window_close: self.base.emit_on_window_close(),
         })
     }
 }

@@ -551,7 +551,7 @@ impl ToStream for LogicalScan {
                 None.into(),
             )));
         }
-        match self.base.stream_key.is_none() {
+        match self.base.stream_key().is_none() {
             true => {
                 let mut col_ids = HashSet::new();
 

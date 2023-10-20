@@ -28,6 +28,7 @@ use risingwave_connector::source::{ConnectorProperties, DataType};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 
+use super::generic::GenericPlanRef;
 use super::stream_watermark_filter::StreamWatermarkFilter;
 use super::utils::{childless_record, Distill};
 use super::{
@@ -506,7 +507,7 @@ impl PredicatePushdown for LogicalSource {
 
         let mut new_conjunctions = Vec::with_capacity(predicate.conjunctions.len());
         for expr in predicate.conjunctions {
-            if let Some(e) = expr_to_kafka_timestamp_range(expr, &mut range, &self.base.schema) {
+            if let Some(e) = expr_to_kafka_timestamp_range(expr, &mut range, &self.base.schema()) {
                 // Not recognized, so push back
                 new_conjunctions.push(e);
             }

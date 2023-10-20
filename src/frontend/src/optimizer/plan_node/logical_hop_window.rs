@@ -446,8 +446,7 @@ mod test {
         // 0, 1 --> 2
         values
             .base
-            .functional_dependency
-            .add_functional_dependency_by_column_indices(&[0, 1], &[2]);
+            .functional_dependency_mut().add_functional_dependency_by_column_indices(&[0, 1], &[2]);
         let hop_window: PlanRef = LogicalHopWindow::new(
             values.into(),
             InputRef::new(0, DataType::Date),

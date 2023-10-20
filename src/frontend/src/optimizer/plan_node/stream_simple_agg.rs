@@ -21,6 +21,7 @@ use super::generic::{self, PlanAggCall};
 use super::utils::{childless_record, plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -100,7 +101,7 @@ impl StreamNode for StreamSimpleAgg {
                 .collect(),
             distribution_key: self
                 .base
-                .dist
+                .distribution()
                 .dist_column_indices()
                 .iter()
                 .map(|idx| *idx as u32)

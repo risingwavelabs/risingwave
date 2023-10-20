@@ -2000,8 +2000,7 @@ mod tests {
             // 0 --> 1
             values
                 .base
-                .functional_dependency
-                .add_functional_dependency_by_column_indices(&[0], &[1]);
+                .functional_dependency_mut().add_functional_dependency_by_column_indices(&[0], &[1]);
             values
         };
         let right = {
@@ -2014,8 +2013,7 @@ mod tests {
             // 0 --> 1, 2
             values
                 .base
-                .functional_dependency
-                .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
+                .functional_dependency_mut().add_functional_dependency_by_column_indices(&[0], &[1, 2]);
             values
         };
         // l0 = 0 AND l1 = r1

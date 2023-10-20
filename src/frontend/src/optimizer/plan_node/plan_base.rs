@@ -27,28 +27,33 @@ use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
 /// every planNode and correctly value it when construct the planNode.
 #[derive(Clone, Debug, Educe)]
 #[educe(PartialEq, Eq, Hash)]
+// #[readonly::make]
 pub struct PlanBase {
-    #[educe(PartialEq(ignore))]
-    #[educe(Hash(ignore))]
-    pub id: PlanNodeId,
-    #[educe(PartialEq(ignore))]
-    #[educe(Hash(ignore))]
+    // -- common fields --
+    #[educe(PartialEq(ignore), Hash(ignore))]
+    id: PlanNodeId,
+    #[educe(PartialEq(ignore), Hash(ignore))]
     pub ctx: OptimizerContextRef,
-    pub schema: Schema,
+
+    schema: Schema,
     /// the pk indices of the PlanNode's output, a empty stream key vec means there is no stream key
-    pub stream_key: Option<Vec<usize>>,
+    stream_key: Option<Vec<usize>>,
+    functional_dependency: FunctionalDependencySet,
+
+    // -- batch-only fields --
     /// The order property of the PlanNode's output, store an `&Order::any()` here will not affect
     /// correctness, but insert unnecessary sort in plan
-    pub order: Order,
+    order: Order,
+
+    // -- stream-only fields --
     /// The distribution property of the PlanNode's output, store an `Distribution::any()` here
     /// will not affect correctness, but insert unnecessary exchange in plan
-    pub dist: Distribution,
+    dist: Distribution,
     /// The append-only property of the PlanNode's output is a stream-only property. Append-only
     /// means the stream contains only insert operation.
-    pub append_only: bool,
+    append_only: bool,
     /// Whether the output is emitted on window close.
-    pub emit_on_window_close: bool,
-    pub functional_dependency: FunctionalDependencySet,
+    emit_on_window_close: bool,
     /// The watermark column indices of the PlanNode's output. There could be watermark output from
     /// this stream operator.
     pub watermark_columns: FixedBitSet,
@@ -93,6 +98,17 @@ impl batch::BatchPlanRef for PlanBase {
 }
 
 impl PlanBase {
+    #[cfg(test)]
+    pub fn functional_dependency_mut(&mut self) -> &mut FunctionalDependencySet {
+        &mut self.functional_dependency
+    }
+
+    pub fn id(&self) -> PlanNodeId {
+        self.id
+    }
+}
+
+impl PlanBase {
     pub fn new_logical(
         ctx: OptimizerContextRef,
         schema: Schema,
@@ -104,8 +120,8 @@ impl PlanBase {
         Self {
             id,
             ctx,
-            schema,
-            stream_key,
+            schema: schema,
+            stream_key: stream_key,
             dist: Distribution::Single,
             order: Order::any(),
             // Logical plan node won't touch `append_only` field
@@ -159,12 +175,12 @@ impl PlanBase {
         Self {
             id,
             ctx,
-            schema,
-            dist,
+            schema: schema,
+            dist: dist,
             order: Order::any(),
-            stream_key,
-            append_only,
-            emit_on_window_close,
+            stream_key: stream_key,
+            append_only: append_only,
+            emit_on_window_close: emit_on_window_close,
             functional_dependency,
             watermark_columns,
         }
@@ -190,9 +206,9 @@ impl PlanBase {
         Self {
             id,
             ctx,
-            schema,
-            dist,
-            order,
+            schema: schema,
+            dist: dist,
+            order: order,
             stream_key: None,
             // Batch plan node won't touch `append_only` field
             append_only: true,
@@ -202,22 +218,15 @@ impl PlanBase {
         }
     }
 
-    pub fn derive_stream_plan_base(plan_node: &PlanRef) -> Self {
-        PlanBase::new_stream(
-            plan_node.ctx(),
-            plan_node.schema().clone(),
-            plan_node.stream_key().map(|v| v.to_vec()),
-            plan_node.functional_dependency().clone(),
-            plan_node.distribution().clone(),
-            plan_node.append_only(),
-            plan_node.emit_on_window_close(),
-            plan_node.watermark_columns().clone(),
-        )
-    }
-
     pub fn clone_with_new_plan_id(&self) -> Self {
         let mut new = self.clone();
         new.id = self.ctx.next_plan_node_id();
+        new
+    }
+
+    pub fn clone_with_new_distribution(&self, dist: Distribution) -> Self {
+        let mut new = self.clone();
+        new.dist = dist;
         new
     }
 }

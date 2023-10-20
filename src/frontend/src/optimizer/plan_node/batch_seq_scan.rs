@@ -24,6 +24,7 @@ use risingwave_pb::batch_plan::row_seq_scan_node::ChunkSize;
 use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
 use risingwave_pb::plan_common::PbColumnDesc;
 
+use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
 use crate::catalog::ColumnId;
@@ -196,7 +197,7 @@ impl Distill for BatchSeqScan {
         if verbose {
             let dist = Pretty::display(&DistributionDisplay {
                 distribution: self.distribution(),
-                input_schema: &self.base.schema,
+                input_schema: &self.base.schema(),
             });
             vec.push(("distribution", dist));
         }

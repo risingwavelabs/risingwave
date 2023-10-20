@@ -17,6 +17,9 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeNode, MergeSortExchangeNode};
 
+use super::batch::BatchPlanRef;
+use super::generic::GenericPlanRef;
+use super::stream::StreamPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -43,12 +46,12 @@ impl Distill for BatchExchange {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let input_schema = self.input.schema();
         let order = OrderDisplay {
-            order: &self.base.order,
+            order: &self.base.order(),
             input_schema,
         }
         .distill();
         let dist = Pretty::display(&DistributionDisplay {
-            distribution: &self.base.dist,
+            distribution: &self.base.distribution(),
             input_schema,
         });
         childless_record("BatchExchange", vec![("order", order), ("dist", dist)])
@@ -75,18 +78,18 @@ impl ToDistributedBatch for BatchExchange {
 /// The serialization of Batch Exchange is default cuz it will be rewritten in scheduler.
 impl ToBatchPb for BatchExchange {
     fn to_batch_prost_body(&self) -> NodeBody {
-        if self.base.order.is_any() {
+        if self.base.order().is_any() {
             NodeBody::Exchange(ExchangeNode {
                 sources: vec![],
-                input_schema: self.base.schema.to_prost(),
+                input_schema: self.base.schema().to_prost(),
             })
         } else {
             NodeBody::MergeSortExchange(MergeSortExchangeNode {
                 exchange: Some(ExchangeNode {
                     sources: vec![],
-                    input_schema: self.base.schema.to_prost(),
+                    input_schema: self.base.schema().to_prost(),
                 }),
-                column_orders: self.base.order.to_protobuf(),
+                column_orders: self.base.order().to_protobuf(),
             })
         }
     }

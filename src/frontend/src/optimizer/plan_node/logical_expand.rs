@@ -192,8 +192,7 @@ mod tests {
         let mut values = LogicalValues::new(vec![], Schema { fields }, ctx);
         values
             .base
-            .functional_dependency
-            .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
+            .functional_dependency_mut().add_functional_dependency_by_column_indices(&[0], &[1, 2]);
 
         let column_subsets = vec![vec![0, 1], vec![2]];
         let expand = LogicalExpand::create(values.into(), column_subsets);

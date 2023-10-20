@@ -20,6 +20,7 @@ use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use super::stream::StreamPlanRef;
 use super::utils::{childless_record, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -84,7 +85,7 @@ impl StreamEowcSort {
         tbl_builder.add_order_column(self.sort_column_index, OrderType::ascending());
         order_cols.insert(self.sort_column_index);
 
-        let dist_key = self.base.dist.dist_column_indices().to_vec();
+        let dist_key = self.base.distribution().dist_column_indices().to_vec();
         for idx in &dist_key {
             if !order_cols.contains(idx) {
                 tbl_builder.add_order_column(*idx, OrderType::ascending());

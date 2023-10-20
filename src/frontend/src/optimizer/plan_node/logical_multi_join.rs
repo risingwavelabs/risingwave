@@ -883,8 +883,7 @@ mod test {
             // 0 --> 1
             values
                 .base
-                .functional_dependency
-                .add_functional_dependency_by_column_indices(&[0], &[1]);
+                .functional_dependency_mut().add_functional_dependency_by_column_indices(&[0], &[1]);
             values
         };
         let t2 = {
@@ -897,8 +896,7 @@ mod test {
             // 0 --> 1, 2
             values
                 .base
-                .functional_dependency
-                .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
+                .functional_dependency_mut().add_functional_dependency_by_column_indices(&[0], &[1, 2]);
             values
         };
         let t3 = {
@@ -910,8 +908,7 @@ mod test {
             // {} --> 0
             values
                 .base
-                .functional_dependency
-                .add_functional_dependency_by_column_indices(&[], &[0]);
+                .functional_dependency_mut().add_functional_dependency_by_column_indices(&[], &[0]);
             values
         };
         // On: v0 = 0 AND v1 = v3 AND v4 = v5

@@ -79,7 +79,7 @@ impl StreamNode for StreamShare {
 
 impl StreamShare {
     pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> PbStreamNode {
-        let operator_id = self.base.id.0 as u32;
+        let operator_id = self.base.id().0 as u32;
 
         match state.get_share_stream_node(operator_id) {
             None => {
