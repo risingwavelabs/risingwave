@@ -14,7 +14,7 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::agg::{build, AggCall, BoxedAggregateFunction};
@@ -173,13 +173,17 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         // Calculate the row visibility for every agg call.
         let mut call_visibilities = Vec::with_capacity(this.agg_calls.len());
         for agg_call in &this.agg_calls {
+            println!("WKXLOG simple agg apply_chunk agg_call {:?}", agg_call);
             let vis =
                 agg_call_filter_res(&this.actor_ctx, &this.info.identity, agg_call, &chunk).await?;
             call_visibilities.push(vis);
         }
-
+        println!(
+            "WKXLOG after agg_call: chunk: \n{}",
+            chunk.to_pretty()
+        );
         // Deduplicate for distinct columns.
-        let visibilities = vars
+        let visibilities: Vec<risingwave_common::array::Vis> = vars
             .distinct_dedup
             .dedup_chunk(
                 chunk.ops(),
@@ -195,7 +199,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         for (storage, visibility) in this.storages.iter_mut().zip_eq_fast(visibilities.iter()) {
             if let AggStateStorage::MaterializedInput { table, mapping } = storage {
                 let chunk = chunk.project_with_vis(mapping.upstream_columns(), visibility.clone());
-                table.write_chunk(chunk);
+                table.write_chunk_consistent(chunk).await;
             }
         }
 
@@ -215,6 +219,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         vars: &mut ExecutionVars<S>,
         epoch: EpochPair,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
+        println!("WKXLOG simple agg flush_data {:?}", epoch);
         let chunk = if vars.state_changed || vars.agg_group.is_uninitialized() {
             // Flush distinct dedup state.
             vars.distinct_dedup

@@ -35,7 +35,7 @@ use super::{HummockError, HummockResult};
 use crate::error::StorageResult;
 use crate::hummock::CachePolicy;
 use crate::mem_table::{KeyOp, MemTableError};
-use crate::store::{ReadOptions, StateStoreRead};
+use crate::store::{ReadOptions, StateStoreRead, LocalStateStore};
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
@@ -402,7 +402,7 @@ pub(crate) async fn do_insert_sanity_check(
 pub(crate) async fn do_delete_sanity_check(
     key: Bytes,
     old_value: Bytes,
-    inner: &impl StateStoreRead,
+    inner: &impl LocalStateStore,
     epoch: u64,
     table_id: TableId,
     table_option: TableOption,
@@ -413,16 +413,16 @@ pub(crate) async fn do_delete_sanity_check(
         cache_policy: CachePolicy::Fill(CachePriority::High),
         ..Default::default()
     };
-    match inner.get(key.clone(), epoch, read_options).await? {
+    match inner.get(key.clone(), read_options).await? {
         // ERROR: Probably no key here....
         None => {
-            println!("no keys");
+            println!("WKXLOG no keys, epoch: {} table: {}", epoch, table_id);
             Err(Box::new(MemTableError::InconsistentOperation {
                 key,
                 prev: KeyOp::Delete(Bytes::default()),
                 new: KeyOp::Delete(old_value),
             })
-                .into())
+            .into())
         }
         Some(stored_value) => {
             if stored_value != old_value {

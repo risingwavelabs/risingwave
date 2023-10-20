@@ -425,6 +425,10 @@ impl<const T: JoinTypePrimitive, const SIDE: SideTypePrimitive> HashJoinChunkBui
     fn forward_if_not_matched(&mut self, op: Op, row: RowRef<'_>) -> Option<StreamChunk> {
         // if it's outer join or anti join and the side needs to be maintained.
         if (is_anti(T) && forward_exactly_once(T, SIDE)) || is_outer_side(T, SIDE) {
+            // println!(
+            //     "WKXLOGLOG generate update here, op: {:?}, row: {:?}",
+            //     op, row
+            // );
             self.stream_chunk_builder.append_row_update(op, row)
         } else {
             None
@@ -1095,6 +1099,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                     if let Some(chunk) = hashjoin_chunk_builder
                                         .with_match_on_insert(&row, &matched_row)
                                     {
+                                        println!(
+                                            "WKXLOGLOG forward_if_not_matched with_match_on_insert"
+                                        );
+                                        if chunk.contains_updates() {
+                                            println!("WKXLOGLOG contains_updates with_match_on_insert(&row, &matched_row)");
+                                        }
                                         yield chunk;
                                     }
                                 }
@@ -1131,14 +1141,25 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             }
                         }
                         if degree == 0 {
+                            // println!("WKXLOGLOG forward_if_not_matched degree == 0");
                             if let Some(chunk) =
                                 hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
                             {
+                                println!("WKXLOGLOG forward_if_not_matched.is_some() degree == 0");
+                                if chunk.contains_updates() {
+                                    println!("WKXLOGLOG contains_updates degree == 0");
+                                }
                                 yield chunk;
                             }
                         } else if let Some(chunk) =
                             hashjoin_chunk_builder.forward_exactly_once_if_matched(Op::Insert, row)
                         {
+                            println!(
+                                "WKXLOGLOG forward_if_not_matched forward_exactly_once_if_matched"
+                            );
+                            if chunk.contains_updates() {
+                                println!("WKXLOGLOG contains_updates forward_exactly_once_if_matched(Op::Insert, row)");
+                            }
                             yield chunk;
                         }
                         // Insert back the state taken from ht.
@@ -1164,14 +1185,20 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     } else {
                         // Row which violates null-safe bitmap will never be matched so we need not
                         // store.
+                        println!("WKXLOGLOG forward_if_not_matched violates null-safe bitmap");
                         if let Some(chunk) =
                             hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
                         {
+                            println!("WKXLOGLOG forward_if_not_matched.is_some() violates null-safe bitmap");
+                            if chunk.contains_updates() {
+                                println!("WKXLOGLOG contains_updates violates null-safe bitmap");
+                            }
                             yield chunk;
                         }
                     }
                 }
                 Op::Delete | Op::UpdateDelete => {
+                    unreachable!("`Op::UpdateDelete` should not yield chunk");
                     let mut degree = 0;
                     if let Some(mut matched_rows) = matched_rows {
                         let mut matched_rows_to_clean = vec![];
@@ -1271,6 +1298,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             }
         }
         if let Some(chunk) = hashjoin_chunk_builder.take() {
+            println!(
+                "WKXLOG finish one chunk in hashjoin: SIDE: {:?}: chunk: \n{}",
+                SIDE,
+                chunk.to_pretty()
+            );
             yield chunk;
         }
     }

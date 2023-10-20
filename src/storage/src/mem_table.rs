@@ -493,7 +493,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                         do_delete_sanity_check(
                             key.clone(),
                             old_value,
-                            &self.inner,
+                            self,
                             self.epoch(),
                             self.table_id,
                             self.table_option,

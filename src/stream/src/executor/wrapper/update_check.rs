@@ -17,7 +17,9 @@ use std::sync::Arc;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::Op;
+use risingwave_common::row::RowExt;
 
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{ExecutorInfo, Message, MessageStream};
@@ -48,6 +50,23 @@ pub async fn update_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
                     )
                 }
             }
+            // for record in chunk.records() {
+            //     // `chunk.records()` will check U-/U+ pairing
+            //     if let Record::Update { old_row, new_row } = record {
+            //         println!("WKXLOGLOG find an update {:?}", info.identity);
+            //         debug_assert!(
+            //             old_row.project(&info.pk_indices) == new_row.project(&info.pk_indices),
+            //             "U- and U+ should have same stream key, U- row: {:?}, U+ row: {:?},
+            // stream key: {:?}, executor id: {}, U- projected: {:?}, U+ projected: {:?}",
+            //             old_row,
+            //             new_row,
+            //             info.pk_indices,
+            //             info.identity,
+            //             old_row.project(&info.pk_indices),
+            //             new_row.project(&info.pk_indices)
+            //         )
+            //     }
+            // }
         }
 
         yield message;

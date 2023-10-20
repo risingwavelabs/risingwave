@@ -140,6 +140,12 @@ impl StreamChunk {
         &self.data
     }
 
+    pub fn contains_updates(&self) -> bool {
+        self.ops
+            .iter()
+            .any(|op| *op == Op::UpdateDelete || *op == Op::UpdateInsert)
+    }
+
     /// compact the `StreamChunk` with its visibility map
     pub fn compact(self) -> Self {
         if self.visibility().is_none() {

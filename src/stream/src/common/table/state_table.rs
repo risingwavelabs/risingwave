@@ -581,7 +581,6 @@ where
     S: StateStore,
     SD: ValueRowSerde,
 {
-
     /// Get a single row from state table.
     pub async fn get_row_raw_pk(&self, pk: impl Row) -> StreamExecutorResult<Option<OwnedRow>> {
         assert!(pk.len() <= self.pk_indices.len());
@@ -598,9 +597,7 @@ where
             ..Default::default()
         };
 
-        let encoded_row = self.local_store
-            .get(serialized_pk, read_options)
-            .await?;
+        let encoded_row = self.local_store.get(serialized_pk, read_options).await?;
         match encoded_row {
             Some(encoded_row) => {
                 let row = self.row_serde.deserialize(&encoded_row)?;
@@ -752,6 +749,14 @@ where
     }
 
     fn delete_inner(&mut self, key_bytes: Bytes, value_bytes: Bytes) {
+        if self.table_id.table_id == 1003 {
+            tracing::debug!(
+                "WKXLOG table {} delete_inner: {:?} {:?}",
+                self.table_id,
+                key_bytes,
+                value_bytes
+            );
+        }
         self.local_store
             .delete(key_bytes, value_bytes)
             .unwrap_or_else(|e| self.handle_mem_table_error(e));
@@ -826,6 +831,19 @@ where
         let key_chunk = chunk.project(self.pk_indices());
         let vis = key_chunk.vis();
         match vis {
+            Vis::Bitmap(_) => {
+                for (op, key) in izip!(op.iter(), key_chunk.rows()) {
+                    match op {
+                        Op::UpdateDelete => {
+                            if !self.get_row_raw_pk(key).await.unwrap().is_none() {
+                                panic!("DELETE MISSING ROW: {:?}", key);
+                            }
+                            tracing::debug!("WKXLOG DELETE MISSING ROW: {:?}", key);
+                        }
+                        _ => {}
+                    }
+                }
+            }
             Vis::Compact(_) => {
                 for (op, key) in izip!(op.iter(), key_chunk.rows()) {
                     match op {
@@ -838,12 +856,13 @@ where
                     }
                 }
             }
-            _ => panic!("should have been compacted...")
         }
     }
 
     pub async fn write_chunk_consistent(&mut self, chunk: StreamChunk) {
-        self.check_chunk_consistency(chunk.clone().compact()).await;
+        if self.table_id.table_id == 1003 {
+            self.check_chunk_consistency(chunk.clone().compact()).await;
+        }
         self.write_chunk(chunk);
     }
 
@@ -851,6 +870,12 @@ where
     // allow(izip, which use zip instead of zip_eq)
     #[allow(clippy::disallowed_methods)]
     pub fn write_chunk(&mut self, chunk: StreamChunk) {
+        if self.table_id.table_id == 1003 {
+            println!(
+                "WKXLOG get one chunk in simple agg: chunk: \n{}",
+                chunk.to_pretty()
+            );
+        }
         let (chunk, op) = chunk.into_parts();
 
         let vnodes = compute_chunk_vnode(
@@ -883,24 +908,41 @@ where
                 (r, buffer.freeze())
             })
             .collect_vec();
-
+        println!("WKXLOG finish one chunk in simple agg");
         let vis = key_chunk.vis();
         match vis {
             Vis::Bitmap(vis) => {
                 for ((op, (key, key_bytes), value), vis) in
                     izip!(op.iter(), vnode_and_pks, values).zip_eq_debug(vis.iter())
                 {
+                    if self.table_id.table_id == 1003 {
+                        println!(
+                            "WKXLOG op: {:?}, vis :{}, Bitmap table id: {}, key: {:?}",
+                            op, vis, self.table_id, key
+                        )
+                    }
                     if vis {
                         match op {
                             Op::Insert | Op::UpdateInsert => {
                                 if USE_WATERMARK_CACHE && let Some(ref pk) = key {
                                     self.watermark_cache.insert(pk);
                                 }
+
                                 self.insert_inner(key_bytes, value);
                             }
                             Op::Delete | Op::UpdateDelete => {
                                 if USE_WATERMARK_CACHE && let Some(ref pk) = key {
                                     self.watermark_cache.delete(pk);
+                                }
+                                if self.table_id.table_id == 1003 {
+                                    tracing::debug!(
+                                        "WKXLOG op: {:?}, Bitmap table {} delete: {:?} {:?} {:?}",
+                                        op,
+                                        self.table_id,
+                                        key,
+                                        key_bytes,
+                                        value
+                                    );
                                 }
                                 self.delete_inner(key_bytes, value);
                             }
@@ -910,16 +952,32 @@ where
             }
             Vis::Compact(_) => {
                 for (op, (key, key_bytes), value) in izip!(op.iter(), vnode_and_pks, values) {
+                    if self.table_id.table_id == 1003 {
+                        println!(
+                            "WKXLOG op: {:?}, Compact table {} insert: {:?} {:?} {:?}",
+                            op, self.table_id, key, key_bytes, value
+                        )
+                    }
                     match op {
                         Op::Insert | Op::UpdateInsert => {
                             if USE_WATERMARK_CACHE && let Some(ref pk) = key {
                                 self.watermark_cache.insert(pk);
                             }
+
                             self.insert_inner(key_bytes, value);
                         }
                         Op::Delete | Op::UpdateDelete => {
                             if USE_WATERMARK_CACHE && let Some(ref pk) = key {
                                 self.watermark_cache.delete(pk);
+                            }
+                            if self.table_id.table_id == 1003 {
+                                tracing::debug!(
+                                    "WKXLOG op: {:?}, Compact table {} delete: {:?} {:?}",
+                                    op,
+                                    self.table_id,
+                                    key_bytes,
+                                    value
+                                );
                             }
                             self.delete_inner(key_bytes, value);
                         }
