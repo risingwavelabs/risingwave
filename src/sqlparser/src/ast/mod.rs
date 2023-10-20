@@ -442,11 +442,12 @@ pub enum Expr {
         obj: Box<Expr>,
         index: Box<Expr>,
     },
-    /// A slice expression `arr[1:3]`
+    /// A slice expression `arr[1:3:2]`
     ArrayRangeIndex {
         obj: Box<Expr>,
         start: Option<Box<Expr>>,
         end: Option<Box<Expr>>,
+        step: Option<Box<Expr>>,
     },
     LambdaFunction {
         args: Vec<Ident>,
@@ -670,7 +671,12 @@ impl fmt::Display for Expr {
                 write!(f, "{}[{}]", obj, index)?;
                 Ok(())
             }
-            Expr::ArrayRangeIndex { obj, start, end } => {
+            Expr::ArrayRangeIndex {
+                obj,
+                start,
+                end,
+                step,
+            } => {
                 let start_str = match start {
                     None => "".to_string(),
                     Some(start) => format!("{}", start),
@@ -679,7 +685,11 @@ impl fmt::Display for Expr {
                     None => "".to_string(),
                     Some(end) => format!("{}", end),
                 };
-                write!(f, "{}[{}:{}]", obj, start_str, end_str)?;
+                let step_str = match step {
+                    None => "".to_string(),
+                    Some(step) => format!(":{}", step),
+                };
+                write!(f, "{}[{}:{}{}]", obj, start_str, end_str, step_str)?;
                 Ok(())
             }
             Expr::Array(exprs) => write!(f, "{}", exprs),

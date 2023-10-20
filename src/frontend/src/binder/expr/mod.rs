@@ -122,9 +122,12 @@ impl Binder {
             Expr::Nested(expr) => self.bind_expr_inner(*expr),
             Expr::Array(Array { elem: exprs, .. }) => self.bind_array(exprs),
             Expr::ArrayIndex { obj, index } => self.bind_array_index(*obj, *index),
-            Expr::ArrayRangeIndex { obj, start, end } => {
-                self.bind_array_range_index(*obj, start, end)
-            }
+            Expr::ArrayRangeIndex {
+                obj,
+                start,
+                end,
+                step,
+            } => self.bind_array_range_index(*obj, start, end, step),
             Expr::Function(f) => self.bind_function(f),
             Expr::Subquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Scalar),
             Expr::Exists(q) => self.bind_subquery_expr(*q, SubqueryKind::Existential),

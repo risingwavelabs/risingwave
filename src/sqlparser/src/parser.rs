@@ -1540,63 +1540,175 @@ impl Parser {
         }
     }
 
-    /// We parse both `array[1,9][1]`, `array[1,9][1:2]`, `array[1,9][:2]`, `array[1,9][1:]` and
-    /// `array[1,9][:]` in this function.
-    pub fn parse_array_index(&mut self, expr: Expr) -> Result<Expr, ParserError> {
-        let new_expr = match self.peek_token().token {
+    fn parse_array_index_inner(&mut self, expr: Expr) -> Result<Expr, ParserError> {
+        //       [N]
+        // [:],  [N:],   [:N],   [N:M]
+        // [::], [N::],  [:N:],  [::N]
+        //       [N:M:], [N::M], [:N:P], [N:M:P]
+        match self.peek_token().token {
+            // [:]
+            // [:N]
+            // [:N:M], [:N:]
             Token::Colon => {
-                // [:] or [:N]
                 assert!(self.consume_token(&Token::Colon));
-                let end = match self.peek_token().token {
-                    Token::RBracket => None,
+                match self.peek_token().token {
+                    // [:]
+                    Token::RBracket => Ok(Expr::ArrayRangeIndex {
+                        obj: Box::new(expr),
+                        start: None,
+                        end: None,
+                        step: None,
+                    }),
+                    // [:N], [:N:]
+                    // [:N:M]
                     _ => {
-                        let end_index = Box::new(self.parse_expr()?);
-                        Some(end_index)
+                        let end = Some(Box::new(self.parse_expr()?));
+                        match self.peek_token().token {
+                            // [:N], [:N:]
+                            Token::RBracket | Token::Colon => Ok(Expr::ArrayRangeIndex {
+                                obj: Box::new(expr),
+                                start: None,
+                                end,
+                                step: None,
+                            }),
+                            // [:N:M]
+                            _ => {
+                                let step = Some(Box::new(self.parse_expr()?));
+                                Ok(Expr::ArrayRangeIndex {
+                                    obj: Box::new(expr),
+                                    start: None,
+                                    end,
+                                    step,
+                                })
+                            }
+                        }
                     }
-                };
-                Expr::ArrayRangeIndex {
-                    obj: Box::new(expr),
-                    start: None,
-                    end,
                 }
             }
+            // [::], [::N]
+            Token::DoubleColon => {
+                assert!(self.consume_token(&Token::DoubleColon));
+                match self.peek_token().token {
+                    // [::]
+                    Token::RBracket => Ok(Expr::ArrayRangeIndex {
+                        obj: Box::new(expr),
+                        start: None,
+                        end: None,
+                        step: None,
+                    }),
+                    // [::N]
+                    _ => {
+                        let step = Some(Box::new(self.parse_expr()?));
+                        Ok(Expr::ArrayRangeIndex {
+                            obj: Box::new(expr),
+                            start: None,
+                            end: None,
+                            step,
+                        })
+                    }
+                }
+            }
+            // [N]
+            // [N:], [N:M]
+            // [N:M:P], [N:M:], [N::M]
+            // [N::]
             _ => {
-                // [N], [N:], [N:M]
                 let index = Box::new(self.parse_expr()?);
                 match self.peek_token().token {
+                    // [N:], [N:M]
+                    // [N:M:P], [N:M:]
                     Token::Colon => {
-                        // [N:], [N:M]
                         assert!(self.consume_token(&Token::Colon));
+
                         match self.peek_token().token {
-                            Token::RBracket => {
-                                // [N:]
-                                Expr::ArrayRangeIndex {
+                            // [N:]
+                            Token::RBracket => Ok(Expr::ArrayRangeIndex {
+                                obj: Box::new(expr),
+                                start: Some(index),
+                                end: None,
+                                step: None,
+                            }),
+
+                            // [N:M]
+                            // [N:M:P], [N:M:]
+                            _ => {
+                                let end = Some(Box::new(self.parse_expr()?));
+                                match self.peek_token().token {
+                                    // [N:M:P], [N:M:]
+                                    Token::Colon => {
+                                        assert!(self.consume_token(&Token::Colon));
+                                        match self.peek_token().token {
+                                            // [N:M:]
+                                            Token::RBracket => Ok(Expr::ArrayRangeIndex {
+                                                obj: Box::new(expr),
+                                                start: Some(index),
+                                                end,
+                                                step: None,
+                                            }),
+                                            // [N:M:P]
+                                            _ => {
+                                                let step = Some(Box::new(self.parse_expr()?));
+                                                Ok(Expr::ArrayRangeIndex {
+                                                    obj: Box::new(expr),
+                                                    start: Some(index),
+                                                    end,
+                                                    step,
+                                                })
+                                            }
+                                        }
+                                    }
+                                    // [N:M]
+                                    _ => Ok(Expr::ArrayRangeIndex {
+                                        obj: Box::new(expr),
+                                        start: Some(index),
+                                        end,
+                                        step: None,
+                                    }),
+                                }
+                            }
+                        }
+                    }
+                    // [N::], [N::M]
+                    Token::DoubleColon => {
+                        assert!(self.consume_token(&Token::DoubleColon));
+                        match self.peek_token().token {
+                            // [N::]
+                            Token::RBracket => Ok(Expr::ArrayRangeIndex {
+                                obj: Box::new(expr),
+                                start: Some(index),
+                                end: None,
+                                step: None,
+                            }),
+                            // [N::M]
+                            _ => {
+                                let step = Some(Box::new(self.parse_expr()?));
+                                Ok(Expr::ArrayRangeIndex {
                                     obj: Box::new(expr),
                                     start: Some(index),
                                     end: None,
-                                }
-                            }
-                            _ => {
-                                // [N:M]
-                                let end = Some(Box::new(self.parse_expr()?));
-                                Expr::ArrayRangeIndex {
-                                    obj: Box::new(expr),
-                                    start: Some(index),
-                                    end,
-                                }
+                                    step,
+                                })
                             }
                         }
                     }
-                    _ => {
-                        // [N]
-                        Expr::ArrayIndex {
-                            obj: Box::new(expr),
-                            index,
-                        }
-                    }
+                    // [N]
+                    _ => Ok(Expr::ArrayIndex {
+                        obj: Box::new(expr),
+                        index,
+                    }),
                 }
             }
-        };
+        }
+    }
+
+    /// We parse both array index and slice in this function.
+    ///       [N]
+    /// [:],  [N:],   [:N],   [N:M]
+    /// [::], [N::],  [:N:],  [::N]
+    ///       [N:M:], [N::M], [:N:P], [N:M:P]
+    pub fn parse_array_index(&mut self, expr: Expr) -> Result<Expr, ParserError> {
+        let new_expr = self.parse_array_index_inner(expr)?;
+
         self.expect_token(&Token::RBracket)?;
         // recursively checking for more indices
         if self.consume_token(&Token::LBracket) {
