@@ -26,7 +26,6 @@ use risingwave_common::constants::log_store::{
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::match_sink_name_str;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::{
@@ -34,6 +33,7 @@ use risingwave_connector::sink::{
     SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_sink_impl::match_sink_name_str;
 use tracing::info;
 
 use super::derive::{derive_columns, derive_pk};

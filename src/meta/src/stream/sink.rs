@@ -12,18 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_connector::dispatch_sink;
-use risingwave_connector::sink::catalog::SinkCatalog;
-use risingwave_connector::sink::{build_sink, Sink, SinkParam};
+use futures::future::BoxFuture;
+use risingwave_connector::sink::SinkError;
 use risingwave_pb::catalog::PbSink;
 
-use crate::MetaResult;
+extern "Rust" {
+    fn __exported_validate_sink(
+        prost_sink_catalog: &PbSink,
+    ) -> BoxFuture<'_, std::result::Result<(), SinkError>>;
+}
 
-pub async fn validate_sink(prost_sink_catalog: &PbSink) -> MetaResult<()> {
-    let sink_catalog = SinkCatalog::from(prost_sink_catalog);
-    let param = SinkParam::from(sink_catalog);
-
-    let sink = build_sink(param)?;
-
-    dispatch_sink!(sink, sink, Ok(sink.validate().await?))
+pub async fn validate_sink(prost_sink_catalog: &PbSink) -> std::result::Result<(), SinkError> {
+    unsafe { __exported_validate_sink(prost_sink_catalog).await }
 }

@@ -259,10 +259,10 @@ fn bind_sink_format_desc(value: SinkSchema) -> Result<SinkFormatDesc> {
 
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, Vec<Encode>>>> =
     LazyLock::new(|| {
-        use risingwave_connector::sink::kafka::KafkaSink;
-        use risingwave_connector::sink::kinesis::KinesisSink;
-        use risingwave_connector::sink::pulsar::PulsarSink;
         use risingwave_connector::sink::Sink as _;
+        use risingwave_sink_impl::sink::kafka::KafkaSink;
+        use risingwave_sink_impl::sink::kinesis::KinesisSink;
+        use risingwave_sink_impl::sink::pulsar::PulsarSink;
 
         convert_args!(hashmap!(
                 KafkaSink::SINK_NAME => hashmap!(

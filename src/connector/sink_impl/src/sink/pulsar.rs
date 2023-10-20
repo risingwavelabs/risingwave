@@ -24,6 +24,7 @@ use pulsar::producer::{Message, SendFuture};
 use pulsar::{Producer, ProducerOptions, Pulsar, TokioExecutor};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_connector_common::common::PULSAR_CONNECTOR_NAME;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
@@ -34,8 +35,6 @@ use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::writer::{FormattedSink, LogSinkerOf, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result};
 use crate::{deserialize_duration_from_string, dispatch_sink_formatter_impl};
-
-pub const PULSAR_SINK: &str = "pulsar";
 
 /// The delivery buffer queue size
 /// When the `SendFuture` the current `send_future_buffer`
@@ -157,7 +156,7 @@ impl Sink for PulsarSink {
     type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = LogSinkerOf<PulsarSinkWriter>;
 
-    const SINK_NAME: &'static str = PULSAR_SINK;
+    const SINK_NAME: &'static str = PULSAR_CONNECTOR_NAME;
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(PulsarSinkWriter::new(

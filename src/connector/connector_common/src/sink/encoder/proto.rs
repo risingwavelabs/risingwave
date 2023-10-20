@@ -201,6 +201,7 @@ fn encode_fields<'a>(
 
 // Full name of Well-Known Types
 const WKT_TIMESTAMP: &str = "google.protobuf.Timestamp";
+#[allow(dead_code)]
 const WKT_BOOL_VALUE: &str = "google.protobuf.BoolValue";
 
 /// Handles both `validate` (without actual data) and `encode`.

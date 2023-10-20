@@ -21,6 +21,7 @@ use aws_sdk_kinesis::primitives::Blob;
 use aws_sdk_kinesis::Client as KinesisClient;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_connector_common::common::KINESIS_CONNECTOR_NAME;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -33,8 +34,6 @@ use crate::dispatch_sink_formatter_impl;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::writer::{FormattedSink, LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriterParam};
-
-pub const KINESIS_SINK: &str = "kinesis";
 
 #[derive(Clone, Debug)]
 pub struct KinesisSink {
@@ -69,7 +68,7 @@ impl Sink for KinesisSink {
     type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = LogSinkerOf<KinesisSinkWriter>;
 
-    const SINK_NAME: &'static str = KINESIS_SINK;
+    const SINK_NAME: &'static str = KINESIS_CONNECTOR_NAME;
 
     async fn validate(&self) -> Result<()> {
         // Kinesis requires partition key. There is no builtin support for round-robin as in kafka/pulsar.

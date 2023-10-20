@@ -56,6 +56,7 @@ risingwave_connector = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
+risingwave_sink_impl = { workspace = true }
 risingwave_source = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 risingwave_storage = { workspace = true }

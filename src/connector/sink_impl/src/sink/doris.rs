@@ -27,7 +27,7 @@ use serde_with::serde_as;
 
 use super::doris_connector::{DorisField, DorisInsert, DorisInsertClient, DORIS_DELETE_SIGN};
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
-use crate::common::DorisCommon;
+use crate::sink::doris_connector::DorisCommon;
 use crate::sink::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{

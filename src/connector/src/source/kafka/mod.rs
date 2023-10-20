@@ -16,23 +16,18 @@ use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
 pub mod enumerator;
-pub mod private_link;
 pub mod source;
 pub mod split;
-pub mod stats;
 
 pub use enumerator::*;
 pub use private_link::*;
+use risingwave_connector_common::common::KAFKA_CONNECTOR_NAME;
+pub use risingwave_connector_common::kafka::*;
 pub use source::*;
 pub use split::*;
 
 use crate::common::KafkaCommon;
 use crate::source::SourceProperties;
-
-pub const KAFKA_CONNECTOR: &str = "kafka";
-pub const KAFKA_PROPS_BROKER_KEY: &str = "properties.bootstrap.server";
-pub const KAFKA_PROPS_BROKER_KEY_ALIAS: &str = "kafka.brokers";
-pub const PRIVATELINK_CONNECTION: &str = "privatelink";
 
 /// Properties for the rdkafka library. Leave a field as `None` to use the default value.
 /// These properties are not intended to be exposed to users in the majority of cases.
@@ -130,7 +125,7 @@ impl SourceProperties for KafkaProperties {
     type SplitEnumerator = KafkaSplitEnumerator;
     type SplitReader = KafkaSplitReader;
 
-    const SOURCE_NAME: &'static str = KAFKA_CONNECTOR;
+    const SOURCE_NAME: &'static str = KAFKA_CONNECTOR_NAME;
 }
 
 impl KafkaProperties {
@@ -141,8 +136,6 @@ impl KafkaProperties {
         tracing::info!("kafka client starts with: {:?}", c);
     }
 }
-
-const KAFKA_ISOLATION_LEVEL: &str = "read_committed";
 
 impl RdKafkaPropertiesConsumer {
     pub fn set_client(&self, c: &mut rdkafka::ClientConfig) {

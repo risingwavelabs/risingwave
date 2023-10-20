@@ -16,6 +16,7 @@ pub mod enumerator;
 pub mod source;
 pub mod split;
 
+use risingwave_connector_common::common::KINESIS_CONNECTOR_NAME;
 use serde::Deserialize;
 
 use crate::common::KinesisCommon;
@@ -23,8 +24,6 @@ use crate::source::kinesis::enumerator::client::KinesisSplitEnumerator;
 use crate::source::kinesis::source::reader::KinesisSplitReader;
 use crate::source::kinesis::split::KinesisSplit;
 use crate::source::SourceProperties;
-
-pub const KINESIS_CONNECTOR: &str = "kinesis";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct KinesisProperties {
@@ -44,5 +43,5 @@ impl SourceProperties for KinesisProperties {
     type SplitEnumerator = KinesisSplitEnumerator;
     type SplitReader = KinesisSplitReader;
 
-    const SOURCE_NAME: &'static str = KINESIS_CONNECTOR;
+    const SOURCE_NAME: &'static str = KINESIS_CONNECTOR_NAME;
 }

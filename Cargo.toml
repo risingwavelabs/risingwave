@@ -9,6 +9,8 @@ members = [
   "src/common/common_service",
   "src/compute",
   "src/connector",
+  "src/connector/connector_common",
+  "src/connector/sink_impl",
   "src/ctl",
   "src/expr/core",
   "src/expr/impl",
@@ -132,6 +134,7 @@ risingwave_compactor = { path = "./src/storage/compactor" }
 risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }
 risingwave_connector = { path = "./src/connector" }
+risingwave_connector_common = { path = "./src/connector/connector_common" }
 risingwave_expr = { path = "./src/expr/core" }
 risingwave_expr_impl = { path = "./src/expr/impl" }
 risingwave_frontend = { path = "./src/frontend" }
@@ -143,6 +146,7 @@ risingwave_object_store = { path = "./src/object_store" }
 risingwave_pb = { path = "./src/prost" }
 risingwave_rpc_client = { path = "./src/rpc_client" }
 risingwave_rt = { path = "./src/utils/runtime" }
+risingwave_sink_impl = { path = "./src/connector/sink_impl" }
 risingwave_source = { path = "./src/source" }
 risingwave_sqlparser = { path = "./src/sqlparser" }
 risingwave_sqlsmith = { path = "./src/tests/sqlsmith" }

@@ -12,33 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod blackhole;
 pub mod boxed;
 pub mod catalog;
-pub mod clickhouse;
-pub mod coordinate;
-pub mod doris;
-pub mod doris_connector;
 pub mod encoder;
 pub mod formatter;
-pub mod iceberg;
-pub mod kafka;
-pub mod kinesis;
 pub mod log_store;
-pub mod nats;
-pub mod pulsar;
-pub mod redis;
-pub mod remote;
-pub mod test_sink;
 pub mod utils;
 pub mod writer;
 
 use std::collections::HashMap;
 use std::future::Future;
 
-use ::clickhouse::error::Error as ClickHouseError;
 use anyhow::anyhow;
 use async_trait::async_trait;
+use clickhouse::error::Error as ClickHouseError;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
@@ -50,77 +37,12 @@ use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
 use thiserror::Error;
-pub use tracing;
 
-use self::catalog::{SinkFormatDesc, SinkType};
 use crate::sink::catalog::desc::SinkDesc;
-use crate::sink::catalog::{SinkCatalog, SinkId};
+use crate::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkId, SinkType};
 use crate::sink::log_store::LogReader;
 use crate::sink::writer::SinkWriter;
 use crate::ConnectorParams;
-
-#[macro_export]
-macro_rules! for_all_sinks {
-    ($macro:path $(, $arg:tt)*) => {
-        $macro! {
-            {
-                { Redis, $crate::sink::redis::RedisSink },
-                { Kafka, $crate::sink::kafka::KafkaSink },
-                { Pulsar, $crate::sink::pulsar::PulsarSink },
-                { BlackHole, $crate::sink::blackhole::BlackHoleSink },
-                { Kinesis, $crate::sink::kinesis::KinesisSink },
-                { ClickHouse, $crate::sink::clickhouse::ClickHouseSink },
-                { Iceberg, $crate::sink::iceberg::IcebergSink },
-                { Nats, $crate::sink::nats::NatsSink },
-                { RemoteIceberg, $crate::sink::iceberg::RemoteIcebergSink },
-                { Jdbc, $crate::sink::remote::JdbcSink },
-                { DeltaLake, $crate::sink::remote::DeltaLakeSink },
-                { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
-                { Cassandra, $crate::sink::remote::CassandraSink },
-                { Doris, $crate::sink::doris::DorisSink },
-                { Test, $crate::sink::test_sink::TestSink }
-            }
-            $(,$arg)*
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! dispatch_sink {
-    ({$({$variant_name:ident, $sink_type:ty}),*}, $impl:tt, $sink:tt, $body:tt) => {{
-        use $crate::sink::SinkImpl;
-
-        match $impl {
-            $(
-                SinkImpl::$variant_name($sink) => $body,
-            )*
-        }
-    }};
-    ($impl:expr, $sink:ident, $body:expr) => {{
-        $crate::for_all_sinks! {$crate::dispatch_sink, {$impl}, $sink, {$body}}
-    }};
-}
-
-#[macro_export]
-macro_rules! match_sink_name_str {
-    ({$({$variant_name:ident, $sink_type:ty}),*}, $name_str:tt, $type_name:ident, $body:tt, $on_other_closure:tt) => {{
-        use $crate::sink::Sink;
-        match $name_str {
-            $(
-                <$sink_type>::SINK_NAME => {
-                    type $type_name = $sink_type;
-                    {
-                        $body
-                    }
-                },
-            )*
-            other => ($on_other_closure)(other),
-        }
-    }};
-    ($name_str:expr, $type_name:ident, $body:expr, $on_other_closure:expr) => {{
-        $crate::for_all_sinks! {$crate::match_sink_name_str, {$name_str}, $type_name, {$body}, {$on_other_closure}}
-    }};
-}
 
 pub const CONNECTOR_TYPE_KEY: &str = "connector";
 pub const SINK_TYPE_OPTION: &str = "type";
@@ -226,7 +148,7 @@ pub struct SinkMetrics {
 }
 
 impl SinkMetrics {
-    fn for_test() -> Self {
+    pub fn for_test() -> Self {
         SinkMetrics {
             sink_commit_duration_metrics: LabelGuardedHistogram::test_histogram(),
             connector_sink_rows_received: LabelGuardedIntCounter::test_int_counter(),
@@ -308,61 +230,6 @@ impl SinkCommitCoordinator for DummySinkCommitCoordinator {
     }
 }
 
-impl SinkImpl {
-    pub fn new(mut param: SinkParam) -> Result<Self> {
-        const CONNECTION_NAME_KEY: &str = "connection.name";
-        const PRIVATE_LINK_TARGET_KEY: &str = "privatelink.targets";
-
-        // remove privatelink related properties if any
-        param.properties.remove(PRIVATE_LINK_TARGET_KEY);
-        param.properties.remove(CONNECTION_NAME_KEY);
-
-        let sink_type = param
-            .properties
-            .get(CONNECTOR_TYPE_KEY)
-            .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)))?;
-        match_sink_name_str!(
-            sink_type.to_lowercase().as_str(),
-            SinkType,
-            Ok(SinkType::try_from(param)?.into()),
-            |other| {
-                Err(SinkError::Config(anyhow!(
-                    "unsupported sink connector {}",
-                    other
-                )))
-            }
-        )
-    }
-}
-
-pub fn build_sink(param: SinkParam) -> Result<SinkImpl> {
-    SinkImpl::new(param)
-}
-
-macro_rules! def_sink_impl {
-    () => {
-        $crate::for_all_sinks! { def_sink_impl }
-    };
-    ({ $({ $variant_name:ident, $sink_type:ty }),* }) => {
-        #[derive(Debug)]
-        pub enum SinkImpl {
-            $(
-                $variant_name($sink_type),
-            )*
-        }
-
-        $(
-            impl From<$sink_type> for SinkImpl {
-                fn from(sink: $sink_type) -> SinkImpl {
-                    SinkImpl::$variant_name(sink)
-                }
-            }
-        )*
-    };
-}
-
-def_sink_impl!();
-
 pub type Result<T> = std::result::Result<T, SinkError>;
 
 #[derive(Error, Debug)]
@@ -378,7 +245,7 @@ pub enum SinkError {
     #[error("Iceberg error: {0}")]
     Iceberg(anyhow::Error),
     #[error("config error: {0}")]
-    Config(#[from] anyhow::Error),
+    Config(anyhow::Error),
     #[error("coordinator error: {0}")]
     Coordinator(anyhow::Error),
     #[error("ClickHouse error: {0}")]
@@ -392,7 +259,7 @@ pub enum SinkError {
     #[error("Pulsar error: {0}")]
     Pulsar(anyhow::Error),
     #[error("Internal error: {0}")]
-    Internal(anyhow::Error),
+    Internal(#[from] anyhow::Error),
 }
 
 impl From<icelake::Error> for SinkError {

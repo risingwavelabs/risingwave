@@ -16,13 +16,13 @@ use std::collections::HashSet;
 use std::pin::pin;
 
 use anyhow::anyhow;
-use futures::future::{select, Either};
+use futures::future::{select, BoxFuture, Either};
 use futures::stream::FuturesUnordered;
 use futures::{StreamExt, TryStreamExt};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_connector::dispatch_sink;
-use risingwave_connector::sink::{build_sink, Sink, SinkCommitCoordinator, SinkParam};
+use risingwave_connector::sink::boxed::BoxCoordinator;
+use risingwave_connector::sink::{SinkCommitCoordinator, SinkError, SinkParam};
 use risingwave_pb::connector_service::coordinate_request::CommitRequest;
 use risingwave_pb::connector_service::coordinate_response::{
     CommitResponse, StartCoordinationResponse,
@@ -53,42 +53,34 @@ pub(crate) struct CoordinatorWorker {
     request_rx: UnboundedReceiver<NewSinkWriterRequest>,
 }
 
+extern "Rust" {
+    fn __exported_build_box_coordinator(
+        param: SinkParam,
+    ) -> BoxFuture<'static, std::result::Result<BoxCoordinator, SinkError>>;
+}
+
 impl CoordinatorWorker {
     pub(crate) async fn run(
         first_writer_request: NewSinkWriterRequest,
         request_rx: UnboundedReceiver<NewSinkWriterRequest>,
     ) {
-        let sink = match build_sink(first_writer_request.param.clone()) {
-            Ok(sink) => sink,
+        let coordinator_result =
+            unsafe { __exported_build_box_coordinator(first_writer_request.param.clone()).await };
+        let coordinator = match coordinator_result {
+            Ok(coordinator) => coordinator,
             Err(e) => {
                 error!(
-                    "unable to build sink with param {:?}: {:?}",
+                    "unable to build coordinator with param {:?}: {:?}",
                     first_writer_request.param, e
                 );
                 send_await_with_err_check!(
                     first_writer_request.response_tx,
-                    Err(Status::invalid_argument("failed to build sink"))
+                    Err(Status::invalid_argument("failed to build coordinator"))
                 );
                 return;
             }
         };
-        dispatch_sink!(sink, sink, {
-            let coordinator = match sink.new_coordinator().await {
-                Ok(coordinator) => coordinator,
-                Err(e) => {
-                    error!(
-                        "unable to build coordinator with param {:?}: {:?}",
-                        first_writer_request.param, e
-                    );
-                    send_await_with_err_check!(
-                        first_writer_request.response_tx,
-                        Err(Status::invalid_argument("failed to build coordinator"))
-                    );
-                    return;
-                }
-            };
-            Self::execute_coordinator(first_writer_request, request_rx, coordinator).await
-        });
+        Self::execute_coordinator(first_writer_request, request_rx, coordinator).await
     }
 
     pub(crate) async fn execute_coordinator(

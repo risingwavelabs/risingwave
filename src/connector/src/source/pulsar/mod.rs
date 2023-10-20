@@ -18,6 +18,7 @@ pub mod split;
 pub mod topic;
 
 pub use enumerator::*;
+use risingwave_connector_common::common::PULSAR_CONNECTOR_NAME;
 use serde::Deserialize;
 pub use split::*;
 
@@ -25,14 +26,12 @@ use crate::common::PulsarCommon;
 use crate::source::pulsar::source::reader::PulsarSplitReader;
 use crate::source::SourceProperties;
 
-pub const PULSAR_CONNECTOR: &str = "pulsar";
-
 impl SourceProperties for PulsarProperties {
     type Split = PulsarSplit;
     type SplitEnumerator = PulsarSplitEnumerator;
     type SplitReader = PulsarSplitReader;
 
-    const SOURCE_NAME: &'static str = PULSAR_CONNECTOR;
+    const SOURCE_NAME: &'static str = PULSAR_CONNECTOR_NAME;
 }
 
 #[derive(Clone, Debug, Deserialize)]

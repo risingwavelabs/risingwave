@@ -27,8 +27,6 @@ pub mod pulsar;
 pub use base::*;
 pub(crate) use common::*;
 pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
-pub use kafka::KAFKA_CONNECTOR;
-pub use kinesis::KINESIS_CONNECTOR;
 pub use nats::NATS_CONNECTOR;
 mod common;
 pub mod external;
@@ -41,4 +39,3 @@ pub use mock_external_table::MockExternalTableReader;
 
 pub use crate::source::filesystem::{S3_CONNECTOR, S3_V2_CONNECTOR};
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
-pub use crate::source::pulsar::PULSAR_CONNECTOR;

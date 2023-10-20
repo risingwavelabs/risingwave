@@ -26,6 +26,9 @@ use risingwave_common::catalog::{
 use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_connector::common::{
+    KAFKA_CONNECTOR_NAME, KINESIS_CONNECTOR_NAME, PULSAR_CONNECTOR_NAME,
+};
 use risingwave_connector::parser::{
     name_strategy_from_str, schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig,
     ProtobufParserConfig, SpecificParserConfig,
@@ -37,9 +40,8 @@ use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
-    SourceEncode, SourceFormat, SourceStruct, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
-    KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
-    S3_V2_CONNECTOR,
+    SourceEncode, SourceFormat, SourceStruct, GOOGLE_PUBSUB_CONNECTOR, NATS_CONNECTOR,
+    NEXMARK_CONNECTOR, S3_CONNECTOR, S3_V2_CONNECTOR,
 };
 use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
@@ -854,7 +856,7 @@ pub(super) fn bind_source_watermark(
 static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, Vec<Encode>>>> =
     LazyLock::new(|| {
         convert_args!(hashmap!(
-                KAFKA_CONNECTOR => hashmap!(
+                KAFKA_CONNECTOR_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes, Encode::Csv],
                     Format::Upsert => vec![Encode::Json, Encode::Avro],
                     Format::Debezium => vec![Encode::Json, Encode::Avro],
@@ -862,14 +864,14 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Canal => vec![Encode::Json],
                     Format::DebeziumMongo => vec![Encode::Json],
                 ),
-                PULSAR_CONNECTOR => hashmap!(
+                PULSAR_CONNECTOR_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes],
                     Format::Upsert => vec![Encode::Json, Encode::Avro],
                     Format::Debezium => vec![Encode::Json],
                     Format::Maxwell => vec![Encode::Json],
                     Format::Canal => vec![Encode::Json],
                 ),
-                KINESIS_CONNECTOR => hashmap!(
+                KINESIS_CONNECTOR_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes],
                     Format::Upsert => vec![Encode::Json, Encode::Avro],
                     Format::Debezium => vec![Encode::Json],
@@ -933,7 +935,7 @@ pub fn validate_compatibility(
                 CONNECTORS_COMPATIBLE_FORMATS.keys()
             )))
         })?;
-    if connector != KAFKA_CONNECTOR {
+    if connector != KAFKA_CONNECTOR_NAME {
         let res = match (&source_schema.format, &source_schema.row_encode) {
             (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
                 let mut options = source_schema.gen_options().map_err(|e| anyhow!(e))?;

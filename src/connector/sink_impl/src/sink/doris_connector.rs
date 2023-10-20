@@ -356,6 +356,33 @@ impl DorisGet {
         Ok(schema)
     }
 }
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct DorisCommon {
+    #[serde(rename = "doris.url")]
+    pub url: String,
+    #[serde(rename = "doris.user")]
+    pub user: String,
+    #[serde(rename = "doris.password")]
+    pub password: String,
+    #[serde(rename = "doris.database")]
+    pub database: String,
+    #[serde(rename = "doris.table")]
+    pub table: String,
+}
+
+impl DorisCommon {
+    pub(crate) fn build_get_client(&self) -> DorisGet {
+        DorisGet::new(
+            self.url.clone(),
+            self.table.clone(),
+            self.database.clone(),
+            self.user.clone(),
+            self.password.clone(),
+        )
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DorisSchema {
     status: i32,

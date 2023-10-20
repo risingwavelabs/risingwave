@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::pin::pin;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -23,11 +22,13 @@ use futures::future::{select, Either};
 use futures::{Future, FutureExt, TryFuture};
 use rdkafka::error::KafkaError;
 use rdkafka::message::ToBytes;
-use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord};
+use rdkafka::producer::{DeliveryFuture, FutureProducer, FutureRecord, Producer};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::drop_either_future;
+use risingwave_connector_common::common::KAFKA_CONNECTOR_NAME;
+use risingwave_connector_common::kafka::private_link::PrivateLinkProducerContext;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
 use strum_macros::{Display, EnumString};
@@ -42,8 +43,6 @@ use crate::sink::log_store::{
 };
 use crate::sink::writer::FormattedSink;
 use crate::sink::{DummySinkCommitCoordinator, LogSinker, Result, SinkWriterParam};
-use crate::source::kafka::{KafkaProperties, KafkaSplitEnumerator, PrivateLinkProducerContext};
-use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 use crate::{
     deserialize_duration_from_string, deserialize_u32_from_string, dispatch_sink_formatter_impl,
 };
@@ -245,26 +244,33 @@ impl KafkaConfig {
         Ok(config)
     }
 
-    pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
+    fn set_client(&self, c: &mut rdkafka::ClientConfig) {
         self.common.set_client(c);
         self.rdkafka_properties.set_client(c);
 
         tracing::info!("kafka client starts with: {:?}", c);
     }
-}
 
-impl From<KafkaConfig> for KafkaProperties {
-    fn from(val: KafkaConfig) -> Self {
-        KafkaProperties {
-            bytes_per_second: None,
-            max_num_messages: None,
-            scan_startup_mode: None,
-            time_offset: None,
-            consumer_group: None,
-            upsert: None,
-            common: val.common,
-            rdkafka_properties: Default::default(),
-        }
+    async fn build_producer(&self) -> Result<FutureProducer<PrivateLinkProducerContext>> {
+        let mut c = ClientConfig::new();
+
+        // KafkaConfig configuration
+        self.common.set_security_properties(&mut c);
+        self.set_client(&mut c);
+
+        // ClientConfig configuration
+        c.set("bootstrap.servers", &self.common.brokers);
+
+        // Create the producer context, will be used to create the producer
+        let producer_ctx = PrivateLinkProducerContext::new(
+            self.common.broker_rewrite_map.clone(),
+            // fixme: enable kafka native metrics for sink
+            None,
+            None,
+        )?;
+
+        // Generate the producer
+        Ok(c.create_with_context(producer_ctx).await?)
     }
 }
 
@@ -301,7 +307,7 @@ impl Sink for KafkaSink {
     type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = KafkaLogSinker;
 
-    const SINK_NAME: &'static str = KAFKA_SINK;
+    const SINK_NAME: &'static str = KAFKA_CONNECTOR_NAME;
 
     fn default_sink_decouple(desc: &SinkDesc) -> bool {
         desc.sink_type.is_append_only()
@@ -330,12 +336,15 @@ impl Sink for KafkaSink {
         // Try Kafka connection.
         // There is no such interface for kafka producer to validate a connection
         // use enumerator to validate broker reachability and existence of topic
-        let check = KafkaSplitEnumerator::new(
-            KafkaProperties::from(self.config.clone()),
-            Arc::new(SourceEnumeratorContext::default()),
-        )
-        .await?;
-        if !check.check_reachability().await {
+        if self
+            .config
+            .build_producer()
+            .await?
+            .client()
+            .fetch_metadata(None, self.config.common.sync_call_timeout)
+            .await
+            .is_err()
+        {
             return Err(SinkError::Config(anyhow!(
                 "cannot connect to kafka broker ({})",
                 self.config.common.brokers
@@ -371,27 +380,7 @@ pub struct KafkaLogSinker {
 
 impl KafkaLogSinker {
     async fn new(config: KafkaConfig, formatter: SinkFormatterImpl) -> Result<Self> {
-        let inner: FutureProducer<PrivateLinkProducerContext> = {
-            let mut c = ClientConfig::new();
-
-            // KafkaConfig configuration
-            config.common.set_security_properties(&mut c);
-            config.set_client(&mut c);
-
-            // ClientConfig configuration
-            c.set("bootstrap.servers", &config.common.brokers);
-
-            // Create the producer context, will be used to create the producer
-            let producer_ctx = PrivateLinkProducerContext::new(
-                config.common.broker_rewrite_map.clone(),
-                // fixme: enable kafka native metrics for sink
-                None,
-                None,
-            )?;
-
-            // Generate the producer
-            c.create_with_context(producer_ctx).await?
-        };
+        let inner: FutureProducer<PrivateLinkProducerContext> = config.build_producer().await?;
 
         let max_delivery_buffer_size = (config
             .rdkafka_properties

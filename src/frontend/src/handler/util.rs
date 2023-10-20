@@ -31,7 +31,7 @@ use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl, Timestamptz};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::source::KAFKA_CONNECTOR;
+use risingwave_connector::common::KAFKA_CONNECTOR_NAME;
 use risingwave_sqlparser::ast::display_comma_separated;
 
 use crate::catalog::IndexCatalog;
@@ -250,7 +250,7 @@ pub fn is_kafka_connector(with_properties: &HashMap<String, String>) -> bool {
         return false;
     };
 
-    connector == KAFKA_CONNECTOR
+    connector == KAFKA_CONNECTOR_NAME
 }
 
 #[inline(always)]

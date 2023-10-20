@@ -37,11 +37,13 @@ use url::Url;
 use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::deserialize_duration_from_string;
-use crate::sink::doris_connector::DorisGet;
 use crate::sink::SinkError;
-use crate::source::nats::source::NatsOffset;
 // The file describes the common abstractions for each connector and can be used in both source and
 // sink.
+
+pub const KAFKA_CONNECTOR_NAME: &str = "kafka";
+pub const PULSAR_CONNECTOR_NAME: &str = "pulsar";
+pub const KINESIS_CONNECTOR_NAME: &str = "kinesis";
 
 pub const BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
 pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
@@ -168,7 +170,7 @@ pub struct RdKafkaPropertiesCommon {
 }
 
 impl RdKafkaPropertiesCommon {
-    pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
+    pub fn set_client(&self, c: &mut rdkafka::ClientConfig) {
         if let Some(v) = self.statistics_interval_ms {
             c.set("statistics.interval.ms", v.to_string());
         }
@@ -185,7 +187,7 @@ impl RdKafkaPropertiesCommon {
 }
 
 impl KafkaCommon {
-    pub(crate) fn set_security_properties(&self, config: &mut ClientConfig) {
+    pub fn set_security_properties(&self, config: &mut ClientConfig) {
         // Security protocol
         if let Some(security_protocol) = self.security_protocol.as_ref() {
             config.set("security.protocol", security_protocol);
@@ -248,7 +250,7 @@ impl KafkaCommon {
         config.set("enable.sasl.oauthbearer.unsecure.jwt", "true");
     }
 
-    pub(crate) fn set_client(&self, c: &mut rdkafka::ClientConfig) {
+    pub fn set_client(&self, c: &mut rdkafka::ClientConfig) {
         self.rdkafka_properties.set_client(c);
     }
 }
@@ -288,7 +290,7 @@ pub struct PulsarOauthCommon {
 }
 
 impl PulsarCommon {
-    pub(crate) async fn build_client(&self) -> anyhow::Result<Pulsar<TokioExecutor>> {
+    pub async fn build_client(&self) -> anyhow::Result<Pulsar<TokioExecutor>> {
         let mut pulsar_builder = Pulsar::builder(&self.service_url, TokioExecutor);
         let mut temp_file = None;
         if let Some(oauth) = &self.oauth {
@@ -386,7 +388,7 @@ pub struct KinesisCommon {
 }
 
 impl KinesisCommon {
-    pub(crate) async fn build_client(&self) -> anyhow::Result<KinesisClient> {
+    pub async fn build_client(&self) -> anyhow::Result<KinesisClient> {
         let config = AwsAuthProps {
             region: Some(self.stream_region.clone()),
             endpoint: self.endpoint.clone(),
@@ -423,7 +425,7 @@ pub struct ClickHouseCommon {
 const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
 
 impl ClickHouseCommon {
-    pub(crate) fn build_client(&self) -> anyhow::Result<Client> {
+    pub fn build_client(&self) -> anyhow::Result<Client> {
         use hyper_tls::HttpsConnector;
 
         let https = HttpsConnector::new();
@@ -440,38 +442,21 @@ impl ClickHouseCommon {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct DorisCommon {
-    #[serde(rename = "doris.url")]
-    pub url: String,
-    #[serde(rename = "doris.user")]
-    pub user: String,
-    #[serde(rename = "doris.password")]
-    pub password: String,
-    #[serde(rename = "doris.database")]
-    pub database: String,
-    #[serde(rename = "doris.table")]
-    pub table: String,
-}
-
-impl DorisCommon {
-    pub(crate) fn build_get_client(&self) -> DorisGet {
-        DorisGet::new(
-            self.url.clone(),
-            self.table.clone(),
-            self.database.clone(),
-            self.user.clone(),
-            self.password.clone(),
-        )
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpsertMessage<'a> {
     #[serde(borrow)]
     pub primary_key: Cow<'a, [u8]>,
     #[serde(borrow)]
     pub record: Cow<'a, [u8]>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub enum NatsOffset {
+    Earliest,
+    Latest,
+    SequenceNumber(String),
+    Timestamp(i128),
+    None,
 }
 
 #[serde_as]
@@ -511,7 +496,7 @@ pub struct NatsCommon {
 }
 
 impl NatsCommon {
-    pub(crate) async fn build_client(&self) -> anyhow::Result<async_nats::Client> {
+    pub async fn build_client(&self) -> anyhow::Result<async_nats::Client> {
         let mut connect_options = async_nats::ConnectOptions::new();
         match self.connect_mode.as_deref() {
             Some("user_and_password") => {
@@ -559,13 +544,13 @@ impl NatsCommon {
         Ok(client)
     }
 
-    pub(crate) async fn build_context(&self) -> anyhow::Result<jetstream::Context> {
+    pub async fn build_context(&self) -> anyhow::Result<jetstream::Context> {
         let client = self.build_client().await?;
         let jetstream = async_nats::jetstream::new(client);
         Ok(jetstream)
     }
 
-    pub(crate) async fn build_consumer(
+    pub async fn build_consumer(
         &self,
         split_id: String,
         start_sequence: NatsOffset,
@@ -604,7 +589,7 @@ impl NatsCommon {
         Ok(consumer)
     }
 
-    pub(crate) async fn build_or_get_stream(
+    pub async fn build_or_get_stream(
         &self,
         jetstream: jetstream::Context,
     ) -> anyhow::Result<jetstream::stream::Stream> {
@@ -634,7 +619,7 @@ impl NatsCommon {
         Ok(stream)
     }
 
-    pub(crate) fn create_credential(&self, seed: &str, jwt: &str) -> anyhow::Result<String> {
+    pub fn create_credential(&self, seed: &str, jwt: &str) -> anyhow::Result<String> {
         let creds = format!(
             "-----BEGIN NATS USER JWT-----\n{}\n------END NATS USER JWT------\n\n\
                          ************************* IMPORTANT *************************\n\

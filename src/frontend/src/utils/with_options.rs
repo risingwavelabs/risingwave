@@ -18,10 +18,10 @@ use std::num::NonZeroU32;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
+use risingwave_connector::common::KAFKA_CONNECTOR_NAME;
 use risingwave_connector::source::kafka::{
     insert_privatelink_broker_rewrite_map, PRIVATELINK_ENDPOINT_KEY,
 };
-use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_sqlparser::ast::{
     CompatibleSourceSchema, CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
     SqlOption, Statement, Value,
@@ -126,7 +126,7 @@ fn is_kafka_connector(with_options: &WithOptions) -> bool {
     else {
         return false;
     };
-    connector == KAFKA_CONNECTOR
+    connector == KAFKA_CONNECTOR_NAME
 }
 
 pub(crate) fn resolve_privatelink_in_with_option(

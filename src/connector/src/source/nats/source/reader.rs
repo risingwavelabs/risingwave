@@ -17,11 +17,12 @@ use async_nats::jetstream::consumer;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use risingwave_connector_common::common::NatsOffset;
 
 use super::message::NatsMessage;
-use super::{NatsOffset, NatsSplit};
 use crate::parser::ParserConfig;
 use crate::source::common::{into_chunk_stream, CommonSplitReader};
+use crate::source::nats::source::NatsSplit;
 use crate::source::nats::NatsProperties;
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitReader,

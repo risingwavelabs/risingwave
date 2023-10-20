@@ -26,9 +26,11 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus};
 
 use super::{
-    SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
+    CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
     SINK_TYPE_UPSERT,
 };
+use crate::common::*;
+use crate::sink::SinkError;
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct SinkId {
@@ -136,11 +138,6 @@ pub enum SinkEncode {
 
 impl SinkFormatDesc {
     pub fn from_legacy_type(connector: &str, r#type: &str) -> Result<Option<Self>, SinkError> {
-        use crate::sink::kafka::KafkaSink;
-        use crate::sink::kinesis::KinesisSink;
-        use crate::sink::pulsar::PulsarSink;
-        use crate::sink::Sink as _;
-
         let format = match r#type {
             SINK_TYPE_APPEND_ONLY => SinkFormat::AppendOnly,
             SINK_TYPE_UPSERT => SinkFormat::Upsert,
@@ -153,7 +150,7 @@ impl SinkFormatDesc {
             }
         };
         let encode = match connector {
-            KafkaSink::SINK_NAME | KinesisSink::SINK_NAME | PulsarSink::SINK_NAME => {
+            KAFKA_CONNECTOR_NAME | PULSAR_CONNECTOR_NAME | KINESIS_CONNECTOR_NAME => {
                 SinkEncode::Json
             }
             _ => return Ok(None),

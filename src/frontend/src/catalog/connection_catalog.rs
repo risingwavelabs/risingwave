@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_common::error::{Result, RwError};
+use risingwave_connector::common::KAFKA_CONNECTOR_NAME;
 use risingwave_connector::source::kafka::private_link::insert_privatelink_broker_rewrite_map;
-use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
 use risingwave_pb::catalog::connection::Info;
 use risingwave_pb::catalog::{connection, PbConnection};
@@ -72,7 +72,7 @@ fn is_kafka_connector(with_properties: &BTreeMap<String, String>) -> bool {
         .get(UPSTREAM_SOURCE_KEY)
         .unwrap_or(&"".to_string())
         .to_lowercase()
-        .eq_ignore_ascii_case(KAFKA_CONNECTOR)
+        .eq_ignore_ascii_case(KAFKA_CONNECTOR_NAME)
 }
 
 pub(crate) fn resolve_private_link_connection(

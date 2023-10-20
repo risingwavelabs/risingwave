@@ -22,14 +22,13 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::array::{merge_chunk_row, Op, StreamChunk, StreamChunkCompactor};
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
-use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::log_store::{
     LogReader, LogReaderExt, LogStoreFactory, LogWriter, LogWriterExt,
 };
-use risingwave_connector::sink::{
-    build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
-};
+use risingwave_connector::sink::{LogSinker, Sink, SinkParam, SinkWriterParam};
+use risingwave_sink_impl::dispatch_sink;
+use risingwave_sink_impl::sink::{build_sink, SinkImpl};
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message, PkIndices};
