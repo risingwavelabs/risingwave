@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use anyhow::anyhow;
 use futures::future::try_join_all;
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
@@ -25,6 +27,7 @@ use risingwave_pb::stream_plan::AddMutation;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, UpdateActorsRequest,
 };
+use tokio::sync::oneshot;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tracing::{debug, warn, Instrument};
 use uuid::Uuid;
@@ -32,6 +35,8 @@ use uuid::Uuid;
 use super::TracedEpoch;
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
+use crate::barrier::notifier::Notifier;
+use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
 use crate::manager::WorkerId;
 use crate::model::{BarrierManagerState, MigrationPlan};
@@ -105,6 +110,101 @@ impl GlobalBarrierManager {
             .drop_source_change(&to_drop_table_fragments)
             .await;
 
+        Ok(())
+    }
+
+    async fn recover_background_mv_progress(&self) -> MetaResult<()> {
+        let creating_tables = self.catalog_manager.list_creating_background_mvs().await;
+        let creating_table_ids = creating_tables
+            .iter()
+            .map(|t| TableId { table_id: t.id })
+            .collect_vec();
+
+        let mut senders = HashMap::new();
+        let mut receivers = Vec::new();
+        for table_id in creating_table_ids.iter().copied() {
+            let (finished_tx, finished_rx) = oneshot::channel();
+            senders.insert(
+                table_id,
+                Notifier {
+                    finished: Some(finished_tx),
+                    ..Default::default()
+                },
+            );
+
+            let fragments = self
+                .fragment_manager
+                .select_table_fragments_by_table_id(&table_id)
+                .await?;
+            let internal_table_ids = fragments.internal_table_ids();
+            let internal_tables = self.catalog_manager.get_tables(&internal_table_ids).await;
+            let table = self.catalog_manager.get_tables(&[table_id.table_id]).await;
+            assert_eq!(table.len(), 1, "should only have 1 materialized table");
+            let table = table.into_iter().next().unwrap();
+            receivers.push((table, internal_tables, finished_rx));
+        }
+
+        let table_map = self
+            .fragment_manager
+            .get_table_id_actor_mapping(&creating_table_ids)
+            .await;
+        let table_fragment_map = self
+            .fragment_manager
+            .get_table_id_table_fragment_map(&creating_table_ids)
+            .await?;
+        let upstream_mv_counts = self
+            .fragment_manager
+            .get_upstream_relation_counts(&creating_table_ids)
+            .await;
+        let definitions: HashMap<_, _> = creating_tables
+            .into_iter()
+            .map(|t| (TableId { table_id: t.id }, t.definition))
+            .collect();
+        let version_stats = self.hummock_manager.get_version_stats().await;
+        // If failed, enter recovery mode.
+        {
+            let mut tracker = self.tracker.lock().await;
+            *tracker = CreateMviewProgressTracker::recover(
+                table_map.into(),
+                upstream_mv_counts.into(),
+                definitions.into(),
+                version_stats,
+                senders.into(),
+                table_fragment_map.into(),
+                self.fragment_manager.clone(),
+            );
+        }
+        for (table, internal_tables, finished) in receivers {
+            let catalog_manager = self.catalog_manager.clone();
+            tokio::spawn(async move {
+                let res: MetaResult<()> = try {
+                    tracing::debug!("recovering stream job {}", table.id);
+                    finished
+                        .await
+                        .map_err(|e| anyhow!("failed to finish command: {}", e))?;
+
+                    tracing::debug!("finished stream job {}", table.id);
+                    // Once notified that job is finished we need to notify frontend.
+                    // and mark catalog as created and commit to meta.
+                    // both of these are done by catalog manager.
+                    catalog_manager
+                        .finish_create_table_procedure(internal_tables, table.clone())
+                        .await?;
+                    tracing::debug!("notified frontend for stream job {}", table.id);
+                };
+                if let Err(e) = res.as_ref() {
+                    tracing::error!(
+                        "stream job {} interrupted, will retry after recovery: {e:?}",
+                        table.id
+                    );
+                    // NOTE(kwannoel): We should not cleanup stream jobs,
+                    // we don't know if it's just due to CN killed,
+                    // or the job has actually failed.
+                    // Users have to manually cancel the stream jobs,
+                    // if they want to clean it.
+                }
+            });
+        }
         Ok(())
     }
 
