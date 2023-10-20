@@ -26,6 +26,9 @@ COMMON_DIR=$BACKGROUND_DDL_DIR/common
 CLUSTER_PROFILE='ci-1cn-1fe-with-recovery'
 export RUST_LOG="risingwave_meta=debug"
 
+export SLT_DB="dev"
+export SLT_PORT="4566"
+
 run_sql_file() {
   psql -h localhost -p 4566 -d dev -U root -f "$@"
 }
