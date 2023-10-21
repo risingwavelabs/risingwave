@@ -56,6 +56,9 @@ enum MetaErrorInner {
     #[error("{0} id not found: {1}")]
     CatalogIdNotFound(&'static str, u32),
 
+    #[error("table_fragment not exist: id={0}")]
+    FragmentNotFound(u32),
+
     #[error("{0} with name {1} exists")]
     Duplicated(&'static str, String),
 
@@ -133,6 +136,14 @@ impl MetaError {
 
     pub fn catalog_id_not_found<T: Into<u32>>(relation: &'static str, id: T) -> Self {
         MetaErrorInner::CatalogIdNotFound(relation, id.into()).into()
+    }
+
+    pub fn fragment_not_found<T: Into<u32>>(id: T) -> Self {
+        MetaErrorInner::FragmentNotFound(id.into()).into()
+    }
+
+    pub fn is_fragment_not_found(&self) -> bool {
+        matches!(self.inner.as_ref(), &MetaErrorInner::FragmentNotFound(..))
     }
 
     pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {

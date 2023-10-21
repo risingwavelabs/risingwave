@@ -1,0 +1,2 @@
+statement ok
+CREATE MATERIALIZED VIEW m1 as SELECT * FROM t;
