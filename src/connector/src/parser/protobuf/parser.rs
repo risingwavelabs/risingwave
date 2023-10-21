@@ -358,13 +358,13 @@ mod test {
     use risingwave_common::types::{DataType, StructType};
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::data::data_type::PbTypeName;
+    use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
 
     use super::*;
     use crate::parser::protobuf::recursive::all_types::{EnumType, ExampleOneof, NestedMessage};
     use crate::parser::protobuf::recursive::AllTypes;
     use crate::parser::unified::Access;
     use crate::parser::SpecificParserConfig;
-    use crate::source::{SourceEncode, SourceFormat, SourceStruct};
 
     fn schema_dir() -> String {
         let dir = PathBuf::from("src/test_data");
@@ -391,13 +391,11 @@ mod test {
             proto_message_name: message_name.to_string(),
             row_schema_location: location.to_string(),
             use_schema_registry: false,
+            format: PbFormatType::Plain.into(),
+            row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(
-            SourceStruct::new(SourceFormat::Plain, SourceEncode::Protobuf),
-            &info,
-            &HashMap::new(),
-        )?;
+        let parser_config = SpecificParserConfig::new(&info, &HashMap::new())?;
         let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let value = DynamicMessage::decode(conf.message_descriptor, PRE_GEN_PROTO_DATA).unwrap();
 
@@ -438,13 +436,11 @@ mod test {
             proto_message_name: message_name.to_string(),
             row_schema_location: location.to_string(),
             use_schema_registry: false,
+            format: PbFormatType::Plain.into(),
+            row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(
-            SourceStruct::new(SourceFormat::Plain, SourceEncode::Protobuf),
-            &info,
-            &HashMap::new(),
-        )?;
+        let parser_config = SpecificParserConfig::new(&info, &HashMap::new())?;
         let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
         let columns = conf.map_to_columns().unwrap();
 
@@ -489,14 +485,11 @@ mod test {
             proto_message_name: message_name.to_string(),
             row_schema_location: location.to_string(),
             use_schema_registry: false,
+            format: PbFormatType::Plain.into(),
+            row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(
-            SourceStruct::new(SourceFormat::Plain, SourceEncode::Protobuf),
-            &info,
-            &HashMap::new(),
-        )
-        .unwrap();
+        let parser_config = SpecificParserConfig::new(&info, &HashMap::new()).unwrap();
         let conf = ProtobufParserConfig::new(parser_config.encoding_config)
             .await
             .unwrap();
@@ -518,14 +511,11 @@ mod test {
             proto_message_name: message_name.to_string(),
             row_schema_location: location.to_string(),
             use_schema_registry: false,
+            format: PbFormatType::Plain.into(),
+            row_encode: PbEncodeType::Protobuf.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(
-            SourceStruct::new(SourceFormat::Plain, SourceEncode::Protobuf),
-            &info,
-            &HashMap::new(),
-        )
-        .unwrap();
+        let parser_config = SpecificParserConfig::new(&info, &HashMap::new()).unwrap();
 
         ProtobufParserConfig::new(parser_config.encoding_config)
             .await
