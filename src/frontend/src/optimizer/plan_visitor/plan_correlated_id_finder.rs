@@ -129,7 +129,9 @@ impl ExprCorrelatedIdFinder {
     }
 }
 
-impl ExprVisitor<()> for ExprCorrelatedIdFinder {
+impl ExprVisitor for ExprCorrelatedIdFinder {
+    type Result = ();
+
     fn merge(_: (), _: ()) {}
 
     fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {

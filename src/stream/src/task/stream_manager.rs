@@ -504,7 +504,6 @@ impl LocalStreamManagerCore {
         &mut self,
         fragment_id: FragmentId,
         node: &stream_plan::StreamNode,
-        input_pos: usize,
         env: StreamEnvironment,
         store: impl StateStore,
         actor_context: &ActorContextRef,
@@ -531,12 +530,11 @@ impl LocalStreamManagerCore {
 
         // Create the input executor before creating itself
         let mut input = Vec::with_capacity(node.input.iter().len());
-        for (input_pos, input_stream_node) in node.input.iter().enumerate() {
+        for input_stream_node in &node.input {
             input.push(
                 self.create_nodes_inner(
                     fragment_id,
                     input_stream_node,
-                    input_pos,
                     env.clone(),
                     store.clone(),
                     actor_context,
@@ -570,10 +568,10 @@ impl LocalStreamManagerCore {
         // Build the executor with params.
         let executor_params = ExecutorParams {
             env: env.clone(),
-            pk_indices,
+            pk_indices: pk_indices.clone(),
             executor_id,
             operator_id,
-            identity,
+            identity: identity.clone(),
             op_info,
             schema,
             input,
@@ -585,14 +583,17 @@ impl LocalStreamManagerCore {
         };
 
         let executor = create_executor(executor_params, self, node, store).await?;
+        assert_eq!(
+            executor.pk_indices(),
+            &pk_indices,
+            "`pk_indices` of {} not consistent with what derived by optimizer",
+            executor.identity()
+        );
 
         // Wrap the executor for debug purpose.
         let executor = WrapperExecutor::new(
             executor,
-            input_pos,
-            actor_context.id,
-            executor_id,
-            self.streaming_metrics.clone(),
+            actor_context.clone(),
             self.config.developer.enable_executor_row_count,
         )
         .boxed();
@@ -628,7 +629,6 @@ impl LocalStreamManagerCore {
             self.create_nodes_inner(
                 fragment_id,
                 node,
-                0,
                 env,
                 store,
                 actor_context,
@@ -715,13 +715,14 @@ impl LocalStreamManagerCore {
                 {
                     let metrics = self.streaming_metrics.clone();
                     let actor_id_str = actor_id.to_string();
+                    let fragment_id_str = actor_context.fragment_id.to_string();
                     let allocation_stated = task_stats_alloc::allocation_stat(
                         instrumented,
                         Duration::from_millis(1000),
                         move |bytes| {
                             metrics
                                 .actor_memory_usage
-                                .with_label_values(&[&actor_id_str])
+                                .with_label_values(&[&actor_id_str, &fragment_id_str])
                                 .set(bytes as i64);
 
                             actor_context.store_mem_usage(bytes);

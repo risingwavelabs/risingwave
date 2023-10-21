@@ -13,27 +13,32 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use risingwave_pb::catalog::{PbDatabase, PbSchema};
+use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
+use risingwave_pb::catalog::{PbConnection, PbDatabase, PbSchema};
 use sea_orm::{ActiveValue, DatabaseConnection, ModelTrait};
 
-use crate::model_v2::{database, object, schema};
+use crate::model_v2::{connection, database, object, schema};
 use crate::MetaError;
 
 #[allow(dead_code)]
 pub mod catalog;
+pub mod cluster;
 pub mod system_param;
 pub mod utils;
 
 // todo: refine the error transform.
 impl From<sea_orm::DbErr> for MetaError {
     fn from(err: sea_orm::DbErr) -> Self {
+        if let Some(err) = err.sql_err() {
+            return anyhow!(err).into();
+        }
         anyhow!(err).into()
     }
 }
 
 #[derive(Clone)]
 pub struct SqlMetaStore {
-    pub(crate) conn: DatabaseConnection,
+    pub conn: DatabaseConnection,
 }
 
 impl SqlMetaStore {
@@ -77,7 +82,6 @@ impl From<PbSchema> for schema::ActiveModel {
         Self {
             schema_id: ActiveValue::Set(schema.id as _),
             name: ActiveValue::Set(schema.name),
-            database_id: ActiveValue::Set(schema.database_id as _),
         }
     }
 }
@@ -87,8 +91,21 @@ impl From<ObjectModel<schema::Model>> for PbSchema {
         Self {
             id: value.0.schema_id as _,
             name: value.0.name,
-            database_id: value.0.database_id as _,
+            database_id: value.1.database_id.unwrap() as _,
             owner: value.1.owner_id as _,
+        }
+    }
+}
+
+impl From<ObjectModel<connection::Model>> for PbConnection {
+    fn from(value: ObjectModel<connection::Model>) -> Self {
+        Self {
+            id: value.1.oid as _,
+            schema_id: value.1.schema_id.unwrap() as _,
+            database_id: value.1.database_id.unwrap() as _,
+            name: value.0.name,
+            owner: value.1.owner_id as _,
+            info: Some(PbConnectionInfo::PrivateLinkService(value.0.info.0)),
         }
     }
 }

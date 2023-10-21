@@ -20,11 +20,14 @@ use apache_avro::{from_avro_datum, Schema};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
+use risingwave_pb::catalog::PbSchemaRegistryNameStrategy;
 use risingwave_pb::plan_common::ColumnDesc;
 
 use crate::parser::avro::schema_resolver::ConfluentSchemaResolver;
 use crate::parser::avro::util::avro_schema_to_column_descs;
-use crate::parser::schema_registry::{extract_schema_id, handle_sr_list, Client};
+use crate::parser::schema_registry::{
+    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
+};
 use crate::parser::unified::avro::{
     avro_extract_field_schema, avro_schema_skip_union, AvroAccess, AvroParseOptions,
 };
@@ -108,18 +111,16 @@ impl DebeziumAvroParserConfig {
         let kafka_topic = &avro_config.topic;
         let url = handle_sr_list(schema_location)?;
         let client = Client::new(url, client_config)?;
-        let raw_schema = client
-            .get_schema_by_subject(format!("{}-key", &kafka_topic).as_str())
-            .await?;
-        let key_schema = Schema::parse_str(&raw_schema.content)
-            .map_err(|e| RwError::from(ProtocolError(format!("Avro schema parse error {}", e))))?;
-
         let resolver = ConfluentSchemaResolver::new(client);
-        let outer_schema = resolver
-            .get_by_subject_name(&format!("{}-value", kafka_topic))
-            .await?;
+
+        let name_strategy = &PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified;
+        let key_subject = get_subject_by_strategy(name_strategy, kafka_topic, None, true)?;
+        let val_subject = get_subject_by_strategy(name_strategy, kafka_topic, None, false)?;
+        let key_schema = resolver.get_by_subject_name(&key_subject).await?;
+        let outer_schema = resolver.get_by_subject_name(&val_subject).await?;
+
         Ok(Self {
-            key_schema: Arc::new(key_schema),
+            key_schema,
             outer_schema,
             schema_resolver: Arc::new(resolver),
         })

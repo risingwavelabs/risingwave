@@ -612,6 +612,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 max_space_reclaim_bytes = 13;
       uint64 level0_max_compact_file_number = 14;
       bool enable_emergency_picker = 15;
+      uint32 tombstone_reclaim_ratio = 16;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -680,6 +681,10 @@ message ListHummockMetaConfigResponse {
   map<string, string> configs = 1;
 }
 
+message RiseCtlRebuildTableStatsRequest {}
+
+message RiseCtlRebuildTableStatsResponse {}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -705,6 +710,7 @@ service HummockManagerService {
   rpc RiseCtlPauseVersionCheckpoint(RiseCtlPauseVersionCheckpointRequest) returns (RiseCtlPauseVersionCheckpointResponse);
   rpc RiseCtlResumeVersionCheckpoint(RiseCtlResumeVersionCheckpointRequest) returns (RiseCtlResumeVersionCheckpointResponse);
   rpc RiseCtlGetCheckpointVersion(RiseCtlGetCheckpointVersionRequest) returns (RiseCtlGetCheckpointVersionResponse);
+  rpc RiseCtlRebuildTableStats(RiseCtlRebuildTableStatsRequest) returns (RiseCtlRebuildTableStatsResponse);
   rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc SplitCompactionGroup(SplitCompactionGroupRequest) returns (SplitCompactionGroupResponse);

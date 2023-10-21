@@ -23,7 +23,7 @@ use risingwave_expr::aggregate::{
 };
 use risingwave_expr::{build_aggregate, Result};
 
-#[build_aggregate("mode(*) -> auto")]
+#[build_aggregate("mode(any) -> any")]
 fn build(agg: &AggCall) -> Result<BoxedAggregateFunction> {
     Ok(Box::new(Mode {
         return_type: agg.return_type.clone(),

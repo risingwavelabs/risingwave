@@ -19,12 +19,15 @@ mod fs_source_executor;
 pub use fs_source_executor::*;
 use risingwave_common::bail;
 pub use state_table_handler::*;
+pub mod fetch_executor;
+pub use fetch_executor::*;
 
 pub mod source_executor;
 
+pub mod list_executor;
 pub mod state_table_handler;
-
 use futures_async_stream::try_stream;
+pub use list_executor::*;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::executor::error::StreamExecutorError;

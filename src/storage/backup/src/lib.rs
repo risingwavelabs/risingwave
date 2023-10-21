@@ -14,7 +14,6 @@
 
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
-#![feature(binary_heap_drain_sorted)]
 #![feature(type_alias_impl_trait)]
 #![feature(extract_if)]
 #![feature(custom_test_frameworks)]

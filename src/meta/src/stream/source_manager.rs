@@ -23,7 +23,6 @@ use std::time::Duration;
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SourceProperties,
@@ -48,12 +47,11 @@ pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
 
 pub struct SourceManager {
-    pub(crate) paused: Mutex<()>,
+    pub paused: Mutex<()>,
     env: MetaSrvEnv,
     barrier_scheduler: BarrierScheduler,
     core: Mutex<SourceManagerCore>,
     metrics: Arc<MetaMetrics>,
-    runtime: Arc<BackgroundShutdownRuntime>,
 }
 
 const MAX_FAIL_CNT: u32 = 10;
@@ -194,6 +192,7 @@ struct ConnectorSourceWorkerHandle {
     handle: JoinHandle<()>,
     sync_call_tx: UnboundedSender<oneshot::Sender<MetaResult<()>>>,
     splits: SharedSplitMapRef,
+    enable_scale_in: bool,
 }
 
 impl ConnectorSourceWorkerHandle {
@@ -285,7 +284,9 @@ impl SourceManagerCore {
                         *fragment_id,
                         prev_actor_splits,
                         &discovered_splits,
-                        SplitDiffOptions::default(),
+                        SplitDiffOptions {
+                            enable_scale_in: handle.enable_scale_in,
+                        },
                     ) {
                         split_assignment.insert(*fragment_id, change);
                     }
@@ -498,20 +499,11 @@ impl SourceManager {
         fragment_manager: FragmentManagerRef,
         metrics: Arc<MetaMetrics>,
     ) -> MetaResult<Self> {
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .thread_name("risingwave-source-manager")
-            .enable_all()
-            .build()
-            .map_err(|e| anyhow!(e))?;
-
-        let runtime: Arc<BackgroundShutdownRuntime> = Arc::new(runtime.into());
-
         let mut managed_sources = HashMap::new();
         {
             let sources = catalog_manager.list_sources().await;
             for source in sources {
                 Self::create_source_worker_async(
-                    runtime.clone(),
                     env.connector_client(),
                     source,
                     &mut managed_sources,
@@ -545,7 +537,6 @@ impl SourceManager {
             core,
             paused: Mutex::new(()),
             metrics,
-            runtime,
         })
     }
 
@@ -615,6 +606,7 @@ impl SourceManager {
             fragment_id,
             empty_actor_splits,
             &prev_splits,
+            // pre-allocate splits is the first time getting splits and it does not have scale in scene
             SplitDiffOptions::default(),
         )
         .unwrap_or_default();
@@ -687,7 +679,6 @@ impl SourceManager {
             tracing::warn!("source {} already registered", source.get_id());
         } else {
             Self::create_source_worker(
-                self.runtime.clone(),
                 self.env.connector_client(),
                 source,
                 &mut core.managed_sources,
@@ -700,7 +691,6 @@ impl SourceManager {
     }
 
     fn create_source_worker_async(
-        runtime: Arc<BackgroundShutdownRuntime>,
         connector_client: Option<ConnectorClient>,
         source: Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
@@ -715,7 +705,8 @@ impl SourceManager {
         let source_id = source.id;
 
         let connector_properties = extract_prop_from_source(&source)?;
-        let handle = runtime.spawn(async move {
+        let enable_scale_in = connector_properties.enable_split_scale_in();
+        let handle = tokio::spawn(async move {
             let mut ticker = time::interval(Self::DEFAULT_SOURCE_TICK_INTERVAL);
             ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
@@ -752,13 +743,13 @@ impl SourceManager {
                 handle,
                 sync_call_tx,
                 splits: current_splits_ref,
+                enable_scale_in,
             },
         );
         Ok(())
     }
 
     async fn create_source_worker(
-        runtime: Arc<BackgroundShutdownRuntime>,
         connector_client: Option<ConnectorClient>,
         source: &Source,
         managed_sources: &mut HashMap<SourceId, ConnectorSourceWorkerHandle>,
@@ -767,6 +758,7 @@ impl SourceManager {
     ) -> MetaResult<()> {
         let current_splits_ref = Arc::new(Mutex::new(SharedSplitMap { splits: None }));
         let connector_properties = extract_prop_from_source(source)?;
+        let enable_scale_in = connector_properties.enable_split_scale_in();
         let (sync_call_tx, sync_call_rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = dispatch_source_prop!(connector_properties, prop, {
             let mut worker = ConnectorSourceWorker::create(
@@ -799,7 +791,7 @@ impl SourceManager {
                     })??;
             }
 
-            runtime.spawn(async move { worker.run(sync_call_rx).await })
+            tokio::spawn(async move { worker.run(sync_call_rx).await })
         });
 
         managed_sources.insert(
@@ -808,6 +800,7 @@ impl SourceManager {
                 handle,
                 sync_call_tx,
                 splits: current_splits_ref,
+                enable_scale_in,
             },
         );
 

@@ -23,7 +23,7 @@ def check_mv(rel: str):
     rows = run_psql("SELECT COUNT(*) FROM {}_mv".format(rel))
     rows = int(rows.decode('utf8').strip())
     print("{} rows in {}".format(rows, rel))
-    assert rows >= 1
+    return rows >= 1
 
 
 # Check the number of rows of cdc table
@@ -67,8 +67,12 @@ with open(data_check_file) as f:
     for rel in relations:
         create_mv(rel)
         time.sleep(20)
+    failed_cases = []
     for rel in relations:
-        check_mv(rel)
+        if not check_mv(rel):
+            failed_cases.append(rel)
+    if len(failed_cases) != 0:
+        raise Exception("Data check failed for case {}".format(failed_cases))
 
 cdc_check_file = os.path.join(demo_dir, 'cdc_check')
 if not os.path.exists(cdc_check_file):

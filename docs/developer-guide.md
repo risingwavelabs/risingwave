@@ -23,6 +23,7 @@ http://ecotrust-canada.github.io/markdown-toc/
   * [Start the playground with RiseDev](#start-the-playground-with-risedev)
   * [Start the playground with cargo](#start-the-playground-with-cargo)
 - [Debug playground using vscode](#debug-playground-using-vscode)
+- [Use standalone-mode](#use-standalone-mode)
 - [Develop the dashboard](#develop-the-dashboard)
 - [Observability components](#observability-components)
   * [Cluster Control](#cluster-control)
@@ -84,7 +85,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 To install the dependencies on Debian-based Linux systems, run:
 
 ```shell
-sudo apt install make build-essential cmake protobuf-compiler curl postgresql-client tmux lld pkg-config libssl-dev
+sudo apt install make build-essential cmake protobuf-compiler curl postgresql-client tmux lld pkg-config libssl-dev libsasl2-dev
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
@@ -205,6 +206,10 @@ psql -h localhost -p 4566 -d dev -U root
 ## Debug playground using vscode
 
 To step through risingwave locally with a debugger you can use the `launch.json` and the `tasks.json` provided in `vscode_suggestions`. After adding these files to your local `.vscode` folder you can debug and set breakpoints by launching `Launch 'risingwave p' debug`.
+
+## Use standalone-mode
+
+Please refer to [README](../src/cmd_all/src/README.md) for more details.
 
 ## Develop the dashboard
 

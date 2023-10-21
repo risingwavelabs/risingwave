@@ -261,7 +261,7 @@ impl ClusterManager {
                             .unwrap()
                             .is_unschedulable = target;
 
-                        var_txn.apply_to_txn(&mut txn)?;
+                        var_txn.apply_to_txn(&mut txn).await?;
                         var_txns.push(var_txn);
                     }
                 }
@@ -314,7 +314,7 @@ impl ClusterManager {
         worker_id: WorkerId,
         info: Vec<heartbeat_request::extra_info::Info>,
     ) -> MetaResult<()> {
-        tracing::trace!(target: "events::meta::server_heartbeat", worker_id = worker_id, "receive heartbeat");
+        tracing::debug!(target: "events::meta::server_heartbeat", worker_id, "receive heartbeat");
         let mut core = self.core.write().await;
         for worker in core.workers.values_mut() {
             if worker.worker_id() == worker_id {
@@ -557,7 +557,7 @@ impl ClusterManagerCore {
                     worker_id
                 );
 
-                var_txn.apply_to_txn(&mut txn)?;
+                var_txn.apply_to_txn(&mut txn).await?;
                 var_txns.push(var_txn);
             }
         }
@@ -728,11 +728,8 @@ mod tests {
     async fn test_cluster_manager() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
 
-        let cluster_manager = Arc::new(
-            ClusterManager::new(env.clone(), Duration::new(0, 0))
-                .await
-                .unwrap(),
-        );
+        let cluster_manager =
+            Arc::new(ClusterManager::new(env, Duration::new(0, 0)).await.unwrap());
 
         let mut worker_nodes = Vec::new();
         let worker_count = 5usize;
@@ -839,11 +836,8 @@ mod tests {
     async fn test_cluster_manager_schedulability() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
 
-        let cluster_manager = Arc::new(
-            ClusterManager::new(env.clone(), Duration::new(0, 0))
-                .await
-                .unwrap(),
-        );
+        let cluster_manager =
+            Arc::new(ClusterManager::new(env, Duration::new(0, 0)).await.unwrap());
         let worker_node = cluster_manager
             .add_worker_node(
                 WorkerType::ComputeNode,

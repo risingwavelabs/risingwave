@@ -255,7 +255,7 @@ impl HummockManager {
         assert!(sst_split_info.is_empty());
 
         let mut trx = Transaction::default();
-        new_version_delta.apply_to_txn(&mut trx)?;
+        new_version_delta.apply_to_txn(&mut trx).await?;
         self.env.meta_store().txn(trx).await?;
         versioning.current_version = current_version;
         new_version_delta.commit();
@@ -350,7 +350,7 @@ impl HummockManager {
         assert!(sst_split_info.is_empty());
 
         let mut trx = Transaction::default();
-        new_version_delta.apply_to_txn(&mut trx)?;
+        new_version_delta.apply_to_txn(&mut trx).await?;
         self.env.meta_store().txn(trx).await?;
         for group_id in &groups_to_remove {
             let max_level = versioning
@@ -386,8 +386,9 @@ impl HummockManager {
         &self,
         compaction_group_ids: &[CompactionGroupId],
         config_to_update: &[MutableConfig],
-    ) -> Result<()> {
-        self.compaction_group_manager
+    ) -> Result<Vec<CompactionGroup>> {
+        let result = self
+            .compaction_group_manager
             .write()
             .await
             .update_compaction_config(
@@ -402,7 +403,7 @@ impl HummockManager {
         {
             self.try_update_write_limits(compaction_group_ids).await;
         }
-        Ok(())
+        Ok(result)
     }
 
     /// Gets complete compaction group info.
@@ -598,9 +599,9 @@ impl HummockManager {
         let mut current_version = versioning.current_version.clone();
         let sst_split_info = current_version.apply_version_delta(&new_version_delta);
 
-        let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
+        let mut branched_ssts = BTreeMapTransaction::<'_, _, _>::new(&mut versioning.branched_ssts);
         let mut trx = Transaction::default();
-        new_version_delta.apply_to_txn(&mut trx)?;
+        new_version_delta.apply_to_txn(&mut trx).await?;
         if let Some((new_compaction_group_id, config)) = new_group {
             let mut compaction_group_manager = self.compaction_group_manager.write().await;
             let insert = BTreeMapEntryTransaction::new_insert(
@@ -611,7 +612,7 @@ impl HummockManager {
                     compaction_config: Arc::new(config),
                 },
             );
-            insert.apply_to_txn(&mut trx)?;
+            insert.apply_to_txn(&mut trx).await?;
             self.env.meta_store().txn(trx).await?;
             insert.commit();
         } else {
@@ -779,7 +780,7 @@ impl CompactionGroupManager {
             compaction_groups.insert(*id, new_entry);
         }
         let mut trx = Transaction::default();
-        compaction_groups.apply_to_txn(&mut trx)?;
+        compaction_groups.apply_to_txn(&mut trx).await?;
         meta_store.txn(trx).await?;
         compaction_groups.commit();
         let r = compaction_group_ids
@@ -801,13 +802,14 @@ impl CompactionGroupManager {
         self.default_config.clone()
     }
 
-    async fn update_compaction_config<S: MetaStore>(
+    pub async fn update_compaction_config<S: MetaStore>(
         &mut self,
         compaction_group_ids: &[CompactionGroupId],
         config_to_update: &[MutableConfig],
         meta_store: &S,
-    ) -> Result<()> {
+    ) -> Result<Vec<CompactionGroup>> {
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
+        let mut result = Vec::with_capacity(compaction_group_ids.len());
         for compaction_group_id in compaction_group_ids.iter().unique() {
             let group = compaction_groups.get(compaction_group_id).ok_or_else(|| {
                 Error::CompactionGroup(format!("invalid group {}", *compaction_group_id))
@@ -819,14 +821,15 @@ impl CompactionGroupManager {
             }
             let mut new_group = group.clone();
             new_group.compaction_config = Arc::new(config);
-            compaction_groups.insert(*compaction_group_id, new_group);
+            compaction_groups.insert(*compaction_group_id, new_group.clone());
+            result.push(new_group);
         }
 
         let mut trx = Transaction::default();
-        compaction_groups.apply_to_txn(&mut trx)?;
+        compaction_groups.apply_to_txn(&mut trx).await?;
         meta_store.txn(trx).await?;
         compaction_groups.commit();
-        Ok(())
+        Ok(result)
     }
 
     /// Initializes the config for a group.
@@ -846,7 +849,7 @@ impl CompactionGroupManager {
             },
         );
         let mut trx = Transaction::default();
-        insert.apply_to_txn(&mut trx)?;
+        insert.apply_to_txn(&mut trx).await?;
         meta_store.txn(trx).await?;
         insert.commit();
         Ok(())
@@ -872,7 +875,7 @@ impl CompactionGroupManager {
             compaction_groups.remove(group);
         }
         let mut trx = Transaction::default();
-        compaction_groups.apply_to_txn(&mut trx)?;
+        compaction_groups.apply_to_txn(&mut trx).await?;
         meta_store.txn(trx).await?;
         compaction_groups.commit();
         Ok(())
@@ -923,6 +926,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             }
             MutableConfig::EnableEmergencyPicker(c) => {
                 target.enable_emergency_picker = *c;
+            }
+            MutableConfig::TombstoneReclaimRatio(c) => {
+                target.tombstone_reclaim_ratio = *c;
             }
         }
     }

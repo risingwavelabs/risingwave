@@ -14,12 +14,19 @@
 
 pub use super::actor::Entity as Actor;
 pub use super::cluster::Entity as Cluster;
+pub use super::compaction_config::Entity as CompactionConfig;
+pub use super::compaction_status::Entity as CompactionStatus;
+pub use super::compaction_task::Entity as CompactionTask;
 pub use super::connection::Entity as Connection;
 pub use super::database::Entity as Database;
 pub use super::election_leader::Entity as ElectionLeader;
 pub use super::election_member::Entity as ElectionMember;
 pub use super::fragment::Entity as Fragment;
 pub use super::function::Entity as Function;
+pub use super::hummock_pinned_snapshot::Entity as HummockPinnedSnapshot;
+pub use super::hummock_pinned_version::Entity as HummockPinnedVersion;
+pub use super::hummock_version_delta::Entity as HummockVersionDelta;
+pub use super::hummock_version_stats::Entity as HummockVersionStats;
 pub use super::index::Entity as Index;
 pub use super::object::Entity as Object;
 pub use super::object_dependency::Entity as ObjectDependency;

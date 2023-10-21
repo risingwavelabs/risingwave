@@ -106,6 +106,13 @@ enum SinkType {
   UPSERT = 3;
 }
 
+// Similar to `StreamSourceInfo`, and may replace `SinkType` later.
+message SinkFormatDesc {
+  plan_common.FormatType format = 1;
+  plan_common.EncodeType encode = 2;
+  map<string, string> options = 3;
+}
+
 // the catalog of the sink. There are two kind of schema here. The full schema is all columns
 // stored in the `column` which is the sink executor/fragment's output schema. The visible
 // schema contains the columns whose `is_hidden` is false, which is the columns sink out to the
@@ -122,7 +129,7 @@ message Sink {
   repeated int32 distribution_key = 8;
   // User-defined primary key indices for the upsert sink.
   repeated int32 downstream_pk = 9;
-  SinkType sink_type = 10;
+  SinkType sink_type = 10; // to be deprecated
   uint32 owner = 11;
   map<string, string> properties = 12;
   string definition = 13;
@@ -132,6 +139,7 @@ message Sink {
   string db_name = 17;
   string sink_from_name = 18;
   StreamJobStatus stream_job_status = 19;
+  SinkFormatDesc format_desc = 20;
 }
 
 message Connection {

@@ -664,7 +664,7 @@ impl MetaClient {
                         extra_info.push(info);
                     }
                 }
-                tracing::trace!(target: "events::meta::client_heartbeat", "heartbeat");
+                tracing::debug!(target: "events::meta::client_heartbeat", "heartbeat");
                 match tokio::time::timeout(
                     // TODO: decide better min_interval for timeout
                     min_interval * 3,
@@ -1043,6 +1043,12 @@ impl MetaClient {
             resp.task_assignment,
             resp.task_progress,
         ))
+    }
+
+    pub async fn risectl_rebuild_table_stats(&self) -> Result<()> {
+        let req = RiseCtlRebuildTableStatsRequest {};
+        let _resp = self.inner.rise_ctl_rebuild_table_stats(req).await?;
+        Ok(())
     }
 
     pub async fn list_branched_object(&self) -> Result<Vec<BranchedObject>> {
@@ -1728,6 +1734,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
             ,{ hummock_client, split_compaction_group, SplitCompactionGroupRequest, SplitCompactionGroupResponse }
             ,{ hummock_client, rise_ctl_list_compaction_status, RiseCtlListCompactionStatusRequest, RiseCtlListCompactionStatusResponse }
+            ,{ hummock_client, rise_ctl_rebuild_table_stats, RiseCtlRebuildTableStatsRequest, RiseCtlRebuildTableStatsResponse }
             ,{ hummock_client, subscribe_compaction_event, impl tonic::IntoStreamingRequest<Message = SubscribeCompactionEventRequest>, Streaming<SubscribeCompactionEventResponse> }
             ,{ hummock_client, list_branched_object, ListBranchedObjectRequest, ListBranchedObjectResponse }
             ,{ hummock_client, list_active_write_limit, ListActiveWriteLimitRequest, ListActiveWriteLimitResponse }

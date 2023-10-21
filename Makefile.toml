@@ -406,6 +406,7 @@ condition = { env_set = [
   "ENABLE_BUILD_DASHBOARD",
 ], files_modified = { input = [
   "./dashboard/**/*.js",
+  "./dashboard/**/*.ts*",
   "./dashboard/package.json",
   "./dashboard/next.config.js",
 ], output = [
@@ -461,12 +462,37 @@ cargo build -p risingwave_cmd_all \
 [tasks.clean]
 private = true
 category = "RiseDev - Build"
+description = "Clean all build targets"
+dependencies = ["clean-rust", "clean-java"]
+
+[tasks.clean-rust]
+private = true
+category = "RiseDev - Build"
 description = "Clean Rust targets"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
 script = '''
 #!/usr/bin/env bash
 set -e
 cargo clean
+'''
+
+[tasks.clean-java]
+private = true
+category = "RiseDev - Build"
+description = "Clean Rust targets"
+condition = { env_set = ["ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+script = '''
+#!/usr/bin/env bash
+set -e
+
+if command -v mvn &> /dev/null; then
+  MAVEN_PATH="$(command -v mvn)"
+else
+  MAVEN_PATH="${PREFIX_BIN}/maven/bin/mvn"
+fi
+
+cd "${JAVA_DIR}"
+"${MAVEN_PATH}" clean
 '''
 
 [tasks.build-docs]
@@ -1291,7 +1317,6 @@ dependencies = ["k", "l", "check-logs", "wait-processes-exit"]
 description = "Kill cluster, dump logs and check logs"
 
 [tasks.wait-processes-exit]
-private = true
 category = "Misc"
 description = "Wait for RisingWave processes to exit"
 script = """

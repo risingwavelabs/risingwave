@@ -13,7 +13,10 @@
 // limitations under the License.
 
 use sea_orm::entity::prelude::*;
-#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+
+use crate::model_v2::{TransactionId, WorkerId};
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum WorkerType {
     #[sea_orm(string_value = "FRONTEND")]
@@ -41,11 +44,12 @@ pub enum WorkerStatus {
 #[sea_orm(table_name = "worker")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub worker_id: i32,
+    pub worker_id: WorkerId,
     pub worker_type: WorkerType,
     pub host: String,
     pub port: i32,
     pub status: WorkerStatus,
+    pub transaction_id: Option<TransactionId>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

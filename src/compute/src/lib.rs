@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #![feature(trait_alias)]
-#![feature(binary_heap_drain_sorted)]
 #![feature(generators)]
 #![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
@@ -38,8 +37,12 @@ use std::pin::Pin;
 use clap::{Parser, ValueEnum};
 use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConfig};
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
-use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
+use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use serde::{Deserialize, Serialize};
+
+/// If `total_memory_bytes` is not specified, the default memory limit will be set to
+/// the system memory limit multiplied by this proportion
+const DEFAULT_MEMORY_PROPORTION: f64 = 0.7;
 
 /// Command-line arguments for compute-node.
 #[derive(Parser, Clone, Debug, OverrideConfig)]
@@ -168,9 +171,9 @@ impl Role {
 }
 
 fn validate_opts(opts: &ComputeNodeOpts) {
-    let total_memory_available_bytes = total_memory_available_bytes();
-    if opts.total_memory_bytes > total_memory_available_bytes {
-        let error_msg = format!("total_memory_bytes {} is larger than the total memory available bytes {} that can be acquired.", opts.total_memory_bytes, total_memory_available_bytes);
+    let system_memory_available_bytes = system_memory_available_bytes();
+    if opts.total_memory_bytes > system_memory_available_bytes {
+        let error_msg = format!("total_memory_bytes {} is larger than the total memory available bytes {} that can be acquired.", opts.total_memory_bytes, system_memory_available_bytes);
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
@@ -224,7 +227,7 @@ pub fn start(opts: ComputeNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> 
 }
 
 fn default_total_memory_bytes() -> usize {
-    total_memory_available_bytes()
+    (system_memory_available_bytes() as f64 * DEFAULT_MEMORY_PROPORTION) as usize
 }
 
 fn default_parallelism() -> usize {

@@ -16,6 +16,8 @@ use std::fmt::Debug;
 
 use risingwave_common::array::{Array, BoolArray};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::row::Row;
+use risingwave_common::types::{Scalar, ScalarRef, ScalarRefImpl};
 use risingwave_expr::function;
 
 #[function("equal(boolean, boolean) -> boolean", batch_fn = "boolarray_eq")]
@@ -35,7 +37,7 @@ use risingwave_expr::function;
 #[function("equal(interval, time) -> boolean")]
 #[function("equal(varchar, varchar) -> boolean")]
 #[function("equal(bytea, bytea) -> boolean")]
-#[function("equal(list, list) -> boolean")]
+#[function("equal(anyarray, anyarray) -> boolean")]
 #[function("equal(struct, struct) -> boolean")]
 pub fn general_eq<T1, T2, T3>(l: T1, r: T2) -> bool
 where
@@ -63,7 +65,7 @@ where
 #[function("not_equal(interval, time) -> boolean")]
 #[function("not_equal(varchar, varchar) -> boolean")]
 #[function("not_equal(bytea, bytea) -> boolean")]
-#[function("not_equal(list, list) -> boolean")]
+#[function("not_equal(anyarray, anyarray) -> boolean")]
 #[function("not_equal(struct, struct) -> boolean")]
 pub fn general_ne<T1, T2, T3>(l: T1, r: T2) -> bool
 where
@@ -94,7 +96,7 @@ where
 #[function("greater_than_or_equal(interval, time) -> boolean")]
 #[function("greater_than_or_equal(varchar, varchar) -> boolean")]
 #[function("greater_than_or_equal(bytea, bytea) -> boolean")]
-#[function("greater_than_or_equal(list, list) -> boolean")]
+#[function("greater_than_or_equal(anyarray, anyarray) -> boolean")]
 #[function("greater_than_or_equal(struct, struct) -> boolean")]
 pub fn general_ge<T1, T2, T3>(l: T1, r: T2) -> bool
 where
@@ -122,7 +124,7 @@ where
 #[function("greater_than(interval, time) -> boolean")]
 #[function("greater_than(varchar, varchar) -> boolean")]
 #[function("greater_than(bytea, bytea) -> boolean")]
-#[function("greater_than(list, list) -> boolean")]
+#[function("greater_than(anyarray, anyarray) -> boolean")]
 #[function("greater_than(struct, struct) -> boolean")]
 pub fn general_gt<T1, T2, T3>(l: T1, r: T2) -> bool
 where
@@ -153,7 +155,7 @@ where
 #[function("less_than_or_equal(interval, time) -> boolean")]
 #[function("less_than_or_equal(varchar, varchar) -> boolean")]
 #[function("less_than_or_equal(bytea, bytea) -> boolean")]
-#[function("less_than_or_equal(list, list) -> boolean")]
+#[function("less_than_or_equal(anyarray, anyarray) -> boolean")]
 #[function("less_than_or_equal(struct, struct) -> boolean")]
 pub fn general_le<T1, T2, T3>(l: T1, r: T2) -> bool
 where
@@ -181,7 +183,7 @@ where
 #[function("less_than(interval, time) -> boolean")]
 #[function("less_than(varchar, varchar) -> boolean")]
 #[function("less_than(bytea, bytea) -> boolean")]
-#[function("less_than(list, list) -> boolean")]
+#[function("less_than(anyarray, anyarray) -> boolean")]
 #[function("less_than(struct, struct) -> boolean")]
 pub fn general_lt<T1, T2, T3>(l: T1, r: T2) -> bool
 where
@@ -212,7 +214,7 @@ where
 #[function("is_distinct_from(interval, time) -> boolean")]
 #[function("is_distinct_from(varchar, varchar) -> boolean")]
 #[function("is_distinct_from(bytea, bytea) -> boolean")]
-#[function("is_distinct_from(list, list) -> boolean")]
+#[function("is_distinct_from(anyarray, anyarray) -> boolean")]
 #[function("is_distinct_from(struct, struct) -> boolean")]
 pub fn general_is_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> bool
 where
@@ -243,7 +245,7 @@ where
 #[function("is_not_distinct_from(interval, time) -> boolean")]
 #[function("is_not_distinct_from(varchar, varchar) -> boolean")]
 #[function("is_not_distinct_from(bytea, bytea) -> boolean")]
-#[function("is_not_distinct_from(list, list) -> boolean")]
+#[function("is_not_distinct_from(anyarray, anyarray) -> boolean")]
 #[function("is_not_distinct_from(struct, struct) -> boolean")]
 pub fn general_is_not_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> bool
 where
@@ -285,6 +287,66 @@ fn is_null<T>(v: Option<T>) -> bool {
 #[function("is_not_null(*) -> boolean", batch_fn = "batch_is_not_null")]
 fn is_not_null<T>(v: Option<T>) -> bool {
     v.is_some()
+}
+
+#[function("greatest(...) -> boolean")]
+#[function("greatest(...) -> *int")]
+#[function("greatest(...) -> decimal")]
+#[function("greatest(...) -> *float")]
+#[function("greatest(...) -> serial")]
+#[function("greatest(...) -> int256")]
+#[function("greatest(...) -> date")]
+#[function("greatest(...) -> time")]
+#[function("greatest(...) -> interval")]
+#[function("greatest(...) -> timestamp")]
+#[function("greatest(...) -> timestamptz")]
+#[function("greatest(...) -> varchar")]
+#[function("greatest(...) -> bytea")]
+pub fn general_variadic_greatest<T>(row: impl Row) -> Option<T>
+where
+    T: Scalar,
+    for<'a> <T as Scalar>::ScalarRefType<'a>: TryFrom<ScalarRefImpl<'a>> + Ord + Debug,
+{
+    row.iter()
+        .flatten()
+        .map(
+            |scalar| match <<T as Scalar>::ScalarRefType<'_>>::try_from(scalar) {
+                Ok(v) => v,
+                Err(_) => unreachable!("all input type should have been aligned in the frontend"),
+            },
+        )
+        .max()
+        .map(|v| v.to_owned_scalar())
+}
+
+#[function("least(...) -> boolean")]
+#[function("least(...) -> *int")]
+#[function("least(...) -> decimal")]
+#[function("least(...) -> *float")]
+#[function("least(...) -> serial")]
+#[function("least(...) -> int256")]
+#[function("least(...) -> date")]
+#[function("least(...) -> time")]
+#[function("least(...) -> interval")]
+#[function("least(...) -> timestamp")]
+#[function("least(...) -> timestamptz")]
+#[function("least(...) -> varchar")]
+#[function("least(...) -> bytea")]
+pub fn general_variadic_least<T>(row: impl Row) -> Option<T>
+where
+    T: Scalar,
+    for<'a> <T as Scalar>::ScalarRefType<'a>: TryFrom<ScalarRefImpl<'a>> + Ord + Debug,
+{
+    row.iter()
+        .flatten()
+        .map(
+            |scalar| match <<T as Scalar>::ScalarRefType<'_>>::try_from(scalar) {
+                Ok(v) => v,
+                Err(_) => unreachable!("all input type should have been aligned in the frontend"),
+            },
+        )
+        .min()
+        .map(|v| v.to_owned_scalar())
 }
 
 // optimized functions for bool arrays
@@ -365,7 +427,7 @@ fn batch_is_not_null(a: &impl Array) -> BoolArray {
 mod tests {
     use std::str::FromStr;
 
-    use risingwave_common::types::{Decimal, F32, F64};
+    use risingwave_common::types::{Decimal, Timestamp, F32, F64};
     use risingwave_expr::expr::build_from_pretty;
 
     use super::*;
@@ -472,6 +534,26 @@ mod tests {
         test_binary_i32::<BoolArray, _>(|x, y| x >= y, Type::GreaterThanOrEqual).await;
         test_binary_i32::<BoolArray, _>(|x, y| x < y, Type::LessThan).await;
         test_binary_i32::<BoolArray, _>(|x, y| x <= y, Type::LessThanOrEqual).await;
+        test_binary_inner::<I32Array, I32Array, I32Array, _>(
+            reduce(std::cmp::max::<i32>),
+            Type::Greatest,
+        )
+        .await;
+        test_binary_inner::<I32Array, I32Array, I32Array, _>(
+            reduce(std::cmp::min::<i32>),
+            Type::Least,
+        )
+        .await;
+        test_binary_inner::<BoolArray, BoolArray, BoolArray, _>(
+            reduce(std::cmp::max::<bool>),
+            Type::Greatest,
+        )
+        .await;
+        test_binary_inner::<BoolArray, BoolArray, BoolArray, _>(
+            reduce(std::cmp::min::<bool>),
+            Type::Least,
+        )
+        .await;
         test_binary_decimal::<DecimalArray, _>(|x, y| x + y, Type::Add).await;
         test_binary_decimal::<DecimalArray, _>(|x, y| x - y, Type::Subtract).await;
         test_binary_decimal::<DecimalArray, _>(|x, y| x * y, Type::Multiply).await;
@@ -494,46 +576,132 @@ mod tests {
         .await;
     }
 
-    async fn test_binary_i32<A, F>(f: F, kind: Type)
+    trait TestFrom: Copy {
+        const NAME: &'static str;
+        fn test_from(i: usize) -> Self;
+    }
+
+    impl TestFrom for i32 {
+        const NAME: &'static str = "int4";
+
+        fn test_from(i: usize) -> Self {
+            i as i32
+        }
+    }
+
+    impl TestFrom for Decimal {
+        const NAME: &'static str = "decimal";
+
+        fn test_from(i: usize) -> Self {
+            i.into()
+        }
+    }
+
+    impl TestFrom for bool {
+        const NAME: &'static str = "boolean";
+
+        fn test_from(i: usize) -> Self {
+            i % 2 == 0
+        }
+    }
+
+    impl TestFrom for Timestamp {
+        const NAME: &'static str = "timestamp";
+
+        fn test_from(_: usize) -> Self {
+            unimplemented!("not implemented as input yet")
+        }
+    }
+
+    impl TestFrom for Interval {
+        const NAME: &'static str = "interval";
+
+        fn test_from(i: usize) -> Self {
+            Interval::from_ymd(0, i as _, i as _)
+        }
+    }
+
+    impl TestFrom for Date {
+        const NAME: &'static str = "date";
+
+        fn test_from(i: usize) -> Self {
+            Date::from_num_days_from_ce_uncheck(i as i32)
+        }
+    }
+
+    #[expect(clippy::type_complexity)]
+    fn gen_test_data<L: TestFrom, R: TestFrom, O>(
+        count: usize,
+        f: impl Fn(Option<L>, Option<R>) -> Option<O>,
+    ) -> (Vec<Option<L>>, Vec<Option<R>>, Vec<Option<O>>) {
+        let mut lhs = Vec::<Option<L>>::new();
+        let mut rhs = Vec::<Option<R>>::new();
+        let mut target = Vec::<Option<O>>::new();
+        for i in 0..count {
+            let (l, r) = if i % 2 == 0 {
+                (Some(i), None)
+            } else if i % 3 == 0 {
+                (Some(i), Some(i + 1))
+            } else if i % 5 == 0 {
+                (Some(i + 1), Some(i))
+            } else if i % 7 == 0 {
+                (None, Some(i))
+            } else {
+                (Some(i), Some(i))
+            };
+            let l = l.map(TestFrom::test_from);
+            let r = r.map(TestFrom::test_from);
+            lhs.push(l);
+            rhs.push(r);
+            target.push(f(l, r));
+        }
+        (lhs, rhs, target)
+    }
+
+    fn arithmetic<L, R, O>(f: impl Fn(L, R) -> O) -> impl Fn(Option<L>, Option<R>) -> Option<O> {
+        move |l, r| match (l, r) {
+            (Some(l), Some(r)) => Some(f(l, r)),
+            _ => None,
+        }
+    }
+
+    fn reduce<I>(f: impl Fn(I, I) -> I) -> impl Fn(Option<I>, Option<I>) -> Option<I> {
+        move |l, r| match (l, r) {
+            (Some(l), Some(r)) => Some(f(l, r)),
+            (Some(l), None) => Some(l),
+            (None, Some(r)) => Some(r),
+            (None, None) => None,
+        }
+    }
+
+    async fn test_binary_inner<L, R, A, F>(f: F, kind: Type)
     where
+        L: Array,
+        L: for<'a> FromIterator<&'a Option<<L as Array>::OwnedItem>>,
+        <L as Array>::OwnedItem: TestFrom,
+        R: Array,
+        R: for<'a> FromIterator<&'a Option<<R as Array>::OwnedItem>>,
+        <R as Array>::OwnedItem: TestFrom,
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
         for<'a> <A as Array>::RefItem<'a>: PartialEq,
-        F: Fn(i32, i32) -> <A as Array>::OwnedItem,
+        <A as Array>::OwnedItem: TestFrom,
+        F: Fn(
+            Option<<L as Array>::OwnedItem>,
+            Option<<R as Array>::OwnedItem>,
+        ) -> Option<<A as Array>::OwnedItem>,
     {
-        let mut lhs = Vec::<Option<i32>>::new();
-        let mut rhs = Vec::<Option<i32>>::new();
-        let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
-        for i in 0..100 {
-            if i % 2 == 0 {
-                lhs.push(Some(i));
-                rhs.push(None);
-                target.push(None);
-            } else if i % 3 == 0 {
-                lhs.push(Some(i));
-                rhs.push(Some(i + 1));
-                target.push(Some(f(i, i + 1)));
-            } else if i % 5 == 0 {
-                lhs.push(Some(i + 1));
-                rhs.push(Some(i));
-                target.push(Some(f(i + 1, i)));
-            } else {
-                lhs.push(Some(i));
-                rhs.push(Some(i));
-                target.push(Some(f(i, i)));
-            }
-        }
+        let (lhs, rhs, target) = gen_test_data(100, f);
 
-        let col1 = I32Array::from_iter(&lhs).into_ref();
-        let col2 = I32Array::from_iter(&rhs).into_ref();
+        let col1 = L::from_iter(&lhs).into_ref();
+        let col2 = R::from_iter(&rhs).into_ref();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
-        let ty = match kind {
-            Type::Add | Type::Subtract | Type::Multiply | Type::Divide => "int4",
-            _ => "boolean",
-        };
+        let l_name = <<L as Array>::OwnedItem as TestFrom>::NAME;
+        let r_name = <<R as Array>::OwnedItem as TestFrom>::NAME;
+        let output_name = <<A as Array>::OwnedItem as TestFrom>::NAME;
         let expr = build_from_pretty(format!(
-            "({name}:{ty} $0:int4 $1:int4)",
-            name = kind.as_str_name()
+            "({name}:{output_name} $0:{l_name} $1:{r_name})",
+            name = kind.as_str_name(),
         ));
         let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
@@ -553,54 +721,26 @@ mod tests {
         }
     }
 
+    async fn test_binary_i32<A, F>(f: F, kind: Type)
+    where
+        A: Array,
+        for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
+        for<'a> <A as Array>::RefItem<'a>: PartialEq,
+        <A as Array>::OwnedItem: TestFrom,
+        F: Fn(i32, i32) -> <A as Array>::OwnedItem,
+    {
+        test_binary_inner::<I32Array, I32Array, _, _>(arithmetic(f), kind).await
+    }
+
     async fn test_binary_interval<A, F>(f: F, kind: Type)
     where
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
         for<'a> <A as Array>::RefItem<'a>: PartialEq,
+        <A as Array>::OwnedItem: TestFrom,
         F: Fn(Date, Interval) -> <A as Array>::OwnedItem,
     {
-        let mut lhs = Vec::<Option<Date>>::new();
-        let mut rhs = Vec::<Option<Interval>>::new();
-        let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
-        for i in 0..100 {
-            if i % 2 == 0 {
-                rhs.push(Some(Interval::from_ymd(0, i, i)));
-                lhs.push(None);
-                target.push(None);
-            } else {
-                rhs.push(Some(Interval::from_ymd(0, i, i)));
-                lhs.push(Some(Date::from_num_days_from_ce_uncheck(i)));
-                target.push(Some(f(
-                    Date::from_num_days_from_ce_uncheck(i),
-                    Interval::from_ymd(0, i, i),
-                )));
-            }
-        }
-
-        let col1 = DateArray::from_iter(&lhs).into_ref();
-        let col2 = IntervalArray::from_iter(&rhs).into_ref();
-        let data_chunk = DataChunk::new(vec![col1, col2], 100);
-        let expr = build_from_pretty(format!(
-            "({name}:timestamp $0:date $1:interval)",
-            name = kind.as_str_name()
-        ));
-        let res = expr.eval(&data_chunk).await.unwrap();
-        let arr: &A = res.as_ref().into();
-        for (idx, item) in arr.iter().enumerate() {
-            let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
-            assert_eq!(x, item);
-        }
-
-        for i in 0..lhs.len() {
-            let row = OwnedRow::new(vec![
-                lhs[i].map(|date| date.to_scalar_value()),
-                rhs[i].map(|date| date.to_scalar_value()),
-            ]);
-            let result = expr.eval_row(&row).await.unwrap();
-            let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
-            assert_eq!(result, expected);
-        }
+        test_binary_inner::<DateArray, IntervalArray, _, _>(arithmetic(f), kind).await
     }
 
     async fn test_binary_decimal<A, F>(f: F, kind: Type)
@@ -608,57 +748,9 @@ mod tests {
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
         for<'a> <A as Array>::RefItem<'a>: PartialEq,
+        <A as Array>::OwnedItem: TestFrom,
         F: Fn(Decimal, Decimal) -> <A as Array>::OwnedItem,
     {
-        let mut lhs = Vec::<Option<Decimal>>::new();
-        let mut rhs = Vec::<Option<Decimal>>::new();
-        let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
-        for i in 0..100 {
-            if i % 2 == 0 {
-                lhs.push(Some(i.into()));
-                rhs.push(None);
-                target.push(None);
-            } else if i % 3 == 0 {
-                lhs.push(Some(i.into()));
-                rhs.push(Some((i + 1).into()));
-                target.push(Some(f((i).into(), (i + 1).into())));
-            } else if i % 5 == 0 {
-                lhs.push(Some((i + 1).into()));
-                rhs.push(Some((i).into()));
-                target.push(Some(f((i + 1).into(), (i).into())));
-            } else {
-                lhs.push(Some((i).into()));
-                rhs.push(Some((i).into()));
-                target.push(Some(f((i).into(), (i).into())));
-            }
-        }
-
-        let col1 = DecimalArray::from_iter(&lhs).into_ref();
-        let col2 = DecimalArray::from_iter(&rhs).into_ref();
-        let data_chunk = DataChunk::new(vec![col1, col2], 100);
-        let ty = match kind {
-            Type::Add | Type::Subtract | Type::Multiply | Type::Divide => "decimal",
-            _ => "boolean",
-        };
-        let expr = build_from_pretty(format!(
-            "({name}:{ty} $0:decimal $1:decimal)",
-            name = kind.as_str_name()
-        ));
-        let res = expr.eval(&data_chunk).await.unwrap();
-        let arr: &A = res.as_ref().into();
-        for (idx, item) in arr.iter().enumerate() {
-            let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
-            assert_eq!(x, item);
-        }
-
-        for i in 0..lhs.len() {
-            let row = OwnedRow::new(vec![
-                lhs[i].map(|dec| dec.to_scalar_value()),
-                rhs[i].map(|dec| dec.to_scalar_value()),
-            ]);
-            let result = expr.eval_row(&row).await.unwrap();
-            let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
-            assert_eq!(result, expected);
-        }
+        test_binary_inner::<DecimalArray, DecimalArray, _, _>(arithmetic(f), kind).await
     }
 }
