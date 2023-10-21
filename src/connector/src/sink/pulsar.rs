@@ -186,6 +186,15 @@ impl Sink for PulsarSink {
                 self.format_desc.format
             )));
         }
+        // Check for formatter constructor error, before it is too late for error reporting.
+        SinkFormatterImpl::new(
+            &self.format_desc,
+            self.schema.clone(),
+            self.downstream_pk.clone(),
+            self.db_name.clone(),
+            self.sink_from_name.clone(),
+        )
+        .await?;
 
         // Validate pulsar connection.
         let pulsar = self.config.common.build_client().await?;
@@ -228,7 +237,8 @@ impl PulsarSinkWriter {
         sink_from_name: String,
     ) -> Result<Self> {
         let formatter =
-            SinkFormatterImpl::new(format_desc, schema, downstream_pk, db_name, sink_from_name)?;
+            SinkFormatterImpl::new(format_desc, schema, downstream_pk, db_name, sink_from_name)
+                .await?;
         let pulsar = config.common.build_client().await?;
         let producer = build_pulsar_producer(&pulsar, &config).await?;
         Ok(Self {

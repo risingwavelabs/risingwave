@@ -312,7 +312,8 @@ impl Sink for KafkaSink {
             self.pk_indices.clone(),
             self.db_name.clone(),
             self.sink_from_name.clone(),
-        )?;
+        )
+        .await?;
         let max_delivery_buffer_size = (self
             .config
             .rdkafka_properties
@@ -335,6 +336,15 @@ impl Sink for KafkaSink {
                 self.format_desc.format
             )));
         }
+        // Check for formatter constructor error, before it is too late for error reporting.
+        SinkFormatterImpl::new(
+            &self.format_desc,
+            self.schema.clone(),
+            self.pk_indices.clone(),
+            self.db_name.clone(),
+            self.sink_from_name.clone(),
+        )
+        .await?;
 
         // Try Kafka connection.
         // There is no such interface for kafka producer to validate a connection

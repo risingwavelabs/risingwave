@@ -12,7 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod backfill;
-mod background_ddl;
-mod nexmark_recovery;
-mod pause_on_bootstrap;
+pub mod protobuf;
+
+const MESSAGE_NAME_KEY: &str = "message";
+const SCHEMA_LOCATION_KEY: &str = "schema.location";
+
+#[derive(Debug)]
+pub struct SchemaFetchError(pub String);
