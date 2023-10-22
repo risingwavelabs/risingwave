@@ -73,6 +73,7 @@ mod show;
 mod transaction;
 pub mod util;
 pub mod variable;
+mod wait;
 
 /// The [`PgResponseBuilder`] used by RisingWave.
 pub type RwPgResponseBuilder = PgResponseBuilder<PgResponseStream>;
@@ -419,6 +420,7 @@ pub async fn handle(
             }
         }
         Statement::Flush => flush::handle_flush(handler_args).await,
+        Statement::Wait => {}
         Statement::SetVariable {
             local: _,
             variable,

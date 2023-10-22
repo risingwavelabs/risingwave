@@ -697,6 +697,12 @@ impl MetaClient {
         Ok(resp.snapshot.unwrap())
     }
 
+    pub async fn wait(&self) -> Result<()> {
+        let request = WaitRequest {};
+        let resp = self.inner.wait(request).await?;
+        Ok(resp)
+    }
+
     pub async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>> {
         let request = CancelCreatingJobsRequest { jobs: Some(jobs) };
         let resp = self.inner.cancel_creating_jobs(request).await?;

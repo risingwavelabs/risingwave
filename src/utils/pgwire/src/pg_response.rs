@@ -278,6 +278,7 @@ impl StatementType {
             },
             Statement::Explain { .. } => Ok(StatementType::EXPLAIN),
             Statement::Flush => Ok(StatementType::FLUSH),
+            Statement::Wait => Ok(StatementType::OTHER),
             _ => Err("unsupported statement type".to_string()),
         }
     }
