@@ -61,6 +61,9 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
         .run("create materialized view m1 as select * from t1;")
         .await?;
 
+    // Workaround, if job killed before table fragments persisted, the test fails.
+    sleep(Duration::from_secs(5)).await;
+
     kill_cn_and_wait_recover(&cluster).await;
 
     // Send some upstream updates.
