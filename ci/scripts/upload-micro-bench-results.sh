@@ -37,7 +37,7 @@ get_commit() {
 }
 
 get_machine() {
-  buildkite-agent artifact download ./microbench_instance_type.txt ./
+  buildkite-agent artifact download microbench_instance_type.txt ./
   cat ./microbench_instance_type.txt
 }
 
