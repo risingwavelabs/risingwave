@@ -24,15 +24,14 @@ use crate::model::FragmentId;
 #[derive(Default, Debug, Clone)]
 pub enum TableJobType {
     #[default]
-    Normal,
-    SharedCdcSource,
+    Unspecified,
+    SharedCdcSource, // table streaming job sharing a cdc source
 }
 
 impl TableJobType {
     pub fn from_protobuf(pb: PbTableJobType) -> Self {
         match pb {
-            PbTableJobType::Unspecified => Self::default(),
-            PbTableJobType::Normal => Self::Normal,
+            PbTableJobType::Unspecified => Self::Unspecified,
             PbTableJobType::SharedCdcSource => Self::SharedCdcSource,
         }
     }

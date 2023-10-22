@@ -141,10 +141,8 @@ message DropViewResponse {
 
 enum TableJobType {
   UNSPECIFIED = 0;
-  // table streaming job w/ or w/o a connector
-  NORMAL = 1;
   // table streaming job w/ a shared upstream CDC source job
-  SHARED_CDC_SOURCE = 2;
+  SHARED_CDC_SOURCE = 1;
 }
 
 message CreateTableRequest {

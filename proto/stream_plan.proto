@@ -486,6 +486,10 @@ message ChainNode {
 
   // Snapshot read every N barriers
   uint32 snapshot_read_barrier_interval = 9 [deprecated = true];
+
+  // The external table that will be backfilled for CDC.
+  plan_common.ExternalTableDesc cdc_table_desc = 10;
+
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.

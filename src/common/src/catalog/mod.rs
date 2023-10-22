@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod column;
+mod external_table;
 mod internal_table;
 mod physical_table;
 mod schema;
@@ -23,6 +24,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 pub use column::*;
+pub use external_table::*;
 pub use internal_table::*;
 use parse_display::Display;
 pub use physical_table::*;

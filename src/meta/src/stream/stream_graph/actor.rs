@@ -390,6 +390,7 @@ impl ActorGraphBuildStateInner {
     ) -> Dispatcher {
         // dist key is the index to `_rw_table_name` column
         assert_eq!(strategy.dist_key_indices.len(), 1);
+        assert!(strategy.downstream_table_name.is_some());
 
         Dispatcher {
             r#type: strategy.r#type,

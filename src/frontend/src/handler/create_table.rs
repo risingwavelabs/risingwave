@@ -20,8 +20,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, TableDesc, TableId, TableVersionId, INITIAL_SOURCE_VERSION_ID,
-    INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
+    CdcTableDesc, ColumnCatalog, ColumnDesc, TableDesc, TableId, TableVersionId,
+    INITIAL_SOURCE_VERSION_ID, INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
 };
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -56,7 +56,7 @@ use crate::handler::create_source::{
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalScan, LogicalSource};
-use crate::optimizer::property::{Cardinality, Order, RequiredDist};
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::{CheckRelationError, SessionImpl};
 use crate::stream_fragmenter::build_graph;
@@ -802,34 +802,22 @@ fn gen_create_table_plan_for_cdc_source(
     let connect_properties =
         derive_connect_properties(source.as_ref(), external_table_name.clone())?;
 
-    let external_table_desc = TableDesc {
+    let cdc_table_desc = CdcTableDesc {
         table_id: source.id.into(), // source can be considered as an external table
+        external_table_name: external_table_name.clone(),
         pk: table_pk,
         columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
-        // distribution_key: vec![offset_column_idx], // use offset column as distribution key
-        distribution_key: pk_column_indices.clone(),
         stream_key: pk_column_indices,
-        append_only,
-        retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
         value_indices: (0..columns.len()).collect_vec(),
-        read_prefix_len_hint: 0,
-        watermark_columns: FixedBitSet::with_capacity(columns.len()), // no watermarks
         connect_properties,
-        versioned: false,
-        table_name: Some(external_table_name),
     };
 
-    tracing::debug!(?external_table_desc, "create cdc table");
+    tracing::debug!(?cdc_table_desc, "create cdc table");
 
-    let logical_scan = LogicalScan::create(
-        source_name,
-        false,
-        true,
-        Rc::new(external_table_desc),
-        vec![],
+    let logical_scan = LogicalScan::create_for_cdc(
+        external_table_name,
+        Rc::new(cdc_table_desc),
         context.clone(),
-        false,
-        Cardinality::unknown(),
     );
 
     let scan_node: PlanRef = logical_scan.into();
@@ -947,7 +935,7 @@ pub async fn handle_create_table(
                     append_only,
                 )
                 .await?,
-                TableJobType::Normal,
+                TableJobType::Unspecified,
             ),
             (None, None) => (
                 gen_create_table_plan(
@@ -959,7 +947,7 @@ pub async fn handle_create_table(
                     source_watermarks,
                     append_only,
                 )?,
-                TableJobType::Normal,
+                TableJobType::Unspecified,
             ),
 
             (None, Some(source_name)) => (

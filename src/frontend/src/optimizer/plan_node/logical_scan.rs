@@ -18,7 +18,7 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnDesc, TableDesc};
+use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::stream_plan::ChainType;
@@ -87,6 +87,20 @@ impl LogicalScan {
         .into()
     }
 
+    pub fn create_for_cdc(
+        table_name: String, // explain-only
+        cdc_table_desc: Rc<CdcTableDesc>,
+        ctx: OptimizerContextRef,
+    ) -> Self {
+        generic::Scan::new_for_cdc(
+            table_name,
+            (0..cdc_table_desc.columns.len()).collect(),
+            cdc_table_desc,
+            ctx,
+        )
+        .into()
+    }
+
     pub fn table_name(&self) -> &str {
         &self.core.table_name
     }
@@ -111,6 +125,10 @@ impl LogicalScan {
     /// Get a reference to the logical scan's table desc.
     pub fn table_desc(&self) -> &TableDesc {
         self.core.table_desc.as_ref()
+    }
+
+    pub fn cdc_table_desc(&self) -> &CdcTableDesc {
+        self.core.cdc_table_desc.as_ref()
     }
 
     /// Get the descs of the output columns.
@@ -275,12 +293,13 @@ impl LogicalScan {
     }
 
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
-        generic::Scan::new(
+        generic::Scan::new_inner(
             self.table_name().to_string(),
             self.is_sys_table(),
             self.is_cdc_table(),
             self.output_col_idx().to_vec(),
             self.core.table_desc.clone(),
+            self.core.cdc_table_desc.clone(),
             self.indexes().to_vec(),
             self.base.ctx.clone(),
             predicate,
@@ -291,12 +310,13 @@ impl LogicalScan {
     }
 
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
-        generic::Scan::new(
+        generic::Scan::new_inner(
             self.table_name().to_string(),
             self.is_sys_table(),
             self.is_cdc_table(),
             output_col_idx,
             self.core.table_desc.clone(),
+            self.core.cdc_table_desc.clone(),
             self.indexes().to_vec(),
             self.base.ctx.clone(),
             self.predicate().clone(),
@@ -404,6 +424,12 @@ impl PredicatePushdown for LogicalScan {
         mut predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
+        // skip pushdown if the table is cdc table
+        if self.is_cdc_table() {
+            return self.clone().into();
+            // return LogicalScan::from(self.core.clone()).into();
+        }
+
         // If the predicate contains `CorrelatedInputRef` or `now()`. We don't push down.
         // This case could come from the predicate push down before the subquery unnesting.
         struct HasCorrelated {}
@@ -420,10 +446,15 @@ impl PredicatePushdown for LogicalScan {
             .conjunctions
             .extract_if(|expr| expr.count_nows() > 0 || HasCorrelated {}.visit_expr(expr))
             .collect();
-        let predicate = predicate.rewrite_expr(&mut ColIndexMapping::with_target_size(
-            self.output_col_idx().iter().map(|i| Some(*i)).collect(),
-            self.table_desc().columns.len(),
-        ));
+
+        let predicate = if predicate.always_true() {
+            predicate
+        } else {
+            predicate.rewrite_expr(&mut ColIndexMapping::with_target_size(
+                self.output_col_idx().iter().map(|i| Some(*i)).collect(),
+                self.table_desc().columns.len(),
+            ))
+        };
         if non_pushable_predicate.is_empty() {
             self.clone_with_predicate(predicate.and(self.predicate().clone()))
                 .into()
@@ -566,6 +597,14 @@ impl ToStream for LogicalScan {
                 None.into(),
             )));
         }
+
+        if self.is_cdc_table() {
+            return Ok((
+                self.clone().into(),
+                ColIndexMapping::identity(self.schema().len()),
+            ));
+        }
+
         match self.base.stream_key.is_none() {
             true => {
                 let mut col_ids = HashSet::new();

@@ -17,12 +17,12 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, Field, TableDesc};
+use risingwave_common::catalog::{CdcTableDesc, ColumnCatalog, Field, TableDesc};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
+use risingwave_pb::stream_plan::{ChainNode, ChainType, PbStreamNode};
 
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
@@ -154,7 +154,7 @@ impl StreamTableScan {
     ) -> TableCatalog {
         let properties = self.ctx().with_options().internal_table_subset();
         let mut catalog_builder = TableCatalogBuilder::new(properties);
-        let upstream_schema = &self.logical.table_desc.columns;
+        let upstream_schema = &self.logical.get_table_columns();
 
         // We use vnode as primary key in state table.
         // If `Distribution::Single`, vnode will just be `VirtualNode::default()`.
@@ -266,8 +266,7 @@ impl StreamTableScan {
             .map(|&id| {
                 let col = self
                     .logical
-                    .table_desc
-                    .columns
+                    .get_table_columns()
                     .iter()
                     .find(|c| c.column_id.get_id() == id)
                     .unwrap();
@@ -300,15 +299,52 @@ impl StreamTableScan {
             })
             .collect_vec();
 
-        // TODO: snapshot read of upstream mview
         let batch_plan_node = BatchPlanNode {
-            table_desc: Some(self.logical.table_desc.to_protobuf()),
+            table_desc: if cdc_upstream {
+                None
+            } else {
+                Some(self.logical.table_desc.to_protobuf())
+            },
             column_ids: upstream_column_ids.clone(),
         };
 
         let catalog = self
             .build_backfill_state_catalog(state)
             .to_internal_table_prost();
+
+        let node_body = if cdc_upstream {
+            // don't need batch plan for cdc source
+            PbNodeBody::Chain(ChainNode {
+                table_id: self.logical.cdc_table_desc.table_id.table_id,
+                chain_type: self.chain_type as i32,
+                // The column indices need to be forwarded to the downstream
+                output_indices,
+                upstream_column_ids,
+                // The table desc used by backfill executor
+                state_table: Some(catalog),
+                rate_limit: None,
+                cdc_table_desc: Some(self.logical.cdc_table_desc.to_protobuf()),
+                ..Default::default()
+            })
+        } else {
+            PbNodeBody::Chain(ChainNode {
+                table_id: self.logical.table_desc.table_id.table_id,
+                chain_type: self.chain_type as i32,
+                // The column indices need to be forwarded to the downstream
+                output_indices,
+                upstream_column_ids,
+                // The table desc used by backfill executor
+                table_desc: Some(self.logical.table_desc.to_protobuf()),
+                state_table: Some(catalog),
+                rate_limit: self
+                    .base
+                    .ctx()
+                    .session_ctx()
+                    .config()
+                    .get_streaming_rate_limit(),
+                ..Default::default()
+            })
+        };
 
         PbStreamNode {
             fields: self.schema().to_prost(),
@@ -331,23 +367,8 @@ impl StreamTableScan {
                     append_only: true,
                 },
             ],
-            node_body: Some(PbNodeBody::Chain(ChainNode {
-                table_id: self.logical.table_desc.table_id.table_id,
-                chain_type: self.chain_type as i32,
-                // The column indices need to be forwarded to the downstream
-                output_indices,
-                upstream_column_ids,
-                // The table desc used by backfill executor
-                table_desc: Some(self.logical.table_desc.to_protobuf()),
-                state_table: Some(catalog),
-                rate_limit: self
-                    .base
-                    .ctx()
-                    .session_ctx()
-                    .config()
-                    .get_streaming_rate_limit(),
-                ..Default::default()
-            })),
+
+            node_body: Some(node_body),
             stream_key,
             operator_id: self.base.id.0 as u64,
             identity: {

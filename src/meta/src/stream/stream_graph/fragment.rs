@@ -560,8 +560,11 @@ impl CompleteStreamFragmentGraph {
                             // extract the upstream full_table_name from the source fragment
                             let mut full_table_name = None;
                             visit_fragment(&mut fragment.inner, |node_body| {
-                                if let NodeBody::Chain(chain_node) = node_body && let Some(table_desc) = chain_node.table_desc.as_ref() {
-                                    full_table_name = table_desc.table_name.clone();
+                                if let NodeBody::Chain(chain_node) = node_body {
+                                    full_table_name = chain_node
+                                        .cdc_table_desc
+                                        .as_ref()
+                                        .map(|desc| desc.table_name.clone());
                                 }
                             });
 
@@ -580,6 +583,7 @@ impl CompleteStreamFragmentGraph {
                                     .expect("table name column not found")
                             };
 
+                            assert!(full_table_name.is_some());
                             tracing::debug!(
                                 ?full_table_name,
                                 ?source_job_id,

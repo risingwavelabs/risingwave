@@ -1116,7 +1116,7 @@ impl FragmentManager {
                         fragments.insert(table_id, fragment);
                     }
                 }
-                _ => {
+                None | Some(TableJobType::Unspecified) => {
                     if let Some(fragment) = table_fragments.mview_fragment() {
                         fragments.insert(table_id, fragment);
                     }
