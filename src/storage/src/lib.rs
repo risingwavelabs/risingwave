@@ -18,7 +18,7 @@
 #![feature(bound_map)]
 #![feature(custom_test_frameworks)]
 #![feature(extract_if)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(hash_extract_if)]
 #![feature(lint_reasons)]
 #![feature(proc_macro_hygiene)]
@@ -42,8 +42,6 @@
 #![feature(associated_type_bounds)]
 #![feature(exclusive_range_pattern)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(async_fn_in_trait)]
-#![feature(return_position_impl_trait_in_trait)]
 
 pub mod hummock;
 pub mod memory;

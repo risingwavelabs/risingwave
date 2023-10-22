@@ -18,7 +18,7 @@
 #![feature(exact_size_is_empty)]
 #![feature(type_alias_impl_trait)]
 #![cfg_attr(coverage, feature(no_coverage))]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(iterator_try_collect)]
 #![feature(lint_reasons)]
@@ -27,13 +27,11 @@
 #![feature(let_chains)]
 #![feature(bound_map)]
 #![feature(int_roundings)]
-#![feature(async_fn_in_trait)]
 #![feature(allocator_api)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(result_option_inspect)]
 #![feature(assert_matches)]
 #![feature(lazy_cell)]
-#![feature(return_position_impl_trait_in_trait)]
 
 mod error;
 pub mod exchange_source;

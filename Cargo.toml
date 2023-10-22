@@ -97,7 +97,7 @@ aws-smithy-types = "0.55"
 aws-endpoint = "0.55"
 aws-types = "0.55"
 etcd-client = { package = "madsim-etcd-client", version = "0.4" }
-futures-async-stream = "0.2"
+futures-async-stream = "0.2.9"
 hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "0.3.0", features = [
   "cmake-build",
@@ -165,6 +165,8 @@ unused_must_use = "forbid"
 future_incompatible = "warn"
 nonstandard_style = "warn"
 rust_2018_idioms = "warn"
+# Backward compatibility is not important for an application.
+async_fn_in_trait = "allow"
 
 [workspace.lints.clippy]
 uninlined_format_args = "allow"

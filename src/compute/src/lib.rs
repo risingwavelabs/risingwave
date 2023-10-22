@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #![feature(trait_alias)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
 #![feature(result_option_inspect)]

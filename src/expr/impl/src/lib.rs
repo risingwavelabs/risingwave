@@ -28,7 +28,7 @@
 #![feature(exclusive_range_pattern)]
 #![feature(lazy_cell)]
 #![feature(round_ties_even)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(test)]
 #![feature(arc_unwrap_or_clone)]
 

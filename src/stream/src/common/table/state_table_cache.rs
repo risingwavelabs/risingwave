@@ -67,9 +67,9 @@ type WatermarkCacheKey = DefaultOrdered<OwnedRow>;
 ///        Issue delete ranges.
 ///
 ///    B. Refreshing the cache:
-///        On barrier, do table scan from most_recently_cleaned_watermark (inclusive) to +inf.
+///        On barrier, do table scan from `most_recently_cleaned_watermark` (inclusive) to +inf.
 ///        Take the Top N rows and insert into cache.
-///        This has to be implemented in state_table.
+///        This has to be implemented in `state_table`.
 ///        We do not need to store any values, just the keys.
 ///
 /// TODO(kwannoel):

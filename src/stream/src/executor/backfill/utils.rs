@@ -309,9 +309,6 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
 }
 
 /// Flush the data
-// This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
-// TODO: remove `allow` here after the issued is closed.
-#[expect(clippy::needless_pass_by_ref_mut)]
 pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     epoch: EpochPair,

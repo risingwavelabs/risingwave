@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 
 use std::sync::atomic::AtomicU64;
