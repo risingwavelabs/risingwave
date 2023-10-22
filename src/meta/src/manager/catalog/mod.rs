@@ -919,10 +919,11 @@ impl CatalogManager {
             let database_core = &mut core.database;
             let tables = &mut database_core.tables;
             let Some(table) = tables.get(&table_id).cloned() else {
-                bail!(
-                    "table_id {} missing when attempting to cancel job",
+                tracing::warn!(
+                    "table_id {} missing when attempting to cancel job, could be cleaned on recovery",
                     table_id
-                )
+                );
+                return Ok(())
             };
             table
         };
