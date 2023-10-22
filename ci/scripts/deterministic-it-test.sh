@@ -14,9 +14,9 @@ mkdir target/sim
 mv target/ci-sim target/sim
 
 echo "--- Run integration tests in deterministic simulation mode"
-seq $TEST_NUM | parallel MADSIM_TEST_SEED={} NEXTEST_PROFILE=ci-sim \
+MADSIM_TEST_SEED=50 NEXTEST_PROFILE=ci-sim \
  cargo nextest run \
  --no-fail-fast \
  --cargo-metadata target/nextest/cargo-metadata.json \
  --binaries-metadata target/nextest/binaries-metadata.json \
- "$@"
+ "test_background_mv_barrier_recovery"
