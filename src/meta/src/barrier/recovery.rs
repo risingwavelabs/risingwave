@@ -227,11 +227,9 @@ impl GlobalBarrierManager {
             .await;
 
         tracing::info!("recovery start!");
-        if bootstrap_recovery {
-            self.clean_dirty_tables()
-                .await
-                .expect("clean dirty tables should not fail");
-        }
+        self.clean_dirty_tables()
+            .await
+            .expect("clean dirty tables should not fail");
         self.clean_dirty_fragments()
             .await
             .expect("clean dirty fragments");
