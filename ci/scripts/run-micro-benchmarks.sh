@@ -46,6 +46,8 @@ main() {
   echo "--- Getting aws instance type"
   local instance_type=$(get_instance_type)
   echo "instance_type: $instance_type"
+  echo "$instance_type" > instance_type.txt
+  buildkite-agent artifact upload ./microbench_instance_type.txt
   if [[ $instance_type != "m6i.4xlarge" ]]; then
     echo "Only m6i.4xlarge is supported, skipping microbenchmark"
     exit 0

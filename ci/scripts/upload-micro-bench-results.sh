@@ -36,6 +36,11 @@ get_commit() {
   | sed 's/\"//g'
 }
 
+get_machine() {
+  buildkite-agent artifact download ./microbench_instance_type.txt ./
+  cat ./microbench_instance_type.txt
+}
+
 setup
 
 BUILDKITE_BUILD_URL="https://buildkite.com/risingwavelabs/main-cron/builds/$BUILDKITE_BUILD_NUMBER"
@@ -48,6 +53,14 @@ curl -L https://rw-qa-infra-public.s3.us-west-2.amazonaws.com/scripts/download-q
 git clone --depth 1 https://"$GITHUB_TOKEN"@github.com/risingwavelabs/qa-infra.git
 cp -r qa-infra/certs ./certs
 rm -rf qa-infra
+
+echo "--- Checking microbench_instance_type"
+INSTANCE_TYPE=$(get_machine)
+echo "instance type: $INSTANCE_TYPE"
+if [[ $INSTANCE_TYPE != "m6i.4xlarge" ]]; then
+  echo "Only m6i.4xlarge is supported, microbenchmark was skipped"
+  exit 0
+fi
 
 echo "--- Uploading results for $BUILDKITE_BUILD_URL"
 echo "Commit: $COMMIT"
