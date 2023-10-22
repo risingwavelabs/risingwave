@@ -61,6 +61,9 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
         .run("create materialized view m1 as select * from t1;")
         .await?;
 
+    // If the CN is killed before first barrier pass for the MV, the MV will be dropped.
+    // This is because it's table fragments will NOT be committed until first barrier pass.
+    sleep(Duration::from_secs(5)).await;
     kill_cn_and_wait_recover(&cluster).await;
 
     // Send some upstream updates.
