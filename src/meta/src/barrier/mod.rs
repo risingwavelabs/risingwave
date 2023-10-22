@@ -626,7 +626,7 @@ impl GlobalBarrierManager {
             let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
             let paused_reason = paused.then_some(PausedReason::Manual);
 
-            self.recovery(prev_epoch, paused_reason, true)
+            self.recovery(prev_epoch, paused_reason)
                 .instrument(span)
                 .await
         };
@@ -981,10 +981,7 @@ impl GlobalBarrierManager {
 
             // No need to clean dirty tables for barrier recovery,
             // The foreground stream job should cleanup their own tables.
-            *state = self
-                .recovery(prev_epoch, None, false)
-                .instrument(span)
-                .await;
+            *state = self.recovery(prev_epoch, None).instrument(span).await;
             self.set_status(BarrierManagerStatus::Running).await;
         } else {
             panic!("failed to execute barrier: {:?}", err);

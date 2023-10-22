@@ -923,7 +923,7 @@ impl CatalogManager {
                     "table_id {} missing when attempting to cancel job, could be cleaned on recovery",
                     table_id
                 );
-                return Ok(())
+                return Ok(());
             };
             table
         };
