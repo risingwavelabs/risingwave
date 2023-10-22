@@ -766,7 +766,7 @@ impl CatalogManager {
     ///    Clean up these hanging tables by the id.
     pub async fn clean_dirty_tables(&self, fragment_manager: FragmentManagerRef) -> MetaResult<()> {
         let creating_tables: Vec<Table> = self.list_persisted_creating_tables().await;
-        tracing::debug!(
+        eprintln!(
             "creating_tables ids: {:#?}",
             creating_tables.iter().map(|t| t.id).collect_vec()
         );
@@ -786,7 +786,7 @@ impl CatalogManager {
                 && table.table_type != TableType::Internal as i32
             // || table.create_type == CreateType::Unspecified as i32
             {
-                tracing::debug!("cleaning table_id for foreground: {:#?}", table.id);
+                eprintln!("cleaning table_id for foreground: {:#?}", table.id);
                 tables_to_clean.push(table);
                 continue;
             }
@@ -803,7 +803,7 @@ impl CatalogManager {
             {
                 Err(e) => {
                     if e.is_fragment_not_found() {
-                        tracing::debug!("cleaning table_id for no fragments: {:#?}", table.id);
+                        eprintln!("cleaning table_id for no fragments: {:#?}", table.id);
                         tables_to_clean.push(table);
                         continue;
                     } else {
@@ -815,7 +815,7 @@ impl CatalogManager {
                     // 3. For those in initial state (i.e. not running / created),
                     // we should purge them.
                     if fragment.state() == State::Initial {
-                        tracing::debug!("cleaning table_id no initial state: {:#?}", table.id);
+                        eprintln!("cleaning table_id no initial state: {:#?}", table.id);
                         tables_to_clean.push(table);
                         continue;
                     } else {
@@ -831,7 +831,7 @@ impl CatalogManager {
         }
         for t in internal_tables_to_clean {
             if !reserved_internal_tables.contains(&t.id) {
-                tracing::debug!(
+                eprintln!(
                     "cleaning table_id for internal tables not reserved: {:#?}",
                     t.id
                 );
@@ -844,7 +844,7 @@ impl CatalogManager {
         let tables = &mut database_core.tables;
         let mut tables = BTreeMapTransaction::new(tables);
         for table in &tables_to_clean {
-            tracing::debug!("cleaning table_id: {}", table.id);
+            eprintln!("cleaning table_id: {}", table.id);
             let table = tables.remove(table.id);
             assert!(table.is_some())
         }
