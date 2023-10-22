@@ -87,7 +87,7 @@ impl GlobalBarrierManager {
             .map(|t| t.table_id())
             .collect();
 
-        debug!("clean dirty table fragments: {:?}", to_drop_streaming_ids);
+        eprintln!("clean dirty table fragments: {:?}", to_drop_streaming_ids);
 
         self.fragment_manager
             .drop_table_fragments_vec(&to_drop_streaming_ids)
