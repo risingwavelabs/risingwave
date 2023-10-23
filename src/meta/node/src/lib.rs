@@ -27,6 +27,7 @@ use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_meta::*;
 use risingwave_meta_service::*;
+use risingwave_sink_impl as _;
 pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
 use server::{rpc_serve, MetaStoreSqlBackend};
 

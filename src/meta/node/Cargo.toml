@@ -30,6 +30,7 @@ risingwave_meta = { workspace = true }
 risingwave_meta_service = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
+risingwave_sink_impl = { workspace = true }
 sea-orm = { version = "0.12.0", features = [
     "sqlx-mysql",
     "sqlx-postgres",
