@@ -14,7 +14,7 @@
 
 #![cfg_attr(coverage, feature(no_coverage))]
 
-#[cfg_attr(coverage, no_coverage)]
+#[cfg_attr(coverage, coverage(off))]
 fn main() {
     use clap::Parser;
 

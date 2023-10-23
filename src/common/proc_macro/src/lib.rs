@@ -52,7 +52,7 @@ mod estimate_size;
 ///     }
 /// }
 /// ```
-#[cfg_attr(coverage, no_coverage)]
+#[cfg_attr(coverage, coverage(off))]
 #[proc_macro_derive(OverrideConfig, attributes(override_opts))]
 #[proc_macro_error]
 pub fn override_config(input: TokenStream) -> TokenStream {

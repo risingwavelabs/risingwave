@@ -36,7 +36,7 @@ impl MetaMemberServiceImpl {
 
 #[async_trait::async_trait]
 impl MetaMemberService for MetaMemberServiceImpl {
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn members(
         &self,
         _request: Request<MembersRequest>,

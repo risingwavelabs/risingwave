@@ -29,7 +29,7 @@ macro_rules! main {
         #[cfg(not(enable_task_local_alloc))]
         risingwave_common::enable_jemalloc!();
 
-        #[cfg_attr(coverage, no_coverage)]
+        #[cfg_attr(coverage, coverage(off))]
         fn main() {
             let opts = clap::Parser::parse();
             $crate::$component(opts);

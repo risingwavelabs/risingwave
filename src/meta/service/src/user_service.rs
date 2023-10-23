@@ -107,7 +107,7 @@ impl UserServiceImpl {
 
 #[async_trait::async_trait]
 impl UserService for UserServiceImpl {
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn create_user(
         &self,
         request: Request<CreateUserRequest>,
@@ -128,7 +128,7 @@ impl UserService for UserServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn drop_user(
         &self,
         request: Request<DropUserRequest>,
@@ -142,7 +142,7 @@ impl UserService for UserServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn update_user(
         &self,
         request: Request<UpdateUserRequest>,
@@ -165,7 +165,7 @@ impl UserService for UserServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn grant_privilege(
         &self,
         request: Request<GrantPrivilegeRequest>,
@@ -185,7 +185,7 @@ impl UserService for UserServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn revoke_privilege(
         &self,
         request: Request<RevokePrivilegeRequest>,
