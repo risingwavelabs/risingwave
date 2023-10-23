@@ -31,14 +31,14 @@ use crate::utils::ConditionDisplay;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchNestedLoopJoin {
     pub base: PlanBase,
-    logical: generic::Join<PlanRef>,
+    core: generic::Join<PlanRef>,
 }
 
 impl BatchNestedLoopJoin {
-    pub fn new(logical: generic::Join<PlanRef>) -> Self {
-        let dist = Self::derive_dist(logical.left.distribution(), logical.right.distribution());
-        let base = PlanBase::new_batch_from_logical(&logical, dist, Order::any());
-        Self { base, logical }
+    pub fn new(core: generic::Join<PlanRef>) -> Self {
+        let dist = Self::derive_dist(core.left.distribution(), core.right.distribution());
+        let base = PlanBase::new_batch_from_logical(&core, dist, Order::any());
+        Self { base, core }
     }
 
     fn derive_dist(left: &Distribution, right: &Distribution) -> Distribution {
@@ -53,19 +53,19 @@ impl Distill for BatchNestedLoopJoin {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx.is_explain_verbose();
         let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
-        vec.push(("type", Pretty::debug(&self.logical.join_type)));
+        vec.push(("type", Pretty::debug(&self.core.join_type)));
 
-        let concat_schema = self.logical.concat_schema();
+        let concat_schema = self.core.concat_schema();
         vec.push((
             "predicate",
             Pretty::debug(&ConditionDisplay {
-                condition: &self.logical.on,
+                condition: &self.core.on,
                 input_schema: &concat_schema,
             }),
         ));
 
         if verbose {
-            let data = IndicesDisplay::from_join(&self.logical, &concat_schema);
+            let data = IndicesDisplay::from_join(&self.core, &concat_schema);
             vec.push(("output", data));
         }
 
@@ -75,18 +75,18 @@ impl Distill for BatchNestedLoopJoin {
 
 impl PlanTreeNodeBinary for BatchNestedLoopJoin {
     fn left(&self) -> PlanRef {
-        self.logical.left.clone()
+        self.core.left.clone()
     }
 
     fn right(&self) -> PlanRef {
-        self.logical.right.clone()
+        self.core.right.clone()
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
-        logical.left = left;
-        logical.right = right;
-        Self::new(logical)
+        let mut core = self.core.clone();
+        core.left = left;
+        core.right = right;
+        Self::new(core)
     }
 }
 
@@ -108,14 +108,9 @@ impl ToDistributedBatch for BatchNestedLoopJoin {
 impl ToBatchPb for BatchNestedLoopJoin {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::NestedLoopJoin(NestedLoopJoinNode {
-            join_type: self.logical.join_type as i32,
-            join_cond: Some(ExprImpl::from(self.logical.on.clone()).to_expr_proto()),
-            output_indices: self
-                .logical
-                .output_indices
-                .iter()
-                .map(|&x| x as u32)
-                .collect(),
+            join_type: self.core.join_type as i32,
+            join_cond: Some(ExprImpl::from(self.core.on.clone()).to_expr_proto()),
+            output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
         })
     }
 }
@@ -138,8 +133,8 @@ impl ExprRewritable for BatchNestedLoopJoin {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.logical.clone();
-        logical.rewrite_exprs(r);
-        Self::new(logical).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::new(core).into()
     }
 }

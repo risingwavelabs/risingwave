@@ -34,8 +34,6 @@ impl MigrationTrait for Migration {
                 .has_table(SystemParameter::Table.to_string())
                 .await?
         );
-        assert!(!manager.has_table(ElectionLeader::Table.to_string()).await?);
-        assert!(!manager.has_table(ElectionMember::Table.to_string()).await?);
 
         // 2. create tables.
         manager
@@ -634,44 +632,6 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
-        manager
-            .create_table(
-                MigrationTable::create()
-                    .table(ElectionLeader::Table)
-                    .col(
-                        ColumnDef::new(ElectionLeader::Service)
-                            .string()
-                            .primary_key()
-                            .not_null(),
-                    )
-                    .col(ColumnDef::new(ElectionLeader::Id).string().not_null())
-                    .col(
-                        ColumnDef::new(ElectionLeader::LastHeartbeat)
-                            .timestamp()
-                            .not_null(),
-                    )
-                    .to_owned(),
-            )
-            .await?;
-        manager
-            .create_table(
-                MigrationTable::create()
-                    .table(ElectionMember::Table)
-                    .col(ColumnDef::new(ElectionMember::Service).string().not_null())
-                    .col(
-                        ColumnDef::new(ElectionMember::Id)
-                            .string()
-                            .primary_key()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(ElectionMember::LastHeartbeat)
-                            .timestamp()
-                            .not_null(),
-                    )
-                    .to_owned(),
-            )
-            .await?;
 
         // 3. create indexes.
         manager
@@ -790,9 +750,7 @@ impl MigrationTrait for Migration {
             Function,
             Object,
             ObjectDependency,
-            SystemParameter,
-            ElectionLeader,
-            ElectionMember
+            SystemParameter
         );
         Ok(())
     }
@@ -1022,20 +980,4 @@ enum SystemParameter {
     Value,
     IsMutable,
     Description,
-}
-
-#[derive(DeriveIden)]
-enum ElectionLeader {
-    Table,
-    Service,
-    Id,
-    LastHeartbeat,
-}
-
-#[derive(DeriveIden)]
-enum ElectionMember {
-    Table,
-    Service,
-    Id,
-    LastHeartbeat,
 }

@@ -21,7 +21,6 @@ use anyhow::{anyhow, Ok};
 use async_nats::jetstream::consumer::DeliverPolicy;
 use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
-use clickhouse::Client;
 use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
@@ -37,7 +36,6 @@ use url::Url;
 use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::deserialize_duration_from_string;
-use crate::sink::doris_connector::DorisGet;
 use crate::sink::SinkError;
 use crate::source::nats::source::NatsOffset;
 // The file describes the common abstractions for each connector and can be used in both source and
@@ -403,66 +401,6 @@ impl KinesisCommon {
             builder = builder.endpoint_url(endpoint);
         }
         Ok(KinesisClient::from_conf(builder.build()))
-    }
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct ClickHouseCommon {
-    #[serde(rename = "clickhouse.url")]
-    pub url: String,
-    #[serde(rename = "clickhouse.user")]
-    pub user: String,
-    #[serde(rename = "clickhouse.password")]
-    pub password: String,
-    #[serde(rename = "clickhouse.database")]
-    pub database: String,
-    #[serde(rename = "clickhouse.table")]
-    pub table: String,
-}
-
-const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
-
-impl ClickHouseCommon {
-    pub(crate) fn build_client(&self) -> anyhow::Result<Client> {
-        use hyper_tls::HttpsConnector;
-
-        let https = HttpsConnector::new();
-        let client = hyper::Client::builder()
-            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
-            .build::<_, hyper::Body>(https);
-
-        let client = Client::with_http_client(client)
-            .with_url(&self.url)
-            .with_user(&self.user)
-            .with_password(&self.password)
-            .with_database(&self.database);
-        Ok(client)
-    }
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct DorisCommon {
-    #[serde(rename = "doris.url")]
-    pub url: String,
-    #[serde(rename = "doris.user")]
-    pub user: String,
-    #[serde(rename = "doris.password")]
-    pub password: String,
-    #[serde(rename = "doris.database")]
-    pub database: String,
-    #[serde(rename = "doris.table")]
-    pub table: String,
-}
-
-impl DorisCommon {
-    pub(crate) fn build_get_client(&self) -> DorisGet {
-        DorisGet::new(
-            self.url.clone(),
-            self.table.clone(),
-            self.database.clone(),
-            self.user.clone(),
-            self.password.clone(),
-        )
     }
 }
 
