@@ -14,13 +14,13 @@
 
 use either::Either;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::meta::meta_member_service_server::MetaMemberService;
 use risingwave_pb::meta::{MembersRequest, MembersResponse, MetaMember};
 use tonic::{Request, Response, Status};
 
-use crate::rpc::server::{AddressInfo, ElectionClientRef};
-
+use crate::AddressInfo;
 #[derive(Clone)]
 pub struct MetaMemberServiceImpl {
     election_client_or_self: Either<ElectionClientRef, AddressInfo>,

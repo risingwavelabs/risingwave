@@ -45,7 +45,7 @@ use crate::model::{
 };
 use crate::storage::Transaction;
 use crate::stream::{SplitAssignment, TableRevision};
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 pub struct FragmentManagerCore {
     table_fragments: BTreeMap<TableId, TableFragments>,
@@ -165,6 +165,56 @@ impl FragmentManager {
         map.values().cloned().collect()
     }
 
+    /// The `table_ids` here should correspond to stream jobs.
+    /// We get their corresponding table fragment, and from there,
+    /// we get the actors that are in the table fragment.
+    pub async fn get_table_id_actor_mapping(
+        &self,
+        table_ids: &[TableId],
+    ) -> HashMap<TableId, Vec<ActorId>> {
+        let map = &self.core.read().await.table_fragments;
+        let mut table_map = HashMap::new();
+        for table_id in table_ids {
+            if let Some(table_fragment) = map.get(table_id) {
+                let mut actors = vec![];
+                for fragment in table_fragment.fragments.values() {
+                    for actor in &fragment.actors {
+                        actors.push(actor.actor_id)
+                    }
+                }
+                table_map.insert(*table_id, actors);
+            }
+        }
+        table_map
+    }
+
+    /// Gets the counts for each upstream relation that each stream job
+    /// indicated by `table_ids` depends on.
+    /// For example in the following query:
+    /// ```sql
+    /// CREATE MATERIALIZED VIEW m1 AS
+    ///   SELECT * FROM t1 JOIN t2 ON t1.a = t2.a JOIN t3 ON t2.b = t3.b
+    /// ```
+    ///
+    /// We have t1 occurring once, and t2 occurring once.
+    pub async fn get_upstream_relation_counts(
+        &self,
+        table_ids: &[TableId],
+    ) -> HashMap<TableId, HashMap<TableId, usize>> {
+        let map = &self.core.read().await.table_fragments;
+        let mut upstream_relation_counts = HashMap::new();
+        for table_id in table_ids {
+            if let Some(table_fragments) = map.get(table_id) {
+                let dependent_ids = table_fragments.dependent_table_ids();
+                let r = upstream_relation_counts.insert(*table_id, dependent_ids);
+                assert!(r.is_none(), "Each table_id should be unique!")
+            } else {
+                upstream_relation_counts.insert(*table_id, HashMap::new());
+            }
+        }
+        upstream_relation_counts
+    }
+
     pub fn get_mv_id_to_internal_table_ids_mapping(&self) -> Option<Vec<(u32, Vec<u32>)>> {
         match self.core.try_read() {
             Ok(core) => Some(
@@ -233,10 +283,11 @@ impl FragmentManager {
         table_id: &TableId,
     ) -> MetaResult<TableFragments> {
         let map = &self.core.read().await.table_fragments;
-        Ok(map
-            .get(table_id)
-            .cloned()
-            .with_context(|| format!("table_fragment not exist: id={}", table_id))?)
+        if let Some(table_fragment) = map.get(table_id) {
+            Ok(table_fragment.clone())
+        } else {
+            Err(MetaError::fragment_not_found(table_id.table_id))
+        }
     }
 
     pub async fn select_table_fragments_by_ids(
@@ -246,13 +297,30 @@ impl FragmentManager {
         let map = &self.core.read().await.table_fragments;
         let mut table_fragments = Vec::with_capacity(table_ids.len());
         for table_id in table_ids {
-            table_fragments.push(
-                map.get(table_id)
-                    .cloned()
-                    .with_context(|| format!("table_fragment not exist: id={}", table_id))?,
-            );
+            table_fragments.push(if let Some(table_fragment) = map.get(table_id) {
+                table_fragment.clone()
+            } else {
+                return Err(MetaError::fragment_not_found(table_id.table_id));
+            });
         }
         Ok(table_fragments)
+    }
+
+    pub async fn get_table_id_table_fragment_map(
+        &self,
+        table_ids: &[TableId],
+    ) -> MetaResult<HashMap<TableId, TableFragments>> {
+        let map = &self.core.read().await.table_fragments;
+        let mut id_to_fragment = HashMap::new();
+        for table_id in table_ids {
+            let table_fragment = if let Some(table_fragment) = map.get(table_id) {
+                table_fragment.clone()
+            } else {
+                return Err(MetaError::fragment_not_found(table_id.table_id));
+            };
+            id_to_fragment.insert(*table_id, table_fragment);
+        }
+        Ok(id_to_fragment)
     }
 
     /// Start create a new `TableFragments` and insert it into meta store, currently the actors'
@@ -501,6 +569,8 @@ impl FragmentManager {
 
     /// Drop table fragments info and remove downstream actor infos in fragments from its dependent
     /// tables.
+    /// If table fragments already deleted, this should just be noop,
+    /// the delete function (`table_fragments.remove`) will not return an error.
     pub async fn drop_table_fragments_vec(&self, table_ids: &HashSet<TableId>) -> MetaResult<()> {
         let mut guard = self.core.write().await;
         let current_revision = guard.table_revision;
@@ -516,7 +586,7 @@ impl FragmentManager {
             table_fragments.remove(table_fragment.table_id());
             let chain_actor_ids = table_fragment.chain_actor_ids();
             let dependent_table_ids = table_fragment.dependent_table_ids();
-            for dependent_table_id in dependent_table_ids {
+            for (dependent_table_id, _) in dependent_table_ids {
                 if table_ids.contains(&dependent_table_id) {
                     continue;
                 }

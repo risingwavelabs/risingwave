@@ -85,11 +85,13 @@ impl stream::StreamPlanRef for PlanBase {
         self.emit_on_window_close
     }
 }
+
 impl batch::BatchPlanRef for PlanBase {
     fn order(&self) -> &Order {
         &self.order
     }
 }
+
 impl PlanBase {
     pub fn new_logical(
         ctx: OptimizerContextRef,

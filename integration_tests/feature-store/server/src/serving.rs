@@ -53,8 +53,15 @@ impl FeatureStoreServer {
         }
     }
 
-    pub async fn get_taxi_amount(&self, do_location_id: i64,pu_location_id: i64) -> Result<f32, Status> {
-        let request = GetAmountRequest { do_location_id ,pu_location_id};
+    pub async fn get_taxi_amount(
+        &self,
+        do_location_id: i64,
+        pu_location_id: i64,
+    ) -> Result<f32, Status> {
+        let request = GetAmountRequest {
+            do_location_id,
+            pu_location_id,
+        };
         let mut model_client = ModelClient::connect("http://localhost:8080")
             .await
             .expect("Failed to connect to model server");

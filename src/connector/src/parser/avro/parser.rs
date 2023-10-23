@@ -126,22 +126,32 @@ impl AvroParserConfig {
                 } else {
                     None
                 };
-            let (subject_key, subject_value) = get_subject_by_strategy(
+            let subject_key = if enable_upsert {
+                Some(get_subject_by_strategy(
+                    &avro_config.name_strategy,
+                    avro_config.topic.as_str(),
+                    avro_config.key_record_name.as_deref(),
+                    true,
+                )?)
+            } else {
+                if let Some(name) = &avro_config.key_record_name {
+                    return Err(RwError::from(ProtocolError(format!(
+                        "key.message = {name} not used",
+                    ))));
+                }
+                None
+            };
+            let subject_value = get_subject_by_strategy(
                 &avro_config.name_strategy,
                 avro_config.topic.as_str(),
-                avro_config.key_record_name.as_deref(),
                 avro_config.record_name.as_deref(),
-                enable_upsert,
+                false,
             )?;
-            tracing::debug!(
-                "infer key subject {}, value subject {}",
-                subject_key,
-                subject_value
-            );
+            tracing::debug!("infer key subject {subject_key:?}, value subject {subject_value}");
 
             Ok(Self {
                 schema: resolver.get_by_subject_name(&subject_value).await?,
-                key_schema: if enable_upsert {
+                key_schema: if let Some(subject_key) = subject_key {
                     Some(resolver.get_by_subject_name(&subject_key).await?)
                 } else {
                     None
@@ -210,6 +220,7 @@ mod test {
     use risingwave_common::types::{DataType, Date, Interval, ScalarImpl, Timestamptz};
     use risingwave_common::{error, try_match_expand};
     use risingwave_pb::catalog::StreamSourceInfo;
+    use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
     use url::Url;
 
     use super::{
@@ -222,7 +233,7 @@ mod test {
     use crate::parser::{
         AccessBuilderImpl, EncodingType, SourceStreamChunkBuilder, SpecificParserConfig,
     };
-    use crate::source::{SourceColumnDesc, SourceEncode, SourceFormat, SourceStruct};
+    use crate::source::SourceColumnDesc;
 
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();
@@ -294,13 +305,11 @@ mod test {
         let info = StreamSourceInfo {
             row_schema_location: schema_path.clone(),
             use_schema_registry: false,
+            format: PbFormatType::Plain.into(),
+            row_encode: PbEncodeType::Avro.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(
-            SourceStruct::new(SourceFormat::Plain, SourceEncode::Avro),
-            &info,
-            &HashMap::new(),
-        )?;
+        let parser_config = SpecificParserConfig::new(&info, &HashMap::new())?;
         AvroParserConfig::new(parser_config.encoding_config).await
     }
 

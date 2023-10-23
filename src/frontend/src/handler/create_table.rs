@@ -20,10 +20,9 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    CdcTableDesc, ColumnCatalog, ColumnDesc, TableDesc, TableId, TableVersionId,
-    INITIAL_SOURCE_VERSION_ID, INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
+    CdcTableDesc, ColumnCatalog, ColumnDesc, TableId, TableVersionId, INITIAL_SOURCE_VERSION_ID,
+    INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
 };
-use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
@@ -534,24 +533,19 @@ pub(crate) async fn gen_create_table_plan_with_source(
             .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
             .collect();
 
-        let upstream_table_desc = TableDesc {
+        let cdc_table_desc = CdcTableDesc {
             table_id: TableId::placeholder(),
-            table_name: None,
+            external_table_name: "".to_string(),
             pk: table_pk,
             columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
-            distribution_key: pk_column_indices.clone(),
             stream_key: pk_column_indices,
-            append_only,
-            retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
             value_indices: (0..columns.len()).collect_vec(), /* FIXME: maybe we can remove `_rw_offset` from TableDesc */
-            read_prefix_len_hint: 0,
-            watermark_columns: Default::default(),
             connect_properties: Default::default(),
-            versioned: false,
         };
-        tracing::debug!("upstream table desc: {:?}", upstream_table_desc);
+
+        tracing::debug!(?cdc_table_desc, "create table with source w/ backfill");
         // save external table info to `source_info`
-        source_info.upstream_table = Some(upstream_table_desc.to_protobuf());
+        source_info.external_table = Some(cdc_table_desc.to_protobuf());
     }
 
     gen_table_plan_inner(

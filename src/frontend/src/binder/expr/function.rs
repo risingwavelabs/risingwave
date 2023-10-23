@@ -866,6 +866,9 @@ impl Binder {
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
                 // Functions that return a constant value
                 ("pi", pi()),
+                // greatest and least
+                ("greatest", raw_call(ExprType::Greatest)),
+                ("least", raw_call(ExprType::Least)),
                 // System information operations.
                 (
                     "pg_typeof",

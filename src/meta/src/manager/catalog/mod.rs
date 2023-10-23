@@ -17,7 +17,7 @@ mod fragment;
 mod user;
 mod utils;
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::iter;
 use std::option::Option::Some;
 use std::sync::Arc;
@@ -32,9 +32,10 @@ use risingwave_common::catalog::{
     DEFAULT_SUPER_USER_FOR_PG_ID, DEFAULT_SUPER_USER_ID, SYSTEM_SCHEMAS,
 };
 use risingwave_common::{bail, ensure};
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType};
 use risingwave_pb::catalog::{
-    Connection, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source, Table, View,
+    Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source,
+    StreamJobStatus, Table, View,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
@@ -44,7 +45,7 @@ use tokio::sync::{Mutex, MutexGuard};
 use user::*;
 
 use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob};
-use crate::model::{BTreeMapTransaction, MetadataModel, ValTransaction};
+use crate::model::{BTreeMapTransaction, MetadataModel, TableFragments, ValTransaction};
 use crate::storage::Transaction;
 use crate::{MetaError, MetaResult};
 
@@ -79,7 +80,7 @@ macro_rules! commit_meta_with_trx {
             async {
                 // Apply the change in `ValTransaction` to trx
                 $(
-                    $val_txn.apply_to_txn(&mut $trx)?;
+                    $val_txn.apply_to_txn(&mut $trx).await?;
                 )*
                 // Commit to meta store
                 $manager.env.meta_store().txn($trx).await?;
@@ -115,6 +116,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::cancel_creating_jobs_request::CreatingJobInfo;
 use risingwave_pb::meta::relation::RelationInfo;
+use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
@@ -629,9 +631,13 @@ impl CatalogManager {
     pub async fn start_create_stream_job_procedure(
         &self,
         stream_job: &StreamingJob,
+        internal_tables: Vec<Table>,
     ) -> MetaResult<()> {
         match stream_job {
-            StreamingJob::MaterializedView(table) => self.start_create_table_procedure(table).await,
+            StreamingJob::MaterializedView(table) => {
+                self.start_create_table_procedure(table, internal_tables)
+                    .await
+            }
             StreamingJob::Sink(sink) => self.start_create_sink_procedure(sink).await,
             StreamingJob::Index(index, index_table) => {
                 self.start_create_index_procedure(index, index_table).await
@@ -641,7 +647,7 @@ impl CatalogManager {
                     self.start_create_table_procedure_with_source(source, table)
                         .await
                 } else {
-                    self.start_create_table_procedure(table).await
+                    self.start_create_table_procedure(table, vec![]).await
                 }
             }
             StreamingJob::Source(source) => self.start_create_source_procedure(source).await,
@@ -695,7 +701,11 @@ impl CatalogManager {
     }
 
     /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
-    pub async fn start_create_table_procedure(&self, table: &Table) -> MetaResult<()> {
+    pub async fn start_create_table_procedure(
+        &self,
+        table: &Table,
+        internal_tables: Vec<Table>,
+    ) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -708,19 +718,151 @@ impl CatalogManager {
         #[cfg(not(test))]
         user_core.ensure_user_id(table.owner)?;
         let key = (table.database_id, table.schema_id, table.name.clone());
+
         database_core.check_relation_name_duplicated(&key)?;
 
-        if database_core.has_in_progress_creation(&key) {
-            bail!("table is in creating procedure");
-        } else {
-            database_core.mark_creating(&key);
-            database_core.mark_creating_streaming_job(table.id, key);
-            for &dependent_relation_id in &table.dependent_relations {
-                database_core.increase_ref_count(dependent_relation_id);
-            }
-            user_core.increase_ref(table.owner);
-            Ok(())
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        assert!(
+            !tables.contains_key(&table.id),
+            "table must not already exist in meta"
+        );
+        for table in internal_tables {
+            tables.insert(table.id, table);
         }
+        tables.insert(table.id, table.clone());
+        commit_meta!(self, tables)?;
+
+        for &dependent_relation_id in &table.dependent_relations {
+            database_core.increase_ref_count(dependent_relation_id);
+        }
+        user_core.increase_ref(table.owner);
+        Ok(())
+    }
+
+    fn assert_table_creating(tables: &BTreeMap<TableId, Table>, table: &Table) {
+        if let Some(t) = tables.get(&table.id)
+            && let Ok(StreamJobStatus::Creating) = t.get_stream_job_status()
+        {} else {
+            panic!("Table must be in creating procedure: {table:#?}")
+        }
+    }
+
+    pub async fn assert_tables_deleted(&self, table_ids: Vec<TableId>) {
+        let core = self.core.lock().await;
+        let tables = &core.database.tables;
+        for id in table_ids {
+            assert_eq!(tables.get(&id), None,)
+        }
+    }
+
+    /// We clean the following tables:
+    /// 1. Those which belonged to incomplete Foreground jobs.
+    /// 2. Those which did not persist their table fragments, we can't recover these.
+    /// 3. Those which were only initialized, but not actually running yet.
+    /// 4. From 2, since we don't have internal table ids from the fragments,
+    ///    we can detect hanging table ids by just finding all internal ids
+    ///    with:
+    ///    1. `stream_job_status` = CREATING
+    ///    2. Not belonging to a background stream job.
+    ///    Clean up these hanging tables by the id.
+    pub async fn clean_dirty_tables(&self, fragment_manager: FragmentManagerRef) -> MetaResult<()> {
+        let creating_tables: Vec<Table> = self.list_persisted_creating_tables().await;
+        tracing::debug!(
+            "creating_tables ids: {:#?}",
+            creating_tables.iter().map(|t| t.id).collect_vec()
+        );
+        let mut reserved_internal_tables = HashSet::new();
+        let mut tables_to_clean = vec![];
+        let mut internal_tables_to_clean = vec![];
+        for table in creating_tables {
+            tracing::trace!(
+                "checking table {} definition: {}, create_type: {:#?}, table_type: {:#?}",
+                table.id,
+                table.definition,
+                table.get_create_type().unwrap_or(CreateType::Foreground),
+                table.get_table_type().unwrap(),
+            );
+            // 1. Incomplete Foreground jobs
+            if table.create_type == CreateType::Foreground as i32
+                && table.table_type != TableType::Internal as i32
+            // || table.create_type == CreateType::Unspecified as i32
+            {
+                tracing::debug!("cleaning table_id for foreground: {:#?}", table.id);
+                tables_to_clean.push(table);
+                continue;
+            }
+            if table.table_type == TableType::Internal as i32 {
+                internal_tables_to_clean.push(table);
+                continue;
+            }
+
+            // 2. No table fragments
+            assert_ne!(table.table_type, TableType::Internal as i32);
+            match fragment_manager
+                .select_table_fragments_by_table_id(&table.id.into())
+                .await
+            {
+                Err(e) => {
+                    if e.is_fragment_not_found() {
+                        tracing::debug!("cleaning table_id for no fragments: {:#?}", table.id);
+                        tables_to_clean.push(table);
+                        continue;
+                    } else {
+                        return Err(e);
+                    }
+                }
+                Ok(fragment) => {
+                    let fragment: TableFragments = fragment;
+                    // 3. For those in initial state (i.e. not running / created),
+                    // we should purge them.
+                    if fragment.state() == State::Initial {
+                        tracing::debug!("cleaning table_id no initial state: {:#?}", table.id);
+                        tables_to_clean.push(table);
+                        continue;
+                    } else {
+                        assert_eq!(table.create_type, CreateType::Background as i32);
+                        // 4. Get all the corresponding internal tables, the rest we can purge.
+                        for id in fragment.internal_table_ids() {
+                            reserved_internal_tables.insert(id);
+                        }
+                        continue;
+                    }
+                }
+            }
+        }
+        for t in internal_tables_to_clean {
+            if !reserved_internal_tables.contains(&t.id) {
+                tracing::debug!(
+                    "cleaning table_id for internal tables not reserved: {:#?}",
+                    t.id
+                );
+                tables_to_clean.push(t);
+            }
+        }
+
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let tables = &mut database_core.tables;
+        let mut tables = BTreeMapTransaction::new(tables);
+        for table in &tables_to_clean {
+            tracing::debug!("cleaning table_id: {}", table.id);
+            let table = tables.remove(table.id);
+            assert!(table.is_some())
+        }
+        commit_meta!(self, tables)?;
+
+        database_core.clear_creating_stream_jobs();
+        let user_core = &mut core.user;
+        for table in &tables_to_clean {
+            // Recovered when init database manager.
+            for relation_id in &table.dependent_relations {
+                database_core.decrease_ref_count(*relation_id);
+            }
+            // Recovered when init user manager.
+            user_core.decrease_ref(table.owner);
+        }
+
+        Ok(())
     }
 
     /// This is used for both `CREATE TABLE` and `CREATE MATERIALIZED VIEW`.
@@ -731,17 +873,11 @@ impl CatalogManager {
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
-        let key = (table.database_id, table.schema_id, table.name.clone());
-        assert!(
-            !tables.contains_key(&table.id)
-                && database_core.in_progress_creation_tracker.contains(&key),
-            "table must be in creating procedure"
-        );
-        database_core.in_progress_creation_tracker.remove(&key);
-        database_core
-            .in_progress_creation_streaming_job
-            .remove(&table.id);
+        let tables = &mut database_core.tables;
+        if cfg!(not(test)) {
+            Self::assert_table_creating(tables, &table);
+        }
+        let mut tables = BTreeMapTransaction::new(tables);
 
         table.stream_job_status = PbStreamJobStatus::Created.into();
         tables.insert(table.id, table.clone());
@@ -770,23 +906,60 @@ impl CatalogManager {
         Ok(version)
     }
 
-    pub async fn cancel_create_table_procedure(&self, table: &Table) {
-        let core = &mut *self.core.lock().await;
-        let database_core = &mut core.database;
-        let user_core = &mut core.user;
-        let key = (table.database_id, table.schema_id, table.name.clone());
-        assert!(
-            !database_core.tables.contains_key(&table.id)
-                && database_core.has_in_progress_creation(&key),
-            "table must be in creating procedure"
-        );
+    /// Used to cleanup states in stream manager.
+    /// It is required because failure may not necessarily happen in barrier,
+    /// e.g. when cordon nodes.
+    /// and we still need some way to cleanup the state.
+    pub async fn cancel_create_table_procedure(
+        &self,
+        table_id: TableId,
+        internal_table_ids: Vec<TableId>,
+    ) -> MetaResult<()> {
+        let table = {
+            let core = &mut self.core.lock().await;
+            let database_core = &mut core.database;
+            let tables = &mut database_core.tables;
+            let Some(table) = tables.get(&table_id).cloned() else {
+                bail!(
+                    "table_id {} missing when attempting to cancel job",
+                    table_id
+                )
+            };
+            table
+        };
 
-        database_core.unmark_creating(&key);
-        database_core.unmark_creating_streaming_job(table.id);
-        for &dependent_relation_id in &table.dependent_relations {
-            database_core.decrease_ref_count(dependent_relation_id);
+        tracing::trace!("cleanup tables for {}", table.id);
+        {
+            let core = &mut self.core.lock().await;
+            let database_core = &mut core.database;
+
+            let mut table_ids = vec![table.id];
+            table_ids.extend(internal_table_ids);
+
+            let tables = &mut database_core.tables;
+            let mut tables = BTreeMapTransaction::new(tables);
+            for table_id in table_ids {
+                tables.remove(table_id);
+            }
+            commit_meta!(self, tables)?;
         }
-        user_core.decrease_ref(table.owner);
+
+        {
+            let core = &mut self.core.lock().await;
+            {
+                let user_core = &mut core.user;
+                user_core.decrease_ref(table.owner);
+            }
+
+            {
+                let database_core = &mut core.database;
+                for &dependent_relation_id in &table.dependent_relations {
+                    database_core.decrease_ref_count(dependent_relation_id);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// return id of streaming jobs in the database which need to be dropped by stream manager.
@@ -977,7 +1150,7 @@ impl CatalogManager {
                             match drop_mode {
                                 DropMode::Restrict => {
                                     return Err(MetaError::permission_denied(format!(
-                                        "Fail to delete table `{}` because {} other relation(s) depend on it",
+                                        "Fail to delete index table `{}` because {} other relation(s) depend on it",
                                         index_table.name, ref_count
                                     )));
                                 }
@@ -1600,6 +1773,7 @@ impl CatalogManager {
         // 2. rename index name.
         index.name = index_name.to_string();
         index_table.name = index_name.to_string();
+        index_table.definition = alter_relation_rename(&index_table.definition, index_name);
         let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         indexes.insert(index_id, index.clone());
@@ -1681,7 +1855,7 @@ impl CatalogManager {
         for table in &internal_tables {
             tables.insert(table.id, table.clone());
         }
-        commit_meta!(self, sources)?;
+        commit_meta!(self, sources, tables)?;
 
         let version = self
             .notify_frontend(
@@ -1702,7 +1876,7 @@ impl CatalogManager {
         Ok(version)
     }
 
-    pub async fn cancel_create_source_procedure(&self, source: &Source) {
+    pub async fn cancel_create_source_procedure(&self, source: &Source) -> MetaResult<()> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -1716,6 +1890,7 @@ impl CatalogManager {
         database_core.unmark_creating(&key);
         user_core.decrease_ref(source.owner);
         refcnt_dec_connection(database_core, source.connection_id);
+        Ok(())
     }
 
     pub async fn start_create_table_procedure_with_source(
@@ -2226,6 +2401,24 @@ impl CatalogManager {
 
     pub async fn list_tables(&self) -> Vec<Table> {
         self.core.lock().await.database.list_tables()
+    }
+
+    /// Lists table catalogs for mviews, without their internal tables.
+    pub async fn list_creating_background_mvs(&self) -> Vec<Table> {
+        self.core
+            .lock()
+            .await
+            .database
+            .list_creating_background_mvs()
+    }
+
+    /// Lists table catalogs for all tables with `stream_job_status=CREATING`.
+    pub async fn list_persisted_creating_tables(&self) -> Vec<Table> {
+        self.core
+            .lock()
+            .await
+            .database
+            .list_persisted_creating_tables()
     }
 
     pub async fn get_all_table_options(&self) -> HashMap<TableId, TableOption> {

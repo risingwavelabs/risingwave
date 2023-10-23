@@ -58,6 +58,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|f| format!("{}/{}.proto", proto_dir, f))
         .collect();
 
+    // Paths to generate `BTreeMap` for protobuf maps.
+    let btree_map_paths = [".monitor_service.StackTraceResponse"];
+
     // Build protobuf structs.
 
     // We first put generated files to `OUT_DIR`, then copy them to `/src` only if they are changed.
@@ -85,6 +88,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "stream_plan.Barrier.BarrierKind",
             "#[derive(::enum_as_inner::EnumAsInner)]",
         )
+        .btree_map(btree_map_paths)
         // Eq + Hash are for plan nodes to do common sub-plan detection.
         // The requirement is from Source node -> SourceCatalog -> WatermarkDesc -> expr
         .type_attribute("catalog.WatermarkDesc", "#[derive(Eq, Hash)]")
@@ -104,7 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.GeneratedColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.DefaultColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.Cardinality", "#[derive(Eq, Hash, Copy)]")
-        .type_attribute("plan_common.StorageTableDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.ExternalTableDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.ColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("common.ColumnOrder", "#[derive(Eq, Hash)]")
         .type_attribute("common.OrderType", "#[derive(Eq, Hash)]")
@@ -116,6 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Implement `serde::Serialize` on those structs.
     let descriptor_set = fs_err::read(file_descriptor_set_path)?;
     pbjson_build::Builder::new()
+        .btree_map(btree_map_paths)
         .register_descriptors(&descriptor_set)?
         .out_dir(out_dir.as_path())
         .build(&["."])

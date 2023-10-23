@@ -17,12 +17,12 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{CdcTableDesc, ColumnCatalog, Field, TableDesc};
+use risingwave_common::catalog::{ColumnCatalog, Field, TableDesc};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{ChainNode, ChainType, PbStreamNode};
+use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};

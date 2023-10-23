@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::ops::AddAssign;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -48,22 +49,22 @@ pub struct TableFragments {
     state: State,
 
     /// The table fragments.
-    pub(crate) fragments: BTreeMap<FragmentId, Fragment>,
+    pub fragments: BTreeMap<FragmentId, Fragment>,
 
     /// The status of actors
-    pub(crate) actor_status: BTreeMap<ActorId, ActorStatus>,
+    pub actor_status: BTreeMap<ActorId, ActorStatus>,
 
     /// The splits of actors
-    pub(crate) actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+    pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
     /// The environment associated with this stream plan and its fragments
-    pub(crate) env: StreamEnvironment,
+    pub env: StreamEnvironment,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct StreamEnvironment {
     /// The timezone used to interpret timestamps and dates for conversion
-    pub(crate) timezone: Option<String>,
+    pub timezone: Option<String>,
 }
 
 impl StreamEnvironment {
@@ -362,9 +363,12 @@ impl TableFragments {
     }
 
     /// Resolve dependent table
-    fn resolve_dependent_table(stream_node: &StreamNode, table_ids: &mut HashSet<TableId>) {
+    fn resolve_dependent_table(stream_node: &StreamNode, table_ids: &mut HashMap<TableId, usize>) {
         if let Some(NodeBody::Chain(chain)) = stream_node.node_body.as_ref() {
-            table_ids.insert(TableId::new(chain.table_id));
+            table_ids
+                .entry(TableId::new(chain.table_id))
+                .or_default()
+                .add_assign(1);
         }
 
         for child in &stream_node.input {
@@ -372,9 +376,10 @@ impl TableFragments {
         }
     }
 
-    /// Returns dependent table ids.
-    pub fn dependent_table_ids(&self) -> HashSet<TableId> {
-        let mut table_ids = HashSet::new();
+    /// Returns a mapping of dependent table ids of the `TableFragments`
+    /// to their corresponding count.
+    pub fn dependent_table_ids(&self) -> HashMap<TableId, usize> {
+        let mut table_ids = HashMap::new();
         self.fragments.values().for_each(|fragment| {
             let actor = &fragment.actors[0];
             Self::resolve_dependent_table(actor.nodes.as_ref().unwrap(), &mut table_ids);

@@ -70,9 +70,6 @@ message StorageTableDesc {
   // be used to be compatible with schema changes.
   bool versioned = 8;
   repeated uint32 stream_key = 9;
-  optional string table_name = 10;
-  // use string as a work around until https://github.com/madsim-rs/madsim/issues/169 finished
-  optional string connect_properties = 11;
 }
 
 // Represents a table in external database for CDC scenario
@@ -86,7 +83,6 @@ message ExternalTableDesc {
   // use string as a work around until https://github.com/madsim-rs/madsim/issues/169 finished
   string connect_properties = 6;
 }
-
 
 enum JoinType {
   // Note that it comes from Calcite's JoinRelType.

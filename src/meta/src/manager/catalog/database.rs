@@ -16,10 +16,12 @@ use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::catalog::TableOption;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::{
-    Connection, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source, Table, View,
+    Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source,
+    StreamJobStatus, Table, View,
 };
 
 use super::{ConnectionId, DatabaseId, FunctionId, RelationId, SchemaId, SinkId, SourceId, ViewId};
@@ -194,12 +196,16 @@ impl DatabaseManager {
     }
 
     pub fn check_relation_name_duplicated(&self, relation_key: &RelationKey) -> MetaResult<()> {
-        if self.tables.values().any(|x| {
+        if let Some(t) = self.tables.values().find(|x| {
             x.database_id == relation_key.0
                 && x.schema_id == relation_key.1
                 && x.name.eq(&relation_key.2)
         }) {
-            Err(MetaError::catalog_duplicated("table", &relation_key.2))
+            if t.stream_job_status == StreamJobStatus::Creating as i32 {
+                bail!("table is in creating procedure: {}", t.id);
+            } else {
+                Err(MetaError::catalog_duplicated("table", &relation_key.2))
+            }
         } else if self.sources.values().any(|x| {
             x.database_id == relation_key.0
                 && x.schema_id == relation_key.1
@@ -258,9 +264,22 @@ impl DatabaseManager {
         self.databases.values().cloned().collect_vec()
     }
 
-    pub fn list_creating_tables(&self) -> Vec<Table> {
-        self.in_progress_creating_tables
+    pub fn list_creating_background_mvs(&self) -> Vec<Table> {
+        self.tables
             .values()
+            .filter(|&t| {
+                t.stream_job_status == PbStreamJobStatus::Creating as i32
+                    && t.table_type == TableType::MaterializedView as i32
+                    && t.create_type == CreateType::Background as i32
+            })
+            .cloned()
+            .collect_vec()
+    }
+
+    pub fn list_persisted_creating_tables(&self) -> Vec<Table> {
+        self.tables
+            .values()
+            .filter(|&t| t.stream_job_status == PbStreamJobStatus::Creating as i32)
             .cloned()
             .collect_vec()
     }
@@ -400,10 +419,12 @@ impl DatabaseManager {
             .contains(&relation.clone())
     }
 
+    /// For all types of DDL
     pub fn mark_creating(&mut self, relation: &RelationKey) {
         self.in_progress_creation_tracker.insert(relation.clone());
     }
 
+    /// Only for streaming DDL
     pub fn mark_creating_streaming_job(&mut self, table_id: TableId, key: RelationKey) {
         self.in_progress_creation_streaming_job
             .insert(table_id, key);
@@ -426,6 +447,11 @@ impl DatabaseManager {
 
     pub fn all_creating_streaming_jobs(&self) -> impl Iterator<Item = TableId> + '_ {
         self.in_progress_creation_streaming_job.keys().cloned()
+    }
+
+    pub fn clear_creating_stream_jobs(&mut self) {
+        self.in_progress_creation_tracker.clear();
+        self.in_progress_creation_streaming_job.clear();
     }
 
     pub fn mark_creating_tables(&mut self, tables: &[Table]) {

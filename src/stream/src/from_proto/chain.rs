@@ -23,7 +23,6 @@ use risingwave_pb::plan_common::{ExternalTableDesc, StorageTableDesc};
 use risingwave_pb::stream_plan::{ChainNode, ChainType};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
-use tokio_stream::StreamExt;
 
 use super::*;
 use crate::common::table::state_table::StateTable;

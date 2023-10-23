@@ -433,7 +433,9 @@ impl PredicatePushdown for LogicalScan {
         // If the predicate contains `CorrelatedInputRef` or `now()`. We don't push down.
         // This case could come from the predicate push down before the subquery unnesting.
         struct HasCorrelated {}
-        impl ExprVisitor<bool> for HasCorrelated {
+        impl ExprVisitor for HasCorrelated {
+            type Result = bool;
+
             fn merge(a: bool, b: bool) -> bool {
                 a | b
             }
