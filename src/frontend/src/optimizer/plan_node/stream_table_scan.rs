@@ -28,7 +28,6 @@ use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -316,12 +315,7 @@ impl StreamTableScan {
                 // The table desc used by backfill executor
                 table_desc: Some(self.core.table_desc.to_protobuf()),
                 state_table: Some(catalog),
-                rate_limit: self
-                    .base
-                    .ctx()
-                    .session_ctx()
-                    .config()
-                    .get_streaming_rate_limit(),
+                rate_limit: self.base.ctx.overwrite_options().stream_rate_control,
                 ..Default::default()
             })),
             stream_key,

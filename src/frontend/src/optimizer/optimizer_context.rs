@@ -24,6 +24,7 @@ use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::session::SessionImpl;
+use crate::utils::OverwriteOptions;
 use crate::WithOptions;
 
 const RESERVED_ID_NUM: u16 = 10000;
@@ -50,6 +51,9 @@ pub struct OptimizerContext {
     session_timezone: RefCell<SessionTimezone>,
     /// Store expr display id.
     next_expr_display_id: RefCell<usize>,
+    /// Store the configs can be overwritten in with clause
+    /// if not specified, use the value from session variable.
+    overwrite_options: OverwriteOptions,
 }
 
 // Still not sure if we need to introduce "on_optimization_finish" or other common callback methods,
@@ -71,10 +75,11 @@ impl OptimizerContext {
     }
 
     /// Create a new [`OptimizerContext`] from the given [`HandlerArgs`] and [`ExplainOptions`].
-    pub fn new(handler_args: HandlerArgs, explain_options: ExplainOptions) -> Self {
+    pub fn new(mut handler_args: HandlerArgs, explain_options: ExplainOptions) -> Self {
         let session_timezone = RefCell::new(SessionTimezone::new(
             handler_args.session.config().get_timezone().to_owned(),
         ));
+        let overwrite_options = OverwriteOptions::new(&mut handler_args);
         Self {
             session_ctx: handler_args.session,
             next_plan_node_id: RefCell::new(RESERVED_ID_NUM.into()),
@@ -87,6 +92,7 @@ impl OptimizerContext {
             with_options: handler_args.with_options,
             session_timezone,
             next_expr_display_id: RefCell::new(RESERVED_ID_NUM.into()),
+            overwrite_options,
         }
     }
 
@@ -106,6 +112,7 @@ impl OptimizerContext {
             with_options: Default::default(),
             session_timezone: RefCell::new(SessionTimezone::new("UTC".into())),
             next_expr_display_id: RefCell::new(0),
+            overwrite_options: OverwriteOptions::default(),
         }
         .into()
     }
@@ -187,6 +194,10 @@ impl OptimizerContext {
 
     pub fn with_options(&self) -> &WithOptions {
         &self.with_options
+    }
+
+    pub fn overwrite_options(&self) -> &OverwriteOptions {
+        &self.overwrite_options
     }
 
     pub fn session_ctx(&self) -> &Arc<SessionImpl> {
