@@ -176,15 +176,6 @@ regex-automata = { version = "0.4", default-features = false, features = ["dfa-o
 regex-syntax = { version = "0.8" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1", features = ["alloc", "preserve_order", "raw_value"] }
-sha1 = { version = "0.10" }
-sha2 = { version = "0.10" }
-signature = { version = "2", default-features = false, features = ["digest", "rand_core", "std"] }
-smallvec = { version = "1", default-features = false, features = ["serde", "union", "write"] }
-sqlx-core = { version = "0.7", features = ["_rt-tokio", "any", "chrono", "json", "migrate", "offline"] }
-sqlx-mysql = { version = "0.7", default-features = false, features = ["any", "chrono", "json", "migrate", "offline"] }
-sqlx-postgres = { version = "0.7", default-features = false, features = ["any", "chrono", "json", "migrate", "offline"] }
-sqlx-sqlite = { version = "0.7", default-features = false, features = ["any", "chrono", "json", "migrate", "offline"] }
-subtle = { version = "2" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3", features = ["local-offset", "macros", "serde-well-known"] }
