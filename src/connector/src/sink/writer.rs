@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::Ready;
+use std::future::{Future, Ready};
 use std::pin::pin;
 use std::sync::Arc;
 use std::time::Instant;
@@ -58,15 +58,15 @@ pub trait SinkWriter: Send + 'static {
 
 pub type DummyDeliveryFuture = Ready<std::result::Result<(), SinkError>>;
 
-pub trait AsyncTruncateSinkWriter: 'static {
+pub trait AsyncTruncateSinkWriter: Send + 'static {
     type DeliveryFuture: TryFuture<Ok = (), Error = SinkError> + Unpin + Send + 'static =
         DummyDeliveryFuture;
 
-    async fn write_chunk<'a>(
+    fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,
         add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
-    ) -> Result<()>;
+    ) -> impl Future<Output = Result<()>> + Send + 'a;
 }
 
 /// A free-form sink that may output in multiple formats and encodings. Examples include kafka,
@@ -121,6 +121,7 @@ impl<W> LogSinkerOf<W> {
     }
 }
 
+#[async_trait]
 impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
     async fn consume_log_and_sink(self, mut log_reader: impl LogReader) -> Result<()> {
         let mut sink_writer = self.writer;
@@ -240,6 +241,7 @@ impl<W: AsyncTruncateSinkWriter> AsyncTruncateLogSinkerOf<W> {
     }
 }
 
+#[async_trait]
 impl<W: AsyncTruncateSinkWriter> LogSinker for AsyncTruncateLogSinkerOf<W> {
     async fn consume_log_and_sink(mut self, mut log_reader: impl LogReader) -> Result<()> {
         log_reader.init().await?;

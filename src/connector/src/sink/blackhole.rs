@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use async_trait::async_trait;
+
 use crate::sink::log_store::{LogReader, LogStoreReadItem, TruncateOffset};
 use crate::sink::{
     DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkError, SinkParam, SinkWriterParam,
@@ -45,6 +47,7 @@ impl Sink for BlackHoleSink {
     }
 }
 
+#[async_trait]
 impl LogSinker for BlackHoleSink {
     async fn consume_log_and_sink(self, mut log_reader: impl LogReader) -> Result<()> {
         log_reader.init().await?;

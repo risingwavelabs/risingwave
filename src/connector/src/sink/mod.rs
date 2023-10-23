@@ -277,6 +277,7 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     }
 }
 
+#[async_trait]
 pub trait LogSinker: 'static {
     async fn consume_log_and_sink(self, log_reader: impl LogReader) -> Result<()>;
 }
