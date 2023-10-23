@@ -19,7 +19,7 @@ use moka::future::Cache;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
-use crate::parser::schema_registry::{Client, ConfluentSchema};
+use crate::schema::schema_registry::{Client, ConfluentSchema};
 
 #[derive(Debug)]
 pub struct ConfluentSchemaResolver {
@@ -62,7 +62,8 @@ impl ConfluentSchemaResolver {
 
     // get the writer schema by id
     pub async fn get(&self, schema_id: i32) -> Result<Arc<Schema>> {
-        if let Some(schema) = self.writer_schemas.get(&schema_id) {
+        // TODO: use `get_with`
+        if let Some(schema) = self.writer_schemas.get(&schema_id).await {
             Ok(schema)
         } else {
             let raw_schema = self.confluent_client.get_schema_by_id(schema_id).await?;

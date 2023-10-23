@@ -47,6 +47,49 @@ impl FunctionAttr {
         attrs
     }
 
+    /// Generate the type infer function.
+    fn generate_type_infer_fn(&self) -> Result<TokenStream2> {
+        if let Some(func) = &self.type_infer {
+            if func == "panic" {
+                return Ok(quote! { |_| panic!("type inference function is not implemented") });
+            }
+            // use the user defined type inference function
+            return Ok(func.parse().unwrap());
+        } else if self.ret == "any" {
+            // TODO: if there are multiple "any", they should be the same type
+            if let Some(i) = self.args.iter().position(|t| t == "any") {
+                // infer as the type of "any" argument
+                return Ok(quote! { |args| Ok(args[#i].clone()) });
+            }
+            if let Some(i) = self.args.iter().position(|t| t == "anyarray") {
+                // infer as the element type of "anyarray" argument
+                return Ok(quote! { |args| Ok(args[#i].as_list().clone()) });
+            }
+        } else if self.ret == "anyarray" {
+            if let Some(i) = self.args.iter().position(|t| t == "anyarray") {
+                // infer as the type of "anyarray" argument
+                return Ok(quote! { |args| Ok(args[#i].clone()) });
+            }
+            if let Some(i) = self.args.iter().position(|t| t == "any") {
+                // infer as the array type of "any" argument
+                return Ok(quote! { |args| Ok(DataType::List(Box::new(args[#i].clone()))) });
+            }
+        } else if self.ret == "struct" {
+            if let Some(i) = self.args.iter().position(|t| t == "struct") {
+                // infer as the type of "struct" argument
+                return Ok(quote! { |args| Ok(args[#i].clone()) });
+            }
+        } else {
+            // the return type is fixed
+            let ty = data_type(&self.ret);
+            return Ok(quote! { |_| Ok(#ty) });
+        }
+        Err(Error::new(
+            Span::call_site(),
+            "type inference function is required",
+        ))
+    }
+
     /// Generate a descriptor of the scalar or table function.
     ///
     /// The types of arguments and return value should not contain wildcard.
@@ -65,31 +108,37 @@ impl FunctionAttr {
             false => &self.args[..],
         }
         .iter()
-        .map(|ty| data_type_name(ty))
+        .map(|ty| sig_data_type(ty))
         .collect_vec();
-        let ret = data_type_name(&self.ret);
+        let ret = sig_data_type(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}", self.ident_name());
-        let descriptor_type = quote! { crate::sig::func::FuncSign };
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
         } else {
             self.generate_build_scalar_function(user_fn, true)?
         };
+        let type_infer_fn = self.generate_type_infer_fn()?;
         let deprecated = self.deprecated;
+
         Ok(quote! {
-            #[ctor::ctor]
+            #[risingwave_expr::codegen::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                unsafe { crate::sig::func::_register(#descriptor_type {
-                    func: risingwave_pb::expr::expr_node::Type::#pb_type,
-                    inputs_type: &[#(#args),*],
+                use risingwave_expr::sig::{_register, FuncSign, SigDataType, FuncBuilder};
+
+                unsafe { _register(FuncSign {
+                    name: risingwave_pb::expr::expr_node::Type::#pb_type.into(),
+                    inputs_type: vec![#(#args),*],
                     variadic: #variadic,
                     ret_type: #ret,
-                    build: #build_fn,
+                    build: FuncBuilder::Scalar(#build_fn),
+                    type_infer: #type_infer_fn,
                     deprecated: #deprecated,
+                    state_type: None,
+                    append_only: false,
                 }) };
             }
         })
@@ -203,7 +252,7 @@ impl FunctionAttr {
                     let #prebuilt_inputs = match &#prebuilt_inputs {
                         Some(s) => s.as_scalar_ref_impl().try_into()?,
                         // the function should always return null if any const argument is null
-                        None => return Ok(Box::new(crate::expr::LiteralExpression::new(
+                        None => return Ok(Box::new(risingwave_expr::expr::LiteralExpression::new(
                             return_type,
                             None,
                         ))),
@@ -217,8 +266,8 @@ impl FunctionAttr {
 
         // ensure the number of children matches the number of arguments
         let check_children = match variadic {
-            true => quote! { crate::ensure!(children.len() >= #num_args); },
-            false => quote! { crate::ensure!(children.len() == #num_args); },
+            true => quote! { risingwave_expr::ensure!(children.len() >= #num_args); },
+            false => quote! { risingwave_expr::ensure!(children.len() == #num_args); },
         };
 
         // evaluate variadic arguments in `eval`
@@ -226,9 +275,9 @@ impl FunctionAttr {
             quote! {
                 let mut columns = Vec::with_capacity(self.children.len() - #num_args);
                 for child in &self.children[#num_args..] {
-                    columns.push(child.eval_checked(input).await?);
+                    columns.push(child.eval(input).await?);
                 }
-                let variadic_input = DataChunk::new(columns, input.vis().clone());
+                let variadic_input = DataChunk::new(columns, input.visibility().clone());
             }
         });
         // evaluate variadic arguments in `eval_row`
@@ -338,6 +387,7 @@ impl FunctionAttr {
         } else if (types::is_primitive(&self.ret) || self.ret == "boolean")
             && user_fn.is_pure()
             && !variadic
+            && self.prebuild.is_none()
         {
             // SIMD optimization for primitive types
             match self.args.len() {
@@ -382,24 +432,21 @@ impl FunctionAttr {
             quote! {
                 let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
 
-                match input.vis() {
-                    Vis::Bitmap(vis) => {
-                        // allow using `zip` for performance
-                        #[allow(clippy::disallowed_methods)]
-                        for (i, ((#(#inputs,)*), visible)) in #array_zip.zip(vis.iter()).enumerate() {
-                            if !visible {
-                                builder.append_null();
-                                continue;
-                            }
-                            #let_variadic
-                            #append_output
-                        }
+                if input.is_compacted() {
+                    for (i, (#(#inputs,)*)) in #array_zip.enumerate() {
+                        #let_variadic
+                        #append_output
                     }
-                    Vis::Compact(_) => {
-                        for (i, (#(#inputs,)*)) in #array_zip.enumerate() {
-                            #let_variadic
-                            #append_output
+                } else {
+                    // allow using `zip` for performance
+                    #[allow(clippy::disallowed_methods)]
+                    for (i, ((#(#inputs,)*), visible)) in #array_zip.zip(input.visibility().iter()).enumerate() {
+                        if !visible {
+                            builder.append_null();
+                            continue;
                         }
+                        #let_variadic
+                        #append_output
                     }
                 }
                 Ok(Arc::new(builder.finish().into()))
@@ -407,8 +454,8 @@ impl FunctionAttr {
         };
 
         Ok(quote! {
-            |return_type: DataType, children: Vec<crate::expr::BoxedExpression>|
-                -> crate::Result<crate::expr::BoxedExpression>
+            |return_type: DataType, children: Vec<risingwave_expr::expr::BoxedExpression>|
+                -> risingwave_expr::Result<risingwave_expr::expr::BoxedExpression>
             {
                 use std::sync::Arc;
                 use risingwave_common::array::*;
@@ -416,10 +463,10 @@ impl FunctionAttr {
                 use risingwave_common::buffer::Bitmap;
                 use risingwave_common::row::OwnedRow;
                 use risingwave_common::util::iter_util::ZipEqFast;
-                use itertools::multizip;
 
-                use crate::expr::{Context, BoxedExpression};
-                use crate::Result;
+                use risingwave_expr::expr::{Context, BoxedExpression};
+                use risingwave_expr::Result;
+                use risingwave_expr::codegen::*;
 
                 #check_children
                 let prebuilt_arg = #prebuild_const;
@@ -434,14 +481,14 @@ impl FunctionAttr {
                     children: Vec<BoxedExpression>,
                     prebuilt_arg: #prebuilt_arg_type,
                 }
-                #[async_trait::async_trait]
-                impl crate::expr::Expression for #struct_name {
+                #[async_trait]
+                impl risingwave_expr::expr::Expression for #struct_name {
                     fn return_type(&self) -> DataType {
                         self.context.return_type.clone()
                     }
                     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
                         #(
-                            let #array_refs = self.children[#children_indices].eval_checked(input).await?;
+                            let #array_refs = self.children[#children_indices].eval(input).await?;
                             let #arrays: &#arg_arrays = #array_refs.as_ref().into();
                         )*
                         #eval_variadic
@@ -480,12 +527,15 @@ impl FunctionAttr {
 
         let mut args = Vec::with_capacity(self.args.len());
         for ty in &self.args {
-            args.push(data_type_name(ty));
+            args.push(sig_data_type(ty));
         }
-        let ret = data_type_name(&self.ret);
+        let ret = sig_data_type(&self.ret);
         let state_type = match &self.state {
-            Some(ty) if ty != "ref" => data_type_name(ty),
-            _ => data_type_name(&self.ret),
+            Some(ty) if ty != "ref" => {
+                let ty = data_type(ty);
+                quote! { Some(#ty) }
+            }
+            _ => quote! { None },
         };
         let append_only = match build_fn {
             false => !user_fn.has_retract(),
@@ -497,24 +547,31 @@ impl FunctionAttr {
             false => format_ident!("{}", self.ident_name()),
             true => format_ident!("{}_append_only", self.ident_name()),
         };
-        let descriptor_type = quote! { crate::sig::agg::AggFuncSig };
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.as_fn().name);
             quote! { #name }
         } else {
             self.generate_agg_build_fn(user_fn)?
         };
+        let type_infer_fn = self.generate_type_infer_fn()?;
+        let deprecated = self.deprecated;
+
         Ok(quote! {
-            #[ctor::ctor]
+            #[risingwave_expr::codegen::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                unsafe { crate::sig::agg::_register(#descriptor_type {
-                    func: crate::agg::AggKind::#pb_type,
-                    inputs_type: &[#(#args),*],
-                    state_type: #state_type,
+                use risingwave_expr::sig::{_register, FuncSign, SigDataType, FuncBuilder};
+
+                unsafe { _register(FuncSign {
+                    name: risingwave_expr::aggregate::AggKind::#pb_type.into(),
+                    inputs_type: vec![#(#args),*],
+                    variadic: false,
                     ret_type: #ret,
-                    build: #build_fn,
+                    build: FuncBuilder::Aggregate(#build_fn),
+                    type_infer: #type_infer_fn,
+                    state_type: #state_type,
                     append_only: #append_only,
+                    deprecated: #deprecated,
                 }) };
             }
         })
@@ -533,11 +590,9 @@ impl FunctionAttr {
             .enumerate()
             .map(|(i, arg)| {
                 let array = format_ident!("a{i}");
-                let variant: TokenStream2 = types::variant(arg).parse().unwrap();
+                let array_type: TokenStream2 = types::array_type(arg).parse().unwrap();
                 quote! {
-                    let ArrayImpl::#variant(#array) = &**input.column_at(#i) else {
-                        bail!("input type mismatch. expect: {}", stringify!(#variant));
-                    };
+                    let #array: &#array_type = input.column_at(#i).as_ref().into();
                 }
             })
             .collect_vec();
@@ -620,10 +675,17 @@ impl FunctionAttr {
                 }
                 1 => {
                     let first_state = if self.init_state.is_some() {
+                        // for count, the state will never be None
                         quote! { unreachable!() }
                     } else if let Some(s) = &self.state && s == "ref" {
                         // for min/max/first/last, the state is the first value
                         quote! { Some(v0) }
+                    } else if let AggregateFnOrImpl::Impl(impl_) = user_fn && impl_.create_state.is_some() {
+                        // use user-defined create_state function
+                        quote! {{
+                            let state = self.function.create_state();
+                            #next_state
+                        }}
                     } else {
                         quote! {{
                             let state = #state_type::default();
@@ -657,14 +719,22 @@ impl FunctionAttr {
             AggregateFnOrImpl::Fn(_) => quote! {},
             AggregateFnOrImpl::Impl(i) => {
                 let struct_name = format_ident!("{}", i.struct_name);
-                quote! { function: #struct_name, }
+                let generic = self.generic.as_ref().map(|g| {
+                    let g = format_ident!("{g}");
+                    quote! { <#g> }
+                });
+                quote! { function: #struct_name #generic, }
             }
         };
         let function_new = match user_fn {
             AggregateFnOrImpl::Fn(_) => quote! {},
             AggregateFnOrImpl::Impl(i) => {
                 let struct_name = format_ident!("{}", i.struct_name);
-                quote! { function: #struct_name::default(), }
+                let generic = self.generic.as_ref().map(|g| {
+                    let g = format_ident!("{g}");
+                    quote! { ::<#g> }
+                });
+                quote! { function: #struct_name #generic :: default(), }
             }
         };
 
@@ -678,8 +748,9 @@ impl FunctionAttr {
                 use risingwave_common::buffer::Bitmap;
                 use risingwave_common::estimate_size::EstimateSize;
 
-                use crate::Result;
-                use crate::agg::AggregateState;
+                use risingwave_expr::Result;
+                use risingwave_expr::aggregate::AggregateState;
+                use risingwave_expr::codegen::async_trait;
 
                 #[derive(Clone)]
                 struct Agg {
@@ -687,8 +758,8 @@ impl FunctionAttr {
                     #function_field
                 }
 
-                #[async_trait::async_trait]
-                impl crate::agg::AggregateFunction for Agg {
+                #[async_trait]
+                impl risingwave_expr::aggregate::AggregateFunction for Agg {
                     fn return_type(&self) -> DataType {
                         self.return_type.clone()
                     }
@@ -699,21 +770,10 @@ impl FunctionAttr {
                         #(#let_arrays)*
                         let state0 = state0.as_datum_mut();
                         let mut state: Option<#state_type> = #let_state;
-                        match input.vis() {
-                            Vis::Bitmap(bitmap) => {
-                                for row_id in bitmap.iter_ones() {
-                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #(#let_values)*
-                                    state = #next_state;
-                                }
-                            }
-                            Vis::Compact(_) => {
-                                for row_id in 0..input.capacity() {
-                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #(#let_values)*
-                                    state = #next_state;
-                                }
-                            }
+                        for row_id in input.visibility().iter_ones() {
+                            let op = unsafe { *input.ops().get_unchecked(row_id) };
+                            #(#let_values)*
+                            state = #next_state;
                         }
                         *state0 = #assign_state;
                         Ok(())
@@ -724,25 +784,22 @@ impl FunctionAttr {
                         #(#let_arrays)*
                         let state0 = state0.as_datum_mut();
                         let mut state: Option<#state_type> = #let_state;
-                        match input.vis() {
-                            Vis::Bitmap(bitmap) => {
-                                for row_id in bitmap.iter_ones() {
-                                    if row_id < range.start {
-                                        continue;
-                                    } else if row_id >= range.end {
-                                        break;
-                                    }
-                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #(#let_values)*
-                                    state = #next_state;
-                                }
+                        if input.is_compacted() {
+                            for row_id in range {
+                                let op = unsafe { *input.ops().get_unchecked(row_id) };
+                                #(#let_values)*
+                                state = #next_state;
                             }
-                            Vis::Compact(_) => {
-                                for row_id in range {
-                                    let op = unsafe { *input.ops().get_unchecked(row_id) };
-                                    #(#let_values)*
-                                    state = #next_state;
+                        } else {
+                            for row_id in input.visibility().iter_ones() {
+                                if row_id < range.start {
+                                    continue;
+                                } else if row_id >= range.end {
+                                    break;
                                 }
+                                let op = unsafe { *input.ops().get_unchecked(row_id) };
+                                #(#let_values)*
+                                state = #next_state;
                             }
                         }
                         *state0 = #assign_state;
@@ -774,41 +831,37 @@ impl FunctionAttr {
         let name = self.name.clone();
         let mut args = Vec::with_capacity(self.args.len());
         for ty in &self.args {
-            args.push(data_type_name(ty));
+            args.push(sig_data_type(ty));
         }
-        let ret = data_type_name(&self.ret);
+        let ret = sig_data_type(&self.ret);
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}", self.ident_name());
-        let descriptor_type = quote! { crate::sig::table_function::FuncSign };
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
         } else {
             self.generate_build_table_function(user_fn)?
         };
-        let type_infer_fn = if let Some(func) = &self.type_infer {
-            func.parse().unwrap()
-        } else {
-            if matches!(self.ret.as_str(), "any" | "list" | "struct") {
-                return Err(Error::new(
-                    Span::call_site(),
-                    format!("type inference function is required for {}", self.ret),
-                ));
-            }
-            let ty = data_type(&self.ret);
-            quote! { |_| Ok(#ty) }
-        };
+        let type_infer_fn = self.generate_type_infer_fn()?;
+        let deprecated = self.deprecated;
+
         Ok(quote! {
-            #[ctor::ctor]
+            #[risingwave_expr::codegen::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                unsafe { crate::sig::table_function::_register(#descriptor_type {
-                    func: risingwave_pb::expr::table_function::Type::#pb_type,
-                    inputs_type: &[#(#args),*],
+                use risingwave_expr::sig::{_register, FuncSign, SigDataType, FuncBuilder};
+
+                unsafe { _register(FuncSign {
+                    name: risingwave_pb::expr::table_function::Type::#pb_type.into(),
+                    inputs_type: vec![#(#args),*],
+                    variadic: false,
                     ret_type: #ret,
-                    build: #build_fn,
+                    build: FuncBuilder::Table(#build_fn),
                     type_infer: #type_infer_fn,
+                    deprecated: #deprecated,
+                    state_type: None,
+                    append_only: false,
                 }) };
             }
         })
@@ -856,15 +909,26 @@ impl FunctionAttr {
                 .map(|i| quote! { self.return_type.as_struct().types().nth(#i).unwrap().clone() })
                 .collect()
         };
+        #[allow(clippy::disallowed_methods)]
+        let optioned_outputs = user_fn
+            .core_return_type
+            .split(',')
+            .map(|t| t.contains("Option"))
+            // example: "(Option<&str>, i32)" => [true, false]
+            .zip(&outputs)
+            .map(|(optional, o)| match optional {
+                false => quote! { Some(#o.as_scalar_ref()) },
+                true => quote! { #o.map(|o| o.as_scalar_ref()) },
+            })
+            .collect_vec();
         let build_value_array = if return_types.len() == 1 {
             quote! { let [value_array] = value_arrays; }
         } else {
             quote! {
-                let bitmap = value_arrays[0].null_bitmap().clone();
                 let value_array = StructArray::new(
                     self.return_type.as_struct().clone(),
                     value_arrays.to_vec(),
-                    bitmap,
+                    Bitmap::ones(len),
                 ).into_ref();
             }
         };
@@ -908,9 +972,11 @@ impl FunctionAttr {
                 use risingwave_common::types::*;
                 use risingwave_common::buffer::Bitmap;
                 use risingwave_common::util::iter_util::ZipEqFast;
-                use itertools::multizip;
+                use risingwave_expr::expr::BoxedExpression;
+                use risingwave_expr::{Result, ExprError};
+                use risingwave_expr::codegen::*;
 
-                crate::ensure!(children.len() == #num_args);
+                risingwave_expr::ensure!(children.len() == #num_args);
                 let mut iter = children.into_iter();
                 #(let #all_child = iter.next().unwrap();)*
                 #(
@@ -918,7 +984,7 @@ impl FunctionAttr {
                     let #const_child = match &#const_child {
                         Some(s) => s.as_scalar_ref_impl().try_into()?,
                         // the function should always return empty if any const argument is null
-                        None => return Ok(crate::table_function::empty(return_type)),
+                        None => return Ok(risingwave_expr::table_function::empty(return_type)),
                     };
                 )*
 
@@ -929,8 +995,8 @@ impl FunctionAttr {
                     #(#child: BoxedExpression,)*
                     prebuilt_arg: #prebuilt_arg_type,
                 }
-                #[async_trait::async_trait]
-                impl crate::table_function::TableFunction for #struct_name {
+                #[async_trait]
+                impl risingwave_expr::table_function::TableFunction for #struct_name {
                     fn return_type(&self) -> DataType {
                         self.return_type.clone()
                     }
@@ -942,24 +1008,25 @@ impl FunctionAttr {
                     #[try_stream(boxed, ok = DataChunk, error = ExprError)]
                     async fn eval_inner<'a>(&'a self, input: &'a DataChunk) {
                         #(
-                        let #array_refs = self.#child.eval_checked(input).await?;
+                        let #array_refs = self.#child.eval(input).await?;
                         let #arrays: &#arg_arrays = #array_refs.as_ref().into();
                         )*
 
                         let mut index_builder = I32ArrayBuilder::new(self.chunk_size);
                         #(let mut #builders = #builder_types::with_type(self.chunk_size, #return_types);)*
 
-                        for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.vis().iter()).enumerate() {
+                        for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.visibility().iter()).enumerate() {
                             if let (#(Some(#inputs),)*) = row && visible {
                                 let iter = #fn_name(#(#inputs,)* #prebuilt_arg);
                                 for output in #iter {
                                     index_builder.append(Some(i as i32));
                                     match #output {
-                                        Some((#(#outputs),*)) => { #(#builders.append(Some(#outputs.as_scalar_ref()));)* }
+                                        Some((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* }
                                         None => { #(#builders.append_null();)* }
                                     }
 
                                     if index_builder.len() == self.chunk_size {
+                                        let len = index_builder.len();
                                         let index_array = std::mem::replace(&mut index_builder, I32ArrayBuilder::new(self.chunk_size)).finish().into_ref();
                                         let value_arrays = [#(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref()),*];
                                         #build_value_array
@@ -990,9 +1057,17 @@ impl FunctionAttr {
     }
 }
 
-fn data_type_name(ty: &str) -> TokenStream2 {
-    let variant = format_ident!("{}", types::data_type(ty));
-    quote! { DataTypeName::#variant }
+fn sig_data_type(ty: &str) -> TokenStream2 {
+    match ty {
+        "any" => quote! { SigDataType::Any },
+        "anyarray" => quote! { SigDataType::AnyArray },
+        "struct" => quote! { SigDataType::AnyStruct },
+        _ if ty.starts_with("struct") && ty.contains("any") => quote! { SigDataType::AnyStruct },
+        _ => {
+            let datatype = data_type(ty);
+            quote! { SigDataType::Exact(#datatype) }
+        }
+    }
 }
 
 fn data_type(ty: &str) -> TokenStream2 {
@@ -1010,7 +1085,7 @@ fn data_type(ty: &str) -> TokenStream2 {
 /// Extract multiple output types.
 ///
 /// ```ignore
-/// output_types("int32") -> ["int32"]
+/// output_types("int4") -> ["int4"]
 /// output_types("struct<key varchar, value jsonb>") -> ["varchar", "jsonb"]
 /// ```
 fn output_types(ty: &str) -> Vec<&str> {

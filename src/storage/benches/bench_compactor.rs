@@ -56,6 +56,7 @@ pub fn mock_sstable_store() -> SstableStoreRef {
         0,
         FileCache::none(),
         FileCache::none(),
+        None,
     ))
 }
 
@@ -112,11 +113,7 @@ async fn build_table(
         let end = start + 8;
         full_key.user_key.table_key[table_key_len - 8..].copy_from_slice(&i.to_be_bytes());
         builder
-            .add_for_test(
-                full_key.to_ref(),
-                HummockValue::put(&value[start..end]),
-                true,
-            )
+            .add_for_test(full_key.to_ref(), HummockValue::put(&value[start..end]))
             .await
             .unwrap();
     }
@@ -193,10 +190,9 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         watermark: 0,
         stats_target_table_ids: None,
         task_type: compact_task::TaskType::Dynamic,
-        is_target_l0_or_lbase: false,
-        split_by_table: false,
         split_weight_by_vnode: 0,
         use_block_based_filter: true,
+        ..Default::default()
     };
     compact_and_build_sst(
         &mut builder,

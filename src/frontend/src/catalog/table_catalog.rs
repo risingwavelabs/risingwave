@@ -24,7 +24,7 @@ use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
-use risingwave_pb::catalog::{PbStreamJobStatus, PbTable};
+use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::DefaultColumnDesc;
 
@@ -149,6 +149,41 @@ pub struct TableCatalog {
 
     /// Indicate whether to use watermark cache for state table.
     pub cleaned_by_watermark: bool,
+
+    /// Indicate whether to create table in background or foreground.
+    pub create_type: CreateType,
+}
+
+// How the stream job was created will determine
+// whether they are persisted.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum CreateType {
+    Background,
+    Foreground,
+}
+
+#[cfg(test)]
+impl Default for CreateType {
+    fn default() -> Self {
+        Self::Foreground
+    }
+}
+
+impl CreateType {
+    fn from_prost(prost: PbCreateType) -> Self {
+        match prost {
+            PbCreateType::Background => Self::Background,
+            PbCreateType::Foreground => Self::Foreground,
+            PbCreateType::Unspecified => unreachable!(),
+        }
+    }
+
+    pub(crate) fn to_prost(self) -> PbCreateType {
+        match self {
+            Self::Background => PbCreateType::Background,
+            Self::Foreground => PbCreateType::Foreground,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -402,6 +437,7 @@ impl TableCatalog {
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
             cleaned_by_watermark: self.cleaned_by_watermark,
             stream_job_status: PbStreamJobStatus::Creating.into(),
+            create_type: self.create_type.to_prost().into(),
         }
     }
 
@@ -428,23 +464,20 @@ impl TableCatalog {
     }
 
     pub fn default_columns(&self) -> impl Iterator<Item = (usize, ExprImpl)> + '_ {
-        self.columns
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| c.is_default())
-            .map(|(i, c)| {
-                if let GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc { expr }) =
-                    c.column_desc.generated_or_default_column.clone().unwrap()
-                {
-                    (
-                        i,
-                        ExprImpl::from_expr_proto(&expr.unwrap())
-                            .expect("expr in default columns corrupted"),
-                    )
-                } else {
-                    unreachable!()
-                }
-            })
+        self.columns.iter().enumerate().filter_map(|(i, c)| {
+            if let Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {
+                expr, ..
+            })) = c.column_desc.generated_or_default_column.as_ref()
+            {
+                Some((
+                    i,
+                    ExprImpl::from_expr_proto(expr.as_ref().unwrap())
+                        .expect("expr in default columns corrupted"),
+                ))
+            } else {
+                None
+            }
+        })
     }
 
     pub fn has_generated_column(&self) -> bool {
@@ -457,6 +490,7 @@ impl From<PbTable> for TableCatalog {
         let id = tb.id;
         let tb_conflict_behavior = tb.handle_pk_conflict_behavior();
         let table_type = tb.get_table_type().unwrap();
+        let create_type = tb.get_create_type().unwrap_or(PbCreateType::Foreground);
         let associated_source_id = tb.optional_associated_source_id.map(|id| match id {
             OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
         });
@@ -516,6 +550,7 @@ impl From<PbTable> for TableCatalog {
             created_at_epoch: tb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
             cleaned_by_watermark: matches!(tb.cleaned_by_watermark, true),
+            create_type: CreateType::from_prost(create_type),
         }
     }
 }
@@ -607,6 +642,7 @@ mod tests {
             created_at_epoch: None,
             cleaned_by_watermark: false,
             stream_job_status: PbStreamJobStatus::Creating.into(),
+            create_type: PbCreateType::Foreground.into(),
         }
         .into();
 
@@ -661,6 +697,7 @@ mod tests {
                 created_at_epoch: None,
                 initialized_at_epoch: None,
                 cleaned_by_watermark: false,
+                create_type: CreateType::Foreground,
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

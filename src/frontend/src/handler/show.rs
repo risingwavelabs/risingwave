@@ -18,12 +18,12 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{ColumnCatalog, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
-use risingwave_expr::vector_op::like::{i_like_default, like_default};
+use risingwave_expr::scalar::like::{i_like_default, like_default};
 use risingwave_pb::catalog::connection;
 use risingwave_sqlparser::ast::{
     Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter,
@@ -36,14 +36,15 @@ use crate::catalog::{CatalogError, IndexCatalog};
 use crate::handler::util::{col_descs_to_rows, indexes_to_rows};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
+use crate::utils::infer_stmt_row_desc::infer_show_object;
 
 pub fn get_columns_from_table(
     session: &SessionImpl,
     table_name: ObjectName,
-) -> Result<Vec<ColumnDesc>> {
+) -> Result<Vec<ColumnCatalog>> {
     let mut binder = Binder::new_for_system(session);
     let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
-    let catalogs = match relation {
+    let column_catalogs = match relation {
         Relation::Source(s) => s.catalog.columns,
         Relation::BaseTable(t) => t.table_catalog.columns,
         Relation::SystemTable(t) => t.sys_table_catalog.columns.clone(),
@@ -52,11 +53,7 @@ pub fn get_columns_from_table(
         }
     };
 
-    Ok(catalogs
-        .into_iter()
-        .filter(|c| !c.is_hidden)
-        .map(|c| c.column_desc)
-        .collect())
+    Ok(column_catalogs)
 }
 
 pub fn get_indexes_from_table(
@@ -95,6 +92,7 @@ pub async fn handle_show_object(
         )
         .into());
     }
+    let row_desc = infer_show_object(&command);
 
     let catalog_reader = session.env().catalog_reader();
 
@@ -146,21 +144,7 @@ pub async fn handle_show_object(
             let rows = col_descs_to_rows(columns);
 
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
-                .values(
-                    rows.into(),
-                    vec![
-                        PgFieldDescriptor::new(
-                            "Name".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Type".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                    ],
-                )
+                .values(rows.into(), row_desc)
                 .into());
         }
         ShowObject::Indexes { table } => {
@@ -168,36 +152,7 @@ pub async fn handle_show_object(
             let rows = indexes_to_rows(indexes);
 
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
-                .values(
-                    rows.into(),
-                    vec![
-                        PgFieldDescriptor::new(
-                            "Name".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "On".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Key".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Include".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Distributed By".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                    ],
-                )
+                .values(rows.into(), row_desc)
                 .into());
         }
         ShowObject::Connection { schema } => {
@@ -246,26 +201,7 @@ pub async fn handle_show_object(
                 })
                 .collect_vec();
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
-                .values(
-                    rows.into(),
-                    vec![
-                        PgFieldDescriptor::new(
-                            "Name".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Type".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Properties".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                    ],
-                )
+                .values(rows.into(), row_desc)
                 .into());
         }
         ShowObject::Function { schema } => {
@@ -284,36 +220,7 @@ pub async fn handle_show_object(
                 })
                 .collect_vec();
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
-                .values(
-                    rows.into(),
-                    vec![
-                        PgFieldDescriptor::new(
-                            "Name".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Arguments".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Return Type".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Language".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Link".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                    ],
-                )
+                .values(rows.into(), row_desc)
                 .into());
         }
         ShowObject::Cluster => {
@@ -341,41 +248,7 @@ pub async fn handle_show_object(
                 })
                 .collect_vec();
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
-                .values(
-                    rows.into(),
-                    vec![
-                        PgFieldDescriptor::new(
-                            "Addr".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "State".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Parallel Units".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Is Streaming".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Is Serving".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Is Unschedulable".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                    ],
-                )
+                .values(rows.into(), row_desc)
                 .into());
         }
         ShowObject::Jobs => {
@@ -391,26 +264,7 @@ pub async fn handle_show_object(
                 })
                 .collect_vec();
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
-                .values(
-                    rows.into(),
-                    vec![
-                        PgFieldDescriptor::new(
-                            "Id".to_owned(),
-                            DataType::Int64.to_oid(),
-                            DataType::Int64.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Statement".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                        PgFieldDescriptor::new(
-                            "Progress".to_owned(),
-                            DataType::Varchar.to_oid(),
-                            DataType::Varchar.type_len(),
-                        ),
-                    ],
-                )
+                .values(rows.into(), row_desc)
                 .into());
         }
     };
@@ -575,14 +429,16 @@ mod tests {
 
         let expected_columns: HashMap<String, String> = maplit::hashmap! {
             "id".into() => "integer".into(),
-            "country.zipcode".into() => "varchar".into(),
+            "country.zipcode".into() => "character varying".into(),
             "zipcode".into() => "bigint".into(),
-            "country.city.address".into() => "varchar".into(),
-            "country.address".into() => "varchar".into(),
+            "country.city.address".into() => "character varying".into(),
+            "country.address".into() => "character varying".into(),
             "country.city".into() => "test.City".into(),
-            "country.city.zipcode".into() => "varchar".into(),
+            "country.city.zipcode".into() => "character varying".into(),
             "rate".into() => "real".into(),
             "country".into() => "test.Country".into(),
+            "_rw_kafka_timestamp".into() => "timestamp with time zone".into(),
+            "_row_id".into() => "serial".into(),
         };
 
         assert_eq!(columns, expected_columns);

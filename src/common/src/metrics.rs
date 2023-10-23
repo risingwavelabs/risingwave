@@ -25,7 +25,10 @@ use tracing_subscriber::Layer;
 
 use crate::monitor::GLOBAL_METRICS_REGISTRY;
 
+mod guarded_metrics;
 mod relabeled_metric;
+
+pub use guarded_metrics::*;
 pub use relabeled_metric::*;
 
 #[derive(Debug)]

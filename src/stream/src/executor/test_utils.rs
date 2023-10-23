@@ -271,7 +271,7 @@ pub mod agg_executor {
     use risingwave_common::hash::SerializedKey;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::agg::{AggCall, AggKind};
+    use risingwave_expr::aggregate::{AggCall, AggKind};
     use risingwave_storage::StateStore;
 
     use crate::common::table::state_table::StateTable;
@@ -454,6 +454,7 @@ pub mod agg_executor {
             extra: HashAggExecutorExtraArgs {
                 group_key_indices,
                 chunk_size: 1024,
+                max_dirty_groups_heap_size: 64 << 20,
                 emit_on_window_close,
             },
         })

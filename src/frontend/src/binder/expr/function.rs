@@ -20,13 +20,13 @@ use std::sync::LazyLock;
 use bk_tree::{metrics, BKTree};
 use itertools::Itertools;
 use risingwave_common::array::ListValue;
-use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
+use risingwave_common::catalog::{INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::USER_NAME_WILD_CARD;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
 use risingwave_common::{GIT_SHA, RW_VERSION};
-use risingwave_expr::agg::{agg_kinds, AggKind};
-use risingwave_expr::function::window::{
+use risingwave_expr::aggregate::{agg_kinds, AggKind};
+use risingwave_expr::window_function::{
     Frame, FrameBound, FrameBounds, FrameExclusion, WindowFuncKind,
 };
 use risingwave_sqlparser::ast::{
@@ -59,12 +59,27 @@ impl Binder {
             [schema, name] => {
                 let schema_name = schema.real_value();
                 if schema_name == PG_CATALOG_SCHEMA_NAME {
+                    // pg_catalog is always effectively part of the search path, so we can always bind the function.
+                    // Ref: https://www.postgresql.org/docs/current/ddl-schemas.html#DDL-SCHEMAS-CATALOG
                     name.real_value()
+                } else if schema_name == INFORMATION_SCHEMA_SCHEMA_NAME {
+                    // definition of information_schema: https://github.com/postgres/postgres/blob/e0b2eed047df9045664da6f724cb42c10f8b12f0/src/backend/catalog/information_schema.sql
+                    //
+                    // FIXME: handle schema correctly, so that the functions are hidden if the schema is not in the search path.
+                    let function_name = name.real_value();
+                    if function_name != "_pg_expandarray" {
+                        return Err(ErrorCode::NotImplemented(
+                            format!("Unsupported function name under schema: {}", schema_name),
+                            12422.into(),
+                        )
+                        .into());
+                    }
+                    function_name
                 } else {
-                    return Err(ErrorCode::BindError(format!(
-                        "Unsupported function name under schema: {}",
-                        schema_name
-                    ))
+                    return Err(ErrorCode::NotImplemented(
+                        format!("Unsupported function name under schema: {}", schema_name),
+                        12422.into(),
+                    )
                     .into());
                 }
             }
@@ -138,7 +153,7 @@ impl Binder {
         }
 
         // user defined function
-        // TODO: resolve schema name
+        // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
         if let Ok(schema) = self.first_valid_schema() &&
             let Some(func) = schema.get_function_by_name_args(
                 &function_name,
@@ -766,6 +781,7 @@ impl Binder {
                 ("regexp_match", raw_call(ExprType::RegexpMatch)),
                 ("regexp_replace", raw_call(ExprType::RegexpReplace)),
                 ("regexp_count", raw_call(ExprType::RegexpCount)),
+                ("regexp_split_to_array", raw_call(ExprType::RegexpSplitToArray)),
                 ("chr", raw_call(ExprType::Chr)),
                 ("starts_with", raw_call(ExprType::StartsWith)),
                 ("initcap", raw_call(ExprType::Initcap)),
@@ -850,6 +866,9 @@ impl Binder {
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
                 // Functions that return a constant value
                 ("pi", pi()),
+                // greatest and least
+                ("greatest", raw_call(ExprType::Greatest)),
+                ("least", raw_call(ExprType::Least)),
                 // System information operations.
                 (
                     "pg_typeof",
@@ -1127,7 +1146,7 @@ impl Binder {
                 // TODO: really implement them.
                 // https://www.postgresql.org/docs/9.5/functions-info.html#FUNCTIONS-INFO-COMMENT-TABLE
                 // WARN: Hacked in [`Binder::bind_function`]!!!
-                ("col_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
+                ("col_description", raw_call(ExprType::ColDescription)),
                 ("obj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("shobj_description", raw_literal(ExprImpl::literal_varchar("".to_string()))),
                 ("pg_is_in_recovery", raw_literal(ExprImpl::literal_bool(false))),
@@ -1147,6 +1166,12 @@ impl Binder {
                 ("pg_sleep_for", raw_call(ExprType::PgSleepFor)),
                 // TODO: implement pg_sleep_until
                 // ("pg_sleep_until", raw_call(ExprType::PgSleepUntil)),
+
+                // cast functions
+                // only functions required by the existing PostgreSQL tool are implemented
+                ("date", guard_by_len(1, raw(|_binder, inputs| {
+                    inputs[0].clone().cast_explicit(DataType::Date).map_err(Into::into)
+                }))),
             ]
             .into_iter()
             .collect()

@@ -60,13 +60,10 @@ impl MetaNodeService {
                 config.listen_address, config.dashboard_port
             ));
 
-        cmd.arg("--prometheus-host")
-            .arg(format!(
-                "{}:{}",
-                config.listen_address, config.exporter_port
-            ))
-            .arg("--connector-rpc-endpoint")
-            .arg(&config.connector_rpc_endpoint);
+        cmd.arg("--prometheus-host").arg(format!(
+            "{}:{}",
+            config.listen_address, config.exporter_port
+        ));
 
         match config.provide_prometheus.as_ref().unwrap().as_slice() {
             [] => {}
@@ -174,8 +171,6 @@ impl Task for MetaNodeService {
         let mut cmd = self.meta_node()?;
 
         cmd.env("RUST_BACKTRACE", "1");
-        // FIXME: Otherwise, CI will throw log size too large error
-        // cmd.env("RW_QUERY_LOG_PATH", DEFAULT_QUERY_LOG_PATH);
 
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
@@ -186,9 +181,16 @@ impl Task for MetaNodeService {
 
         if crate::util::is_env_set("RISEDEV_ENABLE_HEAP_PROFILE") {
             // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
+            let conf = "prof:true,lg_prof_interval:32,lg_prof_sample:19,prof_prefix:meta-node";
+            cmd.env("_RJEM_MALLOC_CONF", conf); // prefixed for macos
+            cmd.env("MALLOC_CONF", conf); // unprefixed for linux
+        }
+
+        if crate::util::is_env_set("ENABLE_BUILD_RW_CONNECTOR") {
+            let prefix_bin = env::var("PREFIX_BIN")?;
             cmd.env(
-                "MALLOC_CONF",
-                "prof:true,lg_prof_interval:32,lg_prof_sample:19,prof_prefix:meta-node",
+                "CONNECTOR_LIBS_PATH",
+                Path::new(&prefix_bin).join("connector-node/libs/"),
             );
         }
 

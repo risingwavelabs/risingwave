@@ -54,6 +54,11 @@
   - batch_plan
   - stream_plan
 - sql: |
+    select 1 c limit 1 offset 2
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- sql: |
     select 1 c order by 1 limit 1
   expected_outputs:
   - batch_plan

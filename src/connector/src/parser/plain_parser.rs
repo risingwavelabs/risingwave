@@ -18,9 +18,10 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use super::unified::util::apply_row_accessor_on_stream_chunk_writer;
 use super::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType,
-    SourceStreamChunkRowWriter, SpecificParserConfig, WriteGuard,
+    SourceStreamChunkRowWriter, SpecificParserConfig,
 };
 use crate::only_parse_payload;
+use crate::parser::ParserFormat;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
@@ -59,10 +60,10 @@ impl PlainParser {
         &mut self,
         payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         let accessor = self.payload_builder.generate_accessor(payload).await?;
 
-        apply_row_accessor_on_stream_chunk_writer(accessor, &mut writer)
+        apply_row_accessor_on_stream_chunk_writer(accessor, &mut writer).map_err(Into::into)
     }
 }
 
@@ -75,12 +76,16 @@ impl ByteStreamSourceParser for PlainParser {
         &self.source_ctx
     }
 
+    fn parser_format(&self) -> ParserFormat {
+        ParserFormat::Plain
+    }
+
     async fn parse_one<'a>(
         &'a mut self,
         _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         only_parse_payload!(self, payload, writer)
     }
 }

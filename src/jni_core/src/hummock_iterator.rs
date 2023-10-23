@@ -29,8 +29,8 @@ use risingwave_pb::java_binding::key_range::Bound;
 use risingwave_pb::java_binding::{KeyRange, ReadPlan};
 use risingwave_storage::error::{StorageError, StorageResult};
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
-use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
+use risingwave_storage::hummock::store::HummockStorageIterator;
 use risingwave_storage::hummock::{CachePolicy, FileCache, SstableStore};
 use risingwave_storage::monitor::HummockStateStoreMetrics;
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
@@ -48,22 +48,6 @@ fn select_all_vnode_stream(
 pub struct HummockJavaBindingIterator {
     row_serde: EitherSerde,
     stream: SelectAllIterStream,
-    pub class_cache: Arc<crate::JavaClassMethodCache>,
-}
-
-pub struct KeyedRow {
-    key: Bytes,
-    row: OwnedRow,
-}
-
-impl KeyedRow {
-    pub fn key(&self) -> &[u8] {
-        self.key.as_ref()
-    }
-
-    pub fn row(&self) -> &OwnedRow {
-        &self.row
-    }
 }
 
 impl HummockJavaBindingIterator {
@@ -85,6 +69,7 @@ impl HummockJavaBindingIterator {
             0,
             FileCache::none(),
             FileCache::none(),
+            None,
         ));
         let reader =
             HummockVersionReader::new(sstable_store, Arc::new(HummockStateStoreMetrics::unused()));
@@ -136,24 +121,20 @@ impl HummockJavaBindingIterator {
             .into()
         };
 
-        Ok(Self {
-            row_serde,
-            stream,
-            class_cache: Default::default(),
-        })
+        Ok(Self { row_serde, stream })
     }
 
-    pub async fn next(&mut self) -> StorageResult<Option<KeyedRow>> {
+    pub async fn next(&mut self) -> StorageResult<Option<(Bytes, OwnedRow)>> {
         let item = self.stream.try_next().await?;
         Ok(match item {
-            Some((key, value)) => Some(KeyedRow {
-                key: key.user_key.table_key.0,
-                row: OwnedRow::new(
+            Some((key, value)) => Some((
+                key.user_key.table_key.0,
+                OwnedRow::new(
                     self.row_serde
                         .deserialize(&value)
                         .map_err(StorageError::DeserializeRow)?,
                 ),
-            }),
+            )),
             None => None,
         })
     }

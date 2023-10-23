@@ -43,8 +43,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Share<PlanRef> {
         self.input.borrow().schema().clone()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some(self.input.borrow().logical_pk().to_vec())
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        Some(self.input.borrow().stream_key()?.to_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {

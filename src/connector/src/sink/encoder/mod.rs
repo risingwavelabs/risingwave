@@ -12,14 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 
 use crate::sink::Result;
 
+mod avro;
 mod json;
+mod proto;
+pub mod template;
 
+pub use avro::AvroEncoder;
 pub use json::JsonEncoder;
+pub use proto::ProtoEncoder;
 
 /// Encode a row of a relation into
 /// * an object in json
@@ -55,7 +63,9 @@ pub trait RowEncoder {
 ///
 /// This is like `TryInto` but allows us to `impl<T: SerTo<String>> SerTo<Vec<u8>> for T`.
 ///
-/// Shall we consider `impl serde::Serialize` in the future?
+/// Note that `serde` does not fit here because its data model does not contain logical types.
+/// For example, although `chrono::DateTime` implements `Serialize`,
+/// it produces avro String rather than avro `TimestampMicros`.
 pub trait SerTo<T> {
     fn ser_to(self) -> Result<T>;
 }
@@ -78,3 +88,55 @@ pub enum TimestampHandlingMode {
     Milli,
     String,
 }
+
+#[derive(Clone)]
+pub enum CustomJsonType {
+    Doris(HashMap<String, (u8, u8)>),
+    None,
+}
+
+#[derive(Debug)]
+struct FieldEncodeError {
+    message: String,
+    rev_path: Vec<String>,
+}
+
+impl FieldEncodeError {
+    fn new(message: impl std::fmt::Display) -> Self {
+        Self {
+            message: message.to_string(),
+            rev_path: vec![],
+        }
+    }
+
+    fn with_name(mut self, name: &str) -> Self {
+        self.rev_path.push(name.into());
+        self
+    }
+}
+
+impl std::fmt::Display for FieldEncodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use itertools::Itertools;
+
+        write!(
+            f,
+            "encode {} error: {}",
+            self.rev_path.iter().rev().join("."),
+            self.message
+        )
+    }
+}
+
+impl From<FieldEncodeError> for super::SinkError {
+    fn from(value: FieldEncodeError) -> Self {
+        Self::Encode(value.to_string())
+    }
+}
+
+#[derive(Clone)]
+pub struct KafkaConnectParams {
+    pub schema_name: String,
+}
+
+type KafkaConnectParamsRef = Arc<KafkaConnectParams>;

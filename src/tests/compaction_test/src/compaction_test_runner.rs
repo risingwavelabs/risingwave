@@ -31,6 +31,7 @@ use risingwave_common::config::{
 };
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, FIRST_VERSION_ID};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
@@ -128,7 +129,7 @@ pub async fn compaction_test_main(
 }
 
 pub async fn start_meta_node(listen_addr: String, state_store: String, config_path: String) {
-    let meta_opts = risingwave_meta::MetaNodeOpts::parse_from([
+    let meta_opts = risingwave_meta_node::MetaNodeOpts::parse_from([
         "meta-node",
         "--listen-addr",
         &listen_addr,
@@ -153,7 +154,7 @@ pub async fn start_meta_node(listen_addr: String, state_store: String, config_pa
         "enable_compaction_deterministic should be set"
     );
 
-    risingwave_meta::start(meta_opts).await
+    risingwave_meta_node::start(meta_opts).await
 }
 
 async fn start_compactor_node(
@@ -619,10 +620,11 @@ async fn open_hummock_iters(
     buf.put_u32(table_id);
     let b = buf.freeze();
     let range = (
-        Bound::Included(b.clone()),
+        Bound::Included(b.clone()).map(TableKey),
         Bound::Excluded(Bytes::from(risingwave_hummock_sdk::key::next_key(
             b.as_ref(),
-        ))),
+        )))
+        .map(TableKey),
     );
 
     for &epoch in snapshots {

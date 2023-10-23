@@ -44,7 +44,7 @@ ENV JAVA_HOME ${JAVA_HOME_PATH}
 ENV LD_LIBRARY_PATH ${JAVA_HOME_PATH}/lib/server:${LD_LIBRARY_PATH}
 
 RUN cargo fetch && \
-  cargo build -p risingwave_cmd_all --release --features "rw-static-link" && \
+  cargo build -p risingwave_cmd_all --release -p risingwave_object_store --features hdfs-backend --features "rw-static-link"  && \
   mkdir -p /risingwave/bin && \
     mv /risingwave/target/release/risingwave /risingwave/bin/ && \
     mv /risingwave/target/release/risingwave.dwp /risingwave/bin/ && \
@@ -52,7 +52,7 @@ RUN cargo fetch && \
   chmod +x /risingwave/bin/jeprof && \
   mkdir -p /risingwave/lib && cargo clean
 
-RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true -Djava.binding.release=true && \
+RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true -Dno-build-rust && \
     mkdir -p /risingwave/bin/connector-node && \
     tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
 
@@ -94,5 +94,5 @@ ENV RW_DASHBOARD_UI_PATH /risingwave/ui
 # Set default connector libs path
 ENV CONNECTOR_LIBS_PATH /risingwave/bin/connector-node/libs
 
-ENTRYPOINT [ "/risingwave/hdfs_env.sh" ]
+ENTRYPOINT [ "/risingwave/bin/risingwave" ]
 CMD [ "playground" ]

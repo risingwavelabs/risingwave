@@ -18,7 +18,6 @@
 )]
 #![feature(extract_if)]
 #![feature(trait_alias)]
-#![feature(binary_heap_drain_sorted)]
 #![feature(is_sorted)]
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
@@ -46,6 +45,7 @@
 #![feature(negative_impls)]
 #![feature(async_fn_in_trait)]
 #![feature(bound_map)]
+#![feature(array_methods)]
 
 #[macro_use]
 pub mod jemalloc;

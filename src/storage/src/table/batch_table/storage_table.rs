@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::{Index, RangeBounds};
 use std::sync::Arc;
@@ -33,7 +32,9 @@ use risingwave_common::util::row_serde::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde};
-use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
+use risingwave_hummock_sdk::key::{
+    end_bound_of_prefix, map_table_key_range, next_key, prefixed_range, TableKeyRange,
+};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::trace;
 
@@ -44,7 +45,7 @@ use crate::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
 use crate::store::{PrefetchOptions, ReadOptions};
 use crate::table::merge_sort::merge_sort;
-use crate::table::{compute_vnode, Distribution, KeyedRow, TableIter, DEFAULT_VNODE};
+use crate::table::{compute_vnode, Distribution, KeyedRow, TableIter};
 use crate::StateStore;
 
 /// [`StorageTableInner`] is the interface accessing relational data in KV(`StateStore`) with
@@ -416,24 +417,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             _ => CachePolicy::Fill(CachePriority::High),
         };
 
-        let raw_key_ranges = if !ordered
-            && matches!(encoded_key_range.start_bound(), Unbounded)
-            && matches!(encoded_key_range.end_bound(), Unbounded)
-        {
-            // If the range is unbounded and order is not required, we can create a single iterator
-            // for each continuous vnode range.
-
-            // In this case, the `vnode_hint` must be default for singletons and `None` for
-            // distributed tables.
-            assert_eq!(vnode_hint.unwrap_or(DEFAULT_VNODE), DEFAULT_VNODE);
-
-            Either::Left(self.vnodes.vnode_ranges().map(|r| {
-                let start = Included(Bytes::copy_from_slice(&r.start().to_be_bytes()[..]));
-                let end = end_bound_of_prefix(&r.end().to_be_bytes());
-                assert_matches!(end, Excluded(_) | Unbounded);
-                (start, end)
-            }))
-        } else {
+        let raw_key_ranges = {
             // Vnodes that are set and should be accessed.
             let vnodes = match vnode_hint {
                 // If `vnode_hint` is set, we can only access this single vnode.
@@ -441,13 +425,12 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                 // Otherwise, we need to access all vnodes of this table.
                 None => Either::Right(self.vnodes.iter_vnodes()),
             };
-            Either::Right(
-                vnodes.map(|vnode| prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes())),
-            )
+            vnodes.map(|vnode| prefixed_range(encoded_key_range.clone(), &vnode.to_be_bytes()))
         };
 
         // For each key range, construct an iterator.
         let iterators: Vec<_> = try_join_all(raw_key_ranges.map(|raw_key_range| {
+            let table_key_range = map_table_key_range(raw_key_range);
             let prefix_hint = prefix_hint.clone();
             let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
             async move {
@@ -473,7 +456,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                     self.value_output_indices.clone(),
                     self.output_row_in_key_indices.clone(),
                     self.row_serde.clone(),
-                    raw_key_range,
+                    table_key_range,
                     read_options,
                     wait_epoch,
                 )
@@ -490,7 +473,10 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             0 => unreachable!(),
             1 => iterators.into_iter().next().unwrap(),
             // Concat all iterators if not to preserve order.
-            _ if !ordered => futures::stream::iter(iterators).flatten(),
+            _ if !ordered => {
+                futures::stream::iter(iterators.into_iter().map(Box::pin).collect_vec())
+                    .flatten_unordered(1024)
+            }
             // Merge all iterators if to preserve order.
             _ => merge_sort(iterators.into_iter().map(Box::pin).collect()),
         };
@@ -680,13 +666,13 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
         value_output_indices: Vec<usize>,
         output_row_in_key_indices: Vec<usize>,
         row_deserializer: Arc<SD>,
-        raw_key_range: (Bound<Bytes>, Bound<Bytes>),
+        table_key_range: TableKeyRange,
         read_options: ReadOptions,
         epoch: HummockReadEpoch,
     ) -> StorageResult<Self> {
         let raw_epoch = epoch.get_epoch();
         store.try_wait_epoch(epoch).await?;
-        let iter = store.iter(raw_key_range, raw_epoch, read_options).await?;
+        let iter = store.iter(table_key_range, raw_epoch, read_options).await?;
         // For `HummockStorage`, a cluster recovery will clear storage data and make subsequent
         // `HummockReadEpoch::Current` read incomplete.
         // `validate_read_epoch` is a safeguard against that incorrect read. It rejects the read

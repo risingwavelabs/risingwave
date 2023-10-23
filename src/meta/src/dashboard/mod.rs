@@ -17,13 +17,14 @@ mod proxy;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::Path as FilePath;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use axum::body::Body;
+use axum::body::{boxed, Body};
 use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, get_service};
 use axum::Router;
 use hyper::Request;
@@ -45,8 +46,7 @@ pub struct DashboardService {
     pub cluster_manager: ClusterManagerRef,
     pub fragment_manager: FragmentManagerRef,
     pub compute_clients: ComputeClientPool,
-
-    // TODO: replace with catalog manager.
+    pub ui_path: Option<String>,
     pub meta_store: MetaStoreRef,
 }
 
@@ -56,11 +56,15 @@ pub(super) mod handlers {
     use anyhow::Context;
     use axum::Json;
     use itertools::Itertools;
+    use risingwave_common::bail;
+    use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{Sink, Source, Table};
-    use risingwave_pb::common::WorkerNode;
+    use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::meta::{ActorLocation, PbTableFragments};
-    use risingwave_pb::monitor_service::StackTraceResponse;
+    use risingwave_pb::monitor_service::{
+        HeapProfilingResponse, ListHeapProfilingResponse, StackTraceResponse,
+    };
     use serde_json::json;
 
     use super::*;
@@ -73,6 +77,12 @@ pub(super) mod handlers {
 
     pub fn err(err: impl Into<anyhow::Error>) -> DashboardError {
         DashboardError(err.into())
+    }
+
+    impl From<anyhow::Error> for DashboardError {
+        fn from(value: anyhow::Error) -> Self {
+            DashboardError(value)
+        }
     }
 
     impl IntoResponse for DashboardError {
@@ -91,12 +101,11 @@ pub(super) mod handlers {
         Path(ty): Path<i32>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<WorkerNode>>> {
-        use risingwave_pb::common::WorkerType;
         let mut result = srv
             .cluster_manager
             .list_worker_node(
-                WorkerType::from_i32(ty)
-                    .ok_or_else(|| anyhow!("invalid worker type"))
+                WorkerType::try_from(ty)
+                    .map_err(|_| anyhow!("invalid worker type"))
                     .map_err(err)?,
                 None,
             )
@@ -188,6 +197,39 @@ pub(super) mod handlers {
         Ok(Json(table_fragments))
     }
 
+    async fn dump_await_tree_inner(
+        worker_nodes: impl IntoIterator<Item = &WorkerNode>,
+        compute_clients: &ComputeClientPool,
+    ) -> Result<Json<StackTraceResponse>> {
+        let mut all = Default::default();
+
+        fn merge(a: &mut StackTraceResponse, b: StackTraceResponse) {
+            a.actor_traces.extend(b.actor_traces);
+            a.rpc_traces.extend(b.rpc_traces);
+            a.compaction_task_traces.extend(b.compaction_task_traces);
+        }
+
+        for worker_node in worker_nodes {
+            let client = compute_clients.get(worker_node).await.map_err(err)?;
+            let result = client.stack_trace().await.map_err(err)?;
+
+            merge(&mut all, result);
+        }
+
+        Ok(all.into())
+    }
+
+    pub async fn dump_await_tree_all(
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<StackTraceResponse>> {
+        let worker_nodes = srv
+            .cluster_manager
+            .list_worker_node(WorkerType::ComputeNode, None)
+            .await;
+
+        dump_await_tree_inner(&worker_nodes, &srv.compute_clients).await
+    }
+
     pub async fn dump_await_tree(
         Path(worker_id): Path<WorkerId>,
         Extension(srv): Extension<Service>,
@@ -200,17 +242,95 @@ pub(super) mod handlers {
             .map_err(err)?
             .worker_node;
 
+        dump_await_tree_inner(std::iter::once(&worker_node), &srv.compute_clients).await
+    }
+
+    pub async fn heap_profile(
+        Path(worker_id): Path<WorkerId>,
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<HeapProfilingResponse>> {
+        let worker_node = srv
+            .cluster_manager
+            .get_worker_by_id(worker_id)
+            .await
+            .context("worker node not found")
+            .map_err(err)?
+            .worker_node;
+
         let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
 
-        let result = client.stack_trace().await.map_err(err)?;
+        let result = client.heap_profile("".to_string()).await.map_err(err)?;
 
         Ok(result.into())
+    }
+
+    pub async fn list_heap_profile(
+        Path(worker_id): Path<WorkerId>,
+        Extension(srv): Extension<Service>,
+    ) -> Result<Json<ListHeapProfilingResponse>> {
+        let worker_node = srv
+            .cluster_manager
+            .get_worker_by_id(worker_id)
+            .await
+            .context("worker node not found")
+            .map_err(err)?
+            .worker_node;
+
+        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+
+        let result = client.list_heap_profile().await.map_err(err)?;
+        Ok(result.into())
+    }
+
+    pub async fn analyze_heap(
+        Path((worker_id, file_path)): Path<(WorkerId, String)>,
+        Extension(srv): Extension<Service>,
+    ) -> Result<Response> {
+        if srv.ui_path.is_none() {
+            bail!("Should provide ui_path");
+        }
+
+        let file_path =
+            String::from_utf8(base64_url::decode(&file_path).map_err(err)?).map_err(err)?;
+
+        let file_name = FilePath::new(&file_path)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+
+        let collapsed_file_name = format!("{}.{}", file_name, COLLAPSED_SUFFIX);
+
+        let worker_node = srv
+            .cluster_manager
+            .get_worker_by_id(worker_id)
+            .await
+            .context("worker node not found")
+            .map_err(err)?
+            .worker_node;
+
+        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+
+        let collapsed_bin = client
+            .analyze_heap(file_path.clone())
+            .await
+            .map_err(err)?
+            .result;
+        let collapsed_str = String::from_utf8_lossy(&collapsed_bin).to_string();
+
+        let response = Response::builder()
+            .header("Content-Type", "application/octet-stream")
+            .header("Content-Disposition", collapsed_file_name)
+            .body(boxed(collapsed_str));
+
+        response.map_err(err)
     }
 }
 
 impl DashboardService {
-    pub async fn serve(self, ui_path: Option<String>) -> Result<()> {
+    pub async fn serve(self) -> Result<()> {
         use handlers::*;
+        let ui_path = self.ui_path.clone();
         let srv = Arc::new(self);
 
         let cors_layer = CorsLayer::new()
@@ -233,6 +353,13 @@ impl DashboardService {
                 get(prometheus::list_prometheus_actor_back_pressure),
             )
             .route("/monitor/await_tree/:worker_id", get(dump_await_tree))
+            .route("/monitor/await_tree/", get(dump_await_tree_all))
+            .route("/monitor/dump_heap_profile/:worker_id", get(heap_profile))
+            .route(
+                "/monitor/list_heap_profile/:worker_id",
+                get(list_heap_profile),
+            )
+            .route("/monitor/analyze/:worker_id/*path", get(analyze_heap))
             .layer(
                 ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(srv.clone()))

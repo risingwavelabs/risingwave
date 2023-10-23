@@ -18,7 +18,6 @@
 #![feature(type_alias_impl_trait)]
 #![feature(more_qualified_paths)]
 #![feature(lint_reasons)]
-#![feature(binary_heap_drain_sorted)]
 #![feature(let_chains)]
 #![feature(hash_extract_if)]
 #![feature(extract_if)]
@@ -54,3 +53,6 @@ pub mod error;
 pub mod executor;
 mod from_proto;
 pub mod task;
+
+#[cfg(test)]
+risingwave_expr_impl::enable!();

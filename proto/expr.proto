@@ -33,6 +33,8 @@ message ExprNode {
     LESS_THAN_OR_EQUAL = 11;
     GREATER_THAN = 12;
     GREATER_THAN_OR_EQUAL = 13;
+    GREATEST = 14;
+    LEAST = 15;
     // logical operators
     AND = 21;
     OR = 22;
@@ -104,6 +106,7 @@ message ExprNode {
     REGEXP_MATCH = 232;
     REGEXP_REPLACE = 280;
     REGEXP_COUNT = 281;
+    REGEXP_SPLIT_TO_ARRAY = 282;
     POW = 233;
     EXP = 234;
     CHR = 235;
@@ -214,6 +217,7 @@ message ExprNode {
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
     IS_JSON = 604;
+    JSONB_CAT = 605;
 
     // Non-pure functions below (> 1000)
     // ------------------------
@@ -224,6 +228,10 @@ message ExprNode {
     PG_SLEEP = 2024;
     PG_SLEEP_FOR = 2025;
     PG_SLEEP_UNTIL = 2026;
+
+    // Adminitration functions
+    COL_DESCRIPTION = 2100;
+    CAST_REGCLASS = 2101;
   }
   Type function_type = 1;
   data.DataType return_type = 3;
@@ -244,6 +252,8 @@ message TableFunction {
     REGEXP_MATCHES = 3;
     RANGE = 4;
     GENERATE_SUBSCRIPTS = 5;
+    // buf:lint:ignore ENUM_VALUE_UPPER_SNAKE_CASE
+    _PG_EXPANDARRAY = 6;
     // Jsonb functions
     JSONB_ARRAY_ELEMENTS = 10;
     JSONB_ARRAY_ELEMENTS_TEXT = 11;

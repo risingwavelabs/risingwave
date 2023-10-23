@@ -7,9 +7,26 @@ ghcraddr="ghcr.io/risingwavelabs/risingwave"
 dockerhubaddr="risingwavelabs/risingwave"
 arch="$(uname -m)"
 
+echo "--- ghcr login"
+echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+
+echo "--- dockerhub login"
+echo "$DOCKER_TOKEN" | docker login -u "risingwavelabs" --password-stdin
+
 # Build RisingWave docker image ${BUILDKITE_COMMIT}-${arch}
 echo "--- docker build and tag"
-docker build -f docker/Dockerfile --build-arg "GIT_SHA=${BUILDKITE_COMMIT}" -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" --target risingwave .
+docker buildx create \
+  --name container \
+  --driver=docker-container
+
+docker buildx build -f docker/Dockerfile \
+  --build-arg "GIT_SHA=${BUILDKITE_COMMIT}" -t "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" \
+  --progress plain \
+  --builder=container \
+  --load \
+  --cache-to "type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache:${arch}" \
+  --cache-from "type=registry,ref=ghcr.io/risingwavelabs/risingwave-build-cache:${arch}" \
+  .
 
 echo "--- check the image can start correctly"
 container_id=$(docker run -d "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}" playground)
@@ -24,12 +41,6 @@ fi
 
 echo "--- docker images"
 docker images
-
-echo "--- ghcr login"
-echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
-
-echo "--- dockerhub login"
-echo "$DOCKER_TOKEN" | docker login -u "risingwavelabs" --password-stdin
 
 echo "--- docker push to ghcr"
 docker push "${ghcraddr}:${BUILDKITE_COMMIT}-${arch}"

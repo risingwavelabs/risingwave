@@ -12,71 +12,51 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ffi::CStr;
-use std::path::Path;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
-use chrono;
 use risingwave_batch::task::BatchManager;
-use risingwave_common::config::AutoDumpHeapProfileConfig;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_jni_core::jvm_runtime::load_jvm_memory_stats;
 use risingwave_stream::task::LocalStreamManager;
-use tikv_jemalloc_ctl::{
-    epoch as jemalloc_epoch, opt as jemalloc_opt, prof as jemalloc_prof, stats as jemalloc_stats,
-};
+use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 
 use super::{MemoryControl, MemoryControlStats};
 
-/// `JemallocMemoryControl` is a memory control policy that uses jemalloc statistics to control. It
-/// assumes that most memory is used by streaming engine and does memory control over LRU watermark
-/// based on jemalloc statistics.
-pub struct JemallocMemoryControl {
+/// `JemallocAndJvmMemoryControl` is a memory control policy that uses jemalloc statistics and
+/// jvm memory statistics and to control. It assumes that most memory is used by streaming engine
+/// and does memory control over LRU watermark based on jemalloc statistics and jvm memory statistics.
+pub struct JemallocAndJvmMemoryControl {
     threshold_stable: usize,
     threshold_graceful: usize,
     threshold_aggressive: usize,
-    threshold_auto_dump_heap_profile: usize,
 
     jemalloc_epoch_mib: tikv_jemalloc_ctl::epoch_mib,
     jemalloc_allocated_mib: jemalloc_stats::allocated_mib,
     jemalloc_active_mib: jemalloc_stats::active_mib,
-    jemalloc_dump_mib: jemalloc_prof::dump_mib,
-
-    dump_seq: u64,
-    auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
 }
 
-impl JemallocMemoryControl {
+impl JemallocAndJvmMemoryControl {
     const THRESHOLD_AGGRESSIVE: f64 = 0.9;
     const THRESHOLD_GRACEFUL: f64 = 0.8;
     const THRESHOLD_STABLE: f64 = 0.7;
 
-    pub fn new(
-        total_memory: usize,
-        auto_dump_heap_profile_config: AutoDumpHeapProfileConfig,
-    ) -> Self {
+    pub fn new(total_memory: usize) -> Self {
         let threshold_stable = (total_memory as f64 * Self::THRESHOLD_STABLE) as usize;
         let threshold_graceful = (total_memory as f64 * Self::THRESHOLD_GRACEFUL) as usize;
         let threshold_aggressive = (total_memory as f64 * Self::THRESHOLD_AGGRESSIVE) as usize;
-        let threshold_auto_dump_heap_profile =
-            (total_memory as f64 * auto_dump_heap_profile_config.threshold as f64) as usize;
 
         let jemalloc_epoch_mib = jemalloc_epoch::mib().unwrap();
         let jemalloc_allocated_mib = jemalloc_stats::allocated::mib().unwrap();
         let jemalloc_active_mib = jemalloc_stats::active::mib().unwrap();
-        let jemalloc_dump_mib = jemalloc_prof::dump::mib().unwrap();
 
         Self {
             threshold_stable,
             threshold_graceful,
             threshold_aggressive,
-            threshold_auto_dump_heap_profile,
             jemalloc_epoch_mib,
             jemalloc_allocated_mib,
             jemalloc_active_mib,
-            jemalloc_dump_mib,
-            dump_seq: 0,
-            auto_dump_heap_profile_config,
         }
     }
 
@@ -100,57 +80,9 @@ impl JemallocMemoryControl {
             }),
         )
     }
-
-    fn dump_heap_prof(&self, cur_used_memory_bytes: usize, prev_used_memory_bytes: usize) {
-        if !self.auto_dump_heap_profile_config.enabled {
-            return;
-        }
-
-        if cur_used_memory_bytes > self.threshold_auto_dump_heap_profile
-            && prev_used_memory_bytes <= self.threshold_auto_dump_heap_profile
-        {
-            let opt_prof = jemalloc_opt::prof::read().unwrap();
-            if !opt_prof {
-                tracing::info!("Cannot dump heap profile because Jemalloc prof is not enabled");
-                return;
-            }
-
-            let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S").to_string();
-            let file_name = format!(
-                "{}.exceed-threshold-aggressive-heap-prof.compute.dump.{}\0",
-                time_prefix, self.dump_seq,
-            );
-
-            let file_path = if !self.auto_dump_heap_profile_config.dir.is_empty() {
-                Path::new(&self.auto_dump_heap_profile_config.dir)
-                    .join(Path::new(&file_name))
-                    .to_str()
-                    .unwrap()
-                    .to_string()
-            } else {
-                let prof_prefix = jemalloc_opt::prof_prefix::read().unwrap();
-                let mut file_path = prof_prefix.to_str().unwrap().to_string();
-                file_path.push_str(&file_name);
-                file_path
-            };
-
-            let file_path_str = Box::leak(file_path.into_boxed_str());
-            let file_path_bytes = unsafe { file_path_str.as_bytes_mut() };
-            let file_path_ptr = file_path_bytes.as_mut_ptr();
-            if let Err(e) = self
-                .jemalloc_dump_mib
-                .write(CStr::from_bytes_with_nul(file_path_bytes).unwrap())
-            {
-                tracing::warn!("Auto Jemalloc dump heap file failed! {:?}", e);
-            } else {
-                tracing::info!("Successfully dumped heap profile to {}", file_name);
-            }
-            let _ = unsafe { Box::from_raw(file_path_ptr) };
-        }
-    }
 }
 
-impl std::fmt::Debug for JemallocMemoryControl {
+impl std::fmt::Debug for JemallocAndJvmMemoryControl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JemallocMemoryControl")
             .field("threshold_stable", &self.threshold_stable)
@@ -160,7 +92,7 @@ impl std::fmt::Debug for JemallocMemoryControl {
     }
 }
 
-impl MemoryControl for JemallocMemoryControl {
+impl MemoryControl for JemallocAndJvmMemoryControl {
     fn apply(
         &self,
         interval_ms: u32,
@@ -174,10 +106,7 @@ impl MemoryControl for JemallocMemoryControl {
             prev_memory_stats.jemalloc_active_bytes,
         );
 
-        self.dump_heap_prof(
-            jemalloc_allocated_bytes,
-            prev_memory_stats.jemalloc_allocated_bytes,
-        );
+        let (jvm_allocated_bytes, jvm_active_bytes) = load_jvm_memory_stats();
 
         // Streaming memory control
         //
@@ -185,7 +114,7 @@ impl MemoryControl for JemallocMemoryControl {
         // on cache eviction. Here we do the calculation based on jemalloc statistics.
 
         let (lru_watermark_step, lru_watermark_time_ms, lru_physical_now) = calculate_lru_watermark(
-            jemalloc_allocated_bytes,
+            jemalloc_allocated_bytes + jvm_allocated_bytes,
             self.threshold_stable,
             self.threshold_graceful,
             self.threshold_aggressive,
@@ -198,6 +127,8 @@ impl MemoryControl for JemallocMemoryControl {
         MemoryControlStats {
             jemalloc_allocated_bytes,
             jemalloc_active_bytes,
+            jvm_allocated_bytes,
+            jvm_active_bytes,
             lru_watermark_step,
             lru_watermark_time_ms,
             lru_physical_now_ms: lru_physical_now,
@@ -215,7 +146,8 @@ fn calculate_lru_watermark(
 ) -> (u64, u64, u64) {
     let mut watermark_time_ms = prev_memory_stats.lru_watermark_time_ms;
     let last_step = prev_memory_stats.lru_watermark_step;
-    let last_used_memory_bytes = prev_memory_stats.jemalloc_allocated_bytes;
+    let last_used_memory_bytes =
+        prev_memory_stats.jemalloc_allocated_bytes + prev_memory_stats.jvm_allocated_bytes;
 
     // The watermark calculation works in the following way:
     //

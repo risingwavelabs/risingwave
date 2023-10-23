@@ -18,7 +18,9 @@ use super::{ExprImpl, ExprVisitor};
 use crate::expr::FunctionCall;
 pub(crate) struct ImpureAnalyzer {}
 
-impl ExprVisitor<bool> for ImpureAnalyzer {
+impl ExprVisitor for ImpureAnalyzer {
+    type Result = bool;
+
     fn merge(a: bool, b: bool) -> bool {
         // the expr will be impure if any of its input is impure
         a || b
@@ -105,6 +107,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::RegexpMatch
             | expr_node::Type::RegexpReplace
             | expr_node::Type::RegexpCount
+            | expr_node::Type::RegexpSplitToArray
             | expr_node::Type::Pow
             | expr_node::Type::Exp
             | expr_node::Type::Ln
@@ -169,6 +172,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::ArrayReplace
             | expr_node::Type::ArrayPosition
             | expr_node::Type::HexToInt256
+            | expr_node::Type::JsonbCat
             | expr_node::Type::JsonbAccessInner
             | expr_node::Type::JsonbAccessStr
             | expr_node::Type::JsonbTypeof
@@ -196,7 +200,9 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::ArrayPositions
             | expr_node::Type::StringToArray
             | expr_node::Type::Format
-            | expr_node::Type::ArrayTransform =>
+            | expr_node::Type::ArrayTransform
+            | expr_node::Type::Greatest
+            | expr_node::Type::Least =>
             // expression output is deterministic(same result for the same input)
             {
                 let x = func_call
@@ -212,7 +218,9 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::Proctime
             | expr_node::Type::PgSleep
             | expr_node::Type::PgSleepFor
-            | expr_node::Type::PgSleepUntil => true,
+            | expr_node::Type::PgSleepUntil
+            | expr_node::Type::ColDescription
+            | expr_node::Type::CastRegclass => true,
         }
     }
 }

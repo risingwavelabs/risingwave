@@ -15,7 +15,6 @@
 #![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
-#![feature(binary_heap_drain_sorted)]
 #![feature(exact_size_is_empty)]
 #![feature(type_alias_impl_trait)]
 #![cfg_attr(coverage, feature(no_coverage))]
@@ -48,3 +47,6 @@ pub mod task;
 extern crate tracing;
 #[macro_use]
 extern crate risingwave_common;
+
+#[cfg(test)]
+risingwave_expr_impl::enable!();

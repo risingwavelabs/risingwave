@@ -144,6 +144,12 @@ mod apply_expand_transpose_rule;
 pub use apply_expand_transpose_rule::*;
 mod expand_to_project_rule;
 pub use expand_to_project_rule::*;
+mod agg_group_by_simplify_rule;
+pub use agg_group_by_simplify_rule::*;
+mod apply_hop_window_transpose_rule;
+pub use apply_hop_window_transpose_rule::*;
+mod agg_call_merge_rule;
+pub use agg_call_merge_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -206,6 +212,9 @@ macro_rules! for_all_rules {
             , { ApplyOverWindowTransposeRule }
             , { ApplyExpandTransposeRule }
             , { ExpandToProjectRule }
+            , { AggGroupBySimplifyRule }
+            , { ApplyHopWindowTransposeRule }
+            , { AggCallMergeRule }
         }
     };
 }

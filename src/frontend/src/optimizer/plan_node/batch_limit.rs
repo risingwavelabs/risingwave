@@ -27,23 +27,23 @@ use crate::optimizer::property::{Order, RequiredDist};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchLimit {
     pub base: PlanBase,
-    logical: generic::Limit<PlanRef>,
+    core: generic::Limit<PlanRef>,
 }
 
 impl BatchLimit {
-    pub fn new(logical: generic::Limit<PlanRef>) -> Self {
+    pub fn new(core: generic::Limit<PlanRef>) -> Self {
         let base = PlanBase::new_batch_from_logical(
-            &logical,
-            logical.input.distribution().clone(),
-            logical.input.order().clone(),
+            &core,
+            core.input.distribution().clone(),
+            core.input.order().clone(),
         );
-        BatchLimit { base, logical }
+        BatchLimit { base, core }
     }
 
-    fn two_phase_limit(&self, input: PlanRef) -> Result<PlanRef> {
-        let new_limit = self.logical.limit + self.logical.offset;
+    fn two_phase_limit(&self, new_input: PlanRef) -> Result<PlanRef> {
+        let new_limit = self.core.limit + self.core.offset;
         let new_offset = 0;
-        let logical_partial_limit = generic::Limit::new(input, new_limit, new_offset);
+        let logical_partial_limit = generic::Limit::new(new_input.clone(), new_limit, new_offset);
         let batch_partial_limit = Self::new(logical_partial_limit);
         let any_order = Order::any();
 
@@ -52,7 +52,7 @@ impl BatchLimit {
             single_dist.enforce_if_not_satisfies(batch_partial_limit.into(), &any_order)?
         } else {
             // The input's distribution is singleton, so use one phase limit is enough.
-            return Ok(batch_partial_limit.into());
+            return Ok(self.clone_with_input(new_input).into());
         };
 
         let batch_global_limit = self.clone_with_input(ensure_single_dist);
@@ -60,27 +60,27 @@ impl BatchLimit {
     }
 
     pub fn limit(&self) -> u64 {
-        self.logical.limit
+        self.core.limit
     }
 
     pub fn offset(&self) -> u64 {
-        self.logical.offset
+        self.core.offset
     }
 }
 
 impl PlanTreeNodeUnary for BatchLimit {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut core = self.logical.clone();
+        let mut core = self.core.clone();
         core.input = input;
         Self::new(core)
     }
 }
 impl_plan_tree_node_for_unary! {BatchLimit}
-impl_distill_by_unit!(BatchLimit, logical, "BatchLimit");
+impl_distill_by_unit!(BatchLimit, core, "BatchLimit");
 
 impl ToDistributedBatch for BatchLimit {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -91,8 +91,8 @@ impl ToDistributedBatch for BatchLimit {
 impl ToBatchPb for BatchLimit {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Limit(LimitNode {
-            limit: self.logical.limit,
-            offset: self.logical.offset,
+            limit: self.core.limit,
+            offset: self.core.offset,
         })
     }
 }

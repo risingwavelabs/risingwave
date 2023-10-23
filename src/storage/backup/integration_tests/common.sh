@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -eo pipefail
-[ -n "${BACKUP_TEST_BACKUP_RESTORE}" ]
 [ -n "${BACKUP_TEST_MCLI}" ]
 [ -n "${BACKUP_TEST_MCLI_CONFIG}" ]
 [ -n "${BACKUP_TEST_RW_ALL_IN_ONE}" ]
@@ -52,7 +51,7 @@ function drop_mvs() {
 
 function backup() {
   local job_id
-  job_id=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl meta backup-meta 2>&1 | grep "backup job succeeded" | awk '{print $(NF)}')
+  job_id=$(${BACKUP_TEST_RW_ALL_IN_ONE} risectl meta backup-meta 2>&1 | grep "backup job succeeded" | awk -F ',' '{print $(NF-1)}'| awk '{print $(NF)}')
   [ -n "${job_id}" ]
   echo "${job_id}"
 }
@@ -70,7 +69,10 @@ function restore() {
   stop_cluster
   clean_etcd_data
   start_etcd_minio
-  ${BACKUP_TEST_BACKUP_RESTORE} \
+  ${BACKUP_TEST_RW_ALL_IN_ONE} \
+  risectl \
+  meta \
+  restore-meta \
   --meta-store-type etcd \
   --meta-snapshot-id "${job_id}" \
   --etcd-endpoints 127.0.0.1:2388 \

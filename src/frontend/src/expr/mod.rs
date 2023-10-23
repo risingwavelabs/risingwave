@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::iter::once;
-
 use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
 use futures::FutureExt;
@@ -21,7 +19,7 @@ use paste::paste;
 use risingwave_common::array::ListValue;
 use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::types::{DataType, Datum, Scalar};
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::aggregate::AggKind;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
@@ -46,6 +44,7 @@ pub use order_by_expr::{OrderBy, OrderByExpr};
 mod expr_mutator;
 mod expr_rewriter;
 mod expr_visitor;
+pub mod function_impl;
 mod session_timezone;
 mod type_inference;
 mod utils;
@@ -67,8 +66,8 @@ pub use session_timezone::SessionTimezone;
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};
 pub use type_inference::{
-    agg_func_sigs, align_types, cast_map_array, cast_ok, cast_sigs, func_sigs, infer_some_all,
-    infer_type, least_restrictive, AggFuncSig, CastContext, CastSig, FuncSign,
+    align_types, cast_map_array, cast_ok, cast_sigs, infer_some_all, infer_type, least_restrictive,
+    CastContext, CastSig, FuncSign,
 };
 pub use user_defined_function::UserDefinedFunction;
 pub use utils::*;
@@ -201,7 +200,7 @@ impl ExprImpl {
     /// # Panics
     /// Panics if `input_ref >= input_col_num`.
     pub fn collect_input_refs(&self, input_col_num: usize) -> FixedBitSet {
-        collect_input_refs(input_col_num, once(self))
+        collect_input_refs(input_col_num, [self])
     }
 
     /// Check if the expression has no side effects and output is deterministic
@@ -251,6 +250,11 @@ impl ExprImpl {
     /// Shorthand to inplace cast expr to `target` type in implicit context.
     pub fn cast_implicit_mut(&mut self, target: DataType) -> Result<(), CastError> {
         FunctionCall::cast_mut(self, target, CastContext::Implicit)
+    }
+
+    /// Shorthand to inplace cast expr to `target` type in explicit context.
+    pub fn cast_explicit_mut(&mut self, target: DataType) -> Result<(), CastError> {
+        FunctionCall::cast_mut(self, target, CastContext::Explicit)
     }
 
     /// Ensure the return type of this expression is an array of some type.
@@ -347,7 +351,9 @@ macro_rules! impl_has_variant {
                     pub fn [<has_ $variant:snake>](&self) -> bool {
                         struct Has {}
 
-                        impl ExprVisitor<bool> for Has {
+                        impl ExprVisitor for Has {
+
+                            type Result = bool;
 
                             fn merge(a: bool, b: bool) -> bool {
                                 a | b
@@ -418,7 +424,9 @@ impl ExprImpl {
             depth: usize,
         }
 
-        impl ExprVisitor<bool> for Has {
+        impl ExprVisitor for Has {
+            type Result = bool;
+
             fn merge(a: bool, b: bool) -> bool {
                 a | b
             }
@@ -476,7 +484,9 @@ impl ExprImpl {
             correlated_id: CorrelatedId,
         }
 
-        impl ExprVisitor<bool> for Has {
+        impl ExprVisitor for Has {
+            type Result = bool;
+
             fn merge(a: bool, b: bool) -> bool {
                 a | b
             }
@@ -596,7 +606,9 @@ impl ExprImpl {
             struct HasOthers {
                 has_others: bool,
             }
-            impl ExprVisitor<()> for HasOthers {
+            impl ExprVisitor for HasOthers {
+                type Result = ();
+
                 fn merge(_: (), _: ()) {}
 
                 fn visit_expr(&mut self, expr: &ExprImpl) {
