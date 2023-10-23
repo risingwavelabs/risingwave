@@ -370,7 +370,7 @@ impl DispatcherImpl {
 
         use risingwave_pb::stream_plan::DispatcherType::*;
         let dispatcher_impl = match dispatcher.get_type()? {
-            Hash | CdcTablename => {
+            Hash => {
                 assert!(!outputs.is_empty());
                 let dist_key_indices = dispatcher
                     .dist_key_indices
@@ -378,29 +378,41 @@ impl DispatcherImpl {
                     .map(|i| *i as usize)
                     .collect();
 
-                if dispatcher.get_type()? == Hash {
-                    let hash_mapping =
-                        ActorMapping::from_protobuf(dispatcher.get_hash_mapping()?).to_expanded();
+                let hash_mapping =
+                    ActorMapping::from_protobuf(dispatcher.get_hash_mapping()?).to_expanded();
 
-                    DispatcherImpl::Hash(HashDataDispatcher::new(
-                        outputs,
-                        dist_key_indices,
-                        output_indices,
-                        hash_mapping,
-                        dispatcher.dispatcher_id,
-                        dispatcher.downstream_table_name.clone(),
-                    ))
-                } else {
-                    assert!(dispatcher.downstream_table_name.is_some());
-                    DispatcherImpl::CdcTableName(CdcTableNameDispatcher::new(
-                        outputs,
-                        dist_key_indices,
-                        output_indices,
-                        dispatcher.dispatcher_id,
-                        dispatcher.downstream_table_name.clone(),
-                    ))
-                }
+                DispatcherImpl::Hash(HashDataDispatcher::new(
+                    outputs,
+                    dist_key_indices,
+                    output_indices,
+                    hash_mapping,
+                    dispatcher.dispatcher_id,
+                    dispatcher.downstream_table_name.clone(),
+                ))
             }
+            CdcTablename => {
+                assert!(!outputs.is_empty());
+                assert!(dispatcher.downstream_table_name.is_some());
+                let dist_key_indices: Vec<usize> = dispatcher
+                    .dist_key_indices
+                    .iter()
+                    .map(|i| *i as usize)
+                    .collect_vec();
+
+                assert_eq!(
+                    dist_key_indices.len(),
+                    1,
+                    "expect only one table name column index"
+                );
+                DispatcherImpl::CdcTableName(CdcTableNameDispatcher::new(
+                    outputs,
+                    dist_key_indices[0],
+                    output_indices,
+                    dispatcher.dispatcher_id,
+                    dispatcher.downstream_table_name.clone(),
+                ))
+            }
+
             Broadcast => DispatcherImpl::Broadcast(BroadcastDispatcher::new(
                 outputs,
                 output_indices,
@@ -854,7 +866,8 @@ impl Dispatcher for BroadcastDispatcher {
 #[derive(Debug)]
 pub struct CdcTableNameDispatcher {
     outputs: Vec<BoxedOutput>,
-    table_name_indices: Vec<usize>,
+    // column index to the `_rw_table_name` column
+    table_name_col_index: usize,
     output_indices: Vec<usize>,
     dispatcher_id: DispatcherId,
     dispatcher_id_str: String,
@@ -864,14 +877,14 @@ pub struct CdcTableNameDispatcher {
 impl CdcTableNameDispatcher {
     pub fn new(
         outputs: Vec<BoxedOutput>,
-        keys: Vec<usize>,
+        table_name_col_index: usize,
         output_indices: Vec<usize>,
         dispatcher_id: DispatcherId,
         downstream_table_name: Option<String>,
     ) -> Self {
         Self {
             outputs,
-            table_name_indices: keys,
+            table_name_col_index,
             output_indices,
             dispatcher_id,
             dispatcher_id_str: dispatcher_id.to_string(),
@@ -898,8 +911,8 @@ impl Dispatcher for CdcTableNameDispatcher {
             // Build visibility map for every output chunk.
             for vis_map in &mut vis_maps {
                 let should_emit = if let Some(row) = row && let Some(full_table_name) = self.downstream_table_name.as_ref() {
-                    let table_name_datum = row.datum_at(self.table_name_indices[0]).unwrap();
-                    tracing::trace!(target: "events::stream::dispatch::hash::cdc", "keys: {:?}, table: {}", self.table_name_indices, full_table_name);
+                    let table_name_datum = row.datum_at(self.table_name_col_index).unwrap();
+                    tracing::trace!(target: "events::stream::dispatch::hash::cdc", "keys: {:?}, table: {}", self.table_name_col_index, full_table_name);
                     // dispatch based on downstream table name
                     table_name_datum == ScalarRefImpl::Utf8(full_table_name)
                 } else {
