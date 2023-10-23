@@ -358,12 +358,15 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         }
 
         let table_id = full_key.user_key.table_id.table_id();
-        let vnode_id = full_key.user_key.get_vnode_id();
 
-        if self.enable_vnode_bitmap && vnode_id != self.last_vnode {
-            let vnode_bitmap_builder = self.vnode_bitmap_mapping.get_mut(&table_id).unwrap();
-            vnode_bitmap_builder.set(vnode_id, true);
-            self.last_vnode = vnode_id;
+        if self.enable_vnode_bitmap {
+            let vnode_id = full_key.user_key.get_vnode_id();
+
+            if vnode_id != self.last_vnode {
+                let vnode_bitmap_builder = self.vnode_bitmap_mapping.get_mut(&table_id).unwrap();
+                vnode_bitmap_builder.set(vnode_id, true);
+                self.last_vnode = vnode_id;
+            }
         }
 
         let mut extract_key = user_key(&self.raw_key);
