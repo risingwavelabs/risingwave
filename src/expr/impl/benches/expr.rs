@@ -390,6 +390,11 @@ fn bench_expr(c: &mut Criterion) {
                 continue;
             }
         };
+        let input = match sig.inputs_type.as_slice() {
+            [] => input.project(&[]),
+            [t] => input.project(&[input_index_for_type(t.as_exact())]),
+            _ => unreachable!(),
+        };
         c.bench_function(&format!("{sig:?}"), |bencher| {
             bencher
                 .to_async(FuturesExecutor)
