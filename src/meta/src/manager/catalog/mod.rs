@@ -2204,17 +2204,13 @@ impl CatalogManager {
 
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
 
-        let mut table = tables
-            .get_mut(comment.table_id)
-            .ok_or_else(|| anyhow!("table id {} not found", comment.table_id))?;
+        // unwrap is safe because the table id was ensured before
+        let mut table = tables.get_mut(comment.table_id).unwrap();
         if let Some(col_idx) = comment.column_index {
-            let column = table.columns.get_mut(col_idx as usize).ok_or_else(|| {
-                anyhow!(
-                    "column index {} for table id {} not found",
-                    col_idx,
-                    comment.table_id
-                )
-            })?;
+            let column = table
+                .columns
+                .get_mut(col_idx as usize)
+                .ok_or_else(|| MetaError::catalog_id_not_found("column", col_idx))?;
             let column_desc = column.column_desc.as_mut().ok_or_else(|| {
                 anyhow!(
                     "column desc at index {} for table id {} not found",
