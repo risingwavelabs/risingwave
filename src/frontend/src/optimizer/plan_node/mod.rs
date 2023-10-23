@@ -433,6 +433,7 @@ impl PlanNodeMeta for PlanRef {
     }
 }
 
+/// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
 impl<P> GenericPlanRef for P
 where
     P: PlanNodeMeta + Eq + Hash,
@@ -458,6 +459,8 @@ where
     }
 }
 
+/// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
+// TODO: further constrain the convention to be `Stream` or `Batch`.
 impl<P> PhysicalPlanRef for P
 where
     P: PlanNodeMeta + Eq + Hash,
@@ -467,6 +470,8 @@ where
     }
 }
 
+/// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
+// TODO: further constrain the convention to be `Stream`.
 impl<P> StreamPlanRef for P
 where
     P: PlanNodeMeta + Eq + Hash,
@@ -484,6 +489,8 @@ where
     }
 }
 
+/// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
+// TODO: further constrain the convention to be `Batch`.
 impl<P> BatchPlanRef for P
 where
     P: PlanNodeMeta + Eq + Hash,
