@@ -37,7 +37,7 @@ combine = { version = "4", features = ["tokio"] }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-queue = { version = "0.3" }
 crossbeam-utils = { version = "0.8" }
-deranged = { version = "0.3", default-features = false, features = ["serde", "std"] }
+deranged = { version = "0.3", default-features = false, features = ["powerfmt", "serde", "std"] }
 digest = { version = "0.10", features = ["mac", "oid", "std"] }
 either = { version = "1", features = ["serde"] }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
@@ -153,7 +153,7 @@ cc = { version = "1", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4", features = ["serde"] }
 crossbeam-queue = { version = "0.3" }
 crossbeam-utils = { version = "0.8" }
-deranged = { version = "0.3", default-features = false, features = ["serde", "std"] }
+deranged = { version = "0.3", default-features = false, features = ["powerfmt", "serde", "std"] }
 digest = { version = "0.10", features = ["mac", "oid", "std"] }
 either = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4" }
