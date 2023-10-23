@@ -23,7 +23,7 @@ fn main() {
         .map(|f| format!("{}/{}.proto", proto_dir, f))
         .collect();
     prost_build::Config::new()
-        .out_dir("./src/parser/protobuf")
+        .out_dir("./connector_common/src/parser/protobuf")
         .compile_protos(&protos, &Vec::<String>::new())
         .unwrap();
 }

@@ -38,7 +38,6 @@ pub use risingwave_connector_common::*;
 pub mod error;
 mod macros;
 
-pub mod parser;
 pub mod source;
 
 pub use paste::paste;

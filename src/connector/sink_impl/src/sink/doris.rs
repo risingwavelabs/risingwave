@@ -22,12 +22,14 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use serde::Deserialize;
+use serde_derive::Serialize;
 use serde_json::Value;
 use serde_with::serde_as;
 
-use super::doris_connector::{DorisField, DorisInsert, DorisInsertClient, DORIS_DELETE_SIGN};
+use super::doris_connector::{
+    DorisField, DorisGet, DorisInsert, DorisInsertClient, DORIS_DELETE_SIGN,
+};
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
-use crate::sink::doris_connector::DorisCommon;
 use crate::sink::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{
@@ -35,6 +37,33 @@ use crate::sink::{
 };
 
 pub const DORIS_SINK: &str = "doris";
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct DorisCommon {
+    #[serde(rename = "doris.url")]
+    pub url: String,
+    #[serde(rename = "doris.user")]
+    pub user: String,
+    #[serde(rename = "doris.password")]
+    pub password: String,
+    #[serde(rename = "doris.database")]
+    pub database: String,
+    #[serde(rename = "doris.table")]
+    pub table: String,
+}
+
+impl DorisCommon {
+    pub(crate) fn build_get_client(&self) -> DorisGet {
+        DorisGet::new(
+            self.url.clone(),
+            self.table.clone(),
+            self.database.clone(),
+            self.user.clone(),
+            self.password.clone(),
+        )
+    }
+}
+
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
 pub struct DorisConfig {

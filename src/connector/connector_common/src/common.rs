@@ -21,7 +21,6 @@ use anyhow::{anyhow, Ok};
 use async_nats::jetstream::consumer::DeliverPolicy;
 use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
-use clickhouse::Client;
 use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
@@ -405,40 +404,6 @@ impl KinesisCommon {
             builder = builder.endpoint_url(endpoint);
         }
         Ok(KinesisClient::from_conf(builder.build()))
-    }
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct ClickHouseCommon {
-    #[serde(rename = "clickhouse.url")]
-    pub url: String,
-    #[serde(rename = "clickhouse.user")]
-    pub user: String,
-    #[serde(rename = "clickhouse.password")]
-    pub password: String,
-    #[serde(rename = "clickhouse.database")]
-    pub database: String,
-    #[serde(rename = "clickhouse.table")]
-    pub table: String,
-}
-
-const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
-
-impl ClickHouseCommon {
-    pub fn build_client(&self) -> anyhow::Result<Client> {
-        use hyper_tls::HttpsConnector;
-
-        let https = HttpsConnector::new();
-        let client = hyper::Client::builder()
-            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
-            .build::<_, hyper::Body>(https);
-
-        let client = Client::with_http_client(client)
-            .with_url(&self.url)
-            .with_user(&self.user)
-            .with_password(&self.password)
-            .with_database(&self.database);
-        Ok(client)
     }
 }
 

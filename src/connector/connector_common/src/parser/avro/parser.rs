@@ -24,13 +24,13 @@ use risingwave_pb::plan_common::ColumnDesc;
 
 use super::schema_resolver::*;
 use super::util::avro_schema_to_column_descs;
-use crate::parser::schema_registry::{
-    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
-};
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::AccessImpl;
 use crate::parser::util::{read_schema_from_http, read_schema_from_local, read_schema_from_s3};
 use crate::parser::{AccessBuilder, EncodingProperties, EncodingType};
+use crate::schema::schema_registry::{
+    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
+};
 
 // Default avro access builder
 #[derive(Debug)]
@@ -220,6 +220,7 @@ mod test {
     use risingwave_common::types::{DataType, Date, Interval, ScalarImpl, Timestamptz};
     use risingwave_common::{error, try_match_expand};
     use risingwave_pb::catalog::StreamSourceInfo;
+    use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
     use url::Url;
 
     use super::{
@@ -232,7 +233,7 @@ mod test {
     use crate::parser::{
         AccessBuilderImpl, EncodingType, SourceStreamChunkBuilder, SpecificParserConfig,
     };
-    use crate::source::{SourceColumnDesc, SourceEncode, SourceFormat, SourceStruct};
+    use crate::source::SourceColumnDesc;
 
     fn test_data_path(file_name: &str) -> String {
         let curr_dir = env::current_dir().unwrap().into_os_string();
@@ -304,13 +305,11 @@ mod test {
         let info = StreamSourceInfo {
             row_schema_location: schema_path.clone(),
             use_schema_registry: false,
+            format: PbFormatType::Plain.into(),
+            row_encode: PbEncodeType::Avro.into(),
             ..Default::default()
         };
-        let parser_config = SpecificParserConfig::new(
-            SourceStruct::new(SourceFormat::Plain, SourceEncode::Avro),
-            &info,
-            &HashMap::new(),
-        )?;
+        let parser_config = SpecificParserConfig::new(&info, &HashMap::new())?;
         AvroParserConfig::new(parser_config.encoding_config).await
     }
 

@@ -23,11 +23,14 @@
 #![feature(iterator_try_collect)]
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
+#![feature(if_let_guard)]
 
 pub mod aws_auth;
 pub mod aws_utils;
 pub mod common;
 pub mod kafka;
+pub mod parser;
+pub mod schema;
 pub mod sink;
 
 use std::time::Duration;

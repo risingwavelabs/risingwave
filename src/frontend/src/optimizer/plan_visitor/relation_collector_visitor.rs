@@ -42,8 +42,10 @@ impl RelationCollectorVisitor {
     }
 }
 
-impl PlanVisitor<()> for RelationCollectorVisitor {
-    type DefaultBehavior = impl DefaultBehavior<()>;
+impl PlanVisitor for RelationCollectorVisitor {
+    type Result = ();
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     fn default_behavior() -> Self::DefaultBehavior {
         DefaultValue

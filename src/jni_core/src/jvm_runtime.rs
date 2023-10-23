@@ -95,7 +95,6 @@ impl JavaVmWrapper {
         let args_builder = InitArgsBuilder::new()
             // Pass the JNI API version (default is 8)
             .version(JNIVersion::V8)
-            .option("-ea")
             .option("-Dis_embedded_connector=true")
             .option(format!("-Djava.class.path={}", class_vec.join(":")))
             .option("-Xms16m")
