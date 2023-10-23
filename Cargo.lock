@@ -7923,6 +7923,7 @@ dependencies = [
  "risingwave_meta_node",
  "risingwave_pb",
  "risingwave_rpc_client",
+ "risingwave_sink_impl",
  "risingwave_sqlparser",
  "risingwave_sqlsmith",
  "serde",

@@ -40,6 +40,7 @@ risingwave_frontend = { workspace = true }
 risingwave_meta_node = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
+risingwave_sink_impl = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 risingwave_sqlsmith = { workspace = true }
 serde = "1.0.188"
