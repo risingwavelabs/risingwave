@@ -94,11 +94,9 @@ pub trait GenericPlanRef: Eq + Hash {
 }
 
 #[auto_impl::auto_impl(&)]
-pub trait PhysicalSpecific {
+pub trait PhysicalPlanRef: GenericPlanRef {
     fn distribution(&self) -> &Distribution;
 }
-
-pub trait PhysicalPlanRef = GenericPlanRef + PhysicalSpecific;
 
 pub trait GenericPlanNode {
     fn functional_dependency(&self) -> FunctionalDependencySet;

@@ -21,6 +21,7 @@ use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
 use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchDelete` implements [`super::LogicalDelete`]

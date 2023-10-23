@@ -45,9 +45,9 @@ use risingwave_pb::stream_plan::StreamNode as StreamPlanPb;
 use serde::Serialize;
 use smallvec::SmallVec;
 
-use self::batch::{BatchPlanRef, BatchSpecific};
-use self::generic::{GenericPlanRef, PhysicalPlanRef, PhysicalSpecific};
-use self::stream::{StreamPlanRef, StreamSpecific};
+use self::batch::BatchPlanRef;
+use self::generic::{GenericPlanRef, PhysicalPlanRef};
+use self::stream::StreamPlanRef;
 use self::utils::Distill;
 use super::property::{Distribution, FunctionalDependencySet, Order};
 
@@ -557,7 +557,7 @@ impl GenericPlanRef for PlanRef {
 //     }
 // }
 
-impl PhysicalSpecific for PlanRef {
+impl PhysicalPlanRef for PlanRef {
     fn distribution(&self) -> &Distribution {
         // self.plan_base().distribution()
         todo!()
@@ -582,7 +582,7 @@ impl PhysicalSpecific for PlanRef {
 //     }
 // }
 
-impl StreamSpecific for PlanRef {
+impl StreamPlanRef for PlanRef {
     fn append_only(&self) -> bool {
         self.plan_base().append_only()
     }
@@ -607,7 +607,7 @@ impl StreamSpecific for PlanRef {
 //     }
 // }
 
-impl BatchSpecific for PlanRef {
+impl BatchPlanRef for PlanRef {
     fn order(&self) -> &Order {
         // self.plan_base().order()
         todo!()

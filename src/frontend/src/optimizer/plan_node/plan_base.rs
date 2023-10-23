@@ -32,6 +32,11 @@ struct PhysicalCommonExtra {
     dist: Distribution,
 }
 
+trait GetPhysicalCommon {
+    fn physical(&self) -> &PhysicalCommonExtra;
+    fn physical_mut(&mut self) -> &mut PhysicalCommonExtra;
+}
+
 /// Extra fields for stream plan nodes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct StreamExtra {
@@ -48,23 +53,13 @@ pub struct StreamExtra {
     watermark_columns: FixedBitSet,
 }
 
-impl generic::PhysicalSpecific for StreamExtra {
-    fn distribution(&self) -> &Distribution {
-        &self.physical.dist
-    }
-}
-
-impl stream::StreamSpecific for StreamExtra {
-    fn append_only(&self) -> bool {
-        self.append_only
+impl GetPhysicalCommon for StreamExtra {
+    fn physical(&self) -> &PhysicalCommonExtra {
+        &self.physical
     }
 
-    fn emit_on_window_close(&self) -> bool {
-        self.emit_on_window_close
-    }
-
-    fn watermark_columns(&self) -> &FixedBitSet {
-        &self.watermark_columns
+    fn physical_mut(&mut self) -> &mut PhysicalCommonExtra {
+        &mut self.physical
     }
 }
 
@@ -79,15 +74,13 @@ pub struct BatchExtra {
     order: Order,
 }
 
-impl generic::PhysicalSpecific for BatchExtra {
-    fn distribution(&self) -> &Distribution {
-        &self.physical.dist
+impl GetPhysicalCommon for BatchExtra {
+    fn physical(&self) -> &PhysicalCommonExtra {
+        &self.physical
     }
-}
 
-impl batch::BatchSpecific for BatchExtra {
-    fn order(&self) -> &Order {
-        &self.order
+    fn physical_mut(&mut self) -> &mut PhysicalCommonExtra {
+        &mut self.physical
     }
 }
 
@@ -140,38 +133,32 @@ impl<C: ConventionMarker> generic::GenericPlanRef for PlanBase<C> {
     }
 }
 
-impl<C: ConventionMarker> generic::PhysicalSpecific for PlanBase<C>
+impl<C: ConventionMarker> generic::PhysicalPlanRef for PlanBase<C>
 where
-    C::Extra: generic::PhysicalSpecific,
+    C::Extra: GetPhysicalCommon,
 {
     fn distribution(&self) -> &Distribution {
-        &self.extra.distribution()
+        &self.extra.physical().dist
     }
 }
 
-impl<C: ConventionMarker> stream::StreamSpecific for PlanBase<C>
-where
-    C::Extra: stream::StreamSpecific,
-{
+impl stream::StreamPlanRef for PlanBase<Stream> {
     fn append_only(&self) -> bool {
-        self.extra.append_only()
+        self.extra.append_only
     }
 
     fn emit_on_window_close(&self) -> bool {
-        self.extra.emit_on_window_close()
+        self.extra.emit_on_window_close
     }
 
     fn watermark_columns(&self) -> &FixedBitSet {
-        &self.extra.watermark_columns()
+        &self.extra.watermark_columns
     }
 }
 
-impl<C: ConventionMarker> batch::BatchSpecific for PlanBase<C>
-where
-    C::Extra: batch::BatchSpecific,
-{
+impl batch::BatchPlanRef for PlanBase<Batch> {
     fn order(&self) -> &Order {
-        &self.extra.order()
+        &self.extra.order
     }
 }
 
@@ -361,28 +348,28 @@ impl GenericPlanRef for PlanBaseRef<'_> {
     }
 }
 
-impl PhysicalSpecific for PlanBaseRef<'_> {
+impl PhysicalPlanRef for PlanBaseRef<'_> {
     fn distribution(&self) -> &Distribution {
-        dispatch_plan_base!(self, [Stream, Batch], PhysicalSpecific::distribution)
+        dispatch_plan_base!(self, [Stream, Batch], PhysicalPlanRef::distribution)
     }
 }
 
-impl StreamSpecific for PlanBaseRef<'_> {
+impl StreamPlanRef for PlanBaseRef<'_> {
     fn append_only(&self) -> bool {
-        dispatch_plan_base!(self, [Stream], StreamSpecific::append_only)
+        dispatch_plan_base!(self, [Stream], StreamPlanRef::append_only)
     }
 
     fn emit_on_window_close(&self) -> bool {
-        dispatch_plan_base!(self, [Stream], StreamSpecific::emit_on_window_close)
+        dispatch_plan_base!(self, [Stream], StreamPlanRef::emit_on_window_close)
     }
 
     fn watermark_columns(&self) -> &FixedBitSet {
-        dispatch_plan_base!(self, [Stream], StreamSpecific::watermark_columns)
+        dispatch_plan_base!(self, [Stream], StreamPlanRef::watermark_columns)
     }
 }
 
-impl BatchSpecific for PlanBaseRef<'_> {
+impl BatchPlanRef for PlanBaseRef<'_> {
     fn order(&self) -> &Order {
-        dispatch_plan_base!(self, [Batch], BatchSpecific::order)
+        dispatch_plan_base!(self, [Batch], BatchPlanRef::order)
     }
 }
