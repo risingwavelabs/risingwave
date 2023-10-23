@@ -132,6 +132,7 @@ pub enum SinkEncode {
     Json,
     Protobuf,
     Avro,
+    Template,
 }
 
 impl SinkFormatDesc {
@@ -139,6 +140,7 @@ impl SinkFormatDesc {
         use crate::sink::kafka::KafkaSink;
         use crate::sink::kinesis::KinesisSink;
         use crate::sink::pulsar::PulsarSink;
+        use crate::sink::redis::RedisSink;
         use crate::sink::Sink as _;
 
         let format = match r#type {
@@ -153,9 +155,10 @@ impl SinkFormatDesc {
             }
         };
         let encode = match connector {
-            KafkaSink::SINK_NAME | KinesisSink::SINK_NAME | PulsarSink::SINK_NAME => {
-                SinkEncode::Json
-            }
+            KafkaSink::SINK_NAME
+            | KinesisSink::SINK_NAME
+            | PulsarSink::SINK_NAME
+            | RedisSink::SINK_NAME => SinkEncode::Json,
             _ => return Ok(None),
         };
         Ok(Some(Self {
@@ -177,6 +180,7 @@ impl SinkFormatDesc {
             SinkEncode::Json => E::Json,
             SinkEncode::Protobuf => E::Protobuf,
             SinkEncode::Avro => E::Avro,
+            SinkEncode::Template => E::Template,
         };
         let options = self
             .options
@@ -212,6 +216,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
         let encode = match value.encode() {
             E::Json => SinkEncode::Json,
             E::Protobuf => SinkEncode::Protobuf,
+            E::Template => SinkEncode::Template,
             E::Avro => SinkEncode::Avro,
             e @ (E::Unspecified | E::Native | E::Csv | E::Bytes) => {
                 return Err(SinkError::Config(anyhow!(

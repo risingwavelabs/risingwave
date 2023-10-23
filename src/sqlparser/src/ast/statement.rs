@@ -294,6 +294,7 @@ pub enum Encode {
     Json,     // Keyword::JSON
     Bytes,    // Keyword::BYTES
     Native,
+    Template,
 }
 
 // TODO: unify with `from_keyword`
@@ -309,6 +310,7 @@ impl fmt::Display for Encode {
                 Encode::Json => "JSON",
                 Encode::Bytes => "BYTES",
                 Encode::Native => "NATIVE",
+                Encode::Template => "TEMPLATE",
             }
         )
     }
@@ -322,13 +324,12 @@ impl Encode {
             "CSV" => Encode::Csv,
             "PROTOBUF" => Encode::Protobuf,
             "JSON" => Encode::Json,
+            "TEMPLATE" => Encode::Template,
             "NATIVE" => Encode::Native, // used internally for schema change
-            _ => {
-                return Err(ParserError::ParserError(
-                    "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE after Encode"
-                        .to_string(),
-                ))
-            }
+            _ => return Err(ParserError::ParserError(
+                "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE after Encode"
+                    .to_string(),
+            )),
         })
     }
 }
