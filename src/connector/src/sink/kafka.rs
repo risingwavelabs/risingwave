@@ -314,6 +314,7 @@ impl Sink for KafkaSink {
             self.pk_indices.clone(),
             self.db_name.clone(),
             self.sink_from_name.clone(),
+            &self.config.common.topic,
         )
         .await?;
         KafkaLogSinker::new(self.config.clone(), formatter).await
@@ -334,6 +335,7 @@ impl Sink for KafkaSink {
             self.pk_indices.clone(),
             self.db_name.clone(),
             self.sink_from_name.clone(),
+            &self.config.common.topic,
         )
         .await?;
 

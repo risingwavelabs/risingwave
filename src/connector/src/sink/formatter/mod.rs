@@ -29,7 +29,9 @@ pub use upsert::UpsertFormatter;
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
 use super::encoder::template::TemplateEncoder;
 use super::encoder::KafkaConnectParams;
-use crate::sink::encoder::{JsonEncoder, ProtoEncoder, TimestampHandlingMode};
+use crate::sink::encoder::{
+    AvroEncoder, AvroHeader, JsonEncoder, ProtoEncoder, TimestampHandlingMode,
+};
 
 /// Transforms a `StreamChunk` into a sequence of key-value pairs according a specific format,
 /// for example append-only, upsert or debezium.
@@ -66,6 +68,7 @@ pub enum SinkFormatterImpl {
     AppendOnlyJson(AppendOnlyFormatter<JsonEncoder, JsonEncoder>),
     AppendOnlyProto(AppendOnlyFormatter<JsonEncoder, ProtoEncoder>),
     UpsertJson(UpsertFormatter<JsonEncoder, JsonEncoder>),
+    UpsertAvro(UpsertFormatter<AvroEncoder, AvroEncoder>),
     DebeziumJson(DebeziumJsonFormatter),
     AppendOnlyTemplate(AppendOnlyFormatter<TemplateEncoder, TemplateEncoder>),
     UpsertTemplate(UpsertFormatter<TemplateEncoder, TemplateEncoder>),
@@ -78,6 +81,7 @@ impl SinkFormatterImpl {
         pk_indices: Vec<usize>,
         db_name: String,
         sink_from_name: String,
+        topic: &str,
     ) -> Result<Self> {
         let err_unsupported = || {
             Err(SinkError::Config(anyhow!(
@@ -131,39 +135,62 @@ impl SinkFormatterImpl {
                 )))
             }
             SinkFormat::Upsert => {
-                if format_desc.encode != SinkEncode::Json {
-                    return err_unsupported();
-                }
+                match format_desc.encode {
+                    SinkEncode::Json => {
+                        let mut key_encoder = JsonEncoder::new(
+                            schema.clone(),
+                            Some(pk_indices),
+                            TimestampHandlingMode::Milli,
+                        );
+                        let mut val_encoder =
+                            JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
 
-                let mut key_encoder = JsonEncoder::new(
-                    schema.clone(),
-                    Some(pk_indices),
-                    TimestampHandlingMode::Milli,
-                );
-                let mut val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
+                        if let Some(s) = format_desc.options.get("schemas.enable") {
+                            match s.to_lowercase().parse::<bool>() {
+                                Ok(true) => {
+                                    let kafka_connect = KafkaConnectParams {
+                                        schema_name: format!("{}.{}", db_name, sink_from_name),
+                                    };
+                                    key_encoder =
+                                        key_encoder.with_kafka_connect(kafka_connect.clone());
+                                    val_encoder = val_encoder.with_kafka_connect(kafka_connect);
+                                }
+                                Ok(false) => {}
+                                _ => {
+                                    return Err(SinkError::Config(anyhow!(
+                                        "schemas.enable is expected to be `true` or `false`, got {}",
+                                        s
+                                    )));
+                                }
+                            }
+                        };
 
-                if let Some(s) = format_desc.options.get("schemas.enable") {
-                    match s.to_lowercase().parse::<bool>() {
-                        Ok(true) => {
-                            let kafka_connect = KafkaConnectParams {
-                                schema_name: format!("{}.{}", db_name, sink_from_name),
-                            };
-                            key_encoder = key_encoder.with_kafka_connect(kafka_connect.clone());
-                            val_encoder = val_encoder.with_kafka_connect(kafka_connect);
-                        }
-                        Ok(false) => {}
-                        _ => {
-                            return Err(SinkError::Config(anyhow!(
-                                "schemas.enable is expected to be `true` or `false`, got {}",
-                                s
-                            )));
-                        }
+                        // Initialize the upsert_stream
+                        let formatter = UpsertFormatter::new(key_encoder, val_encoder);
+                        Ok(SinkFormatterImpl::UpsertJson(formatter))
                     }
-                };
-
-                // Initialize the upsert_stream
-                let formatter = UpsertFormatter::new(key_encoder, val_encoder);
-                Ok(SinkFormatterImpl::UpsertJson(formatter))
+                    SinkEncode::Avro => {
+                        let (key_schema, val_schema) =
+                            crate::schema::avro::fetch_schema(&format_desc.options, topic)
+                                .await
+                                .map_err(|e| SinkError::Config(anyhow!("{e:?}")))?;
+                        let key_encoder = AvroEncoder::new(
+                            schema.clone(),
+                            Some(pk_indices),
+                            key_schema.schema,
+                            AvroHeader::ConfluentSchemaRegistry(key_schema.id),
+                        )?;
+                        let val_encoder = AvroEncoder::new(
+                            schema.clone(),
+                            None,
+                            val_schema.schema,
+                            AvroHeader::ConfluentSchemaRegistry(val_schema.id),
+                        )?;
+                        let formatter = UpsertFormatter::new(key_encoder, val_encoder);
+                        Ok(SinkFormatterImpl::UpsertAvro(formatter))
+                    }
+                    SinkEncode::Protobuf => err_unsupported(),
+                }
             }
         }
     }
@@ -221,6 +248,22 @@ macro_rules! dispatch_sink_formatter_impl {
             SinkFormatterImpl::AppendOnlyJson($name) => $body,
             SinkFormatterImpl::AppendOnlyProto($name) => $body,
             SinkFormatterImpl::UpsertJson($name) => $body,
+            SinkFormatterImpl::UpsertAvro($name) => $body,
+            SinkFormatterImpl::DebeziumJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyTemplate($name) => $body,
+            SinkFormatterImpl::UpsertTemplate($name) => $body,
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! dispatch_sink_formatter_str_key_impl {
+    ($impl:expr, $name:ident, $body:expr) => {
+        match $impl {
+            SinkFormatterImpl::AppendOnlyJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyProto($name) => $body,
+            SinkFormatterImpl::UpsertJson($name) => $body,
+            SinkFormatterImpl::UpsertAvro(_) => unreachable!(),
             SinkFormatterImpl::DebeziumJson($name) => $body,
             SinkFormatterImpl::AppendOnlyTemplate($name) => $body,
             SinkFormatterImpl::UpsertTemplate($name) => $body,

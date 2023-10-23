@@ -33,7 +33,7 @@ use crate::common::PulsarCommon;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::writer::{FormattedSink, LogSinkerOf, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result};
-use crate::{deserialize_duration_from_string, dispatch_sink_formatter_impl};
+use crate::{deserialize_duration_from_string, dispatch_sink_formatter_str_key_impl};
 
 pub const PULSAR_SINK: &str = "pulsar";
 
@@ -187,6 +187,7 @@ impl Sink for PulsarSink {
             self.downstream_pk.clone(),
             self.db_name.clone(),
             self.sink_from_name.clone(),
+            &self.config.common.topic,
         )
         .await?;
 
@@ -219,9 +220,15 @@ impl PulsarSinkWriter {
         db_name: String,
         sink_from_name: String,
     ) -> Result<Self> {
-        let formatter =
-            SinkFormatterImpl::new(format_desc, schema, downstream_pk, db_name, sink_from_name)
-                .await?;
+        let formatter = SinkFormatterImpl::new(
+            format_desc,
+            schema,
+            downstream_pk,
+            db_name,
+            sink_from_name,
+            &config.common.topic,
+        )
+        .await?;
         let pulsar = config.common.build_client().await?;
         let producer = build_pulsar_producer(&pulsar, &config).await?;
         Ok(Self {
@@ -324,7 +331,7 @@ impl FormattedSink for PulsarPayloadWriter {
 #[async_trait]
 impl SinkWriter for PulsarSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        dispatch_sink_formatter_impl!(&self.formatter, formatter, {
+        dispatch_sink_formatter_str_key_impl!(&self.formatter, formatter, {
             self.payload_writer.write_chunk(chunk, formatter).await
         })
     }

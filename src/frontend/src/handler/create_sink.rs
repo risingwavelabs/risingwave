@@ -267,7 +267,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
         convert_args!(hashmap!(
                 KafkaSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf],
-                    Format::Upsert => vec![Encode::Json],
+                    Format::Upsert => vec![Encode::Json, Encode::Avro],
                     Format::Debezium => vec![Encode::Json],
                 ),
                 KinesisSink::SINK_NAME => hashmap!(

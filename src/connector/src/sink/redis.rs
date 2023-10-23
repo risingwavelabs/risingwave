@@ -27,7 +27,7 @@ use serde_with::serde_as;
 use super::formatter::SinkFormatterImpl;
 use super::writer::FormattedSink;
 use super::{SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
-use crate::dispatch_sink_formatter_impl;
+use crate::dispatch_sink_formatter_str_key_impl;
 use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
@@ -270,7 +270,7 @@ impl RedisSinkWriter {
 #[async_trait]
 impl SinkWriter for RedisSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        dispatch_sink_formatter_impl!(&self.formatter, formatter, {
+        dispatch_sink_formatter_str_key_impl!(&self.formatter, formatter, {
             self.payload_writer.write_chunk(chunk, formatter).await
         })
     }
