@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod protobuf;
+pub mod schema_registry;
 
 const MESSAGE_NAME_KEY: &str = "message";
 const SCHEMA_LOCATION_KEY: &str = "schema.location";

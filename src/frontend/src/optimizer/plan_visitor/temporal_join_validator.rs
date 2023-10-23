@@ -29,8 +29,10 @@ impl TemporalJoinValidator {
     }
 }
 
-impl PlanVisitor<bool> for TemporalJoinValidator {
-    type DefaultBehavior = impl DefaultBehavior<bool>;
+impl PlanVisitor for TemporalJoinValidator {
+    type Result = bool;
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     fn default_behavior() -> Self::DefaultBehavior {
         Merge(|a, b| a | b)

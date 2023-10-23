@@ -36,6 +36,7 @@ pub mod writer;
 use std::collections::HashMap;
 
 use ::clickhouse::error::Error as ClickHouseError;
+use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_common::buffer::Bitmap;
@@ -379,6 +380,8 @@ pub enum SinkError {
     Coordinator(anyhow::Error),
     #[error("ClickHouse error: {0}")]
     ClickHouse(String),
+    #[error("Redis error: {0}")]
+    Redis(String),
     #[error("Nats error: {0}")]
     Nats(anyhow::Error),
     #[error("Doris http error: {0}")]
@@ -406,6 +409,12 @@ impl From<RpcError> for SinkError {
 impl From<ClickHouseError> for SinkError {
     fn from(value: ClickHouseError) -> Self {
         SinkError::ClickHouse(format!("{}", value))
+    }
+}
+
+impl From<RedisError> for SinkError {
+    fn from(value: RedisError) -> Self {
+        SinkError::Redis(format!("{}", value))
     }
 }
 

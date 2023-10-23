@@ -14,9 +14,10 @@
 
 use core::fmt::Debug;
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 use anyhow::anyhow;
-use clickhouse::{Client, Row as ClickHouseRow};
+use clickhouse::{Client, Client as ClickHouseClient, Row as ClickHouseRow};
 use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -28,7 +29,6 @@ use serde_derive::Deserialize;
 use serde_with::serde_as;
 
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
-use crate::common::ClickHouseCommon;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
@@ -40,6 +40,40 @@ use crate::sink::{
 
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
 const BUFFER_SIZE: usize = 1024;
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ClickHouseCommon {
+    #[serde(rename = "clickhouse.url")]
+    pub url: String,
+    #[serde(rename = "clickhouse.user")]
+    pub user: String,
+    #[serde(rename = "clickhouse.password")]
+    pub password: String,
+    #[serde(rename = "clickhouse.database")]
+    pub database: String,
+    #[serde(rename = "clickhouse.table")]
+    pub table: String,
+}
+
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
+
+impl ClickHouseCommon {
+    pub(crate) fn build_client(&self) -> anyhow::Result<ClickHouseClient> {
+        use hyper_tls::HttpsConnector;
+
+        let https = HttpsConnector::new();
+        let client = hyper::Client::builder()
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+            .build::<_, hyper::Body>(https);
+
+        let client = ClickHouseClient::with_http_client(client)
+            .with_url(&self.url)
+            .with_user(&self.user)
+            .with_password(&self.password)
+            .with_database(&self.database);
+        Ok(client)
+    }
+}
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]

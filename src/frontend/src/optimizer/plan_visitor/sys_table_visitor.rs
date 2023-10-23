@@ -27,8 +27,10 @@ impl SysTableVisitor {
     }
 }
 
-impl PlanVisitor<bool> for SysTableVisitor {
-    type DefaultBehavior = impl DefaultBehavior<bool>;
+impl PlanVisitor for SysTableVisitor {
+    type Result = bool;
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     fn default_behavior() -> Self::DefaultBehavior {
         Merge(|a, b| a | b)
