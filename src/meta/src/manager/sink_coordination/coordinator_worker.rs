@@ -57,8 +57,7 @@ impl CoordinatorWorker {
         first_writer_request: NewSinkWriterRequest,
         request_rx: UnboundedReceiver<NewSinkWriterRequest>,
     ) {
-        let coordinator_result = build_box_coordinator(first_writer_request.param.clone()).await;
-        let coordinator = match coordinator_result {
+        let coordinator = match build_box_coordinator(first_writer_request.param.clone()).await {
             Ok(coordinator) => coordinator,
             Err(e) => {
                 error!(
