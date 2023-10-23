@@ -408,7 +408,6 @@ pub fn start_compactor(
                     _ = periodic_event_interval.tick() => {
                         let progress_list = get_task_progress(task_progress.clone());
 
-
                         if let Err(e) = request_sender.send(SubscribeCompactionEventRequest {
                             event: Some(RequestEvent::HeartBeat(
                                 HeartBeat {

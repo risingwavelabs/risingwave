@@ -13,70 +13,50 @@
 // limitations under the License.
 
 use risingwave_common::array::{ArrayError, ListRef};
-use risingwave_common::types::{CheckedAdd, Decimal, Scalar, ScalarImpl, ScalarRefImpl};
+use risingwave_common::types::{CheckedAdd, Decimal, ScalarRefImpl};
 use risingwave_expr::{function, ExprError, Result};
 
-/// `array_sum(int2`[]) -> int8
-/// `array_sum(int4`[]) -> int8
-#[function("array_sum(list) -> int8")]
-#[function("array_sum(list) -> float4")]
-#[function("array_sum(list) -> float8")]
-/// `array_sum(int8`[]) -> decimal
-/// `array_sum(decimal`[]) -> decimal
-#[function("array_sum(list) -> decimal")]
-#[function("array_sum(list) -> interval")]
-fn array_sum<T: Scalar>(list: ListRef<'_>) -> Result<Option<T>>
-where
-    T: Default + for<'a> TryFrom<ScalarRefImpl<'a>, Error = ArrayError> + CheckedAdd<Output = T>,
-{
-    let flag = match list.iter().flatten().next() {
-        Some(v) => match v {
-            ScalarRefImpl::Int16(_) | ScalarRefImpl::Int32(_) => 1,
-            ScalarRefImpl::Int64(_) => 2,
-            _ => 0,
-        },
-        None => return Ok(None),
-    };
+#[function("array_sum(int2[]) -> int8")]
+fn array_sum_int2(list: ListRef<'_>) -> Result<Option<i64>> {
+    array_sum_general::<i16, i64>(list)
+}
 
-    if flag != 0 {
-        match flag {
-            1 => {
-                let mut sum = 0;
-                for e in list.iter().flatten() {
-                    sum = sum
-                        .checked_add(match e {
-                            ScalarRefImpl::Int16(v) => v as i64,
-                            ScalarRefImpl::Int32(v) => v as i64,
-                            _ => panic!("Expect ScalarRefImpl::Int16 or ScalarRefImpl::Int32"),
-                        })
-                        .ok_or_else(|| ExprError::NumericOutOfRange)?;
-                }
-                Ok(Some(ScalarImpl::from(sum).try_into()?))
-            }
-            2 => {
-                let mut sum = Decimal::Normalized(0.into());
-                for e in list.iter().flatten() {
-                    sum = sum
-                        .checked_add(match e {
-                            ScalarRefImpl::Int64(v) => Decimal::Normalized(v.into()),
-                            ScalarRefImpl::Decimal(v) => v,
-                            // FIXME: We can't panic here due to the macro expansion
-                            _ => Decimal::Normalized(0.into()),
-                        })
-                        .ok_or_else(|| ExprError::NumericOutOfRange)?;
-                }
-                Ok(Some(ScalarImpl::from(sum).try_into()?))
-            }
-            _ => Ok(None),
-        }
-    } else {
-        let mut sum = T::default();
-        for e in list.iter().flatten() {
-            let v = e.try_into()?;
-            sum = sum
-                .checked_add(v)
-                .ok_or_else(|| ExprError::NumericOutOfRange)?;
-        }
-        Ok(Some(sum))
+#[function("array_sum(int4[]) -> int8")]
+fn array_sum_int4(list: ListRef<'_>) -> Result<Option<i64>> {
+    array_sum_general::<i32, i64>(list)
+}
+
+#[function("array_sum(int8[]) -> decimal")]
+fn array_sum_int8(list: ListRef<'_>) -> Result<Option<Decimal>> {
+    array_sum_general::<i64, Decimal>(list)
+}
+
+#[function("array_sum(float4[]) -> float4")]
+#[function("array_sum(float8[]) -> float8")]
+#[function("array_sum(decimal[]) -> decimal")]
+#[function("array_sum(interval[]) -> interval")]
+fn array_sum<T>(list: ListRef<'_>) -> Result<Option<T>>
+where
+    T: for<'a> TryFrom<ScalarRefImpl<'a>, Error = ArrayError>,
+    T: Default + From<T> + CheckedAdd<Output = T>,
+{
+    array_sum_general::<T, T>(list)
+}
+
+fn array_sum_general<S, T>(list: ListRef<'_>) -> Result<Option<T>>
+where
+    S: for<'a> TryFrom<ScalarRefImpl<'a>, Error = ArrayError>,
+    T: Default + From<S> + CheckedAdd<Output = T>,
+{
+    if list.iter().flatten().next().is_none() {
+        return Ok(None);
     }
+    let mut sum = T::default();
+    for e in list.iter().flatten() {
+        let v: S = e.try_into()?;
+        sum = sum
+            .checked_add(v.into())
+            .ok_or_else(|| ExprError::NumericOutOfRange)?;
+    }
+    Ok(Some(sum))
 }

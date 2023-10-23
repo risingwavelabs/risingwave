@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use base64::engine::general_purpose;
 use base64::Engine as _;
 use chrono::{Datelike, Timelike};
 use indexmap::IndexMap;
+use itertools::Itertools;
 use risingwave_common::array::{ArrayError, ArrayResult};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
@@ -25,7 +27,10 @@ use risingwave_common::types::{DataType, DatumRef, Decimal, ScalarRefImpl, ToTex
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_json::{json, Map, Value};
 
-use super::{CustomJsonType, Result, RowEncoder, SerTo, TimestampHandlingMode};
+use super::{
+    CustomJsonType, KafkaConnectParams, KafkaConnectParamsRef, Result, RowEncoder, SerTo,
+    TimestampHandlingMode,
+};
 use crate::sink::SinkError;
 
 pub struct JsonEncoder {
@@ -33,6 +38,7 @@ pub struct JsonEncoder {
     col_indices: Option<Vec<usize>>,
     timestamp_handling_mode: TimestampHandlingMode,
     custom_json_type: CustomJsonType,
+    kafka_connect: Option<KafkaConnectParamsRef>,
 }
 
 impl JsonEncoder {
@@ -46,6 +52,7 @@ impl JsonEncoder {
             col_indices,
             timestamp_handling_mode,
             custom_json_type: CustomJsonType::None,
+            kafka_connect: None,
         }
     }
 
@@ -60,6 +67,14 @@ impl JsonEncoder {
             col_indices,
             timestamp_handling_mode,
             custom_json_type: CustomJsonType::Doris(map),
+            kafka_connect: None,
+        }
+    }
+
+    pub fn with_kafka_connect(self, kafka_connect: KafkaConnectParams) -> Self {
+        Self {
+            kafka_connect: Some(Arc::new(kafka_connect)),
+            ..self
         }
     }
 }
@@ -81,19 +96,29 @@ impl RowEncoder for JsonEncoder {
         col_indices: impl Iterator<Item = usize>,
     ) -> Result<Self::Output> {
         let mut mappings = Map::with_capacity(self.schema.len());
-        for idx in col_indices {
-            let field = &self.schema[idx];
+        let col_indices = col_indices.collect_vec();
+        for idx in &col_indices {
+            let field = &self.schema[*idx];
             let key = field.name.clone();
             let value = datum_to_json_object(
                 field,
-                row.datum_at(idx),
+                row.datum_at(*idx),
                 self.timestamp_handling_mode,
                 &self.custom_json_type,
             )
-            .map_err(|e| SinkError::JsonParse(e.to_string()))?;
+            .map_err(|e| SinkError::Encode(e.to_string()))?;
             mappings.insert(key, value);
         }
-        Ok(mappings)
+
+        Ok(if let Some(param) = &self.kafka_connect {
+            json_converter_with_schema(
+                Value::Object(mappings),
+                param.schema_name.to_owned(),
+                col_indices.into_iter().map(|i| &self.schema[i]),
+            )
+        } else {
+            mappings
+        })
     }
 }
 
@@ -261,6 +286,79 @@ fn datum_to_json_object(
     };
 
     Ok(value)
+}
+
+fn json_converter_with_schema<'a>(
+    object: Value,
+    name: String,
+    fields: impl Iterator<Item = &'a Field>,
+) -> Map<String, Value> {
+    let mut mapping = Map::with_capacity(2);
+    mapping.insert(
+        "schema".to_string(),
+        json!({
+            "type": "struct",
+            "fields": fields.map(|field| {
+                let mut mapping = type_as_json_schema(&field.data_type);
+                mapping.insert("field".to_string(), json!(field.name));
+                mapping
+            }).collect_vec(),
+            "optional": false,
+            "name": name,
+        }),
+    );
+    mapping.insert("payload".to_string(), object);
+    mapping
+}
+
+// reference: https://github.com/apache/kafka/blob/80982c4ae3fe6be127b48ec09caff11ab5f87c69/connect/json/src/main/java/org/apache/kafka/connect/json/JsonSchema.java#L39
+pub(crate) fn schema_type_mapping(rw_type: &DataType) -> &'static str {
+    match rw_type {
+        DataType::Boolean => "boolean",
+        DataType::Int16 => "int16",
+        DataType::Int32 => "int32",
+        DataType::Int64 => "int64",
+        DataType::Float32 => "float",
+        DataType::Float64 => "double",
+        DataType::Decimal => "string",
+        DataType::Date => "int32",
+        DataType::Varchar => "string",
+        DataType::Time => "int64",
+        DataType::Timestamp => "int64",
+        DataType::Timestamptz => "string",
+        DataType::Interval => "string",
+        DataType::Struct(_) => "struct",
+        DataType::List(_) => "array",
+        DataType::Bytea => "bytes",
+        DataType::Jsonb => "string",
+        DataType::Serial => "int32",
+        DataType::Int256 => "string",
+    }
+}
+
+fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
+    let mut mapping = Map::with_capacity(4); // type + optional + fields/items + field
+    mapping.insert("type".to_string(), json!(schema_type_mapping(rw_type)));
+    mapping.insert("optional".to_string(), json!(true));
+    match rw_type {
+        DataType::Struct(struct_type) => {
+            let sub_fields = struct_type
+                .iter()
+                .map(|(sub_name, sub_type)| {
+                    let mut sub_mapping = type_as_json_schema(sub_type);
+                    sub_mapping.insert("field".to_string(), json!(sub_name));
+                    sub_mapping
+                })
+                .collect_vec();
+            mapping.insert("fields".to_string(), json!(sub_fields));
+        }
+        DataType::List(sub_type) => {
+            mapping.insert("items".to_string(), json!(type_as_json_schema(sub_type)));
+        }
+        _ => {}
+    }
+
+    mapping
 }
 
 #[cfg(test)]
@@ -443,5 +541,136 @@ mod tests {
         )
         .unwrap();
         assert_eq!(interval_value, json!("{\"v3\":3,\"v2\":2,\"v1\":1}"));
+    }
+
+    #[test]
+    fn test_generate_json_converter_schema() {
+        let mock_field = Field {
+            data_type: DataType::Boolean,
+            name: Default::default(),
+            sub_fields: Default::default(),
+            type_name: Default::default(),
+        };
+        let fields = vec![
+            Field {
+                data_type: DataType::Boolean,
+                name: "v1".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Int16,
+                name: "v2".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Int32,
+                name: "v3".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Float32,
+                name: "v4".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Decimal,
+                name: "v5".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Date,
+                name: "v6".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "v7".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Time,
+                name: "v8".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Interval,
+                name: "v9".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Struct(StructType::new(vec![
+                    ("a", DataType::Timestamp),
+                    ("b", DataType::Timestamptz),
+                    (
+                        "c",
+                        DataType::Struct(StructType::new(vec![
+                            ("aa", DataType::Int64),
+                            ("bb", DataType::Float64),
+                        ])),
+                    ),
+                ])),
+                name: "v10".into(),
+                sub_fields: vec![
+                    Field {
+                        data_type: DataType::Timestamp,
+                        name: "a".into(),
+                        ..mock_field.clone()
+                    },
+                    Field {
+                        data_type: DataType::Timestamptz,
+                        name: "b".into(),
+                        ..mock_field.clone()
+                    },
+                    Field {
+                        data_type: DataType::Struct(StructType::new(vec![
+                            ("aa", DataType::Int64),
+                            ("bb", DataType::Float64),
+                        ])),
+                        name: "c".into(),
+                        sub_fields: vec![
+                            Field {
+                                data_type: DataType::Int64,
+                                name: "aa".into(),
+                                ..mock_field.clone()
+                            },
+                            Field {
+                                data_type: DataType::Float64,
+                                name: "bb".into(),
+                                ..mock_field.clone()
+                            },
+                        ],
+                        ..mock_field.clone()
+                    },
+                ],
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::List(Box::new(DataType::List(Box::new(DataType::Struct(
+                    StructType::new(vec![("aa", DataType::Int64), ("bb", DataType::Float64)]),
+                ))))),
+                name: "v11".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Jsonb,
+                name: "12".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Serial,
+                name: "13".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Int256,
+                name: "14".into(),
+                ..mock_field.clone()
+            },
+        ];
+        let schema = json_converter_with_schema(json!({}), "test".to_owned(), fields.iter())
+            ["schema"]
+            .to_string();
+        let ans = r#"{"fields":[{"field":"v1","optional":true,"type":"boolean"},{"field":"v2","optional":true,"type":"int16"},{"field":"v3","optional":true,"type":"int32"},{"field":"v4","optional":true,"type":"float"},{"field":"v5","optional":true,"type":"string"},{"field":"v6","optional":true,"type":"int32"},{"field":"v7","optional":true,"type":"string"},{"field":"v8","optional":true,"type":"int64"},{"field":"v9","optional":true,"type":"string"},{"field":"v10","fields":[{"field":"a","optional":true,"type":"int64"},{"field":"b","optional":true,"type":"string"},{"field":"c","fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"}],"optional":true,"type":"struct"},{"field":"v11","items":{"items":{"fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"},"optional":true,"type":"array"},"optional":true,"type":"array"},{"field":"12","optional":true,"type":"string"},{"field":"13","optional":true,"type":"int32"},{"field":"14","optional":true,"type":"string"}],"name":"test","optional":false,"type":"struct"}"#;
+        assert_eq!(schema, ans);
     }
 }

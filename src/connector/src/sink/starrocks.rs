@@ -36,7 +36,6 @@ use super::doris_starrocks_connector::{
 use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
 use super::writer::LogSinkerOf;
 use super::{SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
-use crate::common::StarrocksCommon;
 use crate::sink::writer::SinkWriterExt;
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
 
@@ -44,6 +43,25 @@ pub const STARROCKS_SINK: &str = "starrocks";
 const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";
 const STARROCK_MYSQL_MAX_ALLOWED_PACKET: usize = 1024;
 const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct StarrocksCommon {
+    #[serde(rename = "starrocks.host")]
+    pub host: String,
+    #[serde(rename = "starrocks.mysqlport")]
+    pub mysql_port: String,
+    #[serde(rename = "starrocks.httpport")]
+    pub http_port: String,
+    #[serde(rename = "starrocks.user")]
+    pub user: String,
+    #[serde(rename = "starrocks.password")]
+    pub password: String,
+    #[serde(rename = "starrocks.database")]
+    pub database: String,
+    #[serde(rename = "starrocks.table")]
+    pub table: String,
+}
+
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
 pub struct StarrocksConfig {

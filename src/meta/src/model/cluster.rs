@@ -128,8 +128,14 @@ const CLUSTER_ID_KEY: &[u8] = "cluster_id".as_bytes();
 #[derive(Clone, Debug)]
 pub struct ClusterId(String);
 
+impl Default for ClusterId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClusterId {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self(Uuid::new_v4().to_string())
     }
 
@@ -139,15 +145,13 @@ impl ClusterId {
         ))
     }
 
-    pub(crate) async fn from_meta_store<S: MetaStore>(
+    pub async fn from_meta_store<S: MetaStore>(
         meta_store: &S,
     ) -> MetadataModelResult<Option<Self>> {
         Self::from_snapshot::<S>(&meta_store.snapshot().await).await
     }
 
-    pub(crate) async fn from_snapshot<S: MetaStore>(
-        s: &S::Snapshot,
-    ) -> MetadataModelResult<Option<Self>> {
+    pub async fn from_snapshot<S: MetaStore>(s: &S::Snapshot) -> MetadataModelResult<Option<Self>> {
         match s.get_cf(CLUSTER_ID_CF_NAME, CLUSTER_ID_KEY).await {
             Ok(bytes) => Ok(Some(Self::from_bytes(bytes)?)),
             Err(e) => match e {
@@ -157,10 +161,7 @@ impl ClusterId {
         }
     }
 
-    pub(crate) async fn put_at_meta_store<S: MetaStore>(
-        &self,
-        meta_store: &S,
-    ) -> MetadataModelResult<()> {
+    pub async fn put_at_meta_store<S: MetaStore>(&self, meta_store: &S) -> MetadataModelResult<()> {
         Ok(meta_store
             .put_cf(
                 CLUSTER_ID_CF_NAME,

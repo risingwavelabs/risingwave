@@ -882,7 +882,7 @@ pub async fn parse_remote_object_store(
         }
         other => {
             unimplemented!(
-                "{} remote object store only supports s3, minio, disk, memory, and memory-shared for now.",
+                "{} remote object store only supports s3, minio, gcs, oss, cos, azure blob, hdfs, disk, memory, and memory-shared.",
                 other
             )
         }

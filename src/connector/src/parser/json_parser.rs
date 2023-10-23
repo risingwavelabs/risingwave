@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use apache_avro::Schema;
+use itertools::{Either, Itertools};
 use jst::{convert_avro, Context};
 use risingwave_common::error::ErrorCode::{self, InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -22,16 +23,17 @@ use risingwave_common::try_match_expand;
 use risingwave_pb::plan_common::ColumnDesc;
 
 use super::avro::schema_resolver::ConfluentSchemaResolver;
-use super::schema_registry::Client;
 use super::util::{get_kafka_topic, read_schema_from_http, read_schema_from_local};
 use super::{EncodingProperties, SchemaRegistryAuth, SpecificParserConfig};
 use crate::only_parse_payload;
 use crate::parser::avro::util::avro_schema_to_column_descs;
-use crate::parser::schema_registry::handle_sr_list;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_accessor_on_stream_chunk_writer;
 use crate::parser::unified::AccessImpl;
-use crate::parser::{AccessBuilder, ByteStreamSourceParser, SourceStreamChunkRowWriter};
+use crate::parser::{
+    AccessBuilder, ByteStreamSourceParser, ParserFormat, SourceStreamChunkRowWriter,
+};
+use crate::schema::schema_registry::{handle_sr_list, Client};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
@@ -111,29 +113,27 @@ impl JsonParser {
         let value = simd_json::to_borrowed_value(&mut payload[self.payload_start_idx..])
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
         let values = if let simd_json::BorrowedValue::Array(arr) = value {
-            arr
+            Either::Left(arr.into_iter())
         } else {
-            vec![value]
+            Either::Right(std::iter::once(value))
         };
+
         let mut errors = Vec::new();
-        let mut guard = None;
         for value in values {
             let accessor = JsonAccess::new(value);
             match apply_row_accessor_on_stream_chunk_writer(accessor, &mut writer) {
-                Ok(this_guard) => guard = Some(this_guard),
+                Ok(_) => {}
                 Err(err) => errors.push(err),
             }
         }
 
-        if let Some(guard) = guard {
-            if !errors.is_empty() {
-                tracing::error!(?errors, "failed to parse some columns");
-            }
-            Ok(guard)
+        if errors.is_empty() {
+            Ok(())
         } else {
             Err(RwError::from(ErrorCode::InternalError(format!(
-                "failed to parse all columns: {:?}",
-                errors
+                "failed to parse {} row(s) in a single json message: {}",
+                errors.len(),
+                errors.iter().join(", ")
             ))))
         }
     }
@@ -180,6 +180,10 @@ impl ByteStreamSourceParser for JsonParser {
 
     fn source_ctx(&self) -> &SourceContext {
         &self.source_ctx
+    }
+
+    fn parser_format(&self) -> ParserFormat {
+        ParserFormat::Json
     }
 
     async fn parse_one<'a>(

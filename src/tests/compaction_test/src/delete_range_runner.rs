@@ -91,7 +91,8 @@ pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output
 }
 pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()> {
     let config = load_config(&opts.config_path, NoOverride);
-    let compaction_config = CompactionConfigBuilder::new().build();
+    let compaction_config =
+        CompactionConfigBuilder::with_opt(&config.meta.compaction_config).build();
     compaction_test(
         compaction_config,
         config,
@@ -210,6 +211,7 @@ async fn compaction_test(
         0,
         FileCache::none(),
         FileCache::none(),
+        None,
     ));
 
     let store = HummockStorage::new(
@@ -596,6 +598,7 @@ fn run_compactor_thread(
         await_tree_reg: None,
         running_task_count: Arc::new(AtomicU32::new(0)),
     };
+
     start_compactor(
         compactor_context,
         meta_client,

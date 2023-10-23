@@ -16,7 +16,6 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
-use super::stream::StreamPlanRef;
 use super::utils::{childless_record, plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
@@ -37,7 +36,7 @@ impl StreamExchange {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
-            input.stream_key().to_vec(),
+            input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             dist,
             input.append_only(),
@@ -53,12 +52,11 @@ impl StreamExchange {
 
     pub fn new_no_shuffle(input: PlanRef) -> Self {
         let ctx = input.ctx();
-        let pk_indices = input.stream_key().to_vec();
         // Dispatch executor won't change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
             ctx,
             input.schema().clone(),
-            pk_indices,
+            input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
             input.append_only(),

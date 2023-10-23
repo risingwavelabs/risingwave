@@ -33,21 +33,22 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::{
     SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
 };
-pub use schema_registry::name_strategy_from_str;
+use tracing_futures::Instrument;
 
 use self::avro::AvroAccessBuilder;
 use self::bytes_parser::BytesAccessBuilder;
 pub use self::mysql::mysql_row_to_datums;
 use self::plain_parser::PlainParser;
 use self::simd_json_parser::DebeziumJsonAccessBuilder;
-use self::unified::AccessImpl;
+use self::unified::{AccessImpl, AccessResult};
 use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
 use crate::aws_auth::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
+use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::{
-    BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext, SourceContextRef,
-    SourceEncode, SourceFormat, SourceMeta, SourceStruct, SourceWithStateStream, SplitId,
+    extract_source_struct, BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
+    SourceContextRef, SourceEncode, SourceFormat, SourceMeta, SourceWithStateStream, SplitId,
     StreamChunkWithState,
 };
 
@@ -62,7 +63,6 @@ mod maxwell;
 mod mysql;
 mod plain_parser;
 mod protobuf;
-mod schema_registry;
 mod unified;
 mod upsert_parser;
 mod util;
@@ -128,6 +128,13 @@ impl SourceStreamChunkBuilder {
 
 /// `SourceStreamChunkRowWriter` is responsible to write one or more records to the [`StreamChunk`],
 /// where each contains either one row (Insert/Delete) or two rows (Update) that can be written atomically.
+///
+/// Callers are supposed to call one of the `insert`, `delete` or `update` methods to write a record,
+/// providing a closure that produces one or two [`Datum`]s by corresponding [`SourceColumnDesc`].
+/// Specifically,
+/// - only columns with [`SourceColumnType::Normal`] need to be handled;
+/// - errors for non-primary key columns will be ignored and filled with default value instead;
+/// - other errors will be propagated.
 pub struct SourceStreamChunkRowWriter<'a> {
     descs: &'a [SourceColumnDesc],
     builders: &'a mut [ArrayBuilderImpl],
@@ -282,15 +289,33 @@ impl SourceStreamChunkRowWriter<'_> {
 impl SourceStreamChunkRowWriter<'_> {
     fn do_action<A: OpAction>(
         &mut self,
-        mut f: impl FnMut(&SourceColumnDesc) -> Result<A::Output>,
-    ) -> Result<()> {
-        let mut f_with_meta = |desc: &SourceColumnDesc| {
+        mut f: impl FnMut(&SourceColumnDesc) -> AccessResult<A::Output>,
+    ) -> AccessResult<()> {
+        let mut wrapped_f = |desc: &SourceColumnDesc| {
             if let Some(meta_value) =
                 (self.row_meta.as_ref()).and_then(|row_meta| row_meta.value_for_column(desc))
             {
+                // For meta columns, fill in the meta data.
                 Ok(A::output_for(meta_value))
             } else {
-                f(desc)
+                // For normal columns, call the user provided closure.
+                match f(desc) {
+                    Ok(output) => Ok(output),
+
+                    // Throw error for failed access to primary key columns.
+                    Err(e) if desc.is_pk => Err(e),
+                    // Ignore error for other columns and fill in `NULL` instead.
+                    Err(error) => {
+                        // TODO: figure out a way to fill in not-null default value if user specifies one
+                        // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
+                        tracing::warn!(
+                            %error,
+                            column = desc.name,
+                            "failed to parse non-pk column, padding with `NULL`"
+                        );
+                        Ok(A::output_for(Datum::None))
+                    }
+                }
             }
         };
 
@@ -300,7 +325,7 @@ impl SourceStreamChunkRowWriter<'_> {
         let result = (self.descs.iter())
             .zip_eq_fast(self.builders.iter_mut())
             .try_for_each(|(desc, builder)| {
-                f_with_meta(desc).map(|output| {
+                wrapped_f(desc).map(|output| {
                     A::apply(builder, output);
                     applied_columns.push(builder);
                 })
@@ -312,7 +337,6 @@ impl SourceStreamChunkRowWriter<'_> {
                 Ok(())
             }
             Err(e) => {
-                tracing::warn!("failed to parse source data: {}", e);
                 for builder in applied_columns {
                     A::rollback(builder);
                 }
@@ -321,52 +345,66 @@ impl SourceStreamChunkRowWriter<'_> {
         }
     }
 
-    /// Write an `Insert` record to the [`StreamChunk`].
+    /// Write an `Insert` record to the [`StreamChunk`], with the given fallible closure that
+    /// produces one [`Datum`] by corresponding [`SourceColumnDesc`].
     ///
-    /// # Arguments
-    ///
-    /// * `f`: A failable closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
-    ///   Callers only need to handle columns with the type [`SourceColumnType::Normal`].
-    pub fn insert(&mut self, f: impl FnMut(&SourceColumnDesc) -> Result<Datum>) -> Result<()> {
+    /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
+    pub fn insert(
+        &mut self,
+        f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
+    ) -> AccessResult<()> {
         self.do_action::<OpActionInsert>(f)
     }
 
-    /// Write a `Delete` record to the [`StreamChunk`].
+    /// Write a `Delete` record to the [`StreamChunk`], with the given fallible closure that
+    /// produces one [`Datum`] by corresponding [`SourceColumnDesc`].
     ///
-    /// # Arguments
-    ///
-    /// * `f`: A failable closure that produced one [`Datum`] by corresponding [`SourceColumnDesc`].
-    ///   Callers only need to handle columns with the type [`SourceColumnType::Normal`].
-    pub fn delete(&mut self, f: impl FnMut(&SourceColumnDesc) -> Result<Datum>) -> Result<()> {
+    /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
+    pub fn delete(
+        &mut self,
+        f: impl FnMut(&SourceColumnDesc) -> AccessResult<Datum>,
+    ) -> AccessResult<()> {
         self.do_action::<OpActionDelete>(f)
     }
 
-    /// Write a `Update` record to the [`StreamChunk`].
+    /// Write a `Update` record to the [`StreamChunk`], with the given fallible closure that
+    /// produces two [`Datum`]s as old and new value by corresponding [`SourceColumnDesc`].
     ///
-    /// # Arguments
-    ///
-    /// * `f`: A failable closure that produced two [`Datum`]s as old and new value by corresponding
-    ///   [`SourceColumnDesc`]. Callers only need to handle columns with the type [`SourceColumnType::Normal`].
+    /// See the [struct-level documentation](SourceStreamChunkRowWriter) for more details.
     pub fn update(
         &mut self,
-        f: impl FnMut(&SourceColumnDesc) -> Result<(Datum, Datum)>,
-    ) -> Result<()> {
+        f: impl FnMut(&SourceColumnDesc) -> AccessResult<(Datum, Datum)>,
+    ) -> AccessResult<()> {
         self.do_action::<OpActionUpdate>(f)
     }
 }
 
 /// Transaction control message. Currently only used by Debezium messages.
+#[derive(Debug)]
 pub enum TransactionControl {
     Begin { id: Box<str> },
     Commit { id: Box<str> },
 }
 
 /// The result of parsing a message.
+#[derive(Debug)]
 pub enum ParseResult {
     /// Some rows are parsed and written to the [`SourceStreamChunkRowWriter`].
     Rows,
     /// A transaction control message is parsed.
     TransactionControl(TransactionControl),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ParserFormat {
+    CanalJson,
+    Csv,
+    Json,
+    Maxwell,
+    Debezium,
+    DebeziumMongo,
+    Upsert,
+    Plain,
 }
 
 /// `ByteStreamSourceParser` is a new message parser, the parser should consume
@@ -378,7 +416,12 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     /// The source context, used to report parsing error.
     fn source_ctx(&self) -> &SourceContext;
 
-    /// Parse one record from the given `payload` and write it to the `writer`.
+    /// The format of the specific parser.
+    fn parser_format(&self) -> ParserFormat;
+
+    /// Parse one record from the given `payload` and write rows to the `writer`.
+    ///
+    /// Returns error if **any** of the rows in the message failed to parse.
     fn parse_one<'a>(
         &'a mut self,
         key: Option<Vec<u8>>,
@@ -386,11 +429,13 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         writer: SourceStreamChunkRowWriter<'a>,
     ) -> impl Future<Output = Result<()>> + Send + 'a;
 
-    /// Parse one record from the given `payload`, either write it to the `writer` or interpret it
+    /// Parse one record from the given `payload`, either write rows to the `writer` or interpret it
     /// as a transaction control message.
     ///
     /// The default implementation forwards to [`ByteStreamSourceParser::parse_one`] for
     /// non-transactional sources.
+    ///
+    /// Returns error if **any** of the rows in the message failed to parse.
     fn parse_one_with_txn<'a>(
         &'a mut self,
         key: Option<Vec<u8>>,
@@ -400,7 +445,10 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
         self.parse_one(key, payload, writer)
             .map_ok(|_| ParseResult::Rows)
     }
+}
 
+#[easy_ext::ext(SourceParserIntoStreamExt)]
+impl<P: ByteStreamSourceParser> P {
     /// Parse a data stream of one source split into a stream of [`StreamChunk`].
     ///
     /// # Arguments
@@ -409,9 +457,17 @@ pub trait ByteStreamSourceParser: Send + Debug + Sized + 'static {
     ///
     /// # Returns
     ///
-    /// A [`crate::source::BoxSourceWithStateStream`] which is a stream of parsed msgs.
-    fn into_stream(self, data_stream: BoxSourceStream) -> impl SourceWithStateStream {
-        into_chunk_stream(self, data_stream)
+    /// A [`SourceWithStateStream`] which is a stream of parsed messages.
+    pub fn into_stream(self, data_stream: BoxSourceStream) -> impl SourceWithStateStream {
+        // Enable tracing to provide more information for parsing failures.
+        let source_info = &self.source_ctx().source_info;
+        let span = tracing::info_span!(
+            "source_parser",
+            actor_id = source_info.actor_id,
+            source_id = source_info.source_id.table_id()
+        );
+
+        into_chunk_stream(self, data_stream).instrument(span)
     }
 }
 
@@ -470,8 +526,22 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 
         for (i, msg) in batch.into_iter().enumerate() {
             if msg.key.is_none() && msg.payload.is_none() {
+                if parser.parser_format() == ParserFormat::Debezium {
+                    tracing::debug!("heartbeat message {}, skip parser", msg.offset);
+                    // empty payload means a heartbeat in cdc source
+                    // heartbeat message offset should not overwrite data messages offset
+                    split_offset_mapping
+                        .entry(msg.split_id)
+                        .or_insert(msg.offset.clone());
+                }
+
                 continue;
             }
+            let parse_span = tracing::info_span!(
+                "parse_one",
+                split_id = msg.split_id.as_ref(),
+                offset = msg.offset
+            );
 
             split_offset_mapping.insert(msg.split_id, msg.offset.clone());
 
@@ -485,9 +555,12 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                         offset: msg.offset,
                     }),
                 )
+                .instrument(parse_span.clone())
                 .await
             {
-                Ok(ParseResult::Rows) => {
+                // It's possible that parsing multiple rows in a single message PARTIALLY failed.
+                // We still have to maintain the row number in this case.
+                res @ (Ok(ParseResult::Rows) | Err(_)) => {
                     // The number of rows added to the builder.
                     let num = builder.op_num() - old_op_num;
 
@@ -495,20 +568,25 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     if let Some(Transaction { len, .. }) = &mut current_transaction {
                         *len += num;
                     }
+
+                    if let Err(error) = res {
+                        tracing::error!(parent: &parse_span, %error, "failed to parse message, skipping");
+                        parser.source_ctx().report_user_source_error(error);
+                    }
                 }
 
                 Ok(ParseResult::TransactionControl(txn_ctl)) => {
                     match txn_ctl {
                         TransactionControl::Begin { id } => {
                             if let Some(Transaction { id: current_id, .. }) = &current_transaction {
-                                tracing::warn!(current_id, id, "already in transaction");
+                                tracing::warn!(parent: &parse_span, current_id, id, "already in transaction");
                             }
                             current_transaction = Some(Transaction { id, len: 0 });
                         }
                         TransactionControl::Commit { id } => {
                             let current_id = current_transaction.as_ref().map(|t| &t.id);
                             if current_id != Some(&id) {
-                                tracing::warn!(?current_id, id, "transaction id mismatch");
+                                tracing::warn!(parent: &parse_span, ?current_id, id, "transaction id mismatch");
                             }
                             current_transaction = None;
                         }
@@ -523,13 +601,6 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                             split_offset_mapping: Some(std::mem::take(&mut split_offset_mapping)),
                         };
                     }
-                }
-
-                Err(error) => {
-                    tracing::warn!(%error, "message parsing failed, skipping");
-                    // Skip for batch
-                    parser.source_ctx().report_user_source_error(error);
-                    continue;
                 }
             }
         }
@@ -612,11 +683,11 @@ pub enum ByteStreamSourceParserImpl {
     CanalJson(CanalJsonParser),
 }
 
-pub type ParserStream = impl SourceWithStateStream + Unpin;
+pub type ParsedStreamImpl = impl SourceWithStateStream + Unpin;
 
 impl ByteStreamSourceParserImpl {
     /// Converts this parser into a stream of [`StreamChunk`].
-    pub fn into_stream(self, msg_stream: BoxSourceStream) -> ParserStream {
+    pub fn into_stream(self, msg_stream: BoxSourceStream) -> ParsedStreamImpl {
         #[auto_enum(futures03::Stream)]
         let stream = match self {
             Self::Csv(parser) => parser.into_stream(msg_stream),
@@ -711,24 +782,6 @@ impl SpecificParserConfig {
     };
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct SchemaRegistryAuth {
-    username: Option<String>,
-    password: Option<String>,
-}
-
-impl From<&HashMap<String, String>> for SchemaRegistryAuth {
-    fn from(props: &HashMap<String, String>) -> Self {
-        const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
-        const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
-
-        SchemaRegistryAuth {
-            username: props.get(SCHEMA_REGISTRY_USERNAME).cloned(),
-            password: props.get(SCHEMA_REGISTRY_PASSWORD).cloned(),
-        }
-    }
-}
-
 #[derive(Debug, Default, Clone)]
 pub struct AvroProperties {
     pub use_schema_registry: bool,
@@ -798,35 +851,9 @@ pub enum ProtocolProperties {
 }
 
 impl SpecificParserConfig {
-    pub fn get_source_struct(&self) -> SourceStruct {
-        let format = match self.protocol_config {
-            ProtocolProperties::Debezium => SourceFormat::Debezium,
-            ProtocolProperties::DebeziumMongo => SourceFormat::DebeziumMongo,
-            ProtocolProperties::Maxwell => SourceFormat::Maxwell,
-            ProtocolProperties::Canal => SourceFormat::Canal,
-            ProtocolProperties::Plain => SourceFormat::Plain,
-            ProtocolProperties::Upsert => SourceFormat::Upsert,
-            ProtocolProperties::Native => SourceFormat::Native,
-            ProtocolProperties::Unspecified => unreachable!(),
-        };
-        let encode = match self.encoding_config {
-            EncodingProperties::Avro(_) => SourceEncode::Avro,
-            EncodingProperties::Protobuf(_) => SourceEncode::Protobuf,
-            EncodingProperties::Csv(_) => SourceEncode::Csv,
-            EncodingProperties::Json(_) => SourceEncode::Json,
-            EncodingProperties::Bytes(_) => SourceEncode::Bytes,
-            EncodingProperties::Native => SourceEncode::Native,
-            EncodingProperties::Unspecified => unreachable!(),
-        };
-        SourceStruct { format, encode }
-    }
-
     // The validity of (format, encode) is ensured by `extract_format_encode`
-    pub fn new(
-        source_struct: SourceStruct,
-        info: &StreamSourceInfo,
-        props: &HashMap<String, String>,
-    ) -> Result<Self> {
+    pub fn new(info: &StreamSourceInfo, props: &HashMap<String, String>) -> Result<Self> {
+        let source_struct = extract_source_struct(info)?;
         let format = source_struct.format;
         let encode = source_struct.encode;
         // this transformation is needed since there may be config for the protocol
@@ -856,7 +883,7 @@ impl SpecificParserConfig {
                         Some(info.proto_message_name.clone())
                     },
                     key_record_name: info.key_message_name.clone(),
-                    name_strategy: PbSchemaRegistryNameStrategy::from_i32(info.name_strategy)
+                    name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
                         .unwrap(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
@@ -887,7 +914,7 @@ impl SpecificParserConfig {
                     message_name: info.proto_message_name.clone(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
-                    name_strategy: PbSchemaRegistryNameStrategy::from_i32(info.name_strategy)
+                    name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
                         .unwrap(),
                     key_message_name: info.key_message_name.clone(),
                     ..Default::default()
@@ -912,7 +939,7 @@ impl SpecificParserConfig {
                     } else {
                         Some(info.proto_message_name.clone())
                     },
-                    name_strategy: PbSchemaRegistryNameStrategy::from_i32(info.name_strategy)
+                    name_strategy: PbSchemaRegistryNameStrategy::try_from(info.name_strategy)
                         .unwrap(),
                     key_record_name: info.key_message_name.clone(),
                     row_schema_location: info.row_schema_location.clone(),
@@ -952,21 +979,5 @@ impl SpecificParserConfig {
             encoding_config,
             protocol_config,
         })
-    }
-}
-
-impl ParserConfig {
-    pub fn new(
-        source_struct: SourceStruct,
-        info: &StreamSourceInfo,
-        props: &HashMap<String, String>,
-        rw_columns: &Vec<SourceColumnDesc>,
-    ) -> Result<Self> {
-        let common = CommonParserConfig {
-            rw_columns: rw_columns.to_owned(),
-        };
-        let specific = SpecificParserConfig::new(source_struct, info, props)?;
-
-        Ok(Self { common, specific })
     }
 }

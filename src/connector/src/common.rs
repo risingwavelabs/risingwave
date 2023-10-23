@@ -21,7 +21,6 @@ use anyhow::{anyhow, Ok};
 use async_nats::jetstream::consumer::DeliverPolicy;
 use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
-use clickhouse::Client;
 use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
@@ -37,7 +36,6 @@ use url::Url;
 use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::deserialize_duration_from_string;
-use crate::sink::doris::DorisSchemaClient;
 use crate::sink::SinkError;
 use crate::source::nats::source::NatsOffset;
 // The file describes the common abstractions for each connector and can be used in both source and
@@ -405,85 +403,6 @@ impl KinesisCommon {
         Ok(KinesisClient::from_conf(builder.build()))
     }
 }
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct ClickHouseCommon {
-    #[serde(rename = "clickhouse.url")]
-    pub url: String,
-    #[serde(rename = "clickhouse.user")]
-    pub user: String,
-    #[serde(rename = "clickhouse.password")]
-    pub password: String,
-    #[serde(rename = "clickhouse.database")]
-    pub database: String,
-    #[serde(rename = "clickhouse.table")]
-    pub table: String,
-}
-
-const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
-
-impl ClickHouseCommon {
-    pub(crate) fn build_client(&self) -> anyhow::Result<Client> {
-        use hyper_tls::HttpsConnector;
-
-        let https = HttpsConnector::new();
-        let client = hyper::Client::builder()
-            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
-            .build::<_, hyper::Body>(https);
-
-        let client = Client::with_http_client(client)
-            .with_url(&self.url)
-            .with_user(&self.user)
-            .with_password(&self.password)
-            .with_database(&self.database);
-        Ok(client)
-    }
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct DorisCommon {
-    #[serde(rename = "doris.url")]
-    pub url: String,
-    #[serde(rename = "doris.user")]
-    pub user: String,
-    #[serde(rename = "doris.password")]
-    pub password: String,
-    #[serde(rename = "doris.database")]
-    pub database: String,
-    #[serde(rename = "doris.table")]
-    pub table: String,
-}
-
-impl DorisCommon {
-    pub(crate) fn build_get_client(&self) -> DorisSchemaClient {
-        DorisSchemaClient::new(
-            self.url.clone(),
-            self.table.clone(),
-            self.database.clone(),
-            self.user.clone(),
-            self.password.clone(),
-        )
-    }
-}
-
-#[derive(Deserialize, Serialize, Debug, Clone)]
-pub struct StarrocksCommon {
-    #[serde(rename = "starrocks.host")]
-    pub host: String,
-    #[serde(rename = "starrocks.mysqlport")]
-    pub mysql_port: String,
-    #[serde(rename = "starrocks.httpport")]
-    pub http_port: String,
-    #[serde(rename = "starrocks.user")]
-    pub user: String,
-    #[serde(rename = "starrocks.password")]
-    pub password: String,
-    #[serde(rename = "starrocks.database")]
-    pub database: String,
-    #[serde(rename = "starrocks.table")]
-    pub table: String,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpsertMessage<'a> {
     #[serde(borrow)]
@@ -497,6 +416,8 @@ pub struct UpsertMessage<'a> {
 pub struct NatsCommon {
     #[serde(rename = "server_url")]
     pub server_url: String,
+    #[serde(rename = "stream")]
+    pub stream: String,
     #[serde(rename = "subject")]
     pub subject: String,
     #[serde(rename = "connect_mode")]
@@ -590,7 +511,8 @@ impl NatsCommon {
     > {
         let context = self.build_context().await?;
         let stream = self.build_or_get_stream(context.clone()).await?;
-        let name = format!("risingwave-consumer-{}-{}", self.subject, split_id);
+        let subject_name = self.subject.replace(',', "-");
+        let name = format!("risingwave-consumer-{}-{}", subject_name, split_id);
         let mut config = jetstream::consumer::pull::Config {
             ack_policy: jetstream::consumer::AckPolicy::None,
             ..Default::default()
@@ -623,10 +545,11 @@ impl NatsCommon {
         &self,
         jetstream: jetstream::Context,
     ) -> anyhow::Result<jetstream::stream::Stream> {
+        let subjects: Vec<String> = self.subject.split(',').map(|s| s.to_string()).collect();
         let mut config = jetstream::stream::Config {
-            // the subject default use name value
-            name: self.subject.clone(),
+            name: self.stream.clone(),
             max_bytes: 1000000,
+            subjects,
             ..Default::default()
         };
         if let Some(v) = self.max_bytes {
