@@ -20,6 +20,7 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbInequalityPair};
 
+use super::generic::Join;
 use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
@@ -366,15 +367,14 @@ impl StreamNode for StreamHashJoin {
 
         let dk_indices_in_jk = self.derive_dist_key_in_join_key();
 
-        use super::stream::HashJoin;
         let (left_table, left_degree_table, left_deduped_input_pk_indices) =
-            HashJoin::infer_internal_and_degree_table_catalog(
+            Join::infer_internal_and_degree_table_catalog(
                 self.left().plan_base(),
                 left_jk_indices,
                 dk_indices_in_jk.clone(),
             );
         let (right_table, right_degree_table, right_deduped_input_pk_indices) =
-            HashJoin::infer_internal_and_degree_table_catalog(
+            Join::infer_internal_and_degree_table_catalog(
                 self.right().plan_base(),
                 right_jk_indices,
                 dk_indices_in_jk,
