@@ -62,7 +62,6 @@ pub trait ConventionMarker: 'static + Sized {
 
     fn value() -> Convention;
 }
-pub trait PhysicalConventionMarker: ConventionMarker {}
 
 pub struct Logical;
 impl ConventionMarker for Logical {
@@ -81,7 +80,6 @@ impl ConventionMarker for Batch {
         Convention::Batch
     }
 }
-impl PhysicalConventionMarker for Batch {}
 
 pub struct Stream;
 impl ConventionMarker for Stream {
@@ -91,7 +89,6 @@ impl ConventionMarker for Stream {
         Convention::Stream
     }
 }
-impl PhysicalConventionMarker for Stream {}
 
 pub trait StaticPlanNodeMeta {
     type Convention: ConventionMarker;
@@ -104,7 +101,7 @@ pub trait StaticPlanNodeMeta {
 
 impl<P> PlanNodeMeta for P
 where
-    P: StaticPlanNodeMeta + 'static,
+    P: StaticPlanNodeMeta,
 {
     fn node_type(&self) -> PlanNodeType {
         P::NODE_TYPE

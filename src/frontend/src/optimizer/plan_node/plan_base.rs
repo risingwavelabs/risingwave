@@ -24,18 +24,26 @@ use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct NoExtra;
 
-/// Common extra fields for physical plan nodes.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct PhysicalCommonExtra {
-    /// The distribution property of the PlanNode's output, store an `Distribution::any()` here
-    /// will not affect correctness, but insert unnecessary exchange in plan
-    dist: Distribution,
+// Make them public types in a private module to allow using them as public trait bounds,
+// while still keeping them private to the super module.
+mod physical_common {
+    use super::*;
+
+    /// Common extra fields for physical plan nodes.
+    #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+    pub struct PhysicalCommonExtra {
+        /// The distribution property of the PlanNode's output, store an `Distribution::any()` here
+        /// will not affect correctness, but insert unnecessary exchange in plan
+        pub dist: Distribution,
+    }
+
+    pub trait GetPhysicalCommon {
+        fn physical(&self) -> &PhysicalCommonExtra;
+        fn physical_mut(&mut self) -> &mut PhysicalCommonExtra;
+    }
 }
 
-trait GetPhysicalCommon {
-    fn physical(&self) -> &PhysicalCommonExtra;
-    fn physical_mut(&mut self) -> &mut PhysicalCommonExtra;
-}
+use physical_common::*;
 
 /// Extra fields for stream plan nodes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -277,25 +285,16 @@ impl PlanBase<Batch> {
     }
 }
 
-impl PlanBase<Batch> {
+impl<C: ConventionMarker> PlanBase<C>
+where
+    C::Extra: GetPhysicalCommon,
+{
     /// Clone the plan node with a new distribution.
     ///
     /// Panics if the plan node is not physical.
     pub fn clone_with_new_distribution(&self, dist: Distribution) -> Self {
         let mut new = self.clone();
-        new.extra.physical.dist = dist;
-        new
-    }
-}
-
-// TODO: unify the impls for `PlanBase<Stream>` and `PlanBase<Batch>`.
-impl PlanBase<Stream> {
-    /// Clone the plan node with a new distribution.
-    ///
-    /// Panics if the plan node is not physical.
-    pub fn clone_with_new_distribution(&self, dist: Distribution) -> Self {
-        let mut new = self.clone();
-        new.extra.physical.dist = dist;
+        new.extra.physical_mut().dist = dist;
         new
     }
 }
@@ -315,18 +314,38 @@ pub enum PlanBaseRef<'a> {
     Batch(&'a PlanBase<Batch>),
 }
 
+impl PlanBaseRef<'_> {
+    pub fn convention(self) -> Convention {
+        match self {
+            PlanBaseRef::Logical(_) => Convention::Logical,
+            PlanBaseRef::Stream(_) => Convention::Stream,
+            PlanBaseRef::Batch(_) => Convention::Batch,
+        }
+    }
+}
+
+/// Dispatch a method call to the corresponding plan base type.
 macro_rules! dispatch_plan_base {
     ($self:ident, [$($convention:ident),+ $(,)?], $method:expr) => {
         match $self {
             $(
                 PlanBaseRef::$convention(plan) => $method(plan),
             )+
+
             #[allow(unreachable_patterns)]
-            _ => panic!() // TODO
+            _ => unreachable!("calling `{}` on a plan node of `{:?}`", stringify!($method), $self.convention()),
         }
     }
 }
 
+/// Workaround for getters returning references.
+///
+/// For example, callers writing `GenericPlanRef::schema(&foo.plan_base())` will lead to a
+/// borrow checker error, as it borrows [`PlanBaseRef`] again, which is already a reference.
+///
+/// As a workaround, we directly let the getters below take the ownership of [`PlanBaseRef`], when
+/// callers write `foo.plan_base().schema()`, the compiler will prefer these ones over the ones
+/// defined in traits like [`GenericPlanRef`].
 impl<'a> PlanBaseRef<'a> {
     pub(super) fn schema(self) -> &'a Schema {
         dispatch_plan_base!(self, [Logical, Stream, Batch], GenericPlanRef::schema)
