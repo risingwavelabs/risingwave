@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::catalog::connection::{PbInfo, PbPrivateLinkService};
+use risingwave_pb::catalog::connection::PbInfo;
 use risingwave_pb::catalog::PbConnection;
 use sea_orm::entity::prelude::*;
-use sea_orm::{ActiveValue, FromJsonQueryResult};
-use serde::{Deserialize, Serialize};
+use sea_orm::ActiveValue;
 
-use crate::model_v2::ConnectionId;
+use crate::model_v2::{ConnectionId, PrivateLinkService};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "connection")]
@@ -64,11 +63,6 @@ impl Related<super::source::Entity> for Entity {
 }
 
 impl ActiveModelBehavior for ActiveModel {}
-
-#[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize, Default)]
-pub struct PrivateLinkService(pub PbPrivateLinkService);
-
-impl Eq for PrivateLinkService {}
 
 impl From<PbConnection> for ActiveModel {
     fn from(conn: PbConnection) -> Self {
