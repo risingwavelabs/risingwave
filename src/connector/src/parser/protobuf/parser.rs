@@ -1110,7 +1110,7 @@ mod test {
                                 "value": "114514",
                             },
                             "any_value_2": {
-                                "value": 114514
+                                "value": 114514,
                             }
                         }))
                     );
