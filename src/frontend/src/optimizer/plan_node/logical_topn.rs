@@ -36,7 +36,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalTopN {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     core: generic::TopN<PlanRef>,
 }
 

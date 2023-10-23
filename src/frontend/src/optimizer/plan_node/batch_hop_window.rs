@@ -29,7 +29,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// input rows
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchHopWindow {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Batch>,
     core: generic::HopWindow<PlanRef>,
     window_start_exprs: Vec<ExprImpl>,
     window_end_exprs: Vec<ExprImpl>,

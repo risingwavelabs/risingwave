@@ -35,7 +35,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// statements, the input relation would be [`super::LogicalValues`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalInsert {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     core: generic::Insert<PlanRef>,
 }
 

@@ -35,7 +35,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// If the function returns a struct, it will be flattened into multiple columns.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalTableFunction {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     pub table_function: TableFunction,
     pub with_ordinality: bool,
 }

@@ -29,7 +29,7 @@ use crate::utils::{ColIndexMapping, Condition};
 ///  matching rows from its other inputs.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalExcept {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     core: generic::Except<PlanRef>,
 }
 

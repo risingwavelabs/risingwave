@@ -41,7 +41,7 @@ use crate::utils::{ColIndexMapping, Condition, Substitute};
 /// column.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalProjectSet {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     core: generic::ProjectSet<PlanRef>,
 }
 

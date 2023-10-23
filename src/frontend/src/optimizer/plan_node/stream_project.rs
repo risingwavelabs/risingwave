@@ -29,7 +29,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// rows.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamProject {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     core: generic::Project<PlanRef>,
     /// All the watermark derivations, (input_column_index, output_column_index). And the
     /// derivation expression is the project's expression itself.

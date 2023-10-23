@@ -42,7 +42,7 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalScan {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     core: generic::Scan,
 }
 

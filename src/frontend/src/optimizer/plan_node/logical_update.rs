@@ -34,7 +34,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// It corresponds to the `UPDATE` statements in SQL.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalUpdate {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     core: generic::Update<PlanRef>,
 }
 

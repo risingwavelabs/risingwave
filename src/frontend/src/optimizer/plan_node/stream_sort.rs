@@ -29,7 +29,7 @@ use crate::TableCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamEowcSort {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
 
     input: PlanRef,
     sort_column_index: usize,

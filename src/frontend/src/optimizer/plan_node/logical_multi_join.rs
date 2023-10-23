@@ -46,7 +46,7 @@ use crate::utils::{
 /// expressed as 2-way `LogicalJoin`s.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalMultiJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     inputs: Vec<PlanRef>,
     on: Condition,
     output_indices: Vec<usize>,

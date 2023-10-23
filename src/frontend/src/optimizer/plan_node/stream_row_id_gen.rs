@@ -22,7 +22,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamRowIdGen {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     input: PlanRef,
     row_id_index: usize,
 }

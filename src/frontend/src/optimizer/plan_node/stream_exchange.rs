@@ -27,7 +27,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// without changing its content.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamExchange {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     input: PlanRef,
     no_shuffle: bool,
 }

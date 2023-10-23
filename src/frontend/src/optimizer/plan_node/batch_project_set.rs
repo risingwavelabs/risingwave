@@ -28,7 +28,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchProjectSet {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Batch>,
     core: generic::ProjectSet<PlanRef>,
 }
 

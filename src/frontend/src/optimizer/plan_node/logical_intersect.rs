@@ -28,7 +28,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// If `all` is false, it needs to eliminate duplicates.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalIntersect {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     core: generic::Intersect<PlanRef>,
 }
 

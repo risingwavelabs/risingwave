@@ -26,14 +26,14 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 /// `BatchDelete` implements [`super::LogicalDelete`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchDelete {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Batch>,
     pub core: generic::Delete<PlanRef>,
 }
 
 impl BatchDelete {
     pub fn new(core: generic::Delete<PlanRef>) -> Self {
         assert_eq!(core.input.distribution(), &Distribution::Single);
-        let base: PlanBase =
+        let base: PlanBase<super::Batch> =
             PlanBase::new_batch_with_core(&core, core.input.distribution().clone(), Order::any());
         Self { base, core }
     }

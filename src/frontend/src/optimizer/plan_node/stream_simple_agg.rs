@@ -28,7 +28,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSimpleAgg {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     core: generic::Agg<PlanRef>,
 
     /// The index of `count(*)` in `agg_calls`.

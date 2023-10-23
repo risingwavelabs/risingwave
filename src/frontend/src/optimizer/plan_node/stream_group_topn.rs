@@ -27,7 +27,7 @@ use crate::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamGroupTopN {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     core: generic::TopN<PlanRef>,
     /// an optional column index which is the vnode of each row computed by the input's consistent
     /// hash distribution

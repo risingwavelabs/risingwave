@@ -29,7 +29,7 @@ use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamNow {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
 }
 
 impl StreamNow {

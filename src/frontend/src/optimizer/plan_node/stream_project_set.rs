@@ -25,7 +25,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamProjectSet {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     core: generic::ProjectSet<PlanRef>,
     /// All the watermark derivations, (input_column_idx, expr_idx). And the
     /// derivation expression is the project_set's expression itself.

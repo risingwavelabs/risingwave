@@ -30,7 +30,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// `StreamUnion` implements [`super::LogicalUnion`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamUnion {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     core: generic::Union<PlanRef>,
 }
 

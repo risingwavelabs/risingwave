@@ -28,7 +28,7 @@ use crate::optimizer::property::{Order, RequiredDist};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchOverWindow {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Batch>,
     core: generic::OverWindow<PlanRef>,
 }
 

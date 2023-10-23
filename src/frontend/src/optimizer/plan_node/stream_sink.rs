@@ -50,7 +50,7 @@ const DOWNSTREAM_PK_KEY: &str = "primary_key";
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSink {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     input: PlanRef,
     sink_desc: SinkDesc,
 }

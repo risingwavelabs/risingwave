@@ -45,9 +45,9 @@ use risingwave_pb::stream_plan::StreamNode as StreamPlanPb;
 use serde::Serialize;
 use smallvec::SmallVec;
 
-use self::batch::BatchPlanRef;
-use self::generic::{GenericPlanRef, PhysicalPlanRef};
-use self::stream::StreamPlanRef;
+use self::batch::{BatchPlanRef, BatchSpecific};
+use self::generic::{GenericPlanRef, PhysicalPlanRef, PhysicalSpecific};
+use self::stream::{StreamPlanRef, StreamSpecific};
 use self::utils::Distill;
 use super::property::{Distribution, FunctionalDependencySet, Order};
 
@@ -541,24 +541,24 @@ impl GenericPlanRef for PlanRef {
     }
 }
 
-impl<P> PhysicalPlanRef for P
+impl<P> PhysicalSpecific for P
 where
     P: Eq + Hash,
     P: StaticPlanNodeMeta,
-    P::Convention: PhysicalConventionMarker,
+    <P::Convention as ConventionMarker>::Extra: PhysicalSpecific,
 {
     fn distribution(&self) -> &Distribution {
         self.plan_base().distribution()
     }
 }
 
-impl PhysicalPlanRef for PlanRef {
+impl PhysicalSpecific for PlanRef {
     fn distribution(&self) -> &Distribution {
         self.plan_base().distribution()
     }
 }
 
-impl<P> StreamPlanRef for P
+impl<P> StreamSpecific for P
 where
     P: Eq + Hash,
     P: StaticPlanNodeMeta<Convention = Stream>,
@@ -576,7 +576,7 @@ where
     }
 }
 
-impl StreamPlanRef for PlanRef {
+impl StreamSpecific for PlanRef {
     fn append_only(&self) -> bool {
         self.plan_base().append_only()
     }
@@ -590,7 +590,7 @@ impl StreamPlanRef for PlanRef {
     }
 }
 
-impl<P> BatchPlanRef for P
+impl<P> BatchSpecific for P
 where
     P: Eq + Hash,
     P: StaticPlanNodeMeta<Convention = Batch>,
@@ -600,7 +600,7 @@ where
     }
 }
 
-impl BatchPlanRef for PlanRef {
+impl BatchSpecific for PlanRef {
     fn order(&self) -> &Order {
         self.plan_base().order()
     }

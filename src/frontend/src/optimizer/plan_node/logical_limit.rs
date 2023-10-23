@@ -30,7 +30,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// `LogicalLimit` fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalLimit {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     pub(super) core: generic::Limit<PlanRef>,
 }
 

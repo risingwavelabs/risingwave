@@ -30,7 +30,7 @@ use crate::optimizer::property::{Distribution, Order};
 /// [`BatchSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSource {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Batch>,
     core: generic::Source,
 }
 

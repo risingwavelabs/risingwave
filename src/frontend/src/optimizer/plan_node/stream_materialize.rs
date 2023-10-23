@@ -38,7 +38,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// Materializes a stream.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamMaterialize {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     /// Child of Materialize plan
     input: PlanRef,
     table: TableCatalog,

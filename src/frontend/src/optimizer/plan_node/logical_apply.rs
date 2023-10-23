@@ -38,7 +38,7 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 /// left side.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalApply {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     left: PlanRef,
     right: PlanRef,
     on: Condition,

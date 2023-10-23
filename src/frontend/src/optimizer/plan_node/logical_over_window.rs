@@ -358,7 +358,7 @@ impl<'a> ExprVisitor for OverWindowProjectBuilder<'a> {
 /// The output schema is the input schema plus the window functions.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalOverWindow {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     core: OverWindow<PlanRef>,
 }
 

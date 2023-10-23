@@ -28,7 +28,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// `StreamValues` implements `LogicalValues.to_stream()`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamValues {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     logical: LogicalValues,
 }
 

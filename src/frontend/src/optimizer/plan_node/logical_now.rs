@@ -31,7 +31,7 @@ use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalNow {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
 }
 
 impl LogicalNow {

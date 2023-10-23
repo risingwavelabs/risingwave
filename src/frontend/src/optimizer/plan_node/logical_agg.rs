@@ -48,7 +48,7 @@ use crate::utils::{
 /// The output schema will first include the group key and then the aggregation calls.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LogicalAgg {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     core: Agg<PlanRef>,
 }
 

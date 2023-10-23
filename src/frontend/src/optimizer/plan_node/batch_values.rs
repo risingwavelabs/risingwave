@@ -30,7 +30,7 @@ use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchValues {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Batch>,
     logical: LogicalValues,
 }
 

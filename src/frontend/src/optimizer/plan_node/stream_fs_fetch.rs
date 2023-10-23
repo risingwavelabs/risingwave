@@ -30,7 +30,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamFsFetch {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     input: PlanRef,
     core: generic::Source,
 }

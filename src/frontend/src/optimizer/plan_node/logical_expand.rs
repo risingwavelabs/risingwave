@@ -37,7 +37,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// is used to distinguish between different `subset`s in `column_subsets`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalExpand {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     core: generic::Expand<PlanRef>,
 }
 

@@ -51,7 +51,7 @@ use crate::utils::{ColIndexMapping, Condition, IndexRewriter};
 /// `LogicalSource` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalSource {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     pub core: generic::Source,
 
     /// Expressions to output. This field presents and will be turned to a `Project` when

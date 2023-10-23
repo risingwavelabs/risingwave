@@ -38,7 +38,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// get output rows.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHashJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     core: generic::Join<PlanRef>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and

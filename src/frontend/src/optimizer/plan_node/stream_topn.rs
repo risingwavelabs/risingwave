@@ -25,7 +25,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// `StreamTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTopN {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     core: generic::TopN<PlanRef>,
 }
 

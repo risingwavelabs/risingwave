@@ -32,7 +32,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 /// `LogicalHopWindow` implements Hop Table Function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalHopWindow {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     core: generic::HopWindow<PlanRef>,
 }
 

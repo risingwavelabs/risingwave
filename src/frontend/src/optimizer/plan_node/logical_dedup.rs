@@ -32,7 +32,7 @@ use crate::utils::Condition;
 /// an `ORDER BY`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalDedup {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     core: generic::Dedup<PlanRef>,
 }
 

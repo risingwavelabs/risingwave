@@ -31,7 +31,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// It corresponds to the `DELETE` statements in SQL.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalDelete {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     core: generic::Delete<PlanRef>,
 }
 

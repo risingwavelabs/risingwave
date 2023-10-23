@@ -28,7 +28,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDynamicFilter {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     core: generic::DynamicFilter<PlanRef>,
     cleaned_by_watermark: bool,
 }

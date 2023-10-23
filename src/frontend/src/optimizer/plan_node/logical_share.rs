@@ -20,8 +20,8 @@ use risingwave_common::error::Result;
 
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
-    ToBatch, ToStream,
+    generic, ColPrunable, ConventionMarker, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
@@ -49,7 +49,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalShare {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     core: generic::Share<PlanRef>,
 }
 
@@ -68,7 +68,11 @@ impl LogicalShare {
         LogicalShare::new(input).into()
     }
 
-    pub(super) fn pretty_fields<'a>(base: &PlanBase, name: &'a str) -> XmlNode<'a> {
+    // TODO
+    pub(super) fn pretty_fields<'a>(
+        base: &PlanBase<impl ConventionMarker>,
+        name: &'a str,
+    ) -> XmlNode<'a> {
         childless_record(name, vec![("id", Pretty::debug(&base.id().0))])
     }
 }

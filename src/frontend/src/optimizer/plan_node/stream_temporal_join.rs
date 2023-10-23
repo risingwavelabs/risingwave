@@ -33,7 +33,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTemporalJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     core: generic::Join<PlanRef>,
     eq_join_predicate: EqJoinPredicate,
 }

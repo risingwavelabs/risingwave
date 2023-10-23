@@ -28,7 +28,7 @@ use crate::optimizer::property::{Distribution, DistributionDisplay, Order, Order
 /// without changing its content.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchExchange {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Batch>,
     input: PlanRef,
 }
 

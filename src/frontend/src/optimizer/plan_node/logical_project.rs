@@ -33,7 +33,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Substi
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalProject {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     core: generic::Project<PlanRef>,
 }
 

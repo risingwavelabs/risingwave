@@ -30,7 +30,7 @@ use crate::{TableCatalog, WithOptions};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamWatermarkFilter {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     input: PlanRef,
     watermark_descs: Vec<WatermarkDesc>,
 }
@@ -54,7 +54,7 @@ impl StreamWatermarkFilter {
         Self::with_base(base, input, watermark_descs)
     }
 
-    fn with_base(base: PlanBase, input: PlanRef, watermark_descs: Vec<WatermarkDesc>) -> Self {
+    fn with_base(base: PlanBase<super::Stream>, input: PlanRef, watermark_descs: Vec<WatermarkDesc>) -> Self {
         Self {
             base,
             input,

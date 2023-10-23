@@ -37,7 +37,7 @@ use crate::Explain;
 /// If `all` is false, it needs to eliminate duplicates.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalUnion {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     core: generic::Union<PlanRef>,
 }
 

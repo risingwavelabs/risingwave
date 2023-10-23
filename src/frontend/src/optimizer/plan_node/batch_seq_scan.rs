@@ -36,7 +36,7 @@ use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSeqScan {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Batch>,
     core: generic::Scan,
     scan_ranges: Vec<ScanRange>,
 }

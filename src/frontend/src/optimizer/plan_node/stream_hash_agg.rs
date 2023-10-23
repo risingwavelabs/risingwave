@@ -28,7 +28,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, IndexSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHashAgg {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     core: generic::Agg<PlanRef>,
 
     /// An optional column index which is the vnode of each row computed by the input's consistent

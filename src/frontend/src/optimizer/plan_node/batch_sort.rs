@@ -27,7 +27,7 @@ use crate::optimizer::property::{Order, OrderDisplay};
 /// collation required by user or parent plan node.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSort {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Batch>,
     input: PlanRef,
 }
 

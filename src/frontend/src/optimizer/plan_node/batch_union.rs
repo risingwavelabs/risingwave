@@ -24,7 +24,7 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 /// `BatchUnion` implements [`super::LogicalUnion`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchUnion {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Batch>,
     core: generic::Union<PlanRef>,
 }
 

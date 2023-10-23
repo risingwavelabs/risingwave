@@ -31,7 +31,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSource {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     pub(crate) core: generic::Source,
 }
 

@@ -41,7 +41,7 @@ use crate::{Explain, TableCatalog};
 /// creation request.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTableScan {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     core: generic::Scan,
     batch_plan_id: PlanNodeId,
     chain_type: ChainType,

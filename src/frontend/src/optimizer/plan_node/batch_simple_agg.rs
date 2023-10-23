@@ -25,7 +25,7 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSimpleAgg {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Batch>,
     core: generic::Agg<PlanRef>,
 }
 

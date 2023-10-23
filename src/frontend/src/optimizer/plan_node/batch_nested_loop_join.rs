@@ -30,7 +30,7 @@ use crate::utils::ConditionDisplay;
 /// against all pairs of rows from inner & outer side within 2 layers of loops.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchNestedLoopJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Batch>,
     core: generic::Join<PlanRef>,
 }
 

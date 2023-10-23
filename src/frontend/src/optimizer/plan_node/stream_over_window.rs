@@ -27,7 +27,7 @@ use crate::TableCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamOverWindow {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     core: generic::OverWindow<PlanRef>,
 }
 

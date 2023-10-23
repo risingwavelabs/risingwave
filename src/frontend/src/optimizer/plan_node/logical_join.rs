@@ -49,7 +49,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Condit
 /// right columns, dependent on the output indices provided. A repeat output index is illegal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Logical>,
     core: generic::Join<PlanRef>,
 }
 

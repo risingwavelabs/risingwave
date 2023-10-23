@@ -32,7 +32,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// by `StreamSimpleAgg`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamStatelessSimpleAgg {
-    pub base: PlanBase,
+    pub base: PlanBase<super::Stream>,
     core: generic::Agg<PlanRef>,
 }
 
