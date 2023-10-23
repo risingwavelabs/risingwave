@@ -71,7 +71,7 @@ pub struct RedisSink {
     format_desc: SinkFormatDesc,
 }
 
-fn check_string_format(format: &String, set: &HashSet<String>) -> Result<()> {
+fn check_string_format(format: &str, set: &HashSet<String>) -> Result<()> {
     // We will check if the string inside {} corresponds to a column name in rw.
     // In other words, the content within {} should exclusively consist of column names from rw,
     // which means '{{column_name}}' or '{{column_name1},{column_name2}}' would be incorrect.
@@ -380,7 +380,7 @@ mod test {
         let format_desc = SinkFormatDesc {
             format: SinkFormat::AppendOnly,
             encode: SinkEncode::Template,
-            options: BTreeMap::default(),
+            options: btree_map,
         };
 
         let mut redis_sink_writer = RedisSinkWriter::mock(schema, vec![0], &format_desc).unwrap();

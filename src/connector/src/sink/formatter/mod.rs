@@ -116,11 +116,9 @@ impl SinkFormatterImpl {
                         Ok(SinkFormatterImpl::AppendOnlyProto(formatter))
                     }
                     SinkEncode::Avro => err_unsupported(),
-                    SinkEncode::Template => {
-                        return Err(SinkError::Config(anyhow!(
-                            "Template only support with redis sink"
-                        )))
-                    }
+                    SinkEncode::Template => Err(SinkError::Config(anyhow!(
+                        "Template only support with redis sink"
+                    ))),
                 }
             }
             SinkFormat::Debezium => {
@@ -184,9 +182,9 @@ impl SinkFormatterImpl {
                 let key_encoder = JsonEncoder::new(
                     schema.clone(),
                     Some(pk_indices),
-                    TimestampHandlingMode::Milli,
+                    TimestampHandlingMode::String,
                 );
-                let val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
+                let val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::String);
                 match format_desc.format {
                     SinkFormat::AppendOnly => Ok(SinkFormatterImpl::AppendOnlyJson(
                         AppendOnlyFormatter::new(Some(key_encoder), val_encoder),
@@ -227,11 +225,9 @@ impl SinkFormatterImpl {
                     ))),
                 }
             }
-            _ => {
-                return Err(SinkError::Config(anyhow!(
-                    "Redis sink only support Json and Template"
-                )))
-            }
+            _ => Err(SinkError::Config(anyhow!(
+                "Redis sink only support Json and Template"
+            ))),
         }
     }
 }
