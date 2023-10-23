@@ -165,7 +165,7 @@ public class DbzConnectorConfig {
             dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
         }
 
-        if (userProps.containsKey(CDC_SHARING_MODE)) {
+        if (Utils.getCdcSourceMode(userProps) == CdcSourceMode.SHARING_MODE) {
             adjustConfigForSharedCdcStream(dbzProps);
         }
 

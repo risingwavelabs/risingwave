@@ -79,6 +79,11 @@ public class SourceValidateHandler {
         ensurePropNotNull(props, DbzConnectorConfig.USER);
         ensurePropNotNull(props, DbzConnectorConfig.PASSWORD);
 
+        // ensure table name is passed by user in single mode
+        if (Utils.getCdcSourceMode(props) == CdcSourceMode.SINGLE_MODE) {
+            ensurePropNotNull(props, DbzConnectorConfig.TABLE_NAME);
+        }
+
         TableSchema tableSchema = TableSchema.fromProto(request.getTableSchema());
         switch (request.getSourceType()) {
             case POSTGRES:
