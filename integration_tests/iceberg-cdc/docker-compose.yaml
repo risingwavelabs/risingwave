@@ -3,23 +3,23 @@ version: '3.8'
 services:
   compactor-0:
     extends:
-      file: ../../docker/docker-compose-latest.yml
+      file: ../../docker/docker-compose.yml
       service: compactor-0
   compute-node-0:
     extends:
-      file: ../../docker/docker-compose-latest.yml
+      file: ../../docker/docker-compose.yml
       service: compute-node-0
   etcd-0:
     extends:
-      file: ../../docker/docker-compose-latest.yml
+      file: ../../docker/docker-compose.yml
       service: etcd-0
   frontend-node-0:
     extends:
-      file: ../../docker/docker-compose-latest.yml
+      file: ../../docker/docker-compose.yml
       service: frontend-node-0
   meta-node-0:
     extends:
-      file: ../../docker/docker-compose-latest.yml
+      file: ../../docker/docker-compose.yml
       service: meta-node-0
   grafana-0:
     extends:
@@ -105,7 +105,7 @@ services:
     depends_on:
       - minio-0
       - rest
-    build: ./spark
+    image: ghcr.io/icelake-io/icelake-spark:latest
     environment:
       - AWS_ACCESS_KEY_ID=hummockadmin
       - AWS_SECRET_ACCESS_KEY=hummockadmin

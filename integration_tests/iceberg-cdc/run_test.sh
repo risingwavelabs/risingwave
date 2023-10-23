@@ -1,12 +1,10 @@
 #!/bin/bash
 
-set -ex
-
 # Start test environment.
-docker-compose up -d
+docker-compose up -d --wait
 
-# Wait for the environment to be ready.
-sleep 20;
+# To avoid exiting by unhealth, set it after start environment.
+set -ex
 
 # Generate data
 docker build -t iceberg-cdc-datagen ../datagen
@@ -17,5 +15,5 @@ poetry update --quiet
 # Init source, mv, and sink.
 poetry run python init.py
 # Wait for sink to be finished.
-sleep 60;
+sleep 40;
 poetry run python check.py

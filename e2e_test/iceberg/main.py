@@ -51,7 +51,7 @@ def execute_slt(args,slt):
     subprocess.run(cmd,
                    shell=True,
                    check=True)
-    time.sleep(30)
+    time.sleep(10)
 
 
 def verify_result(args,verify_sql,verify_schema,verify_data):
