@@ -267,7 +267,6 @@ fn extract_any_info(dyn_msg: &DynamicMessage) -> (String, Value) {
 /// In the same level of fields, add the unique id at the tail of the name.
 /// e.g., "Int32.1" & "Int32.2" in the above example
 fn recursive_parse_json(fields: &[Datum], full_name_vec: Option<Vec<String>>) -> serde_json::Value {
-    println!("fields length: {}", fields.len());
     let mut ret: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
 
     for i in 0..fields.len() {
@@ -381,11 +380,13 @@ pub fn from_protobuf_value(
             ScalarImpl::Utf8(enum_symbol.name().into())
         }
         Value::Message(dyn_msg) => {
-            let any_flag;
-            if let Some(&DataType::Jsonb) = type_expected {
-                any_flag = true;
-            } else {
-                any_flag = false;
+            let any_flag = dyn_msg.descriptor().full_name() == "google.protobuf.Any";
+
+            if any_flag {
+                debug_assert!(
+                    type_expected == Some(&DataType::Jsonb),
+                    "`type_expected` must be of `DataType::Jsonb` for any protobuf type"
+                );
             }
 
             if dyn_msg.has_field_by_name("type_url")
@@ -429,6 +430,9 @@ pub fn from_protobuf_value(
                     field_desc,
                     &Value::Message(decoded_value),
                     descriptor_pool,
+                    // FIXME: Here `type_expected` can not be parsed by context
+                    // Thus this may be error-prone, need refactor / remove this
+                    // when dealing with nested any type
                     type_expected,
                 )?
                 .unwrap();
