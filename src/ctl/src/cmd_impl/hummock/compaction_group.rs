@@ -246,11 +246,9 @@ pub async fn get_compaction_score(
         row
     });
     for s in scores.into_iter().sorted_by(|a, b| {
-        if a.select_level == b.select_level {
-            a.target_level.cmp(&b.target_level)
-        } else {
-            a.select_level.cmp(&b.select_level)
-        }
+        a.select_level
+            .cmp(&b.select_level)
+            .then_with(|| a.target_level.cmp(&b.target_level))
     }) {
         let mut row = Row::new();
         row.add_cell(s.select_level.into());
