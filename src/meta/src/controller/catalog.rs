@@ -33,6 +33,7 @@ use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
+use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::{PbRelation, PbRelationGroup};
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, DatabaseConnection, DatabaseTransaction,
@@ -711,6 +712,24 @@ impl CatalogController {
         ))
     }
 
+    pub async fn load_fragment(
+        &self,
+        fragment_id: crate::model::FragmentId,
+    ) -> MetaResult<PbFragment> {
+        let inner = self.inner.read().await;
+
+        let all = Fragment::find_by_id(fragment_id)
+            .find_also_related(Actor)
+            .all(&inner.db)
+            .await?;
+
+        fn uname(fragment: Fragment, actors: Vec<Actor>) -> PbFragment {
+            let Fragment {} = fragment;
+        };
+
+        // Ok(ObjectModel(conn, obj.unwrap()).into())
+    }
+
     pub async fn alter_relation_name(
         &self,
         object_type: ObjectType,
@@ -852,12 +871,16 @@ impl CatalogController {
 #[cfg(not(madsim))]
 mod tests {
     use risingwave_common::catalog::DEFAULT_SUPER_USER_ID;
+    use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
+    use risingwave_pb::stream_plan::PbFragmentTypeFlag;
 
     use super::*;
 
     const TEST_DATABASE_ID: DatabaseId = 1;
     const TEST_SCHEMA_ID: SchemaId = 2;
     const TEST_OWNER_ID: UserId = 1;
+
+    const TEST_FRAGMENT_ID: i32 = 1;
 
     #[tokio::test]
     async fn test_create_database() -> MetaResult<()> {
@@ -941,6 +964,38 @@ mod tests {
             .one(&mgr.inner.read().await.db)
             .await?
             .is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_load_fragment() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+
+        let pb_fragment = PbFragment {
+            fragment_id: TEST_FRAGMENT_ID as _,
+            fragment_type_mask: PbFragmentTypeFlag::Source as _,
+            distribution_type: PbFragmentDistributionType::Hash as _,
+            actors: vec![],
+            vnode_mapping: None,
+            state_table_ids: vec![],
+            upstream_fragment_ids: vec![],
+        };
+        // let pb_view = PbView {
+        //     schema_id: TEST_SCHEMA_ID,
+        //     database_id: TEST_DATABASE_ID,
+        //     name: "view".to_string(),
+        //     owner: TEST_OWNER_ID,
+        //     sql: "CREATE VIEW view AS SELECT 1".to_string(),
+        //     ..Default::default()
+        // };
+
+        mgr.create_view(pb_view.clone()).await?;
+        assert!(mgr.create_view(pb_view).await.is_err());
+
+        let view = View::find().one(&mgr.inner.read().await.db).await?.unwrap();
+        mgr.drop_relation(ObjectType::View, view.view_id, DropMode::Cascade)
+            .await?;
 
         Ok(())
     }
