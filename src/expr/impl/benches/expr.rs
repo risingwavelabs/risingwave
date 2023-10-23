@@ -373,6 +373,13 @@ fn bench_expr(c: &mut Criterion) {
             args: match sig.inputs_type.as_slice() {
                 [] => AggArgs::None,
                 [t] => AggArgs::Unary(t.as_exact().clone(), input_index_for_type(t.as_exact())),
+                [t1, t2] => AggArgs::Binary(
+                    [t1.as_exact().clone(), t2.as_exact().clone()],
+                    [
+                        input_index_for_type(t1.as_exact()),
+                        input_index_for_type(t2.as_exact()),
+                    ],
+                ),
                 _ => {
                     println!("todo: {sig:?}");
                     continue;
@@ -393,6 +400,10 @@ fn bench_expr(c: &mut Criterion) {
         let input = match sig.inputs_type.as_slice() {
             [] => input.project(&[]),
             [t] => input.project(&[input_index_for_type(t.as_exact())]),
+            [t1, t2] => input.project(&[
+                input_index_for_type(t1.as_exact()),
+                input_index_for_type(t2.as_exact()),
+            ]),
             _ => unreachable!(),
         };
         c.bench_function(&format!("{sig:?}"), |bencher| {
