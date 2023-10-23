@@ -27,7 +27,8 @@ pub mod remote;
 pub mod test_sink;
 
 use anyhow::anyhow;
-pub use risingwave_connector_common::sink::*;
+pub use risingwave_connector::sink::Sink;
+pub(crate) use risingwave_connector::sink::*;
 pub use tracing;
 
 use crate::sink::writer::SinkWriter;

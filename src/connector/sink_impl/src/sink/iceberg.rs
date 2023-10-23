@@ -911,7 +911,8 @@ fn try_matches_arrow_schema(rw_schema: &Schema, arrow_schema: &ArrowSchema) -> R
 #[cfg(test)]
 mod test {
     use risingwave_common::catalog::Field;
-    use risingwave_common::types::DataType;
+
+    use crate::source::DataType;
 
     #[test]
     fn test_compatible_arrow_schema() {

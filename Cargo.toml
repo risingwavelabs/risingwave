@@ -10,7 +10,6 @@ members = [
   "src/common/heap_profiling",
   "src/compute",
   "src/connector",
-  "src/connector/connector_common",
   "src/connector/sink_impl",
   "src/ctl",
   "src/expr/core",
@@ -137,7 +136,6 @@ risingwave_compactor = { path = "./src/storage/compactor" }
 risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }
 risingwave_connector = { path = "./src/connector" }
-risingwave_connector_common = { path = "./src/connector/connector_common" }
 risingwave_expr = { path = "./src/expr/core" }
 risingwave_expr_impl = { path = "./src/expr/impl" }
 risingwave_frontend = { path = "./src/frontend" }

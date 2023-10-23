@@ -14,10 +14,18 @@
 
 use anyhow::{anyhow, Ok};
 use risingwave_common::types::JsonbVal;
-use risingwave_connector_common::common::NatsOffset;
 use serde::{Deserialize, Serialize};
 
 use crate::source::{SplitId, SplitMetaData};
+
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
+pub enum NatsOffset {
+    Earliest,
+    Latest,
+    SequenceNumber(String),
+    Timestamp(i128),
+    None,
+}
 
 /// The states of a NATS split, which will be persisted to checkpoint.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]

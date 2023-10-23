@@ -27,8 +27,9 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::connection::PrivateLinkService;
 
 use crate::common::{AwsPrivateLinkItem, BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY};
-use crate::kafka::stats::RdKafkaStats;
-use crate::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
+use crate::source::kafka::stats::RdKafkaStats;
+use crate::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
+use crate::source::KAFKA_CONNECTOR;
 
 pub const PRIVATELINK_ENDPOINT_KEY: &str = "privatelink.endpoint";
 pub const CONNECTION_NAME_KEY: &str = "connection.name";
@@ -49,7 +50,7 @@ impl std::fmt::Display for PrivateLinkContextRole {
 }
 
 struct BrokerAddrRewriter {
-    _role: PrivateLinkContextRole,
+    role: PrivateLinkContextRole,
     rewrite_map: BTreeMap<BrokerAddr, BrokerAddr>,
 }
 
@@ -87,10 +88,7 @@ impl BrokerAddrRewriter {
                     .collect()
             });
         let rewrite_map = rewrite_map?;
-        Ok(Self {
-            _role: role,
-            rewrite_map,
-        })
+        Ok(Self { role, rewrite_map })
     }
 }
 
@@ -196,6 +194,16 @@ fn get_property_required(
         .get(property)
         .map(|s| s.to_lowercase())
         .ok_or_else(|| anyhow!("Required property \"{property}\" is not provided"))
+}
+
+#[inline(always)]
+fn is_kafka_connector(with_properties: &BTreeMap<String, String>) -> bool {
+    const UPSTREAM_SOURCE_KEY: &str = "connector";
+    with_properties
+        .get(UPSTREAM_SOURCE_KEY)
+        .unwrap_or(&"".to_string())
+        .to_lowercase()
+        .eq_ignore_ascii_case(KAFKA_CONNECTOR)
 }
 
 pub fn insert_privatelink_broker_rewrite_map(

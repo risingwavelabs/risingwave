@@ -21,7 +21,6 @@ use aws_sdk_kinesis::primitives::Blob;
 use aws_sdk_kinesis::Client as KinesisClient;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_connector_common::common::KINESIS_CONNECTOR_NAME;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -29,7 +28,7 @@ use tokio_retry::Retry;
 
 use super::catalog::SinkFormatDesc;
 use super::SinkParam;
-use crate::common::KinesisCommon;
+use crate::common::{KinesisCommon, KINESIS_CONNECTOR_NAME};
 use crate::dispatch_sink_formatter_impl;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::writer::{FormattedSink, LogSinkerOf, SinkWriter, SinkWriterExt};

@@ -37,6 +37,7 @@ use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::deserialize_duration_from_string;
 use crate::sink::SinkError;
+use crate::source::nats::source::NatsOffset;
 // The file describes the common abstractions for each connector and can be used in both source and
 // sink.
 
@@ -413,15 +414,6 @@ pub struct UpsertMessage<'a> {
     pub primary_key: Cow<'a, [u8]>,
     #[serde(borrow)]
     pub record: Cow<'a, [u8]>,
-}
-
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize, Hash)]
-pub enum NatsOffset {
-    Earliest,
-    Latest,
-    SequenceNumber(String),
-    Timestamp(i128),
-    None,
 }
 
 #[serde_as]

@@ -24,13 +24,12 @@ use pulsar::producer::{Message, SendFuture};
 use pulsar::{Producer, ProducerOptions, Pulsar, TokioExecutor};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_connector_common::common::PULSAR_CONNECTOR_NAME;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam, SinkWriter, SinkWriterParam};
-use crate::common::PulsarCommon;
+use crate::common::{PulsarCommon, PULSAR_CONNECTOR_NAME};
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::writer::{FormattedSink, LogSinkerOf, SinkWriterExt};
 use crate::sink::{DummySinkCommitCoordinator, Result};

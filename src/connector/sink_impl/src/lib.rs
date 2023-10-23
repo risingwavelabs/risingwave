@@ -38,13 +38,12 @@ pub mod sink;
 
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use risingwave_connector_common::sink::boxed::BoxCoordinator;
-use risingwave_connector_common::sink::catalog::SinkCatalog;
-use risingwave_connector_common::sink::{Sink, SinkError, SinkParam};
-pub(crate) use risingwave_connector_common::*;
+pub(crate) use risingwave_connector::*;
 use risingwave_pb::catalog::PbSink;
 
-use crate::sink::build_sink;
+use crate::sink::boxed::BoxCoordinator;
+use crate::sink::catalog::SinkCatalog;
+use crate::sink::{build_sink, Sink, SinkError, SinkParam};
 
 #[export_name = "__exported_validate_sink"]
 pub fn validate_sink(

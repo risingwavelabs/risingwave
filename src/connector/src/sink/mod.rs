@@ -26,6 +26,7 @@ use std::future::Future;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use clickhouse::error::Error as ClickHouseError;
+use futures::future::BoxFuture;
 use redis::RedisError;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
@@ -33,12 +34,13 @@ use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
 };
-use risingwave_pb::catalog::PbSinkType;
+use risingwave_pb::catalog::{PbSink, PbSinkType};
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
 use thiserror::Error;
 
+use crate::sink::boxed::BoxCoordinator;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkId, SinkType};
 use crate::sink::log_store::LogReader;
@@ -51,6 +53,24 @@ pub const SINK_TYPE_APPEND_ONLY: &str = "append-only";
 pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
+
+extern "Rust" {
+    fn __exported_build_box_coordinator(
+        param: SinkParam,
+    ) -> BoxFuture<'static, std::result::Result<BoxCoordinator, SinkError>>;
+
+    fn __exported_validate_sink(
+        prost_sink_catalog: &PbSink,
+    ) -> BoxFuture<'_, std::result::Result<(), SinkError>>;
+}
+
+pub async fn build_box_coordinator(param: SinkParam) -> Result<BoxCoordinator> {
+    unsafe { __exported_build_box_coordinator(param).await }
+}
+
+pub async fn validate_sink(prost_sink_catalog: &PbSink) -> std::result::Result<(), SinkError> {
+    unsafe { __exported_validate_sink(prost_sink_catalog).await }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SinkParam {

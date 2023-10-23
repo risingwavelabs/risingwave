@@ -16,18 +16,24 @@ use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 
 pub mod enumerator;
+pub mod private_link;
 pub mod source;
 pub mod split;
+pub mod stats;
 
 pub use enumerator::*;
 pub use private_link::*;
-use risingwave_connector_common::common::KAFKA_CONNECTOR_NAME;
-pub use risingwave_connector_common::kafka::*;
 pub use source::*;
 pub use split::*;
 
-use crate::common::KafkaCommon;
+pub use crate::common::KAFKA_CONNECTOR_NAME as KAFKA_CONNECTOR;
+use crate::common::{KafkaCommon, KAFKA_CONNECTOR_NAME};
 use crate::source::SourceProperties;
+
+pub const KAFKA_PROPS_BROKER_KEY: &str = "properties.bootstrap.server";
+pub const KAFKA_PROPS_BROKER_KEY_ALIAS: &str = "kafka.brokers";
+pub const PRIVATELINK_CONNECTION: &str = "privatelink";
+pub const KAFKA_ISOLATION_LEVEL: &str = "read_committed";
 
 /// Properties for the rdkafka library. Leave a field as `None` to use the default value.
 /// These properties are not intended to be exposed to users in the majority of cases.

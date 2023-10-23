@@ -12,16 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::future::BoxFuture;
-use risingwave_connector::sink::SinkError;
-use risingwave_pb::catalog::PbSink;
-
-extern "Rust" {
-    fn __exported_validate_sink(
-        prost_sink_catalog: &PbSink,
-    ) -> BoxFuture<'_, std::result::Result<(), SinkError>>;
-}
-
-pub async fn validate_sink(prost_sink_catalog: &PbSink) -> std::result::Result<(), SinkError> {
-    unsafe { __exported_validate_sink(prost_sink_catalog).await }
-}
+pub use risingwave_connector::sink::validate_sink;

@@ -16,13 +16,12 @@ use std::collections::HashSet;
 use std::pin::pin;
 
 use anyhow::anyhow;
-use futures::future::{select, BoxFuture, Either};
+use futures::future::{select, Either};
 use futures::stream::FuturesUnordered;
 use futures::{StreamExt, TryStreamExt};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_connector::sink::boxed::BoxCoordinator;
-use risingwave_connector::sink::{SinkCommitCoordinator, SinkError, SinkParam};
+use risingwave_connector::sink::{build_box_coordinator, SinkCommitCoordinator, SinkParam};
 use risingwave_pb::connector_service::coordinate_request::CommitRequest;
 use risingwave_pb::connector_service::coordinate_response::{
     CommitResponse, StartCoordinationResponse,
@@ -53,19 +52,12 @@ pub struct CoordinatorWorker {
     request_rx: UnboundedReceiver<NewSinkWriterRequest>,
 }
 
-extern "Rust" {
-    fn __exported_build_box_coordinator(
-        param: SinkParam,
-    ) -> BoxFuture<'static, std::result::Result<BoxCoordinator, SinkError>>;
-}
-
 impl CoordinatorWorker {
     pub async fn run(
         first_writer_request: NewSinkWriterRequest,
         request_rx: UnboundedReceiver<NewSinkWriterRequest>,
     ) {
-        let coordinator_result =
-            unsafe { __exported_build_box_coordinator(first_writer_request.param.clone()).await };
+        let coordinator_result = build_box_coordinator(first_writer_request.param.clone()).await;
         let coordinator = match coordinator_result {
             Ok(coordinator) => coordinator,
             Err(e) => {
