@@ -15,6 +15,11 @@
 use super::generic::GenericPlanRef;
 use crate::optimizer::property::Order;
 
+/// A subtrait of [`GenericPlanRef`] for batch plans.
+///
+/// Due to the lack of refactoring, all plan nodes currently implement this trait
+/// through [`super::PlanBase`]. One may still use this trait as a bound for
+/// expecting a batch plan, in contrast to [`GenericPlanRef`].
 pub trait BatchPlanRef: GenericPlanRef {
     fn order(&self) -> &Order;
 }

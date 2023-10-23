@@ -472,7 +472,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Table::Version).json().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
-                            .name("FK_view_object_id")
+                            .name("FK_table_object_id")
                             .from(Table::Table, Table::TableId)
                             .to(Object::Table, Object::Oid)
                             .on_delete(ForeignKeyAction::Cascade)
