@@ -2197,7 +2197,7 @@ impl CatalogManager {
     pub async fn comment_on(&self, comment: Comment) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        database_core.ensure_table_view_or_source_id(&comment.table_id)?;
+        database_core.ensure_table_id(&comment.table_id)?;
 
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
 
