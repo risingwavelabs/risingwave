@@ -26,7 +26,6 @@ use std::future::Future;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use clickhouse::error::Error as ClickHouseError;
-use futures::future::BoxFuture;
 use redis::RedisError;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
@@ -54,22 +53,47 @@ pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
-extern "Rust" {
-    fn __exported_build_box_coordinator(
-        param: SinkParam,
-    ) -> BoxFuture<'static, std::result::Result<BoxCoordinator, SinkError>>;
+pub mod __sink_impl_functions {
+    use std::sync::OnceLock;
 
-    fn __exported_validate_sink(
-        prost_sink_catalog: &PbSink,
-    ) -> BoxFuture<'_, std::result::Result<(), SinkError>>;
+    use futures::future::BoxFuture;
+    use risingwave_pb::catalog::PbSink;
+
+    use crate::sink::boxed::BoxCoordinator;
+    use crate::sink::{SinkError, SinkParam};
+
+    pub type BuildBoxCoordinatorFn =
+        fn(SinkParam) -> BoxFuture<'static, Result<BoxCoordinator, SinkError>>;
+    pub type ValidateSinkFn = for<'a> fn(&'a PbSink) -> BoxFuture<'a, Result<(), SinkError>>;
+
+    pub(super) static BUILD_BOX_COORDINATOR_FN: OnceLock<BuildBoxCoordinatorFn> = OnceLock::new();
+
+    pub(super) static VALIDATE_SINK_FN: OnceLock<ValidateSinkFn> = OnceLock::new();
+
+    pub fn set_fn(build_box_coordinator: BuildBoxCoordinatorFn, validate_sink: ValidateSinkFn) {
+        let expect_msg = "should not set build_box_coordinator for multiple times";
+        BUILD_BOX_COORDINATOR_FN
+            .set(build_box_coordinator)
+            .expect(expect_msg);
+        VALIDATE_SINK_FN.set(validate_sink).expect(expect_msg);
+    }
 }
 
+const GET_FN_EXPECT_MSG: &str = "functions in risingwave_sink_impl not imported. \
+            Please add risingwave_sink_impl as a dependency";
+
 pub async fn build_box_coordinator(param: SinkParam) -> Result<BoxCoordinator> {
-    unsafe { __exported_build_box_coordinator(param).await }
+    (__sink_impl_functions::BUILD_BOX_COORDINATOR_FN
+        .get()
+        .expect(GET_FN_EXPECT_MSG))(param)
+    .await
 }
 
 pub async fn validate_sink(prost_sink_catalog: &PbSink) -> std::result::Result<(), SinkError> {
-    unsafe { __exported_validate_sink(prost_sink_catalog).await }
+    (__sink_impl_functions::VALIDATE_SINK_FN
+        .get()
+        .expect(GET_FN_EXPECT_MSG))(prost_sink_catalog)
+    .await
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -45,10 +45,12 @@ use crate::sink::boxed::BoxCoordinator;
 use crate::sink::catalog::SinkCatalog;
 use crate::sink::{build_sink, Sink, SinkError, SinkParam};
 
-#[export_name = "__exported_validate_sink"]
-pub fn validate_sink(
-    prost_sink_catalog: &PbSink,
-) -> BoxFuture<'_, std::result::Result<(), SinkError>> {
+#[ctor::ctor]
+fn __register_sink_impl_fn() {
+    risingwave_connector::sink::__sink_impl_functions::set_fn(build_box_coordinator, validate_sink);
+}
+
+fn validate_sink(prost_sink_catalog: &PbSink) -> BoxFuture<'_, Result<(), SinkError>> {
     async move {
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
         let param = SinkParam::from(sink_catalog);
@@ -60,8 +62,7 @@ pub fn validate_sink(
     .boxed()
 }
 
-#[export_name = "__exported_build_box_coordinator"]
-pub fn build_box_coordinator(
+fn build_box_coordinator(
     param: SinkParam,
 ) -> BoxFuture<'static, std::result::Result<BoxCoordinator, SinkError>> {
     async move {

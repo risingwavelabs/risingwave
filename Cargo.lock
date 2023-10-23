@@ -7962,6 +7962,7 @@ dependencies = [
  "clickhouse",
  "criterion",
  "csv",
+ "ctor",
  "duration-str",
  "easy-ext",
  "enum-as-inner",
