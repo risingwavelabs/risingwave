@@ -27,6 +27,7 @@ use risingwave_common::catalog::Schema;
 pub use upsert::UpsertFormatter;
 
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
+use super::encoder::template::TemplateEncoder;
 use super::encoder::KafkaConnectParams;
 use crate::sink::encoder::{JsonEncoder, ProtoEncoder, TimestampHandlingMode};
 
@@ -66,6 +67,8 @@ pub enum SinkFormatterImpl {
     AppendOnlyProto(AppendOnlyFormatter<JsonEncoder, ProtoEncoder>),
     UpsertJson(UpsertFormatter<JsonEncoder, JsonEncoder>),
     DebeziumJson(DebeziumJsonFormatter),
+    AppendOnlyTemplate(AppendOnlyFormatter<TemplateEncoder, TemplateEncoder>),
+    UpsertTemplate(UpsertFormatter<TemplateEncoder, TemplateEncoder>),
 }
 
 impl SinkFormatterImpl {
@@ -164,6 +167,51 @@ impl SinkFormatterImpl {
             }
         }
     }
+
+    pub fn new_with_redis(
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        is_append_only: bool,
+        key_format: Option<String>,
+        value_format: Option<String>,
+    ) -> Result<Self> {
+        match (key_format, value_format) {
+            (Some(k), Some(v)) => {
+                let key_encoder = TemplateEncoder::new(
+                    schema.clone(),
+                    Some(pk_indices),
+                    k,
+                );
+                let val_encoder =
+                    TemplateEncoder::new(schema, None, v);
+                if is_append_only {
+                    Ok(SinkFormatterImpl::AppendOnlyTemplate(AppendOnlyFormatter::new(Some(key_encoder), val_encoder)))
+                } else {
+                    Ok(SinkFormatterImpl::UpsertTemplate(UpsertFormatter::new(key_encoder, val_encoder)))
+                }
+            }
+            (None, None) => {
+                let key_encoder = JsonEncoder::new(
+                    schema.clone(),
+                    Some(pk_indices),
+                    TimestampHandlingMode::Milli,
+                );
+                let val_encoder = JsonEncoder::new(
+                    schema,
+                    None,
+                    TimestampHandlingMode::Milli,
+                );
+                if is_append_only {
+                    Ok(SinkFormatterImpl::AppendOnlyJson(AppendOnlyFormatter::new(Some(key_encoder), val_encoder)))
+                } else {
+                    Ok(SinkFormatterImpl::UpsertJson(UpsertFormatter::new(key_encoder, val_encoder)))
+                }
+            }
+            _ => {
+                Err(SinkError::Encode("Please provide template formats for both key and value, or choose the JSON format.".to_string()))
+            }
+        }
+    }
 }
 
 #[macro_export]
@@ -174,6 +222,8 @@ macro_rules! dispatch_sink_formatter_impl {
             SinkFormatterImpl::AppendOnlyProto($name) => $body,
             SinkFormatterImpl::UpsertJson($name) => $body,
             SinkFormatterImpl::DebeziumJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyTemplate($name) => $body,
+            SinkFormatterImpl::UpsertTemplate($name) => $body,
         }
     };
 }

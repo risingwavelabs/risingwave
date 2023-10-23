@@ -29,19 +29,21 @@ impl TemporalJoinValidator {
     }
 }
 
-impl PlanVisitor<bool> for TemporalJoinValidator {
-    type DefaultBehavior = impl DefaultBehavior<bool>;
+impl PlanVisitor for TemporalJoinValidator {
+    type Result = bool;
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     fn default_behavior() -> Self::DefaultBehavior {
         Merge(|a, b| a | b)
     }
 
     fn visit_stream_table_scan(&mut self, stream_table_scan: &StreamTableScan) -> bool {
-        stream_table_scan.logical().for_system_time_as_of_proctime
+        stream_table_scan.core().for_system_time_as_of_proctime
     }
 
     fn visit_batch_seq_scan(&mut self, batch_seq_scan: &BatchSeqScan) -> bool {
-        batch_seq_scan.logical().for_system_time_as_of_proctime
+        batch_seq_scan.core().for_system_time_as_of_proctime
     }
 
     fn visit_logical_scan(&mut self, logical_scan: &LogicalScan) -> bool {

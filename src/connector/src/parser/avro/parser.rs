@@ -24,13 +24,13 @@ use risingwave_pb::plan_common::ColumnDesc;
 
 use super::schema_resolver::*;
 use super::util::avro_schema_to_column_descs;
-use crate::parser::schema_registry::{
-    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
-};
 use crate::parser::unified::avro::{AvroAccess, AvroParseOptions};
 use crate::parser::unified::AccessImpl;
 use crate::parser::util::{read_schema_from_http, read_schema_from_local, read_schema_from_s3};
 use crate::parser::{AccessBuilder, EncodingProperties, EncodingType};
+use crate::schema::schema_registry::{
+    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
+};
 
 // Default avro access builder
 #[derive(Debug)]
