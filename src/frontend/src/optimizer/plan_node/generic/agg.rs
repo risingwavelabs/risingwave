@@ -348,7 +348,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
 
         let gen_materialized_input_state = |sort_keys: Vec<(OrderType, usize)>,
-                                            include_keys: Vec<usize>|
+                                            include_keys: Vec<usize>,
+                                            distinct_key: Option<usize>|
          -> MaterializedInputState {
             let (mut table_builder, mut included_upstream_indices, mut column_mapping) =
                 self.create_table_builder(me.ctx(), window_col_idx);
@@ -375,8 +376,17 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             for (order_type, idx) in sort_keys {
                 add_column(idx, Some(order_type), true, &mut table_builder);
             }
-            for &idx in &in_pks {
-                add_column(idx, Some(OrderType::ascending()), true, &mut table_builder);
+            if let Some(distinct_key) = distinct_key {
+                add_column(
+                    distinct_key,
+                    Some(OrderType::ascending()),
+                    true,
+                    &mut table_builder,
+                );
+            } else {
+                for &idx in &in_pks {
+                    add_column(idx, Some(OrderType::ascending()), true, &mut table_builder);
+                }
             }
             for idx in include_keys {
                 add_column(idx, None, true, &mut table_builder);
@@ -470,7 +480,12 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         }
                         _ => vec![],
                     };
-                    let state = gen_materialized_input_state(sort_keys, include_keys);
+                    let state = if agg_call.distinct {
+                        let distinct_key = agg_call.inputs[0].index;
+                        gen_materialized_input_state(sort_keys, include_keys, Some(distinct_key))
+                    } else {
+                        gen_materialized_input_state(sort_keys, include_keys, None)
+                    };
                     AggCallState::MaterializedInput(Box::new(state))
                 }
                 agg_kinds::rewritten!() => {
