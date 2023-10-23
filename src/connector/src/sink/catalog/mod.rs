@@ -140,7 +140,6 @@ impl SinkFormatDesc {
         use crate::sink::kafka::KafkaSink;
         use crate::sink::kinesis::KinesisSink;
         use crate::sink::pulsar::PulsarSink;
-        use crate::sink::redis::RedisSink;
         use crate::sink::Sink as _;
 
         let format = match r#type {
@@ -155,10 +154,9 @@ impl SinkFormatDesc {
             }
         };
         let encode = match connector {
-            KafkaSink::SINK_NAME
-            | KinesisSink::SINK_NAME
-            | PulsarSink::SINK_NAME
-            | RedisSink::SINK_NAME => SinkEncode::Json,
+            KafkaSink::SINK_NAME | KinesisSink::SINK_NAME | PulsarSink::SINK_NAME => {
+                SinkEncode::Json
+            }
             _ => return Ok(None),
         };
         Ok(Some(Self {

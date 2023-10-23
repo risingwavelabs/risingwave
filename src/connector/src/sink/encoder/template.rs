@@ -12,11 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
+use regex::Regex;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::ToText;
 
 use super::{Result, RowEncoder};
+use crate::sink::SinkError;
 
 /// Encode a row according to a specified string template `user_id:{user_id}`
 pub struct TemplateEncoder {
@@ -33,6 +37,24 @@ impl TemplateEncoder {
             col_indices,
             template,
         }
+    }
+
+    pub fn check_string_format(format: &str, set: &HashSet<String>) -> Result<()> {
+        // We will check if the string inside {} corresponds to a column name in rw.
+        // In other words, the content within {} should exclusively consist of column names from rw,
+        // which means '{{column_name}}' or '{{column_name1},{column_name2}}' would be incorrect.
+        let re = Regex::new(r"\{([^}]*)\}").unwrap();
+        if !re.is_match(format) {
+            return Err(SinkError::Redis(
+                "Can't find {} in key_format or value_format".to_string(),
+            ));
+        }
+        for capture in re.captures_iter(format) {
+            if let Some(inner_content) = capture.get(1) && !set.contains(inner_content.as_str()){
+                    return Err(SinkError::Redis(format!("Can't find field({:?}) in key_format or value_format",inner_content.as_str())))
+                }
+        }
+        Ok(())
     }
 }
 

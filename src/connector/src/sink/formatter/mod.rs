@@ -29,7 +29,7 @@ pub use upsert::UpsertFormatter;
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
 use super::encoder::template::TemplateEncoder;
 use super::encoder::KafkaConnectParams;
-use super::redis::{REDIS_KEY_FORMAT, REDIS_VALUE_FORMAT};
+use super::redis::{KEY_FORMAT, VALUE_FORMAT};
 use crate::sink::encoder::{JsonEncoder, ProtoEncoder, TimestampHandlingMode};
 
 /// Transforms a `StreamChunk` into a sequence of key-value pairs according a specific format,
@@ -93,7 +93,7 @@ impl SinkFormatterImpl {
                 let key_encoder = (!pk_indices.is_empty()).then(|| {
                     JsonEncoder::new(
                         schema.clone(),
-                        Some(pk_indices),
+                        Some(pk_indices.clone()),
                         TimestampHandlingMode::Milli,
                     )
                 });
@@ -116,9 +116,28 @@ impl SinkFormatterImpl {
                         Ok(SinkFormatterImpl::AppendOnlyProto(formatter))
                     }
                     SinkEncode::Avro => err_unsupported(),
-                    SinkEncode::Template => Err(SinkError::Config(anyhow!(
-                        "Template only support with redis sink"
-                    ))),
+                    SinkEncode::Template => {
+                        let key_format = format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
+                            SinkError::Config(anyhow!(
+                                "Cannot find 'key_format',please set it or use JSON"
+                            ))
+                        })?;
+                        let value_format =
+                            format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
+                                SinkError::Config(anyhow!(
+                                    "Cannot find 'redis_value_format',please set it or use JSON"
+                                ))
+                            })?;
+                        let key_encoder = TemplateEncoder::new(
+                            schema.clone(),
+                            Some(pk_indices),
+                            key_format.clone(),
+                        );
+                        let val_encoder = TemplateEncoder::new(schema, None, value_format.clone());
+                        Ok(SinkFormatterImpl::AppendOnlyTemplate(
+                            AppendOnlyFormatter::new(Some(key_encoder), val_encoder),
+                        ))
+                    }
                 }
             }
             SinkFormat::Debezium => {
@@ -135,99 +154,66 @@ impl SinkFormatterImpl {
                 )))
             }
             SinkFormat::Upsert => {
-                if format_desc.encode != SinkEncode::Json {
-                    return err_unsupported();
-                }
+                match format_desc.encode {
+                    SinkEncode::Json => {
+                        let mut key_encoder = JsonEncoder::new(
+                            schema.clone(),
+                            Some(pk_indices),
+                            TimestampHandlingMode::Milli,
+                        );
+                        let mut val_encoder =
+                            JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
 
-                let mut key_encoder = JsonEncoder::new(
-                    schema.clone(),
-                    Some(pk_indices),
-                    TimestampHandlingMode::Milli,
-                );
-                let mut val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
+                        if let Some(s) = format_desc.options.get("schemas.enable") {
+                            match s.to_lowercase().parse::<bool>() {
+                                Ok(true) => {
+                                    let kafka_connect = KafkaConnectParams {
+                                        schema_name: format!("{}.{}", db_name, sink_from_name),
+                                    };
+                                    key_encoder =
+                                        key_encoder.with_kafka_connect(kafka_connect.clone());
+                                    val_encoder = val_encoder.with_kafka_connect(kafka_connect);
+                                }
+                                Ok(false) => {}
+                                _ => {
+                                    return Err(SinkError::Config(anyhow!(
+                                        "schemas.enable is expected to be `true` or `false`, got {}",
+                                        s
+                                    )));
+                                }
+                            }
+                        };
 
-                if let Some(s) = format_desc.options.get("schemas.enable") {
-                    match s.to_lowercase().parse::<bool>() {
-                        Ok(true) => {
-                            let kafka_connect = KafkaConnectParams {
-                                schema_name: format!("{}.{}", db_name, sink_from_name),
-                            };
-                            key_encoder = key_encoder.with_kafka_connect(kafka_connect.clone());
-                            val_encoder = val_encoder.with_kafka_connect(kafka_connect);
-                        }
-                        Ok(false) => {}
-                        _ => {
-                            return Err(SinkError::Config(anyhow!(
-                                "schemas.enable is expected to be `true` or `false`, got {}",
-                                s
-                            )));
-                        }
+                        // Initialize the upsert_stream
+                        let formatter = UpsertFormatter::new(key_encoder, val_encoder);
+                        Ok(SinkFormatterImpl::UpsertJson(formatter))
                     }
-                };
-
-                // Initialize the upsert_stream
-                let formatter = UpsertFormatter::new(key_encoder, val_encoder);
-                Ok(SinkFormatterImpl::UpsertJson(formatter))
-            }
-        }
-    }
-
-    pub fn new_with_redis(
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        format_desc: &SinkFormatDesc,
-    ) -> Result<Self> {
-        match format_desc.encode {
-            SinkEncode::Json => {
-                let key_encoder = JsonEncoder::new(
-                    schema.clone(),
-                    Some(pk_indices),
-                    TimestampHandlingMode::String,
-                );
-                let val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::String);
-                match format_desc.format {
-                    SinkFormat::AppendOnly => Ok(SinkFormatterImpl::AppendOnlyJson(
-                        AppendOnlyFormatter::new(Some(key_encoder), val_encoder),
-                    )),
-                    SinkFormat::Upsert => Ok(SinkFormatterImpl::UpsertJson(UpsertFormatter::new(
-                        key_encoder,
-                        val_encoder,
-                    ))),
-                    _ => Err(SinkError::Config(anyhow!(
-                        "Redis sink only support Append_Only and Upsert"
-                    ))),
+                    SinkEncode::Template => {
+                        let key_format = format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
+                            SinkError::Config(anyhow!(
+                                "Cannot find 'key_format',please set it or use JSON"
+                            ))
+                        })?;
+                        let value_format =
+                            format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
+                                SinkError::Config(anyhow!(
+                                    "Cannot find 'redis_value_format',please set it or use JSON"
+                                ))
+                            })?;
+                        let key_encoder = TemplateEncoder::new(
+                            schema.clone(),
+                            Some(pk_indices),
+                            key_format.clone(),
+                        );
+                        let val_encoder = TemplateEncoder::new(schema, None, value_format.clone());
+                        Ok(SinkFormatterImpl::UpsertTemplate(UpsertFormatter::new(
+                            key_encoder,
+                            val_encoder,
+                        )))
+                    }
+                    _ => err_unsupported(),
                 }
             }
-            SinkEncode::Template => {
-                let key_format = format_desc.options.get(REDIS_KEY_FORMAT).ok_or_else(|| {
-                    SinkError::Config(anyhow!(
-                        "Cannot find 'redis_key_format',please set it or use JSON"
-                    ))
-                })?;
-                let value_format =
-                    format_desc.options.get(REDIS_VALUE_FORMAT).ok_or_else(|| {
-                        SinkError::Config(anyhow!(
-                            "Cannot find 'redis_value_format',please set it or use JSON"
-                        ))
-                    })?;
-                let key_encoder =
-                    TemplateEncoder::new(schema.clone(), Some(pk_indices), key_format.clone());
-                let val_encoder = TemplateEncoder::new(schema, None, value_format.clone());
-                match format_desc.format {
-                    SinkFormat::AppendOnly => Ok(SinkFormatterImpl::AppendOnlyTemplate(
-                        AppendOnlyFormatter::new(Some(key_encoder), val_encoder),
-                    )),
-                    SinkFormat::Upsert => Ok(SinkFormatterImpl::UpsertTemplate(
-                        UpsertFormatter::new(key_encoder, val_encoder),
-                    )),
-                    _ => Err(SinkError::Config(anyhow!(
-                        "Redis sink only support Append_Only and Upsert"
-                    ))),
-                }
-            }
-            _ => Err(SinkError::Config(anyhow!(
-                "Redis sink only support Json and Template"
-            ))),
         }
     }
 }
