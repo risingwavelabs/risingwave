@@ -16,6 +16,11 @@ message Int32Value {
   int32 value = 1;
 }
 
+message AnyValue {
+  google.protobuf.Any any_value_1 = 1;
+  google.protobuf.Any any_value_2 = 2;
+}
+
 message StringInt32Value {
   string first = 1;
   int32 second = 2;

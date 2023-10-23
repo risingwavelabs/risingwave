@@ -39,7 +39,7 @@ impl ProtobufAccess {
 }
 
 impl Access for ProtobufAccess {
-    fn access(&self, path: &[&str], type_expected: Option<&DataType>) -> AccessResult {
+    fn access(&self, path: &[&str], _type_expected: Option<&DataType>) -> AccessResult {
         debug_assert_eq!(1, path.len());
         let field_desc = self
             .message
@@ -52,7 +52,7 @@ impl Access for ProtobufAccess {
             })
             .map_err(|e| AccessError::Other(anyhow!(e)))?;
         let value = self.message.get_field(&field_desc);
-        from_protobuf_value(&field_desc, &value, &self.descriptor_pool, type_expected)
+        from_protobuf_value(&field_desc, &value, &self.descriptor_pool)
             .map_err(|e| AccessError::Other(anyhow!(e)))
     }
 }

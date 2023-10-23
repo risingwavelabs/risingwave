@@ -5,7 +5,7 @@
 type_url (	RtypeUrl
 value (RvalueBv
 com.google.protobufBAnyProtoPZ,google.golang.org/protobuf/types/known/anypb¢GPBªGoogle.Protobuf.WellKnownTypesbproto3
-é
+á
 any-schema.prototestgoogle/protobuf/any.proto"L
 TestAny
 id (Rid1
@@ -14,7 +14,10 @@
 value (	Rvalue""
 
 Int32Value
-value (Rvalue"@
+value (Rvalue"v
+AnyValue4
+any_value_1 (2.google.protobuf.AnyR	anyValue14
+any_value_2 (2.google.protobuf.AnyR	anyValue2"@
 StringInt32Value
 first (	Rfirst
 second (Rsecond"Ž
