@@ -268,17 +268,16 @@ fn extract_any_info(dyn_msg: &DynamicMessage) -> (String, Value) {
 /// In the same level of fields, add the unique id at the tail of the name.
 /// e.g., "Int32.1" & "Int32.2" in the above example
 fn recursive_parse_json(fields: &[Datum], full_name_vec: Option<Vec<String>>) -> serde_json::Value {
-    println!("fields length: {}", fields.len());
     let mut ret: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
 
-    for i in 0..fields.len() {
+    for (idx, field) in fields.iter().enumerate() {
         let mut key = if full_name_vec.is_some() {
-            full_name_vec.as_ref().unwrap()[i].to_string()
+            full_name_vec.as_ref().unwrap()[idx].to_string()
         } else {
             "".to_string()
         };
 
-        match fields[i].clone() {
+        match field.clone() {
             Some(ScalarImpl::Int16(v)) => {
                 if key.is_empty() {
                     key = "Int16".to_string();
@@ -358,7 +357,6 @@ pub fn from_protobuf_value(
     field_desc: &FieldDescriptor,
     value: &Value,
     descriptor_pool: &Arc<DescriptorPool>,
-    type_expected: Option<&DataType>,
 ) -> Result<Datum> {
     let v = match value {
         Value::Bool(v) => ScalarImpl::Bool(*v),
@@ -391,12 +389,8 @@ pub fn from_protobuf_value(
 
                 let payload_field_desc = dyn_msg.descriptor().get_field_by_name("value").unwrap();
 
-                let Some(ScalarImpl::Bytea(payload)) = from_protobuf_value(
-                    &payload_field_desc,
-                    &payload,
-                    descriptor_pool,
-                    type_expected,
-                )?
+                let Some(ScalarImpl::Bytea(payload)) =
+                    from_protobuf_value(&payload_field_desc, &payload, descriptor_pool)?
                 else {
                     panic!("Expected ScalarImpl::Bytea for payload");
                 };
@@ -423,7 +417,6 @@ pub fn from_protobuf_value(
                     field_desc,
                     &Value::Message(decoded_value),
                     descriptor_pool,
-                    type_expected,
                 )?
                 .unwrap();
 
@@ -453,12 +446,7 @@ pub fn from_protobuf_value(
                     }
                     // use default value if dyn_msg doesn't has this field
                     let value = dyn_msg.get_field(&field_desc);
-                    rw_values.push(from_protobuf_value(
-                        &field_desc,
-                        &value,
-                        descriptor_pool,
-                        type_expected,
-                    )?);
+                    rw_values.push(from_protobuf_value(&field_desc, &value, descriptor_pool)?);
                 }
                 ScalarImpl::Struct(StructValue::new(rw_values))
             }
@@ -466,7 +454,7 @@ pub fn from_protobuf_value(
         Value::List(values) => {
             let rw_values = values
                 .iter()
-                .map(|value| from_protobuf_value(field_desc, value, descriptor_pool, type_expected))
+                .map(|value| from_protobuf_value(field_desc, value, descriptor_pool))
                 .collect::<Result<Vec<_>>>()?;
             ScalarImpl::List(ListValue::new(rw_values))
         }
@@ -963,8 +951,7 @@ mod test {
         let field = value.fields().next().unwrap().0;
 
         if let Some(ret) =
-            from_protobuf_value(&field, &Value::Message(value), &conf.descriptor_pool, None)
-                .unwrap()
+            from_protobuf_value(&field, &Value::Message(value), &conf.descriptor_pool).unwrap()
         {
             println!("Decoded Value for ANY_GEN_PROTO_DATA: {:#?}", ret);
             println!("---------------------------");
@@ -1024,8 +1011,7 @@ mod test {
         let field = value.fields().next().unwrap().0;
 
         if let Some(ret) =
-            from_protobuf_value(&field, &Value::Message(value), &conf.descriptor_pool, None)
-                .unwrap()
+            from_protobuf_value(&field, &Value::Message(value), &conf.descriptor_pool).unwrap()
         {
             println!("Decoded Value for ANY_GEN_PROTO_DATA: {:#?}", ret);
             println!("---------------------------");
@@ -1096,8 +1082,7 @@ mod test {
         let field = value.fields().next().unwrap().0;
 
         if let Some(ret) =
-            from_protobuf_value(&field, &Value::Message(value), &conf.descriptor_pool, None)
-                .unwrap()
+            from_protobuf_value(&field, &Value::Message(value), &conf.descriptor_pool).unwrap()
         {
             println!("Decoded Value for ANY_RECURSIVE_GEN_PROTO_DATA: {:#?}", ret);
             println!("---------------------------");
