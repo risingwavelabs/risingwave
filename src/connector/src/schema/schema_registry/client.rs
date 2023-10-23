@@ -135,7 +135,9 @@ impl Client {
 
         Err(RwError::from(ProtocolError(format!(
             "all request confluent registry all timeout, req path {:?}, urls {:?}, err: {:?}",
-            path, self.url, errs
+            path,
+            self.url,
+            errs.iter().map(|e| e.to_string()).collect_vec()
         ))))
     }
 
