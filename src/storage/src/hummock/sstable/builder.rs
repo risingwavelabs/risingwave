@@ -676,6 +676,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 pub(super) mod tests {
     use std::collections::Bound;
 
+    use risingwave_common::buffer::Bitmap;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::key::UserKey;
@@ -885,6 +886,75 @@ pub(super) mod tests {
             assert!(table
                 .value()
                 .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_vnode_bitmap() {
+        let opts = SstableBuilderOptions::default();
+        // build remote table
+        let sstable_store = mock_sstable_store();
+        let writer_opts = SstableWriterOptions::default();
+        let object_id = 1;
+        let writer = sstable_store
+            .clone()
+            .create_sst_writer(object_id, writer_opts);
+        let mut filter = MultiFilterKeyExtractor::default();
+        filter.register(
+            1,
+            Arc::new(FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor)),
+        );
+        filter.register(
+            2,
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
+        );
+        filter.register(
+            3,
+            Arc::new(FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor)),
+        );
+        let mut builder = SstableBuilder::new(
+            object_id,
+            writer,
+            BlockedXor16FilterBuilder::new(1024),
+            opts,
+            Arc::new(FilterKeyExtractorImpl::Multi(filter)),
+            None,
+            true,
+        );
+
+        let key_count: usize = 10000;
+        let vnode_vec = vec![0, 63, 127, 255];
+        for table_id in 1..4 {
+            let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
+            let mut vnode_idx = 1;
+            for idx in 0..key_count {
+                if idx > (vnode_idx * 2500) {
+                    let vnode = vnode_vec.get(vnode_idx).unwrap();
+                    table_key = VirtualNode::from_index(*vnode).to_be_bytes().to_vec();
+
+                    vnode_idx += 1;
+                }
+
+                table_key.resize(VirtualNode::SIZE, 0);
+                table_key.extend_from_slice(format!("key_test_{:05}", idx * 2).as_bytes());
+                let k = UserKey::for_test(TableId::new(table_id), table_key.as_ref());
+                let v = test_value_of(idx);
+                builder
+                    .add(FullKey::from_user_key(k, 1), HummockValue::put(v.as_ref()))
+                    .await
+                    .unwrap();
+            }
+        }
+        let ret = builder.finish().await.unwrap();
+        let sst_info = ret.sst_info.sst_info.clone();
+
+        for (_table_id, vnode_bitmap_buffer) in sst_info.vnode_bitmap_mapping {
+            let bitmap = Bitmap::from(&vnode_bitmap_buffer);
+            for vnode in &vnode_vec {
+                assert!(bitmap.is_set(*vnode));
+            }
+
+            assert_eq!(vnode_vec.len(), bitmap.count_ones());
         }
     }
 }
