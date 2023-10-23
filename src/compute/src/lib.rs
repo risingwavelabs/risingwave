@@ -20,7 +20,7 @@
 #![feature(lint_reasons)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(lazy_cell)]
-#![cfg_attr(coverage, feature(no_coverage))]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 #[macro_use]
 extern crate tracing;

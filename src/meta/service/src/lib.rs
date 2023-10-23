@@ -16,7 +16,7 @@
 #![feature(let_chains)]
 #![feature(lazy_cell)]
 #![feature(impl_trait_in_assoc_type)]
-#![cfg_attr(coverage, feature(no_coverage))]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 use risingwave_meta::*;
 

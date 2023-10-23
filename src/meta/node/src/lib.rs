@@ -14,7 +14,7 @@
 
 #![feature(lint_reasons)]
 #![feature(let_chains)]
-#![cfg_attr(coverage, feature(no_coverage))]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 mod server;
 use std::time::Duration;
