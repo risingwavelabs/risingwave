@@ -864,9 +864,9 @@ where
     }
 
     pub async fn write_chunk_consistent(&mut self, chunk: StreamChunk) {
-        if self.table_id.table_id == 1003 {
-            self.check_chunk_consistency(chunk.clone().compact()).await;
-        }
+        // if self.table_id.table_id == 1003 {
+        //     self.check_chunk_consistency(chunk.clone().compact()).await;
+        // }
         self.write_chunk(chunk);
     }
 

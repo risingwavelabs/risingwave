@@ -343,8 +343,10 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         let in_append_only = self.input.append_only();
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
 
+        println!("WKXLOG in_distribution_key: {:?}", in_dist_key);
         let gen_materialized_input_state = |sort_keys: Vec<(OrderType, usize)>,
-                                            include_keys: Vec<usize>|
+                                            include_keys: Vec<usize>,
+                                            distinct_key: Option<usize>|
          -> MaterializedInputState {
             let (mut table_builder, mut included_upstream_indices, mut column_mapping) =
                 self.create_table_builder(me.ctx(), window_col_idx);
@@ -367,13 +369,30 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         table_value_indices.insert(column_mapping[&upstream_idx]);
                     }
                 };
-
+            println!(
+                "WKXLOG table_builder {:?}, sort_keys: {:?}",
+                table_builder.pk, sort_keys
+            );
             for (order_type, idx) in sort_keys {
                 add_column(idx, Some(order_type), true, &mut table_builder);
             }
-            for &idx in &in_pks {
-                add_column(idx, Some(OrderType::ascending()), true, &mut table_builder);
+
+            if let Some(distinct_key) = distinct_key {
+                add_column(
+                    distinct_key,
+                    Some(OrderType::ascending()),
+                    true,
+                    &mut table_builder,
+                );
+            } else {
+                for &idx in &in_dist_key {
+                    add_column(idx, Some(OrderType::ascending()), true, &mut table_builder);
+                }
             }
+            println!(
+                "WKXLOG table_builder in_pks pk: {:?}, include_keys: {:?}",
+                table_builder.pk, include_keys
+            );
             for idx in include_keys {
                 add_column(idx, None, true, &mut table_builder);
             }
@@ -454,7 +473,12 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         | AggKind::ArrayAgg => agg_call.inputs.iter().map(|i| i.index).collect(),
                         _ => vec![],
                     };
-                    let state = gen_materialized_input_state(sort_keys, include_keys);
+                    let state = if agg_call.distinct {
+                        let distinct_key = agg_call.inputs[0].index;
+                        gen_materialized_input_state(sort_keys, include_keys, Some(distinct_key))
+                    } else {
+                        gen_materialized_input_state(sort_keys, include_keys, None)
+                    };
                     AggCallState::MaterializedInput(Box::new(state))
                 }
                 agg_kinds::rewritten!() => {
@@ -521,17 +545,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 let (mut table_builder, mut key_cols, _) =
                     self.create_table_builder(me.ctx(), window_col_idx);
                 let table_col_idx = table_builder.add_column(&in_fields[distinct_col]);
-                println!(
-                    "WKXLOG 1st, table_col_idx: {}, table_builder.pk.len: {}",
-                    table_col_idx,
-                    table_builder.get_current_pk_len()
-                );
                 table_builder.add_order_column(table_col_idx, OrderType::ascending());
-                println!(
-                    "WKXLOG 2nd, table_col_idx: {}, table_builder.pk.len: {}",
-                    table_col_idx,
-                    table_builder.get_current_pk_len()
-                );
                 key_cols.push(distinct_col);
 
                 let read_prefix_len_hint = table_builder.get_current_pk_len();

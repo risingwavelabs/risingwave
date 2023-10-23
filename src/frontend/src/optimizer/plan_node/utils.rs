@@ -32,7 +32,7 @@ use crate::utils::WithOptions;
 pub struct TableCatalogBuilder {
     /// All columns in this table
     columns: Vec<ColumnCatalog>,
-    pk: Vec<ColumnOrder>,
+    pub pk: Vec<ColumnOrder>,
     properties: WithOptions,
     value_indices: Option<Vec<usize>>,
     vnode_col_idx: Option<usize>,

@@ -210,6 +210,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
 
         let mut states = Vec::with_capacity(agg_calls.len());
         for (idx, (agg_call, agg_func)) in agg_calls.iter().zip_eq_fast(agg_funcs).enumerate() {
+            println!("WKXLOG LAST LOG agg_call: {:?}", agg_call);
             let state = AggState::create(
                 agg_call,
                 agg_func,

@@ -69,7 +69,6 @@ pub async fn agg_call_filter_res(
         agg_call.kind,
         AggKind::Min | AggKind::Max | AggKind::StringAgg
     ) {
-        panic!();
         // should skip NULL value for these kinds of agg function
         let agg_col_idx = agg_call.args.val_indices()[0]; // the first arg is the agg column for all these kinds
         let agg_col_bitmap = chunk.column_at(agg_col_idx).null_bitmap();
@@ -77,7 +76,6 @@ pub async fn agg_call_filter_res(
     }
 
     if let Some(ref filter) = agg_call.filter {
-        panic!();
         if let Bool(filter_res) = filter
             .eval_infallible(chunk, |err| ctx.on_compute_error(err, identity))
             .await

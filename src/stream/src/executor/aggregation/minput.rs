@@ -99,10 +99,26 @@ impl MaterializedInputState {
                     })
                     .unzip()
             };
-
+        println!(
+            "WKXLOG MaterializedInputState::new pk_indices: {:?}",
+            pk_indices
+        );
         let pk_len = pk_indices.len();
-        order_col_indices.extend(pk_indices.iter());
-        order_types.extend(itertools::repeat_n(OrderType::ascending(), pk_len));
+        if agg_call.distinct {
+            if !order_col_indices.contains(&agg_call.args.val_indices()[0]) {
+                order_col_indices.push(agg_call.args.val_indices()[0]);
+                order_types.push(OrderType::ascending());
+            }
+        } else {
+            order_col_indices.extend(pk_indices.iter());
+            order_types.extend(itertools::repeat_n(OrderType::ascending(), pk_len));
+        }
+        // order_col_indices.extend(pk_indices.iter());
+        // order_types.extend(itertools::repeat_n(OrderType::ascending(), pk_len));
+        println!(
+            "WKXLOG MaterializedInputState::new order_col_indices: {:?}",
+            order_col_indices
+        );
 
         // map argument columns to state table column indices
         let state_table_arg_col_indices = arg_col_indices
