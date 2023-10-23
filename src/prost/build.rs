@@ -62,6 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let btree_map_paths = [
         ".monitor_service.StackTraceResponse",
         ".plan_common.ExternalTableDesc",
+        ".hummock.CompactTask",
     ];
 
     // Build protobuf structs.
@@ -115,6 +116,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.ColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("common.ColumnOrder", "#[derive(Eq, Hash)]")
         .type_attribute("common.OrderType", "#[derive(Eq, Hash)]")
+        .type_attribute("hummock.TableStats", "#[derive(Eq, Hash)]")
+        .type_attribute("hummock.SstableInfo", "#[derive(Eq, Hash)]")
+        .type_attribute("hummock.KeyRange", "#[derive(Eq, Hash)]")
+        .type_attribute("hummock.CompactionConfig", "#[derive(Eq, Hash)]")
+        .type_attribute("hummock.GroupDelta.delta_type", "#[derive(Eq, Hash)]")
+        .type_attribute("hummock.IntraLevelDelta", "#[derive(Eq, Hash)]")
+        .type_attribute("hummock.GroupConstruct", "#[derive(Eq, Hash)]")
+        .type_attribute("hummock.GroupDestroy", "#[derive(Eq, Hash)]")
+        .type_attribute("hummock.GroupMetaChange", "#[derive(Eq, Hash)]")
+        .type_attribute("hummock.GroupTableChange", "#[derive(Eq, Hash)]")
+        .type_attribute("hummock.GroupDelta", "#[derive(Eq, Hash)]")
+        .type_attribute(
+            "hummock.LevelHandler.RunningCompactTask",
+            "#[derive(Eq, Hash)]",
+        )
+        .type_attribute("hummock.LevelHandler", "#[derive(Eq, Hash)]")
+        .type_attribute("hummock.TableOption", "#[derive(Eq, Hash)]")
+        .type_attribute("hummock.InputLevel", "#[derive(Eq, Hash)]")
+        .type_attribute("hummock.CompactTask", "#[derive(Eq, Hash)]")
         // ===================
         .out_dir(out_dir.as_path())
         .compile(&protos, &[proto_dir.to_string()])

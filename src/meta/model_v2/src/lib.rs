@@ -61,6 +61,11 @@ pub type ViewId = ObjectId;
 pub type FunctionId = ObjectId;
 pub type ConnectionId = ObjectId;
 pub type UserId = u32;
+pub type HummockVersionId = u64;
+pub type Epoch = u64;
+pub type CompactionGroupId = u64;
+pub type CompactionTaskId = u64;
+pub type HummockSstableObjectId = u64;
 
 pub type FragmentId = u32;
 
