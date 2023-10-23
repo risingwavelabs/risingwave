@@ -362,11 +362,10 @@ mod tests {
     use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
     use risingwave_pb::connector_service::SinkMetadata;
     use risingwave_rpc_client::CoordinatorStreamHandle;
+    use risingwave_sink_impl as _;
 
     use crate::manager::sink_coordination::coordinator_worker::CoordinatorWorker;
     use crate::manager::sink_coordination::{NewSinkWriterRequest, SinkCoordinatorManager};
-
-    use risingwave_sink_impl as _;
 
     struct MockCoordinator<C, F: FnMut(u64, Vec<SinkMetadata>, &mut C) -> Result<(), SinkError>> {
         context: C,
