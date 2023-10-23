@@ -21,10 +21,10 @@ use jsonbb::{Value, ValueRef};
 use crate::estimate_size::EstimateSize;
 use crate::types::{Scalar, ScalarRef, F32, F64};
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JsonbVal(pub(crate) Value);
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct JsonbRef<'a>(pub(crate) ValueRef<'a>);
 
 impl EstimateSize for JsonbVal {
@@ -66,6 +66,42 @@ impl<'a> ScalarRef<'a> for JsonbRef<'a> {
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
         self.hash(state)
+    }
+}
+
+impl PartialOrd for JsonbVal {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for JsonbVal {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.as_scalar_ref().cmp(&other.as_scalar_ref())
+    }
+}
+
+impl PartialOrd for JsonbRef<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for JsonbRef<'_> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // We do not intend to support ordering `jsonb` type.
+        // Before #7981 is done, we do not panic but just compare its string representation.
+        // Note that `serde_json` without feature `preserve_order` uses `BTreeMap` for json object.
+        // So its string form always have keys sorted.
+        //
+        // In PostgreSQL, Object > Array > Boolean > Number > String > Null.
+        // But here we have Object > true > Null > false > Array > Number > String.
+        // Because in ascii: `{` > `t` > `n` > `f` > `[` > `9` `-` > `"`.
+        //
+        // This is just to keep consistent with the memcomparable encoding, which uses string form.
+        // If we implemented the same typed comparison as PostgreSQL, we would need a corresponding
+        // memcomparable encoding for it.
+        self.0.to_string().cmp(&other.0.to_string())
     }
 }
 
