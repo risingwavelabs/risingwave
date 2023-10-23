@@ -314,7 +314,8 @@ impl Sink for KafkaSink {
             self.pk_indices.clone(),
             self.db_name.clone(),
             self.sink_from_name.clone(),
-        )?;
+        )
+        .await?;
         KafkaLogSinker::new(self.config.clone(), formatter).await
     }
 
@@ -326,6 +327,15 @@ impl Sink for KafkaSink {
                 self.format_desc.format
             )));
         }
+        // Check for formatter constructor error, before it is too late for error reporting.
+        SinkFormatterImpl::new(
+            &self.format_desc,
+            self.schema.clone(),
+            self.pk_indices.clone(),
+            self.db_name.clone(),
+            self.sink_from_name.clone(),
+        )
+        .await?;
 
         // Try Kafka connection.
         // There is no such interface for kafka producer to validate a connection
@@ -481,14 +491,12 @@ impl<'w> KafkaPayloadWriter<'w> {
         event_object: Option<Vec<u8>>,
     ) -> Result<()> {
         let topic = self.config.common.topic.clone();
-        // here we assume the key part always exists and value part is optional.
-        // if value is None, we will skip the payload part.
-        let key_str = event_key_object.unwrap();
-        let mut record = FutureRecord::<[u8], [u8]>::to(topic.as_str()).key(&key_str);
-        let payload;
-        if let Some(value) = event_object {
-            payload = value;
-            record = record.payload(&payload);
+        let mut record = FutureRecord::<[u8], [u8]>::to(topic.as_str());
+        if let Some(key_str) = &event_key_object {
+            record = record.key(key_str);
+        }
+        if let Some(payload) = &event_object {
+            record = record.payload(payload);
         }
         // Send the data but not wait it to finish sinking
         // Will join all `DeliveryFuture` during commit
@@ -737,19 +745,14 @@ mod test {
             },
         ]);
 
-        // We do not specify primary key for this schema
-        let pk_indices = vec![];
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
 
         // Create the actual sink writer to Kafka
         let mut sink = KafkaLogSinker::new(
             kafka_config.clone(),
             SinkFormatterImpl::AppendOnlyJson(AppendOnlyFormatter::new(
-                JsonEncoder::new(
-                    schema.clone(),
-                    Some(pk_indices),
-                    TimestampHandlingMode::Milli,
-                ),
+                // We do not specify primary key for this schema
+                None,
                 JsonEncoder::new(schema, None, TimestampHandlingMode::Milli),
             )),
         )

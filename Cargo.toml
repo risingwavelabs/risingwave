@@ -7,6 +7,7 @@ members = [
   "src/cmd_all",
   "src/common",
   "src/common/common_service",
+  "src/common/heap_profiling",
   "src/compute",
   "src/connector",
   "src/ctl",
@@ -18,6 +19,8 @@ members = [
   "src/java_binding",
   "src/jni_core",
   "src/meta",
+  "src/meta/node",
+  "src/meta/service",
   "src/meta/src/model_v2/migration",
   "src/object_store",
   "src/prost",
@@ -96,7 +99,7 @@ aws-types = "0.55"
 etcd-client = { package = "madsim-etcd-client", version = "0.4" }
 futures-async-stream = "0.2"
 hytra = "0.1"
-rdkafka = { package = "madsim-rdkafka", git = "https://github.com/madsim-rs/madsim.git", rev = "fedb1e3", features = [
+rdkafka = { package = "madsim-rdkafka", version = "0.3.0", features = [
   "cmake-build",
 ] }
 hashbrown = { version = "0.14.0", features = [
@@ -106,7 +109,7 @@ hashbrown = { version = "0.14.0", features = [
 ] }
 criterion = { version = "0.5", features = ["async_futures"] }
 tonic = { package = "madsim-tonic", version = "0.4.0" }
-tonic-build = { package = "madsim-tonic-build", version = "0.4.0" }
+tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
 prost = { version = "0.12" }
 icelake = { git = "https://github.com/icelake-io/icelake", rev = "16dab0e36ab337e58ee8002d828def2d212fa116" }
 arrow-array = "47"
@@ -127,6 +130,7 @@ risingwave_batch = { path = "./src/batch" }
 risingwave_cmd = { path = "./src/cmd" }
 risingwave_common = { path = "./src/common" }
 risingwave_common_service = { path = "./src/common/common_service" }
+risingwave_common_heap_profiling = { path = "./src/common/heap_profiling" }
 risingwave_compactor = { path = "./src/storage/compactor" }
 risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }
@@ -138,6 +142,8 @@ risingwave_hummock_sdk = { path = "./src/storage/hummock_sdk" }
 risingwave_hummock_test = { path = "./src/storage/hummock_test" }
 risingwave_hummock_trace = { path = "./src/storage/hummock_trace" }
 risingwave_meta = { path = "./src/meta" }
+risingwave_meta_service = { path = "./src/meta/service" }
+risingwave_meta_node = { path = "./src/meta/node" }
 risingwave_object_store = { path = "./src/object_store" }
 risingwave_pb = { path = "./src/prost" }
 risingwave_rpc_client = { path = "./src/rpc_client" }

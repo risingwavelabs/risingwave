@@ -245,6 +245,50 @@ impl DataChunk {
         Self::new(columns, Bitmap::ones(cardinality))
     }
 
+    pub fn uncompact(self, vis: Bitmap) -> Self {
+        let mut uncompact_builders: Vec<_> = self
+            .columns
+            .iter()
+            .map(|c| c.create_builder(vis.len()))
+            .collect();
+        let mut last_u = None;
+
+        for (idx, u) in vis.iter_ones().enumerate() {
+            // pad invisible rows with NULL
+            let zeros = if let Some(last_u) = last_u {
+                u - last_u - 1
+            } else {
+                u
+            };
+            for _ in 0..zeros {
+                uncompact_builders
+                    .iter_mut()
+                    .for_each(|builder| builder.append_null());
+            }
+            uncompact_builders
+                .iter_mut()
+                .zip_eq_fast(self.columns.iter())
+                .for_each(|(builder, c)| builder.append(c.datum_at(idx)));
+            last_u = Some(u);
+        }
+        let zeros = if let Some(last_u) = last_u {
+            vis.len() - last_u - 1
+        } else {
+            vis.len()
+        };
+        for _ in 0..zeros {
+            uncompact_builders
+                .iter_mut()
+                .for_each(|builder| builder.append_null());
+        }
+        let array: Vec<_> = uncompact_builders
+            .into_iter()
+            .map(|builder| Arc::new(builder.finish()))
+            .collect();
+
+        Self::new(array, vis)
+    }
+
     /// Convert the chunk to compact format.
     ///
     /// If the chunk is not compacted, return a new compacted chunk, otherwise return a reference to self.

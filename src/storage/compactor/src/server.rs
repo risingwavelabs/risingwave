@@ -21,7 +21,6 @@ use parking_lot::RwLock;
 use risingwave_common::config::{
     extract_storage_memory_config, load_config, AsyncStackTraceOption, MetricLevel, RwConfig,
 };
-use risingwave_common::heap_profiling::HeapProfiler;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -30,6 +29,7 @@ use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
+use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
@@ -88,7 +88,7 @@ pub async fn prepare_start_parameters(
         &storage_memory_config,
     )));
     let total_memory_available_bytes =
-        (resource_util::memory::total_memory_available_bytes() as f64
+        (resource_util::memory::system_memory_available_bytes() as f64
             * config.storage.compactor_memory_available_proportion) as usize;
     let meta_cache_capacity_bytes = storage_opts.meta_cache_capacity_mb * (1 << 20);
     let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {

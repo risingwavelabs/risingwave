@@ -4,7 +4,7 @@ create table t (v1 int);
 statement ok
 insert into t values (3);
 
-sleep 30s
+sleep 3s
 
 skipif in-memory
 query T
@@ -52,7 +52,7 @@ t
 statement ok
 create index t_idx on t (v1);
 
-sleep 10s
+sleep 3s
 
 skipif in-memory
 query T

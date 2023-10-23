@@ -41,6 +41,19 @@ use crate::sink::{
 
 pub const BIGQUERY_SINK: &str = "bigquery";
 const BIGQUERY_INSERT_MAX_NUMS: usize = 500;
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct BigQueryCommon {
+    #[serde(rename = "bigquery.path")]
+    pub file_path: String,
+    #[serde(rename = "bigquery.project")]
+    pub project: String,
+    #[serde(rename = "bigquery.dataset")]
+    pub dataset: String,
+    #[serde(rename = "bigquery.table")]
+    pub table: String,
+}
+
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
 pub struct BigQueryConfig {

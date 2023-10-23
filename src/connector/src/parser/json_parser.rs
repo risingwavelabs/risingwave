@@ -23,16 +23,17 @@ use risingwave_common::try_match_expand;
 use risingwave_pb::plan_common::ColumnDesc;
 
 use super::avro::schema_resolver::ConfluentSchemaResolver;
-use super::schema_registry::Client;
 use super::util::{get_kafka_topic, read_schema_from_http, read_schema_from_local};
 use super::{EncodingProperties, SchemaRegistryAuth, SpecificParserConfig};
 use crate::only_parse_payload;
 use crate::parser::avro::util::avro_schema_to_column_descs;
-use crate::parser::schema_registry::handle_sr_list;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_accessor_on_stream_chunk_writer;
 use crate::parser::unified::AccessImpl;
-use crate::parser::{AccessBuilder, ByteStreamSourceParser, SourceStreamChunkRowWriter};
+use crate::parser::{
+    AccessBuilder, ByteStreamSourceParser, ParserFormat, SourceStreamChunkRowWriter,
+};
+use crate::schema::schema_registry::{handle_sr_list, Client};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
@@ -179,6 +180,10 @@ impl ByteStreamSourceParser for JsonParser {
 
     fn source_ctx(&self) -> &SourceContext {
         &self.source_ctx
+    }
+
+    fn parser_format(&self) -> ParserFormat {
+        ParserFormat::Json
     }
 
     async fn parse_one<'a>(

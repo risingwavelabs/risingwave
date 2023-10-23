@@ -117,14 +117,13 @@ pub struct HummockManager {
     catalog_manager: CatalogManagerRef,
 
     fragment_manager: FragmentManagerRef,
-    // `CompactionGroupManager` manages `CompactionGroup`'s members.
-    // Note that all hummock state store user should register to `CompactionGroupManager`. It
-    // includes all state tables of streaming jobs except sink.
-    compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
-    // When trying to locks compaction and versioning at the same time, compaction lock should
-    // be requested before versioning lock.
+    /// Lock order: compaction, versioning, compaction_group_manager.
+    /// - Lock compaction first, then versioning, and finally compaction_group_manager.
+    /// - This order should be strictly followed to prevent deadlock.
     compaction: MonitoredRwLock<Compaction>,
     versioning: MonitoredRwLock<Versioning>,
+    /// `CompactionGroupManager` manages compaction configs for compaction groups.
+    compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
     latest_snapshot: Snapshot,
 
     pub metrics: Arc<MetaMetrics>,
@@ -159,7 +158,7 @@ macro_rules! commit_multi_var {
                 let mut trx = $trx_extern_part;
                 // Apply the change in `ValTransaction` to trx
                 $(
-                    $val_txn.apply_to_txn(&mut trx)?;
+                    $val_txn.apply_to_txn(&mut trx).await?;
                 )*
                 // Commit to state store
                 $hummock_mgr.commit_trx($hummock_mgr.env.meta_store(), trx, $context_id)
@@ -253,7 +252,7 @@ pub enum CompactionResumeTrigger {
 }
 
 impl HummockManager {
-    pub(crate) async fn new(
+    pub async fn new(
         env: MetaSrvEnv,
         cluster_manager: ClusterManagerRef,
         fragment_manager: FragmentManagerRef,
@@ -353,7 +352,12 @@ impl HummockManager {
             if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref()
                 && !env.opts.do_not_config_object_storage_lifecycle
             {
-                s3.inner().configure_bucket_lifecycle().await;
+                let is_bucket_expiration_configured = s3.inner().configure_bucket_lifecycle().await;
+                if is_bucket_expiration_configured{
+                    return Err(ObjectError::internal("Cluster cannot start with object expiration configured for bucket because RisingWave data will be lost when object expiration kicks in.
+                    Please disable object expiration and restart the cluster.")
+                    .into());
+                }
             }
         }
         let checkpoint_path = version_checkpoint_path(state_store_dir);
@@ -1490,7 +1494,7 @@ impl HummockManager {
             .id_gen_manager()
             .generate_interval::<{ IdCategory::HummockSstableId }>(new_sst_id_number as u64)
             .await?;
-        let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
+        let mut branched_ssts = BTreeMapTransaction::<'_, _, _>::new(&mut versioning.branched_ssts);
         let original_sstables = std::mem::take(&mut sstables);
         sstables.reserve_exact(original_sstables.len() - incorrect_ssts.len() + new_sst_id_number);
         let mut incorrect_ssts = incorrect_ssts.into_iter();
@@ -3045,6 +3049,8 @@ impl CompactionState {
             Some(compact_task::TaskType::SpaceReclaim)
         } else if guard.contains(&(group, compact_task::TaskType::Ttl)) {
             Some(compact_task::TaskType::Ttl)
+        } else if guard.contains(&(group, compact_task::TaskType::Tombstone)) {
+            Some(compact_task::TaskType::Tombstone)
         } else if guard.contains(&(group, compact_task::TaskType::Dynamic)) {
             Some(compact_task::TaskType::Dynamic)
         } else {

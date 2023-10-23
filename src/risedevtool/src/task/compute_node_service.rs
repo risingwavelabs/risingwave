@@ -58,8 +58,6 @@ impl ComputeNodeService {
             .arg(format!("{}:{}", config.address, config.port))
             .arg("--async-stack-trace")
             .arg(&config.async_stack_trace)
-            .arg("--connector-rpc-endpoint")
-            .arg(&config.connector_rpc_endpoint)
             .arg("--parallelism")
             .arg(&config.parallelism.to_string())
             .arg("--total-memory-bytes")
@@ -102,6 +100,14 @@ impl Task for ComputeNodeService {
             let conf = "prof:true,lg_prof_interval:34,lg_prof_sample:19,prof_prefix:compute-node";
             cmd.env("_RJEM_MALLOC_CONF", conf); // prefixed for macos
             cmd.env("MALLOC_CONF", conf); // unprefixed for linux
+        }
+
+        if crate::util::is_env_set("ENABLE_BUILD_RW_CONNECTOR") {
+            let prefix_bin = env::var("PREFIX_BIN")?;
+            cmd.env(
+                "CONNECTOR_LIBS_PATH",
+                Path::new(&prefix_bin).join("connector-node/libs/"),
+            );
         }
 
         cmd.arg("--config-path")

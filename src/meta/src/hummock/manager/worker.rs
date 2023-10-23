@@ -34,7 +34,7 @@ pub enum HummockManagerEvent {
 }
 
 impl HummockManager {
-    pub(crate) async fn start_worker(
+    pub async fn start_worker(
         self: &HummockManagerRef,
         mut receiver: HummockManagerEventReceiver,
     ) -> JoinHandle<()> {

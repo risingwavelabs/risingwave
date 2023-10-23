@@ -46,7 +46,7 @@ macro_rules! send_await_with_err_check {
     };
 }
 
-pub(crate) struct CoordinatorWorker {
+pub struct CoordinatorWorker {
     param: SinkParam,
     request_streams: Vec<SinkWriterRequestStream>,
     response_senders: Vec<SinkCoordinatorResponseSender>,
@@ -54,7 +54,7 @@ pub(crate) struct CoordinatorWorker {
 }
 
 impl CoordinatorWorker {
-    pub(crate) async fn run(
+    pub async fn run(
         first_writer_request: NewSinkWriterRequest,
         request_rx: UnboundedReceiver<NewSinkWriterRequest>,
     ) {
@@ -91,7 +91,7 @@ impl CoordinatorWorker {
         });
     }
 
-    pub(crate) async fn execute_coordinator(
+    pub async fn execute_coordinator(
         first_writer_request: NewSinkWriterRequest,
         request_rx: UnboundedReceiver<NewSinkWriterRequest>,
         coordinator: impl SinkCommitCoordinator,
@@ -166,7 +166,7 @@ impl CoordinatorWorker {
             registered_vnode.insert(vnode);
         }
 
-        loop {
+        while remaining_count > 0 {
             let new_writer_request = self.next_new_writer().await?;
             if self.param != new_writer_request.param {
                 // TODO: may return error.
@@ -188,10 +188,6 @@ impl CoordinatorWorker {
                 }
                 registered_vnode.insert(vnode);
                 remaining_count -= 1;
-            }
-
-            if remaining_count == 0 {
-                break;
             }
         }
 
