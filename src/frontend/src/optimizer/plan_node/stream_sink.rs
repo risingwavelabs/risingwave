@@ -58,7 +58,11 @@ pub struct StreamSink {
 impl StreamSink {
     #[must_use]
     pub fn new(input: PlanRef, sink_desc: SinkDesc) -> Self {
-        let base = input.plan_base().clone_with_new_plan_id();
+        let base = input
+            .plan_base()
+            .into_stream()
+            .expect("input should be stream plan")
+            .clone_with_new_plan_id();
         Self {
             base,
             input,

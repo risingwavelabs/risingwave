@@ -84,6 +84,7 @@ macro_rules! impl_distill_unit_from_fields {
 }
 pub(super) use impl_distill_unit_from_fields;
 
+#[auto_impl::auto_impl(&)]
 pub trait GenericPlanRef: Eq + Hash {
     fn id(&self) -> PlanNodeId;
     fn schema(&self) -> &Schema;
@@ -92,6 +93,7 @@ pub trait GenericPlanRef: Eq + Hash {
     fn ctx(&self) -> OptimizerContextRef;
 }
 
+#[auto_impl::auto_impl(&)]
 pub trait PhysicalSpecific {
     fn distribution(&self) -> &Distribution;
 }

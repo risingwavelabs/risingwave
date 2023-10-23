@@ -7474,6 +7474,7 @@ dependencies = [
  "async-recursion",
  "async-trait",
  "auto_enums",
+ "auto_impl",
  "bk-tree",
  "bytes",
  "clap",

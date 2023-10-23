@@ -16,6 +16,7 @@ use fixedbitset::FixedBitSet;
 
 use super::generic::PhysicalPlanRef;
 
+#[auto_impl::auto_impl(&)]
 pub trait StreamSpecific {
     fn append_only(&self) -> bool;
     fn emit_on_window_close(&self) -> bool;

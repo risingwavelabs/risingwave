@@ -15,6 +15,7 @@
 use super::generic::PhysicalPlanRef;
 use crate::optimizer::property::Order;
 
+#[auto_impl::auto_impl(&)]
 pub trait BatchSpecific {
     fn order(&self) -> &Order;
 }

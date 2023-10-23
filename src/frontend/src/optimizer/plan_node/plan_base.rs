@@ -118,20 +118,6 @@ pub struct PlanBase<C: ConventionMarker> {
     extra: C::Extra,
 }
 
-// impl PlanBase {
-//     fn physical_extra(&self) -> &PhysicalExtra {
-//         self.physical_extra
-//             .as_ref()
-//             .expect("access physical properties from logical plan node")
-//     }
-
-//     fn physical_extra_mut(&mut self) -> &mut PhysicalExtra {
-//         self.physical_extra
-//             .as_mut()
-//             .expect("access physical properties from logical plan node")
-//     }
-// }
-
 impl<C: ConventionMarker> generic::GenericPlanRef for PlanBase<C> {
     fn id(&self) -> PlanNodeId {
         self.id
@@ -329,8 +315,74 @@ impl PlanBase<Stream> {
 
 // Mutators for testing only.
 #[cfg(test)]
-impl PlanBase {
+impl<C: ConventionMarker> PlanBase<C> {
     pub fn functional_dependency_mut(&mut self) -> &mut FunctionalDependencySet {
         &mut self.functional_dependency
+    }
+}
+
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, enum_as_inner::EnumAsInner)]
+pub enum PlanBaseRef<'a> {
+    Logical(&'a PlanBase<Logical>),
+    Stream(&'a PlanBase<Stream>),
+    Batch(&'a PlanBase<Batch>),
+}
+
+macro_rules! dispatch_plan_base {
+    ($self:ident, [$($convention:ident),+ $(,)?], $method:expr) => {
+        match *($self) {
+            $(
+                PlanBaseRef::$convention(plan) => $method(plan),
+            )+
+            _ => panic!() // TODO
+        }
+    }
+}
+
+impl GenericPlanRef for PlanBaseRef<'_> {
+    fn id(&self) -> PlanNodeId {
+        todo!()
+    }
+
+    fn schema(&self) -> &Schema {
+        dispatch_plan_base!(self, [Logical, Stream, Batch], GenericPlanRef::schema)
+    }
+
+    fn stream_key(&self) -> Option<&[usize]> {
+        todo!()
+    }
+
+    fn functional_dependency(&self) -> &FunctionalDependencySet {
+        todo!()
+    }
+
+    fn ctx(&self) -> OptimizerContextRef {
+        todo!()
+    }
+}
+
+impl PhysicalSpecific for PlanBaseRef<'_> {
+    fn distribution(&self) -> &Distribution {
+        dispatch_plan_base!(self, [Stream, Batch], PhysicalSpecific::distribution)
+    }
+}
+
+impl StreamSpecific for PlanBaseRef<'_> {
+    fn append_only(&self) -> bool {
+        dispatch_plan_base!(self, [Stream], StreamSpecific::append_only)
+    }
+
+    fn emit_on_window_close(&self) -> bool {
+        dispatch_plan_base!(self, [Stream], StreamSpecific::emit_on_window_close)
+    }
+
+    fn watermark_columns(&self) -> &FixedBitSet {
+        dispatch_plan_base!(self, [Stream], StreamSpecific::watermark_columns)
+    }
+}
+
+impl BatchSpecific for PlanBaseRef<'_> {
+    fn order(&self) -> &Order {
+        dispatch_plan_base!(self, [Batch], BatchSpecific::order)
     }
 }

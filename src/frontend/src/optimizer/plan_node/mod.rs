@@ -53,12 +53,12 @@ use super::property::{Distribution, FunctionalDependencySet, Order};
 
 pub trait PlanNodeMeta {
     fn node_type(&self) -> PlanNodeType;
-    fn plan_base(&self) -> &PlanBase;
+    fn plan_base(&self) -> PlanBaseRef<'_>;
     fn convention(&self) -> Convention;
 }
 
 pub trait ConventionMarker: 'static + Sized {
-    type Extra: 'static + Clone + Debug;
+    type Extra: 'static + Eq + Hash + Clone + Debug;
 
     fn value() -> Convention;
 }
@@ -97,19 +97,21 @@ pub trait StaticPlanNodeMeta {
     type Convention: ConventionMarker;
     const NODE_TYPE: PlanNodeType;
 
-    fn plan_base(&self) -> &PlanBase;
+    fn plan_base(&self) -> &PlanBase<Self::Convention>;
+
+    fn plan_base_ref(&self) -> PlanBaseRef<'_>;
 }
 
 impl<P> PlanNodeMeta for P
 where
-    P: StaticPlanNodeMeta,
+    P: StaticPlanNodeMeta + 'static,
 {
     fn node_type(&self) -> PlanNodeType {
         P::NODE_TYPE
     }
 
-    fn plan_base(&self) -> &PlanBase {
-        P::plan_base(self)
+    fn plan_base(&self) -> PlanBaseRef<'_> {
+        StaticPlanNodeMeta::plan_base_ref(self)
     }
 
     fn convention(&self) -> Convention {
@@ -484,7 +486,7 @@ impl PlanNodeMeta for PlanRef {
         self.0.node_type()
     }
 
-    fn plan_base(&self) -> &PlanBase {
+    fn plan_base(&self) -> PlanBaseRef<'_> {
         self.0.plan_base()
     }
 
@@ -493,31 +495,31 @@ impl PlanNodeMeta for PlanRef {
     }
 }
 
-/// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
-impl<P> GenericPlanRef for P
-where
-    P: StaticPlanNodeMeta + Eq + Hash,
-{
-    fn id(&self) -> PlanNodeId {
-        self.plan_base().id()
-    }
+// /// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
+// impl<P> GenericPlanRef for P
+// where
+//     P: StaticPlanNodeMeta + Eq + Hash,
+// {
+//     fn id(&self) -> PlanNodeId {
+//         self.plan_base().id()
+//     }
 
-    fn schema(&self) -> &Schema {
-        self.plan_base().schema()
-    }
+//     fn schema(&self) -> &Schema {
+//         self.plan_base().schema()
+//     }
 
-    fn stream_key(&self) -> Option<&[usize]> {
-        self.plan_base().stream_key()
-    }
+//     fn stream_key(&self) -> Option<&[usize]> {
+//         self.plan_base().stream_key()
+//     }
 
-    fn ctx(&self) -> OptimizerContextRef {
-        self.plan_base().ctx()
-    }
+//     fn ctx(&self) -> OptimizerContextRef {
+//         self.plan_base().ctx()
+//     }
 
-    fn functional_dependency(&self) -> &FunctionalDependencySet {
-        self.plan_base().functional_dependency()
-    }
-}
+//     fn functional_dependency(&self) -> &FunctionalDependencySet {
+//         self.plan_base().functional_dependency()
+//     }
+// }
 
 impl GenericPlanRef for PlanRef {
     fn id(&self) -> PlanNodeId {
@@ -525,11 +527,13 @@ impl GenericPlanRef for PlanRef {
     }
 
     fn schema(&self) -> &Schema {
-        self.plan_base().schema()
+        // self.plan_base().schema()
+        todo!()
     }
 
     fn stream_key(&self) -> Option<&[usize]> {
-        self.plan_base().stream_key()
+        // self.plan_base().stream_key()
+        todo!()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -537,44 +541,46 @@ impl GenericPlanRef for PlanRef {
     }
 
     fn functional_dependency(&self) -> &FunctionalDependencySet {
-        self.plan_base().functional_dependency()
+        // self.plan_base().functional_dependency()
+        todo!()
     }
 }
 
-impl<P> PhysicalSpecific for P
-where
-    P: Eq + Hash,
-    P: StaticPlanNodeMeta,
-    <P::Convention as ConventionMarker>::Extra: PhysicalSpecific,
-{
-    fn distribution(&self) -> &Distribution {
-        self.plan_base().distribution()
-    }
-}
+// impl<P> PhysicalSpecific for P
+// where
+//     P: Eq + Hash,
+//     P: StaticPlanNodeMeta,
+//     <P::Convention as ConventionMarker>::Extra: PhysicalSpecific,
+// {
+//     fn distribution(&self) -> &Distribution {
+//         self.plan_base().distribution()
+//     }
+// }
 
 impl PhysicalSpecific for PlanRef {
     fn distribution(&self) -> &Distribution {
-        self.plan_base().distribution()
+        // self.plan_base().distribution()
+        todo!()
     }
 }
 
-impl<P> StreamSpecific for P
-where
-    P: Eq + Hash,
-    P: StaticPlanNodeMeta<Convention = Stream>,
-{
-    fn append_only(&self) -> bool {
-        self.plan_base().append_only()
-    }
+// impl<P> StreamSpecific for P
+// where
+//     P: Eq + Hash,
+//     P: StaticPlanNodeMeta<Convention = Stream>,
+// {
+//     fn append_only(&self) -> bool {
+//         self.plan_base().append_only()
+//     }
 
-    fn emit_on_window_close(&self) -> bool {
-        self.plan_base().emit_on_window_close()
-    }
+//     fn emit_on_window_close(&self) -> bool {
+//         self.plan_base().emit_on_window_close()
+//     }
 
-    fn watermark_columns(&self) -> &FixedBitSet {
-        self.plan_base().watermark_columns()
-    }
-}
+//     fn watermark_columns(&self) -> &FixedBitSet {
+//         self.plan_base().watermark_columns()
+//     }
+// }
 
 impl StreamSpecific for PlanRef {
     fn append_only(&self) -> bool {
@@ -586,23 +592,25 @@ impl StreamSpecific for PlanRef {
     }
 
     fn watermark_columns(&self) -> &FixedBitSet {
-        self.plan_base().watermark_columns()
+        // self.plan_base().watermark_columns()
+        todo!()
     }
 }
 
-impl<P> BatchSpecific for P
-where
-    P: Eq + Hash,
-    P: StaticPlanNodeMeta<Convention = Batch>,
-{
-    fn order(&self) -> &Order {
-        self.plan_base().order()
-    }
-}
+// impl<P> BatchSpecific for P
+// where
+//     P: Eq + Hash,
+//     P: StaticPlanNodeMeta<Convention = Batch>,
+// {
+//     fn order(&self) -> &Order {
+//         self.plan_base().order()
+//     }
+// }
 
 impl BatchSpecific for PlanRef {
     fn order(&self) -> &Order {
-        self.plan_base().order()
+        // self.plan_base().order()
+        todo!()
     }
 }
 
@@ -660,46 +668,46 @@ pub(crate) fn pretty_config() -> PrettyConfig {
 }
 
 impl dyn PlanNode {
-    pub fn id(&self) -> PlanNodeId {
-        self.plan_base().id()
-    }
+    // pub fn id(&self) -> PlanNodeId {
+    //     self.plan_base().id()
+    // }
 
-    pub fn ctx(&self) -> OptimizerContextRef {
-        self.plan_base().ctx().clone()
-    }
+    // pub fn ctx(&self) -> OptimizerContextRef {
+    //     self.plan_base().ctx().clone()
+    // }
 
-    pub fn schema(&self) -> &Schema {
-        self.plan_base().schema()
-    }
+    // pub fn schema(&self) -> &Schema {
+    //     self.plan_base().schema()
+    // }
 
-    pub fn stream_key(&self) -> Option<&[usize]> {
-        self.plan_base().stream_key()
-    }
+    // pub fn stream_key(&self) -> Option<&[usize]> {
+    //     self.plan_base().stream_key()
+    // }
 
-    pub fn order(&self) -> &Order {
-        self.plan_base().order()
-    }
+    // pub fn order(&self) -> &Order {
+    //     self.plan_base().order()
+    // }
 
-    // TODO: avoid no manual delegation
-    pub fn distribution(&self) -> &Distribution {
-        self.plan_base().distribution()
-    }
+    // // TODO: avoid no manual delegation
+    // pub fn distribution(&self) -> &Distribution {
+    //     self.plan_base().distribution()
+    // }
 
-    pub fn append_only(&self) -> bool {
-        self.plan_base().append_only()
-    }
+    // pub fn append_only(&self) -> bool {
+    //     self.plan_base().append_only()
+    // }
 
-    pub fn emit_on_window_close(&self) -> bool {
-        self.plan_base().emit_on_window_close()
-    }
+    // pub fn emit_on_window_close(&self) -> bool {
+    //     self.plan_base().emit_on_window_close()
+    // }
 
-    pub fn functional_dependency(&self) -> &FunctionalDependencySet {
-        self.plan_base().functional_dependency()
-    }
+    // pub fn functional_dependency(&self) -> &FunctionalDependencySet {
+    //     self.plan_base().functional_dependency()
+    // }
 
-    pub fn watermark_columns(&self) -> &FixedBitSet {
-        self.plan_base().watermark_columns()
-    }
+    // pub fn watermark_columns(&self) -> &FixedBitSet {
+    //     self.plan_base().watermark_columns()
+    // }
 
     /// Serialize the plan node and its children to a stream plan proto.
     ///
@@ -1188,7 +1196,19 @@ macro_rules! impl_plan_node_meta {
                 type Convention = $convention;
                 const NODE_TYPE: PlanNodeType = PlanNodeType::[<$convention $name>];
 
-                fn plan_base(&self) -> &PlanBase {
+                fn plan_base(&self) -> &PlanBase<$convention> {
+                    &self.base
+                }
+
+                fn plan_base_ref(&self) -> PlanBaseRef<'_> {
+                    PlanBaseRef::$convention(&self.base)
+                }
+            }
+
+            impl Deref for [<$convention $name>] {
+                type Target = PlanBase<$convention>;
+
+                fn deref(&self) -> &Self::Target {
                     &self.base
                 }
             })*
