@@ -1,0 +1,220 @@
+# CDC source basic test
+
+# enable cdc backfill in ci
+statement ok
+set cdc_backfill='true';
+
+statement ok
+create table products ( id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'dbz',
+ password = '123456',
+ database.name = 'my@db',
+ table.name = 'products',
+ server.id = '5085'
+);
+
+statement ok
+create materialized view products_cnt as select count(*) as cnt from products;
+
+statement ok
+create table orders (
+   order_id int,
+   order_date timestamp,
+   customer_name string,
+   price decimal,
+   product_id int,
+   order_status smallint,
+   PRIMARY KEY (order_id)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'dbz',
+ password = '123456',
+ database.name = 'my@db',
+ table.name = 'orders',
+ server.id = '5086'
+);
+
+statement ok
+create materialized view orders_cnt as select count(*) as cnt from orders;
+
+statement ok
+create table shipments (
+  shipment_id INTEGER,
+  order_id INTEGER,
+  origin STRING,
+  destination STRING,
+  is_arrived boolean,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+);
+
+statement ok
+create materialized view shipments_cnt as select count(*) as cnt from shipments;
+
+# Create a mview upon above three tables
+statement ok
+create materialized view enriched_orders as SELECT o.*, p.name, p.description, s.shipment_id, s.origin, s.destination, s.is_arrived
+ FROM orders AS o
+ LEFT JOIN products AS p ON o.product_id = p.id
+ LEFT JOIN shipments AS s ON o.order_id = s.order_id;
+
+statement ok
+create table mytable (
+  v1 INTEGER,
+  v2 INTEGER,
+  v3 STRING,
+ PRIMARY KEY (v1)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'my@db',
+ table.name = 'mytable',
+ server.id = '5087'
+);
+
+# Some columns missing and reordered (mysql-cdc)
+statement ok
+create table orders_2 (
+   order_id int,
+   price decimal,
+   customer_name string,
+   PRIMARY KEY (order_id)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'my@db',
+ table.name = 'orders',
+ server.id = '5088'
+);
+
+statement error
+create table tt3_rw (
+   v1 int,
+   v2 timestamp,
+   PRIMARY KEY (v1)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'my@db',
+ table.name = 'tt3',
+ server.id = '5089'
+);
+
+statement ok
+create table tt3_rw (
+   v1 int,
+   v2 timestamptz,
+   PRIMARY KEY (v1)
+) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'my@db',
+ table.name = 'tt3',
+ server.id = '5089'
+);
+
+# Some columns missing and reordered (postgres-cdc)
+statement ok
+create table shipments_2 (
+  origin STRING,
+  destination STRING,
+  shipment_id INTEGER,
+  order_id INTEGER,
+ PRIMARY KEY (shipment_id)
+) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ table.name = 'shipments'
+);
+
+
+# Test user-provided publication
+statement ok
+create table t1_rw (
+    v1 int primary key,
+    v3 varchar
+) with (
+  connector = 'postgres-cdc',
+  hostname = 'db',
+  port = '5432',
+  username = 'postgres',
+  password='postgres',
+  database.name='cdc_test',
+  table.name='t1',
+  schema.name='abs',
+  slot.name='t1_slot',
+  publication.name='my_publicaton',
+  publication.create.enable='false'
+);
+
+statement ok
+create table person_rw (
+    id int primary key,
+    name varchar,
+    email_address varchar,
+    credit_card varchar,
+    city varchar
+) with (
+  connector = 'postgres-cdc',
+  hostname = 'db',
+  port = '5432',
+  username = 'postgres',
+  password='postgres',
+  database.name='cdc_test',
+  table.name='person',
+  publication.name='my_publicaton',
+  publication.create.enable='false'
+);
+
+statement error
+create table person_rw (
+    id int primary key,
+    name varchar,
+    email_address varchar
+) with (
+  connector = 'postgres-cdc',
+  hostname = 'db',
+  port = '5432',
+  username='postgres',
+  password='postgres',
+  database.name='cdc_test',
+  table.name='person',
+  publication.name='dumb_publicaton',
+  publication.create.enable='false'
+);
+
+statement ok
+create materialized view person_cnt as select count(*) as cnt from person_rw;

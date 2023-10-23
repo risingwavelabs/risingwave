@@ -127,6 +127,8 @@ public class DbzConnectorConfig {
                 mysqlProps.setProperty("snapshot.locking.mode", "none");
             }
 
+            mysqlProps.setProperty("database.server.id", String.valueOf(System.currentTimeMillis()));
+
             dbzProps.putAll(mysqlProps);
         } else if (source == SourceTypeE.POSTGRES || source == SourceTypeE.CITUS) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);

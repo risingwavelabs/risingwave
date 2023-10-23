@@ -55,3 +55,9 @@ GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *
 CREATE TABLE tt3 (v1 int primary key, v2 timestamp);
 INSERT INTO tt3 VALUES (1, '2020-07-30 10:08:22');
 INSERT INTO tt3 VALUES (2, '2020-07-31 10:09:22');
+
+CREATE TABLE tt1 (v1 int primary key, v2 int);
+CREATE TABLE tt2 (v1 int primary key, v2 int);
+CREATE TABLE tt4 (v1 int primary key, v2 int);
+CREATE TABLE tt5 (v1 int primary key, v2 int);
+
