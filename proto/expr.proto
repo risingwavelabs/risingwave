@@ -348,6 +348,7 @@ message AggCall {
     MODE = 24;
     LAST_VALUE = 25;
     GROUPING = 26;
+    INTERNAL_LAST_SEEN_VALUE = 27;
   }
   Type type = 1;
   repeated InputRef args = 2;
