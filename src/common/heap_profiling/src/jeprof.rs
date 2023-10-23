@@ -17,8 +17,7 @@ use std::process::Command;
 use std::{env, fs};
 
 use anyhow::anyhow;
-
-use crate::error::Result;
+use risingwave_common::error::Result;
 
 pub async fn run(profile_path: String, collapsed_path: String) -> Result<()> {
     let executable_path = env::current_exe()?;
