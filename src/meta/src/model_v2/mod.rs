@@ -103,7 +103,7 @@ impl From<CreateType> for PbCreateType {
 }
 
 /// Defines struct with a single pb field that derives FromJsonQueryResult, it will helps to map json value stored in database to Pb struct.
-macro_rules! derive_json_struct {
+macro_rules! derive_from_json_struct {
     ($struct_name:ident, $field_type:ty) => {
         #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize, Default)]
         pub struct $struct_name(pub $field_type);
@@ -111,28 +111,28 @@ macro_rules! derive_json_struct {
     };
 }
 
-derive_json_struct!(I32Array, Vec<i32>);
-derive_json_struct!(DataType, risingwave_pb::data::DataType);
-derive_json_struct!(DataTypeArray, Vec<risingwave_pb::data::DataType>);
-derive_json_struct!(FieldArray, Vec<risingwave_pb::plan_common::Field>);
-derive_json_struct!(Property, HashMap<String, String>);
-derive_json_struct!(ColumnCatalog, risingwave_pb::plan_common::PbColumnCatalog);
-derive_json_struct!(
+derive_from_json_struct!(I32Array, Vec<i32>);
+derive_from_json_struct!(DataType, risingwave_pb::data::DataType);
+derive_from_json_struct!(DataTypeArray, Vec<risingwave_pb::data::DataType>);
+derive_from_json_struct!(FieldArray, Vec<risingwave_pb::plan_common::Field>);
+derive_from_json_struct!(Property, HashMap<String, String>);
+derive_from_json_struct!(ColumnCatalog, risingwave_pb::plan_common::PbColumnCatalog);
+derive_from_json_struct!(
     ColumnCatalogArray,
     Vec<risingwave_pb::plan_common::PbColumnCatalog>
 );
-derive_json_struct!(StreamSourceInfo, risingwave_pb::catalog::PbStreamSourceInfo);
-derive_json_struct!(WatermarkDesc, risingwave_pb::catalog::PbWatermarkDesc);
-derive_json_struct!(
+derive_from_json_struct!(StreamSourceInfo, risingwave_pb::catalog::PbStreamSourceInfo);
+derive_from_json_struct!(WatermarkDesc, risingwave_pb::catalog::PbWatermarkDesc);
+derive_from_json_struct!(
     WatermarkDescArray,
     Vec<risingwave_pb::catalog::PbWatermarkDesc>
 );
-derive_json_struct!(ExprNodeArray, Vec<risingwave_pb::expr::PbExprNode>);
-derive_json_struct!(ColumnOrderArray, Vec<risingwave_pb::common::PbColumnOrder>);
-derive_json_struct!(SinkFormatDesc, risingwave_pb::catalog::PbSinkFormatDesc);
-derive_json_struct!(Cardinality, risingwave_pb::plan_common::PbCardinality);
-derive_json_struct!(TableVersion, risingwave_pb::catalog::table::PbTableVersion);
-derive_json_struct!(
+derive_from_json_struct!(ExprNodeArray, Vec<risingwave_pb::expr::PbExprNode>);
+derive_from_json_struct!(ColumnOrderArray, Vec<risingwave_pb::common::PbColumnOrder>);
+derive_from_json_struct!(SinkFormatDesc, risingwave_pb::catalog::PbSinkFormatDesc);
+derive_from_json_struct!(Cardinality, risingwave_pb::plan_common::PbCardinality);
+derive_from_json_struct!(TableVersion, risingwave_pb::catalog::table::PbTableVersion);
+derive_from_json_struct!(
     PrivateLinkService,
     risingwave_pb::catalog::connection::PbPrivateLinkService
 );
