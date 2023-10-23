@@ -391,8 +391,7 @@ pub fn from_protobuf_value(
             if dyn_msg.descriptor().full_name() == "google.protobuf.Any" {
                 // Sanity check
                 debug_assert!(
-                    dyn_msg.has_field_by_name("type_url") &&
-                    dyn_msg.has_field_by_name("value"),
+                    dyn_msg.has_field_by_name("type_url") && dyn_msg.has_field_by_name("value"),
                     "`type_url` & `value` must exist in fields of `dyn_msg`"
                 );
 
@@ -560,8 +559,8 @@ mod test {
     use risingwave_common::types::{DataType, StructType};
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::data::data_type::PbTypeName;
-    use serde_json::json;
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
+    use serde_json::json;
 
     use super::*;
     use crate::parser::protobuf::recursive::all_types::{EnumType, ExampleOneof, NestedMessage};
