@@ -14,6 +14,7 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_pb::catalog::PbComment;
 use risingwave_sqlparser::ast::{CommentObject, ObjectName};
 
 use super::{HandlerArgs, RwPgResponse};
@@ -27,12 +28,12 @@ pub async fn handle_comment(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
 
-    let (table_id, column_index) = {
+    let comment = {
         let mut binder = Binder::new_for_ddl(&session);
         // only `Column` and `Table` object are now supported
         match object_type {
             CommentObject::Column => {
-                let [.., tab, col] = object_name.0.as_slice() else {
+                let [tab @ .., col] = object_name.0.as_slice() else {
                     return Err(ErrorCode::BindError(format!(
                         "Invalid column: {}",
                         object_name.real_value()
@@ -40,27 +41,46 @@ pub async fn handle_comment(
                     .into());
                 };
 
-                let table = binder.bind_table(None, &tab.real_value(), None)?;
+                let (schema, table) = Binder::resolve_schema_qualified_name(
+                    session.database(),
+                    ObjectName(tab.to_vec()),
+                )?;
+
+                let (database_id, schema_id) =
+                    session.get_database_and_schema_id_for_create(schema)?;
+                let table = binder.bind_table(None, &table, None)?;
                 binder.bind_columns_to_context(col.real_value(), table.table_catalog.columns)?;
 
                 let column = binder.bind_column(object_name.0.as_slice())?;
 
-                (
-                    table.table_id,
-                    column.as_input_ref().map(|input_ref| input_ref.index as _),
-                )
+                PbComment {
+                    table_id: table.table_id.into(),
+                    schema_id,
+                    database_id,
+                    column_index: column.as_input_ref().map(|input_ref| input_ref.index as _),
+                    description: comment,
+                }
             }
             CommentObject::Table => {
-                let table = binder.bind_table(None, &object_name.real_value(), None)?;
-                (table.table_id, None)
+                let (schema, table) =
+                    Binder::resolve_schema_qualified_name(session.database(), object_name)?;
+                let (database_id, schema_id) =
+                    session.get_database_and_schema_id_for_create(schema)?;
+                let table = binder.bind_table(None, &table, None)?;
+
+                PbComment {
+                    table_id: table.table_id.into(),
+                    schema_id,
+                    database_id,
+                    column_index: None,
+                    description: comment,
+                }
             }
         }
     };
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .comment_on(table_id, column_index, comment)
-        .await?;
+    catalog_writer.comment_on(comment).await?;
 
     Ok(PgResponse::empty_result(StatementType::COMMENT))
 }

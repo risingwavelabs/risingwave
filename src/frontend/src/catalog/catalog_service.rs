@@ -21,7 +21,8 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{
-    PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+    PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
+    PbView,
 };
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::create_connection_request;
@@ -111,12 +112,7 @@ pub trait CatalogWriter: Send + Sync {
         connection: create_connection_request::Payload,
     ) -> Result<()>;
 
-    async fn comment_on(
-        &self,
-        table_id: TableId,
-        column_index: Option<u32>,
-        comment: Option<String>,
-    ) -> Result<()>;
+    async fn comment_on(&self, comment: PbComment) -> Result<()>;
 
     async fn drop_table(
         &self,
@@ -289,16 +285,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn comment_on(
-        &self,
-        TableId { table_id }: TableId,
-        column_index: Option<u32>,
-        comment: Option<String>,
-    ) -> Result<()> {
-        let version = self
-            .meta_client
-            .comment_on(table_id, column_index, comment)
-            .await?;
+    async fn comment_on(&self, comment: PbComment) -> Result<()> {
+        let version = self.meta_client.comment_on(comment).await?;
         self.wait_version(version).await
     }
 

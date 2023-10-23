@@ -315,9 +315,7 @@ message GetTablesResponse {
 }
 
 message CommentOnRequest {
-  uint32 table_id = 1;
-  optional uint32 column_index = 2;
-  optional string comment = 3;
+  catalog.Comment comment = 1;
 }
 
 message CommentOnResponse {

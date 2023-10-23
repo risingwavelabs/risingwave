@@ -40,7 +40,8 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
-    Connection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
+    Connection, PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
+    PbView, Table,
 };
 use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
@@ -406,16 +407,9 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.version))
     }
 
-    pub async fn comment_on(
-        &self,
-        table_id: u32,
-        column_index: Option<u32>,
-        comment: Option<String>,
-    ) -> Result<CatalogVersion> {
+    pub async fn comment_on(&self, comment: PbComment) -> Result<CatalogVersion> {
         let request = CommentOnRequest {
-            table_id,
-            column_index,
-            comment,
+            comment: Some(comment),
         };
         let resp = self.inner.comment_on(request).await?;
         Ok(resp.version)

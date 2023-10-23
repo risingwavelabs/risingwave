@@ -323,6 +323,8 @@ message Database {
 
 message Comment {
   uint32 table_id = 1;
-  optional uint32 column_index = 2;
-  optional string description = 3;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  optional uint32 column_index = 4;
+  optional string description = 5;
 }

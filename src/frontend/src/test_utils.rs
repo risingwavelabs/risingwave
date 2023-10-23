@@ -32,7 +32,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
+    PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
 use risingwave_pb::ddl_service::{create_connection_request, DdlProgress};
 use risingwave_pb::hummock::write_limits::WriteLimit;
@@ -318,12 +318,7 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
-    async fn comment_on(
-        &self,
-        _table_id: TableId,
-        _column_index: Option<u32>,
-        _comment: Option<String>,
-    ) -> Result<()> {
+    async fn comment_on(&self, _comment: PbComment) -> Result<()> {
         unreachable!()
     }
 

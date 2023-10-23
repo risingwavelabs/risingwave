@@ -722,13 +722,16 @@ impl DdlService for DdlServiceImpl {
         request: Request<CommentOnRequest>,
     ) -> Result<Response<CommentOnResponse>, Status> {
         let req = request.into_inner();
+        let comment = req.get_comment()?.clone();
 
         let version = self
             .ddl_controller
             .run_command(DdlCommand::CommentOn(Comment {
-                table_id: req.table_id,
-                column_index: req.column_index,
-                description: req.comment,
+                table_id: comment.table_id,
+                schema_id: comment.schema_id,
+                database_id: comment.database_id,
+                column_index: comment.column_index,
+                description: comment.description,
             }))
             .await?;
 
