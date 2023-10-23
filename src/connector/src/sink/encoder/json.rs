@@ -88,6 +88,7 @@ impl JsonEncoder {
             col_indices,
             timestamp_handling_mode,
             custom_json_type: CustomJsonType::Bigquery,
+            kafka_connect: None,
         }
     }
 }
