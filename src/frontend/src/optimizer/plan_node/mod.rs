@@ -161,7 +161,6 @@ impl_downcast!(PlanNode);
 
 // Using a new type wrapper allows direct function implementation on `PlanRef`,
 // and we currently need a manual implementation of `PartialEq` for `PlanRef`.
-#[allow(clippy::derived_hash_with_manual_eq)]
 #[derive(Clone, Debug, Eq, Hash)]
 pub struct PlanRef(Rc<dyn PlanNode>);
 
@@ -495,45 +494,17 @@ impl PlanNodeMeta for PlanRef {
     }
 }
 
-// /// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
-// impl<P> GenericPlanRef for P
-// where
-//     P: StaticPlanNodeMeta + Eq + Hash,
-// {
-//     fn id(&self) -> PlanNodeId {
-//         self.plan_base().id()
-//     }
-
-//     fn schema(&self) -> &Schema {
-//         self.plan_base().schema()
-//     }
-
-//     fn stream_key(&self) -> Option<&[usize]> {
-//         self.plan_base().stream_key()
-//     }
-
-//     fn ctx(&self) -> OptimizerContextRef {
-//         self.plan_base().ctx()
-//     }
-
-//     fn functional_dependency(&self) -> &FunctionalDependencySet {
-//         self.plan_base().functional_dependency()
-//     }
-// }
-
 impl GenericPlanRef for PlanRef {
     fn id(&self) -> PlanNodeId {
         self.plan_base().id()
     }
 
     fn schema(&self) -> &Schema {
-        // self.plan_base().schema()
-        todo!()
+        self.plan_base().schema()
     }
 
-    fn stream_key(&self) -> Option<&[usize]> {
-        // self.plan_base().stream_key()
-        todo!()
+    fn stream_key<'a>(&'a self) -> Option<&'a [usize]> {
+        self.plan_base().stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -541,46 +512,15 @@ impl GenericPlanRef for PlanRef {
     }
 
     fn functional_dependency(&self) -> &FunctionalDependencySet {
-        // self.plan_base().functional_dependency()
-        todo!()
+        self.plan_base().functional_dependency()
     }
 }
-
-// impl<P> PhysicalSpecific for P
-// where
-//     P: Eq + Hash,
-//     P: StaticPlanNodeMeta,
-//     <P::Convention as ConventionMarker>::Extra: PhysicalSpecific,
-// {
-//     fn distribution(&self) -> &Distribution {
-//         self.plan_base().distribution()
-//     }
-// }
 
 impl PhysicalPlanRef for PlanRef {
     fn distribution(&self) -> &Distribution {
-        // self.plan_base().distribution()
-        todo!()
+        self.plan_base().distribution()
     }
 }
-
-// impl<P> StreamSpecific for P
-// where
-//     P: Eq + Hash,
-//     P: StaticPlanNodeMeta<Convention = Stream>,
-// {
-//     fn append_only(&self) -> bool {
-//         self.plan_base().append_only()
-//     }
-
-//     fn emit_on_window_close(&self) -> bool {
-//         self.plan_base().emit_on_window_close()
-//     }
-
-//     fn watermark_columns(&self) -> &FixedBitSet {
-//         self.plan_base().watermark_columns()
-//     }
-// }
 
 impl StreamPlanRef for PlanRef {
     fn append_only(&self) -> bool {
@@ -592,25 +532,13 @@ impl StreamPlanRef for PlanRef {
     }
 
     fn watermark_columns(&self) -> &FixedBitSet {
-        // self.plan_base().watermark_columns()
-        todo!()
+        self.plan_base().watermark_columns()
     }
 }
 
-// impl<P> BatchSpecific for P
-// where
-//     P: Eq + Hash,
-//     P: StaticPlanNodeMeta<Convention = Batch>,
-// {
-//     fn order(&self) -> &Order {
-//         self.plan_base().order()
-//     }
-// }
-
 impl BatchPlanRef for PlanRef {
     fn order(&self) -> &Order {
-        // self.plan_base().order()
-        todo!()
+        self.plan_base().order()
     }
 }
 
@@ -667,53 +595,37 @@ pub(crate) fn pretty_config() -> PrettyConfig {
     }
 }
 
+// TODO: remove this direct implementation always require `GenericPlanRef`.
 impl dyn PlanNode {
-    // pub fn id(&self) -> PlanNodeId {
-    //     self.plan_base().id()
-    // }
+    pub fn id(&self) -> PlanNodeId {
+        self.plan_base().id()
+    }
 
-    // pub fn ctx(&self) -> OptimizerContextRef {
-    //     self.plan_base().ctx().clone()
-    // }
+    pub fn ctx(&self) -> OptimizerContextRef {
+        self.plan_base().ctx().clone()
+    }
 
-    // pub fn schema(&self) -> &Schema {
-    //     self.plan_base().schema()
-    // }
+    pub fn schema(&self) -> &Schema {
+        self.plan_base().schema()
+    }
 
-    // pub fn stream_key(&self) -> Option<&[usize]> {
-    //     self.plan_base().stream_key()
-    // }
+    pub fn stream_key(&self) -> Option<&[usize]> {
+        self.plan_base().stream_key()
+    }
 
-    // pub fn order(&self) -> &Order {
-    //     self.plan_base().order()
-    // }
+    pub fn functional_dependency(&self) -> &FunctionalDependencySet {
+        self.plan_base().functional_dependency()
+    }
+}
 
-    // // TODO: avoid no manual delegation
-    // pub fn distribution(&self) -> &Distribution {
-    //     self.plan_base().distribution()
-    // }
-
-    // pub fn append_only(&self) -> bool {
-    //     self.plan_base().append_only()
-    // }
-
-    // pub fn emit_on_window_close(&self) -> bool {
-    //     self.plan_base().emit_on_window_close()
-    // }
-
-    // pub fn functional_dependency(&self) -> &FunctionalDependencySet {
-    //     self.plan_base().functional_dependency()
-    // }
-
-    // pub fn watermark_columns(&self) -> &FixedBitSet {
-    //     self.plan_base().watermark_columns()
-    // }
-
+impl dyn PlanNode {
     /// Serialize the plan node and its children to a stream plan proto.
     ///
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
     pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanPb {
+        use stream::prelude::*;
+
         if let Some(stream_table_scan) = self.as_stream_table_scan() {
             return stream_table_scan.adhoc_to_stream_prost(state);
         }
@@ -740,7 +652,7 @@ impl dyn PlanNode {
                 .map(|x| *x as u32)
                 .collect(),
             fields: self.schema().to_prost(),
-            append_only: self.append_only(),
+            append_only: self.plan_base().append_only(),
         }
     }
 

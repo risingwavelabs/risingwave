@@ -317,40 +317,71 @@ pub enum PlanBaseRef<'a> {
 
 macro_rules! dispatch_plan_base {
     ($self:ident, [$($convention:ident),+ $(,)?], $method:expr) => {
-        match *($self) {
+        match $self {
             $(
                 PlanBaseRef::$convention(plan) => $method(plan),
             )+
+            #[allow(unreachable_patterns)]
             _ => panic!() // TODO
         }
     }
 }
 
-impl GenericPlanRef for PlanBaseRef<'_> {
-    fn id(&self) -> PlanNodeId {
-        todo!()
-    }
-
-    fn schema(&self) -> &Schema {
+impl<'a> PlanBaseRef<'a> {
+    pub(super) fn schema(self) -> &'a Schema {
         dispatch_plan_base!(self, [Logical, Stream, Batch], GenericPlanRef::schema)
     }
 
+    pub(super) fn stream_key(self) -> Option<&'a [usize]> {
+        dispatch_plan_base!(self, [Logical, Stream, Batch], GenericPlanRef::stream_key)
+    }
+
+    pub(super) fn functional_dependency(self) -> &'a FunctionalDependencySet {
+        dispatch_plan_base!(
+            self,
+            [Logical, Stream, Batch],
+            GenericPlanRef::functional_dependency
+        )
+    }
+
+    pub(super) fn distribution(self) -> &'a Distribution {
+        dispatch_plan_base!(self, [Stream, Batch], PhysicalPlanRef::distribution)
+    }
+
+    pub(super) fn watermark_columns(self) -> &'a FixedBitSet {
+        dispatch_plan_base!(self, [Stream], StreamPlanRef::watermark_columns)
+    }
+
+    pub(super) fn order(self) -> &'a Order {
+        dispatch_plan_base!(self, [Batch], BatchPlanRef::order)
+    }
+}
+
+impl GenericPlanRef for PlanBaseRef<'_> {
+    fn id(&self) -> PlanNodeId {
+        dispatch_plan_base!(self, [Logical, Stream, Batch], GenericPlanRef::id)
+    }
+
+    fn schema(&self) -> &Schema {
+        (*self).schema()
+    }
+
     fn stream_key(&self) -> Option<&[usize]> {
-        todo!()
+        (*self).stream_key()
     }
 
     fn functional_dependency(&self) -> &FunctionalDependencySet {
-        todo!()
+        (*self).functional_dependency()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        todo!()
+        dispatch_plan_base!(self, [Logical, Stream, Batch], GenericPlanRef::ctx)
     }
 }
 
 impl PhysicalPlanRef for PlanBaseRef<'_> {
     fn distribution(&self) -> &Distribution {
-        dispatch_plan_base!(self, [Stream, Batch], PhysicalPlanRef::distribution)
+        (*self).distribution()
     }
 }
 
@@ -364,12 +395,12 @@ impl StreamPlanRef for PlanBaseRef<'_> {
     }
 
     fn watermark_columns(&self) -> &FixedBitSet {
-        dispatch_plan_base!(self, [Stream], StreamPlanRef::watermark_columns)
+        (*self).watermark_columns()
     }
 }
 
 impl BatchPlanRef for PlanBaseRef<'_> {
     fn order(&self) -> &Order {
-        dispatch_plan_base!(self, [Batch], BatchPlanRef::order)
+        (*self).order()
     }
 }
