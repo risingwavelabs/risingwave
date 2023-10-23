@@ -24,6 +24,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::derive_columns;
+use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};

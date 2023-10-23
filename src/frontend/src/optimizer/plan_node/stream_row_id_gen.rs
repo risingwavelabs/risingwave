@@ -15,6 +15,7 @@
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Distribution;

@@ -85,6 +85,8 @@ const ANY_ORDER: Order = Order {
 
 impl Order {
     pub fn enforce_if_not_satisfies(&self, plan: PlanRef) -> Result<PlanRef> {
+        use crate::optimizer::plan_node::batch::prelude::*;
+
         if !plan.order().satisfies(self) {
             Ok(self.enforce(plan))
         } else {

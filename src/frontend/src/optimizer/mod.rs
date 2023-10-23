@@ -17,6 +17,7 @@ use std::ops::DerefMut;
 
 pub mod plan_node;
 pub use plan_node::{Explain, PlanRef};
+
 pub mod property;
 
 mod delta_join_solver;
@@ -46,10 +47,11 @@ use risingwave_connector::sink::catalog::SinkFormatDesc;
 use risingwave_pb::catalog::WatermarkDesc;
 
 use self::heuristic_optimizer::ApplyOrder;
+use self::plan_node::generic::{self, PhysicalPlanRef};
 use self::plan_node::{
-    generic, stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject,
-    LogicalSource, StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink,
-    StreamWatermarkFilter, ToStreamContext,
+    stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject, LogicalSource,
+    StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
+    ToStreamContext,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;

@@ -17,6 +17,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 use risingwave_pb::expr::ExprNode;
 
+use super::batch::prelude::*;
 use super::generic::{self, GenericPlanRef, PlanAggCall};
 use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};

@@ -47,6 +47,7 @@ use std::fmt;
 use std::fmt::Debug;
 
 use fixedbitset::FixedBitSet;
+use generic::PhysicalPlanRef;
 use itertools::Itertools;
 use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
 use risingwave_common::error::Result;

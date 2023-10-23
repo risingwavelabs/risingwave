@@ -99,6 +99,8 @@ impl ToStream for LogicalDedup {
     }
 
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         let input = self.input().to_stream(ctx)?;
         let input = RequiredDist::hash_shard(self.dedup_cols())
             .enforce_if_not_satisfies(input, &Order::any())?;

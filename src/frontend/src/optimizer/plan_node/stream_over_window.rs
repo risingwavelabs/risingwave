@@ -19,6 +19,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{GenericPlanNode, PlanWindowFunction};
+use super::stream::prelude::*;
 use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::generic::GenericPlanRef;

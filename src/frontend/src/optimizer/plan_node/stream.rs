@@ -30,3 +30,8 @@ pub trait StreamPlanRef: PhysicalPlanRef {
     fn emit_on_window_close(&self) -> bool;
     fn watermark_columns(&self) -> &FixedBitSet;
 }
+
+pub mod prelude {
+    pub use super::super::generic::{GenericPlanRef, PhysicalPlanRef};
+    pub use super::StreamPlanRef;
+}

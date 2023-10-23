@@ -772,6 +772,8 @@ impl ToBatch for LogicalOverWindow {
 
 impl ToStream for LogicalOverWindow {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         if self
             .window_functions()
             .iter()

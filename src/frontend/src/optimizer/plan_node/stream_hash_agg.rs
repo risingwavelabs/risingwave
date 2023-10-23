@@ -19,6 +19,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, GenericPlanRef, PlanAggCall};
+use super::stream::prelude::*;
 use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;

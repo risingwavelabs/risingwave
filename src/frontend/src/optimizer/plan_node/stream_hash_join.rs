@@ -21,6 +21,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbInequalityPair};
 
 use super::generic::{GenericPlanRef, Join};
+use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
 use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{

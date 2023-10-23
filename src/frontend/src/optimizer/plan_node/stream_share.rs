@@ -17,7 +17,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::PbStreamNode;
 
 use super::generic::GenericPlanRef;
-use super::stream::StreamPlanRef;
+use super::stream::prelude::*;
 use super::utils::Distill;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamExchange, StreamNode};
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
@@ -33,16 +33,19 @@ pub struct StreamShare {
 
 impl StreamShare {
     pub fn new(core: generic::Share<PlanRef>) -> Self {
-        let input = core.input.borrow().0.clone();
-        let dist = input.distribution().clone();
-        // Filter executor won't change the append-only behavior of the stream.
-        let base = PlanBase::new_stream_with_core(
-            &core,
-            dist,
-            input.append_only(),
-            input.emit_on_window_close(),
-            input.watermark_columns().clone(),
-        );
+        let base = {
+            let input = core.input.borrow();
+            let dist = input.distribution().clone();
+            // Filter executor won't change the append-only behavior of the stream.
+            PlanBase::new_stream_with_core(
+                &core,
+                dist,
+                input.append_only(),
+                input.emit_on_window_close(),
+                input.watermark_columns().clone(),
+            )
+        };
+
         StreamShare { base, core }
     }
 }

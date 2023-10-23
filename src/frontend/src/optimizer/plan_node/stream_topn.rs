@@ -17,6 +17,7 @@ use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{DistillUnit, TopNLimit};
+use super::stream::prelude::*;
 use super::utils::{plan_node_name, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, Order};

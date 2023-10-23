@@ -18,6 +18,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LocalLookupJoinNode};
 
+use super::batch::prelude::*;
 use super::generic::{self, GenericPlanRef};
 use super::utils::{childless_record, Distill};
 use super::ExprRewritable;

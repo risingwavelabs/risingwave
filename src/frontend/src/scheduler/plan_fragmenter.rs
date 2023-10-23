@@ -42,7 +42,7 @@ use uuid::Uuid;
 use super::SchedulerError;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::TableId;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;

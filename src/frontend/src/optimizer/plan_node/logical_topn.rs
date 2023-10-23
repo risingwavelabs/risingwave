@@ -107,6 +107,8 @@ impl LogicalTopN {
     }
 
     fn gen_dist_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         let input_dist = stream_input.distribution().clone();
 
         // if it is append only, for now we don't generate 2-phase rules

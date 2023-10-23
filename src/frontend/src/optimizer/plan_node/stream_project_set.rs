@@ -17,6 +17,7 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ProjectSetNode;
 
+use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{try_derive_watermark, ExprRewriter, WatermarkDerivation};

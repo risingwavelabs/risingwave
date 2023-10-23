@@ -18,6 +18,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::InsertNode;
 use risingwave_pb::plan_common::{DefaultColumns, IndexAndExpr};
 
+use super::batch::prelude::*;
 use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};

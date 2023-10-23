@@ -18,6 +18,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashJoinNode;
 use risingwave_pb::plan_common::JoinType;
 
+use super::batch::prelude::*;
 use super::generic::{self, GenericPlanRef};
 use super::utils::{childless_record, Distill};
 use super::{
