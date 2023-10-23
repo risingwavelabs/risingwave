@@ -110,8 +110,10 @@ impl PlanRewriter for ShareSourceRewriter {
     }
 }
 
-impl PlanVisitor<()> for SourceCounter {
-    type DefaultBehavior = impl DefaultBehavior<()>;
+impl PlanVisitor for SourceCounter {
+    type Result = ();
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     fn default_behavior() -> Self::DefaultBehavior {
         DefaultValue

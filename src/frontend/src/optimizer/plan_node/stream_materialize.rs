@@ -27,7 +27,7 @@ use super::derive::derive_columns;
 use super::stream::StreamPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
+use crate::catalog::table_catalog::{CreateType, TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -234,6 +234,7 @@ impl StreamMaterialize {
             created_at_epoch: None,
             initialized_at_epoch: None,
             cleaned_by_watermark: false,
+            create_type: CreateType::Foreground, // Will be updated in the handler itself.
         })
     }
 

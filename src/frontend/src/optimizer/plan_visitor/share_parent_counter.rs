@@ -34,8 +34,10 @@ impl ShareParentCounter {
     }
 }
 
-impl PlanVisitor<()> for ShareParentCounter {
-    type DefaultBehavior = impl DefaultBehavior<()>;
+impl PlanVisitor for ShareParentCounter {
+    type Result = ();
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     fn default_behavior() -> Self::DefaultBehavior {
         DefaultValue

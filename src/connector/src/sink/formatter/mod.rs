@@ -27,8 +27,9 @@ use risingwave_common::catalog::Schema;
 pub use upsert::UpsertFormatter;
 
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
+use super::encoder::template::TemplateEncoder;
 use super::encoder::KafkaConnectParams;
-use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
+use crate::sink::encoder::{JsonEncoder, ProtoEncoder, TimestampHandlingMode};
 
 /// Transforms a `StreamChunk` into a sequence of key-value pairs according a specific format,
 /// for example append-only, upsert or debezium.
@@ -61,27 +62,30 @@ macro_rules! tri {
     };
 }
 
-#[expect(clippy::enum_variant_names)]
 pub enum SinkFormatterImpl {
     AppendOnlyJson(AppendOnlyFormatter<JsonEncoder, JsonEncoder>),
+    AppendOnlyProto(AppendOnlyFormatter<JsonEncoder, ProtoEncoder>),
     UpsertJson(UpsertFormatter<JsonEncoder, JsonEncoder>),
     DebeziumJson(DebeziumJsonFormatter),
+    AppendOnlyTemplate(AppendOnlyFormatter<TemplateEncoder, TemplateEncoder>),
+    UpsertTemplate(UpsertFormatter<TemplateEncoder, TemplateEncoder>),
 }
 
 impl SinkFormatterImpl {
-    pub fn new(
+    pub async fn new(
         format_desc: &SinkFormatDesc,
         schema: Schema,
         pk_indices: Vec<usize>,
         db_name: String,
         sink_from_name: String,
     ) -> Result<Self> {
-        if format_desc.encode != SinkEncode::Json {
-            return Err(SinkError::Config(anyhow!(
-                "sink encode unsupported: {:?}",
+        let err_unsupported = || {
+            Err(SinkError::Config(anyhow!(
+                "sink format/encode unsupported: {:?} {:?}",
+                format_desc.format,
                 format_desc.encode,
-            )));
-        }
+            )))
+        };
 
         match format_desc.format {
             SinkFormat::AppendOnly => {
@@ -92,12 +96,32 @@ impl SinkFormatterImpl {
                         TimestampHandlingMode::Milli,
                     )
                 });
-                let val_encoder = JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
 
-                let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
-                Ok(SinkFormatterImpl::AppendOnlyJson(formatter))
+                match format_desc.encode {
+                    SinkEncode::Json => {
+                        let val_encoder =
+                            JsonEncoder::new(schema, None, TimestampHandlingMode::Milli);
+                        let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
+                        Ok(SinkFormatterImpl::AppendOnlyJson(formatter))
+                    }
+                    SinkEncode::Protobuf => {
+                        // By passing `None` as `aws_auth_props`, reading from `s3://` not supported yet.
+                        let descriptor =
+                            crate::schema::protobuf::fetch_descriptor(&format_desc.options, None)
+                                .await
+                                .map_err(|e| SinkError::Config(anyhow!("{e:?}")))?;
+                        let val_encoder = ProtoEncoder::new(schema, None, descriptor)?;
+                        let formatter = AppendOnlyFormatter::new(key_encoder, val_encoder);
+                        Ok(SinkFormatterImpl::AppendOnlyProto(formatter))
+                    }
+                    SinkEncode::Avro => err_unsupported(),
+                }
             }
             SinkFormat::Debezium => {
+                if format_desc.encode != SinkEncode::Json {
+                    return err_unsupported();
+                }
+
                 Ok(SinkFormatterImpl::DebeziumJson(DebeziumJsonFormatter::new(
                     schema,
                     pk_indices,
@@ -107,6 +131,10 @@ impl SinkFormatterImpl {
                 )))
             }
             SinkFormat::Upsert => {
+                if format_desc.encode != SinkEncode::Json {
+                    return err_unsupported();
+                }
+
                 let mut key_encoder = JsonEncoder::new(
                     schema.clone(),
                     Some(pk_indices),
@@ -139,6 +167,51 @@ impl SinkFormatterImpl {
             }
         }
     }
+
+    pub fn new_with_redis(
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        is_append_only: bool,
+        key_format: Option<String>,
+        value_format: Option<String>,
+    ) -> Result<Self> {
+        match (key_format, value_format) {
+            (Some(k), Some(v)) => {
+                let key_encoder = TemplateEncoder::new(
+                    schema.clone(),
+                    Some(pk_indices),
+                    k,
+                );
+                let val_encoder =
+                    TemplateEncoder::new(schema, None, v);
+                if is_append_only {
+                    Ok(SinkFormatterImpl::AppendOnlyTemplate(AppendOnlyFormatter::new(Some(key_encoder), val_encoder)))
+                } else {
+                    Ok(SinkFormatterImpl::UpsertTemplate(UpsertFormatter::new(key_encoder, val_encoder)))
+                }
+            }
+            (None, None) => {
+                let key_encoder = JsonEncoder::new(
+                    schema.clone(),
+                    Some(pk_indices),
+                    TimestampHandlingMode::Milli,
+                );
+                let val_encoder = JsonEncoder::new(
+                    schema,
+                    None,
+                    TimestampHandlingMode::Milli,
+                );
+                if is_append_only {
+                    Ok(SinkFormatterImpl::AppendOnlyJson(AppendOnlyFormatter::new(Some(key_encoder), val_encoder)))
+                } else {
+                    Ok(SinkFormatterImpl::UpsertJson(UpsertFormatter::new(key_encoder, val_encoder)))
+                }
+            }
+            _ => {
+                Err(SinkError::Encode("Please provide template formats for both key and value, or choose the JSON format.".to_string()))
+            }
+        }
+    }
 }
 
 #[macro_export]
@@ -146,8 +219,11 @@ macro_rules! dispatch_sink_formatter_impl {
     ($impl:expr, $name:ident, $body:expr) => {
         match $impl {
             SinkFormatterImpl::AppendOnlyJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyProto($name) => $body,
             SinkFormatterImpl::UpsertJson($name) => $body,
             SinkFormatterImpl::DebeziumJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyTemplate($name) => $body,
+            SinkFormatterImpl::UpsertTemplate($name) => $body,
         }
     };
 }
