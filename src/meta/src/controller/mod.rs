@@ -146,7 +146,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             optional_associated_source_id: value
                 .0
                 .optional_associated_source_id
-                .map(|id| PbOptionalAssociatedSourceId::AssociatedSourceId(id)),
+                .map(PbOptionalAssociatedSourceId::AssociatedSourceId),
         }
     }
 }
@@ -178,7 +178,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
             optional_associated_table_id: value
                 .0
                 .optional_associated_table_id
-                .map(|id| PbOptionalAssociatedTableId::AssociatedTableId(id)),
+                .map(PbOptionalAssociatedTableId::AssociatedTableId),
         }
     }
 }
