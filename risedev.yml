@@ -685,40 +685,6 @@ profile:
       - use: pubsub
         persist-data: true
 
-  ci-kafka:
-    config-path: src/config/ci.toml
-    steps:
-      - use: minio
-      - use: etcd
-        unsafe-no-fsync: true
-      - use: meta-node
-      - use: compute-node
-        enable-tiered-cache: true
-      - use: frontend
-      - use: compactor
-      - use: zookeeper
-        persist-data: true
-      - use: kafka
-        persist-data: true
-
-  ci-kafka-plus-pubsub:
-    config-path: src/config/ci.toml
-    steps:
-      - use: minio
-      - use: etcd
-        unsafe-no-fsync: true
-      - use: meta-node
-      - use: compute-node
-        enable-tiered-cache: true
-      - use: frontend
-      - use: compactor
-      - use: zookeeper
-        persist-data: true
-      - use: kafka
-        persist-data: true
-      - use: pubsub
-        persist-data: true
-
   ci-redis:
     config-path: src/config/ci.toml
     steps:
