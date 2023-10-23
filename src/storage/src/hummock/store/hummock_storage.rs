@@ -341,6 +341,7 @@ impl HummockStorage {
             self.write_limiter.clone(),
             option,
             version_update_notifier_tx,
+            self.context.storage_opts.mem_table_spill_threshold,
         )
     }
 

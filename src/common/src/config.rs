@@ -582,6 +582,10 @@ pub struct StorageConfig {
     pub enable_fast_compaction: bool,
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
+
+    /// Number of tasks shared buffer can upload in parallel.
+    #[serde(default = "default::storage::mem_table_spill_threshold")]
+    pub mem_table_spill_threshold: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
@@ -1092,6 +1096,10 @@ pub mod default {
 
         pub fn enable_fast_compaction() -> bool {
             true
+        }
+
+        pub fn mem_table_spill_threshold() -> usize {
+            16 << 20
         }
     }
 

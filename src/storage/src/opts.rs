@@ -127,6 +127,8 @@ pub struct StorageOpts {
     pub compactor_max_sst_size: u64,
     /// enable FastCompactorRunner.
     pub enable_fast_compaction: bool,
+
+    pub mem_table_spill_threshold: usize,
 }
 
 impl Default for StorageOpts {
@@ -235,6 +237,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             compactor_max_task_multiplier: c.storage.compactor_max_task_multiplier,
             compactor_max_sst_size: c.storage.compactor_max_sst_size,
             enable_fast_compaction: c.storage.enable_fast_compaction,
+            mem_table_spill_threshold: c.storage.mem_table_spill_threshold,
         }
     }
 }

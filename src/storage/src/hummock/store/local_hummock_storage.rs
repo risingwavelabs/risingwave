@@ -49,8 +49,7 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::StateStoreIter;
 
-const AVAILABLE: u64 = 256;
-const MEM_TABLE_SPILL_THRESHOLD: usize = 64 << 20;
+const MAX_SPILL_TIMES: u64 = 2 << 16;
 
 /// `LocalHummockStorage` is a handle for a state table shard to access data from and write data to
 /// the hummock state backend. It is created via `HummockStorage::new_local`.
@@ -98,6 +97,8 @@ pub struct LocalHummockStorage {
     mem_table_size: IntGauge,
 
     mem_table_item_count: IntGauge,
+
+    mem_table_spill_threshold: usize,
 }
 
 impl LocalHummockStorage {
@@ -343,14 +344,14 @@ impl LocalStateStore for LocalHummockStorage {
     }
 
     async fn try_flush(&mut self) -> StorageResult<()> {
-        if self.mem_table.kv_size.size() > MEM_TABLE_SPILL_THRESHOLD {
+        if self.mem_table.kv_size.size() > self.mem_table_spill_threshold {
             tracing::info!(
                 "The size of mem table exceeds {} Mb and spill occurs. table_id {}",
-                MEM_TABLE_SPILL_THRESHOLD >> 20,
+                self.mem_table_spill_threshold >> 20,
                 self.table_id.table_id()
             );
 
-            if self.spill_offset < AVAILABLE {
+            if self.spill_offset < MAX_SPILL_TIMES {
                 self.spill_offset += 1;
 
                 self.flush(vec![]).await?;
@@ -496,6 +497,7 @@ impl LocalHummockStorage {
         write_limiter: WriteLimiterRef,
         option: NewLocalOptions,
         version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+        mem_table_spill_threshold: usize,
     ) -> Self {
         let stats = hummock_version_reader.stats().clone();
         let mem_table_size = stats.mem_table_memory_size.with_label_values(&[
@@ -524,6 +526,7 @@ impl LocalHummockStorage {
             version_update_notifier_tx,
             mem_table_size,
             mem_table_item_count,
+            mem_table_spill_threshold,
         }
     }
 
