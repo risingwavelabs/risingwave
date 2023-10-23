@@ -320,7 +320,7 @@ fn print_kv_pairs(
         let full_val = block_iter.value();
         let humm_val = HummockValue::from_slice(full_val)?;
 
-        let epoch = Epoch::from(full_key.epoch);
+        let epoch = Epoch::from(full_key.epoch_with_gap.get_epoch());
         let date_time = DateTime::<Utc>::from(epoch.as_system_time());
 
         println!("\t\t   key: {:?}, len={}", full_key, full_key.encoded_len());

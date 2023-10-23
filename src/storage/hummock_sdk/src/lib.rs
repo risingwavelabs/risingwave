@@ -266,3 +266,16 @@ pub fn version_checkpoint_path(root_dir: &str) -> String {
 pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
     checkpoint_path.trim_end_matches(|c| c != '/').to_string()
 }
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug)]
+pub struct EpochWithGap(u64);
+
+impl EpochWithGap {
+    pub fn new(epoch_with_gap: u64) -> Self {
+        EpochWithGap(epoch_with_gap)
+    }
+
+    pub fn get_epoch(&self) -> HummockEpoch {
+        self.0
+    }
+}

@@ -22,7 +22,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::must_match;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
+use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
@@ -227,7 +227,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     for (mut key, value) in kv_iter {
         let is_new_user_key =
             last_key.is_empty() || key.user_key.as_ref() != last_key.user_key.as_ref();
-        let epoch = key.epoch;
+        let epoch = key.epoch_with_gap.get_epoch();
         if is_new_user_key {
             last_key = key.clone();
             user_key_last_delete = HummockEpoch::MAX;
@@ -241,7 +241,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
                 .as_ref()
                 .le(&extended_user_key)
                 && range_tombstone.end_user_key.as_ref().gt(&extended_user_key)
-                && range_tombstone.sequence >= key.epoch
+                && range_tombstone.sequence >= key.epoch_with_gap.get_epoch()
                 && range_tombstone.sequence < earliest_delete_epoch
             {
                 earliest_delete_epoch = range_tombstone.sequence;
@@ -253,9 +253,9 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
         } else if earliest_delete_epoch < user_key_last_delete {
             user_key_last_delete = earliest_delete_epoch;
 
-            key.epoch = earliest_delete_epoch;
+            key.epoch_with_gap = EpochWithGap::new(earliest_delete_epoch);
             b.add(key.to_ref(), HummockValue::Delete).await.unwrap();
-            key.epoch = epoch;
+            key.epoch_with_gap = EpochWithGap::new(epoch);
         }
 
         b.add(key.to_ref(), value.as_slice()).await.unwrap();
@@ -347,7 +347,7 @@ pub fn test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
 pub fn test_key_of(idx: usize) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: test_user_key_of(idx),
-        epoch: 233,
+        epoch_with_gap: EpochWithGap::new(233),
     }
 }
 

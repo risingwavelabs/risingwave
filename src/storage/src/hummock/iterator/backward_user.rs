@@ -16,7 +16,7 @@ use std::ops::Bound::*;
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 
 use crate::hummock::iterator::{Backward, HummockIterator};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
@@ -136,7 +136,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
 
         while self.iterator.is_valid() {
             let full_key = self.iterator.key();
-            let epoch = full_key.epoch;
+            let epoch = full_key.epoch_with_gap.get_epoch();
             let key = &full_key.user_key;
 
             if epoch > self.min_epoch && epoch <= self.read_epoch {
@@ -216,7 +216,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
             Included(end_key) => {
                 let full_key = FullKey {
                     user_key: end_key.clone(),
-                    epoch: 0,
+                    epoch_with_gap: EpochWithGap::new(0),
                 };
                 self.iterator.seek(full_key.to_ref()).await?;
             }
@@ -245,7 +245,10 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
             Unbounded => user_key,
         };
-        let full_key = FullKey { user_key, epoch: 0 };
+        let full_key = FullKey {
+            user_key,
+            epoch_with_gap: EpochWithGap::new(0),
+        };
         self.iterator.seek(full_key).await?;
 
         // Handle multi-version
@@ -299,6 +302,7 @@ mod tests {
     use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::prev_key;
+    use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
@@ -1020,7 +1024,7 @@ mod tests {
                 inserts.iter().map(|(time, value)| {
                     let full_key = FullKey {
                         user_key: key.clone(),
-                        epoch: time.0,
+                        epoch_with_gap: EpochWithGap::new(time.0),
                     };
                     (full_key, value.clone())
                 })
@@ -1190,7 +1194,7 @@ mod tests {
         let mut i = 0;
         while ui.is_valid() {
             let key = ui.key();
-            let key_epoch = key.epoch;
+            let key_epoch = key.epoch_with_gap.get_epoch();
             assert!(key_epoch > min_epoch);
 
             i += 1;

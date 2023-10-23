@@ -24,7 +24,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{can_concat, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{can_concat, EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{CompactTask, SstableInfo};
 
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
@@ -129,7 +129,7 @@ impl BlockStreamIterator {
                     .as_ref(),
             );
             // do not include this key because it is the smallest key of next block.
-            largest_key.epoch = HummockEpoch::MAX;
+            largest_key.epoch_with_gap = EpochWithGap::new(HummockEpoch::MAX);
             largest_key.encode()
         } else {
             self.sstable.value().meta.largest_key.clone()
@@ -541,7 +541,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             let is_new_user_key =
                 !self.last_key.is_empty() && iter.key().user_key != self.last_key.user_key.as_ref();
             let mut drop = false;
-            let epoch = iter.key().epoch;
+            let epoch = iter.key().epoch_with_gap.get_epoch();
             let value = HummockValue::from_slice(iter.value()).unwrap();
             if is_new_user_key || self.last_key.is_empty() {
                 self.last_key.set(iter.key());

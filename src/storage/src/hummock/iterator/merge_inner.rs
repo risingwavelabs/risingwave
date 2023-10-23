@@ -144,7 +144,7 @@ impl OrderedMergeIteratorInner<SharedBufferBatchIterator<Forward>> {
             .expect("no inner iter for imm merge")
             .iter
             .current_item();
-        (item.0.clone(), item.1.clone())
+        (item.0.clone(), (item.1 .0.get_epoch(), item.1 .1.clone()))
     }
 }
 
@@ -300,7 +300,7 @@ impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
                         table_id: top_key.user_key.table_id,
                         table_key: TableKey(self.last_table_key.as_slice()),
                     },
-                    epoch: top_key.epoch,
+                    epoch_with_gap: top_key.epoch_with_gap,
                 }
             };
             loop {
