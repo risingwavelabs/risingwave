@@ -29,7 +29,8 @@ use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam, SinkWriterParam};
 use crate::common::PulsarCommon;
 use crate::sink::catalog::desc::SinkDesc;
-use crate::sink::formatter::SinkFormatterImpl;
+use crate::sink::encoder::SerTo;
+use crate::sink::formatter::{SinkFormatter, SinkFormatterImpl};
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
@@ -327,7 +328,19 @@ impl AsyncTruncateSinkWriter for PulsarSinkWriter {
                 add_future,
                 config: &self.config,
             };
-            payload_writer.write_chunk(chunk, formatter).await
+            // TODO: we can call `payload_writer.write_chunk(chunk, formatter)`,
+            // but for an unknown reason, this will greatly increase the compile time,
+            // by nearly 4x. May investigate it later.
+            for r in formatter.format_chunk(&chunk) {
+                let (key, value) = r?;
+                payload_writer
+                    .write_inner(
+                        key.map(SerTo::ser_to).transpose()?,
+                        value.map(SerTo::ser_to).transpose()?,
+                    )
+                    .await?;
+            }
+            Ok(())
         })
     }
 }
