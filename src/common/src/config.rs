@@ -580,6 +580,9 @@ pub struct StorageConfig {
     pub compactor_max_sst_size: u64,
     #[serde(default = "default::storage::enable_fast_compaction")]
     pub enable_fast_compaction: bool,
+    #[serde(default = "default::storage::enable_sst_vnode_bitmap")]
+    pub enable_sst_vnode_bitmap: bool,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 }
@@ -1092,6 +1095,10 @@ pub mod default {
 
         pub fn enable_fast_compaction() -> bool {
             true
+        }
+
+        pub fn enable_sst_vnode_bitmap() -> bool {
+            false
         }
     }
 

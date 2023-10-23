@@ -167,6 +167,8 @@ pub struct MetaOpts {
 
     pub compaction_task_max_heartbeat_interval_secs: u64,
     pub compaction_config: Option<CompactionConfig>,
+
+    pub enable_sst_vnode_bitmap: bool,
 }
 
 impl MetaOpts {
@@ -206,6 +208,7 @@ impl MetaOpts {
             partition_vnode_count: 32,
             compaction_task_max_heartbeat_interval_secs: 0,
             compaction_config: None,
+            enable_sst_vnode_bitmap: false,
         }
     }
 }
