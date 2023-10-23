@@ -125,10 +125,10 @@ impl PlanTreeNodeBinary for StreamTemporalJoin {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        let mut logical = self.core.clone();
-        logical.left = left;
-        logical.right = right;
-        Self::new(logical, self.eq_join_predicate.clone())
+        let mut core = self.core.clone();
+        core.left = left;
+        core.right = right;
+        Self::new(core, self.eq_join_predicate.clone())
     }
 }
 
@@ -176,8 +176,8 @@ impl ExprRewritable for StreamTemporalJoin {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.core.clone();
-        logical.rewrite_exprs(r);
-        Self::new(logical, self.eq_join_predicate.rewrite_exprs(r)).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::new(core, self.eq_join_predicate.rewrite_exprs(r)).into()
     }
 }

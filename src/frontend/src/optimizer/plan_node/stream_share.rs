@@ -57,9 +57,9 @@ impl PlanTreeNodeUnary for StreamShare {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let logical = self.core.clone();
-        logical.replace_input(input);
-        Self::new(logical)
+        let core = self.core.clone();
+        core.replace_input(input);
+        Self::new(core)
     }
 }
 

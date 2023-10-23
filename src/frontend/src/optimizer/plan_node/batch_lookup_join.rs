@@ -141,10 +141,10 @@ impl PlanTreeNodeUnary for BatchLookupJoin {
 
     // Only change left side
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.core.clone();
-        logical.left = input;
+        let mut core = self.core.clone();
+        core.left = input;
         Self::new(
-            logical,
+            core,
             self.eq_join_predicate.clone(),
             self.right_table_desc.clone(),
             self.right_output_column_ids.clone(),
@@ -277,11 +277,11 @@ impl ExprRewritable for BatchLookupJoin {
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let base = self.base.clone_with_new_plan_id();
-        let mut logical = self.core.clone();
-        logical.rewrite_exprs(r);
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
         Self {
             base,
-            core: logical,
+            core,
             eq_join_predicate: self.eq_join_predicate.rewrite_exprs(r),
             ..Self::clone(self)
         }

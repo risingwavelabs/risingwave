@@ -48,9 +48,9 @@ impl PlanTreeNodeUnary for BatchUpdate {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.core.clone();
-        logical.input = input;
-        Self::new(logical, self.schema().clone())
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core, self.schema().clone())
     }
 }
 
@@ -99,8 +99,8 @@ impl ExprRewritable for BatchUpdate {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.core.clone();
-        logical.rewrite_exprs(r);
-        Self::new(logical, self.schema().clone()).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::new(core, self.schema().clone()).into()
     }
 }

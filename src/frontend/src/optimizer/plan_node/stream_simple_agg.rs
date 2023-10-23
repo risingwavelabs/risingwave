@@ -137,8 +137,8 @@ impl ExprRewritable for StreamSimpleAgg {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.core.clone();
-        logical.rewrite_exprs(r);
-        Self::new(logical, self.row_count_idx).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::new(core, self.row_count_idx).into()
     }
 }

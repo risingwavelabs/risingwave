@@ -110,9 +110,9 @@ impl PlanTreeNodeUnary for StreamProject {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.core.clone();
-        logical.input = input;
-        Self::new(logical)
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 impl_plan_tree_node_for_unary! {StreamProject}
@@ -139,8 +139,8 @@ impl ExprRewritable for StreamProject {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.core.clone();
-        logical.rewrite_exprs(r);
-        Self::new(logical).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::new(core).into()
     }
 }

@@ -72,9 +72,9 @@ impl PlanTreeNodeUnary for StreamTopN {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.core.clone();
-        logical.input = input;
-        Self::new(logical)
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 

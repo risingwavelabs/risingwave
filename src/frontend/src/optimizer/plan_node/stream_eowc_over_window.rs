@@ -121,9 +121,9 @@ impl PlanTreeNodeUnary for StreamEowcOverWindow {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.core.clone();
-        logical.input = input;
-        Self::new(logical)
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 impl_plan_tree_node_for_unary! { StreamEowcOverWindow }

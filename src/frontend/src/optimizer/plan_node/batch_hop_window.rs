@@ -65,10 +65,10 @@ impl PlanTreeNodeUnary for BatchHopWindow {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.core.clone();
-        logical.input = input;
+        let mut core = self.core.clone();
+        core.input = input;
         Self::new(
-            logical,
+            core,
             self.window_start_exprs.clone(),
             self.window_end_exprs.clone(),
         )

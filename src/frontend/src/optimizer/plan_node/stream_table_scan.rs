@@ -341,8 +341,8 @@ impl ExprRewritable for StreamTableScan {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.core.clone();
-        logical.rewrite_exprs(r);
-        Self::new_with_chain_type(logical, self.chain_type).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::new_with_chain_type(core, self.chain_type).into()
     }
 }

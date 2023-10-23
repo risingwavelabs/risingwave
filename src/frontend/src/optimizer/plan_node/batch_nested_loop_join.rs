@@ -83,10 +83,10 @@ impl PlanTreeNodeBinary for BatchNestedLoopJoin {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        let mut logical = self.core.clone();
-        logical.left = left;
-        logical.right = right;
-        Self::new(logical)
+        let mut core = self.core.clone();
+        core.left = left;
+        core.right = right;
+        Self::new(core)
     }
 }
 
@@ -133,8 +133,8 @@ impl ExprRewritable for BatchNestedLoopJoin {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.core.clone();
-        logical.rewrite_exprs(r);
-        Self::new(logical).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::new(core).into()
     }
 }
