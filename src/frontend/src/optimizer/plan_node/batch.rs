@@ -15,6 +15,10 @@
 use super::generic::PhysicalPlanRef;
 use crate::optimizer::property::Order;
 
+pub trait BatchSpecific {
+    fn order(&self) -> &Order;
+}
+
 /// A subtrait of [`PhysicalPlanRef`] for batch plans.
 ///
 /// Due to the lack of refactoring, all plan nodes currently implement this trait
@@ -23,6 +27,4 @@ use crate::optimizer::property::Order;
 /// [`PhysicalPlanRef`].
 ///
 /// [`GenericPlanRef`]: super::generic::GenericPlanRef
-pub trait BatchPlanRef: PhysicalPlanRef {
-    fn order(&self) -> &Order;
-}
+pub trait BatchPlanRef = PhysicalPlanRef + BatchSpecific;

@@ -57,13 +57,17 @@ pub trait PlanNodeMeta {
     fn convention(&self) -> Convention;
 }
 
-pub trait ConventionMarker {
+pub trait ConventionMarker: 'static + Sized {
+    type Extra: 'static + Clone + Debug;
+
     fn value() -> Convention;
 }
 pub trait PhysicalConventionMarker: ConventionMarker {}
 
 pub struct Logical;
 impl ConventionMarker for Logical {
+    type Extra = plan_base::NoExtra;
+
     fn value() -> Convention {
         Convention::Logical
     }
@@ -71,6 +75,8 @@ impl ConventionMarker for Logical {
 
 pub struct Batch;
 impl ConventionMarker for Batch {
+    type Extra = plan_base::BatchExtra;
+
     fn value() -> Convention {
         Convention::Batch
     }
@@ -79,6 +85,8 @@ impl PhysicalConventionMarker for Batch {}
 
 pub struct Stream;
 impl ConventionMarker for Stream {
+    type Extra = plan_base::StreamExtra;
+
     fn value() -> Convention {
         Convention::Stream
     }
@@ -87,8 +95,8 @@ impl PhysicalConventionMarker for Stream {}
 
 pub trait StaticPlanNodeMeta {
     type Convention: ConventionMarker;
+    const NODE_TYPE: PlanNodeType;
 
-    fn node_type(&self) -> PlanNodeType;
     fn plan_base(&self) -> &PlanBase;
 }
 
@@ -97,7 +105,7 @@ where
     P: StaticPlanNodeMeta,
 {
     fn node_type(&self) -> PlanNodeType {
-        P::node_type(self)
+        P::NODE_TYPE
     }
 
     fn plan_base(&self) -> &PlanBase {
@@ -1178,10 +1186,8 @@ macro_rules! impl_plan_node_meta {
 
             $(impl StaticPlanNodeMeta for [<$convention $name>] {
                 type Convention = $convention;
+                const NODE_TYPE: PlanNodeType = PlanNodeType::[<$convention $name>];
 
-                fn node_type(&self) -> PlanNodeType {
-                    PlanNodeType::[<$convention $name>]
-                }
                 fn plan_base(&self) -> &PlanBase {
                     &self.base
                 }

@@ -21,6 +21,9 @@ use super::*;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct NoExtra;
+
 /// Common extra fields for physical plan nodes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct PhysicalCommonExtra {
@@ -31,7 +34,7 @@ struct PhysicalCommonExtra {
 
 /// Extra fields for stream plan nodes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct StreamExtra {
+pub struct StreamExtra {
     /// Common fields for physical plan nodes.
     physical: PhysicalCommonExtra,
 
@@ -45,9 +48,29 @@ struct StreamExtra {
     watermark_columns: FixedBitSet,
 }
 
+impl generic::PhysicalSpecific for StreamExtra {
+    fn distribution(&self) -> &Distribution {
+        &self.physical.dist
+    }
+}
+
+impl stream::StreamSpecific for StreamExtra {
+    fn append_only(&self) -> bool {
+        self.append_only
+    }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.emit_on_window_close
+    }
+
+    fn watermark_columns(&self) -> &FixedBitSet {
+        &self.watermark_columns
+    }
+}
+
 /// Extra fields for batch plan nodes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct BatchExtra {
+pub struct BatchExtra {
     /// Common fields for physical plan nodes.
     physical: PhysicalCommonExtra,
 
@@ -56,40 +79,15 @@ struct BatchExtra {
     order: Order,
 }
 
-/// Extra fields for physical plan nodes.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-enum PhysicalExtra {
-    Stream(StreamExtra),
-    Batch(BatchExtra),
+impl generic::PhysicalSpecific for BatchExtra {
+    fn distribution(&self) -> &Distribution {
+        &self.physical.dist
+    }
 }
 
-impl PhysicalExtra {
-    fn common(&self) -> &PhysicalCommonExtra {
-        match self {
-            PhysicalExtra::Stream(stream) => &stream.physical,
-            PhysicalExtra::Batch(batch) => &batch.physical,
-        }
-    }
-
-    fn common_mut(&mut self) -> &mut PhysicalCommonExtra {
-        match self {
-            PhysicalExtra::Stream(stream) => &mut stream.physical,
-            PhysicalExtra::Batch(batch) => &mut batch.physical,
-        }
-    }
-
-    fn stream(&self) -> &StreamExtra {
-        match self {
-            PhysicalExtra::Stream(extra) => extra,
-            _ => panic!("access stream properties from batch plan node"),
-        }
-    }
-
-    fn batch(&self) -> &BatchExtra {
-        match self {
-            PhysicalExtra::Batch(extra) => extra,
-            _ => panic!("access batch properties from stream plan node"),
-        }
+impl batch::BatchSpecific for BatchExtra {
+    fn order(&self) -> &Order {
+        &self.order
     }
 }
 
@@ -102,9 +100,9 @@ impl PhysicalExtra {
 /// - To access them, use traits including [`GenericPlanRef`],
 ///   [`PhysicalPlanRef`], [`StreamPlanRef`] and [`BatchPlanRef`].
 /// - To mutate them, use methods like `new_*` or `clone_with_*`.
-#[derive(Clone, Debug, Educe)]
-#[educe(PartialEq, Eq, Hash)]
-pub struct PlanBase {
+#[derive(Educe)]
+#[educe(PartialEq, Eq, Hash, Clone, Debug)]
+pub struct PlanBase<C: ConventionMarker> {
     // -- common fields --
     #[educe(PartialEq(ignore), Hash(ignore))]
     id: PlanNodeId,
@@ -117,25 +115,24 @@ pub struct PlanBase {
     stream_key: Option<Vec<usize>>,
     functional_dependency: FunctionalDependencySet,
 
-    /// Extra fields if the plan node is physical.
-    physical_extra: Option<PhysicalExtra>,
+    extra: C::Extra,
 }
 
-impl PlanBase {
-    fn physical_extra(&self) -> &PhysicalExtra {
-        self.physical_extra
-            .as_ref()
-            .expect("access physical properties from logical plan node")
-    }
+// impl PlanBase {
+//     fn physical_extra(&self) -> &PhysicalExtra {
+//         self.physical_extra
+//             .as_ref()
+//             .expect("access physical properties from logical plan node")
+//     }
 
-    fn physical_extra_mut(&mut self) -> &mut PhysicalExtra {
-        self.physical_extra
-            .as_mut()
-            .expect("access physical properties from logical plan node")
-    }
-}
+//     fn physical_extra_mut(&mut self) -> &mut PhysicalExtra {
+//         self.physical_extra
+//             .as_mut()
+//             .expect("access physical properties from logical plan node")
+//     }
+// }
 
-impl generic::GenericPlanRef for PlanBase {
+impl<C: ConventionMarker> generic::GenericPlanRef for PlanBase<C> {
     fn id(&self) -> PlanNodeId {
         self.id
     }
@@ -157,33 +154,50 @@ impl generic::GenericPlanRef for PlanBase {
     }
 }
 
-impl generic::PhysicalPlanRef for PlanBase {
+impl<C: ConventionMarker> generic::PhysicalSpecific for PlanBase<C>
+where
+    C::Extra: generic::PhysicalSpecific,
+{
     fn distribution(&self) -> &Distribution {
-        &self.physical_extra().common().dist
+        &self.extra.distribution()
     }
 }
 
-impl stream::StreamPlanRef for PlanBase {
+impl<C: ConventionMarker> stream::StreamSpecific for PlanBase<C>
+where
+    C::Extra: stream::StreamSpecific,
+{
     fn append_only(&self) -> bool {
-        self.physical_extra().stream().append_only
+        self.extra.append_only()
     }
 
     fn emit_on_window_close(&self) -> bool {
-        self.physical_extra().stream().emit_on_window_close
+        self.extra.emit_on_window_close()
     }
 
     fn watermark_columns(&self) -> &FixedBitSet {
-        &self.physical_extra().stream().watermark_columns
+        &self.extra.watermark_columns()
     }
 }
 
-impl batch::BatchPlanRef for PlanBase {
+impl<C: ConventionMarker> batch::BatchSpecific for PlanBase<C>
+where
+    C::Extra: batch::BatchSpecific,
+{
     fn order(&self) -> &Order {
-        &self.physical_extra().batch().order
+        &self.extra.order()
     }
 }
 
-impl PlanBase {
+impl<C: ConventionMarker> PlanBase<C> {
+    pub fn clone_with_new_plan_id(&self) -> Self {
+        let mut new = self.clone();
+        new.id = self.ctx().next_plan_node_id();
+        new
+    }
+}
+
+impl PlanBase<Logical> {
     pub fn new_logical(
         ctx: OptimizerContextRef,
         schema: Schema,
@@ -197,7 +211,7 @@ impl PlanBase {
             schema,
             stream_key,
             functional_dependency,
-            physical_extra: None,
+            extra: NoExtra,
         }
     }
 
@@ -209,7 +223,9 @@ impl PlanBase {
             core.functional_dependency(),
         )
     }
+}
 
+impl PlanBase<Stream> {
     pub fn new_stream(
         ctx: OptimizerContextRef,
         schema: Schema,
@@ -228,14 +244,12 @@ impl PlanBase {
             schema,
             stream_key,
             functional_dependency,
-            physical_extra: Some(PhysicalExtra::Stream({
-                StreamExtra {
-                    physical: PhysicalCommonExtra { dist },
-                    append_only,
-                    emit_on_window_close,
-                    watermark_columns,
-                }
-            })),
+            extra: StreamExtra {
+                physical: PhysicalCommonExtra { dist },
+                append_only,
+                emit_on_window_close,
+                watermark_columns,
+            },
         }
     }
 
@@ -257,7 +271,9 @@ impl PlanBase {
             watermark_columns,
         )
     }
+}
 
+impl PlanBase<Batch> {
     pub fn new_batch(
         ctx: OptimizerContextRef,
         schema: Schema,
@@ -272,12 +288,10 @@ impl PlanBase {
             schema,
             stream_key: None,
             functional_dependency,
-            physical_extra: Some(PhysicalExtra::Batch({
-                BatchExtra {
-                    physical: PhysicalCommonExtra { dist },
-                    order,
-                }
-            })),
+            extra: BatchExtra {
+                physical: PhysicalCommonExtra { dist },
+                order,
+            },
         }
     }
 
@@ -288,19 +302,27 @@ impl PlanBase {
     ) -> Self {
         Self::new_batch(core.ctx(), core.schema(), dist, order)
     }
+}
 
-    pub fn clone_with_new_plan_id(&self) -> Self {
-        let mut new = self.clone();
-        new.id = self.ctx().next_plan_node_id();
-        new
-    }
-
+impl PlanBase<Batch> {
     /// Clone the plan node with a new distribution.
     ///
     /// Panics if the plan node is not physical.
     pub fn clone_with_new_distribution(&self, dist: Distribution) -> Self {
         let mut new = self.clone();
-        new.physical_extra_mut().common_mut().dist = dist;
+        new.extra.physical.dist = dist;
+        new
+    }
+}
+
+// TODO: unify the impls for `PlanBase<Stream>` and `PlanBase<Batch>`.
+impl PlanBase<Stream> {
+    /// Clone the plan node with a new distribution.
+    ///
+    /// Panics if the plan node is not physical.
+    pub fn clone_with_new_distribution(&self, dist: Distribution) -> Self {
+        let mut new = self.clone();
+        new.extra.physical.dist = dist;
         new
     }
 }

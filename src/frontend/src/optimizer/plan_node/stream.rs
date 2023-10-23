@@ -16,6 +16,13 @@ use fixedbitset::FixedBitSet;
 
 use super::generic::PhysicalPlanRef;
 
+pub trait StreamSpecific {
+    fn append_only(&self) -> bool;
+    fn emit_on_window_close(&self) -> bool;
+    fn watermark_columns(&self) -> &FixedBitSet;
+}
+
+
 /// A subtrait of [`PhysicalPlanRef`] for stream plans.
 ///
 /// Due to the lack of refactoring, all plan nodes currently implement this trait
@@ -24,8 +31,4 @@ use super::generic::PhysicalPlanRef;
 /// [`PhysicalPlanRef`].
 ///
 /// [`GenericPlanRef`]: super::generic::GenericPlanRef
-pub trait StreamPlanRef: PhysicalPlanRef {
-    fn append_only(&self) -> bool;
-    fn emit_on_window_close(&self) -> bool;
-    fn watermark_columns(&self) -> &FixedBitSet;
-}
+pub trait StreamPlanRef = PhysicalPlanRef + StreamSpecific;

@@ -92,9 +92,11 @@ pub trait GenericPlanRef: Eq + Hash {
     fn ctx(&self) -> OptimizerContextRef;
 }
 
-pub trait PhysicalPlanRef: GenericPlanRef {
+pub trait PhysicalSpecific {
     fn distribution(&self) -> &Distribution;
 }
+
+pub trait PhysicalPlanRef = GenericPlanRef + PhysicalSpecific;
 
 pub trait GenericPlanNode {
     fn functional_dependency(&self) -> FunctionalDependencySet;
