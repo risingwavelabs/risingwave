@@ -399,7 +399,7 @@ pub enum SinkError {
     #[error("Internal error: {0}")]
     Internal(anyhow::Error),
     #[error("BigQuery error: {0}")]
-    BigQuery(String),
+    BigQuery(anyhow::Error),
 }
 
 impl From<icelake::Error> for SinkError {

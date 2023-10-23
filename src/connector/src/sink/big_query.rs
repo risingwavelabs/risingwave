@@ -109,24 +109,24 @@ impl BigQuerySink {
     ) -> Result<()> {
         let rw_fields_name = self.schema.fields();
         if big_query_columns_desc.is_empty() {
-            return Err(SinkError::BigQuery(
-                "Cannot find table in bigquery".to_string(),
-            ));
+            return Err(SinkError::BigQuery(anyhow::anyhow!(
+                "Cannot find table in bigquery"
+            )));
         }
         if rw_fields_name.len().ne(&big_query_columns_desc.len()) {
-            return Err(SinkError::BigQuery(format!("The length of the RisingWave column {} must be equal to the length of the bigquery column {}",rw_fields_name.len(),big_query_columns_desc.len())));
+            return Err(SinkError::BigQuery(anyhow::anyhow!("The length of the RisingWave column {} must be equal to the length of the bigquery column {}",rw_fields_name.len(),big_query_columns_desc.len())));
         }
 
         for i in rw_fields_name {
             let value = big_query_columns_desc.get(&i.name).ok_or_else(|| {
-                SinkError::BigQuery(format!(
+                SinkError::BigQuery(anyhow::anyhow!(
                     "Column name don't find in bigquery, risingwave is {:?} ",
                     i.name
                 ))
             })?;
             let data_type_string = Self::get_string_and_check_support_from_datatype(&i.data_type)?;
             if data_type_string.ne(value) {
-                return Err(SinkError::BigQuery(format!(
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
                     "Column type don't match, column name is {:?}. bigquery type is {:?} risingwave type is {:?} ",i.name,value,data_type_string
                 )));
             };
@@ -140,16 +140,16 @@ impl BigQuerySink {
             DataType::Int16 => Ok("INT64".to_owned()),
             DataType::Int32 => Ok("INT64".to_owned()),
             DataType::Int64 => Ok("INT64".to_owned()),
-            DataType::Float32 => Err(SinkError::BigQuery(
-                "Bigquery cannot support real".to_string(),
-            )),
+            DataType::Float32 => Err(SinkError::BigQuery(anyhow::anyhow!(
+                "Bigquery cannot support real"
+            ))),
             DataType::Float64 => Ok("FLOAT64".to_owned()),
             DataType::Decimal => Ok("NUMERIC".to_owned()),
             DataType::Date => Ok("DATE".to_owned()),
             DataType::Varchar => Ok("STRING".to_owned()),
-            DataType::Time => Err(SinkError::BigQuery(
-                "Bigquery cannot support Time".to_string(),
-            )),
+            DataType::Time => Err(SinkError::BigQuery(anyhow::anyhow!(
+                "Bigquery cannot support Time"
+            ))),
             DataType::Timestamp => Ok("DATETIME".to_owned()),
             DataType::Timestamptz => Ok("TIMESTAMP".to_owned()),
             DataType::Interval => Ok("INTERVAL".to_owned()),
@@ -169,9 +169,9 @@ impl BigQuerySink {
             DataType::Bytea => Ok("BYTES".to_owned()),
             DataType::Jsonb => Ok("JSON".to_owned()),
             DataType::Serial => Ok("INT64".to_owned()),
-            DataType::Int256 => Err(SinkError::BigQuery(
-                "Bigquery cannot support Int256".to_string(),
-            )),
+            DataType::Int256 => Err(SinkError::BigQuery(anyhow::anyhow!(
+                "Bigquery cannot support Int256"
+            ))),
         }
     }
 }
@@ -202,7 +202,7 @@ impl Sink for BigQuerySink {
 
         let client = Client::from_service_account_key_file(&self.config.common.file_path)
             .await
-            .map_err(|e| SinkError::BigQuery(e.to_string()))?;
+            .map_err(|e| SinkError::BigQuery(e.into()))?;
         let mut rs = client
         .job()
         .query(
@@ -212,29 +212,25 @@ impl Sink for BigQuerySink {
                 ,self.config.common.project,self.config.common.dataset,self.config.common.table,
             )),
         )
-        .await.map_err(|e| SinkError::BigQuery(e.to_string()))?;
+        .await.map_err(|e| SinkError::BigQuery(e.into()))?;
         let mut big_query_schema = HashMap::default();
         while rs.next_row() {
             big_query_schema.insert(
                 rs.get_string_by_name("column_name")
-                    .map_err(|e| SinkError::BigQuery(e.to_string()))?
-                    .ok_or_else(|| SinkError::BigQuery("Cannot find column_name".to_owned()))?,
+                    .map_err(|e| SinkError::BigQuery(e.into()))?
+                    .ok_or_else(|| {
+                        SinkError::BigQuery(anyhow::anyhow!("Cannot find column_name"))
+                    })?,
                 rs.get_string_by_name("data_type")
-                    .map_err(|e| SinkError::BigQuery(e.to_string()))?
-                    .ok_or_else(|| SinkError::BigQuery("Cannot find column_name".to_owned()))?,
+                    .map_err(|e| SinkError::BigQuery(e.into()))?
+                    .ok_or_else(|| {
+                        SinkError::BigQuery(anyhow::anyhow!("Cannot find column_name"))
+                    })?,
             );
         }
 
         self.check_column_name_and_type(big_query_schema)?;
         Ok(())
-    }
-
-    fn default_sink_decouple(_desc: &super::catalog::desc::SinkDesc) -> bool {
-        false
-    }
-
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
-        Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }
 
@@ -272,7 +268,7 @@ impl BigQuerySinkWriter {
     ) -> Result<Self> {
         let client = Client::from_service_account_key_file(&config.common.file_path)
             .await
-            .map_err(|e| SinkError::BigQuery(e.to_string()))
+            .map_err(|e| SinkError::BigQuery(e.into()))
             .unwrap();
         Ok(Self {
             config,
@@ -293,7 +289,9 @@ impl BigQuerySinkWriter {
         let mut insert_vec = vec![];
         for (op, row) in chunk.rows() {
             if op != Op::Insert {
-                continue;
+                return Err(SinkError::BigQuery(anyhow::anyhow!(
+                    "BigQuery sink don't support upsert"
+                )));
             }
             insert_vec.push(TableDataInsertAllRequestRows {
                 insert_id: None,
@@ -302,7 +300,7 @@ impl BigQuerySinkWriter {
         }
         self.insert_request
             .add_rows(insert_vec)
-            .map_err(|e| SinkError::BigQuery(e.to_string()))?;
+            .map_err(|e| SinkError::BigQuery(e.into()))?;
         if self.insert_request.len().ge(&BIGQUERY_INSERT_MAX_NUMS) {
             self.insert_data().await?;
         }
@@ -322,7 +320,7 @@ impl BigQuerySinkWriter {
                     insert_request,
                 )
                 .await
-                .map_err(|e| SinkError::BigQuery(e.to_string()))?;
+                .map_err(|e| SinkError::BigQuery(e.into()))?;
         }
         Ok(())
     }
@@ -334,9 +332,9 @@ impl SinkWriter for BigQuerySinkWriter {
         if self.is_append_only {
             self.append_only(chunk).await
         } else {
-            Err(SinkError::BigQuery(
-                "BigQuery sink don't support upsert".to_string(),
-            ))
+            Err(SinkError::BigQuery(anyhow::anyhow!(
+                "BigQuery sink don't support upsert"
+            )))
         }
     }
 
