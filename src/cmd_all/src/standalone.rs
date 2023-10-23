@@ -264,6 +264,7 @@ mod test {
                             connector_rpc_sink_payload_format: None,
                             config_path: "src/config/test.toml",
                             total_memory_bytes: 34359738368,
+                            mem_table_spill_threshold: 16777216,
                             parallelism: 10,
                             role: Both,
                             metrics_level: None,
