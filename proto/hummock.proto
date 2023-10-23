@@ -395,8 +395,13 @@ message SubscribeCompactionEventRequest {
 
   // ReportTask provides the compact task to report to the meta.
   message ReportTask {
-    CompactTask compact_task = 2;
+    reserved 2;
+    reserved "compact_task";
     map<uint32, TableStats> table_stats_change = 3;
+
+    uint64 task_id = 4;
+    CompactTask.TaskStatus task_status = 5;
+    repeated SstableInfo sorted_output_ssts = 6;
   }
 
   // HeartBeat provides the progress status of all tasks on the Compactor.
@@ -437,6 +442,26 @@ message SubscribeCompactionEventResponse {
   }
 
   uint64 create_at = 7;
+}
+
+message ReportCompactionTaskRequest {
+  // ReportTask provides the compact task to report to the meta.
+  message ReportTask {
+    CompactTask compact_task = 2;
+    map<uint32, TableStats> table_stats_change = 3;
+  }
+  // HeartBeat provides the progress status of all tasks on the Compactor.
+  message HeartBeat {
+    repeated CompactTaskProgress progress = 2;
+  }
+  oneof event {
+    ReportTask report_task = 1;
+    HeartBeat heart_beat = 2;
+  }
+}
+
+message ReportCompactionTaskResponse {
+  common.Status status = 1;
 }
 
 message ValidationTask {
@@ -587,6 +612,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 max_space_reclaim_bytes = 13;
       uint64 level0_max_compact_file_number = 14;
       bool enable_emergency_picker = 15;
+      uint32 tombstone_reclaim_ratio = 16;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -655,6 +681,25 @@ message ListHummockMetaConfigResponse {
   map<string, string> configs = 1;
 }
 
+message RiseCtlRebuildTableStatsRequest {}
+
+message RiseCtlRebuildTableStatsResponse {}
+
+message GetCompactionScoreRequest {
+  uint64 compaction_group_id = 1;
+}
+
+message GetCompactionScoreResponse {
+  message PickerInfo {
+    uint64 score = 1;
+    uint64 select_level = 2;
+    uint64 target_level = 3;
+    string picker_type = 4;
+  }
+  uint64 compaction_group_id = 1;
+  repeated PickerInfo scores = 2;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -680,14 +725,17 @@ service HummockManagerService {
   rpc RiseCtlPauseVersionCheckpoint(RiseCtlPauseVersionCheckpointRequest) returns (RiseCtlPauseVersionCheckpointResponse);
   rpc RiseCtlResumeVersionCheckpoint(RiseCtlResumeVersionCheckpointRequest) returns (RiseCtlResumeVersionCheckpointResponse);
   rpc RiseCtlGetCheckpointVersion(RiseCtlGetCheckpointVersionRequest) returns (RiseCtlGetCheckpointVersionResponse);
+  rpc RiseCtlRebuildTableStats(RiseCtlRebuildTableStatsRequest) returns (RiseCtlRebuildTableStatsResponse);
   rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc SplitCompactionGroup(SplitCompactionGroupRequest) returns (SplitCompactionGroupResponse);
   rpc RiseCtlListCompactionStatus(RiseCtlListCompactionStatusRequest) returns (RiseCtlListCompactionStatusResponse);
   rpc SubscribeCompactionEvent(stream SubscribeCompactionEventRequest) returns (stream SubscribeCompactionEventResponse);
+  rpc ReportCompactionTask(ReportCompactionTaskRequest) returns (ReportCompactionTaskResponse);
   rpc ListBranchedObject(ListBranchedObjectRequest) returns (ListBranchedObjectResponse);
   rpc ListActiveWriteLimit(ListActiveWriteLimitRequest) returns (ListActiveWriteLimitResponse);
   rpc ListHummockMetaConfig(ListHummockMetaConfigRequest) returns (ListHummockMetaConfigResponse);
+  rpc GetCompactionScore(GetCompactionScoreRequest) returns (GetCompactionScoreResponse);
 }
 
 message CompactionConfig {

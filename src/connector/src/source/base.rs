@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use aws_sdk_s3::types::Object;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
@@ -27,7 +28,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorSuppressor, RwError};
 use risingwave_common::types::{JsonbVal, Scalar};
-use risingwave_pb::catalog::PbSource;
+use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
@@ -40,7 +41,9 @@ use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
 use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
+use crate::source::filesystem::{FsPageItem, S3Properties, S3_V2_CONNECTOR};
 use crate::source::monitor::EnumeratorMetrics;
+use crate::source::S3_CONNECTOR;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
     impl_split, match_source_name_str,
@@ -48,6 +51,7 @@ use crate::{
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
+const UPSTREAM_SOURCE_KEY: &str = "connector";
 
 pub trait TryFromHashmap: Sized {
     fn try_from_hashmap(props: HashMap<String, String>) -> Result<Self>;
@@ -249,6 +253,67 @@ impl SourceStruct {
     }
 }
 
+// Only return valid (format, encode)
+pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> {
+    use risingwave_pb::plan_common::{PbEncodeType, PbFormatType, RowFormatType};
+
+    // old version meta.
+    if let Ok(format) = info.get_row_format() {
+        let (format, encode) = match format {
+            RowFormatType::Json => (SourceFormat::Plain, SourceEncode::Json),
+            RowFormatType::Protobuf => (SourceFormat::Plain, SourceEncode::Protobuf),
+            RowFormatType::DebeziumJson => (SourceFormat::Debezium, SourceEncode::Json),
+            RowFormatType::Avro => (SourceFormat::Plain, SourceEncode::Avro),
+            RowFormatType::Maxwell => (SourceFormat::Maxwell, SourceEncode::Json),
+            RowFormatType::CanalJson => (SourceFormat::Canal, SourceEncode::Json),
+            RowFormatType::Csv => (SourceFormat::Plain, SourceEncode::Csv),
+            RowFormatType::Native => (SourceFormat::Native, SourceEncode::Native),
+            RowFormatType::DebeziumAvro => (SourceFormat::Debezium, SourceEncode::Avro),
+            RowFormatType::UpsertJson => (SourceFormat::Upsert, SourceEncode::Json),
+            RowFormatType::UpsertAvro => (SourceFormat::Upsert, SourceEncode::Avro),
+            RowFormatType::DebeziumMongoJson => (SourceFormat::DebeziumMongo, SourceEncode::Json),
+            RowFormatType::Bytes => (SourceFormat::Plain, SourceEncode::Bytes),
+            RowFormatType::RowUnspecified => unreachable!(),
+        };
+        return Ok(SourceStruct::new(format, encode));
+    }
+    let source_format = info.get_format().map_err(|e| anyhow!("{e:?}"))?;
+    let source_encode = info.get_row_encode().map_err(|e| anyhow!("{e:?}"))?;
+    let (format, encode) = match (source_format, source_encode) {
+        (PbFormatType::Plain, PbEncodeType::Json) => (SourceFormat::Plain, SourceEncode::Json),
+        (PbFormatType::Plain, PbEncodeType::Protobuf) => {
+            (SourceFormat::Plain, SourceEncode::Protobuf)
+        }
+        (PbFormatType::Debezium, PbEncodeType::Json) => {
+            (SourceFormat::Debezium, SourceEncode::Json)
+        }
+        (PbFormatType::Plain, PbEncodeType::Avro) => (SourceFormat::Plain, SourceEncode::Avro),
+        (PbFormatType::Maxwell, PbEncodeType::Json) => (SourceFormat::Maxwell, SourceEncode::Json),
+        (PbFormatType::Canal, PbEncodeType::Json) => (SourceFormat::Canal, SourceEncode::Json),
+        (PbFormatType::Plain, PbEncodeType::Csv) => (SourceFormat::Plain, SourceEncode::Csv),
+        (PbFormatType::Native, PbEncodeType::Native) => {
+            (SourceFormat::Native, SourceEncode::Native)
+        }
+        (PbFormatType::Debezium, PbEncodeType::Avro) => {
+            (SourceFormat::Debezium, SourceEncode::Avro)
+        }
+        (PbFormatType::Upsert, PbEncodeType::Json) => (SourceFormat::Upsert, SourceEncode::Json),
+        (PbFormatType::Upsert, PbEncodeType::Avro) => (SourceFormat::Upsert, SourceEncode::Avro),
+        (PbFormatType::DebeziumMongo, PbEncodeType::Json) => {
+            (SourceFormat::DebeziumMongo, SourceEncode::Json)
+        }
+        (PbFormatType::Plain, PbEncodeType::Bytes) => (SourceFormat::Plain, SourceEncode::Bytes),
+        (format, encode) => {
+            return Err(anyhow!(
+                "Unsupported combination of format {:?} and encode {:?}",
+                format,
+                encode
+            ));
+        }
+    };
+    Ok(SourceStruct::new(format, encode))
+}
+
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;
 
 pub trait SourceWithStateStream =
@@ -297,8 +362,49 @@ pub trait SplitReader: Sized + Send {
 for_all_sources!(impl_connector_properties);
 
 impl ConnectorProperties {
+    pub fn is_new_fs_connector_b_tree_map(props: &BTreeMap<String, String>) -> bool {
+        props
+            .get(UPSTREAM_SOURCE_KEY)
+            .map(|s| s.eq_ignore_ascii_case(S3_V2_CONNECTOR))
+            .unwrap_or(false)
+    }
+
+    pub fn is_new_fs_connector_hash_map(props: &HashMap<String, String>) -> bool {
+        props
+            .get(UPSTREAM_SOURCE_KEY)
+            .map(|s| s.eq_ignore_ascii_case(S3_V2_CONNECTOR))
+            .unwrap_or(false)
+    }
+
+    pub fn rewrite_upstream_source_key_hash_map(props: &mut HashMap<String, String>) {
+        let connector = props.remove(UPSTREAM_SOURCE_KEY).unwrap();
+        match connector.as_str() {
+            S3_V2_CONNECTOR => {
+                tracing::info!(
+                    "using new fs source, rewrite connector from '{}' to '{}'",
+                    S3_V2_CONNECTOR,
+                    S3_CONNECTOR
+                );
+                props.insert(UPSTREAM_SOURCE_KEY.to_string(), S3_CONNECTOR.to_string());
+            }
+            _ => {
+                props.insert(UPSTREAM_SOURCE_KEY.to_string(), connector);
+            }
+        }
+    }
+}
+
+impl ConnectorProperties {
     pub fn extract(mut props: HashMap<String, String>) -> Result<Self> {
-        const UPSTREAM_SOURCE_KEY: &str = "connector";
+        if Self::is_new_fs_connector_hash_map(&props) {
+            _ = props
+                .remove(UPSTREAM_SOURCE_KEY)
+                .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
+            return Ok(ConnectorProperties::S3(Box::new(
+                S3Properties::try_from_hashmap(props)?,
+            )));
+        }
+
         let connector = props
             .remove(UPSTREAM_SOURCE_KEY)
             .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
@@ -308,6 +414,11 @@ impl ConnectorProperties {
             PropType::try_from_hashmap(props).map(ConnectorProperties::from),
             |other| Err(anyhow!("connector '{}' is not supported", other))
         )
+    }
+
+    pub fn enable_split_scale_in(&self) -> bool {
+        // enable split scale in just for Kinesis
+        matches!(self, ConnectorProperties::Kinesis(_))
     }
 
     pub fn init_from_pb_source(&mut self, source: &PbSource) {
@@ -498,6 +609,17 @@ pub trait SplitMetaData: Sized {
 /// split readers) [`SplitImpl`]. If no split is assigned to source executor, `ConnectorState` is
 /// [`None`] and the created source stream will be a pending stream.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
+
+#[derive(Debug, Clone, Default)]
+pub struct FsFilterCtrlCtx;
+pub type FsFilterCtrlCtxRef = Arc<FsFilterCtrlCtx>;
+
+#[async_trait]
+pub trait FsListInner: Sized {
+    // fixme: better to implement as an Iterator, but the last page still have some contents
+    async fn get_next_page<T: for<'a> From<&'a Object>>(&mut self) -> Result<(Vec<T>, bool)>;
+    fn filter_policy(&self, ctx: &FsFilterCtrlCtx, page_num: usize, item: &FsPageItem) -> bool;
+}
 
 #[cfg(test)]
 mod tests {

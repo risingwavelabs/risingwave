@@ -140,11 +140,11 @@ impl Executor for ReceiverExecutor {
                     Message::Chunk(chunk) => {
                         self.metrics
                             .actor_in_record_cnt
-                            .with_label_values(&[&actor_id_str])
+                            .with_label_values(&[&actor_id_str, &fragment_id_str])
                             .inc_by(chunk.cardinality() as _);
                     }
                     Message::Barrier(barrier) => {
-                        tracing::trace!(
+                        tracing::debug!(
                             target: "events::stream::barrier::path",
                             actor_id = actor_id,
                             "receiver receives barrier from path: {:?}",

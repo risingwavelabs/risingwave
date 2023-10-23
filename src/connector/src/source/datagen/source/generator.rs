@@ -23,10 +23,8 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 
-use crate::source::{
-    SourceEncode, SourceFormat, SourceMessage, SourceMeta, SourceStruct, SplitId,
-    StreamChunkWithState,
-};
+use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
+use crate::source::{SourceMessage, SourceMeta, SplitId, StreamChunkWithState};
 
 pub enum FieldDesc {
     // field is invisible, generate None
@@ -38,7 +36,7 @@ pub struct DatagenEventGenerator {
     // fields_map: HashMap<String, FieldGeneratorImpl>,
     field_names: Vec<String>,
     fields_vec: Vec<FieldDesc>,
-    source_struct: SourceStruct,
+    source_format: SpecificParserConfig,
     data_types: Vec<DataType>,
     offset: u64,
     split_id: SplitId,
@@ -56,7 +54,7 @@ impl DatagenEventGenerator {
     pub fn new(
         fields_vec: Vec<FieldDesc>,
         field_names: Vec<String>,
-        source_struct: SourceStruct,
+        source_format: SpecificParserConfig,
         data_types: Vec<DataType>,
         rows_per_second: u64,
         offset: u64,
@@ -72,7 +70,7 @@ impl DatagenEventGenerator {
         Ok(Self {
             field_names,
             fields_vec,
-            source_struct,
+            source_format,
             data_types,
             offset,
             split_id,
@@ -96,8 +94,11 @@ impl DatagenEventGenerator {
                 );
                 let mut msgs = Vec::with_capacity(num_rows_to_generate as usize);
                 'outer: for _ in 0..num_rows_to_generate {
-                    let payload = match (self.source_struct.format, self.source_struct.encode) {
-                        (SourceFormat::Plain, SourceEncode::Json) => {
+                    let payload = match (
+                        &self.source_format.protocol_config,
+                        &self.source_format.encoding_config,
+                    ) {
+                        (ProtocolProperties::Plain, EncodingProperties::Json(_)) => {
                             let mut map = serde_json::Map::with_capacity(self.fields_vec.len());
                             for (name, field_generator) in self
                                 .field_names
@@ -225,7 +226,6 @@ mod tests {
     use futures::stream::StreamExt;
 
     use super::*;
-    use crate::source::SourceEncode;
 
     async fn check_sequence_partition_result(
         split_num: u64,
@@ -266,7 +266,13 @@ mod tests {
         let generator = DatagenEventGenerator::new(
             fields_vec,
             vec!["c1".to_owned(), "c2".to_owned()],
-            SourceStruct::new(SourceFormat::Plain, SourceEncode::Json),
+            SpecificParserConfig {
+                protocol_config: ProtocolProperties::Plain,
+                encoding_config: EncodingProperties::Json(crate::parser::JsonProperties {
+                    use_schema_registry: false,
+                }),
+                key_encoding_config: None,
+            },
             data_types,
             rows_per_second,
             0,

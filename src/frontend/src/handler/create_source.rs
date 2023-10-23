@@ -27,18 +27,19 @@ use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolErro
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
-    name_strategy_from_str, schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig,
-    ProtobufParserConfig, SpecificParserConfig,
+    schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
+    SpecificParserConfig,
 };
+use risingwave_connector::schema::schema_registry::name_strategy_from_str;
 use risingwave_connector::source::cdc::{
     CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
-use risingwave_connector::source::filesystem::S3_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
+use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
-    SourceEncode, SourceFormat, SourceStruct, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
-    KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, PULSAR_CONNECTOR,
+    GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR,
+    PULSAR_CONNECTOR, S3_CONNECTOR, S3_V2_CONNECTOR,
 };
 use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
@@ -98,11 +99,7 @@ async fn extract_avro_table_schema(
     info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let parser_config = SpecificParserConfig::new(
-        SourceStruct::new(SourceFormat::Plain, SourceEncode::Avro),
-        info,
-        with_properties,
-    )?;
+    let parser_config = SpecificParserConfig::new(info, with_properties)?;
     let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
     Ok(vec_column_desc
@@ -119,11 +116,7 @@ async fn extract_upsert_avro_table_schema(
     info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
-    let parser_config = SpecificParserConfig::new(
-        SourceStruct::new(SourceFormat::Upsert, SourceEncode::Avro),
-        info,
-        with_properties,
-    )?;
+    let parser_config = SpecificParserConfig::new(info, with_properties)?;
     let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
     let mut vec_column_catalog = vec_column_desc
@@ -163,11 +156,7 @@ async fn extract_debezium_avro_table_pk_columns(
     info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<String>> {
-    let parser_config = SpecificParserConfig::new(
-        SourceStruct::new(SourceFormat::Debezium, SourceEncode::Avro),
-        info,
-        with_properties,
-    )?;
+    let parser_config = SpecificParserConfig::new(info, with_properties)?;
     let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
     Ok(conf.extract_pks()?.drain(..).map(|c| c.name).collect())
 }
@@ -177,11 +166,7 @@ async fn extract_debezium_avro_table_schema(
     info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let parser_config = SpecificParserConfig::new(
-        SourceStruct::new(SourceFormat::Debezium, SourceEncode::Avro),
-        info,
-        with_properties,
-    )?;
+    let parser_config = SpecificParserConfig::new(info, with_properties)?;
     let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
     let column_catalog = vec_column_desc
@@ -203,13 +188,11 @@ async fn extract_protobuf_table_schema(
         proto_message_name: schema.message_name.0.clone(),
         row_schema_location: schema.row_schema_location.0.clone(),
         use_schema_registry: schema.use_schema_registry,
+        format: FormatType::Plain.into(),
+        row_encode: EncodeType::Protobuf.into(),
         ..Default::default()
     };
-    let parser_config = SpecificParserConfig::new(
-        SourceStruct::new(SourceFormat::Plain, SourceEncode::Protobuf),
-        &info,
-        &with_properties,
-    )?;
+    let parser_config = SpecificParserConfig::new(&info, &with_properties)?;
     let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
 
     let column_descs = conf.map_to_columns()?;
@@ -892,6 +875,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 S3_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Csv, Encode::Json],
                 ),
+                S3_V2_CONNECTOR => hashmap!(
+                    Format::Plain => vec![Encode::Csv, Encode::Json],
+                ),
                 MYSQL_CDC_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Bytes],
                     Format::Debezium => vec![Encode::Json],
@@ -907,6 +893,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 NATS_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json],
                 ),
+                TEST_CONNECTOR => hashmap!(
+                    Format::Plain => vec![Encode::Json],
+                )
         ))
     });
 
@@ -921,8 +910,9 @@ pub fn validate_compatibility(
         .get(&connector)
         .ok_or_else(|| {
             RwError::from(ProtocolError(format!(
-                "connector {} is not supported",
-                connector
+                "connector {:?} is not supported, accept {:?}",
+                connector,
+                CONNECTORS_COMPATIBLE_FORMATS.keys()
             )))
         })?;
     if connector != KAFKA_CONNECTOR {

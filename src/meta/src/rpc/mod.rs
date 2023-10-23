@@ -12,19 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod cloud_provider;
+pub mod cloud_provider;
 pub mod ddl_controller;
 pub mod election;
-mod intercept;
+pub mod intercept;
 pub mod metrics;
-pub mod server;
-pub mod service;
+
+pub type ElectionClientRef = std::sync::Arc<dyn ElectionClient>;
 
 pub use election::etcd::EtcdElectionClient;
 pub use election::{ElectionClient, ElectionMember};
-pub use service::cluster_service::ClusterServiceImpl;
-pub use service::ddl_service::DdlServiceImpl;
-pub use service::heartbeat_service::HeartbeatServiceImpl;
-pub use service::hummock_service::HummockServiceImpl;
-pub use service::notification_service::NotificationServiceImpl;
-pub use service::stream_service::StreamServiceImpl;

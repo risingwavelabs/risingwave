@@ -616,7 +616,16 @@ impl S3ObjectStore {
     pub async fn with_minio(server: &str, metrics: Arc<ObjectStoreMetrics>) -> Self {
         let server = server.strip_prefix("minio://").unwrap();
         let (access_key_id, rest) = server.split_once(':').unwrap();
-        let (secret_access_key, rest) = rest.split_once('@').unwrap();
+        let (secret_access_key, mut rest) = rest.split_once('@').unwrap();
+        let endpoint_prefix = if let Some(rest_stripped) = rest.strip_prefix("https://") {
+            rest = rest_stripped;
+            "https://"
+        } else if let Some(rest_stripped) = rest.strip_prefix("http://") {
+            rest = rest_stripped;
+            "http://"
+        } else {
+            "http://"
+        };
         let (address, bucket) = rest.split_once('/').unwrap();
 
         #[cfg(madsim)]
@@ -626,10 +635,9 @@ impl S3ObjectStore {
             aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await)
                 .force_path_style(true)
                 .http_connector(Self::new_http_connector(&S3ObjectStoreConfig::default()));
-
         let config = builder
             .region(Region::new("custom"))
-            .endpoint_url(format!("http://{}", address))
+            .endpoint_url(format!("{}{}", endpoint_prefix, address))
             .credentials_provider(Credentials::from_keys(
                 access_key_id,
                 secret_access_key,
@@ -663,7 +671,6 @@ impl S3ObjectStore {
         range: impl ObjectRangeBounds,
     ) -> GetObjectFluentBuilder {
         let req = self.client.get_object().bucket(&self.bucket).key(path);
-
         if range.is_full() {
             return req;
         }
@@ -689,7 +696,7 @@ impl S3ObjectStore {
     ///   - <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpu-abort-incomplete-mpu-lifecycle-config.html>
     /// - MinIO
     ///   - <https://github.com/minio/minio/issues/15681#issuecomment-1245126561>
-    pub async fn configure_bucket_lifecycle(&self) {
+    pub async fn configure_bucket_lifecycle(&self) -> bool {
         // Check if lifecycle is already configured to avoid overriding existing configuration.
         let bucket = self.bucket.as_str();
         let mut configured_rules = vec![];
@@ -699,8 +706,12 @@ impl S3ObjectStore {
             .bucket(bucket)
             .send()
             .await;
+        let mut is_expiration_configured = false;
         if let Ok(config) = &get_config_result {
             for rule in config.rules().unwrap_or_default() {
+                if rule.expiration().is_some() {
+                    is_expiration_configured = true;
+                }
                 if matches!(rule.status().unwrap(), ExpirationStatus::Enabled)
                     && rule.abort_incomplete_multipart_upload().is_some()
                 {
@@ -747,6 +758,13 @@ impl S3ObjectStore {
                 tracing::warn!("Failed to configure life cycle rule for S3 bucket: {:?}. It is recommended to configure it manually to avoid unnecessary storage cost.", bucket);
             }
         }
+        if is_expiration_configured {
+            tracing::info!(
+                "S3 bucket {} has already configured the expiration for the lifecycle.",
+                bucket,
+            );
+        }
+        is_expiration_configured
     }
 
     #[inline(always)]

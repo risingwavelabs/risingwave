@@ -63,7 +63,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
             .collect()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
+    fn stream_key(&self) -> Option<Vec<usize>> {
         let window_start_index = self
             .output_indices
             .iter()
@@ -77,7 +77,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
         } else {
             let mut pk = self
                 .input
-                .logical_pk()
+                .stream_key()?
                 .iter()
                 .filter_map(|&pk_idx| self.output_indices.iter().position(|&idx| idx == pk_idx))
                 .collect_vec();

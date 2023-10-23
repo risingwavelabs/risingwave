@@ -33,6 +33,7 @@ use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::pretty_bytes::convert;
 use risingwave_common::{GIT_SHA, RW_VERSION};
+use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
@@ -222,7 +223,6 @@ pub async fn compute_node_serve(
                 compactor_metrics: compactor_metrics.clone(),
                 is_share_buffer_compact: false,
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
-                filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
                 memory_limiter,
 
                 task_progress_manager: Default::default(),
@@ -234,6 +234,7 @@ pub async fn compute_node_serve(
                 compactor_context,
                 hummock_meta_client.clone(),
                 storage.sstable_object_id_manager().clone(),
+                storage.filter_key_extractor_manager().clone(),
             );
             sub_tasks.push((handle, shutdown_sender));
         }
@@ -284,18 +285,18 @@ pub async fn compute_node_serve(
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
 
-    let memory_mgr = GlobalMemoryManager::new(
-        streaming_metrics.clone(),
-        total_memory_bytes,
-        config.server.heap_profiling.clone(),
-    );
-    // Run a background memory monitor
+    let memory_mgr = GlobalMemoryManager::new(streaming_metrics.clone(), total_memory_bytes);
+    // Run a background memory manager
     tokio::spawn(memory_mgr.clone().run(
         batch_mgr_clone,
         stream_mgr_clone,
         system_params.barrier_interval_ms(),
         system_params_manager.watch_params(),
     ));
+
+    let heap_profiler = HeapProfiler::new(total_memory_bytes, config.server.heap_profiling.clone());
+    // Run a background heap profiler
+    heap_profiler.start();
 
     let watermark_epoch = memory_mgr.get_watermark_epoch();
     // Set back watermark epoch to stream mgr. Executor will read epoch from stream manager instead

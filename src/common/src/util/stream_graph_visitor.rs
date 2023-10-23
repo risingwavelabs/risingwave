@@ -147,6 +147,11 @@ fn visit_stream_node_tables_inner<F>(
                     always!(source.state_table, "Source");
                 }
             }
+            NodeBody::StreamFsFetch(node) => {
+                if let Some(source) = &mut node.node_inner {
+                    always!(source.state_table, "FsFetch");
+                }
+            }
 
             // Sink
             NodeBody::Sink(node) => {

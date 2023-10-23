@@ -25,16 +25,16 @@ use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
 use risingwave_ctl::CliOpts as CtlOpts;
 use risingwave_frontend::FrontendOpts;
-use risingwave_meta::MetaNodeOpts;
+use risingwave_meta_node::MetaNodeOpts;
 use strum::IntoEnumIterator;
 use strum_macros::{Display, EnumIter, EnumString, IntoStaticStr};
 use tracing::Level;
 
 #[cfg(enable_task_local_alloc)]
-risingwave_common::enable_task_local_jemalloc_on_unix!();
+risingwave_common::enable_task_local_jemalloc!();
 
 #[cfg(not(enable_task_local_alloc))]
-risingwave_common::enable_jemalloc_on_unix!();
+risingwave_common::enable_jemalloc!();
 
 const BINARY_NAME: &str = "risingwave";
 const VERSION: &str = {

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::str::FromStr;
-use std::sync::LazyLock;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -121,7 +120,8 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
 
         let (tx, mut rx) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
 
-        LazyLock::force(&JVM).as_ref()?;
+        // Force init, because we don't want to see initialization failure in the following thread.
+        JVM.get_or_init()?;
 
         let get_event_stream_request = GetEventStreamRequest {
             source_id: self.source_id,
@@ -135,11 +135,7 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
         let source_type = get_event_stream_request.source_type.to_string();
 
         std::thread::spawn(move || {
-            let mut env = JVM
-                .as_ref()
-                .unwrap()
-                .attach_current_thread_as_daemon()
-                .unwrap();
+            let mut env = JVM.get_or_init().unwrap().attach_current_thread().unwrap();
 
             let get_event_stream_request_bytes = env
                 .byte_array_from_slice(&Message::encode_to_vec(&get_event_stream_request))
@@ -165,7 +161,7 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
         });
 
         while let Some(GetEventStreamResponse { events, .. }) = rx.recv().await {
-            tracing::debug!("receive events {:?}", events.len());
+            tracing::trace!("receive events {:?}", events.len());
             self.source_ctx
                 .metrics
                 .connector_source_rows_received

@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::aggregate::AggKind;
 use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
@@ -341,7 +341,9 @@ impl<'a> OverWindowProjectBuilder<'a> {
     }
 }
 
-impl<'a> ExprVisitor<()> for OverWindowProjectBuilder<'a> {
+impl<'a> ExprVisitor for OverWindowProjectBuilder<'a> {
+    type Result = ();
+
     fn merge(_a: (), _b: ()) {}
 
     fn visit_window_function(&mut self, window_function: &WindowFunction) {
@@ -832,9 +834,9 @@ impl ToStream for LogicalOverWindow {
                     .enforce_if_not_satisfies(stream_input, &Order::any())?;
             let sort = StreamEowcSort::new(sort_input, order_key_index);
 
-            let mut logical = self.core.clone();
-            logical.input = sort.into();
-            Ok(StreamEowcOverWindow::new(logical).into())
+            let mut core = self.core.clone();
+            core.input = sort.into();
+            Ok(StreamEowcOverWindow::new(core).into())
         } else {
             // General (Emit-On-Update) case
 
@@ -863,9 +865,9 @@ impl ToStream for LogicalOverWindow {
             let new_input =
                 RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
                     .enforce_if_not_satisfies(stream_input, &Order::any())?;
-            let mut logical = self.core.clone();
-            logical.input = new_input;
-            Ok(StreamOverWindow::new(logical).into())
+            let mut core = self.core.clone();
+            core.input = new_input;
+            Ok(StreamOverWindow::new(core).into())
         }
     }
 

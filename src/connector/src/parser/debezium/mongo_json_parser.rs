@@ -20,10 +20,10 @@ use risingwave_common::types::DataType;
 use simd_json::{BorrowedValue, Mutable};
 
 use crate::only_parse_payload;
-use crate::parser::unified::debezium::{DebeziumChangeEvent, MongoProjeciton};
+use crate::parser::unified::debezium::{DebeziumChangeEvent, MongoProjection};
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
-use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter, WriteGuard};
+use crate::parser::{ByteStreamSourceParser, ParserFormat, SourceStreamChunkRowWriter};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
@@ -82,7 +82,7 @@ impl DebeziumMongoJsonParser {
         &self,
         mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         let mut event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
@@ -97,9 +97,9 @@ impl DebeziumMongoJsonParser {
 
         let accessor = JsonAccess::new_with_options(payload, &JsonParseOptions::DEBEZIUM);
 
-        let row_op = DebeziumChangeEvent::with_value(MongoProjeciton::new(accessor));
+        let row_op = DebeziumChangeEvent::with_value(MongoProjection::new(accessor));
 
-        apply_row_operation_on_stream_chunk_writer(row_op, &mut writer)
+        apply_row_operation_on_stream_chunk_writer(row_op, &mut writer).map_err(Into::into)
     }
 }
 
@@ -112,12 +112,16 @@ impl ByteStreamSourceParser for DebeziumMongoJsonParser {
         &self.source_ctx
     }
 
+    fn parser_format(&self) -> ParserFormat {
+        ParserFormat::DebeziumMongo
+    }
+
     async fn parse_one<'a>(
         &'a mut self,
         _key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         only_parse_payload!(self, payload, writer)
     }
 }

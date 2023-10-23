@@ -19,7 +19,6 @@
 #![feature(stmt_expr_attributes)]
 #![feature(box_patterns)]
 #![feature(trait_alias)]
-#![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
 #![feature(lazy_cell)]
 #![feature(result_option_inspect)]
@@ -31,6 +30,8 @@
 #![feature(associated_type_defaults)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(iter_from_generator)]
+#![feature(if_let_guard)]
+#![feature(iterator_try_collect)]
 
 use std::time::Duration;
 
@@ -45,6 +46,7 @@ pub mod error;
 mod macros;
 
 pub mod parser;
+pub mod schema;
 pub mod sink;
 pub mod source;
 

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Either;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
@@ -23,8 +22,8 @@ use crate::parser::unified::debezium::DebeziumChangeEvent;
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, JsonProperties,
-    ProtocolProperties, SourceStreamChunkRowWriter, SpecificParserConfig, TransactionControl,
-    WriteGuard,
+    ParseResult, ParserFormat, ProtocolProperties, SourceStreamChunkRowWriter,
+    SpecificParserConfig,
 };
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
@@ -93,7 +92,7 @@ impl DebeziumParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
-    ) -> Result<Either<WriteGuard, TransactionControl>> {
+    ) -> Result<ParseResult> {
         // tombetone messages are handled implicitly by these accessors
         let key_accessor = match key {
             None => None,
@@ -106,14 +105,14 @@ impl DebeziumParser {
         let row_op = DebeziumChangeEvent::new(key_accessor, payload_accessor);
 
         match apply_row_operation_on_stream_chunk_writer(&row_op, &mut writer) {
-            Ok(guard) => Ok(Either::Left(guard)),
+            Ok(_) => Ok(ParseResult::Rows),
             Err(err) => {
                 // Only try to access transaction control message if the row operation access failed
                 // to make it a fast path.
                 if let Ok(transaction_control) = row_op.transaction_control() {
-                    Ok(Either::Right(transaction_control))
+                    Ok(ParseResult::TransactionControl(transaction_control))
                 } else {
-                    Err(err)
+                    Err(err)?
                 }
             }
         }
@@ -129,13 +128,17 @@ impl ByteStreamSourceParser for DebeziumParser {
         &self.source_ctx
     }
 
+    fn parser_format(&self) -> ParserFormat {
+        ParserFormat::Debezium
+    }
+
     #[allow(clippy::unused_async)] // false positive for `async_trait`
     async fn parse_one<'a>(
         &'a mut self,
         _key: Option<Vec<u8>>,
         _payload: Option<Vec<u8>>,
         _writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<WriteGuard> {
+    ) -> Result<()> {
         unreachable!("should call `parse_one_with_txn` instead")
     }
 
@@ -144,7 +147,7 @@ impl ByteStreamSourceParser for DebeziumParser {
         key: Option<Vec<u8>>,
         payload: Option<Vec<u8>>,
         writer: SourceStreamChunkRowWriter<'a>,
-    ) -> Result<Either<WriteGuard, TransactionControl>> {
+    ) -> Result<ParseResult> {
         self.parse_inner(key, payload, writer).await
     }
 }

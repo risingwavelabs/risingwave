@@ -135,6 +135,8 @@ impl RearrangedChainExecutor {
                 .unbounded_send(RearrangedMessage::PhantomBarrier(first_barrier))
                 .unwrap();
 
+            let mut processed_rows: u64 = 0;
+
             {
                 // 3. Rearrange stream, will yield the barriers polled from upstream to rearrange.
                 let rearranged_barrier =
@@ -161,8 +163,6 @@ impl RearrangedChainExecutor {
                 // Record the epoch of the last rearranged barrier we received.
                 let mut last_rearranged_epoch = create_epoch;
                 let mut stop_rearrange_tx = Some(stop_rearrange_tx);
-
-                let mut processed_rows: u64 = 0;
 
                 #[for_await]
                 for rearranged_msg in &mut rearranged {
@@ -223,7 +223,7 @@ impl RearrangedChainExecutor {
                         continue;
                     };
                     if let Some(barrier) = msg.as_barrier() {
-                        self.progress.finish(barrier.epoch.curr);
+                        self.progress.finish(barrier.epoch.curr, processed_rows);
                     }
                     yield msg;
                 }
@@ -236,7 +236,7 @@ impl RearrangedChainExecutor {
             for msg in upstream {
                 let msg: Message = msg?;
                 if let Some(barrier) = msg.as_barrier() {
-                    self.progress.finish(barrier.epoch.curr);
+                    self.progress.finish(barrier.epoch.curr, processed_rows);
                 }
                 yield msg;
             }

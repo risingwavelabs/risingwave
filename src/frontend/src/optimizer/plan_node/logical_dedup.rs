@@ -38,13 +38,8 @@ pub struct LogicalDedup {
 
 impl LogicalDedup {
     pub fn new(input: PlanRef, dedup_cols: Vec<usize>) -> Self {
-        let base = PlanBase::new_logical(
-            input.ctx(),
-            input.schema().clone(),
-            dedup_cols.clone(),
-            input.functional_dependency().clone(),
-        );
         let core = generic::Dedup { input, dedup_cols };
+        let base = PlanBase::new_logical_with_core(&core);
         LogicalDedup { base, core }
     }
 

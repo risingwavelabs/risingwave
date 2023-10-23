@@ -23,7 +23,6 @@ use crate::hummock::level_handler::LevelHandler;
 
 pub struct TombstoneReclaimCompactionPicker {
     overlap_strategy: Arc<dyn OverlapStrategy>,
-    max_compaction_bytes: u64,
     delete_ratio: u64,
     range_delete_ratio: u64,
 }
@@ -36,13 +35,11 @@ pub struct TombstoneReclaimPickerState {
 impl TombstoneReclaimCompactionPicker {
     pub fn new(
         overlap_strategy: Arc<dyn OverlapStrategy>,
-        max_compaction_bytes: u64,
         delete_ratio: u64,
         range_delete_ratio: u64,
     ) -> Self {
         Self {
             overlap_strategy,
-            max_compaction_bytes,
             delete_ratio,
             range_delete_ratio,
         }
@@ -55,34 +52,23 @@ impl TombstoneReclaimCompactionPicker {
         state: &mut TombstoneReclaimPickerState,
     ) -> Option<CompactionInput> {
         assert!(!levels.levels.is_empty());
-        let mut select_input_ssts = vec![];
         if state.last_level == 0 {
             state.last_level = 1;
         }
 
         while state.last_level <= levels.levels.len() {
-            let mut select_file_size = 0;
+            let mut select_input_ssts = vec![];
             for sst in &levels.levels[state.last_level - 1].table_infos {
                 let need_reclaim = (sst.range_tombstone_count * 100
                     >= sst.total_key_count * self.range_delete_ratio)
                     || (sst.stale_key_count * 100 >= sst.total_key_count * self.delete_ratio);
                 if !need_reclaim || level_handlers[state.last_level].is_pending_compact(&sst.sst_id)
                 {
-                    if !select_input_ssts.is_empty() {
-                        // Our goal is to pick as many complete layers of data as possible and keep
-                        // the picked files contiguous to avoid overlapping
-                        // key_ranges, so the strategy is to pick as many
-                        // contiguous files as possible (at least one)
-                        break;
-                    }
                     continue;
                 }
 
                 select_input_ssts.push(sst.clone());
-                select_file_size += sst.file_size;
-                if select_file_size > self.max_compaction_bytes {
-                    break;
-                }
+                break;
             }
 
             // turn to next_round
@@ -108,6 +94,7 @@ impl TombstoneReclaimCompactionPicker {
                         }
                     }
                     if pending_compact {
+                        state.last_level += 1;
                         continue;
                     }
                     InputLevel {
@@ -151,7 +138,7 @@ pub mod tests {
     use super::*;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::create_overlap_strategy;
-    use crate::hummock::compaction::level_selector::tests::{generate_level, generate_table};
+    use crate::hummock::compaction::selector::tests::{generate_level, generate_table};
 
     #[test]
     fn test_basic() {
@@ -180,12 +167,7 @@ pub mod tests {
         let config = Arc::new(CompactionConfigBuilder::new().build());
 
         let strategy = create_overlap_strategy(config.compaction_mode());
-        let picker = TombstoneReclaimCompactionPicker::new(
-            strategy.clone(),
-            config.max_compaction_bytes,
-            40,
-            20,
-        );
+        let picker = TombstoneReclaimCompactionPicker::new(strategy.clone(), 40, 20);
         let ret = picker.pick_compaction(&levels, &levels_handler, &mut state);
         assert!(ret.is_none());
         let mut sst = generate_table(3, 1, 201, 300, 1);
@@ -203,8 +185,7 @@ pub mod tests {
         sst.range_tombstone_count = 30;
         sst.total_key_count = 100;
         levels.levels[0].table_infos.push(sst);
-        let picker =
-            TombstoneReclaimCompactionPicker::new(strategy, config.max_compaction_bytes, 50, 10);
+        let picker = TombstoneReclaimCompactionPicker::new(strategy, 50, 10);
         let mut state = TombstoneReclaimPickerState::default();
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut state)

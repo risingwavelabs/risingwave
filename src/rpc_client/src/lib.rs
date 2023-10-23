@@ -16,7 +16,6 @@
 //! response gRPC message structs.
 
 #![feature(trait_alias)]
-#![feature(binary_heap_drain_sorted)]
 #![feature(result_option_inspect)]
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_defaults)]
@@ -31,12 +30,13 @@ use std::any::type_name;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::iter::repeat;
+use std::pin::pin;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use futures::future::try_join_all;
-use futures::stream::BoxStream;
+use futures::future::{select, try_join_all, Either};
+use futures::stream::{BoxStream, Peekable};
 use futures::{Stream, StreamExt};
 use moka::future::Cache;
 use rand::prelude::SliceRandom;
@@ -58,7 +58,9 @@ mod sink_coordinate_client;
 mod stream_client;
 mod tracing;
 
-pub use compactor_client::CompactorClient;
+use std::pin::Pin;
+
+pub use compactor_client::{CompactorClient, GrpcCompactorProxyClient};
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use connector_client::{ConnectorClient, SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
 pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
@@ -173,7 +175,7 @@ macro_rules! meta_rpc_client_method_impl {
 
 pub struct BidiStreamHandle<REQ: 'static, RSP: 'static> {
     request_sender: Sender<REQ>,
-    response_stream: BoxStream<'static, std::result::Result<RSP, Status>>,
+    response_stream: Peekable<BoxStream<'static, std::result::Result<RSP, Status>>>,
 }
 
 impl<REQ: 'static, RSP: 'static> Debug for BidiStreamHandle<REQ, RSP> {
@@ -189,7 +191,7 @@ impl<REQ: 'static, RSP: 'static> BidiStreamHandle<REQ, RSP> {
     ) -> Self {
         Self {
             request_sender,
-            response_stream,
+            response_stream: response_stream.peekable(),
         }
     }
 
@@ -223,7 +225,7 @@ impl<REQ: 'static, RSP: 'static> BidiStreamHandle<REQ, RSP> {
         Ok((
             Self {
                 request_sender,
-                response_stream: response_stream.boxed(),
+                response_stream: response_stream.boxed().peekable(),
             },
             first_response,
         ))
@@ -238,10 +240,25 @@ impl<REQ: 'static, RSP: 'static> BidiStreamHandle<REQ, RSP> {
     }
 
     pub async fn send_request(&mut self, request: REQ) -> Result<()> {
-        Ok(self
-            .request_sender
-            .send(request)
-            .await
-            .map_err(|_| anyhow!("unable to send request {}", type_name::<REQ>()))?)
+        // Poll the response stream to early see the error
+        let send_request_result = match select(
+            pin!(self.request_sender.send(request)),
+            pin!(Pin::new(&mut self.response_stream).peek()),
+        )
+        .await
+        {
+            Either::Left((result, _)) => result,
+            Either::Right((response_result, send_future)) => match response_result {
+                None => {
+                    return Err(anyhow!("end of response stream").into());
+                }
+                Some(Err(e)) => {
+                    return Err(e.clone().into());
+                }
+                Some(Ok(_)) => send_future.await,
+            },
+        };
+        send_request_result
+            .map_err(|_| anyhow!("unable to send request {}", type_name::<REQ>()).into())
     }
 }
