@@ -111,6 +111,7 @@ impl BuildingFragment {
             );
             table.fragment_id = fragment_id;
             table.owner = job.owner();
+            println!("WKXLOG META: table: {:?}", table)
         });
     }
 

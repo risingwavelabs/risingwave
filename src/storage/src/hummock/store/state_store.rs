@@ -283,15 +283,15 @@ impl LocalStateStore for LocalHummockStorage {
                 KeyOp::Delete(old_value) => {
                     if ENABLE_SANITY_CHECK && self.is_consistent_op {
                         // ERROR: Trace should be here??? (do_delete_sanity_check)
-                        // do_delete_sanity_check(
-                        //     key.clone(),
-                        //     old_value,
-                        //     self,
-                        //     self.epoch(),
-                        //     self.table_id,
-                        //     self.table_option,
-                        // )
-                        // .await?;
+                        do_delete_sanity_check(
+                            key.clone(),
+                            old_value,
+                            self,
+                            self.epoch(),
+                            self.table_id,
+                            self.table_option,
+                        )
+                        .await?;
                     }
                     kv_pairs.push((key, StorageValue::new_delete()));
                 }

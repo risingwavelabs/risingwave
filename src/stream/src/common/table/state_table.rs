@@ -241,6 +241,10 @@ where
             .iter()
             .map(|col_order| col_order.column_index as usize)
             .collect_vec();
+        println!(
+            "WKXLOG, table_id: {}, pk_indices: {:?}",
+            table_id, pk_indices
+        );
 
         // FIXME(yuhao): only use `dist_key_in_pk` in the proto
         let dist_key_in_pk_indices = if table_catalog.get_dist_key_in_pk().is_empty() {
@@ -835,10 +839,10 @@ where
                 for (op, key) in izip!(op.iter(), key_chunk.rows()) {
                     match op {
                         Op::UpdateDelete => {
+                            tracing::debug!("WKXLOG DELETE MISSING ROW: {:?}", key);
                             if !self.get_row_raw_pk(key).await.unwrap().is_none() {
                                 panic!("DELETE MISSING ROW: {:?}", key);
                             }
-                            tracing::debug!("WKXLOG DELETE MISSING ROW: {:?}", key);
                         }
                         _ => {}
                     }

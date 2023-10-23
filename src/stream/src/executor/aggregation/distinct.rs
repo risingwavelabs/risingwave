@@ -266,17 +266,20 @@ impl<S: StateStore> DistinctDeduplicater<S> {
         ctx: ActorContextRef,
     ) -> StreamExecutorResult<Vec<Vis>> {
         for (distinct_col, (ref call_indices, deduplicater)) in &mut self.deduplicaters {
-            println!(
-                "WKXLOG interesting find distinct_col: {}, call_indices: {:?}",
-                distinct_col, call_indices
-            );
             let column = &columns[*distinct_col];
+            println!(
+                "WKXLOG interesting find distinct_col: {}, call_indices: {:?}, columns: \n{:?}\n, column: \n{:?}\n",
+                distinct_col, call_indices, columns, column
+            );
             let dedup_table = dedup_tables.get_mut(distinct_col).unwrap();
             // Select visibilities (as mutable references) of distinct agg calls that distinct on
             // `distinct_col` so that `Deduplicater` doesn't need to care about index mapping.
             // SAFETY: all items in `agg_call_indices` are unique by nature, see `new`.
             let visibilities = unsafe { get_many_mut_from_slice(&mut visibilities, call_indices) };
-            println!("WKXLOG before dedup, the visibilities are: {:?}", visibilities);
+            println!(
+                "WKXLOG before dedup, the visibilities are: {:?}",
+                visibilities
+            );
             deduplicater
                 .dedup(
                     ops,
@@ -288,7 +291,10 @@ impl<S: StateStore> DistinctDeduplicater<S> {
                 )
                 .await?;
         }
-        println!("WKXLOG after dedup, the visibilities are: {:?}", visibilities);
+        println!(
+            "WKXLOG after dedup, the visibilities are: {:?}",
+            visibilities
+        );
 
         Ok(visibilities)
     }

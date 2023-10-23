@@ -521,7 +521,17 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 let (mut table_builder, mut key_cols, _) =
                     self.create_table_builder(me.ctx(), window_col_idx);
                 let table_col_idx = table_builder.add_column(&in_fields[distinct_col]);
+                println!(
+                    "WKXLOG 1st, table_col_idx: {}, table_builder.pk.len: {}",
+                    table_col_idx,
+                    table_builder.get_current_pk_len()
+                );
                 table_builder.add_order_column(table_col_idx, OrderType::ascending());
+                println!(
+                    "WKXLOG 2nd, table_col_idx: {}, table_builder.pk.len: {}",
+                    table_col_idx,
+                    table_builder.get_current_pk_len()
+                );
                 key_cols.push(distinct_col);
 
                 let read_prefix_len_hint = table_builder.get_current_pk_len();
@@ -546,6 +556,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 }
                 let dist_key = mapping.rewrite_dist_key(&in_dist_key).unwrap_or_default();
                 let table = table_builder.build(dist_key, read_prefix_len_hint);
+                println!("WKXLOG 2nd, table.pk: {:?}", table.pk);
+
                 (distinct_col, table)
             })
             .collect()
