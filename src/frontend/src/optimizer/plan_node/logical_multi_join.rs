@@ -23,7 +23,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::utils::{childless_record, Distill};
 use super::{
-    ColPrunable, ExprRewritable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase,
+    ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalJoin, LogicalProject, PlanBase,
     PlanNodeType, PlanRef, PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
     ToStream,
 };
@@ -46,7 +46,7 @@ use crate::utils::{
 /// expressed as 2-way `LogicalJoin`s.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalMultiJoin {
-    pub base: PlanBase<super::Logical>,
+    pub base: PlanBase<Logical>,
     inputs: Vec<PlanRef>,
     on: Condition,
     output_indices: Vec<usize>,

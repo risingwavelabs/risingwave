@@ -17,8 +17,8 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchLimit, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchLimit, ColPrunable, ExprRewritable, Logical, PlanBase,
+    PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::{
     ColumnPruningContext, LogicalTopN, PredicatePushdownContext, RewriteStreamContext,
@@ -30,7 +30,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// `LogicalLimit` fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalLimit {
-    pub base: PlanBase<super::Logical>,
+    pub base: PlanBase<Logical>,
     pub(super) core: generic::Limit<PlanRef>,
 }
 

@@ -19,7 +19,7 @@ use risingwave_common::types::DataType;
 
 use super::utils::{childless_record, Distill};
 use super::{
-    ColPrunable, ExprRewritable, LogicalFilter, LogicalProject, PlanBase, PlanRef,
+    ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalProject, PlanBase, PlanRef,
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprRewriter, TableFunction};
@@ -35,7 +35,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// If the function returns a struct, it will be flattened into multiple columns.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalTableFunction {
-    pub base: PlanBase<super::Logical>,
+    pub base: PlanBase<Logical>,
     pub table_function: TableFunction,
     pub with_ordinality: bool,
 }

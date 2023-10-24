@@ -20,8 +20,8 @@ use risingwave_common::error::Result;
 
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
-    ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
@@ -49,7 +49,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalShare {
-    pub base: PlanBase<super::Logical>,
+    pub base: PlanBase<Logical>,
     core: generic::Share<PlanRef>,
 }
 

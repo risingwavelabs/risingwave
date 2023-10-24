@@ -19,8 +19,8 @@ use risingwave_common::error::Result;
 
 use super::utils::{childless_record, Distill};
 use super::{
-    gen_filter_and_pushdown, generic, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase,
+    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{collect_input_refs, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -33,7 +33,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Substi
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalProject {
-    pub base: PlanBase<super::Logical>,
+    pub base: PlanBase<Logical>,
     core: generic::Project<PlanRef>,
 }
 

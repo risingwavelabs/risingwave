@@ -32,9 +32,9 @@ use super::generic::GenericPlanRef;
 use super::stream_watermark_filter::StreamWatermarkFilter;
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, BatchProject, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject,
-    PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen, StreamSource, ToBatch,
-    ToStream,
+    generic, BatchProject, BatchSource, ColPrunable, ExprRewritable, Logical, LogicalFilter,
+    LogicalProject, PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen,
+    StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
@@ -51,7 +51,7 @@ use crate::utils::{ColIndexMapping, Condition, IndexRewriter};
 /// `LogicalSource` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalSource {
-    pub base: PlanBase<super::Logical>,
+    pub base: PlanBase<Logical>,
     pub core: generic::Source,
 
     /// Expressions to output. This field presents and will be turned to a `Project` when

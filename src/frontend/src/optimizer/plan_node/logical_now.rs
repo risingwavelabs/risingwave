@@ -21,7 +21,7 @@ use risingwave_common::types::DataType;
 use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{
-    ColPrunable, ColumnPruningContext, ExprRewritable, LogicalFilter, PlanBase, PlanRef,
+    ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalFilter, PlanBase, PlanRef,
     PredicatePushdown, RewriteStreamContext, StreamNow, ToBatch, ToStream, ToStreamContext,
 };
 use crate::optimizer::plan_node::utils::column_names_pretty;
@@ -31,7 +31,7 @@ use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalNow {
-    pub base: PlanBase<super::Logical>,
+    pub base: PlanBase<Logical>,
 }
 
 impl LogicalNow {

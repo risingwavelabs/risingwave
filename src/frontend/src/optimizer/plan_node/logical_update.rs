@@ -18,8 +18,8 @@ use risingwave_common::error::Result;
 use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchUpdate, ColPrunable, ExprRewritable, LogicalProject,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchUpdate, ColPrunable, ExprRewritable, Logical,
+    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
 use crate::expr::{ExprImpl, ExprRewriter};
@@ -34,7 +34,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// It corresponds to the `UPDATE` statements in SQL.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalUpdate {
-    pub base: PlanBase<super::Logical>,
+    pub base: PlanBase<Logical>,
     core: generic::Update<PlanRef>,
 }
 

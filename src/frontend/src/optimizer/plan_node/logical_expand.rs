@@ -18,8 +18,8 @@ use risingwave_common::error::Result;
 use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, Logical, PlanBase,
+    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::{
     ColumnPruningContext, LogicalProject, PredicatePushdownContext, RewriteStreamContext,
@@ -37,7 +37,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// is used to distinguish between different `subset`s in `column_subsets`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalExpand {
-    pub base: PlanBase<super::Logical>,
+    pub base: PlanBase<Logical>,
     core: generic::Expand<PlanRef>,
 }
 

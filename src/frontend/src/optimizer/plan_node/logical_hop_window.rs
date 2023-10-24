@@ -20,8 +20,9 @@ use risingwave_common::types::Interval;
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, ExprRewritable, LogicalFilter,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, ExprRewritable, Logical,
+    LogicalFilter, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow,
+    ToBatch, ToStream,
 };
 use crate::expr::{ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
@@ -32,7 +33,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 /// `LogicalHopWindow` implements Hop Table Function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalHopWindow {
-    pub base: PlanBase<super::Logical>,
+    pub base: PlanBase<Logical>,
     core: generic::HopWindow<PlanRef>,
 }
 

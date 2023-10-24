@@ -23,7 +23,7 @@ use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, BatchOverWindow, ColPrunable, ExprRewritable, LogicalProject,
+    gen_filter_and_pushdown, BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalProject,
     PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamEowcSort,
     StreamOverWindow, ToBatch, ToStream,
 };
@@ -358,7 +358,7 @@ impl<'a> ExprVisitor for OverWindowProjectBuilder<'a> {
 /// The output schema is the input schema plus the window functions.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalOverWindow {
-    pub base: PlanBase<super::Logical>,
+    pub base: PlanBase<Logical>,
     core: OverWindow<PlanRef>,
 }
 

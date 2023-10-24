@@ -19,8 +19,8 @@ use risingwave_common::error::Result;
 use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{
-    gen_filter_and_pushdown, generic, BatchInsert, ColPrunable, ExprRewritable, LogicalProject,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchInsert, ColPrunable, ExprRewritable, Logical,
+    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::TableId;
 use crate::expr::{ExprImpl, ExprRewriter};
@@ -35,7 +35,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// statements, the input relation would be [`super::LogicalValues`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalInsert {
-    pub base: PlanBase<super::Logical>,
+    pub base: PlanBase<Logical>,
     core: generic::Insert<PlanRef>,
 }
 

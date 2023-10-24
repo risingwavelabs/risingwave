@@ -26,8 +26,8 @@ use super::generic::{
 };
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown,
-    StreamHashJoin, StreamProject, ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeBinary,
+    PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::DynamicFilter;
@@ -49,7 +49,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Condit
 /// right columns, dependent on the output indices provided. A repeat output index is illegal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalJoin {
-    pub base: PlanBase<super::Logical>,
+    pub base: PlanBase<Logical>,
     core: generic::Join<PlanRef>,
 }
 

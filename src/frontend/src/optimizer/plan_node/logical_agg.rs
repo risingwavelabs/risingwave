@@ -22,7 +22,7 @@ use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamSimpleAgg,
     StreamStatelessSimpleAgg, ToBatch, ToStream,
 };
@@ -48,7 +48,7 @@ use crate::utils::{
 /// The output schema will first include the group key and then the aggregation calls.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LogicalAgg {
-    pub base: PlanBase<super::Logical>,
+    pub base: PlanBase<Logical>,
     core: Agg<PlanRef>,
 }
 
