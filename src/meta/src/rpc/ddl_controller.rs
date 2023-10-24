@@ -15,6 +15,7 @@
 use std::cmp::Ordering;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
@@ -29,6 +30,7 @@ use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use tokio::sync::Semaphore;
+use tokio::time::sleep;
 use tracing::log::warn;
 use tracing::Instrument;
 
@@ -1092,6 +1094,14 @@ impl DdlController {
                     .alter_source_name(source_id, new_name)
                     .await
             }
+        }
+    }
+
+    async fn wait(
+        &self,
+    ) {
+        while self.catalog_manager.list_creating_background_mvs() != 0 {
+            sleep(Duration::from_secs(1))
         }
     }
 }
