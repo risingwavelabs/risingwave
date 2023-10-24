@@ -9,7 +9,7 @@
 
 <div align="center">
   
-### Stream Processing Redefined.
+### 🌊Stream Processing Redefined.
 
 </div>
 
@@ -21,7 +21,7 @@
   <a
     href="https://tutorials.risingwave.com/"
     target="_blank"
-  ><b>Hands-on Tutorials</b></a>&nbsp;&nbsp;&nbsp;🌊&nbsp;&nbsp;&nbsp;
+  ><b>Hands-on Tutorials</b></a>&nbsp;&nbsp;&nbsp;🎯&nbsp;&nbsp;&nbsp;
   <a
     href="https://cloud.risingwave.com/"
     target="_blank"
