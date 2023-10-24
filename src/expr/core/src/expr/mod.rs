@@ -49,19 +49,16 @@ mod build;
 pub mod test_utils;
 mod value;
 
-use std::sync::Arc;
-
 use futures_util::TryFutureExt;
 use risingwave_common::array::{ArrayRef, DataChunk};
-use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_pb::expr::PbExprNode;
-use static_assertions::const_assert;
 
 pub use self::build::*;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
 pub use self::value::{ValueImpl, ValueRef};
+pub use self::wrapper::EvalErrorReport;
 pub use super::{ExprError, Result};
 
 /// Interface of an expression.
@@ -114,50 +111,21 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     }
 }
 
-/// Extension trait to convert the protobuf representation to a boxed [`Expression`], with a
-/// concrete expression type.
-#[easy_ext::ext(TryFromExprNodeBoxed)]
-impl<'a, T> T
-where
-    T: TryFrom<&'a PbExprNode, Error = ExprError> + Expression + 'static,
-{
-    /// Performs the conversion.
-    fn try_from_boxed(expr: &'a PbExprNode) -> Result<BoxedExpression> {
-        T::try_from(expr).map(|e| e.boxed())
-    }
-}
-
+// TODO: make this an extension, or implement it on a `NonStrict` newtype.
 impl dyn Expression {
-    pub async fn eval_infallible(&self, input: &DataChunk, on_err: impl Fn(ExprError)) -> ArrayRef {
-        const_assert!(!STRICT_MODE);
-
-        if let Ok(array) = self.eval(input).await {
-            return array;
-        }
-
-        // When eval failed, recompute in row-based execution
-        // and pad with NULL for each failed row.
-        let mut array_builder = self.return_type().create_array_builder(input.cardinality());
-        for row in input.rows_with_holes() {
-            if let Some(row) = row {
-                let datum = self
-                    .eval_row_infallible(&row.into_owned_row(), &on_err)
-                    .await;
-                array_builder.append(&datum);
-            } else {
-                array_builder.append_null();
-            }
-        }
-        Arc::new(array_builder.finish())
+    /// Evaluate the expression in vectorized execution and assert it succeeds. Returns an array.
+    ///
+    /// Use with expressions built in non-strict mode.
+    pub async fn eval_infallible(&self, input: &DataChunk) -> ArrayRef {
+        self.eval(input).await.expect("evaluation failed")
     }
 
-    pub async fn eval_row_infallible(&self, input: &OwnedRow, on_err: impl Fn(ExprError)) -> Datum {
-        const_assert!(!STRICT_MODE);
-
-        self.eval_row(input).await.unwrap_or_else(|err| {
-            on_err(err);
-            None
-        })
+    /// Evaluate the expression in row-based execution and assert it succeeds. Returns a nullable
+    /// scalar.
+    ///
+    /// Use with expressions built in non-strict mode.
+    pub async fn eval_row_infallible(&self, input: &OwnedRow) -> Datum {
+        self.eval_row(input).await.expect("evaluation failed")
     }
 }
 
@@ -191,16 +159,6 @@ impl Expression for BoxedExpression {
         self
     }
 }
-
-/// Controls the behavior when a compute error happens.
-///
-/// - If set to `false`, `NULL` will be inserted.
-/// - TODO: If set to `true`, The MV will be suspended and removed from further checkpoints. It can
-///   still be used to serve outdated data without corruption.
-///
-/// See also <https://github.com/risingwavelabs/risingwave/issues/4625>.
-#[allow(dead_code)]
-const STRICT_MODE: bool = false;
 
 /// An optional context that can be used in a function.
 ///

@@ -49,6 +49,16 @@ select
     , row_number() over (partition by p1 order by p2 desc, id) as out11
 from t;
 
+# over + agg
+statement ok
+create materialized view v_e as
+select
+    p1, p2
+    , row_number() over (partition by p1 order by p2) as out12
+    , sum(sum(v2)) over (partition by p1, avg(time) order by max(v1), p2) as out13
+from t
+group by p1, p2;
+
 statement ok
 create materialized view v_a_b as
 select

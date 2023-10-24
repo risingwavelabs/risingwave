@@ -20,9 +20,9 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parse_display::{Display, FromStr};
 use risingwave_common::bail;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_common::util::value_encoding;
+use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_pb::expr::agg_call::PbType;
 use risingwave_pb::expr::{PbAggCall, PbInputRef};
 
@@ -68,7 +68,7 @@ impl AggCall {
             })
             .collect();
         let filter = match agg_call.filter {
-            Some(ref pb_filter) => Some(build_from_prost(pb_filter)?.into()),
+            Some(ref pb_filter) => Some(build_from_prost(pb_filter)?.into()), /* TODO: non-strict filter in streaming */
             None => None,
         };
         let direct_args = agg_call
@@ -78,11 +78,7 @@ impl AggCall {
                 let data_type = DataType::from(arg.get_type().unwrap());
                 LiteralExpression::new(
                     data_type.clone(),
-                    value_encoding::deserialize_datum(
-                        arg.get_datum().unwrap().get_body().as_slice(),
-                        &data_type,
-                    )
-                    .unwrap(),
+                    Datum::from_protobuf(arg.get_datum().unwrap(), &data_type).unwrap(),
                 )
             })
             .collect_vec();
@@ -312,13 +308,7 @@ pub mod agg_kinds {
     #[macro_export]
     macro_rules! unimplemented_in_stream {
         () => {
-            AggKind::BitAnd
-                | AggKind::BitOr
-                | AggKind::JsonbAgg
-                | AggKind::JsonbObjectAgg
-                | AggKind::PercentileCont
-                | AggKind::PercentileDisc
-                | AggKind::Mode
+            AggKind::PercentileCont | AggKind::PercentileDisc | AggKind::Mode
         };
     }
     pub use unimplemented_in_stream;
@@ -412,6 +402,8 @@ pub mod agg_kinds {
                 //  after we support general merge in stateless_simple_agg
                 | AggKind::BoolAnd
                 | AggKind::BoolOr
+                | AggKind::BitAnd
+                | AggKind::BitOr
         };
     }
     pub use simply_cannot_two_phase;
@@ -424,6 +416,8 @@ pub mod agg_kinds {
             AggKind::Sum
                 | AggKind::Sum0
                 | AggKind::Count
+                | AggKind::BitAnd
+                | AggKind::BitOr
                 | AggKind::BitXor
                 | AggKind::BoolAnd
                 | AggKind::BoolOr
@@ -456,12 +450,7 @@ impl AggKind {
     /// Get the total phase agg kind from the partial phase agg kind.
     pub fn partial_to_total(self) -> Option<Self> {
         match self {
-            AggKind::BitAnd
-            | AggKind::BitOr
-            | AggKind::BitXor
-            | AggKind::Min
-            | AggKind::Max
-            | AggKind::Sum => Some(self),
+            AggKind::BitXor | AggKind::Min | AggKind::Max | AggKind::Sum => Some(self),
             AggKind::Sum0 | AggKind::Count => Some(AggKind::Sum0),
             agg_kinds::simply_cannot_two_phase!() => None,
             agg_kinds::rewritten!() => None,

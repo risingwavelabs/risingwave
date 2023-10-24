@@ -14,7 +14,6 @@
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Instant;
 
 use either::Either;
 use futures::{pin_mut, Stream, StreamExt, TryStreamExt};
@@ -96,7 +95,6 @@ impl ExchangeService for ExchangeServiceImpl {
         };
 
         let up_down_actor_ids = (get_req.up_actor_id, get_req.down_actor_id);
-        let up_down_fragment_ids = (get_req.up_fragment_id, get_req.down_fragment_id);
         let receiver = self.stream_mgr.take_receiver(up_down_actor_ids).await?;
 
         // Map the remaining stream to add-permits.
@@ -111,7 +109,6 @@ impl ExchangeService for ExchangeServiceImpl {
             receiver,
             add_permits_stream,
             up_down_actor_ids,
-            up_down_fragment_ids,
         )))
     }
 }
@@ -135,11 +132,9 @@ impl ExchangeServiceImpl {
         peer_addr: SocketAddr,
         mut receiver: Receiver,
         add_permits_stream: impl Stream<Item = std::result::Result<permits::Value, tonic::Status>>,
-        up_down_actor_ids: (u32, u32),
         up_down_fragment_ids: (u32, u32),
     ) {
-        tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, "serve stream exchange RPC");
-        let up_actor_id = up_down_actor_ids.0.to_string();
+        tracing::debug!(target: "events::compute::exchange", peer_addr = %peer_addr, "serve stream exchange RPC");
         let up_fragment_id = up_down_fragment_ids.0.to_string();
         let down_fragment_id = up_down_fragment_ids.1.to_string();
 
@@ -157,29 +152,13 @@ impl ExchangeServiceImpl {
         );
         pin_mut!(select_stream);
 
-        let mut rr = 0;
-        const SAMPLING_FREQUENCY: u64 = 100;
-
         while let Some(r) = select_stream.try_next().await? {
             match r {
                 Either::Left(permits_to_add) => {
                     permits.add_permits(permits_to_add);
                 }
                 Either::Right(MessageWithPermits { message, permits }) => {
-                    // add serialization duration metric with given sampling frequency
-                    let proto = if rr % SAMPLING_FREQUENCY == 0 {
-                        let start_time = Instant::now();
-                        let proto = message.to_protobuf();
-                        metrics
-                            .actor_sampled_serialize_duration_ns
-                            .with_label_values(&[&up_actor_id])
-                            .inc_by(start_time.elapsed().as_nanos() as u64);
-                        proto
-                    } else {
-                        message.to_protobuf()
-                    };
-                    rr += 1;
-
+                    let proto = message.to_protobuf();
                     // forward the acquired permit to the downstream
                     let response = GetStreamResponse {
                         message: Some(proto),

@@ -27,8 +27,8 @@ use risingwave_common::util::value_encoding::column_aware_row_encoding::{
 };
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_common::util::value_encoding::{
-    BasicSerde, BasicSerializer, EitherSerde, ValueRowDeserializer, ValueRowSerdeKind,
-    ValueRowSerializer,
+    BasicSerde, BasicSerializer, DatumFromProtoExt, EitherSerde, ValueRowDeserializer,
+    ValueRowSerdeKind, ValueRowSerializer,
 };
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
@@ -98,21 +98,27 @@ impl ValueRowSerdeNew for ColumnAwareSerde {
         }
 
         let column_with_default = table_columns.iter().enumerate().filter_map(|(i, c)| {
-            if c.is_default() {
-                if let GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc { expr }) =
-                    c.generated_or_default_column.clone().unwrap()
-                {
-                    Some((
-                        i,
-                        build_from_prost(&expr.expect("expr should not be none"))
-                            .expect("build_from_prost error")
-                            .eval_row_infallible(&OwnedRow::empty(), |_err| {})
-                            .now_or_never()
-                            .expect("constant expression should not be async"),
-                    ))
+            if let Some(GeneratedOrDefaultColumn::DefaultColumn(DefaultColumnDesc {
+                snapshot_value,
+                expr,
+            })) = c.generated_or_default_column.clone()
+            {
+                // TODO: may not panic on error
+                let value = if let Some(snapshot_value) = snapshot_value {
+                    // If there's a `snapshot_value`, we can use it directly.
+                    Datum::from_protobuf(&snapshot_value, &c.data_type)
+                        .expect("invalid default value")
                 } else {
-                    unreachable!()
-                }
+                    // For backward compatibility, default columns in old tables may not have `snapshot_value`.
+                    // In this case, we need to evaluate the expression to get the default value.
+                    // It's okay since we previously banned impure expressions in default columns.
+                    build_from_prost(&expr.expect("expr should not be none"))
+                        .expect("build_from_prost error")
+                        .eval_row_infallible(&OwnedRow::empty())
+                        .now_or_never()
+                        .expect("constant expression should not be async")
+                };
+                Some((i, value))
             } else {
                 None
             }

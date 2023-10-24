@@ -25,8 +25,9 @@ use risingwave_common::{bail, ensure};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
-use crate::expr::{build_from_prost, BoxedExpression, Expression};
-use crate::{ExprError, Result};
+use super::Build;
+use crate::expr::{BoxedExpression, Expression};
+use crate::Result;
 
 #[derive(Debug)]
 pub struct InExpression {
@@ -94,10 +95,11 @@ impl Expression for InExpression {
     }
 }
 
-impl<'a> TryFrom<&'a ExprNode> for InExpression {
-    type Error = ExprError;
-
-    fn try_from(prost: &'a ExprNode) -> Result<Self> {
+impl Build for InExpression {
+    fn build(
+        prost: &ExprNode,
+        build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+    ) -> Result<Self> {
         ensure!(prost.get_function_type().unwrap() == Type::In);
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
@@ -106,13 +108,13 @@ impl<'a> TryFrom<&'a ExprNode> for InExpression {
         };
         let children = &func_call_node.children;
 
-        let left_expr = build_from_prost(&children[0])?;
+        let left_expr = build_child(&children[0])?;
         let mut data = Vec::new();
         // Used for const expression below to generate datum.
         // Frontend has made sure these can all be folded to constants.
         let data_chunk = DataChunk::new_dummy(1);
         for child in &children[1..] {
-            let const_expr = build_from_prost(child)?;
+            let const_expr = build_child(child)?;
             let array = const_expr
                 .eval(&data_chunk)
                 .now_or_never()
@@ -129,15 +131,15 @@ mod tests {
     use risingwave_common::array::DataChunk;
     use risingwave_common::row::OwnedRow;
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_common::util::value_encoding::serialize_datum;
+    use risingwave_common::types::{DataType, Datum, ScalarImpl};
+    use risingwave_common::util::value_encoding::DatumToProtoExt;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::{PbDataType, PbDatum};
+    use risingwave_pb::data::PbDataType;
     use risingwave_pb::expr::expr_node::{RexNode, Type};
     use risingwave_pb::expr::{ExprNode, FunctionCall};
 
     use crate::expr::expr_in::InExpression;
-    use crate::expr::{Expression, InputRefExpression};
+    use crate::expr::{Build, Expression, InputRefExpression};
 
     #[test]
     fn test_in_expr() {
@@ -156,9 +158,7 @@ mod tests {
                     type_name: TypeName::Varchar as i32,
                     ..Default::default()
                 }),
-                rex_node: Some(RexNode::Constant(PbDatum {
-                    body: serialize_datum(Some("ABC".into()).as_ref()),
-                })),
+                rex_node: Some(RexNode::Constant(Datum::Some("ABC".into()).to_protobuf())),
             },
             ExprNode {
                 function_type: Type::Unspecified as i32,
@@ -166,9 +166,7 @@ mod tests {
                     type_name: TypeName::Varchar as i32,
                     ..Default::default()
                 }),
-                rex_node: Some(RexNode::Constant(PbDatum {
-                    body: serialize_datum(Some("def".into()).as_ref()),
-                })),
+                rex_node: Some(RexNode::Constant(Datum::Some("def".into()).to_protobuf())),
             },
         ];
         let mut in_children = vec![input_ref_expr_node];
@@ -184,7 +182,7 @@ mod tests {
             }),
             rex_node: Some(RexNode::FuncCall(call)),
         };
-        assert!(InExpression::try_from(&p).is_ok());
+        assert!(InExpression::build_for_test(&p).is_ok());
     }
 
     #[tokio::test]

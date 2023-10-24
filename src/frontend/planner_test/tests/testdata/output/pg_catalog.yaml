@@ -221,9 +221,19 @@
 - sql: |
     select 'pg_namespace'::regclass
   logical_plan: |-
-    LogicalProject { exprs: [2:Int32] }
+    LogicalProject { exprs: [CastRegclass('pg_namespace':Varchar) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-  batch_plan: 'BatchValues { rows: [[2:Int32]] }'
+  batch_plan: |-
+    BatchProject { exprs: [CastRegclass('pg_namespace':Varchar) as $expr1] }
+    └─BatchValues { rows: [[]] }
+- sql: |
+    select ('pg' || '_namespace')::regclass
+  logical_plan: |-
+    LogicalProject { exprs: [CastRegclass(ConcatOp('pg':Varchar, '_namespace':Varchar)) as $expr1] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+  batch_plan: |-
+    BatchProject { exprs: [CastRegclass('pg_namespace':Varchar) as $expr1] }
+    └─BatchValues { rows: [[]] }
 - sql: |
     select 'boolin'::regproc
   logical_plan: |-

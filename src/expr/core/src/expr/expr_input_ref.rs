@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::convert::TryFrom;
 use std::ops::Index;
 
 use risingwave_common::array::{ArrayRef, DataChunk};
@@ -20,8 +19,9 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
 
+use super::{BoxedExpression, Build};
 use crate::expr::Expression;
-use crate::{ExprError, Result};
+use crate::Result;
 
 /// A reference to a column in input relation.
 #[derive(Debug, Clone)]
@@ -51,6 +51,19 @@ impl InputRefExpression {
         InputRefExpression { return_type, idx }
     }
 
+    /// Create an [`InputRefExpression`] from a protobuf expression.
+    ///
+    /// Panics if the protobuf expression is not an input reference.
+    pub fn from_prost(prost: &ExprNode) -> Self {
+        let ret_type = DataType::from(prost.get_return_type().unwrap());
+        let input_col_idx = prost.get_rex_node().unwrap().as_input_ref().unwrap();
+
+        Self {
+            return_type: ret_type,
+            idx: *input_col_idx as _,
+        }
+    }
+
     pub fn index(&self) -> usize {
         self.idx
     }
@@ -60,17 +73,12 @@ impl InputRefExpression {
     }
 }
 
-impl<'a> TryFrom<&'a ExprNode> for InputRefExpression {
-    type Error = ExprError;
-
-    fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        let ret_type = DataType::from(prost.get_return_type().unwrap());
-        let input_col_idx = prost.get_rex_node().unwrap().as_input_ref().unwrap();
-
-        Ok(Self {
-            return_type: ret_type,
-            idx: *input_col_idx as _,
-        })
+impl Build for InputRefExpression {
+    fn build(
+        prost: &ExprNode,
+        _build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
+    ) -> Result<Self> {
+        Ok(Self::from_prost(prost))
     }
 }
 

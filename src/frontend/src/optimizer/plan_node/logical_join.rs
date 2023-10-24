@@ -31,7 +31,6 @@ use super::{
 };
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::DynamicFilter;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
     BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext, EqJoinPredicate,
@@ -1395,14 +1394,14 @@ impl ToStream for LogicalJoin {
 
         // Add missing pk indices to the logical join
         let mut left_to_add = left
-            .stream_key()
+            .expect_stream_key()
             .iter()
             .cloned()
             .filter(|i| l2o.try_map(*i).is_none())
             .collect_vec();
 
         let mut right_to_add = right
-            .stream_key()
+            .expect_stream_key()
             .iter()
             .filter(|&&i| r2o.try_map(i).is_none())
             .map(|&i| i + left_len)
@@ -1464,13 +1463,13 @@ impl ToStream for LogicalJoin {
                 .composite(&join_with_pk.core.i2o_col_mapping());
             let left_right_stream_keys = join_with_pk
                 .left()
-                .stream_key()
+                .expect_stream_key()
                 .iter()
                 .map(|i| l2o.map(*i))
                 .chain(
                     join_with_pk
                         .right()
-                        .stream_key()
+                        .expect_stream_key()
                         .iter()
                         .map(|i| r2o.map(*i)),
                 )

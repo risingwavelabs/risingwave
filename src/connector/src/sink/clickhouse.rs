@@ -13,6 +13,7 @@
 // limitations under the License.
 use core::fmt::Debug;
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 use anyhow::anyhow;
 use clickhouse::{Client as ClickHouseClient, Row as ClickHouseRow};
@@ -27,19 +28,120 @@ use serde_derive::Deserialize;
 use serde_with::serde_as;
 
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
-use crate::common::ClickHouseCommon;
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{
     Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
 };
-const VERSIONED_COLLAPSING_MERGE_TREE: &str = "VersionedCollapsingMergeTree";
-const COLLAPSING_MERGE_TREE: &str = "CollapsingMergeTree";
-const QUERY_ENGIN: &str =
+
+const QUERY_ENGINE: &str =
     "select distinct ?fields from system.tables where database = ? and table = ?";
 const QUERY_COLUMN: &str =
     "select distinct ?fields from system.columns where database = ? and table = ? order by ?";
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
 const BUFFER_SIZE: usize = 1024;
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ClickHouseCommon {
+    #[serde(rename = "clickhouse.url")]
+    pub url: String,
+    #[serde(rename = "clickhouse.user")]
+    pub user: String,
+    #[serde(rename = "clickhouse.password")]
+    pub password: String,
+    #[serde(rename = "clickhouse.database")]
+    pub database: String,
+    #[serde(rename = "clickhouse.table")]
+    pub table: String,
+}
+
+#[allow(clippy::enum_variant_names)]
+#[derive(Debug)]
+enum ClickHouseEngine {
+    MergeTree,
+    ReplacingMergeTree,
+    SummingMergeTree,
+    AggregatingMergeTree,
+    CollapsingMergeTree(String),
+    VersionedCollapsingMergeTree(String),
+    GraphiteMergeTree,
+}
+impl ClickHouseEngine {
+    pub fn is_collapsing_engine(&self) -> bool {
+        matches!(
+            self,
+            ClickHouseEngine::CollapsingMergeTree(_)
+                | ClickHouseEngine::VersionedCollapsingMergeTree(_)
+        )
+    }
+
+    pub fn get_sign_name(&self) -> Option<String> {
+        match self {
+            ClickHouseEngine::CollapsingMergeTree(sign_name) => Some(sign_name.to_string()),
+            ClickHouseEngine::VersionedCollapsingMergeTree(sign_name) => {
+                Some(sign_name.to_string())
+            }
+            _ => None,
+        }
+    }
+
+    pub fn form_query_engine(engine_name: &ClickhouseQueryEngine) -> Result<Self> {
+        match engine_name.engine.as_str() {
+            "MergeTree" => Ok(ClickHouseEngine::MergeTree),
+            "ReplacingMergeTree" => Ok(ClickHouseEngine::ReplacingMergeTree),
+            "SummingMergeTree" => Ok(ClickHouseEngine::SummingMergeTree),
+            "AggregatingMergeTree" => Ok(ClickHouseEngine::AggregatingMergeTree),
+            "VersionedCollapsingMergeTree" => {
+                let sign_name = engine_name
+                    .create_table_query
+                    .split("VersionedCollapsingMergeTree(")
+                    .last()
+                    .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                    .split(',')
+                    .next()
+                    .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
+                    .to_string();
+                Ok(ClickHouseEngine::VersionedCollapsingMergeTree(sign_name))
+            }
+            "CollapsingMergeTree" => {
+                let sign_name = engine_name
+                    .create_table_query
+                    .split("CollapsingMergeTree(")
+                    .last()
+                    .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
+                    .split(')')
+                    .next()
+                    .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
+                    .to_string();
+                Ok(ClickHouseEngine::CollapsingMergeTree(sign_name))
+            }
+            "GraphiteMergeTree" => Ok(ClickHouseEngine::GraphiteMergeTree),
+            _ => Err(SinkError::ClickHouse(format!(
+                "Cannot find clickhouse engine {:?}",
+                engine_name.engine
+            ))),
+        }
+    }
+}
+
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(5);
+
+impl ClickHouseCommon {
+    pub(crate) fn build_client(&self) -> anyhow::Result<ClickHouseClient> {
+        use hyper_tls::HttpsConnector;
+
+        let https = HttpsConnector::new();
+        let client = hyper::Client::builder()
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+            .build::<_, hyper::Body>(https);
+
+        let client = ClickHouseClient::with_http_client(client)
+            .with_url(&self.url)
+            .with_user(&self.user)
+            .with_password(&self.password)
+            .with_database(&self.database);
+        Ok(client)
+    }
+}
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
@@ -225,14 +327,12 @@ impl Sink for ClickHouseSink {
         // check reachability
         let client = self.config.common.build_client()?;
 
-        let (clickhouse_column, sign_name) =
-            query_column_engin_from_ck(client, &self.config).await?;
+        let (clickhouse_column, clickhouse_engine) =
+            query_column_engine_from_ck(client, &self.config).await?;
 
-        if !self.is_append_only && sign_name.is_none() {
-            return Err(SinkError::ClickHouse(format!(
-                "If you want to use upsert, please modify your engine is {} or {} in ClickHouse",
-                VERSIONED_COLLAPSING_MERGE_TREE, COLLAPSING_MERGE_TREE
-            )));
+        if !self.is_append_only && !clickhouse_engine.is_collapsing_engine() {
+            return Err(SinkError::ClickHouse(
+                "If you want to use upsert, please modify your engine is `VersionedCollapsingMergeTree` or `CollapsingMergeTree` in ClickHouse".to_owned()));
         }
 
         self.check_column_name_and_type(&clickhouse_column)?;
@@ -261,8 +361,8 @@ pub struct ClickHouseSinkWriter {
     is_append_only: bool,
     // Save some features of the clickhouse column type
     column_correct_vec: Vec<ClickHouseSchemaFeature>,
-    clickhouse_fields_name: Vec<String>,
-    is_collapsing_engine: bool,
+    rw_fields_name_after_calibration: Vec<String>,
+    clickhouse_engine: ClickHouseEngine,
 }
 #[derive(Debug)]
 struct ClickHouseSchemaFeature {
@@ -282,20 +382,20 @@ impl ClickHouseSinkWriter {
     ) -> Result<Self> {
         let client = config.common.build_client()?;
 
-        let (clickhouse_column, sign_name) =
-            query_column_engin_from_ck(client.clone(), &config).await?;
+        let (clickhouse_column, clickhouse_engine) =
+            query_column_engine_from_ck(client.clone(), &config).await?;
 
         let column_correct_vec: Result<Vec<ClickHouseSchemaFeature>> = clickhouse_column
             .iter()
             .map(Self::build_column_correct_vec)
             .collect();
-        let mut clickhouse_fields_name = build_fields_name_type_from_schema(&schema)?
+        let mut rw_fields_name_after_calibration = build_fields_name_type_from_schema(&schema)?
             .iter()
             .map(|(a, _)| a.clone())
             .collect_vec();
 
-        if let Some(sign) = sign_name.clone() {
-            clickhouse_fields_name.push(sign);
+        if let Some(sign) = clickhouse_engine.get_sign_name() {
+            rw_fields_name_after_calibration.push(sign);
         }
         Ok(Self {
             config,
@@ -304,8 +404,8 @@ impl ClickHouseSinkWriter {
             client,
             is_append_only,
             column_correct_vec: column_correct_vec?,
-            clickhouse_fields_name,
-            is_collapsing_engine: sign_name.is_some(),
+            rw_fields_name_after_calibration,
+            clickhouse_engine,
         })
     }
 
@@ -366,45 +466,10 @@ impl ClickHouseSinkWriter {
         })
     }
 
-    async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
+    async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
         let mut insert = self.client.insert_with_fields_name(
             &self.config.common.table,
-            self.clickhouse_fields_name.clone(),
-        )?;
-        for (op, row) in chunk.rows() {
-            if op != Op::Insert {
-                tracing::warn!(
-                    "append only click house sink receive an {:?} which will be ignored.",
-                    op
-                );
-                continue;
-            }
-            let mut clickhouse_filed_vec = vec![];
-            for (index, data) in row.iter().enumerate() {
-                clickhouse_filed_vec.extend(ClickHouseFieldWithNull::from_scalar_ref(
-                    data,
-                    &self.column_correct_vec,
-                    index,
-                )?);
-            }
-            if self.is_collapsing_engine {
-                clickhouse_filed_vec.push(ClickHouseFieldWithNull::WithoutSome(
-                    ClickHouseField::Int8(-1),
-                ));
-            }
-            let clickhouse_column = ClickHouseColumn {
-                row: clickhouse_filed_vec,
-            };
-            insert.write(&clickhouse_column).await?;
-        }
-        insert.end().await?;
-        Ok(())
-    }
-
-    async fn upsert(&mut self, chunk: StreamChunk) -> Result<()> {
-        let mut insert = self.client.insert_with_fields_name(
-            &self.config.common.table,
-            self.clickhouse_fields_name.clone(),
+            self.rw_fields_name_after_calibration.clone(),
         )?;
         for (op, row) in chunk.rows() {
             let mut clickhouse_filed_vec = vec![];
@@ -416,18 +481,23 @@ impl ClickHouseSinkWriter {
                 )?);
             }
             match op {
-                Op::Insert => clickhouse_filed_vec.push(ClickHouseFieldWithNull::WithoutSome(
-                    ClickHouseField::Int8(1),
-                )),
-                Op::Delete => clickhouse_filed_vec.push(ClickHouseFieldWithNull::WithoutSome(
-                    ClickHouseField::Int8(-1),
-                )),
-                Op::UpdateDelete => clickhouse_filed_vec.push(
-                    ClickHouseFieldWithNull::WithoutSome(ClickHouseField::Int8(-1)),
-                ),
-                Op::UpdateInsert => clickhouse_filed_vec.push(
-                    ClickHouseFieldWithNull::WithoutSome(ClickHouseField::Int8(1)),
-                ),
+                Op::Insert | Op::UpdateInsert => {
+                    if self.clickhouse_engine.is_collapsing_engine() {
+                        clickhouse_filed_vec.push(ClickHouseFieldWithNull::WithoutSome(
+                            ClickHouseField::Int8(1),
+                        ));
+                    }
+                }
+                Op::Delete | Op::UpdateDelete => {
+                    if !self.clickhouse_engine.is_collapsing_engine() {
+                        return Err(SinkError::ClickHouse(format!(
+                            "Clickhouse engine don't support upsert",
+                        )));
+                    }
+                    clickhouse_filed_vec.push(ClickHouseFieldWithNull::WithoutSome(
+                        ClickHouseField::Int8(-1),
+                    ))
+                }
             }
             let clickhouse_column = ClickHouseColumn {
                 row: clickhouse_filed_vec,
@@ -442,11 +512,7 @@ impl ClickHouseSinkWriter {
 #[async_trait::async_trait]
 impl SinkWriter for ClickHouseSinkWriter {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.is_append_only {
-            self.append_only(chunk).await
-        } else {
-            self.upsert(chunk).await
-        }
+        self.write(chunk).await
     }
 
     async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
@@ -467,24 +533,24 @@ struct SystemColumn {
 }
 
 #[derive(ClickHouseRow, Deserialize)]
-struct SystemEngine {
+struct ClickhouseQueryEngine {
     name: String,
     engine: String,
     create_table_query: String,
 }
 
-async fn query_column_engin_from_ck(
+async fn query_column_engine_from_ck(
     client: ClickHouseClient,
     config: &ClickHouseConfig,
-) -> Result<(Vec<SystemColumn>, Option<String>)> {
-    let query_engine = QUERY_ENGIN;
+) -> Result<(Vec<SystemColumn>, ClickHouseEngine)> {
+    let query_engine = QUERY_ENGINE;
     let query_column = QUERY_COLUMN;
 
     let clickhouse_engine = client
         .query(query_engine)
         .bind(config.common.database.clone())
         .bind(config.common.table.clone())
-        .fetch_all::<SystemEngine>()
+        .fetch_all::<ClickhouseQueryEngine>()
         .await?;
     let mut clickhouse_column = client
         .query(query_column)
@@ -500,43 +566,12 @@ async fn query_column_engin_from_ck(
         )));
     }
 
-    let SystemEngine {
-        name: _,
-        engine,
-        create_table_query,
-    } = &clickhouse_engine.get(0).unwrap();
-    tracing::info!("Clickhouse engine is {:?}", engine);
+    let clickhouse_engine = ClickHouseEngine::form_query_engine(clickhouse_engine.get(0).unwrap())?;
 
-    let mut sign_name = None;
-    if engine.eq(VERSIONED_COLLAPSING_MERGE_TREE) {
-        sign_name = Some(
-            create_table_query
-                .split("VersionedCollapsingMergeTree(")
-                .last()
-                .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
-                .split(',')
-                .next()
-                .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
-                .to_string(),
-        );
-    }
-    if engine.eq(COLLAPSING_MERGE_TREE) {
-        sign_name = Some(
-            create_table_query
-                .split("CollapsingMergeTree(")
-                .last()
-                .ok_or_else(|| SinkError::ClickHouse("must have last".to_string()))?
-                .split(')')
-                .next()
-                .ok_or_else(|| SinkError::ClickHouse("must have next".to_string()))?
-                .to_string(),
-        );
-    }
-
-    if let Some(sign) = &sign_name {
+    if let Some(sign) = &clickhouse_engine.get_sign_name() {
         clickhouse_column.retain(|a| sign.ne(&a.name))
     }
-    Ok((clickhouse_column, sign_name))
+    Ok((clickhouse_column, clickhouse_engine))
 }
 
 /// Serialize this structure to simulate the `struct` call clickhouse interface
