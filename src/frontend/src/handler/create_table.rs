@@ -467,6 +467,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         &source_schema,
         columns_from_resolve_source,
         columns_from_sql,
+        &column_defs,
     )?;
     let pk_names = bind_source_pk(
         &source_schema,

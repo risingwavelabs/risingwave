@@ -46,8 +46,8 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_sqlparser::ast::{
-    get_delimiter, AstString, AvroSchema, CreateSourceStatement, DebeziumAvroSchema, Encode,
-    Format, ProtobufSchema, SourceSchemaV2, SourceWatermark,
+    get_delimiter, AstString, AvroSchema, ColumnDef, CreateSourceStatement, DebeziumAvroSchema,
+    Encode, Format, ProtobufSchema, SourceSchemaV2, SourceWatermark,
 };
 
 use super::RwPgResponse;
@@ -62,7 +62,7 @@ use crate::handler::util::{get_connector, is_kafka_connector};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
 use crate::utils::resolve_privatelink_in_with_option;
-use crate::WithOptions;
+use crate::{bind_data_type, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
@@ -196,10 +196,10 @@ async fn extract_protobuf_table_schema(
         .collect_vec())
 }
 
-fn non_generated_sql_columns(columns: &[ColumnCatalog]) -> Vec<ColumnCatalog> {
+fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
     columns
         .iter()
-        .filter(|c| c.is_generated())
+        .filter(|c| !c.is_generated())
         .cloned()
         .collect()
 }
@@ -553,6 +553,7 @@ pub(crate) fn bind_all_columns(
     source_schema: &SourceSchemaV2,
     cols_from_source: Option<Vec<ColumnCatalog>>,
     cols_from_sql: Vec<ColumnCatalog>,
+    col_defs_from_sql: &[ColumnDef],
 ) -> Result<Vec<ColumnCatalog>> {
     if let Some(cols_from_source) = cols_from_source {
         if cols_from_sql.is_empty() {
@@ -596,10 +597,11 @@ pub(crate) fn bind_all_columns(
                         is_hidden: false,
                     },
                 ];
-                let non_generated_sql_defined_columns = non_generated_sql_columns(&cols_from_sql);
+                let non_generated_sql_defined_columns =
+                    non_generated_sql_columns(col_defs_from_sql);
                 if non_generated_sql_defined_columns.len() != 2
-                    && non_generated_sql_defined_columns[0].name() != columns[0].name()
-                    && non_generated_sql_defined_columns[1].name() != columns[1].name()
+                    && non_generated_sql_defined_columns[0].name.real_value() != columns[0].name()
+                    && non_generated_sql_defined_columns[1].name.real_value() != columns[1].name()
                 {
                     return Err(RwError::from(ProtocolError(
                         "the not generated columns of the source with row format DebeziumMongoJson
@@ -607,7 +609,13 @@ pub(crate) fn bind_all_columns(
                             .to_string(),
                     )));
                 }
-                let key_data_type = non_generated_sql_defined_columns[0].data_type();
+                // ok to unwrap since it was checked at `bind_sql_columns`
+                let key_data_type = bind_data_type(
+                    non_generated_sql_defined_columns[0]
+                        .data_type
+                        .as_ref()
+                        .unwrap(),
+                )?;
                 match key_data_type {
                     DataType::Jsonb | DataType::Varchar | DataType::Int32 | DataType::Int64 => {
                         columns[0].column_desc.data_type = key_data_type.clone();
@@ -621,7 +629,13 @@ pub(crate) fn bind_all_columns(
                     }
                 }
 
-                let value_data_type = non_generated_sql_defined_columns[1].data_type();
+                // ok to unwrap since it was checked at `bind_sql_columns`
+                let value_data_type = bind_data_type(
+                    non_generated_sql_defined_columns[1]
+                        .data_type
+                        .as_ref()
+                        .unwrap(),
+                )?;
                 if !matches!(value_data_type, DataType::Jsonb) {
                     return Err(RwError::from(ProtocolError(
                         "the `payload` column of the source with row format DebeziumMongoJson
@@ -1067,6 +1081,7 @@ pub async fn handle_create_source(
         &source_schema,
         columns_from_resolve_source,
         columns_from_sql,
+        &stmt.columns,
     )?;
     let pk_names = bind_source_pk(
         &source_schema,
