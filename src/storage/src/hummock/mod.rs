@@ -84,7 +84,7 @@ pub async fn get_from_sstable_info(
                 sstable.value().as_ref(),
                 full_key.user_key,
             );
-            if delete_epoch <= full_key.epoch_with_gap.as_u64() {
+            if delete_epoch <= full_key.epoch_with_gap.pure_epoch() {
                 return Ok(Some((HummockValue::Delete, delete_epoch)));
             }
         }
@@ -122,7 +122,7 @@ pub async fn get_from_sstable_info(
     } else if !read_options.ignore_range_tombstone {
         let delete_epoch =
             get_min_delete_range_epoch_from_sstable(iter.sst().value().as_ref(), full_key.user_key);
-        if delete_epoch <= full_key.epoch_with_gap.as_u64() {
+        if delete_epoch <= full_key.epoch_with_gap.pure_epoch() {
             Some((HummockValue::Delete, delete_epoch))
         } else {
             None

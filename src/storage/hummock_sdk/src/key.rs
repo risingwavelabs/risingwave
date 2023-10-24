@@ -598,6 +598,17 @@ impl<T: AsRef<[u8]>> FullKey<T> {
         }
     }
 
+    pub fn new_with_gap_epoch(
+        table_id: TableId,
+        table_key: TableKey<T>,
+        epoch_with_gap: EpochWithGap,
+    ) -> Self {
+        Self {
+            user_key: UserKey::new(table_id, table_key),
+            epoch_with_gap,
+        }
+    }
+
     pub fn from_user_key(user_key: UserKey<T>, epoch: HummockEpoch) -> Self {
         Self {
             user_key,

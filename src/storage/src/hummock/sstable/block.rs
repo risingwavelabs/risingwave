@@ -473,7 +473,7 @@ impl BlockBuilder {
             debug_assert_eq!(
                 KeyComparator::compare_encoded_full_key(&self.last_key[..], &key[..]),
                 Ordering::Less,
-                "epoch: {}, table key: {}",
+                "epoch_with_gap: {}, table key: {}",
                 full_key.epoch_with_gap.as_u64(),
                 u64::from_be_bytes(
                     full_key.user_key.table_key.as_ref()[0..8]

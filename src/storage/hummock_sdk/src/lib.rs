@@ -267,6 +267,7 @@ pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
     checkpoint_path.trim_end_matches(|c| c != '/').to_string()
 }
 
+const EPOCH_AVAILABLE_BITS: u64 = 16;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug)]
 pub struct EpochWithGap(u64);
 
@@ -277,7 +278,7 @@ impl EpochWithGap {
     }
 
     pub fn new_from_epoch(epoch_with_gap: u64) -> Self {
-        // debug_assert_eq!(epoch_with_gap % 16, 0);
+        debug_assert_eq!(epoch_with_gap % EPOCH_AVAILABLE_BITS, 0);
         EpochWithGap(epoch_with_gap)
     }
 

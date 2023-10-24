@@ -217,7 +217,7 @@ pub mod sled {
                     table_id,
                     table_key: TableKey(Bytes::from(table_key.to_vec())),
                 },
-                epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
+                epoch_with_gap: EpochWithGap::new_for_test(epoch),
             };
 
             let left_full_key = to_full_key(&left_table_key[..]);
@@ -516,7 +516,7 @@ impl<R: RangeKv> RangeKvStateStore<R> {
             .inner
             .range(to_full_key_range(table_id, key_range), None)?
         {
-            if key.epoch_with_gap.as_u64() > epoch {
+            if key.epoch_with_gap.pure_epoch() > epoch {
                 continue;
             }
             if Some(&key.user_key) != last_user_key.as_ref() {
@@ -694,7 +694,7 @@ impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
 impl<R: RangeKv> RangeKvStateStoreIter<R> {
     fn next_inner(&mut self) -> StorageResult<Option<StateStoreIterItem>> {
         while let Some((key, value)) = self.inner.next()? {
-            if key.epoch_with_gap.as_u64() > self.epoch {
+            if key.epoch_with_gap.pure_epoch() > self.epoch {
                 continue;
             }
             if Some(key.user_key.as_ref()) != self.last_key.as_ref().map(|key| key.as_ref()) {

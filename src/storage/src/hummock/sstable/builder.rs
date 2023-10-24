@@ -296,10 +296,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         if table_key_len >= LARGE_KEY_LEN {
             let table_id = full_key.user_key.table_id.table_id();
             tracing::warn!(
-                "A large key (table_id={}, len={}, epoch={}) is added to block",
+                "A large key (table_id={}, len={}, epoch={}, spill offset={}) is added to block",
                 table_id,
                 table_key_len,
-                full_key.epoch_with_gap.as_u64()
+                full_key.epoch_with_gap.pure_epoch(),
+                full_key.epoch_with_gap.offset()
             );
         }
 
