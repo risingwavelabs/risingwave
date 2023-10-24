@@ -26,6 +26,6 @@ pub(super) async fn handle_wait(handler_args: HandlerArgs) -> Result<RwPgRespons
 
 pub(crate) async fn do_wait(session: &SessionImpl) -> Result<()> {
     let client = session.env().meta_client();
-    let snapshot = client.wait().await?;
+    client.wait().await?;
     Ok(())
 }

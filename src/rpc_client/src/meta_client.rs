@@ -699,7 +699,7 @@ impl MetaClient {
 
     pub async fn wait(&self) -> Result<()> {
         let request = WaitRequest {};
-        let resp = self.inner.wait(request).await?;
+        self.inner.wait(request).await?;
         Ok(())
     }
 
