@@ -1615,6 +1615,19 @@
           └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (x int, y int);
+    select first_value(distinct x order by x asc) from t;
+  batch_plan: |-
+    BatchSimpleAgg { aggs: [first_value(distinct t.x order_by(t.x ASC))] }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [first_value], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [first_value(distinct t.x order_by(t.x ASC))] }
+      └─StreamSimpleAgg { aggs: [first_value(distinct t.x order_by(t.x ASC)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- sql: |
+    create table t (x int, y int);
     select last_value(x order by y desc nulls last) from t;
   batch_plan: |-
     BatchSimpleAgg { aggs: [last_value(t.x order_by(t.y DESC NULLS LAST))] }
