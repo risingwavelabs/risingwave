@@ -160,7 +160,10 @@ impl<K: Ord, V: Clone> WindowBuffer<K, V> {
     /// Consume the delta of values comparing the current window to the previous window.
     /// The delta is not guaranteed to be sorted, especially when frame exclusion is not `NoOthers`.
     pub fn consume_curr_window_values_delta(&mut self) -> impl Iterator<Item = (Op, V)> + '_ {
-        self.curr_delta.iter_mut().flat_map(|delta| delta.drain(..))
+        self.curr_delta
+            .as_mut()
+            .expect("delta mode should be enabled")
+            .drain(..)
     }
 
     fn recalculate_left_right(&mut self) {
