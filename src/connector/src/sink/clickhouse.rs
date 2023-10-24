@@ -490,9 +490,9 @@ impl ClickHouseSinkWriter {
                 }
                 Op::Delete | Op::UpdateDelete => {
                     if !self.clickhouse_engine.is_collapsing_engine() {
-                        return Err(SinkError::ClickHouse(format!(
-                            "Clickhouse engine don't support upsert",
-                        )));
+                        return Err(SinkError::ClickHouse(
+                            "Clickhouse engine don't support upsert".to_string(),
+                        ));
                     }
                     clickhouse_filed_vec.push(ClickHouseFieldWithNull::WithoutSome(
                         ClickHouseField::Int8(-1),
