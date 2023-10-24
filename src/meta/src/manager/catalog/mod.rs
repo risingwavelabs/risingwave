@@ -861,13 +861,15 @@ impl CatalogManager {
         database_core.clear_creating_stream_jobs();
         let user_core = &mut core.user;
         for table in &tables_to_clean {
-            // Recovered when init database manager.
-            for relation_id in &table.dependent_relations {
-                database_core.decrease_ref_count(*relation_id);
+            if table.table_type != TableType::Internal as i32 {
+                // Recovered when init database manager.
+                for relation_id in &table.dependent_relations {
+                    database_core.decrease_ref_count(*relation_id);
+                }
+                // Recovered when init user manager.
+                tracing::debug!("decrease ref for {}", table.id);
+                user_core.decrease_ref(table.owner);
             }
-            // Recovered when init user manager.
-            tracing::debug!("decrease ref for {}", table.id);
-            user_core.decrease_ref(table.owner);
         }
 
         Ok(())
