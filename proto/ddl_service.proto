@@ -314,11 +314,9 @@ message GetTablesResponse {
   map<uint32, catalog.Table> tables = 1;
 }
 
-message WaitRequest {
-}
+message WaitRequest {}
 
-message WaitResponse {
-}
+message WaitResponse {}
 
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
