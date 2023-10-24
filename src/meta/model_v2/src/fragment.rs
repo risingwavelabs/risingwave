@@ -15,6 +15,7 @@
 use sea_orm::entity::prelude::*;
 
 use crate::I32Array;
+use crate::model_v2::{StreamNode, VnodeBitmap, FragmentVnodeMapping, I32Array};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "fragment")]
@@ -24,8 +25,8 @@ pub struct Model {
     pub table_id: i32,
     pub fragment_type_mask: i32,
     pub distribution_type: String,
-    pub stream_node: Json,
-    pub vnode_mapping: Option<Json>,
+    pub stream_node: StreamNode,
+    pub vnode_mapping: Option<FragmentVnodeMapping>,
     pub state_table_ids: Option<I32Array>,
     pub upstream_fragment_id: Option<I32Array>,
     pub dispatcher_type: Option<String>,

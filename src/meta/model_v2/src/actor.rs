@@ -15,6 +15,7 @@
 use sea_orm::entity::prelude::*;
 
 use crate::I32Array;
+use crate::model_v2::{Dispatchers, ConnectorSplits, VnodeBitmap, I32Array};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "actor")]
@@ -23,11 +24,11 @@ pub struct Model {
     pub actor_id: i32,
     pub fragment_id: i32,
     pub status: Option<String>,
-    pub splits: Option<Json>,
+    pub splits: Option<ConnectorSplits>,
     pub parallel_unit_id: i32,
     pub upstream_actor_ids: Option<I32Array>,
-    pub dispatchers: Option<Json>,
-    pub vnode_bitmap: Option<String>,
+    pub dispatchers: Dispatchers,
+    pub vnode_bitmap: Option<VnodeBitmap>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -363,7 +363,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Actor::Splits).json())
                     .col(ColumnDef::new(Actor::ParallelUnitId).integer().not_null())
                     .col(ColumnDef::new(Actor::UpstreamActorIds).json())
-                    .col(ColumnDef::new(Actor::Dispatchers).json())
+                    .col(ColumnDef::new(Actor::Dispatchers).json().not_null())
                     .col(ColumnDef::new(Actor::VnodeBitmap).string())
                     .foreign_key(
                         &mut ForeignKey::create()

@@ -35,6 +35,7 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::{PbRelation, PbRelationGroup};
+use risingwave_pb::stream_plan::StreamActor;
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, DatabaseConnection, DatabaseTransaction,
     EntityTrait, QueryFilter, QuerySelect, TransactionTrait,
@@ -50,6 +51,13 @@ use crate::controller::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::manager::{MetaSrvEnv, NotificationVersion};
+use crate::model_v2::object::ObjectType;
+use crate::model_v2::prelude::*;
+use crate::model_v2::{
+    actor, connection, database, fragment, function, index, object, object_dependency, schema,
+    sink, source, table, view, ConnectionId, DatabaseId, FunctionId, ObjectId, PrivateLinkService,
+    SchemaId, SourceId, TableId, UserId,
+};
 use crate::rpc::ddl_controller::DropMode;
 use crate::{MetaError, MetaResult};
 
@@ -716,16 +724,74 @@ impl CatalogController {
         &self,
         fragment_id: crate::model::FragmentId,
     ) -> MetaResult<PbFragment> {
-        let inner = self.inner.read().await;
+        // let inner = self.inner.read().await;
+        //
+        // let all = Fragment::find_by_id(fragment_id)
+        //     .find_also_related(Actor)
+        //     .all(&inner.db)
+        //     .await?;
+        //
+        // fn uname(fragment: Fragment, actors: Vec<Actor>) -> PbFragment {
+        //     let Fragment {} = fragment;
+        // };
+        //
+        // let actors = vec![];
+        //
 
-        let all = Fragment::find_by_id(fragment_id)
-            .find_also_related(Actor)
-            .all(&inner.db)
-            .await?;
+        fn uname(fragment: fragment::Model, actors: Vec<actor::Model>) -> MetaResult<PbFragment> {
+            let fragment::Model {
+                fragment_id,
+                table_id,
+                fragment_type_mask,
+                distribution_type,
+                stream_node,
+                vnode_mapping,
+                state_table_ids,
+                upstream_fragment_id,
+                dispatcher_type,
+                dist_key_indices,
+                output_indices,
+            } = fragment;
 
-        fn uname(fragment: Fragment, actors: Vec<Actor>) -> PbFragment {
-            let Fragment {} = fragment;
-        };
+            let mut stream_actors = vec![];
+
+            for actor in actors {
+                let actor::Model {
+                    actor_id,
+                    fragment_id,
+                    status,
+                    splits,
+                    parallel_unit_id,
+                    upstream_actor_ids,
+                    dispatchers,
+                    vnode_bitmap,
+                } = actor;
+
+                stream_actors.push(StreamActor {
+                    actor_id: actor_id as _,
+                    fragment_id: fragment_id as _,
+                    nodes: None,
+                    dispatcher: dispatchers.0,
+                    upstream_actor_id: vec![],
+                    vnode_bitmap: None,
+                    mview_definition: "".to_string(),
+                })
+            }
+
+            let fragment = PbFragment {
+                fragment_id,
+                fragment_type_mask: 0,
+                distribution_type: 0,
+                actors: stream_actors,
+                vnode_mapping: None,
+                state_table_ids: vec![],
+                upstream_fragment_ids: vec![],
+            };
+
+            Ok(fragment)
+        }
+
+        todo!()
 
         // Ok(ObjectModel(conn, obj.unwrap()).into())
     }
