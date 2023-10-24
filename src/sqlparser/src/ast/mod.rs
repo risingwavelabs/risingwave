@@ -1790,6 +1790,9 @@ impl fmt::Display for Statement {
             Statement::Flush => {
                 write!(f, "FLUSH")
             }
+            Statement::Wait => {
+                write!(f, "WAIT")
+            }
             Statement::Begin { modes } => {
                 write!(f, "BEGIN")?;
                 if !modes.is_empty() {
