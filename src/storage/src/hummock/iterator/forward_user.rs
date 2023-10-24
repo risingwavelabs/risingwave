@@ -183,7 +183,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             Included(begin_key) => {
                 let full_key = FullKey {
                     user_key: begin_key.clone(),
-                    epoch_with_gap: EpochWithGap::new(self.read_epoch),
+                    epoch_with_gap: EpochWithGap::new_from_epoch(self.read_epoch),
                 };
                 self.iterator.seek(full_key.to_ref()).await?;
                 if !self.iterator.is_valid() {
@@ -235,7 +235,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
         let full_key = FullKey {
             user_key,
-            epoch_with_gap: EpochWithGap::new(self.read_epoch),
+            epoch_with_gap: EpochWithGap::new_from_epoch(self.read_epoch),
         };
         self.iterator.seek(full_key).await?;
         if !self.iterator.is_valid() {

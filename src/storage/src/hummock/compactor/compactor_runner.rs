@@ -808,7 +808,7 @@ where
             user_key_last_delete_epoch = epoch;
         } else if earliest_range_delete_which_can_see_iter_key < user_key_last_delete_epoch {
             debug_assert!(
-                iter_key.epoch_with_gap.as_u64() < earliest_range_delete_which_can_see_iter_key
+                iter_key.epoch_with_gap.pure_epoch() < earliest_range_delete_which_can_see_iter_key
                     && earliest_range_delete_which_can_see_iter_key < user_key_last_delete_epoch
             );
             user_key_last_delete_epoch = earliest_range_delete_which_can_see_iter_key;
@@ -819,7 +819,7 @@ where
             // the same SST. Therefore we need to construct a corresponding
             // delete key to represent this.
             iter_key.epoch_with_gap =
-                EpochWithGap::new(earliest_range_delete_which_can_see_iter_key);
+                EpochWithGap::new_from_epoch(earliest_range_delete_which_can_see_iter_key);
             sst_builder
                 .add_full_key(iter_key, HummockValue::Delete, is_new_user_key)
                 .verbose_instrument_await("add_full_key_delete")
@@ -827,7 +827,7 @@ where
             last_table_stats.total_key_count += 1;
             last_table_stats.total_key_size += iter_key.encoded_len() as i64;
             last_table_stats.total_value_size += 1;
-            iter_key.epoch_with_gap = EpochWithGap::new(epoch);
+            iter_key.epoch_with_gap = EpochWithGap::new_from_epoch(epoch);
             is_new_user_key = false;
         }
 

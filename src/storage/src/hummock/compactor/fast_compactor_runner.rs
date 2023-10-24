@@ -129,7 +129,7 @@ impl BlockStreamIterator {
                     .as_ref(),
             );
             // do not include this key because it is the smallest key of next block.
-            largest_key.epoch_with_gap = EpochWithGap::new(HummockEpoch::MAX);
+            largest_key.epoch_with_gap = EpochWithGap::new_from_epoch(HummockEpoch::MAX);
             largest_key.encode()
         } else {
             self.sstable.value().meta.largest_key.clone()

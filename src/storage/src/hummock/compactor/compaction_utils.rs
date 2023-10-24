@@ -183,14 +183,14 @@ fn generate_splits_fast(
         indexes.push(
             FullKey {
                 user_key: FullKey::decode(&key_range.left).user_key,
-                epoch_with_gap: EpochWithGap::new(HummockEpoch::MAX),
+                epoch_with_gap: EpochWithGap::new_from_epoch(HummockEpoch::MAX),
             }
             .encode(),
         );
         indexes.push(
             FullKey {
                 user_key: FullKey::decode(&key_range.right).user_key,
-                epoch_with_gap: EpochWithGap::new(HummockEpoch::MAX),
+                epoch_with_gap: EpochWithGap::new_from_epoch(HummockEpoch::MAX),
             }
             .encode(),
         );
@@ -241,7 +241,7 @@ pub async fn generate_splits(
                         let data_size = block.len;
                         let full_key = FullKey {
                             user_key: FullKey::decode(&block.smallest_key).user_key,
-                            epoch_with_gap: EpochWithGap::new(HummockEpoch::MAX),
+                            epoch_with_gap: EpochWithGap::new_from_epoch(HummockEpoch::MAX),
                         }
                         .encode();
                         (data_size as u64, full_key)

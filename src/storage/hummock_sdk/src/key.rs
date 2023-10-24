@@ -591,25 +591,25 @@ impl<T: AsRef<[u8]>> Debug for FullKey<T> {
 }
 
 impl<T: AsRef<[u8]>> FullKey<T> {
-    pub fn new(table_id: TableId, table_key: TableKey<T>, epoch_with_gap: HummockEpoch) -> Self {
+    pub fn new(table_id: TableId, table_key: TableKey<T>, epoch: HummockEpoch) -> Self {
         Self {
             user_key: UserKey::new(table_id, table_key),
-            epoch_with_gap: EpochWithGap::new(epoch_with_gap),
+            epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
         }
     }
 
     pub fn from_user_key(user_key: UserKey<T>, epoch: HummockEpoch) -> Self {
         Self {
             user_key,
-            epoch_with_gap: EpochWithGap::new(epoch),
+            epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
         }
     }
 
     /// Pass the inner type of `table_key` to make the code less verbose.
-    pub fn for_test(table_id: TableId, table_key: T, epoch_with_gap: HummockEpoch) -> Self {
+    pub fn for_test(table_id: TableId, table_key: T, epoch: HummockEpoch) -> Self {
         Self {
             user_key: UserKey::for_test(table_id, table_key),
-            epoch_with_gap: EpochWithGap::new(epoch_with_gap),
+            epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
         }
     }
 
@@ -660,7 +660,7 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::decode(&slice[..epoch_pos]),
-            epoch_with_gap: EpochWithGap::new(epoch),
+            epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
         }
     }
 
@@ -674,7 +674,7 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::new(table_id, TableKey(&slice_without_table_id[..epoch_pos])),
-            epoch_with_gap: EpochWithGap::new(epoch),
+            epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
         }
     }
 
@@ -685,7 +685,7 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::decode(&slice[..epoch_pos]),
-            epoch_with_gap: EpochWithGap::new(u64::MAX - epoch),
+            epoch_with_gap: EpochWithGap::new_from_epoch(u64::MAX - epoch),
         }
     }
 

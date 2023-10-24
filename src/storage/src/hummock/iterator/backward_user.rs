@@ -216,7 +216,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
             Included(end_key) => {
                 let full_key = FullKey {
                     user_key: end_key.clone(),
-                    epoch_with_gap: EpochWithGap::new(0),
+                    epoch_with_gap: EpochWithGap::new_from_epoch(0),
                 };
                 self.iterator.seek(full_key.to_ref()).await?;
             }
@@ -247,7 +247,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
         };
         let full_key = FullKey {
             user_key,
-            epoch_with_gap: EpochWithGap::new(0),
+            epoch_with_gap: EpochWithGap::new_from_epoch(0),
         };
         self.iterator.seek(full_key).await?;
 
@@ -1024,7 +1024,7 @@ mod tests {
                 inserts.iter().map(|(time, value)| {
                     let full_key = FullKey {
                         user_key: key.clone(),
-                        epoch_with_gap: EpochWithGap::new(time.0),
+                        epoch_with_gap: EpochWithGap::new_from_epoch(time.0),
                     };
                     (full_key, value.clone())
                 })

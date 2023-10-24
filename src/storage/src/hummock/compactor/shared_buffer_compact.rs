@@ -194,7 +194,7 @@ async fn compact_shared_buffer(
                     key_split_append(
                         &FullKey {
                             user_key,
-                            epoch_with_gap: EpochWithGap::new(HummockEpoch::MAX),
+                            epoch_with_gap: EpochWithGap::new_from_epoch(HummockEpoch::MAX),
                         }
                         .encode()
                         .into(),
@@ -413,11 +413,11 @@ pub async fn merge_imms_in_memory(
             // a delete range in the merged imm which it belongs to. Therefore we need
             // to construct a corresponding delete key to represent this.
             versions.push((
-                EpochWithGap::new(earliest_range_delete_which_can_see_key),
+                EpochWithGap::new_from_epoch(earliest_range_delete_which_can_see_key),
                 HummockValue::Delete,
             ));
         }
-        versions.push((EpochWithGap::new(epoch), value));
+        versions.push((EpochWithGap::new_from_epoch(epoch), value));
     }
     // process the last key
     if !versions.is_empty() {

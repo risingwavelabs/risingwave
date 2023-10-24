@@ -271,7 +271,12 @@ pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
 pub struct EpochWithGap(u64);
 
 impl EpochWithGap {
-    pub fn new(epoch_with_gap: u64) -> Self {
+    pub fn new(epoch: u64, spill_offset: u64) -> Self {
+        let epoch_with_gap = epoch + spill_offset;
+        EpochWithGap(epoch_with_gap)
+    }
+
+    pub fn new_from_epoch(epoch_with_gap: u64) -> Self {
         EpochWithGap(epoch_with_gap)
     }
 

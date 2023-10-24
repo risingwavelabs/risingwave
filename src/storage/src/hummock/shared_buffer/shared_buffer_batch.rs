@@ -154,7 +154,7 @@ impl SharedBufferBatchInner {
             }
         }
         let kv_count = payload.len();
-        let epoch_with_gap = EpochWithGap::new(epoch + spill_offset);
+        let epoch_with_gap = EpochWithGap::new(epoch, spill_offset);
         let items = payload
             .into_iter()
             .map(|(k, v)| (k, vec![(epoch_with_gap, v)]))

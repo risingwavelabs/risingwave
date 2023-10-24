@@ -253,9 +253,9 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
         } else if earliest_delete_epoch < user_key_last_delete {
             user_key_last_delete = earliest_delete_epoch;
 
-            key.epoch_with_gap = EpochWithGap::new(earliest_delete_epoch);
+            key.epoch_with_gap = EpochWithGap::new_from_epoch(earliest_delete_epoch);
             b.add(key.to_ref(), HummockValue::Delete).await.unwrap();
-            key.epoch_with_gap = EpochWithGap::new(epoch);
+            key.epoch_with_gap = EpochWithGap::new_from_epoch(epoch);
         }
 
         b.add(key.to_ref(), value.as_slice()).await.unwrap();
@@ -347,7 +347,7 @@ pub fn test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
 pub fn test_key_of(idx: usize) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: test_user_key_of(idx),
-        epoch_with_gap: EpochWithGap::new(233),
+        epoch_with_gap: EpochWithGap::new_from_epoch(233),
     }
 }
 

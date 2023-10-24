@@ -217,7 +217,7 @@ pub mod sled {
                     table_id,
                     table_key: TableKey(Bytes::from(table_key.to_vec())),
                 },
-                epoch_with_gap: EpochWithGap::new(epoch),
+                epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
             };
 
             let left_full_key = to_full_key(&left_table_key[..]);
