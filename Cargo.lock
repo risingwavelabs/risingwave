@@ -11205,3 +11205,8 @@ dependencies = [
  "libc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "ordered-multimap"
+version = "0.7.0"
+source = "git+https://github.com/risingwavelabs/ordered-multimap-rs.git#c3151128a6f19ca778d1fd1b7e22fd0190fe9e51"

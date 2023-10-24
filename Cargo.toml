@@ -244,3 +244,4 @@ etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev =
 # Patch for coverage_attribute.
 # https://github.com/sgodwincs/dlv-list-rs/pull/19#issuecomment-1774786289
 dlv-list = { git = "https://github.com/sgodwincs/dlv-list-rs.git", rev = "5bbc5d0" }
+ordered-multimap = { git = "https://github.com/risingwavelabs/ordered-multimap-rs.git", dev = "c315112" }
