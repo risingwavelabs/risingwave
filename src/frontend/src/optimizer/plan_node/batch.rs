@@ -28,6 +28,7 @@ pub trait BatchPlanRef: PhysicalPlanRef {
     fn order(&self) -> &Order;
 }
 
+/// Prelude for batch plan nodes.
 pub mod prelude {
     pub use super::super::generic::{GenericPlanRef, PhysicalPlanRef};
     pub use super::super::Batch;

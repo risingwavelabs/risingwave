@@ -21,6 +21,7 @@ use super::*;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order};
 
+/// No extra fields for logical plan nodes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct NoExtra;
 
@@ -37,6 +38,8 @@ mod physical_common {
         pub dist: Distribution,
     }
 
+    /// A helper trait to reuse code for accessing the common physical fields of batch and stream
+    /// plan bases.
     pub trait GetPhysicalCommon {
         fn physical(&self) -> &PhysicalCommonExtra;
         fn physical_mut(&mut self) -> &mut PhysicalCommonExtra;
@@ -92,14 +95,17 @@ impl GetPhysicalCommon for BatchExtra {
     }
 }
 
-/// the common fields of all nodes, please make a field named `base` in
-/// every planNode and correctly value it when construct the planNode.
+/// The common fields of all plan nodes with different conventions.
+///
+/// Please make a field named `base` in every planNode and correctly value
+/// it when construct the planNode.
 ///
 /// All fields are intentionally made private and immutable, as they should
 /// normally be the same as the given [`GenericPlanNode`] when constructing.
 ///
 /// - To access them, use traits including [`GenericPlanRef`],
-///   [`PhysicalPlanRef`], [`StreamPlanRef`] and [`BatchPlanRef`].
+///   [`PhysicalPlanRef`], [`StreamPlanRef`] and [`BatchPlanRef`] with
+///   compile-time checks.
 /// - To mutate them, use methods like `new_*` or `clone_with_*`.
 #[derive(Educe)]
 #[educe(PartialEq, Eq, Hash, Clone, Debug)]
@@ -118,6 +124,7 @@ pub struct PlanBase<C: ConventionMarker> {
     stream_key: Option<Vec<usize>>,
     functional_dependency: FunctionalDependencySet,
 
+    /// Extra fields for different conventions.
     extra: C::Extra,
 }
 
@@ -309,6 +316,11 @@ impl<C: ConventionMarker> PlanBase<C> {
     }
 }
 
+/// Reference to [`PlanBase`] with erased conventions.
+///
+/// Used for accessing fields on a type-erased plan node. All traits of [`GenericPlanRef`],
+/// [`PhysicalPlanRef`], [`StreamPlanRef`] and [`BatchPlanRef`] are implemented for this type,
+/// so runtime checks are required when calling methods on it.
 #[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, enum_as_inner::EnumAsInner)]
 pub enum PlanBaseRef<'a> {
     Logical(&'a PlanBase<Logical>),
@@ -317,6 +329,7 @@ pub enum PlanBaseRef<'a> {
 }
 
 impl PlanBaseRef<'_> {
+    /// Get the convention of this plan base.
     pub fn convention(self) -> Convention {
         match self {
             PlanBaseRef::Logical(_) => Convention::Logical,
@@ -345,9 +358,9 @@ macro_rules! dispatch_plan_base {
 /// For example, callers writing `GenericPlanRef::schema(&foo.plan_base())` will lead to a
 /// borrow checker error, as it borrows [`PlanBaseRef`] again, which is already a reference.
 ///
-/// As a workaround, we directly let the getters below take the ownership of [`PlanBaseRef`], when
-/// callers write `foo.plan_base().schema()`, the compiler will prefer these ones over the ones
-/// defined in traits like [`GenericPlanRef`].
+/// As a workaround, we directly let the getters below take the ownership of [`PlanBaseRef`],
+/// which is `Copy`. When callers write `foo.plan_base().schema()`, the compiler will prefer
+/// these ones over the ones defined in traits like [`GenericPlanRef`].
 impl<'a> PlanBaseRef<'a> {
     pub(super) fn schema(self) -> &'a Schema {
         dispatch_plan_base!(self, [Logical, Stream, Batch], GenericPlanRef::schema)

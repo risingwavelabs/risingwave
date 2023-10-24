@@ -51,18 +51,18 @@ use self::stream::StreamPlanRef;
 use self::utils::Distill;
 use super::property::{Distribution, FunctionalDependencySet, Order};
 
-pub trait PlanNodeMeta {
-    fn node_type(&self) -> PlanNodeType;
-    fn plan_base(&self) -> PlanBaseRef<'_>;
-    fn convention(&self) -> Convention;
-}
-
+/// A marker trait for different conventions, used for enforcing type safety.
+///
+/// Implementors are [`Logical`], [`Batch`], and [`Stream`].
 pub trait ConventionMarker: 'static + Sized {
+    /// The extra fields in the [`PlanBase`] of this convention.
     type Extra: 'static + Eq + Hash + Clone + Debug;
 
+    /// Get the [`Convention`] enum value.
     fn value() -> Convention;
 }
 
+/// The marker for logical convention.
 pub struct Logical;
 impl ConventionMarker for Logical {
     type Extra = plan_base::NoExtra;
@@ -72,6 +72,7 @@ impl ConventionMarker for Logical {
     }
 }
 
+/// The marker for batch convention.
 pub struct Batch;
 impl ConventionMarker for Batch {
     type Extra = plan_base::BatchExtra;
@@ -81,6 +82,7 @@ impl ConventionMarker for Batch {
     }
 }
 
+/// The marker for stream convention.
 pub struct Stream;
 impl ConventionMarker for Stream {
     type Extra = plan_base::StreamExtra;
@@ -90,31 +92,54 @@ impl ConventionMarker for Stream {
     }
 }
 
-pub trait StaticPlanNodeMeta {
+/// The trait for accessing the meta data and [`PlanBase`] for plan nodes.
+pub trait PlanNodeMeta {
     type Convention: ConventionMarker;
+
     const NODE_TYPE: PlanNodeType;
 
+    /// Get the reference to the [`PlanBase`] with corresponding convention.
     fn plan_base(&self) -> &PlanBase<Self::Convention>;
 
+    /// Get the reference to the [`PlanBase`] with erased convention.
+    ///
+    /// This is mainly used for implementing [`AnyPlanNodeMeta`]. Callers should prefer
+    /// [`PlanNodeMeta::plan_base`] instead as it is more type-safe.
     fn plan_base_ref(&self) -> PlanBaseRef<'_>;
 }
 
-impl<P> PlanNodeMeta for P
-where
-    P: StaticPlanNodeMeta,
-{
-    fn node_type(&self) -> PlanNodeType {
-        P::NODE_TYPE
+// Intentionally made private.
+mod plan_node_meta {
+    use super::*;
+
+    /// The object-safe version of [`PlanNodeMeta`], used as a super trait of [`PlanNode`].
+    ///
+    /// Check [`PlanNodeMeta`] for more details.
+    pub trait AnyPlanNodeMeta {
+        fn node_type(&self) -> PlanNodeType;
+        fn plan_base(&self) -> PlanBaseRef<'_>;
+        fn convention(&self) -> Convention;
     }
 
-    fn plan_base(&self) -> PlanBaseRef<'_> {
-        StaticPlanNodeMeta::plan_base_ref(self)
-    }
+    /// Implement [`AnyPlanNodeMeta`] for all [`PlanNodeMeta`].
+    impl<P> AnyPlanNodeMeta for P
+    where
+        P: PlanNodeMeta,
+    {
+        fn node_type(&self) -> PlanNodeType {
+            P::NODE_TYPE
+        }
 
-    fn convention(&self) -> Convention {
-        P::Convention::value()
+        fn plan_base(&self) -> PlanBaseRef<'_> {
+            PlanNodeMeta::plan_base_ref(self)
+        }
+
+        fn convention(&self) -> Convention {
+            P::Convention::value()
+        }
     }
 }
+use plan_node_meta::AnyPlanNodeMeta;
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treat all node as
 /// `dyn PlanNode`
@@ -136,7 +161,7 @@ pub trait PlanNode:
     + ToPb
     + ToLocalBatch
     + PredicatePushdown
-    + PlanNodeMeta
+    + AnyPlanNodeMeta
 {
 }
 
@@ -477,7 +502,8 @@ impl PlanTreeNode for PlanRef {
     }
 }
 
-impl PlanNodeMeta for PlanRef {
+/// Implement again for the `dyn` newtype wrapper.
+impl AnyPlanNodeMeta for PlanRef {
     fn node_type(&self) -> PlanNodeType {
         self.0.node_type()
     }
@@ -491,6 +517,8 @@ impl PlanNodeMeta for PlanRef {
     }
 }
 
+/// Allow access to all fields defined in [`GenericPlanRef`] for the type-erased plan node.
+// TODO: may also implement on `dyn PlanNode` directly.
 impl GenericPlanRef for PlanRef {
     fn id(&self) -> PlanNodeId {
         self.plan_base().id()
@@ -513,12 +541,16 @@ impl GenericPlanRef for PlanRef {
     }
 }
 
+/// Allow access to all fields defined in [`PhysicalPlanRef`] for the type-erased plan node.
+// TODO: may also implement on `dyn PlanNode` directly.
 impl PhysicalPlanRef for PlanRef {
     fn distribution(&self) -> &Distribution {
         self.plan_base().distribution()
     }
 }
 
+/// Allow access to all fields defined in [`StreamPlanRef`] for the type-erased plan node.
+// TODO: may also implement on `dyn PlanNode` directly.
 impl StreamPlanRef for PlanRef {
     fn append_only(&self) -> bool {
         self.plan_base().append_only()
@@ -533,6 +565,8 @@ impl StreamPlanRef for PlanRef {
     }
 }
 
+/// Allow access to all fields defined in [`BatchPlanRef`] for the type-erased plan node.
+// TODO: may also implement on `dyn PlanNode` directly.
 impl BatchPlanRef for PlanRef {
     fn order(&self) -> &Order {
         self.plan_base().order()
@@ -592,7 +626,8 @@ pub(crate) fn pretty_config() -> PrettyConfig {
     }
 }
 
-// TODO: remove this direct implementation always require `GenericPlanRef`.
+/// Directly implement methods for [`PlanNode`] to access the fields defined in [`GenericPlanRef`].
+// TODO: always require `GenericPlanRef` to make it more consistent.
 impl dyn PlanNode {
     pub fn id(&self) -> PlanNodeId {
         self.plan_base().id()
@@ -1101,7 +1136,7 @@ macro_rules! impl_plan_node_meta {
                 $( [<$convention $name>] ),*
             }
 
-            $(impl StaticPlanNodeMeta for [<$convention $name>] {
+            $(impl PlanNodeMeta for [<$convention $name>] {
                 type Convention = $convention;
                 const NODE_TYPE: PlanNodeType = PlanNodeType::[<$convention $name>];
 
