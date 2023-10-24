@@ -16,6 +16,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::LimitNode;
 
+use super::generic::PhysicalPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
@@ -32,7 +33,7 @@ pub struct BatchLimit {
 
 impl BatchLimit {
     pub fn new(core: generic::Limit<PlanRef>) -> Self {
-        let base = PlanBase::new_batch_from_logical(
+        let base = PlanBase::new_batch_with_core(
             &core,
             core.input.distribution().clone(),
             core.input.order().clone(),
