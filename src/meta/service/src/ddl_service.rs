@@ -437,7 +437,11 @@ impl DdlService for DdlServiceImpl {
                     CdcSourceType::from(connector.as_str()),
                     CdcSourceType::Mysql
                 ) {
-                    let server_id = self.gen_unique_id_u64::<{ IdCategory::MySqlCdc }>().await?;
+                    let server_id = self
+                        .env
+                        .id_gen_manager()
+                        .generate::<{ IdCategory::MySqlCdc }>()
+                        .await?;
                     fill_cdc_mysql_server_id(server_id, &mut fragment_graph);
                 }
             }
@@ -750,11 +754,6 @@ impl DdlService for DdlServiceImpl {
 impl DdlServiceImpl {
     async fn gen_unique_id<const C: IdCategoryType>(&self) -> MetaResult<u32> {
         let id = self.env.id_gen_manager().generate::<C>().await? as u32;
-        Ok(id)
-    }
-
-    async fn gen_unique_id_u64<const C: IdCategoryType>(&self) -> MetaResult<u64> {
-        let id = self.env.id_gen_manager().generate::<C>().await?;
         Ok(id)
     }
 
