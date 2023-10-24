@@ -115,8 +115,11 @@ pub struct PartialObject {
     pub database_id: Option<DatabaseId>,
 }
 
-/// List all objects that are using the given one. It runs a recursive CTE to find all the dependencies.
-pub async fn list_used_by<C>(obj_id: ObjectId, db: &C) -> MetaResult<Vec<PartialObject>>
+/// List all objects that are using the given one in a cascade way. It runs a recursive CTE to find all the dependencies.
+pub async fn get_referring_objects_cascade<C>(
+    obj_id: ObjectId,
+    db: &C,
+) -> MetaResult<Vec<PartialObject>>
 where
     C: ConnectionTrait,
 {
@@ -316,6 +319,24 @@ where
         )));
     }
     Ok(())
+}
+
+/// List all objects that are using the given one.
+pub async fn get_referring_objects<C>(object_id: ObjectId, db: &C) -> MetaResult<Vec<PartialObject>>
+where
+    C: ConnectionTrait,
+{
+    let objs = ObjectDependency::find()
+        .filter(object_dependency::Column::Oid.eq(object_id))
+        .join(
+            JoinType::InnerJoin,
+            object_dependency::Relation::Object1.def(),
+        )
+        .into_partial_model()
+        .all(db)
+        .await?;
+
+    Ok(objs)
 }
 
 /// `ensure_schema_empty` ensures that the schema is empty, used by `DROP SCHEMA`.

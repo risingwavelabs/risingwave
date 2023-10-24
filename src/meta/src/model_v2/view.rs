@@ -25,7 +25,7 @@ pub struct Model {
     pub view_id: ViewId,
     pub name: String,
     pub properties: Property,
-    pub sql: String,
+    pub definition: String,
     pub columns: FieldArray,
 }
 
@@ -55,7 +55,7 @@ impl From<PbView> for ActiveModel {
             view_id: ActiveValue::Set(view.id as _),
             name: ActiveValue::Set(view.name),
             properties: ActiveValue::Set(Property(view.properties)),
-            sql: ActiveValue::Set(view.sql),
+            definition: ActiveValue::Set(view.sql),
             columns: ActiveValue::Set(FieldArray(view.columns)),
         }
     }

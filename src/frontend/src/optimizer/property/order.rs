@@ -92,7 +92,7 @@ impl Order {
         }
     }
 
-    pub fn enforce(&self, plan: PlanRef) -> PlanRef {
+    fn enforce(&self, plan: PlanRef) -> PlanRef {
         assert_eq!(plan.convention(), Convention::Batch);
         BatchSort::new(plan, self.clone()).into()
     }

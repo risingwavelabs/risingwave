@@ -16,6 +16,7 @@ use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::TableVersionId;
 use risingwave_common::error::Result;
 
+use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{
     gen_filter_and_pushdown, generic, BatchInsert, ColPrunable, ExprRewritable, LogicalProject,
@@ -90,7 +91,9 @@ impl_plan_tree_node_for_unary! {LogicalInsert}
 
 impl Distill for LogicalInsert {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let vec = self.core.fields_pretty(self.base.ctx.is_explain_verbose());
+        let vec = self
+            .core
+            .fields_pretty(self.base.ctx().is_explain_verbose());
         childless_record("LogicalInsert", vec)
     }
 }
@@ -142,9 +145,9 @@ impl PredicatePushdown for LogicalInsert {
 impl ToBatch for LogicalInsert {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
-        let mut logical = self.core.clone();
-        logical.input = new_input;
-        Ok(BatchInsert::new(logical).into())
+        let mut core = self.core.clone();
+        core.input = new_input;
+        Ok(BatchInsert::new(core).into())
     }
 }
 

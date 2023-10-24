@@ -62,6 +62,7 @@ use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServ
 use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::user_service_server::UserServiceServer;
 use risingwave_rpc_client::ComputeClientPool;
+use sea_orm::{ConnectionTrait, DbBackend};
 use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
 use tokio::sync::watch;
 use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
@@ -79,6 +80,9 @@ use crate::manager::{
 };
 use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election::etcd::EtcdElectionClient;
+use crate::rpc::election::sql::{
+    MySqlDriver, PostgresDriver, SqlBackendElectionClient, SqliteDriver,
+};
 use crate::rpc::metrics::{
     start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
 };
@@ -119,6 +123,27 @@ pub async fn rpc_serve(
         }
         None => None,
     };
+
+    let mut election_client = if let Some(sql_store) = &meta_store_sql {
+        let id = address_info.advertise_addr.clone();
+        let conn = sql_store.conn.clone();
+        let election_client: ElectionClientRef = match conn.get_database_backend() {
+            DbBackend::Sqlite => {
+                Arc::new(SqlBackendElectionClient::new(id, SqliteDriver::new(conn)))
+            }
+            DbBackend::Postgres => {
+                Arc::new(SqlBackendElectionClient::new(id, PostgresDriver::new(conn)))
+            }
+            DbBackend::MySql => Arc::new(SqlBackendElectionClient::new(id, MySqlDriver::new(conn))),
+        };
+
+        election_client.init().await?;
+
+        Some(election_client)
+    } else {
+        None
+    };
+
     match meta_store_backend {
         MetaStoreBackend::Etcd {
             endpoints,
@@ -136,25 +161,27 @@ pub async fn rpc_serve(
                     .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
             let meta_store = EtcdMetaStore::new(client).into_ref();
 
-            // `with_keep_alive` option will break the long connection in election client.
-            let mut election_options = ConnectOptions::default();
-            if let Some((username, password)) = &credentials {
-                election_options = election_options.with_user(username, password)
-            }
+            if election_client.is_none() {
+                // `with_keep_alive` option will break the long connection in election client.
+                let mut election_options = ConnectOptions::default();
+                if let Some((username, password)) = &credentials {
+                    election_options = election_options.with_user(username, password)
+                }
 
-            let election_client = Arc::new(
-                EtcdElectionClient::new(
-                    endpoints,
-                    Some(election_options),
-                    auth_enabled,
-                    address_info.advertise_addr.clone(),
-                )
-                .await?,
-            );
+                election_client = Some(Arc::new(
+                    EtcdElectionClient::new(
+                        endpoints,
+                        Some(election_options),
+                        auth_enabled,
+                        address_info.advertise_addr.clone(),
+                    )
+                    .await?,
+                ));
+            }
 
             rpc_serve_with_store(
                 meta_store,
-                Some(election_client),
+                election_client,
                 meta_store_sql,
                 address_info,
                 max_cluster_heartbeat_interval,
@@ -167,7 +194,7 @@ pub async fn rpc_serve(
             let meta_store = MemStore::new().into_ref();
             rpc_serve_with_store(
                 meta_store,
-                None,
+                election_client,
                 meta_store_sql,
                 address_info,
                 max_cluster_heartbeat_interval,

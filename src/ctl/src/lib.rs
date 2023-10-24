@@ -245,6 +245,10 @@ enum HummockCommands {
         #[clap(short, long = "verbose", default_value_t = false)]
         verbose: bool,
     },
+    GetCompactionScore {
+        #[clap(long)]
+        compaction_group_id: u64,
+    },
     /// Validate the current HummockVersion.
     ValidateVersion,
     /// Rebuild table stats
@@ -607,6 +611,11 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Hummock(HummockCommands::ListCompactionStatus { verbose }) => {
             cmd_impl::hummock::list_compaction_status(context, verbose).await?;
+        }
+        Commands::Hummock(HummockCommands::GetCompactionScore {
+            compaction_group_id,
+        }) => {
+            cmd_impl::hummock::get_compaction_score(context, compaction_group_id).await?;
         }
         Commands::Hummock(HummockCommands::ValidateVersion) => {
             cmd_impl::hummock::validate_version(context).await?;
