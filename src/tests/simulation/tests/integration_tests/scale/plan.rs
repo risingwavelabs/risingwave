@@ -39,9 +39,7 @@ async fn test_resize_normal() -> Result<()> {
         .await?;
 
     let join_fragment = cluster
-        .locate_one_fragment([
-            identity_contains("hashJoin"),
-        ])
+        .locate_one_fragment([identity_contains("hashJoin")])
         .await?;
 
     let join_fragment_id = join_fragment.inner.fragment_id;
@@ -269,7 +267,7 @@ async fn test_resize_no_shuffle() -> Result<()> {
     session
         .run(
             "create materialized view mv7 as select mv1.v as mv1v, mv5.v as mv5v from mv1
-join mv5 on mv1.v = mv5.v;",
+join mv5 on mv1.v = mv5.v limit 1;",
         )
         .await?;
 
@@ -315,6 +313,7 @@ join mv5 on mv1.v = mv5.v;",
     let top_materialize_fragment = cluster
         .locate_one_fragment([
             identity_contains("materialize"),
+            no_identity_contains("topn"),
             no_identity_contains("chain"),
             no_identity_contains("hashJoin"),
         ])
