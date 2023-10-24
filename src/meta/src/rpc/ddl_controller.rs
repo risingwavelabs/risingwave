@@ -1098,8 +1098,13 @@ impl DdlController {
     }
 
     pub async fn wait(&self) {
-        while self.catalog_manager.list_creating_background_mvs() != 0 {
-            sleep(Duration::from_secs(1))
+        while !self
+            .catalog_manager
+            .list_creating_background_mvs()
+            .await
+            .is_empty()
+        {
+            sleep(Duration::from_secs(1)).await;
         }
     }
 }

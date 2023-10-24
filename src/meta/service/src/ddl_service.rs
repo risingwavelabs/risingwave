@@ -29,7 +29,6 @@ use risingwave_pb::catalog::{connection, Connection, CreateType, PbSource, PbTab
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
-use risingwave_pb::meta::{WaitRequest, WaitResponse};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use tonic::{Request, Response, Status};

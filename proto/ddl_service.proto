@@ -314,6 +314,12 @@ message GetTablesResponse {
   map<uint32, catalog.Table> tables = 1;
 }
 
+message WaitRequest {
+}
+
+message WaitResponse {
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -343,4 +349,5 @@ service DdlService {
   rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
   rpc DropConnection(DropConnectionRequest) returns (DropConnectionResponse);
   rpc GetTables(GetTablesRequest) returns (GetTablesResponse);
+  rpc Wait(WaitRequest) returns (WaitResponse);
 }

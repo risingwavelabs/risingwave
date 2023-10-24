@@ -130,12 +130,6 @@ message FlushResponse {
   hummock.HummockSnapshot snapshot = 2;
 }
 
-message WaitRequest {
-}
-
-message WaitResponse {
-}
-
 // The reason why the data sources in the cluster are paused.
 enum PausedReason {
   PAUSED_REASON_UNSPECIFIED = 0;

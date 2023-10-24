@@ -420,7 +420,7 @@ pub async fn handle(
             }
         }
         Statement::Flush => flush::handle_flush(handler_args).await,
-        Statement::Wait => {}
+        Statement::Wait => wait::handle_wait(handler_args).await,
         Statement::SetVariable {
             local: _,
             variable,
