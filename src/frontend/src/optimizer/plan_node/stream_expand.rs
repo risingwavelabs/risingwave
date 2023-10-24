@@ -25,7 +25,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamExpand {
-    pub base: PlanBase<super::Stream>,
+    pub base: PlanBase<Stream>,
     core: generic::Expand<PlanRef>,
 }
 

@@ -18,7 +18,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::values_node::ExprTuple;
 use risingwave_pb::stream_plan::ValuesNode;
 
-use super::generic::GenericPlanRef;
+use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, LogicalValues, PlanBase, StreamNode};
 use crate::expr::{Expr, ExprImpl};
@@ -28,7 +28,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// `StreamValues` implements `LogicalValues.to_stream()`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamValues {
-    pub base: PlanBase<super::Stream>,
+    pub base: PlanBase<Stream>,
     logical: LogicalValues,
 }
 

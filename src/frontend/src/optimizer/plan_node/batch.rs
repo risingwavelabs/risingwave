@@ -30,5 +30,6 @@ pub trait BatchPlanRef: PhysicalPlanRef {
 
 pub mod prelude {
     pub use super::super::generic::{GenericPlanRef, PhysicalPlanRef};
+    pub use super::super::Batch;
     pub use super::BatchPlanRef;
 }

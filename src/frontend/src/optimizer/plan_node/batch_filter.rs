@@ -26,7 +26,7 @@ use crate::utils::Condition;
 /// `BatchFilter` implements [`super::LogicalFilter`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchFilter {
-    pub base: PlanBase<super::Batch>,
+    pub base: PlanBase<Batch>,
     core: generic::Filter<PlanRef>,
 }
 

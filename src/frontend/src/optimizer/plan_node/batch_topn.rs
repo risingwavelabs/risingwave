@@ -29,7 +29,7 @@ use crate::optimizer::property::{Order, RequiredDist};
 /// `BatchTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchTopN {
-    pub base: PlanBase<super::Batch>,
+    pub base: PlanBase<Batch>,
     core: generic::TopN<PlanRef>,
 }
 

@@ -35,7 +35,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// inputs to be indexes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDeltaJoin {
-    pub base: PlanBase<super::Stream>,
+    pub base: PlanBase<Stream>,
     core: generic::Join<PlanRef>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and

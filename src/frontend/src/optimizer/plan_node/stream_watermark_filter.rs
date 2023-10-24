@@ -31,7 +31,7 @@ use crate::{TableCatalog, WithOptions};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamWatermarkFilter {
-    pub base: PlanBase<super::Stream>,
+    pub base: PlanBase<Stream>,
     input: PlanRef,
     watermark_descs: Vec<WatermarkDesc>,
 }
@@ -56,7 +56,7 @@ impl StreamWatermarkFilter {
     }
 
     fn with_base(
-        base: PlanBase<super::Stream>,
+        base: PlanBase<Stream>,
         input: PlanRef,
         watermark_descs: Vec<WatermarkDesc>,
     ) -> Self {

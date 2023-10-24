@@ -34,7 +34,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchLookupJoin {
-    pub base: PlanBase<super::Batch>,
+    pub base: PlanBase<Batch>,
     core: generic::Join<PlanRef>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and

@@ -29,14 +29,14 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 /// `BatchInsert` implements [`super::LogicalInsert`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchInsert {
-    pub base: PlanBase<super::Batch>,
+    pub base: PlanBase<Batch>,
     pub core: generic::Insert<PlanRef>,
 }
 
 impl BatchInsert {
     pub fn new(core: generic::Insert<PlanRef>) -> Self {
         assert_eq!(core.input.distribution(), &Distribution::Single);
-        let base: PlanBase<super::Batch> =
+        let base: PlanBase<Batch> =
             PlanBase::new_batch_with_core(&core, core.input.distribution().clone(), Order::any());
 
         BatchInsert { base, core }

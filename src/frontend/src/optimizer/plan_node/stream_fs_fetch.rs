@@ -20,9 +20,9 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbStreamFsFetch, StreamFsFetchNode};
 
+use super::stream::prelude::*;
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary};
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::{childless_record, Distill};
 use crate::optimizer::plan_node::{generic, ExprRewritable, StreamNode};
 use crate::optimizer::property::Distribution;
@@ -30,7 +30,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamFsFetch {
-    pub base: PlanBase<super::Stream>,
+    pub base: PlanBase<Stream>,
     input: PlanRef,
     core: generic::Source,
 }

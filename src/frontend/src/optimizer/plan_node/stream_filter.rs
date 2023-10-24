@@ -26,7 +26,7 @@ use crate::utils::Condition;
 /// `StreamFilter` implements [`super::LogicalFilter`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamFilter {
-    pub base: PlanBase<super::Stream>,
+    pub base: PlanBase<Stream>,
     core: generic::Filter<PlanRef>,
 }
 

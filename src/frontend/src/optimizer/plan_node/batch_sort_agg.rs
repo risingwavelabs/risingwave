@@ -28,7 +28,7 @@ use crate::utils::{ColIndexMappingRewriteExt, IndexSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSortAgg {
-    pub base: PlanBase<super::Batch>,
+    pub base: PlanBase<Batch>,
     core: generic::Agg<PlanRef>,
     input_order: Order,
 }

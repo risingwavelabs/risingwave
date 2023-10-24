@@ -29,7 +29,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// [`StreamHopWindow`] represents a hop window table function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHopWindow {
-    pub base: PlanBase<super::Stream>,
+    pub base: PlanBase<Stream>,
     core: generic::HopWindow<PlanRef>,
     window_start_exprs: Vec<ExprImpl>,
     window_end_exprs: Vec<ExprImpl>,

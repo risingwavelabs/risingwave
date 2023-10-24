@@ -20,10 +20,10 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 
+use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, StreamNode};
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -31,7 +31,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSource {
-    pub base: PlanBase<super::Stream>,
+    pub base: PlanBase<Stream>,
     pub(crate) core: generic::Source,
 }
 

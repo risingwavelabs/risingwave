@@ -20,8 +20,7 @@ use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::{GenericPlanRef, PhysicalPlanRef};
-use super::stream::StreamPlanRef;
+use super::stream::prelude::*;
 use super::utils::{childless_record, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -29,7 +28,7 @@ use crate::TableCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamEowcSort {
-    pub base: PlanBase<super::Stream>,
+    pub base: PlanBase<Stream>,
 
     input: PlanRef,
     sort_column_index: usize,

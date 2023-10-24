@@ -31,7 +31,7 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 /// `BatchUpdate` implements [`super::LogicalUpdate`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchUpdate {
-    pub base: PlanBase<super::Batch>,
+    pub base: PlanBase<Batch>,
     pub core: generic::Update<PlanRef>,
 }
 

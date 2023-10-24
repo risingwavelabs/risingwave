@@ -24,13 +24,11 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 
-use super::generic::PhysicalPlanRef;
+use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};
-use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -41,7 +39,7 @@ use crate::{Explain, TableCatalog};
 /// creation request.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTableScan {
-    pub base: PlanBase<super::Stream>,
+    pub base: PlanBase<Stream>,
     core: generic::Scan,
     batch_plan_id: PlanNodeId,
     chain_type: ChainType,

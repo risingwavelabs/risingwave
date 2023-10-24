@@ -25,7 +25,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDml {
-    pub base: PlanBase<super::Stream>,
+    pub base: PlanBase<Stream>,
     input: PlanRef,
     column_descs: Vec<ColumnDesc>,
 }

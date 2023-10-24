@@ -24,8 +24,7 @@ use risingwave_pb::batch_plan::row_seq_scan_node::ChunkSize;
 use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
 use risingwave_pb::plan_common::PbColumnDesc;
 
-use super::batch::BatchPlanRef;
-use super::generic::{GenericPlanRef, PhysicalPlanRef};
+use super::batch::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
 use crate::catalog::ColumnId;
@@ -36,7 +35,7 @@ use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSeqScan {
-    pub base: PlanBase<super::Batch>,
+    pub base: PlanBase<Batch>,
     core: generic::Scan,
     scan_ranges: Vec<ScanRange>,
 }

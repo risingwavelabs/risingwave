@@ -19,7 +19,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::NowNode;
 
-use super::generic::{GenericPlanRef, PhysicalPlanRef};
+use super::stream::prelude::*;
 use super::utils::{childless_record, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, LogicalNow, PlanBase, StreamNode};
 use crate::optimizer::plan_node::utils::column_names_pretty;
@@ -29,7 +29,7 @@ use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamNow {
-    pub base: PlanBase<super::Stream>,
+    pub base: PlanBase<Stream>,
 }
 
 impl StreamNow {

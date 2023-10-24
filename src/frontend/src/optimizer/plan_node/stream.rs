@@ -33,5 +33,6 @@ pub trait StreamPlanRef: PhysicalPlanRef {
 
 pub mod prelude {
     pub use super::super::generic::{GenericPlanRef, PhysicalPlanRef};
+    pub use super::super::Stream;
     pub use super::StreamPlanRef;
 }

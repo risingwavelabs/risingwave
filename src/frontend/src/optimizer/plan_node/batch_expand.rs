@@ -29,7 +29,7 @@ use crate::optimizer::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchExpand {
-    pub base: PlanBase<super::Batch>,
+    pub base: PlanBase<Batch>,
     core: generic::Expand<PlanRef>,
 }
 

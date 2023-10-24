@@ -36,7 +36,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// get output rows.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchHashJoin {
-    pub base: PlanBase<super::Batch>,
+    pub base: PlanBase<Batch>,
     core: generic::Join<PlanRef>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and

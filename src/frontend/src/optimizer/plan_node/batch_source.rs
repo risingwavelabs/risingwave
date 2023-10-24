@@ -19,7 +19,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
 
-use super::generic::GenericPlanRef;
+use super::batch::prelude::*;
 use super::utils::{childless_record, column_names_pretty, Distill};
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch,
@@ -30,7 +30,7 @@ use crate::optimizer::property::{Distribution, Order};
 /// [`BatchSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSource {
-    pub base: PlanBase<super::Batch>,
+    pub base: PlanBase<Batch>,
     core: generic::Source,
 }
 
