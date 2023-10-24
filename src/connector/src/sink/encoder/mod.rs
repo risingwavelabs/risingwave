@@ -23,6 +23,7 @@ use crate::sink::Result;
 mod avro;
 mod json;
 mod proto;
+pub mod template;
 
 pub use avro::AvroEncoder;
 pub use json::JsonEncoder;

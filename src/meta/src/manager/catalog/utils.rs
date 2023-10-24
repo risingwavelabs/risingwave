@@ -401,7 +401,7 @@ impl ReplaceTableExprRewriter {
 
 #[cfg(test)]
 mod tests {
-    use crate::manager::catalog::utils::{alter_relation_rename, alter_relation_rename_refs};
+    use super::*;
 
     #[test]
     fn test_alter_table_rename() {

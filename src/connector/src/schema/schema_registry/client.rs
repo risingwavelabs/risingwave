@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -23,8 +23,25 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use serde::de::DeserializeOwned;
 
-use crate::parser::schema_registry::util::*;
-use crate::parser::SchemaRegistryAuth;
+use super::util::*;
+
+#[derive(Debug, Clone, Default)]
+pub struct SchemaRegistryAuth {
+    username: Option<String>,
+    password: Option<String>,
+}
+
+impl From<&HashMap<String, String>> for SchemaRegistryAuth {
+    fn from(props: &HashMap<String, String>) -> Self {
+        const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
+        const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
+
+        SchemaRegistryAuth {
+            username: props.get(SCHEMA_REGISTRY_USERNAME).cloned(),
+            password: props.get(SCHEMA_REGISTRY_PASSWORD).cloned(),
+        }
+    }
+}
 
 /// An client for communication with schema registry
 #[derive(Debug)]

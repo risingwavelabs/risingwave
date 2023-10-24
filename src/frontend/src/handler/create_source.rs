@@ -28,9 +28,10 @@ use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolErro
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
-    name_strategy_from_str, schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig,
-    ProtobufParserConfig, SpecificParserConfig,
+    schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
+    SpecificParserConfig,
 };
+use risingwave_connector::schema::schema_registry::name_strategy_from_str;
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CITUS_CDC_CONNECTOR,
     MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,

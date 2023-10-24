@@ -14,7 +14,7 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::model_v2::{I32Array, IndexId, TableId};
+use crate::model_v2::{ExprNodeArray, I32Array, IndexId, JobStatus, TableId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "index")]
@@ -24,8 +24,9 @@ pub struct Model {
     pub name: String,
     pub index_table_id: TableId,
     pub primary_table_id: TableId,
-    pub index_items: Option<Json>,
-    pub original_columns: Option<I32Array>,
+    pub index_items: ExprNodeArray,
+    pub original_columns: I32Array,
+    pub job_status: JobStatus,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
