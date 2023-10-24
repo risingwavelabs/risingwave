@@ -14,23 +14,27 @@
 
 use sea_orm::entity::prelude::*;
 
+use crate::model_v2::{
+    ColumnCatalogArray, ConnectionId, I32Array, Property, SourceId, StreamSourceInfo, TableId,
+    WatermarkDescArray,
+};
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "source")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub source_id: i32,
+    pub source_id: SourceId,
     pub name: String,
-    pub schema_id: i32,
-    pub database_id: i32,
-    pub row_id_index: Option<String>,
-    pub columns: Option<Json>,
-    pub pk_column_ids: Option<Json>,
-    pub properties: Option<Json>,
-    pub definition: Option<String>,
-    pub source_info: Option<Json>,
-    pub watermark_descs: Option<Json>,
-    pub optional_associated_table_id: Option<i32>,
-    pub connection_id: Option<i32>,
+    pub row_id_index: Option<u32>,
+    pub columns: ColumnCatalogArray,
+    pub pk_column_ids: I32Array,
+    pub properties: Property,
+    pub definition: String,
+    pub source_info: Option<StreamSourceInfo>,
+    pub watermark_descs: WatermarkDescArray,
+    pub optional_associated_table_id: Option<TableId>,
+    pub connection_id: Option<ConnectionId>,
+    pub version: u64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -44,14 +48,6 @@ pub enum Relation {
     )]
     Connection,
     #[sea_orm(
-        belongs_to = "super::database::Entity",
-        from = "Column::DatabaseId",
-        to = "super::database::Column::DatabaseId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Database,
-    #[sea_orm(
         belongs_to = "super::object::Entity",
         from = "Column::SourceId",
         to = "super::object::Column::Oid",
@@ -59,14 +55,6 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Object,
-    #[sea_orm(
-        belongs_to = "super::schema::Entity",
-        from = "Column::SchemaId",
-        to = "super::schema::Column::SchemaId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Schema,
     #[sea_orm(has_many = "super::table::Entity")]
     Table,
 }
@@ -77,21 +65,9 @@ impl Related<super::connection::Entity> for Entity {
     }
 }
 
-impl Related<super::database::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Database.def()
-    }
-}
-
 impl Related<super::object::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Object.def()
-    }
-}
-
-impl Related<super::schema::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Schema.def()
     }
 }
 

@@ -37,7 +37,7 @@ risingwave_ctl = { workspace = true }
 risingwave_e2e_extended_mode_test = { path = "../e2e_extended_mode" }
 risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
-risingwave_meta = { workspace = true }
+risingwave_meta_node = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_sqlparser = { workspace = true }

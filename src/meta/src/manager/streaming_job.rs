@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use risingwave_common::catalog::TableVersionId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::catalog::{Index, Sink, Source, Table};
+use risingwave_pb::catalog::{CreateType, Index, Sink, Source, Table};
 
 use crate::model::FragmentId;
 
@@ -31,7 +31,7 @@ pub enum StreamingJob {
 }
 
 impl StreamingJob {
-    pub(crate) fn mark_created(&mut self) {
+    pub fn mark_created(&mut self) {
         let created_at_epoch = Some(Epoch::now().0);
         match self {
             StreamingJob::MaterializedView(table) => table.created_at_epoch = created_at_epoch,
@@ -48,7 +48,7 @@ impl StreamingJob {
         }
     }
 
-    pub(crate) fn mark_initialized(&mut self) {
+    pub fn mark_initialized(&mut self) {
         let initialized_at_epoch = Some(Epoch::now().0);
         match self {
             StreamingJob::MaterializedView(table) => {
@@ -195,6 +195,15 @@ impl StreamingJob {
             )
         } else {
             None
+        }
+    }
+
+    pub fn create_type(&self) -> CreateType {
+        match self {
+            Self::MaterializedView(table) => {
+                table.get_create_type().unwrap_or(CreateType::Foreground)
+            }
+            _ => CreateType::Foreground,
         }
     }
 }

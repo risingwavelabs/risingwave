@@ -69,7 +69,7 @@ where
             SourceType::from(T::source_type())
         );
 
-        let mut env = JVM.as_ref()?.attach_current_thread()?;
+        let mut env = JVM.get_or_init()?.attach_current_thread()?;
 
         let validate_source_request = ValidateSourceRequest {
             source_id: context.info.source_id as u64,

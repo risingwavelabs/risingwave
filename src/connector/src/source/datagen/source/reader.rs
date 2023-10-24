@@ -120,7 +120,7 @@ impl SplitReader for DatagenSplitReader {
         let generator = DatagenEventGenerator::new(
             fields_vec,
             field_names,
-            parser_config.specific.get_source_struct(),
+            parser_config.specific.clone(),
             data_types,
             rows_per_second,
             events_so_far,

@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
+use super::generic::GenericPlanRef;
 use super::{EndoPlan, LogicalShare, PlanNodeId, PlanRef, PlanTreeNodeUnary, VisitPlan};
 use crate::optimizer::plan_visitor;
 use crate::utils::{Endo, Visit};

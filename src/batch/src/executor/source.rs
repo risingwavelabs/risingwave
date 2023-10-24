@@ -30,7 +30,6 @@ use risingwave_connector::source::{
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::connector_source::ConnectorSource;
-use risingwave_source::source_desc::extract_source_struct;
 
 use super::Executor;
 use crate::error::BatchError;
@@ -71,9 +70,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
             .map_err(|e| RwError::from(ConnectorError(e.into())))?;
 
         let info = source_node.get_info().unwrap();
-        let source_struct = extract_source_struct(info)?;
-        let parser_config =
-            SpecificParserConfig::new(source_struct, info, &source_node.properties)?;
+        let parser_config = SpecificParserConfig::new(info, &source_node.properties)?;
 
         let columns: Vec<_> = source_node
             .columns

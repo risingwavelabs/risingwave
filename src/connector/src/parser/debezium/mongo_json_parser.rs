@@ -23,7 +23,7 @@ use crate::only_parse_payload;
 use crate::parser::unified::debezium::{DebeziumChangeEvent, MongoProjection};
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
-use crate::parser::{ByteStreamSourceParser, SourceStreamChunkRowWriter};
+use crate::parser::{ByteStreamSourceParser, ParserFormat, SourceStreamChunkRowWriter};
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
@@ -110,6 +110,10 @@ impl ByteStreamSourceParser for DebeziumMongoJsonParser {
 
     fn source_ctx(&self) -> &SourceContext {
         &self.source_ctx
+    }
+
+    fn parser_format(&self) -> ParserFormat {
+        ParserFormat::DebeziumMongo
     }
 
     async fn parse_one<'a>(

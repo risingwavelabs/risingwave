@@ -18,9 +18,9 @@ use std::hash::Hash;
 use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::Schema;
 
-use super::{stream, EqJoinPredicate};
+use super::{stream, EqJoinPredicate, PlanNodeId};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 
 pub mod dynamic_filter;
 pub use dynamic_filter::*;
@@ -85,21 +85,18 @@ macro_rules! impl_distill_unit_from_fields {
 pub(super) use impl_distill_unit_from_fields;
 
 pub trait GenericPlanRef: Eq + Hash {
+    fn id(&self) -> PlanNodeId;
     fn schema(&self) -> &Schema;
     fn stream_key(&self) -> Option<&[usize]>;
     fn functional_dependency(&self) -> &FunctionalDependencySet;
     fn ctx(&self) -> OptimizerContextRef;
 }
 
+pub trait PhysicalPlanRef: GenericPlanRef {
+    fn distribution(&self) -> &Distribution;
+}
+
 pub trait GenericPlanNode {
-    /// return (schema, `stream_key`, fds)
-    fn logical_properties(&self) -> (Schema, Option<Vec<usize>>, FunctionalDependencySet) {
-        (
-            self.schema(),
-            self.stream_key(),
-            self.functional_dependency(),
-        )
-    }
     fn functional_dependency(&self) -> FunctionalDependencySet;
     fn schema(&self) -> Schema;
     fn stream_key(&self) -> Option<Vec<usize>>;

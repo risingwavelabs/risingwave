@@ -781,6 +781,7 @@ impl Binder {
                 ("regexp_match", raw_call(ExprType::RegexpMatch)),
                 ("regexp_replace", raw_call(ExprType::RegexpReplace)),
                 ("regexp_count", raw_call(ExprType::RegexpCount)),
+                ("regexp_split_to_array", raw_call(ExprType::RegexpSplitToArray)),
                 ("chr", raw_call(ExprType::Chr)),
                 ("starts_with", raw_call(ExprType::StartsWith)),
                 ("initcap", raw_call(ExprType::Initcap)),
@@ -865,6 +866,9 @@ impl Binder {
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
                 // Functions that return a constant value
                 ("pi", pi()),
+                // greatest and least
+                ("greatest", raw_call(ExprType::Greatest)),
+                ("least", raw_call(ExprType::Least)),
                 // System information operations.
                 (
                     "pg_typeof",

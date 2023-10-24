@@ -18,6 +18,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::values_node::ExprTuple;
 use risingwave_pb::stream_plan::ValuesNode;
 
+use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, LogicalValues, PlanBase, StreamNode};
 use crate::expr::{Expr, ExprImpl};
