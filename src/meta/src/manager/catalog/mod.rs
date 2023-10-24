@@ -929,14 +929,8 @@ impl CatalogManager {
                 );
                 return Ok(());
             };
-            table
-        };
 
-        tracing::trace!("cleanup tables for {}", table.id);
-        {
-            let core = &mut self.core.lock().await;
-            let database_core = &mut core.database;
-
+            tracing::trace!("cleanup tables for {}", table.id);
             let mut table_ids = vec![table.id];
             table_ids.extend(internal_table_ids);
 
@@ -947,7 +941,8 @@ impl CatalogManager {
                 assert!(res.is_some());
             }
             commit_meta!(self, tables)?;
-        }
+            table
+        };
 
         {
             let core = &mut self.core.lock().await;
