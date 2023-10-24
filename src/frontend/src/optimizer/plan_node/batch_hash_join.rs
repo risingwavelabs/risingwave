@@ -50,7 +50,7 @@ impl BatchHashJoin {
             logical.right.distribution(),
             &logical,
         );
-        let base = PlanBase::new_batch_with_core(&logical, dist, Order::any());
+        let base = PlanBase::new_batch_from_logical(&logical, dist, Order::any());
 
         Self {
             base,

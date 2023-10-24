@@ -48,7 +48,7 @@ impl BatchOverWindow {
                 .collect(),
         );
 
-        let base = PlanBase::new_batch_with_core(&logical, input_dist, order);
+        let base = PlanBase::new_batch_from_logical(&logical, input_dist, order);
         BatchOverWindow { base, logical }
     }
 

@@ -44,7 +44,7 @@ impl BatchHopWindow {
         let distribution = logical
             .i2o_col_mapping()
             .rewrite_provided_distribution(logical.input.distribution());
-        let base = PlanBase::new_batch_with_core(
+        let base = PlanBase::new_batch_from_logical(
             &logical,
             distribution,
             logical.get_out_column_index_order(),

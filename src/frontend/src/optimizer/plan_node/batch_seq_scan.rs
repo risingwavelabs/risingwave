@@ -48,7 +48,7 @@ impl BatchSeqScan {
         } else {
             logical.get_out_column_index_order()
         };
-        let base = PlanBase::new_batch_with_core(&logical, dist, order);
+        let base = PlanBase::new_batch_from_logical(&logical, dist, order);
 
         {
             // validate scan_range

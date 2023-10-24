@@ -48,7 +48,7 @@ impl_plan_tree_node_for_unary! { StreamFsFetch }
 
 impl StreamFsFetch {
     pub fn new(input: PlanRef, source: generic::Source) -> Self {
-        let base = PlanBase::new_stream_with_core(
+        let base = PlanBase::new_stream_with_logical(
             &source,
             Distribution::SomeShard,
             source.catalog.as_ref().map_or(true, |s| s.append_only),

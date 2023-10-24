@@ -37,7 +37,7 @@ pub struct StreamSource {
 
 impl StreamSource {
     pub fn new(logical: generic::Source) -> Self {
-        let base = PlanBase::new_stream_with_core(
+        let base = PlanBase::new_stream_with_logical(
             &logical,
             Distribution::SomeShard,
             logical.catalog.as_ref().map_or(true, |s| s.append_only),

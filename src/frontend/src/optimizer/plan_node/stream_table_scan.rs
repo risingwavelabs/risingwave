@@ -71,7 +71,7 @@ impl StreamTableScan {
                 None => Distribution::SomeShard,
             }
         };
-        let base = PlanBase::new_stream_with_core(
+        let base = PlanBase::new_stream_with_logical(
             &logical,
             distribution,
             logical.table_desc.append_only,

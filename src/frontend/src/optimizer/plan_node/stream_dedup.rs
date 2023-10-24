@@ -37,7 +37,7 @@ impl StreamDedup {
         // A dedup operator must be append-only.
         assert!(input.append_only());
 
-        let base = PlanBase::new_stream_with_core(
+        let base = PlanBase::new_stream_with_logical(
             &logical,
             input.distribution().clone(),
             true,

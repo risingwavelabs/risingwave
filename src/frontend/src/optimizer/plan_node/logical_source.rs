@@ -205,7 +205,7 @@ impl LogicalSource {
             ..self.core.clone()
         };
         let mut new_s3_plan: PlanRef = StreamSource {
-            base: PlanBase::new_stream_with_core(
+            base: PlanBase::new_stream_with_logical(
                 &logical_source,
                 Distribution::Single,
                 true, // `list` will keep listing all objects, it must be append-only

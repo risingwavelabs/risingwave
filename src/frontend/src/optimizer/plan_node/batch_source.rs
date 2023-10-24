@@ -36,7 +36,7 @@ pub struct BatchSource {
 
 impl BatchSource {
     pub fn new(logical: generic::Source) -> Self {
-        let base = PlanBase::new_batch_with_core(
+        let base = PlanBase::new_batch_from_logical(
             &logical,
             // Use `Single` by default, will be updated later with `clone_with_dist`.
             Distribution::Single,

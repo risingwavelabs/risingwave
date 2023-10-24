@@ -41,7 +41,7 @@ impl BatchExpand {
             | Distribution::UpstreamHashShard(_, _) => Distribution::SomeShard,
             Distribution::Broadcast => unreachable!(),
         };
-        let base = PlanBase::new_batch_with_core(&logical, dist, Order::any());
+        let base = PlanBase::new_batch_from_logical(&logical, dist, Order::any());
         BatchExpand { base, logical }
     }
 

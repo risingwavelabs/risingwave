@@ -33,7 +33,7 @@ pub struct BatchGroupTopN {
 impl BatchGroupTopN {
     pub fn new(logical: generic::TopN<PlanRef>) -> Self {
         assert!(!logical.group_key.is_empty());
-        let base = PlanBase::new_batch_with_core(
+        let base = PlanBase::new_batch_from_logical(
             &logical,
             logical.input.distribution().clone(),
             Order::any(),

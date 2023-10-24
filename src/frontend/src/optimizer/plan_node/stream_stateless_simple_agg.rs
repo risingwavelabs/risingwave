@@ -50,7 +50,7 @@ impl StreamStatelessSimpleAgg {
             }
         }
 
-        let base = PlanBase::new_stream_with_core(
+        let base = PlanBase::new_stream_with_logical(
             &logical,
             input_dist.clone(),
             input.append_only(),

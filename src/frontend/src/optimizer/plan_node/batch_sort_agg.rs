@@ -56,7 +56,7 @@ impl BatchSortAgg {
             .i2o_col_mapping()
             .rewrite_provided_order(&input_order);
 
-        let base = PlanBase::new_batch_with_core(&logical, dist, order);
+        let base = PlanBase::new_batch_from_logical(&logical, dist, order);
 
         BatchSortAgg {
             base,
