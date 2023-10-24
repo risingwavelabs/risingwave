@@ -78,7 +78,7 @@ statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
-sleep 5s
+sleep 10s
 
 query II
 SELECT

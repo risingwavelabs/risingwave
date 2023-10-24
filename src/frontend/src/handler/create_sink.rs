@@ -226,7 +226,7 @@ pub async fn handle_create_sink(
 }
 
 /// Transforms the (format, encode, options) from sqlparser AST into an internal struct `SinkFormatDesc`.
-/// This is an analogy to (part of) [`crate::handler::create_source::try_bind_columns_from_source`]
+/// This is an analogy to (part of) [`crate::handler::create_source::bind_columns_from_source`]
 /// which transforms sqlparser AST `SourceSchemaV2` into `StreamSourceInfo`.
 fn bind_sink_format_desc(value: SinkSchema) -> Result<SinkFormatDesc> {
     use risingwave_connector::sink::catalog::{SinkEncode, SinkFormat};

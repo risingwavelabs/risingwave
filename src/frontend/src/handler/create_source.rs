@@ -570,69 +570,76 @@ pub(crate) fn bind_all_columns(
                 "Schema definition is required, either from SQL or schema registry.".to_string(),
             )));
         }
-        if let (Format::DebeziumMongo, Encode::Json) =
-            (&source_schema.format, &source_schema.row_encode)
-        {
-            let mut columns = vec![
-                ColumnCatalog {
-                    column_desc: ColumnDesc {
-                        data_type: DataType::Varchar,
-                        column_id: 0.into(),
-                        name: "_id".to_string(),
-                        field_descs: vec![],
-                        type_name: "".to_string(),
-                        generated_or_default_column: None,
+        match (&source_schema.format, &source_schema.row_encode) {
+            (Format::DebeziumMongo, Encode::Json) => {
+                let mut columns = vec![
+                    ColumnCatalog {
+                        column_desc: ColumnDesc {
+                            data_type: DataType::Varchar,
+                            column_id: 0.into(),
+                            name: "_id".to_string(),
+                            field_descs: vec![],
+                            type_name: "".to_string(),
+                            generated_or_default_column: None,
+                        },
+                        is_hidden: false,
                     },
-                    is_hidden: false,
-                },
-                ColumnCatalog {
-                    column_desc: ColumnDesc {
-                        data_type: DataType::Jsonb,
-                        column_id: 0.into(),
-                        name: "payload".to_string(),
-                        field_descs: vec![],
-                        type_name: "".to_string(),
-                        generated_or_default_column: None,
+                    ColumnCatalog {
+                        column_desc: ColumnDesc {
+                            data_type: DataType::Jsonb,
+                            column_id: 0.into(),
+                            name: "payload".to_string(),
+                            field_descs: vec![],
+                            type_name: "".to_string(),
+                            generated_or_default_column: None,
+                        },
+                        is_hidden: false,
                     },
-                    is_hidden: false,
-                },
-            ];
-            let non_generated_sql_defined_columns = non_generated_sql_columns(&cols_from_sql);
-            if non_generated_sql_defined_columns.len() != 2
-                && non_generated_sql_defined_columns[0].name() != columns[0].name()
-                && non_generated_sql_defined_columns[1].name() != columns[1].name()
-            {
-                return Err(RwError::from(ProtocolError(
-                    "the not generated columns of the source with row format DebeziumMongoJson
-    must be (_id [Jsonb | Varchar | Int32 | Int64], payload jsonb)."
-                        .to_string(),
-                )));
-            }
-            let key_data_type = non_generated_sql_defined_columns[0].data_type();
-            match key_data_type {
-                DataType::Jsonb | DataType::Varchar | DataType::Int32 | DataType::Int64 => {
-                    columns[0].column_desc.data_type = key_data_type.clone();
-                }
-                _ => {
+                ];
+                let non_generated_sql_defined_columns = non_generated_sql_columns(&cols_from_sql);
+                if non_generated_sql_defined_columns.len() != 2
+                    && non_generated_sql_defined_columns[0].name() != columns[0].name()
+                    && non_generated_sql_defined_columns[1].name() != columns[1].name()
+                {
                     return Err(RwError::from(ProtocolError(
-                        "the `_id` column of the source with row format DebeziumMongoJson
-    must be [Jsonb | Varchar | Int32 | Int64]"
+                        "the not generated columns of the source with row format DebeziumMongoJson
+        must be (_id [Jsonb | Varchar | Int32 | Int64], payload jsonb)."
                             .to_string(),
                     )));
                 }
-            }
+                let key_data_type = non_generated_sql_defined_columns[0].data_type();
+                match key_data_type {
+                    DataType::Jsonb | DataType::Varchar | DataType::Int32 | DataType::Int64 => {
+                        columns[0].column_desc.data_type = key_data_type.clone();
+                    }
+                    _ => {
+                        return Err(RwError::from(ProtocolError(
+                            "the `_id` column of the source with row format DebeziumMongoJson
+        must be [Jsonb | Varchar | Int32 | Int64]"
+                                .to_string(),
+                        )));
+                    }
+                }
 
-            let value_data_type = non_generated_sql_defined_columns[1].data_type();
-            if !matches!(value_data_type, DataType::Jsonb) {
-                return Err(RwError::from(ProtocolError(
-                    "the `payload` column of the source with row format DebeziumMongoJson
-    must be Jsonb datatype"
-                        .to_string(),
-                )));
+                let value_data_type = non_generated_sql_defined_columns[1].data_type();
+                if !matches!(value_data_type, DataType::Jsonb) {
+                    return Err(RwError::from(ProtocolError(
+                        "the `payload` column of the source with row format DebeziumMongoJson
+        must be Jsonb datatype"
+                            .to_string(),
+                    )));
+                }
+                Ok(columns)
             }
-            Ok(columns)
-        } else {
-            Ok(cols_from_sql)
+            (Format::Plain, Encode::Bytes) => {
+                if cols_from_sql.len() != 1 || cols_from_sql[0].data_type() != &DataType::Bytea {
+                    return Err(RwError::from(ProtocolError(
+                        "ENCODE BYTES only accepts one BYTEA type column".to_string(),
+                    )));
+                }
+                Ok(cols_from_sql)
+            }
+            (_, _) => Ok(cols_from_sql),
         }
     }
 }
