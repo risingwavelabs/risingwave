@@ -949,6 +949,7 @@ impl CatalogManager {
             let core = &mut self.core.lock().await;
             {
                 let user_core = &mut core.user;
+                tracing::debug!("decrease ref for {}", table.id);
                 user_core.decrease_ref(table.owner);
             }
 
