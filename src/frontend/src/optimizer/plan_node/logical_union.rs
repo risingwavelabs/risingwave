@@ -130,7 +130,7 @@ impl ToBatch for LogicalUnion {
         if !self.all() {
             let batch_union = BatchUnion::new(new_logical).into();
             Ok(BatchHashAgg::new(
-                generic::Agg::new(vec![], (0..self.base.schema.len()).collect(), batch_union)
+                generic::Agg::new(vec![], (0..self.base.schema().len()).collect(), batch_union)
                     .with_enable_two_phase(false),
             )
             .into())
@@ -170,7 +170,7 @@ impl ToStream for LogicalUnion {
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        let original_schema = self.base.schema.clone();
+        let original_schema = self.base.schema().clone();
         let original_schema_len = original_schema.len();
         let mut rewrites = vec![];
         for input in &self.core.inputs {
@@ -353,7 +353,7 @@ mod tests {
 
         // Check the result
         let union = plan.as_logical_union().unwrap();
-        assert_eq!(union.base.schema.len(), 2);
+        assert_eq!(union.base.schema().len(), 2);
     }
 
     #[tokio::test]

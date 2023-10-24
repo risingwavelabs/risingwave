@@ -22,7 +22,9 @@ use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Int256, IntoOrdered, JsonbRef, ToText, F64};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::{build_func, Context, Expression, InputRefExpression};
+use risingwave_expr::expr::{
+    build_func, Context, Expression, ExpressionBoxExt, InputRefExpression,
+};
 use risingwave_expr::{function, ExprError, Result};
 use risingwave_pb::expr::expr_node::PbType;
 

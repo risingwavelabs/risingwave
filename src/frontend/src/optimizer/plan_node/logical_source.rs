@@ -28,6 +28,7 @@ use risingwave_connector::source::{ConnectorProperties, DataType};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 
+use super::generic::GenericPlanRef;
 use super::stream_watermark_filter::StreamWatermarkFilter;
 use super::utils::{childless_record, Distill};
 use super::{
@@ -204,14 +205,14 @@ impl LogicalSource {
             ..self.core.clone()
         };
         let mut new_s3_plan: PlanRef = StreamSource {
-            base: PlanBase::new_stream_with_logical(
+            base: PlanBase::new_stream_with_core(
                 &logical_source,
                 Distribution::Single,
                 true, // `list` will keep listing all objects, it must be append-only
                 false,
                 FixedBitSet::with_capacity(logical_source.column_catalog.len()),
             ),
-            logical: logical_source,
+            core: logical_source,
         }
         .into();
         new_s3_plan = RequiredDist::shard_by_key(3, &[0])
@@ -506,7 +507,7 @@ impl PredicatePushdown for LogicalSource {
 
         let mut new_conjunctions = Vec::with_capacity(predicate.conjunctions.len());
         for expr in predicate.conjunctions {
-            if let Some(e) = expr_to_kafka_timestamp_range(expr, &mut range, &self.base.schema) {
+            if let Some(e) = expr_to_kafka_timestamp_range(expr, &mut range, self.base.schema()) {
                 // Not recognized, so push back
                 new_conjunctions.push(e);
             }

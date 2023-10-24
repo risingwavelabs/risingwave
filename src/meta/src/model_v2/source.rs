@@ -14,7 +14,10 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::model_v2::{ConnectionId, SourceId, TableId};
+use crate::model_v2::{
+    ColumnCatalogArray, ConnectionId, I32Array, Property, SourceId, StreamSourceInfo, TableId,
+    WatermarkDescArray,
+};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "source")]
@@ -22,15 +25,16 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub source_id: SourceId,
     pub name: String,
-    pub row_id_index: Option<String>,
-    pub columns: Option<Json>,
-    pub pk_column_ids: Option<Json>,
-    pub properties: Option<Json>,
-    pub definition: Option<String>,
-    pub source_info: Option<Json>,
-    pub watermark_descs: Option<Json>,
+    pub row_id_index: Option<u32>,
+    pub columns: ColumnCatalogArray,
+    pub pk_column_ids: I32Array,
+    pub properties: Property,
+    pub definition: String,
+    pub source_info: Option<StreamSourceInfo>,
+    pub watermark_descs: WatermarkDescArray,
     pub optional_associated_table_id: Option<TableId>,
     pub connection_id: Option<ConnectionId>,
+    pub version: u64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

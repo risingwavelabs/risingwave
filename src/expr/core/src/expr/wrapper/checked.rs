@@ -22,7 +22,7 @@ use crate::expr::{Expression, ValueImpl};
 
 /// A wrapper of [`Expression`] that does extra checks after evaluation.
 #[derive(Debug)]
-pub struct Checked<E>(pub E);
+pub(crate) struct Checked<E>(pub E);
 
 // TODO: avoid the overhead of extra boxing.
 #[async_trait]
