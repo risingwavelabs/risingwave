@@ -43,8 +43,8 @@ use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, CatalogError, ColumnId};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
-    bind_source_watermark, check_source_schema, try_bind_columns_from_source,
-    validate_compatibility, UPSTREAM_SOURCE_KEY,
+    bind_all_columns, bind_columns_from_source, bind_source_pk, bind_source_watermark,
+    check_source_schema, validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
@@ -345,7 +345,7 @@ pub fn ensure_table_constraints_supported(table_constraints: &[TableConstraint])
     Ok(())
 }
 
-pub fn bind_pk_names(
+pub fn bind_sql_pk_names(
     columns_defs: &[ColumnDef],
     table_constraints: &[TableConstraint],
 ) -> Result<Vec<String>> {
@@ -456,13 +456,26 @@ pub(crate) async fn gen_create_table_plan_with_source(
     validate_compatibility(&source_schema, &mut properties)?;
 
     ensure_table_constraints_supported(&constraints)?;
-    let pk_names = bind_pk_names(&column_defs, &constraints)?;
 
-    let (columns_from_resolve_source, pk_names, mut source_info) =
-        try_bind_columns_from_source(&source_schema, pk_names, &column_defs, &properties).await?;
+    let sql_pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
+
+    let (columns_from_resolve_source, mut source_info) =
+        bind_columns_from_source(&source_schema, &properties).await?;
     let columns_from_sql = bind_sql_columns(&column_defs)?;
 
-    let mut columns = columns_from_resolve_source.unwrap_or(columns_from_sql);
+    let mut columns = bind_all_columns(
+        &source_schema,
+        columns_from_resolve_source,
+        columns_from_sql,
+    )?;
+    let pk_names = bind_source_pk(
+        &source_schema,
+        &source_info,
+        &mut columns,
+        sql_pk_names,
+        &properties,
+    )
+    .await?;
 
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
@@ -604,7 +617,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
     version: Option<TableVersion>,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     ensure_table_constraints_supported(&constraints)?;
-    let pk_names = bind_pk_names(&column_defs, &constraints)?;
+    let pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
     let (mut columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names)?;
 
     let watermark_descs = bind_source_watermark(
@@ -975,7 +988,7 @@ mod tests {
                     c.column_desc.column_id = col_id_gen.generate(c.name())
                 }
                 ensure_table_constraints_supported(&constraints)?;
-                let pk_names = bind_pk_names(&column_defs, &constraints)?;
+                let pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
                 let (_, pk_column_ids, _) = bind_pk_on_relation(columns, pk_names)?;
                 Ok(pk_column_ids)
             })();

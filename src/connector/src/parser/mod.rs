@@ -908,7 +908,6 @@ impl SpecificParserConfig {
                         .unwrap(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
-                    upsert_primary_key: info.upsert_avro_primary_key.clone(),
                     ..Default::default()
                 };
                 if format == SourceFormat::Upsert {
