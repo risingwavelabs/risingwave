@@ -231,8 +231,8 @@ opt-level = 2
 incremental = false
 debug = 1
 
-# Patch third-party crates for deterministic simulation.
 [patch.crates-io]
+# Patch third-party crates for deterministic simulation.
 quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "948bdc3" }
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "8daf97e" }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e" }
@@ -240,3 +240,7 @@ tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev =
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
+
+# Patch for coverage_attribute.
+# https://github.com/sgodwincs/dlv-list-rs/pull/19#issuecomment-1774786289
+dlv-list = { git = "https://github.com/sgodwincs/dlv-list-rs.git", rev = "5bbc5d0" }
