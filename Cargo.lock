@@ -7285,6 +7285,7 @@ dependencies = [
  "mysql_common",
  "nexmark",
  "num-bigint",
+ "opendal 0.39.0",
  "parking_lot 0.12.1",
  "paste",
  "prometheus",

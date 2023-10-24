@@ -73,6 +73,7 @@ mysql_async = { version = "0.32", default-features = false, features = [
 mysql_common = { version = "0.30", default-features = false, features = [
     "chrono",
 ] }
+opendal = "0.39"
 nexmark = { version = "0.2", features = ["serde"] }
 num-bigint = "0.4"
 parking_lot = "0.12"
