@@ -21,7 +21,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::expr::NonStrictExpression;
 
 use super::*;
 
@@ -38,7 +38,7 @@ struct Inner {
     info: ExecutorInfo,
 
     /// Expressions of the current projection.
-    exprs: Vec<BoxedExpression>,
+    exprs: Vec<NonStrictExpression>,
     /// All the watermark derivations, (input_column_index, output_column_index). And the
     /// derivation expression is the project's expression itself.
     watermark_derivations: MultiMap<usize, usize>,
@@ -58,7 +58,7 @@ impl ProjectExecutor {
         ctx: ActorContextRef,
         input: Box<dyn Executor>,
         pk_indices: PkIndices,
-        exprs: Vec<BoxedExpression>,
+        exprs: Vec<NonStrictExpression>,
         executor_id: u64,
         watermark_derivations: MultiMap<usize, usize>,
         nondecreasing_expr_indices: Vec<usize>,
@@ -233,11 +233,12 @@ mod tests {
     use risingwave_common::array::{DataChunk, StreamChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, Datum};
-    use risingwave_expr::expr::{self, build_from_pretty, Expression, ValueImpl};
+    use risingwave_expr::expr::{self, Expression, ValueImpl};
 
     use super::super::test_utils::MockSource;
     use super::super::*;
     use super::*;
+    use crate::executor::test_utils::expr::build_from_pretty;
     use crate::executor::test_utils::StreamExecutorTestExt;
 
     #[tokio::test]
@@ -345,7 +346,7 @@ mod tests {
 
         let a_expr = build_from_pretty("(add:int8 $0:int8 1:int8)");
         let b_expr = build_from_pretty("(subtract:int8 $0:int8 1:int8)");
-        let c_expr = DummyNondecreasingExpr.boxed();
+        let c_expr = NonStrictExpression::for_test(DummyNondecreasingExpr);
 
         let project = Box::new(ProjectExecutor::new(
             ActorContext::create(123),

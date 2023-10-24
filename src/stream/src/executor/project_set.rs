@@ -24,6 +24,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::expr::{LogReport, NonStrictExpression};
 use risingwave_expr::table_function::ProjectSetSelectItem;
 
 use super::error::StreamExecutorError;
@@ -260,7 +261,11 @@ impl Inner {
                 ProjectSetSelectItem::Expr(expr) => {
                     watermark
                         .clone()
-                        .transform_with_expr(expr, expr_idx + PROJ_ROW_ID_OFFSET)
+                        .transform_with_expr(
+                            // TODO: should we build `expr` in non-strict mode?
+                            &NonStrictExpression::new_topmost(expr, LogReport),
+                            expr_idx + PROJ_ROW_ID_OFFSET,
+                        )
                         .await
                 }
                 ProjectSetSelectItem::TableFunction(_) => {

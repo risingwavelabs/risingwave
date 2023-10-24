@@ -171,7 +171,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
+    use risingwave_expr::expr::{ExpressionBoxExt, InputRefExpression, LiteralExpression};
     use risingwave_expr::table_function::repeat;
 
     use super::*;

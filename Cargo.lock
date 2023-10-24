@@ -1825,13 +1825,13 @@ dependencies = [
 
 [[package]]
 name = "comfy-table"
-version = "7.0.1"
+version = "7.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ab77dbd8adecaf3f0db40581631b995f312a8a5ae3aa9993188bb8f23d83a5b"
+checksum = "7c64043d6c7b7a4c58e39e7efccfdea7b93d885a795d0c054a69dbbf4dd52686"
 dependencies = [
- "crossterm 0.26.1",
- "strum 0.24.1",
- "strum_macros 0.24.3",
+ "crossterm 0.27.0",
+ "strum 0.25.0",
+ "strum_macros 0.25.2",
  "unicode-width",
 ]
 
@@ -2140,17 +2140,14 @@ dependencies = [
 
 [[package]]
 name = "crossterm"
-version = "0.26.1"
+version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a84cda67535339806297f1b331d6dd6320470d2a0fe65381e79ee9e156dd3d13"
+checksum = "f476fe445d41c9e991fd07515a6f463074b782242ccf4a5b7b1d1012e70824df"
 dependencies = [
- "bitflags 1.3.2",
+ "bitflags 2.4.0",
  "crossterm_winapi",
  "libc",
- "mio",
  "parking_lot 0.12.1",
- "signal-hook",
- "signal-hook-mio",
  "winapi",
 ]
 
@@ -3018,7 +3015,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
+source = "git+https://github.com/mrcroxx/foyer?rev=5d0134b#5d0134b28c0edb03277b01ce08b035ef52c1b783"
 dependencies = [
  "foyer-common",
  "foyer-intrusive",
@@ -3029,10 +3026,11 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
+source = "git+https://github.com/mrcroxx/foyer?rev=5d0134b#5d0134b28c0edb03277b01ce08b035ef52c1b783"
 dependencies = [
  "bytes",
  "foyer-workspace-hack",
+ "itertools 0.11.0",
  "madsim-tokio",
  "parking_lot 0.12.1",
  "paste",
@@ -3043,13 +3041,13 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
+source = "git+https://github.com/mrcroxx/foyer?rev=5d0134b#5d0134b28c0edb03277b01ce08b035ef52c1b783"
 dependencies = [
  "bytes",
  "cmsketch",
  "foyer-common",
  "foyer-workspace-hack",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "memoffset",
  "parking_lot 0.12.1",
  "paste",
@@ -3060,7 +3058,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
+source = "git+https://github.com/mrcroxx/foyer?rev=5d0134b#5d0134b28c0edb03277b01ce08b035ef52c1b783"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -3089,7 +3087,7 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
+source = "git+https://github.com/mrcroxx/foyer?rev=5d0134b#5d0134b28c0edb03277b01ce08b035ef52c1b783"
 dependencies = [
  "crossbeam-utils",
  "either",
@@ -3098,7 +3096,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "hyper",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "libc",
  "memchr",
  "parking_lot 0.12.1",

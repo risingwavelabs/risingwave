@@ -58,7 +58,7 @@ pub use self::build::*;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
 pub use self::value::{ValueImpl, ValueRef};
-pub use self::wrapper::EvalErrorReport;
+pub use self::wrapper::*;
 pub use super::{ExprError, Result};
 
 /// Interface of an expression.
@@ -67,6 +67,7 @@ pub use super::{ExprError, Result};
 /// should be implemented. Prefer calling and implementing `eval_v2` instead of `eval` if possible,
 /// to gain the performance benefit of scalar expression.
 #[async_trait::async_trait]
+#[auto_impl::auto_impl(&, Box)]
 pub trait Expression: std::fmt::Debug + Sync + Send {
     /// Get the return data type.
     fn return_type(&self) -> DataType;
@@ -101,23 +102,77 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     fn eval_const(&self) -> Result<Datum> {
         Err(ExprError::NotConstant)
     }
+}
 
+/// An owned dynamically typed [`Expression`].
+pub type BoxedExpression = Box<dyn Expression>;
+
+/// Extension trait for boxing expressions.
+///
+/// This is not directly made into [`Expression`] trait because...
+/// - an expression does not have to be `'static`,
+/// - and for the ease of `auto_impl`.
+#[easy_ext::ext(ExpressionBoxExt)]
+impl<E: Expression + 'static> E {
     /// Wrap the expression in a Box.
-    fn boxed(self) -> BoxedExpression
-    where
-        Self: Sized + Send + 'static,
-    {
+    pub fn boxed(self) -> BoxedExpression {
         Box::new(self)
     }
 }
 
-// TODO: make this an extension, or implement it on a `NonStrict` newtype.
-impl dyn Expression {
+/// An type-safe wrapper that indicates the inner expression can be evaluated in a non-strict
+/// manner, i.e., developers can directly call `eval_infallible` and `eval_row_infallible` without
+/// checking the result.
+///
+/// This is usually created by non-strict build functions like [`crate::expr::build_non_strict_from_prost`]
+/// and [`crate::expr::build_func_non_strict`]. It can also be created directly by
+/// [`NonStrictExpression::new_topmost`], where only the evaluation of the topmost level expression
+/// node is non-strict and should be treated as a TODO.
+///
+/// Compared to [`crate::expr::wrapper::non_strict::NonStrict`], this is more like an indicator
+/// applied on the root of an expression tree, while the latter is a wrapper that can be applied on
+/// each node of the tree and actually changes the behavior. As a result, [`NonStrictExpression`]
+/// does not implement [`Expression`] trait and instead deals directly with developers.
+#[derive(Debug)]
+pub struct NonStrictExpression<E = BoxedExpression>(E);
+
+impl<E> NonStrictExpression<E>
+where
+    E: Expression,
+{
+    /// Create a non-strict expression directly wrapping the given expression.
+    ///
+    /// Should only be used in tests as evaluation may panic.
+    pub fn for_test(inner: E) -> NonStrictExpression
+    where
+        E: 'static,
+    {
+        NonStrictExpression(inner.boxed())
+    }
+
+    /// Create a non-strict expression from the given expression, where only the evaluation of the
+    /// topmost level expression node is non-strict (which is subtly different from
+    /// [`crate::expr::build_non_strict_from_prost`] where every node is non-strict).
+    ///
+    /// This should be used as a TODO.
+    pub fn new_topmost(
+        inner: E,
+        error_report: impl EvalErrorReport,
+    ) -> NonStrictExpression<impl Expression> {
+        let inner = wrapper::non_strict::NonStrict::new(inner, error_report);
+        NonStrictExpression(inner)
+    }
+
+    /// Get the return data type.
+    pub fn return_type(&self) -> DataType {
+        self.0.return_type()
+    }
+
     /// Evaluate the expression in vectorized execution and assert it succeeds. Returns an array.
     ///
     /// Use with expressions built in non-strict mode.
     pub async fn eval_infallible(&self, input: &DataChunk) -> ArrayRef {
-        self.eval(input).await.expect("evaluation failed")
+        self.0.eval(input).await.expect("evaluation failed")
     }
 
     /// Evaluate the expression in row-based execution and assert it succeeds. Returns a nullable
@@ -125,38 +180,17 @@ impl dyn Expression {
     ///
     /// Use with expressions built in non-strict mode.
     pub async fn eval_row_infallible(&self, input: &OwnedRow) -> Datum {
-        self.eval_row(input).await.expect("evaluation failed")
-    }
-}
-
-/// An owned dynamically typed [`Expression`].
-pub type BoxedExpression = Box<dyn Expression>;
-
-// TODO: avoid the overhead of extra boxing.
-#[async_trait::async_trait]
-impl Expression for BoxedExpression {
-    fn return_type(&self) -> DataType {
-        (**self).return_type()
+        self.0.eval_row(input).await.expect("evaluation failed")
     }
 
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        (**self).eval(input).await
+    /// Unwrap the inner expression.
+    pub fn into_inner(self) -> E {
+        self.0
     }
 
-    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
-        (**self).eval_v2(input).await
-    }
-
-    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        (**self).eval_row(input).await
-    }
-
-    fn eval_const(&self) -> Result<Datum> {
-        (**self).eval_const()
-    }
-
-    fn boxed(self) -> BoxedExpression {
-        self
+    /// Get a reference to the inner expression.
+    pub fn inner(&self) -> &E {
+        &self.0
     }
 }
 
