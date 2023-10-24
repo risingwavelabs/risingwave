@@ -140,7 +140,7 @@ impl<PlanRef: GenericPlanRef> DynamicFilter<PlanRef> {
 }
 
 pub fn infer_left_internal_table_catalog(
-    me: &impl stream::StreamPlanRef,
+    me: impl stream::StreamPlanRef,
     left_key_index: usize,
 ) -> TableCatalog {
     let schema = me.schema();

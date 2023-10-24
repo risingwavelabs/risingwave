@@ -112,7 +112,9 @@ pub struct PlanBase<C: ConventionMarker> {
 
     schema: Schema,
     /// the pk indices of the PlanNode's output, a empty stream key vec means there is no stream key
-    // TODO: this is actually a logical and stream only property
+    // TODO: this is actually a logical and stream only property.
+    // - For logical nodes, this is `None` in most time expect for the phase after `logical_rewrite_for_stream`.
+    // - For stream nodes, this is always `Some`.
     stream_key: Option<Vec<usize>>,
     functional_dependency: FunctionalDependencySet,
 

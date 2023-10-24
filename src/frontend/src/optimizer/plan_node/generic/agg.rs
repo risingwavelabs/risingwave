@@ -265,7 +265,7 @@ pub struct MaterializedInputState {
 impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     pub fn infer_tables(
         &self,
-        me: &impl stream::StreamPlanRef,
+        me: impl stream::StreamPlanRef,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> (
@@ -274,9 +274,9 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         HashMap<usize, TableCatalog>,
     ) {
         (
-            self.infer_intermediate_state_table(me, vnode_col_idx, window_col_idx),
-            self.infer_stream_agg_state(me, vnode_col_idx, window_col_idx),
-            self.infer_distinct_dedup_tables(me, vnode_col_idx, window_col_idx),
+            self.infer_intermediate_state_table(&me, vnode_col_idx, window_col_idx),
+            self.infer_stream_agg_state(&me, vnode_col_idx, window_col_idx),
+            self.infer_distinct_dedup_tables(&me, vnode_col_idx, window_col_idx),
         )
     }
 
@@ -338,7 +338,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     /// Infer `AggCallState`s for streaming agg.
     pub fn infer_stream_agg_state(
         &self,
-        me: &impl stream::StreamPlanRef,
+        me: impl stream::StreamPlanRef,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> Vec<AggCallState> {
@@ -487,7 +487,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     /// group key | state for AGG1 | state for AGG2 | ...
     pub fn infer_intermediate_state_table(
         &self,
-        me: &impl GenericPlanRef,
+        me: impl GenericPlanRef,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> TableCatalog {
@@ -553,7 +553,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     /// group key | distinct key | count for AGG1(distinct x) | count for AGG2(distinct x) | ...
     pub fn infer_distinct_dedup_tables(
         &self,
-        me: &impl GenericPlanRef,
+        me: impl GenericPlanRef,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> HashMap<usize, TableCatalog> {
