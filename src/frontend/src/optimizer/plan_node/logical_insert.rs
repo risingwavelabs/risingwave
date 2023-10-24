@@ -142,9 +142,9 @@ impl PredicatePushdown for LogicalInsert {
 impl ToBatch for LogicalInsert {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
-        let mut logical = self.core.clone();
-        logical.input = new_input;
-        Ok(BatchInsert::new(logical).into())
+        let mut core = self.core.clone();
+        core.input = new_input;
+        Ok(BatchInsert::new(core).into())
     }
 }
 

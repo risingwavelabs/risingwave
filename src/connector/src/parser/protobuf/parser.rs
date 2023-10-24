@@ -28,12 +28,12 @@ use risingwave_pb::plan_common::ColumnDesc;
 
 use super::schema_resolver::*;
 use crate::aws_utils::load_file_descriptor_from_s3;
-use crate::parser::schema_registry::{
-    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
-};
 use crate::parser::unified::protobuf::ProtobufAccess;
 use crate::parser::unified::AccessImpl;
 use crate::parser::{AccessBuilder, EncodingProperties};
+use crate::schema::schema_registry::{
+    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
+};
 
 #[derive(Debug)]
 pub struct ProtobufAccessBuilder {
