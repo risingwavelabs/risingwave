@@ -19,13 +19,13 @@ use super::RwPgResponse;
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
 
-pub(super) async fn handle_flush(handler_args: HandlerArgs) -> Result<RwPgResponse> {
-    do_flush(&handler_args.session).await?;
+pub(super) async fn handle_wait(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    do_wait(&handler_args.session).await?;
     Ok(PgResponse::empty_result(StatementType::FLUSH))
 }
 
-pub(crate) async fn do_flush(session: &SessionImpl) -> Result<()> {
+pub(crate) async fn do_wait(session: &SessionImpl) -> Result<()> {
     let client = session.env().meta_client();
-    let snapshot = client.flush(true).await?;
+    let snapshot = client.wait().await?;
     Ok(())
 }
