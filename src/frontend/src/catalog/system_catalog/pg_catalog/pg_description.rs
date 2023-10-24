@@ -39,6 +39,7 @@ pub static PG_DESCRIPTION: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView 
                      WHEN objsubid IS NULL THEN 0 \
                      ELSE objsubid \
                  END AS objsubid, \
-                 description FROM rw_catalog.rw_description;"
+                 description FROM rw_catalog.rw_description \
+          WHERE description IS NOT NULL;"
         .into(),
 });

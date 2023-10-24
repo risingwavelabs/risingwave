@@ -38,14 +38,15 @@ pub const RW_DESCRIPTION: BuiltinTable = BuiltinTable {
 
 impl SysCatalogReaderImpl {
     pub fn read_rw_description(&self) -> Result<Vec<OwnedRow>> {
-        let build_row = |table_id, catalog_id, index: Option<i32>, description| {
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int32(table_id)),
-                Some(ScalarImpl::Int32(catalog_id)),
-                index.map(ScalarImpl::Int32),
-                Some(ScalarImpl::Utf8(description)),
-            ])
-        };
+        let build_row =
+            |table_id, catalog_id, index: Option<i32>, description: Option<Box<str>>| {
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int32(table_id)),
+                    Some(ScalarImpl::Int32(catalog_id)),
+                    index.map(ScalarImpl::Int32),
+                    description.map(ScalarImpl::Utf8),
+                ])
+            };
 
         let reader = self.catalog_reader.read_guard();
         let rw_catalog =
@@ -66,18 +67,14 @@ impl SysCatalogReaderImpl {
                         table.id.table_id as _,
                         rw_tables_id,
                         None,
-                        table.description.as_deref().unwrap_or_default().into(),
+                        table.description.as_deref().map(Into::into),
                     ))
                     .chain(table.columns.iter().map(|col| {
                         build_row(
                             table.id.table_id as _,
                             rw_tables_id,
                             Some(col.column_id().get_id() as _),
-                            col.column_desc
-                                .description
-                                .as_deref()
-                                .unwrap_or_default()
-                                .into(),
+                            col.column_desc.description.as_deref().map(Into::into),
                         )
                     }))
                 })

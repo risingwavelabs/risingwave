@@ -27,6 +27,7 @@ pub async fn handle_comment(
     comment: Option<String>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
+    let comment = comment.filter(|s| !s.is_empty());
 
     let comment = {
         let mut binder = Binder::new_for_ddl(&session);
