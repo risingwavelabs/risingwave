@@ -33,7 +33,7 @@ pub struct BatchLimit {
 
 impl BatchLimit {
     pub fn new(core: generic::Limit<PlanRef>) -> Self {
-        let base = PlanBase::new_batch_from_logical(
+        let base = PlanBase::new_batch_with_core(
             &core,
             core.input.distribution().clone(),
             core.input.order().clone(),

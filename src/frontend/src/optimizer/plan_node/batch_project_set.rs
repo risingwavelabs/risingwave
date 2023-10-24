@@ -38,7 +38,7 @@ impl BatchProjectSet {
             .i2o_col_mapping()
             .rewrite_provided_distribution(core.input.distribution());
 
-        let base = PlanBase::new_batch_from_logical(
+        let base = PlanBase::new_batch_with_core(
             &core,
             distribution,
             core.get_out_column_index_order(),

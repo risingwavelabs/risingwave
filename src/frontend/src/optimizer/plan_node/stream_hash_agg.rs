@@ -86,7 +86,7 @@ impl StreamHashAgg {
         }
 
         // Hash agg executor might change the append-only behavior of the stream.
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             dist,
             emit_on_window_close, // in EOWC mode, we produce append only output
@@ -142,13 +142,8 @@ impl StreamHashAgg {
 
 impl Distill for StreamHashAgg {
     fn distill<'a>(&self) -> XmlNode<'a> {
-<<<<<<< HEAD
-        let mut vec = self.logical.fields_pretty();
-        if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
-=======
         let mut vec = self.core.fields_pretty();
-        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
->>>>>>> origin/main
+        if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             vec.push(("output_watermarks", ow));
         }
         childless_record(

@@ -63,7 +63,7 @@ impl StreamTemporalJoin {
                 .rewrite_bitset(core.left.watermark_columns()),
         );
 
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             dist,
             true,

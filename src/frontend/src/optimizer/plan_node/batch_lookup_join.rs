@@ -68,7 +68,7 @@ impl BatchLookupJoin {
         assert!(eq_join_predicate.has_eq());
         assert!(eq_join_predicate.eq_keys_are_type_aligned());
         let dist = Self::derive_dist(core.left.distribution(), &core);
-        let base = PlanBase::new_batch_from_logical(&core, dist, Order::any());
+        let base = PlanBase::new_batch_with_core(&core, dist, Order::any());
         Self {
             base,
             core,

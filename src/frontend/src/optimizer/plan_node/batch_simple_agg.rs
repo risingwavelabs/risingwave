@@ -32,7 +32,7 @@ pub struct BatchSimpleAgg {
 impl BatchSimpleAgg {
     pub fn new(core: generic::Agg<PlanRef>) -> Self {
         let input_dist = core.input.distribution().clone();
-        let base = PlanBase::new_batch_from_logical(&core, input_dist, Order::any());
+        let base = PlanBase::new_batch_with_core(&core, input_dist, Order::any());
         BatchSimpleAgg { base, core }
     }
 

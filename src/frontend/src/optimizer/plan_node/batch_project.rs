@@ -44,7 +44,7 @@ impl BatchProject {
             .i2o_col_mapping()
             .rewrite_provided_order(core.input.order());
 
-        let base = PlanBase::new_batch_from_logical(&core, distribution, order);
+        let base = PlanBase::new_batch_with_core(&core, distribution, order);
         BatchProject { base, core }
     }
 

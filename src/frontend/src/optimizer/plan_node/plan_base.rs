@@ -239,7 +239,7 @@ impl PlanBase {
         }
     }
 
-    pub fn new_stream_with_logical(
+    pub fn new_stream_with_core(
         core: &impl GenericPlanNode,
         dist: Distribution,
         append_only: bool,
@@ -281,7 +281,7 @@ impl PlanBase {
         }
     }
 
-    pub fn new_batch_from_logical(
+    pub fn new_batch_with_core(
         core: &impl GenericPlanNode,
         dist: Distribution,
         order: Order,

@@ -48,7 +48,7 @@ impl StreamUnion {
             |acc_watermark_columns, input| acc_watermark_columns.bitand(input.watermark_columns()),
         );
 
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             dist,
             inputs.iter().all(|x| x.append_only()),

@@ -58,7 +58,7 @@ impl StreamHopWindow {
         )
         .rewrite_bitset(&watermark_columns);
 
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             dist,
             input.append_only(),

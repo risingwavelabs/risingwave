@@ -36,7 +36,7 @@ impl StreamShare {
         let input = core.input.borrow().0.clone();
         let dist = input.distribution().clone();
         // Filter executor won't change the append-only behavior of the stream.
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             dist,
             input.append_only(),

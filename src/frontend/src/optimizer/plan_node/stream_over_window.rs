@@ -38,7 +38,7 @@ impl StreamOverWindow {
         let input = &core.input;
         let watermark_columns = FixedBitSet::with_capacity(core.output_len());
 
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             input.distribution().clone(),
             false, // general over window cannot be append-only
