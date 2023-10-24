@@ -18,6 +18,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
+use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
@@ -52,6 +53,9 @@ pub struct SimpleAggExecutor<S: StateStore> {
 }
 
 struct ExecutorInner<S: StateStore> {
+    /// Version of aggregation executors.
+    version: PbAggNodeVersion,
+
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
 
@@ -135,6 +139,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         Ok(Self {
             input: args.input,
             inner: ExecutorInner {
+                version: args.version,
                 actor_ctx: args.actor_ctx,
                 info: ExecutorInfo {
                     schema,
@@ -260,6 +265,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         let mut vars = ExecutionVars {
             // This will fetch previous agg states from the intermediate state table.
             agg_group: AggGroup::create(
+                this.version,
                 None,
                 &this.agg_calls,
                 &this.agg_funcs,

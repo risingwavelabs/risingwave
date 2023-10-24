@@ -268,6 +268,16 @@ message AggCallState {
   reserved "table_state";
 }
 
+enum AggNodeVersion {
+  AGG_NODE_VERSION_UNSPECIFIED = 0;
+
+  // https://github.com/risingwavelabs/risingwave/issues/12140#issuecomment-1776289808
+  AGG_NODE_VERSION_ISSUE_12140 = 1;
+
+  // max value of int32
+  AGG_NODE_VERSION_MAX = 2147483647;
+}
+
 message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
   // Only used for stateless simple agg.
@@ -279,6 +289,7 @@ message SimpleAggNode {
   bool is_append_only = 5;
   map<uint32, catalog.Table> distinct_dedup_tables = 6;
   uint32 row_count_index = 7;
+  AggNodeVersion version = 8;
 }
 
 message HashAggNode {
@@ -292,6 +303,7 @@ message HashAggNode {
   map<uint32, catalog.Table> distinct_dedup_tables = 6;
   uint32 row_count_index = 7;
   bool emit_on_window_close = 8;
+  AggNodeVersion version = 9;
 }
 
 message TopNNode {
