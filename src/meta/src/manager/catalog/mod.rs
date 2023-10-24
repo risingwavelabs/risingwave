@@ -939,7 +939,8 @@ impl CatalogManager {
             let tables = &mut database_core.tables;
             let mut tables = BTreeMapTransaction::new(tables);
             for table_id in table_ids {
-                tables.remove(table_id);
+                let res = tables.remove(table_id);
+                assert!(res.is_some());
             }
             commit_meta!(self, tables)?;
         }
