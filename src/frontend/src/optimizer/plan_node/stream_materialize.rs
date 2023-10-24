@@ -24,11 +24,13 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::derive_columns;
+use super::stream::StreamPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::table_catalog::{CreateType, TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::derive::derive_pk;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -273,8 +275,8 @@ impl Distill for StreamMaterialize {
 
         vec.push(("pk_conflict", Pretty::from(pk_conflict_behavior)));
 
-        let watermark_columns = &self.base.watermark_columns;
-        if self.base.watermark_columns.count_ones(..) > 0 {
+        let watermark_columns = &self.base.watermark_columns();
+        if self.base.watermark_columns().count_ones(..) > 0 {
             let watermark_column_names = watermark_columns
                 .ones()
                 .map(|i| table.columns()[i].name_with_hidden().to_string())
@@ -294,16 +296,16 @@ impl PlanTreeNodeUnary for StreamMaterialize {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let new = Self::new(input, self.table().clone());
         new.base
-            .schema
+            .schema()
             .fields
             .iter()
-            .zip_eq_fast(self.base.schema.fields.iter())
+            .zip_eq_fast(self.base.schema().fields.iter())
             .for_each(|(a, b)| {
                 assert_eq!(a.data_type, b.data_type);
                 assert_eq!(a.type_name, b.type_name);
                 assert_eq!(a.sub_fields, b.sub_fields);
             });
-        assert_eq!(new.plan_base().stream_key, self.plan_base().stream_key);
+        assert_eq!(new.plan_base().stream_key(), self.plan_base().stream_key());
         new
     }
 }

@@ -44,7 +44,7 @@ impl<T: SqlDriver> SqlBackendElectionClient<T> {
     }
 }
 
-#[derive(sqlx::FromRow, Debug, FromQueryResult)]
+#[derive(Debug, FromQueryResult)]
 pub struct ElectionRow {
     service: String,
     id: String,
@@ -191,16 +191,14 @@ DO
     }
 
     async fn leader(&self, service_name: &str) -> MetaResult<Option<ElectionRow>> {
-        let string = format!(
-            r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = $1;"#,
-            table = Self::election_table_name()
-        );
-
         let query_result = self
             .conn
             .query_one(Statement::from_sql_and_values(
                 DatabaseBackend::Sqlite,
-                string,
+                format!(
+                    r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = $1;"#,
+                    table = Self::election_table_name()
+                ),
                 vec![Value::from(service_name)],
             ))
             .await?;
@@ -285,19 +283,17 @@ impl SqlDriver for MySqlDriver {
     }
 
     async fn update_heartbeat(&self, service_name: &str, id: &str) -> MetaResult<()> {
-        let string = format!(
-            r#"INSERT INTO {table} (id, service, last_heartbeat)
-VALUES(?, ?, NOW())
-ON duplicate KEY
-   UPDATE last_heartbeat = VALUES(last_heartbeat);
-"#,
-            table = Self::member_table_name()
-        );
-
         self.conn
             .execute(Statement::from_sql_and_values(
                 DatabaseBackend::MySql,
-                string,
+                format!(
+                    r#"INSERT INTO {table} (id, service, last_heartbeat)
+        VALUES(?, ?, NOW())
+        ON duplicate KEY
+           UPDATE last_heartbeat = VALUES(last_heartbeat);
+        "#,
+                    table = Self::member_table_name()
+                ),
                 vec![Value::from(id), Value::from(service_name)],
             ))
             .await?;
@@ -353,16 +349,14 @@ ON duplicate KEY
     }
 
     async fn leader(&self, service_name: &str) -> MetaResult<Option<ElectionRow>> {
-        let string = format!(
-            r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = ?;"#,
-            table = Self::election_table_name()
-        );
-
         let query_result = self
             .conn
             .query_one(Statement::from_sql_and_values(
                 DatabaseBackend::MySql,
-                string,
+                format!(
+                    r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = ?;"#,
+                    table = Self::election_table_name()
+                ),
                 vec![Value::from(service_name)],
             ))
             .await?;
@@ -375,16 +369,14 @@ ON duplicate KEY
     }
 
     async fn candidates(&self, service_name: &str) -> MetaResult<Vec<ElectionRow>> {
-        let string = format!(
-            r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = ?;"#,
-            table = Self::member_table_name()
-        );
-
         let all = self
             .conn
             .query_all(Statement::from_sql_and_values(
                 DatabaseBackend::MySql,
-                string,
+                format!(
+                    r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = ?;"#,
+                    table = Self::member_table_name()
+                ),
                 vec![Value::from(service_name)],
             ))
             .await?;
@@ -412,16 +404,14 @@ ON duplicate KEY
         ))
         .await?;
 
-        let string = format!(
-            r#"
-        DELETE FROM {table} WHERE service = ? AND id = ?;
-        "#,
-            table = Self::member_table_name()
-        );
-
         txn.execute(Statement::from_sql_and_values(
             DatabaseBackend::MySql,
-            string,
+            format!(
+                r#"
+            DELETE FROM {table} WHERE service = ? AND id = ?;
+            "#,
+                table = Self::member_table_name()
+            ),
             vec![Value::from(service_name), Value::from(id)],
         ))
         .await?;
@@ -451,20 +441,18 @@ impl SqlDriver for PostgresDriver {
     }
 
     async fn update_heartbeat(&self, service_name: &str, id: &str) -> MetaResult<()> {
-        let string = format!(
-            r#"INSERT INTO {table} (id, service, last_heartbeat)
-VALUES($1, $2, NOW())
-ON CONFLICT (id, service)
-DO
-   UPDATE SET last_heartbeat = EXCLUDED.last_heartbeat;
-"#,
-            table = Self::member_table_name()
-        );
-
         self.conn
             .execute(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
-                string,
+                format!(
+                    r#"INSERT INTO {table} (id, service, last_heartbeat)
+        VALUES($1, $2, NOW())
+        ON CONFLICT (id, service)
+        DO
+           UPDATE SET last_heartbeat = EXCLUDED.last_heartbeat;
+        "#,
+                    table = Self::member_table_name()
+                ),
                 vec![Value::from(id), Value::from(service_name)],
             ))
             .await?;
@@ -478,30 +466,28 @@ DO
         id: &str,
         ttl: i64,
     ) -> MetaResult<ElectionRow> {
-        let string = format!(
-            r#"INSERT INTO {table} (service, id, last_heartbeat)
-VALUES ($1, $2, NOW())
-ON CONFLICT (service)
-    DO UPDATE
-    SET id             = CASE
-                             WHEN {table}.last_heartbeat < NOW() - $3::INTERVAL THEN EXCLUDED.id
-                             ELSE {table}.id
-        END,
-        last_heartbeat = CASE
-                             WHEN {table}.last_heartbeat < NOW() - $3::INTERVAL THEN EXCLUDED.last_heartbeat
-                             WHEN {table}.id = EXCLUDED.id THEN EXCLUDED.last_heartbeat
-                             ELSE {table}.last_heartbeat
-            END
-RETURNING service, id, last_heartbeat;
-"#,
-            table = Self::election_table_name()
-        );
-
         let query_result = self
             .conn
             .query_one(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
-                string,
+                format!(
+                    r#"INSERT INTO {table} (service, id, last_heartbeat)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (service)
+            DO UPDATE
+            SET id             = CASE
+                                     WHEN {table}.last_heartbeat < NOW() - $3::INTERVAL THEN EXCLUDED.id
+                                     ELSE {table}.id
+                END,
+                last_heartbeat = CASE
+                                     WHEN {table}.last_heartbeat < NOW() - $3::INTERVAL THEN EXCLUDED.last_heartbeat
+                                     WHEN {table}.id = EXCLUDED.id THEN EXCLUDED.last_heartbeat
+                                     ELSE {table}.last_heartbeat
+                    END
+        RETURNING service, id, last_heartbeat;
+        "#,
+                    table = Self::election_table_name()
+                ),
                 vec![
                     Value::from(service_name),
                     Value::from(id),
@@ -541,16 +527,14 @@ RETURNING service, id, last_heartbeat;
     }
 
     async fn candidates(&self, service_name: &str) -> MetaResult<Vec<ElectionRow>> {
-        let string = format!(
-            r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = $1;"#,
-            table = Self::member_table_name()
-        );
-
         let all = self
             .conn
             .query_all(Statement::from_sql_and_values(
                 DatabaseBackend::Postgres,
-                string,
+                format!(
+                    r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = $1;"#,
+                    table = Self::member_table_name()
+                ),
                 vec![Value::from(service_name)],
             ))
             .await?;
@@ -578,16 +562,14 @@ RETURNING service, id, last_heartbeat;
         ))
         .await?;
 
-        let string = format!(
-            r#"
-        DELETE FROM {table} WHERE service = $1 AND id = $2;
-        "#,
-            table = Self::member_table_name()
-        );
-
         txn.execute(Statement::from_sql_and_values(
             DatabaseBackend::Postgres,
-            string,
+            format!(
+                r#"
+            DELETE FROM {table} WHERE service = $1 AND id = $2;
+            "#,
+                table = Self::member_table_name()
+            ),
             vec![Value::from(service_name), Value::from(id)],
         ))
         .await?;

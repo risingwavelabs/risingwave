@@ -14,7 +14,8 @@
 
 use std::collections::HashMap;
 
-use sea_orm::FromJsonQueryResult;
+use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
+use sea_orm::{DeriveActiveEnum, EnumIter, FromJsonQueryResult};
 use serde::{Deserialize, Serialize};
 
 pub mod prelude;
@@ -63,19 +64,73 @@ pub type FunctionId = ObjectId;
 pub type ConnectionId = ObjectId;
 pub type UserId = u32;
 
-#[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Eq, Serialize, Deserialize, Default)]
-pub struct I32Array(pub Vec<i32>);
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "String(None)")]
+pub enum JobStatus {
+    #[sea_orm(string_value = "CREATING")]
+    Creating,
+    #[sea_orm(string_value = "CREATED")]
+    Created,
+}
 
-#[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Eq, Serialize, Deserialize, Default)]
-pub struct DataType(pub risingwave_pb::data::DataType);
+impl From<JobStatus> for PbStreamJobStatus {
+    fn from(job_status: JobStatus) -> Self {
+        match job_status {
+            JobStatus::Creating => Self::Creating,
+            JobStatus::Created => Self::Created,
+        }
+    }
+}
 
-#[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Eq, Serialize, Deserialize, Default)]
-pub struct DataTypeArray(pub Vec<risingwave_pb::data::DataType>);
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "String(None)")]
+pub enum CreateType {
+    #[sea_orm(string_value = "BACKGROUND")]
+    Background,
+    #[sea_orm(string_value = "FOREGROUND")]
+    Foreground,
+}
 
-#[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize, Default)]
-pub struct FieldArray(pub Vec<risingwave_pb::plan_common::Field>);
+impl From<CreateType> for PbCreateType {
+    fn from(create_type: CreateType) -> Self {
+        match create_type {
+            CreateType::Background => Self::Background,
+            CreateType::Foreground => Self::Foreground,
+        }
+    }
+}
 
-impl Eq for FieldArray {}
+/// Defines struct with a single pb field that derives `FromJsonQueryResult`, it will helps to map json value stored in database to Pb struct.
+macro_rules! derive_from_json_struct {
+    ($struct_name:ident, $field_type:ty) => {
+        #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize, Default)]
+        pub struct $struct_name(pub $field_type);
+        impl Eq for $struct_name {}
+    };
+}
 
-#[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Eq, Serialize, Deserialize, Default)]
-pub struct Property(pub HashMap<String, String>);
+derive_from_json_struct!(I32Array, Vec<i32>);
+derive_from_json_struct!(DataType, risingwave_pb::data::DataType);
+derive_from_json_struct!(DataTypeArray, Vec<risingwave_pb::data::DataType>);
+derive_from_json_struct!(FieldArray, Vec<risingwave_pb::plan_common::Field>);
+derive_from_json_struct!(Property, HashMap<String, String>);
+derive_from_json_struct!(ColumnCatalog, risingwave_pb::plan_common::PbColumnCatalog);
+derive_from_json_struct!(
+    ColumnCatalogArray,
+    Vec<risingwave_pb::plan_common::PbColumnCatalog>
+);
+derive_from_json_struct!(StreamSourceInfo, risingwave_pb::catalog::PbStreamSourceInfo);
+derive_from_json_struct!(WatermarkDesc, risingwave_pb::catalog::PbWatermarkDesc);
+derive_from_json_struct!(
+    WatermarkDescArray,
+    Vec<risingwave_pb::catalog::PbWatermarkDesc>
+);
+derive_from_json_struct!(ExprNodeArray, Vec<risingwave_pb::expr::PbExprNode>);
+derive_from_json_struct!(ColumnOrderArray, Vec<risingwave_pb::common::PbColumnOrder>);
+derive_from_json_struct!(SinkFormatDesc, risingwave_pb::catalog::PbSinkFormatDesc);
+derive_from_json_struct!(Cardinality, risingwave_pb::plan_common::PbCardinality);
+derive_from_json_struct!(TableVersion, risingwave_pb::catalog::table::PbTableVersion);
+derive_from_json_struct!(
+    PrivateLinkService,
+    risingwave_pb::catalog::connection::PbPrivateLinkService
+);
