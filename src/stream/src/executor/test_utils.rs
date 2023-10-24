@@ -34,11 +34,11 @@ pub mod prelude {
     pub use risingwave_common::test_prelude::StreamChunkTestExt;
     pub use risingwave_common::types::DataType;
     pub use risingwave_common::util::sort_util::OrderType;
-    pub use risingwave_expr::expr::build_from_pretty;
     pub use risingwave_storage::memory::MemoryStateStore;
     pub use risingwave_storage::StateStore;
 
     pub use crate::common::table::state_table::StateTable;
+    pub use crate::executor::test_utils::expr::build_from_pretty;
     pub use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
     pub use crate::executor::{ActorContext, BoxedMessageStream, Executor, PkIndices};
 }
@@ -262,6 +262,14 @@ pub trait StreamExecutorTestExt: MessageStream + Unpin {
 
 // FIXME: implement on any `impl MessageStream` if the analyzer works well.
 impl StreamExecutorTestExt for BoxedMessageStream {}
+
+pub mod expr {
+    use risingwave_expr::expr::NonStrictExpression;
+
+    pub fn build_from_pretty(s: impl AsRef<str>) -> NonStrictExpression {
+        NonStrictExpression::for_test(risingwave_expr::expr::build_from_pretty(s))
+    }
+}
 
 pub mod agg_executor {
     use std::sync::atomic::AtomicU64;

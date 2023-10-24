@@ -18,7 +18,7 @@ use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::expr::{build_non_strict_from_prost, BoxedExpression};
+use risingwave_expr::expr::{build_non_strict_from_prost, NonStrictExpression};
 use risingwave_pb::plan_common::{JoinType as JoinTypeProto, StorageTableDesc};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
@@ -190,7 +190,7 @@ struct TemporalJoinExecutorDispatcherArgs<S: StateStore> {
     left_join_keys: Vec<usize>,
     right_join_keys: Vec<usize>,
     null_safe: Vec<bool>,
-    condition: Option<BoxedExpression>,
+    condition: Option<NonStrictExpression>,
     pk_indices: PkIndices,
     output_indices: Vec<usize>,
     table_output_indices: Vec<usize>,
