@@ -103,7 +103,7 @@ impl Serialize for ExecutionPlanNode {
 impl From<PlanRef> for ExecutionPlanNode {
     fn from(plan_node: PlanRef) -> Self {
         Self {
-            plan_node_id: plan_node.plan_base().id,
+            plan_node_id: plan_node.plan_base().id(),
             plan_node_type: plan_node.node_type(),
             node: plan_node.to_batch_prost_body(),
             children: vec![],
