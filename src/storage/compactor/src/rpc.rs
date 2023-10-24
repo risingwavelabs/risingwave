@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
@@ -85,7 +84,7 @@ impl MonitorService for MonitorServiceImpl {
         _request: Request<StackTraceRequest>,
     ) -> Result<Response<StackTraceResponse>, Status> {
         let compaction_task_traces = match &self.await_tree_reg {
-            None => HashMap::default(),
+            None => Default::default(),
             Some(await_tree_reg) => await_tree_reg
                 .read()
                 .iter()

@@ -19,6 +19,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
 
+use super::generic::GenericPlanRef;
 use super::utils::{childless_record, column_names_pretty, Distill};
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch,
@@ -30,19 +31,19 @@ use crate::optimizer::property::{Distribution, Order};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSource {
     pub base: PlanBase,
-    logical: generic::Source,
+    core: generic::Source,
 }
 
 impl BatchSource {
-    pub fn new(logical: generic::Source) -> Self {
-        let base = PlanBase::new_batch_from_logical(
-            &logical,
+    pub fn new(core: generic::Source) -> Self {
+        let base = PlanBase::new_batch_with_core(
+            &core,
             // Use `Single` by default, will be updated later with `clone_with_dist`.
             Distribution::Single,
             Order::any(),
         );
 
-        Self { base, logical }
+        Self { base, core }
     }
 
     pub fn column_names(&self) -> Vec<&str> {
@@ -50,19 +51,20 @@ impl BatchSource {
     }
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
-        self.logical.catalog.clone()
+        self.core.catalog.clone()
     }
 
     pub fn kafka_timestamp_range_value(&self) -> (Option<i64>, Option<i64>) {
-        self.logical.kafka_timestamp_range_value()
+        self.core.kafka_timestamp_range_value()
     }
 
     pub fn clone_with_dist(&self) -> Self {
-        let mut base = self.base.clone();
-        base.dist = Distribution::SomeShard;
+        let base = self
+            .base
+            .clone_with_new_distribution(Distribution::SomeShard);
         Self {
             base,
-            logical: self.logical.clone(),
+            core: self.core.clone(),
         }
     }
 }
@@ -100,7 +102,7 @@ impl ToBatchPb for BatchSource {
             source_id: source_catalog.id,
             info: Some(source_catalog.info.clone()),
             columns: self
-                .logical
+                .core
                 .column_catalog
                 .iter()
                 .map(|c| c.to_protobuf())

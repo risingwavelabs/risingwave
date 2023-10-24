@@ -18,7 +18,6 @@
 )]
 #![feature(extract_if)]
 #![feature(trait_alias)]
-#![feature(binary_heap_drain_sorted)]
 #![feature(is_sorted)]
 #![feature(type_alias_impl_trait)]
 #![feature(test)]
@@ -78,7 +77,6 @@ pub mod test_utils;
 pub mod types;
 pub mod vnode_mapping;
 
-pub mod heap_profiling;
 pub mod range;
 
 pub mod test_prelude {

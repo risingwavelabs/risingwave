@@ -10,6 +10,12 @@ set -euo pipefail
 # Make sure the added benchmark has a unique name.
 BENCHMARKS="stream_hash_agg json_parser bench_block_iter bench_compactor bench_lru_cache bench_merge_iter"
 
+# Reference: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+get_instance_type() {
+  TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"` \
+  && curl -H "X-aws-ec2-metadata-token: $TOKEN" -v http://169.254.169.254/latest/meta-data/instance-type
+}
+
 # cargo criterion --bench stream_hash_agg --message-format=json
 bench() {
   BENCHMARK_NAME=$1
@@ -34,6 +40,19 @@ bench() {
 }
 
 main() {
+  # FIXME(kwannoel): This is a workaround
+  # Microbenchmarks need to be namespaced by instance types,
+  # the result upload endpoint needs to be parameterized by instance type as well to support this.
+  echo "--- Getting aws instance type"
+  local instance_type=$(get_instance_type)
+  echo "instance_type: $instance_type"
+  echo "$instance_type" > microbench_instance_type.txt
+  buildkite-agent artifact upload ./microbench_instance_type.txt
+  if [[ $instance_type != "m6i.4xlarge" ]]; then
+    echo "Only m6i.4xlarge is supported, skipping microbenchmark"
+    exit 0
+  fi
+
   # We need cargo criterion to generate machine-readable benchmark results from
   # microbench.
   echo "--- Installing cargo criterion"

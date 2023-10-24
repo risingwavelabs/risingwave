@@ -25,5 +25,10 @@ zstd-sys = { version = "2", optional = true, default-features = false, features 
 # workspace-hack = { path = "../../workspace-hack" }
 # Don't add workspace-hack into this crate!
 
+# FIXME(xxchan): This is a temporary fix due to how cargo and hakari works. See related PR for more details.
+# We will revisit how to handle workspace-hack and build-dependency issues later.
+[build-dependencies]
+openssl-sys = { version = "=0.9.92", optional = true, features = ["vendored"] }
+
 [lints]
 workspace = true

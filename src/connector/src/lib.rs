@@ -19,7 +19,6 @@
 #![feature(stmt_expr_attributes)]
 #![feature(box_patterns)]
 #![feature(trait_alias)]
-#![feature(binary_heap_drain_sorted)]
 #![feature(lint_reasons)]
 #![feature(lazy_cell)]
 #![feature(result_option_inspect)]
@@ -47,6 +46,7 @@ pub mod error;
 mod macros;
 
 pub mod parser;
+pub mod schema;
 pub mod sink;
 pub mod source;
 

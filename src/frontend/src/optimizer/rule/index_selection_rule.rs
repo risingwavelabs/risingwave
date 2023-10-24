@@ -66,6 +66,7 @@ use crate::expr::{
     FunctionCall, InputRef,
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     generic, ColumnPruningContext, LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode,
     PlanTreeNodeBinary, PredicatePushdown, PredicatePushdownContext,
@@ -917,7 +918,9 @@ impl IndexCost {
     }
 }
 
-impl ExprVisitor<IndexCost> for TableScanIoEstimator<'_> {
+impl ExprVisitor for TableScanIoEstimator<'_> {
+    type Result = IndexCost;
+
     fn visit_function_call(&mut self, func_call: &FunctionCall) -> IndexCost {
         match func_call.func_type() {
             ExprType::Or => func_call
@@ -944,7 +947,9 @@ struct ExprInputRefFinder {
     pub input_ref_index_set: HashSet<usize>,
 }
 
-impl ExprVisitor<()> for ExprInputRefFinder {
+impl ExprVisitor for ExprInputRefFinder {
+    type Result = ();
+
     fn merge(_: (), _: ()) {}
 
     fn visit_input_ref(&mut self, input_ref: &InputRef) {

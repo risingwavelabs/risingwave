@@ -102,6 +102,14 @@ impl Task for ComputeNodeService {
             cmd.env("MALLOC_CONF", conf); // unprefixed for linux
         }
 
+        if crate::util::is_env_set("ENABLE_BUILD_RW_CONNECTOR") {
+            let prefix_bin = env::var("PREFIX_BIN")?;
+            cmd.env(
+                "CONNECTOR_LIBS_PATH",
+                Path::new(&prefix_bin).join("connector-node/libs/"),
+            );
+        }
+
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"));
         Self::apply_command_args(&mut cmd, &self.config)?;

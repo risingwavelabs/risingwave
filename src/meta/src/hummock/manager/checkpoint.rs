@@ -36,7 +36,7 @@ const HUMMOCK_INIT_FLAG_KEY: &[u8] = b"hummock_init_flag";
 impl HummockManager {
     /// # Panics
     /// if checkpoint is not found.
-    pub(crate) async fn read_checkpoint(&self) -> Result<HummockVersionCheckpoint> {
+    pub async fn read_checkpoint(&self) -> Result<HummockVersionCheckpoint> {
         use prost::Message;
         let data = match self
             .object_store
@@ -173,23 +173,23 @@ impl HummockManager {
             .map_err(Into::into)
     }
 
-    pub(crate) fn pause_version_checkpoint(&self) {
+    pub fn pause_version_checkpoint(&self) {
         self.pause_version_checkpoint.store(true, Ordering::Relaxed);
         tracing::info!("hummock version checkpoint is paused.");
     }
 
-    pub(crate) fn resume_version_checkpoint(&self) {
+    pub fn resume_version_checkpoint(&self) {
         self.pause_version_checkpoint
             .store(false, Ordering::Relaxed);
         tracing::info!("hummock version checkpoint is resumed.");
     }
 
-    pub(crate) fn is_version_checkpoint_paused(&self) -> bool {
+    pub fn is_version_checkpoint_paused(&self) -> bool {
         self.pause_version_checkpoint.load(Ordering::Relaxed)
     }
 
     #[named]
-    pub(crate) async fn get_checkpoint_version(&self) -> HummockVersion {
+    pub async fn get_checkpoint_version(&self) -> HummockVersion {
         let versioning_guard = read_lock!(self, versioning).await;
         versioning_guard
             .checkpoint

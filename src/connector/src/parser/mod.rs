@@ -33,7 +33,6 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::{
     SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
 };
-pub use schema_registry::name_strategy_from_str;
 use tracing_futures::Instrument;
 
 use self::avro::AvroAccessBuilder;
@@ -46,9 +45,10 @@ use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
 use crate::aws_auth::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
+use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::{
-    BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext, SourceContextRef,
-    SourceEncode, SourceFormat, SourceMeta, SourceStruct, SourceWithStateStream, SplitId,
+    extract_source_struct, BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
+    SourceContextRef, SourceEncode, SourceFormat, SourceMeta, SourceWithStateStream, SplitId,
     StreamChunkWithState,
 };
 
@@ -63,7 +63,6 @@ mod maxwell;
 mod mysql;
 mod plain_parser;
 mod protobuf;
-mod schema_registry;
 mod unified;
 mod upsert_parser;
 mod util;
@@ -783,24 +782,6 @@ impl SpecificParserConfig {
     };
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct SchemaRegistryAuth {
-    username: Option<String>,
-    password: Option<String>,
-}
-
-impl From<&HashMap<String, String>> for SchemaRegistryAuth {
-    fn from(props: &HashMap<String, String>) -> Self {
-        const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
-        const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
-
-        SchemaRegistryAuth {
-            username: props.get(SCHEMA_REGISTRY_USERNAME).cloned(),
-            password: props.get(SCHEMA_REGISTRY_PASSWORD).cloned(),
-        }
-    }
-}
-
 #[derive(Debug, Default, Clone)]
 pub struct AvroProperties {
     pub use_schema_registry: bool,
@@ -870,35 +851,9 @@ pub enum ProtocolProperties {
 }
 
 impl SpecificParserConfig {
-    pub fn get_source_struct(&self) -> SourceStruct {
-        let format = match self.protocol_config {
-            ProtocolProperties::Debezium => SourceFormat::Debezium,
-            ProtocolProperties::DebeziumMongo => SourceFormat::DebeziumMongo,
-            ProtocolProperties::Maxwell => SourceFormat::Maxwell,
-            ProtocolProperties::Canal => SourceFormat::Canal,
-            ProtocolProperties::Plain => SourceFormat::Plain,
-            ProtocolProperties::Upsert => SourceFormat::Upsert,
-            ProtocolProperties::Native => SourceFormat::Native,
-            ProtocolProperties::Unspecified => unreachable!(),
-        };
-        let encode = match self.encoding_config {
-            EncodingProperties::Avro(_) => SourceEncode::Avro,
-            EncodingProperties::Protobuf(_) => SourceEncode::Protobuf,
-            EncodingProperties::Csv(_) => SourceEncode::Csv,
-            EncodingProperties::Json(_) => SourceEncode::Json,
-            EncodingProperties::Bytes(_) => SourceEncode::Bytes,
-            EncodingProperties::Native => SourceEncode::Native,
-            EncodingProperties::Unspecified => unreachable!(),
-        };
-        SourceStruct { format, encode }
-    }
-
     // The validity of (format, encode) is ensured by `extract_format_encode`
-    pub fn new(
-        source_struct: SourceStruct,
-        info: &StreamSourceInfo,
-        props: &HashMap<String, String>,
-    ) -> Result<Self> {
+    pub fn new(info: &StreamSourceInfo, props: &HashMap<String, String>) -> Result<Self> {
+        let source_struct = extract_source_struct(info)?;
         let format = source_struct.format;
         let encode = source_struct.encode;
         // this transformation is needed since there may be config for the protocol
@@ -1024,21 +979,5 @@ impl SpecificParserConfig {
             encoding_config,
             protocol_config,
         })
-    }
-}
-
-impl ParserConfig {
-    pub fn new(
-        source_struct: SourceStruct,
-        info: &StreamSourceInfo,
-        props: &HashMap<String, String>,
-        rw_columns: &Vec<SourceColumnDesc>,
-    ) -> Result<Self> {
-        let common = CommonParserConfig {
-            rw_columns: rw_columns.to_owned(),
-        };
-        let specific = SpecificParserConfig::new(source_struct, info, props)?;
-
-        Ok(Self { common, specific })
     }
 }

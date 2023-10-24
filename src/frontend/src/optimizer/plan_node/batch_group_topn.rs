@@ -27,36 +27,33 @@ use crate::optimizer::property::{Order, RequiredDist};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchGroupTopN {
     pub base: PlanBase,
-    logical: generic::TopN<PlanRef>,
+    core: generic::TopN<PlanRef>,
 }
 
 impl BatchGroupTopN {
-    pub fn new(logical: generic::TopN<PlanRef>) -> Self {
-        assert!(!logical.group_key.is_empty());
-        let base = PlanBase::new_batch_from_logical(
-            &logical,
-            logical.input.distribution().clone(),
-            Order::any(),
-        );
-        BatchGroupTopN { base, logical }
+    pub fn new(core: generic::TopN<PlanRef>) -> Self {
+        assert!(!core.group_key.is_empty());
+        let base =
+            PlanBase::new_batch_with_core(&core, core.input.distribution().clone(), Order::any());
+        BatchGroupTopN { base, core }
     }
 
     fn group_key(&self) -> &[usize] {
-        &self.logical.group_key
+        &self.core.group_key
     }
 }
 
-impl_distill_by_unit!(BatchGroupTopN, logical, "BatchGroupTopN");
+impl_distill_by_unit!(BatchGroupTopN, core, "BatchGroupTopN");
 
 impl PlanTreeNodeUnary for BatchGroupTopN {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
-        logical.input = input;
-        Self::new(logical)
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 
@@ -73,13 +70,13 @@ impl ToDistributedBatch for BatchGroupTopN {
 
 impl ToBatchPb for BatchGroupTopN {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let column_orders = self.logical.order.to_protobuf();
+        let column_orders = self.core.order.to_protobuf();
         NodeBody::GroupTopN(GroupTopNNode {
-            limit: self.logical.limit_attr.limit(),
-            offset: self.logical.offset,
+            limit: self.core.limit_attr.limit(),
+            offset: self.core.offset,
             column_orders,
             group_key: self.group_key().iter().map(|c| *c as u32).collect(),
-            with_ties: self.logical.limit_attr.with_ties(),
+            with_ties: self.core.limit_attr.with_ties(),
         })
     }
 }
