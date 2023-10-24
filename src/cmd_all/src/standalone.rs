@@ -138,8 +138,11 @@ pub async fn standalone(opts: StandaloneOpts) -> Result<()> {
         compactor_opts,
     } = parse_opt_args(&opts);
 
-    if let Some(opts) = meta_opts {
+    if let Some(mut opts) = meta_opts {
+        let etcd_pwd = opts.etcd_password;
+        opts.etcd_password = String::from("*");
         tracing::info!("starting meta-node thread with cli args: {:?}", opts);
+        opts.etcd_password = etcd_pwd;
 
         let _meta_handle = tokio::spawn(async move {
             risingwave_meta_node::start(opts).await;

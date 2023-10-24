@@ -17,6 +17,7 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 
 mod server;
+
 use std::time::Duration;
 
 use clap::Parser;
@@ -71,7 +72,7 @@ pub struct MetaNodeOpts {
 
     /// Password of etcd, required when --etcd-auth is enabled.
     #[clap(long, env = "RW_ETCD_PASSWORD", default_value = "")]
-    etcd_password: String,
+    pub etcd_password: String,
 
     /// Endpoint of the SQL service, make it non-option when SQL service is required.
     #[clap(long, env = "RW_SQL_ENDPOINT")]
