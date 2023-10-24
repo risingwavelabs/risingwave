@@ -866,7 +866,6 @@ impl CatalogManager {
                 user_core.decrease_ref(table.owner);
             }
         }
-
         Ok(())
     }
 
