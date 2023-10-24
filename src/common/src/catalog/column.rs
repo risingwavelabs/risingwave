@@ -174,8 +174,8 @@ impl ColumnDesc {
             name: name.to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
-            description: None,
             generated_or_default_column: None,
+            description: None,
         }
     }
 
@@ -195,8 +195,8 @@ impl ColumnDesc {
             name: name.to_string(),
             field_descs: fields,
             type_name: type_name.to_string(),
-            description: None,
             generated_or_default_column: None,
+            description: None,
         }
     }
 
@@ -248,8 +248,8 @@ impl From<PbColumnDesc> for ColumnDesc {
             name: prost.name,
             type_name: prost.type_name,
             field_descs,
-            description: prost.description.clone(),
             generated_or_default_column: prost.generated_or_default_column,
+            description: prost.description.clone(),
         }
     }
 }
@@ -268,8 +268,8 @@ impl From<&ColumnDesc> for PbColumnDesc {
             name: c.name.clone(),
             field_descs: c.field_descs.iter().map(ColumnDesc::to_protobuf).collect(),
             type_name: c.type_name.clone(),
-            description: c.description.clone(),
             generated_or_default_column: c.generated_or_default_column.clone(),
+            description: c.description.clone(),
         }
     }
 }
