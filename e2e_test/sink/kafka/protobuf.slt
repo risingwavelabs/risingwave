@@ -95,3 +95,12 @@ format plain encode protobuf (
   force_append_only = true,
   schema.location = 's3:///risingwave/proto-recursive',
   message = 'recursive.AllTypes');
+
+statement ok
+drop sink sink0;
+
+statement ok
+drop table into_kafka;
+
+statement ok
+drop table from_kafka;
