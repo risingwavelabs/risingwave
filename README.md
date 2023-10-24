@@ -85,7 +85,7 @@ RisingWave adaptly tackles some of the most challenging problems in stream proce
 * **Highly efficient in multi-stream joins**
   * RisingWave has made significant optimizations for multiple stream join scenarios. Users can easily join 10-20 streams (or more) efficiently in a production environment.
 * **High resource utilization**
-  * Queries within RisingWave benefit from shared computational resources, obviating the need for users to manually allocate resources for individual queries.
+  * Queries in RisingWave leverage shared computational resources, eliminating the need for users to manually allocate resources for each query.
 * **No compromise on large state management**
   * The decoupled compute-storage architecture of RisingWave ensures remote persistence of internal states, and users never need to worry about the size of internal states when handling complex queries.
 * **Transparent dynamic scaling**
@@ -95,11 +95,11 @@ RisingWave adaptly tackles some of the most challenging problems in stream proce
 * **Easy to verify correctness**
   * RisingWave persists results in materialized views and allow users to break down complex stream computation programs into stacked materialized views, simplifying program development and result verification.
 * **Simplified data stack**
-  * RisingWave's ability to store data and serve queries eliminates the need for separate maintenance of stream processors and databases. Users can effortlessly link RisingWave to their preferred BI tools or through client libraries.
+  * RisingWave's ability to store data and serve queries eliminates the need for separate maintenance of stream processors and databases. Users can effortlessly connect RisingWave to their preferred BI tools or through client libraries.
 * **Simple to maintain and operate**
   * RisingWave abstracts away unnecessary low-level details, allowing users to concentrate solely on SQL code-level issues.
 * **Rich ecosystem**
-  * With integrations to a diverse range of cloud systems and the PostgreSQL ecosystem, RisingWave boasts a rich and expansive ecosystem.
+  * RisingWave offers a robust ecosystem, seamlessly integrating with a wide range of cloud systems and the PostgreSQL ecosystem.
 
 ## RisingWave's limitations
 RisingWave isn’t a panacea for all data engineering hurdles. It has its own set of limitations:
