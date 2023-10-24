@@ -39,7 +39,9 @@ async fn test_resize_normal() -> Result<()> {
         .await?;
 
     let join_fragment = cluster
-        .locate_one_fragment([identity_contains("materialize")])
+        .locate_one_fragment([
+            identity_contains("hashJoin"),
+        ])
         .await?;
 
     let join_fragment_id = join_fragment.inner.fragment_id;
