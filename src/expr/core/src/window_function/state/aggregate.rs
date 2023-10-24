@@ -78,7 +78,6 @@ impl AggregateState {
             } else {
                 (AggImpl::Full, false)
             };
-        // let (agg_impl, enable_delta) = (AggImpl::Full, false);
         Ok(Self {
             agg_func,
             agg_impl,
