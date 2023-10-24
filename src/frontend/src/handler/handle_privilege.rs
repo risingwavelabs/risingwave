@@ -39,7 +39,10 @@ fn make_prost_privilege(
     let reader = catalog_reader.read_guard();
     let actions = match privileges {
         Privileges::All { .. } => available_privilege_actions(&objects)?,
-        Privileges::Actions(actions) => actions,
+        Privileges::Actions(actions) => actions
+            .into_iter()
+            .map(|action| get_prost_action(&action))
+            .collect(),
     };
     let mut grant_objs = vec![];
     match objects {
@@ -147,14 +150,11 @@ fn make_prost_privilege(
         }
     };
     let action_with_opts = actions
-        .iter()
-        .map(|action| {
-            let prost_action = get_prost_action(action);
-            ActionWithGrantOption {
-                action: prost_action as i32,
-                granted_by: session.user_id(),
-                ..Default::default()
-            }
+        .into_iter()
+        .map(|action| ActionWithGrantOption {
+            action: action as i32,
+            granted_by: session.user_id(),
+            ..Default::default()
         })
         .collect::<Vec<_>>();
 
@@ -318,12 +318,12 @@ mod tests {
                     PbGrantPrivilege {
                         action_with_opts: vec![
                             ActionWithGrantOption {
-                                action: Action::Connect as i32,
+                                action: Action::Create as i32,
                                 with_grant_option: true,
                                 granted_by: DEFAULT_SUPER_USER_ID,
                             },
                             ActionWithGrantOption {
-                                action: Action::Create as i32,
+                                action: Action::Connect as i32,
                                 with_grant_option: true,
                                 granted_by: DEFAULT_SUPER_USER_ID,
                             }

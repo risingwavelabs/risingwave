@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub(crate) mod user_authentication;
+pub(crate) mod user_catalog;
 pub(crate) mod user_manager;
 pub mod user_privilege;
 pub(crate) mod user_service;

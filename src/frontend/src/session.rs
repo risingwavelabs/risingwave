@@ -27,6 +27,7 @@ use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuth
 use pgwire::types::{Format, FormatIterator};
 use rand::RngCore;
 use risingwave_batch::task::{ShutdownSender, ShutdownToken};
+use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 #[cfg(test)]
 use risingwave_common::catalog::{
@@ -49,7 +50,7 @@ use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
-use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_pb::user::grant_privilege::Object;
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
@@ -633,7 +634,7 @@ impl SessionImpl {
         if schema.name() != DEFAULT_SCHEMA_NAME {
             self.check_privileges(&[ObjectCheckItem::new(
                 schema.owner(),
-                Action::Create,
+                AclMode::Create,
                 Object::SchemaId(schema.id()),
             )])?;
         }
@@ -800,13 +801,8 @@ impl SessionManager for SessionManagerImpl {
                     format!("User {} is not allowed to login", user_name),
                 )));
             }
-            let has_privilege = user.grant_privileges.iter().any(|privilege| {
-                privilege.object == Some(Object::DatabaseId(database_id))
-                    && privilege
-                        .action_with_opts
-                        .iter()
-                        .any(|ao| ao.action == Action::Connect as i32)
-            });
+            let has_privilege =
+                user.check_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
             if !user.is_super && !has_privilege {
                 return Err(Box::new(Error::new(
                     ErrorKind::PermissionDenied,

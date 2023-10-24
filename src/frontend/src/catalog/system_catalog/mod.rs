@@ -21,6 +21,7 @@ use std::sync::{Arc, LazyLock};
 
 use async_trait::async_trait;
 use itertools::Itertools;
+use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, SysCatalogReader, TableDesc, TableId, DEFAULT_SUPER_USER_ID,
     NON_RESERVED_SYS_CATALOG_ID,
@@ -28,8 +29,7 @@ use risingwave_common::catalog::{
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
-use risingwave_pb::user::grant_privilege::{Action, Object};
-use risingwave_pb::user::UserInfo;
+use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::system_catalog::information_schema::*;
@@ -39,6 +39,7 @@ use crate::catalog::view_catalog::ViewCatalog;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::session::AuthContext;
+use crate::user::user_catalog::UserCatalog;
 use crate::user::user_privilege::available_prost_privilege;
 use crate::user::user_service::UserInfoReader;
 use crate::user::UserId;
@@ -208,17 +209,17 @@ fn infer_dummy_view_sql(columns: &[SystemCatalogColumnsDef<'_>]) -> String {
 fn get_acl_items(
     object: &Object,
     for_dml_table: bool,
-    users: &Vec<UserInfo>,
+    users: &Vec<UserCatalog>,
     username_map: &HashMap<UserId, String>,
 ) -> String {
     let mut res = String::from("{");
     let mut empty_flag = true;
     let super_privilege = available_prost_privilege(object.clone(), for_dml_table);
     for user in users {
-        let privileges = if user.get_is_super() {
+        let privileges = if user.is_super {
             vec![&super_privilege]
         } else {
-            user.get_grant_privileges()
+            user.grant_privileges
                 .iter()
                 .filter(|&privilege| privilege.object.as_ref().unwrap() == object)
                 .collect_vec()
@@ -229,43 +230,29 @@ fn get_acl_items(
         let mut grantor_map = HashMap::new();
         privileges.iter().for_each(|&privilege| {
             privilege.action_with_opts.iter().for_each(|ao| {
-                grantor_map.entry(ao.granted_by).or_insert_with(Vec::new);
                 grantor_map
-                    .get_mut(&ao.granted_by)
-                    .unwrap()
-                    .push((ao.action, ao.with_grant_option));
+                    .entry(ao.granted_by)
+                    .or_insert_with(Vec::new)
+                    .push((ao.get_action().unwrap(), ao.with_grant_option));
             })
         });
-        for key in grantor_map.keys() {
+        for (granted_by, actions) in grantor_map {
             if empty_flag {
                 empty_flag = false;
             } else {
                 res.push(',');
             }
-            res.push_str(user.get_name());
+            res.push_str(&user.name);
             res.push('=');
-            grantor_map
-                .get(key)
-                .unwrap()
-                .iter()
-                .for_each(|(action, option)| {
-                    let str = match Action::try_from(*action).unwrap() {
-                        Action::Select => "r",
-                        Action::Insert => "a",
-                        Action::Update => "w",
-                        Action::Delete => "d",
-                        Action::Create => "C",
-                        Action::Connect => "c",
-                        _ => unreachable!(),
-                    };
-                    res.push_str(str);
-                    if *option {
-                        res.push('*');
-                    }
-                });
+            for (action, option) in actions {
+                res.push_str(&AclMode::from(action).to_string());
+                if option {
+                    res.push('*');
+                }
+            }
             res.push('/');
             // should be able to query grantor's name
-            res.push_str(username_map.get(key).as_ref().unwrap());
+            res.push_str(username_map.get(&granted_by).unwrap());
         }
     }
     res.push('}');
