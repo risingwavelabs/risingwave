@@ -902,14 +902,17 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkWriterRe
     'a,
 >(
     env: EnvParam<'a>,
-    channel: Pointer<'a, Sender<SinkWriterStreamResponse>>,
+    channel: Pointer<'a, Sender<anyhow::Result<SinkWriterStreamResponse>>>,
     msg: JByteArray<'a>,
 ) -> jboolean {
     execute_and_catch(env, move |env| {
         let sink_writer_stream_response: SinkWriterStreamResponse =
             Message::decode(to_guarded_slice(&msg, env)?.deref())?;
 
-        match channel.as_ref().blocking_send(sink_writer_stream_response) {
+        match channel
+            .as_ref()
+            .blocking_send(Ok(sink_writer_stream_response))
+        {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {
                 tracing::info!("send error.  {:?}", e);

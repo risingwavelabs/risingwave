@@ -45,7 +45,9 @@ pub mod tracing;
 pub mod value_encoding;
 pub mod worker_util;
 
-pub use future_utils::{drop_either_future, pending_on_none, select_all};
+pub use future_utils::{
+    await_future_with_monitor_error_stream, drop_either_future, pending_on_none, select_all,
+};
 #[macro_use]
 pub mod match_util;
 

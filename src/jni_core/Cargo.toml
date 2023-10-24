@@ -10,6 +10,7 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
+anyhow = "1"
 bytes = "1"
 cfg-or-panic = "0.2"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }

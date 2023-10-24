@@ -30,12 +30,11 @@ use std::any::type_name;
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
 use std::iter::repeat;
-use std::pin::pin;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use futures::future::{select, try_join_all, Either};
+use futures::future::try_join_all;
 use futures::stream::{BoxStream, Peekable};
 use futures::{Stream, StreamExt};
 use moka::future::Cache;
@@ -58,13 +57,12 @@ mod sink_coordinate_client;
 mod stream_client;
 mod tracing;
 
-use std::pin::Pin;
-
 pub use compactor_client::{CompactorClient, GrpcCompactorProxyClient};
 pub use compute_client::{ComputeClient, ComputeClientPool, ComputeClientPoolRef};
 pub use connector_client::{ConnectorClient, SinkCoordinatorStreamHandle, SinkWriterStreamHandle};
 pub use hummock_meta_client::{CompactionEventItem, HummockMetaClient};
 pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
+use risingwave_common::util::await_future_with_monitor_error_stream;
 pub use sink_coordinate_client::CoordinatorStreamHandle;
 pub use stream_client::{StreamClient, StreamClientPool, StreamClientPoolRef};
 
@@ -240,25 +238,16 @@ impl<REQ: 'static, RSP: 'static> BidiStreamHandle<REQ, RSP> {
     }
 
     pub async fn send_request(&mut self, request: REQ) -> Result<()> {
-        // Poll the response stream to early see the error
-        let send_request_result = match select(
-            pin!(self.request_sender.send(request)),
-            pin!(Pin::new(&mut self.response_stream).peek()),
+        match await_future_with_monitor_error_stream(
+            &mut self.response_stream,
+            self.request_sender.send(request),
         )
         .await
         {
-            Either::Left((result, _)) => result,
-            Either::Right((response_result, send_future)) => match response_result {
-                None => {
-                    return Err(anyhow!("end of response stream").into());
-                }
-                Some(Err(e)) => {
-                    return Err(e.clone().into());
-                }
-                Some(Ok(_)) => send_future.await,
-            },
-        };
-        send_request_result
-            .map_err(|_| anyhow!("unable to send request {}", type_name::<REQ>()).into())
+            Ok(send_result) => send_result
+                .map_err(|_| anyhow!("unable to send request {}", type_name::<REQ>()).into()),
+            Err(None) => Err(anyhow!("end of response stream").into()),
+            Err(Some(e)) => Err(e.into()),
+        }
     }
 }

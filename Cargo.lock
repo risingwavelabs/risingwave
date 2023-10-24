@@ -7615,6 +7615,7 @@ dependencies = [
 name = "risingwave_jni_core"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bytes",
  "cfg-or-panic",
  "futures",
