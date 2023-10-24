@@ -13,20 +13,18 @@
 // limitations under the License.
 
 use std::fmt::Display;
-use std::sync::Arc;
 
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
 use super::RwPgResponse;
 use crate::binder::{Binder, Relation};
-use crate::catalog::{CatalogError, IndexCatalog};
+use crate::catalog::CatalogError;
 use crate::handler::util::col_descs_to_rows;
 use crate::handler::HandlerArgs;
 
@@ -35,14 +33,9 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
     let mut binder = Binder::new_for_system(&session);
     let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
     // For Source, it doesn't have table catalog so use get source to get column descs.
-    let (columns, pk_columns, dist_columns, indices, relname, description): (
-        Vec<ColumnCatalog>,
-        Vec<ColumnDesc>,
-        Vec<ColumnDesc>,
-        Vec<Arc<IndexCatalog>>,
-        String,
-        Option<String>,
-    ) = match relation {
+
+    // Vec<ColumnCatalog>, Vec<ColumnDesc>, Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>, String, Option<String>
+    let (columns, pk_columns, dist_columns, indices, relname, description) = match relation {
         Relation::Source(s) => {
             let pk_column_catalogs = s
                 .catalog
