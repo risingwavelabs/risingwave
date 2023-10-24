@@ -93,7 +93,7 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_TOTAL_MEMORY_BYTES", default_value_t = default_total_memory_bytes())]
     pub total_memory_bytes: usize,
 
-    /// Total available memory for the compute node in bytes. Used by both computing and storage.
+    /// Spill threshold for mem table.
     #[clap(long, env = "RW_MEM_TABLE_SPILL_THRESHOLD", default_value_t = default_mem_table_spill_threshold())]
     pub mem_table_spill_threshold: usize,
 
@@ -236,7 +236,7 @@ fn default_total_memory_bytes() -> usize {
 }
 
 fn default_mem_table_spill_threshold() -> usize {
-    (16 << 20) as usize
+    (1 << 20) as usize
 }
 
 fn default_parallelism() -> usize {

@@ -299,7 +299,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 "A large key (table_id={}, len={}, epoch={}) is added to block",
                 table_id,
                 table_key_len,
-                full_key.epoch_with_gap.get_epoch()
+                full_key.epoch_with_gap.as_u64()
             );
         }
 
@@ -325,7 +325,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             self.build_block().await?;
         }
         self.last_table_stats.total_key_count += 1;
-        self.epoch_set.insert(full_key.epoch_with_gap.get_epoch());
+        self.epoch_set.insert(full_key.epoch_with_gap.as_u64());
 
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_empty() {

@@ -103,7 +103,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     pub async fn next(&mut self) -> HummockResult<()> {
         while self.iterator.is_valid() {
             let full_key = self.iterator.key();
-            let epoch = full_key.epoch_with_gap.get_epoch();
+            let epoch = full_key.epoch_with_gap.as_u64();
 
             // handle multi-version
             if epoch < self.min_epoch || epoch > self.read_epoch {
@@ -930,7 +930,7 @@ mod tests {
         let mut i = 0;
         while ui.is_valid() {
             let key = ui.key();
-            let key_epoch = key.epoch_with_gap.get_epoch();
+            let key_epoch = key.epoch_with_gap.as_u64();
             assert!(key_epoch >= min_epoch);
 
             i += 1;

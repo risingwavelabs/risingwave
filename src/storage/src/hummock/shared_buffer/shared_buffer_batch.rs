@@ -296,10 +296,10 @@ impl SharedBufferBatchInner {
             // Scan to find the first version <= epoch
             for (e, v) in &item.1 {
                 // skip invisible versions
-                if read_epoch < e.get_epoch() {
+                if read_epoch < e.pure_epoch() {
                     continue;
                 }
-                return Some((v.clone(), e.get_epoch()));
+                return Some((v.clone(), e.as_u64()));
             }
             // cannot find a visible version
         }
@@ -731,7 +731,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
 
     fn key(&self) -> FullKey<&[u8]> {
         let (key, (epoch_with_gap, _)) = self.current_item();
-        FullKey::new(self.table_id, TableKey(key), epoch_with_gap.get_epoch())
+        FullKey::new(self.table_id, TableKey(key), epoch_with_gap.as_u64())
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -771,7 +771,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
             let partition_point = self
                 .inner
                 .binary_search_by(|probe| probe.0[..].cmp(*key.user_key.table_key));
-            let seek_key_epoch = key.epoch_with_gap.get_epoch();
+            let seek_key_epoch = key.epoch_with_gap.as_u64();
             match D::direction() {
                 DirectionEnum::Forward => match partition_point {
                     Ok(i) => {
@@ -779,7 +779,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
                         // seek to the first version that is <= the seek key epoch
                         let mut idx: i32 = 0;
                         for (epoch_with_gap, _) in self.current_versions() {
-                            if epoch_with_gap.get_epoch() <= seek_key_epoch {
+                            if epoch_with_gap.as_u64() <= seek_key_epoch {
                                 break;
                             }
                             idx += 1;
@@ -807,7 +807,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
                             let values = self.current_versions();
                             let mut idx: i32 = (values.len() - 1) as i32;
                             for (epoch_with_gap, _) in values.iter().rev() {
-                                if epoch_with_gap.get_epoch() >= seek_key_epoch {
+                                if epoch_with_gap.as_u64() >= seek_key_epoch {
                                     break;
                                 }
                                 idx -= 1;
@@ -1387,7 +1387,7 @@ mod tests {
             iter.rewind().await.unwrap();
             let mut output = vec![];
             while iter.is_valid() {
-                let epoch = iter.key().epoch_with_gap.get_epoch();
+                let epoch = iter.key().epoch_with_gap.as_u64();
                 if snapshot_epoch == epoch {
                     output.push((
                         iter.key().user_key.table_key.to_vec(),

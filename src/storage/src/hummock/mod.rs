@@ -84,7 +84,7 @@ pub async fn get_from_sstable_info(
                 sstable.value().as_ref(),
                 full_key.user_key,
             );
-            if delete_epoch <= full_key.epoch_with_gap.get_epoch() {
+            if delete_epoch <= full_key.epoch_with_gap.as_u64() {
                 return Ok(Some((HummockValue::Delete, delete_epoch)));
             }
         }
@@ -107,7 +107,7 @@ pub async fn get_from_sstable_info(
                 iter.sst().value().as_ref(),
                 full_key.user_key,
             );
-            if delete_epoch <= full_key.epoch_with_gap.get_epoch() {
+            if delete_epoch <= full_key.epoch_with_gap.as_u64() {
                 return Ok(Some((HummockValue::Delete, delete_epoch)));
             }
         }
@@ -118,14 +118,11 @@ pub async fn get_from_sstable_info(
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
     let value = if iter.key().user_key == full_key.user_key {
-        Some((
-            iter.value().to_bytes(),
-            iter.key().epoch_with_gap.get_epoch(),
-        ))
+        Some((iter.value().to_bytes(), iter.key().epoch_with_gap.as_u64()))
     } else if !read_options.ignore_range_tombstone {
         let delete_epoch =
             get_min_delete_range_epoch_from_sstable(iter.sst().value().as_ref(), full_key.user_key);
-        if delete_epoch <= full_key.epoch_with_gap.get_epoch() {
+        if delete_epoch <= full_key.epoch_with_gap.as_u64() {
             Some((HummockValue::Delete, delete_epoch))
         } else {
             None

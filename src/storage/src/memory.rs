@@ -323,7 +323,7 @@ mod batched_iter {
                 let full_key = FullKey::new(
                     last_key.user_key.table_id,
                     TableKey(last_key.user_key.table_key.0.clone()),
-                    last_key.epoch_with_gap.get_epoch(),
+                    last_key.epoch_with_gap.as_u64(),
                 );
                 self.range.0 = Bound::Excluded(full_key);
             }
@@ -516,7 +516,7 @@ impl<R: RangeKv> RangeKvStateStore<R> {
             .inner
             .range(to_full_key_range(table_id, key_range), None)?
         {
-            if key.epoch_with_gap.get_epoch() > epoch {
+            if key.epoch_with_gap.as_u64() > epoch {
                 continue;
             }
             if Some(&key.user_key) != last_user_key.as_ref() {
@@ -694,7 +694,7 @@ impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
 impl<R: RangeKv> RangeKvStateStoreIter<R> {
     fn next_inner(&mut self) -> StorageResult<Option<StateStoreIterItem>> {
         while let Some((key, value)) = self.inner.next()? {
-            if key.epoch_with_gap.get_epoch() > self.epoch {
+            if key.epoch_with_gap.as_u64() > self.epoch {
                 continue;
             }
             if Some(key.user_key.as_ref()) != self.last_key.as_ref().map(|key| key.as_ref()) {

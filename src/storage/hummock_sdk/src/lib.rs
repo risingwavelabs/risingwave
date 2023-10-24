@@ -275,7 +275,27 @@ impl EpochWithGap {
         EpochWithGap(epoch_with_gap)
     }
 
-    pub fn get_epoch(&self) -> HummockEpoch {
+    pub fn as_u64(&self) -> HummockEpoch {
         self.0
+    }
+
+    pub fn pure_epoch(&self) -> HummockEpoch {
+        self.0 >> 16
+    }
+
+    pub fn offset(&self) -> u64 {
+        self.0 % 16
+    }
+}
+
+impl Ord for EpochWithGap {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.cmp(&other.0)
+    }
+}
+
+impl PartialOrd for EpochWithGap {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }

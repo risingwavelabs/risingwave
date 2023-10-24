@@ -320,13 +320,14 @@ fn print_kv_pairs(
         let full_val = block_iter.value();
         let humm_val = HummockValue::from_slice(full_val)?;
 
-        let epoch = Epoch::from(full_key.epoch_with_gap.get_epoch());
+        let epoch = Epoch::from(full_key.epoch_with_gap.pure_epoch());
+        let epoch_with_gap = Epoch::from(full_key.epoch_with_gap.as_u64());
         let date_time = DateTime::<Utc>::from(epoch.as_system_time());
 
         println!("\t\t   key: {:?}, len={}", full_key, full_key.encoded_len());
         println!("\t\t value: {:?}, len={}", humm_val, humm_val.encoded_len());
         println!("\t\t epoch: {} ({})", epoch, date_time);
-
+        println!("\t\t epoch_with_gap: {} ({})", epoch_with_gap, date_time);
         if args.print_table {
             print_table_column(full_key, humm_val, table_data)?;
         }

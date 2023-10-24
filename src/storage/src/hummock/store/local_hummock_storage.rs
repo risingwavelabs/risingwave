@@ -49,7 +49,8 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::StateStoreIter;
 
-const MAX_SPILL_TIMES: u64 = 2 << 16;
+const EPOCH_AVAILABLE_BITS: u64 = 16;
+const MAX_SPILL_TIMES: u64 = 1 << EPOCH_AVAILABLE_BITS;
 
 /// `LocalHummockStorage` is a handle for a state table shard to access data from and write data to
 /// the hummock state backend. It is created via `HummockStorage::new_local`.
@@ -352,8 +353,6 @@ impl LocalStateStore for LocalHummockStorage {
             );
 
             if self.spill_offset < MAX_SPILL_TIMES {
-                self.spill_offset += 1;
-
                 self.flush(vec![]).await?;
             } else {
                 tracing::warn!("No mem table spill occurs, the gap epoch exceeds available range.");
@@ -462,6 +461,7 @@ impl LocalHummockStorage {
                 Some(instance_id),
                 Some(tracker),
             );
+            self.spill_offset += 1;
             let imm_size = imm.size();
             self.update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
 

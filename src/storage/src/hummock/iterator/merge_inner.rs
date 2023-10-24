@@ -144,7 +144,7 @@ impl OrderedMergeIteratorInner<SharedBufferBatchIterator<Forward>> {
             .expect("no inner iter for imm merge")
             .iter
             .current_item();
-        (item.0.clone(), (item.1 .0.get_epoch(), item.1 .1.clone()))
+        (item.0.clone(), (item.1 .0.as_u64(), item.1 .1.clone()))
     }
 }
 

@@ -541,7 +541,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             let is_new_user_key =
                 !self.last_key.is_empty() && iter.key().user_key != self.last_key.user_key.as_ref();
             let mut drop = false;
-            let epoch = iter.key().epoch_with_gap.get_epoch();
+            let epoch = iter.key().epoch_with_gap.as_u64();
             let value = HummockValue::from_slice(iter.value()).unwrap();
             if is_new_user_key || self.last_key.is_empty() {
                 self.last_key.set(iter.key());

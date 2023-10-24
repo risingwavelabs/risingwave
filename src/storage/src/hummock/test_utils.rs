@@ -227,7 +227,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     for (mut key, value) in kv_iter {
         let is_new_user_key =
             last_key.is_empty() || key.user_key.as_ref() != last_key.user_key.as_ref();
-        let epoch = key.epoch_with_gap.get_epoch();
+        let epoch = key.epoch_with_gap.as_u64();
         if is_new_user_key {
             last_key = key.clone();
             user_key_last_delete = HummockEpoch::MAX;
@@ -241,7 +241,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
                 .as_ref()
                 .le(&extended_user_key)
                 && range_tombstone.end_user_key.as_ref().gt(&extended_user_key)
-                && range_tombstone.sequence >= key.epoch_with_gap.get_epoch()
+                && range_tombstone.sequence >= key.epoch_with_gap.as_u64()
                 && range_tombstone.sequence < earliest_delete_epoch
             {
                 earliest_delete_epoch = range_tombstone.sequence;

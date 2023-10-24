@@ -583,7 +583,7 @@ pub struct StorageConfig {
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 
-    /// Number of tasks shared buffer can upload in parallel.
+    /// The spill threshold for mem table.
     #[serde(default = "default::storage::mem_table_spill_threshold")]
     pub mem_table_spill_threshold: usize,
 }
@@ -1099,7 +1099,7 @@ pub mod default {
         }
 
         pub fn mem_table_spill_threshold() -> usize {
-            16 << 20
+            1 << 20
         }
     }
 
