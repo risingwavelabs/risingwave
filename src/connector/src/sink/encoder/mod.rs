@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
@@ -22,6 +23,7 @@ use crate::sink::Result;
 mod avro;
 mod json;
 mod proto;
+pub mod template;
 
 pub use avro::AvroEncoder;
 pub use json::JsonEncoder;
@@ -131,3 +133,10 @@ impl From<FieldEncodeError> for super::SinkError {
         Self::Encode(value.to_string())
     }
 }
+
+#[derive(Clone)]
+pub struct KafkaConnectParams {
+    pub schema_name: String,
+}
+
+type KafkaConnectParamsRef = Arc<KafkaConnectParams>;

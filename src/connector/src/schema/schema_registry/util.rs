@@ -195,7 +195,7 @@ enum ReqResp<T> {
 
 #[cfg(test)]
 mod test {
-    use crate::parser::schema_registry::handle_sr_list;
+    use super::super::handle_sr_list;
 
     #[test]
     fn test_handle_sr_list() {

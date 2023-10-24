@@ -1,3 +1,4 @@
+#![feature(result_option_inspect)]
 // Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -72,5 +73,8 @@ pub fn ctl(opts: CtlOpts) {
         .build()
         .unwrap()
         .block_on(risingwave_ctl::start(opts))
+        .inspect_err(|e| {
+            eprintln!("{:#?}", e);
+        })
         .unwrap();
 }

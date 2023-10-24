@@ -17,6 +17,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TableFunctionNode;
 
+use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchPb, ToDistributedBatch};
 use crate::expr::ExprRewriter;
@@ -39,7 +40,7 @@ impl BatchTableFunction {
     }
 
     pub fn with_dist(logical: LogicalTableFunction, dist: Distribution) -> Self {
-        let ctx = logical.base.ctx.clone();
+        let ctx = logical.base.ctx().clone();
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         BatchTableFunction { base, logical }
     }

@@ -83,8 +83,10 @@ impl CardinalityVisitor {
     }
 }
 
-impl PlanVisitor<Cardinality> for CardinalityVisitor {
-    type DefaultBehavior = impl DefaultBehavior<Cardinality>;
+impl PlanVisitor for CardinalityVisitor {
+    type Result = Cardinality;
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     fn default_behavior() -> Self::DefaultBehavior {
         // returns unknown cardinality for default behavior, which is always correct

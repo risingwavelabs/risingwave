@@ -14,23 +14,19 @@
 
 use sea_orm::entity::prelude::*;
 
+use crate::model_v2::DatabaseId;
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "database")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub database_id: i32,
+    pub database_id: DatabaseId,
     #[sea_orm(unique)]
     pub name: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::connection::Entity")]
-    Connection,
-    #[sea_orm(has_many = "super::function::Entity")]
-    Function,
-    #[sea_orm(has_many = "super::index::Entity")]
-    Index,
     #[sea_orm(
         belongs_to = "super::object::Entity",
         from = "Column::DatabaseId",
@@ -39,69 +35,11 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Object,
-    #[sea_orm(has_many = "super::schema::Entity")]
-    Schema,
-    #[sea_orm(has_many = "super::sink::Entity")]
-    Sink,
-    #[sea_orm(has_many = "super::source::Entity")]
-    Source,
-    #[sea_orm(has_many = "super::table::Entity")]
-    Table,
-    #[sea_orm(has_many = "super::view::Entity")]
-    View,
-}
-
-impl Related<super::connection::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Connection.def()
-    }
-}
-
-impl Related<super::function::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Function.def()
-    }
-}
-
-impl Related<super::index::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Index.def()
-    }
 }
 
 impl Related<super::object::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Object.def()
-    }
-}
-
-impl Related<super::schema::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Schema.def()
-    }
-}
-
-impl Related<super::sink::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Sink.def()
-    }
-}
-
-impl Related<super::source::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Source.def()
-    }
-}
-
-impl Related<super::table::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Table.def()
-    }
-}
-
-impl Related<super::view::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::View.def()
     }
 }
 

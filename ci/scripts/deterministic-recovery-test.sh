@@ -9,10 +9,18 @@ echo "--- Download artifacts"
 download-and-decompress-artifact risingwave_simulation .
 chmod +x ./risingwave_simulation
 
-export RUST_LOG="info,risingwave_meta::barrier::recovery=debug"
+export RUST_LOG="info,\
+risingwave_meta::barrier::recovery=debug,\
+risingwave_meta::rpc::ddl_controller=debug,\
+risingwave_meta::barrier::mod=debug,\
+risingwave_simulation=debug"
 export LOGDIR=.risingwave/log
 
 mkdir -p $LOGDIR
+
+# FIXME(kwannoel): Why is this failing?
+# echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, background_ddl"
+# seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation --kill --kill-rate=${KILL_RATE} ./e2e_test/background_ddl/sim/basic.slt 2> $LOGDIR/recovery-ddl-{}.log && rm $LOGDIR/recovery-ddl-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe-3meta, recovery, ddl"
 seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './risingwave_simulation --kill --kill-rate=${KILL_RATE} ./e2e_test/ddl/\*\*/\*.slt 2> $LOGDIR/recovery-ddl-{}.log && rm $LOGDIR/recovery-ddl-{}.log'

@@ -36,7 +36,7 @@ impl Rule for ExpandToProjectRule {
         let column_subset = column_subsets.get(0).unwrap();
 
         // if `column_subsets` len equals 1, convert it into a project
-        let mut exprs = Vec::with_capacity(expand.base.schema.len());
+        let mut exprs = Vec::with_capacity(expand.base.schema().len());
         // Add original input column first
         for i in 0..input.schema().len() {
             exprs.push(ExprImpl::InputRef(

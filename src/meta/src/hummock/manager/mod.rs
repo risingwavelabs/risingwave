@@ -117,14 +117,13 @@ pub struct HummockManager {
     catalog_manager: CatalogManagerRef,
 
     fragment_manager: FragmentManagerRef,
-    // `CompactionGroupManager` manages `CompactionGroup`'s members.
-    // Note that all hummock state store user should register to `CompactionGroupManager`. It
-    // includes all state tables of streaming jobs except sink.
-    compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
-    // When trying to locks compaction and versioning at the same time, compaction lock should
-    // be requested before versioning lock.
+    /// Lock order: compaction, versioning, compaction_group_manager.
+    /// - Lock compaction first, then versioning, and finally compaction_group_manager.
+    /// - This order should be strictly followed to prevent deadlock.
     compaction: MonitoredRwLock<Compaction>,
     versioning: MonitoredRwLock<Versioning>,
+    /// `CompactionGroupManager` manages compaction configs for compaction groups.
+    compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
     latest_snapshot: Snapshot,
 
     pub metrics: Arc<MetaMetrics>,

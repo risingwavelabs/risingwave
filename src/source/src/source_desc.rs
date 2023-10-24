@@ -18,15 +18,12 @@ use std::sync::Arc;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_connector::parser::SpecificParserConfig;
+use risingwave_connector::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use risingwave_connector::source::monitor::SourceMetrics;
-use risingwave_connector::source::{
-    ConnectorProperties, SourceColumnDesc, SourceColumnType, SourceEncode, SourceFormat,
-    SourceStruct,
-};
+use risingwave_connector::source::{ConnectorProperties, SourceColumnDesc, SourceColumnType};
 use risingwave_connector::ConnectorParams;
 use risingwave_pb::catalog::PbStreamSourceInfo;
-use risingwave_pb::plan_common::{PbColumnCatalog, PbEncodeType, PbFormatType, RowFormatType};
+use risingwave_pb::plan_common::PbColumnCatalog;
 
 use crate::connector_source::ConnectorSource;
 use crate::fs_connector_source::FsConnectorSource;
@@ -37,7 +34,6 @@ pub const DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 16;
 #[derive(Debug, Clone)]
 pub struct SourceDesc {
     pub source: ConnectorSource,
-    pub source_struct: SourceStruct,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
 
@@ -48,7 +44,6 @@ pub struct SourceDesc {
 #[derive(Debug)]
 pub struct FsSourceDesc {
     pub source: FsConnectorSource,
-    pub source_struct: SourceStruct,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
 }
@@ -107,9 +102,7 @@ impl SourceDescBuilder {
     pub fn build(mut self) -> Result<SourceDesc> {
         let columns = self.column_catalogs_to_source_column_descs();
 
-        let source_struct = extract_source_struct(&self.source_info)?;
-        let psrser_config =
-            SpecificParserConfig::new(source_struct, &self.source_info, &self.properties)?;
+        let psrser_config = SpecificParserConfig::new(&self.source_info, &self.properties)?;
 
         let is_new_fs_source = ConnectorProperties::is_new_fs_connector_hash_map(&self.properties);
         if is_new_fs_source {
@@ -126,7 +119,6 @@ impl SourceDescBuilder {
 
         Ok(SourceDesc {
             source,
-            source_struct,
             columns,
             metrics: self.metrics,
             is_new_fs_source,
@@ -138,9 +130,16 @@ impl SourceDescBuilder {
     }
 
     pub fn build_fs_source_desc(&self) -> Result<FsSourceDesc> {
-        let source_struct = extract_source_struct(&self.source_info)?;
-        match (source_struct.format, source_struct.encode) {
-            (SourceFormat::Plain, SourceEncode::Csv | SourceEncode::Json) => {}
+        let parser_config = SpecificParserConfig::new(&self.source_info, &self.properties)?;
+
+        match (
+            &parser_config.protocol_config,
+            &parser_config.encoding_config,
+        ) {
+            (
+                ProtocolProperties::Plain,
+                EncodingProperties::Csv(_) | EncodingProperties::Json(_),
+            ) => {}
             (format, encode) => {
                 return Err(RwError::from(ProtocolError(format!(
                     "Unsupported combination of format {:?} and encode {:?}",
@@ -150,9 +149,6 @@ impl SourceDescBuilder {
         }
 
         let columns = self.column_catalogs_to_source_column_descs();
-
-        let parser_config =
-            SpecificParserConfig::new(source_struct, &self.source_info, &self.properties)?;
 
         let source = FsConnectorSource::new(
             self.properties.clone(),
@@ -166,69 +162,10 @@ impl SourceDescBuilder {
 
         Ok(FsSourceDesc {
             source,
-            source_struct,
             columns,
             metrics: self.metrics.clone(),
         })
     }
-}
-
-// Only return valid (format, encode)
-pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> {
-    // old version meta.
-    if let Ok(format) = info.get_row_format() {
-        let (format, encode) = match format {
-            RowFormatType::Json => (SourceFormat::Plain, SourceEncode::Json),
-            RowFormatType::Protobuf => (SourceFormat::Plain, SourceEncode::Protobuf),
-            RowFormatType::DebeziumJson => (SourceFormat::Debezium, SourceEncode::Json),
-            RowFormatType::Avro => (SourceFormat::Plain, SourceEncode::Avro),
-            RowFormatType::Maxwell => (SourceFormat::Maxwell, SourceEncode::Json),
-            RowFormatType::CanalJson => (SourceFormat::Canal, SourceEncode::Json),
-            RowFormatType::Csv => (SourceFormat::Plain, SourceEncode::Csv),
-            RowFormatType::Native => (SourceFormat::Native, SourceEncode::Native),
-            RowFormatType::DebeziumAvro => (SourceFormat::Debezium, SourceEncode::Avro),
-            RowFormatType::UpsertJson => (SourceFormat::Upsert, SourceEncode::Json),
-            RowFormatType::UpsertAvro => (SourceFormat::Upsert, SourceEncode::Avro),
-            RowFormatType::DebeziumMongoJson => (SourceFormat::DebeziumMongo, SourceEncode::Json),
-            RowFormatType::Bytes => (SourceFormat::Plain, SourceEncode::Bytes),
-            RowFormatType::RowUnspecified => unreachable!(),
-        };
-        return Ok(SourceStruct::new(format, encode));
-    }
-    let source_format = info.get_format()?;
-    let source_encode = info.get_row_encode()?;
-    let (format, encode) = match (source_format, source_encode) {
-        (PbFormatType::Plain, PbEncodeType::Json) => (SourceFormat::Plain, SourceEncode::Json),
-        (PbFormatType::Plain, PbEncodeType::Protobuf) => {
-            (SourceFormat::Plain, SourceEncode::Protobuf)
-        }
-        (PbFormatType::Debezium, PbEncodeType::Json) => {
-            (SourceFormat::Debezium, SourceEncode::Json)
-        }
-        (PbFormatType::Plain, PbEncodeType::Avro) => (SourceFormat::Plain, SourceEncode::Avro),
-        (PbFormatType::Maxwell, PbEncodeType::Json) => (SourceFormat::Maxwell, SourceEncode::Json),
-        (PbFormatType::Canal, PbEncodeType::Json) => (SourceFormat::Canal, SourceEncode::Json),
-        (PbFormatType::Plain, PbEncodeType::Csv) => (SourceFormat::Plain, SourceEncode::Csv),
-        (PbFormatType::Native, PbEncodeType::Native) => {
-            (SourceFormat::Native, SourceEncode::Native)
-        }
-        (PbFormatType::Debezium, PbEncodeType::Avro) => {
-            (SourceFormat::Debezium, SourceEncode::Avro)
-        }
-        (PbFormatType::Upsert, PbEncodeType::Json) => (SourceFormat::Upsert, SourceEncode::Json),
-        (PbFormatType::Upsert, PbEncodeType::Avro) => (SourceFormat::Upsert, SourceEncode::Avro),
-        (PbFormatType::DebeziumMongo, PbEncodeType::Json) => {
-            (SourceFormat::DebeziumMongo, SourceEncode::Json)
-        }
-        (PbFormatType::Plain, PbEncodeType::Bytes) => (SourceFormat::Plain, SourceEncode::Bytes),
-        (format, encode) => {
-            return Err(RwError::from(ProtocolError(format!(
-                "Unsupported combination of format {:?} and encode {:?}",
-                format, encode
-            ))));
-        }
-    };
-    Ok(SourceStruct::new(format, encode))
 }
 
 pub mod test_utils {

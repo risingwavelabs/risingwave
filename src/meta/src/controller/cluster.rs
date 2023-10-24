@@ -40,9 +40,9 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
 use crate::manager::prelude::{Worker, WorkerProperty};
-use crate::manager::{LocalNotification, MetaSrvEnv, WorkerId, WorkerKey};
+use crate::manager::{LocalNotification, MetaSrvEnv, WorkerKey};
 use crate::model_v2::worker::{WorkerStatus, WorkerType};
-use crate::model_v2::{worker, worker_property, I32Array};
+use crate::model_v2::{worker, worker_property, I32Array, TransactionId, WorkerId};
 use crate::{MetaError, MetaResult};
 
 pub type ClusterControllerRef = Arc<ClusterController>;
@@ -58,7 +58,7 @@ struct WorkerInfo(worker::Model, Option<worker_property::Model>);
 impl From<WorkerInfo> for PbWorkerNode {
     fn from(info: WorkerInfo) -> Self {
         Self {
-            id: info.0.worker_id as _,
+            id: info.0.worker_id,
             r#type: PbWorkerType::from(info.0.worker_type) as _,
             host: Some(PbHostAddress {
                 host: info.0.host,
@@ -74,7 +74,7 @@ impl From<WorkerInfo> for PbWorkerNode {
                         .iter()
                         .map(|&id| PbParallelUnit {
                             id: id as _,
-                            worker_node_id: info.0.worker_id as _,
+                            worker_node_id: info.0.worker_id,
                         })
                         .collect_vec()
                 })
@@ -84,7 +84,7 @@ impl From<WorkerInfo> for PbWorkerNode {
                 is_serving: p.is_serving,
                 is_unschedulable: p.is_unschedulable,
             }),
-            transactional_id: info.0.transaction_id.map(|txn| txn as _),
+            transactional_id: info.0.transaction_id,
         }
     }
 }
@@ -137,7 +137,7 @@ impl From<&PbWorkerNode> for worker::ActiveModel {
     fn from(worker: &PbWorkerNode) -> Self {
         let host = worker.host.clone().unwrap();
         Self {
-            worker_id: ActiveValue::Set(worker.id as i32),
+            worker_id: ActiveValue::Set(worker.id),
             worker_type: ActiveValue::Set(worker.r#type().into()),
             host: ActiveValue::Set(host.host),
             port: ActiveValue::Set(host.port),
@@ -312,14 +312,7 @@ impl ClusterController {
                 };
 
                 if let Err(err) = Worker::delete_many()
-                    .filter(
-                        worker::Column::WorkerId.is_in(
-                            worker_to_delete
-                                .into_iter()
-                                .map(|id| id as i32)
-                                .collect_vec(),
-                        ),
-                    )
+                    .filter(worker::Column::WorkerId.is_in(worker_to_delete))
                     .exec(&inner.db)
                     .await
                 {
@@ -457,7 +450,7 @@ pub struct StreamingClusterInfo {
 pub struct ClusterControllerInner {
     db: DatabaseConnection,
     /// Record for tracking available machine ids, one is available.
-    available_transactional_ids: VecDeque<i32>,
+    available_transactional_ids: VecDeque<TransactionId>,
     worker_extra_info: HashMap<WorkerId, WorkerExtraInfo>,
 }
 
@@ -466,7 +459,7 @@ impl ClusterControllerInner {
     pub const MAX_WORKER_REUSABLE_ID_COUNT: usize = 1 << Self::MAX_WORKER_REUSABLE_ID_BITS;
 
     pub async fn new(db: DatabaseConnection) -> MetaResult<Self> {
-        let workers: Vec<(i32, Option<i32>)> = Worker::find()
+        let workers: Vec<(WorkerId, Option<TransactionId>)> = Worker::find()
             .select_only()
             .column(worker::Column::WorkerId)
             .column(worker::Column::TransactionId)
@@ -478,13 +471,13 @@ impl ClusterControllerInner {
             .cloned()
             .filter_map(|(_, txn_id)| txn_id)
             .collect();
-        let available_transactional_ids = (0..Self::MAX_WORKER_REUSABLE_ID_COUNT as i32)
+        let available_transactional_ids = (0..Self::MAX_WORKER_REUSABLE_ID_COUNT as TransactionId)
             .filter(|id| !inuse_txn_ids.contains(id))
             .collect();
 
         let worker_extra_info = workers
             .into_iter()
-            .map(|(w, _)| (w as u32, WorkerExtraInfo::default()))
+            .map(|(w, _)| (w, WorkerExtraInfo::default()))
             .collect();
 
         Ok(Self {
@@ -527,7 +520,7 @@ impl ClusterControllerInner {
         }
     }
 
-    fn apply_transaction_id(&self, r#type: PbWorkerType) -> MetaResult<Option<i32>> {
+    fn apply_transaction_id(&self, r#type: PbWorkerType) -> MetaResult<Option<TransactionId>> {
         match (self.available_transactional_ids.front(), r#type) {
             (None, _) => Err(MetaError::unavailable(
                 "no available reusable machine id".to_string(),
@@ -548,9 +541,9 @@ impl ClusterControllerInner {
         let txn = self.db.begin().await?;
 
         // TODO: remove this workaround when we deprecate parallel unit ids.
-        let derive_parallel_units = |txn_id: i32, start: u32, end: u32| {
+        let derive_parallel_units = |txn_id: TransactionId, start: u32, end: u32| {
             (start..end)
-                .map(|idx| (idx << Self::MAX_WORKER_REUSABLE_ID_BITS) as i32 + txn_id)
+                .map(|idx| ((idx << Self::MAX_WORKER_REUSABLE_ID_BITS) + txn_id) as i32)
                 .collect_vec()
         };
 
@@ -607,11 +600,11 @@ impl ClusterControllerInner {
 
                 WorkerProperty::update(property).exec(&txn).await?;
                 txn.commit().await?;
-                self.update_worker_ttl(worker.worker_id as _, ttl)?;
-                Ok(worker.worker_id as WorkerId)
+                self.update_worker_ttl(worker.worker_id, ttl)?;
+                Ok(worker.worker_id)
             } else {
-                self.update_worker_ttl(worker.worker_id as _, ttl)?;
-                Ok(worker.worker_id as WorkerId)
+                self.update_worker_ttl(worker.worker_id, ttl)?;
+                Ok(worker.worker_id)
             };
         }
         let txn_id = self.apply_transaction_id(r#type)?;
@@ -628,7 +621,7 @@ impl ClusterControllerInner {
         let worker_id = insert_res.last_insert_id as WorkerId;
         if r#type == PbWorkerType::ComputeNode {
             let property = worker_property::ActiveModel {
-                worker_id: ActiveValue::Set(insert_res.last_insert_id),
+                worker_id: ActiveValue::Set(worker_id),
                 parallel_unit_ids: ActiveValue::Set(I32Array(derive_parallel_units(
                     *txn_id.as_ref().unwrap(),
                     0,
@@ -653,7 +646,7 @@ impl ClusterControllerInner {
 
     pub async fn activate_worker(&self, worker_id: WorkerId) -> MetaResult<PbWorkerNode> {
         let worker = worker::ActiveModel {
-            worker_id: ActiveValue::Set(worker_id as i32),
+            worker_id: ActiveValue::Set(worker_id),
             status: ActiveValue::Set(WorkerStatus::Running),
             ..Default::default()
         };
@@ -676,10 +669,7 @@ impl ClusterControllerInner {
                 worker_property::Column::IsUnschedulable,
                 Expr::value(is_unschedulable),
             )
-            .filter(
-                worker_property::Column::WorkerId
-                    .is_in(worker_ids.into_iter().map(|id| id as i32).collect_vec()),
-            )
+            .filter(worker_property::Column::WorkerId.is_in(worker_ids))
             .exec(&self.db)
             .await?;
 
@@ -707,10 +697,9 @@ impl ClusterControllerInner {
             return Err(MetaError::invalid_parameter("worker not found!"));
         }
 
-        self.worker_extra_info
-            .remove(&(worker.worker_id as WorkerId));
+        self.worker_extra_info.remove(&worker.worker_id);
         if let Some(txn_id) = &worker.transaction_id {
-            self.available_transactional_ids.push_back(*txn_id as _);
+            self.available_transactional_ids.push_back(*txn_id);
         }
         Ok(WorkerInfo(worker, property).into())
     }
@@ -776,7 +765,7 @@ impl ClusterControllerInner {
     }
 
     pub async fn list_active_parallel_units(&self) -> MetaResult<Vec<ParallelUnit>> {
-        let parallel_units: Vec<(i32, I32Array)> = WorkerProperty::find()
+        let parallel_units: Vec<(WorkerId, I32Array)> = WorkerProperty::find()
             .select_only()
             .column(worker_property::Column::WorkerId)
             .column(worker_property::Column::ParallelUnitIds)
@@ -790,7 +779,7 @@ impl ClusterControllerInner {
             .flat_map(|(id, pu)| {
                 pu.0.into_iter().map(move |parallel_unit_id| ParallelUnit {
                     id: parallel_unit_id as _,
-                    worker_node_id: id as _,
+                    worker_node_id: id,
                 })
             })
             .collect_vec())
@@ -848,7 +837,7 @@ impl ClusterControllerInner {
     }
 
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> MetaResult<Option<PbWorkerNode>> {
-        let worker = Worker::find_by_id(worker_id as i32)
+        let worker = Worker::find_by_id(worker_id)
             .find_also_related(WorkerProperty)
             .one(&self.db)
             .await?;
