@@ -863,6 +863,7 @@ impl CatalogManager {
                 database_core.decrease_ref_count(*relation_id);
             }
             // Recovered when init user manager.
+            tracing::debug!("decrease ref for {}", table.id);
             user_core.decrease_ref(table.owner);
         }
 
