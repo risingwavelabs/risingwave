@@ -594,14 +594,14 @@ impl<T: AsRef<[u8]>> FullKey<T> {
     pub fn new(table_id: TableId, table_key: TableKey<T>, epoch: HummockEpoch) -> Self {
         Self {
             user_key: UserKey::new(table_id, table_key),
-            epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
+            epoch_with_gap: EpochWithGap::new(epoch, 0),
         }
     }
 
     pub fn from_user_key(user_key: UserKey<T>, epoch: HummockEpoch) -> Self {
         Self {
             user_key,
-            epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
+            epoch_with_gap: EpochWithGap::new(epoch, 0),
         }
     }
 
@@ -609,7 +609,7 @@ impl<T: AsRef<[u8]>> FullKey<T> {
     pub fn for_test(table_id: TableId, table_key: T, epoch: HummockEpoch) -> Self {
         Self {
             user_key: UserKey::for_test(table_id, table_key),
-            epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
+            epoch_with_gap: EpochWithGap::new(epoch, 0),
         }
     }
 
@@ -660,7 +660,7 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::decode(&slice[..epoch_pos]),
-            epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
+            epoch_with_gap: EpochWithGap::new(epoch, 0),
         }
     }
 
@@ -674,7 +674,7 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::new(table_id, TableKey(&slice_without_table_id[..epoch_pos])),
-            epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
+            epoch_with_gap: EpochWithGap::new(epoch, 0),
         }
     }
 
@@ -685,7 +685,7 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::decode(&slice[..epoch_pos]),
-            epoch_with_gap: EpochWithGap::new_from_epoch(u64::MAX - epoch),
+            epoch_with_gap: EpochWithGap::new(u64::MAX - epoch, 0),
         }
     }
 

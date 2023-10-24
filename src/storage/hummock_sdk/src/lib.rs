@@ -277,6 +277,7 @@ impl EpochWithGap {
     }
 
     pub fn new_from_epoch(epoch_with_gap: u64) -> Self {
+        debug_assert_eq!(epoch_with_gap % 16, 0);
         EpochWithGap(epoch_with_gap)
     }
 
