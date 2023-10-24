@@ -19,6 +19,8 @@ use anyhow::anyhow;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_connector::sink::catalog::SinkId;
+use risingwave_connector::source::cdc::CdcSourceType;
+use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_pb::catalog::connection::private_link_service::{
     PbPrivateLinkProvider, PrivateLinkProvider,
 };
@@ -428,6 +430,17 @@ impl DdlService for DdlServiceImpl {
             // Generate source id.
             let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?; // TODO: Use source category
             fill_table_source(source, source_id, &mut mview, table_id, &mut fragment_graph);
+
+            // Modify properties for cdc sources if needed
+            if let Some(connector) = source.properties.get(UPSTREAM_SOURCE_KEY) {
+                if matches!(
+                    CdcSourceType::from(connector.as_str()),
+                    CdcSourceType::Mysql
+                ) {
+                    let server_id = self.gen_unique_id_u64::<{ IdCategory::MySqlCdc }>().await?;
+                    fill_cdc_mysql_server_id(server_id, &mut fragment_graph);
+                }
+            }
         }
 
         let mut stream_job = StreamingJob::Table(source, mview);
@@ -740,6 +753,11 @@ impl DdlServiceImpl {
         Ok(id)
     }
 
+    async fn gen_unique_id_u64<const C: IdCategoryType>(&self) -> MetaResult<u64> {
+        let id = self.env.id_gen_manager().generate::<C>().await?;
+        Ok(id)
+    }
+
     async fn validate_connection(&self, connection_id: ConnectionId) -> MetaResult<()> {
         let connection = self
             .catalog_manager
@@ -797,4 +815,23 @@ fn fill_table_source(
     // Fill in the correct source id for mview.
     table.optional_associated_source_id =
         Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
+}
+
+fn fill_cdc_mysql_server_id(server_id: u64, fragment_graph: &mut PbStreamFragmentGraph) {
+    for fragment in fragment_graph.fragments.values_mut() {
+        visit_fragment(fragment, |node_body| {
+            if let NodeBody::Source(source_node) = node_body {
+                let props = &mut source_node.source_inner.as_mut().unwrap().properties;
+
+                // Modify properties for cdc sources if needed
+                if props.contains_key("server.id") {
+                    return;
+                }
+                props
+                    .entry("server.id".to_string())
+                    .or_insert(server_id.to_string());
+                tracing::debug!("server.id no set, generate one {}", server_id);
+            }
+        });
+    }
 }

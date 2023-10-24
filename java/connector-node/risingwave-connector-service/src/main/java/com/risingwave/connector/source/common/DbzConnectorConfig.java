@@ -22,7 +22,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
-import java.util.concurrent.atomic.AtomicLong;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.text.StringSubstitutor;
 import org.slf4j.Logger;
@@ -77,8 +76,6 @@ public class DbzConnectorConfig {
         return dbzProps;
     }
 
-    private static final AtomicLong serverId = new AtomicLong(20220410);
-
     private final long sourceId;
 
     private final SourceTypeE sourceType;
@@ -129,8 +126,6 @@ public class DbzConnectorConfig {
                 // disable snapshot locking at all
                 mysqlProps.setProperty("snapshot.locking.mode", "none");
             }
-
-            mysqlProps.setProperty("database.server.id", String.valueOf(serverId.getAndAdd(1L)));
 
             dbzProps.putAll(mysqlProps);
         } else if (source == SourceTypeE.POSTGRES || source == SourceTypeE.CITUS) {

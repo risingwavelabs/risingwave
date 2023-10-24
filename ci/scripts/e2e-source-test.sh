@@ -95,6 +95,7 @@ sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
 
 # kill cluster and the connector node
 cargo make kill
+echo "cluster killed "
 
 # insert new rows
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc_insert.sql
