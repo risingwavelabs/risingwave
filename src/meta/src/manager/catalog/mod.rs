@@ -347,7 +347,10 @@ impl CatalogManager {
                     tables_to_drop
                         .iter()
                         .filter(|table| valid_table_name(&table.name))
-                        .map(|table| table.owner),
+                        .map(|table| {
+                            tracing::debug!("decrease ref for {}", table.id);
+                            table.owner
+                        }),
                 )
                 .chain(indexes_to_drop.iter().map(|index| index.owner))
                 .chain(views_to_drop.iter().map(|view| view.owner))
@@ -734,7 +737,7 @@ impl CatalogManager {
         for &dependent_relation_id in &table.dependent_relations {
             database_core.increase_ref_count(dependent_relation_id);
         }
-        tracing::debug!("increase ref for table: {}", table.id);
+        tracing::debug!("increase ref for {}", table.id);
         user_core.increase_ref(table.owner);
         Ok(())
     }
