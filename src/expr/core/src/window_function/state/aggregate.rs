@@ -66,7 +66,7 @@ impl AggregateState {
             .get_aggregate(
                 agg_kind,
                 &arg_data_types,
-                (&call.return_type).into(),
+                &call.return_type,
                 false, // means prefer retractable version
             )
             .expect("the agg func must exist");
@@ -182,7 +182,7 @@ struct AggregatorWrapper<'a> {
 }
 
 impl AggregatorWrapper<'_> {
-    fn aggregate<'a, V>(&'a self, values: impl IntoIterator<Item = V>) -> Result<Datum>
+    fn aggregate<V>(&self, values: impl IntoIterator<Item = V>) -> Result<Datum>
     where
         V: AsRef<[Datum]>,
     {
@@ -193,8 +193,8 @@ impl AggregatorWrapper<'_> {
         )
     }
 
-    fn update<'a, V>(
-        &'a self,
+    fn update<V>(
+        &self,
         state: &mut AggImplState,
         delta: impl IntoIterator<Item = (Op, V)>,
     ) -> Result<Datum>
