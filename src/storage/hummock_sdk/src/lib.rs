@@ -281,6 +281,14 @@ impl EpochWithGap {
         EpochWithGap(epoch_with_gap)
     }
 
+    pub fn new_for_test(epoch_with_gap: u64) -> Self {
+        EpochWithGap(epoch_with_gap)
+    }
+
+    pub fn new_max_epoch() -> Self {
+        EpochWithGap(HummockEpoch::MAX)
+    }
+
     pub fn as_u64(&self) -> HummockEpoch {
         self.0
     }

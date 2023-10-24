@@ -90,7 +90,7 @@ pub fn iterator_test_bytes_user_key_of(idx: usize) -> UserKey<Bytes> {
 pub fn iterator_test_key_of(idx: usize) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: iterator_test_user_key_of(idx),
-        epoch_with_gap: EpochWithGap::new_from_epoch(233),
+        epoch_with_gap: EpochWithGap::new_for_test(233),
     }
 }
 
@@ -103,7 +103,7 @@ pub fn iterator_test_bytes_key_of(idx: usize) -> FullKey<Bytes> {
 pub fn iterator_test_key_of_epoch(idx: usize, epoch: HummockEpoch) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: iterator_test_user_key_of(idx),
-        epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
+        epoch_with_gap: EpochWithGap::new_for_test(epoch),
     }
 }
 

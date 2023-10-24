@@ -194,7 +194,7 @@ async fn compact_shared_buffer(
                     key_split_append(
                         &FullKey {
                             user_key,
-                            epoch_with_gap: EpochWithGap::new_from_epoch(HummockEpoch::MAX),
+                            epoch_with_gap: EpochWithGap::new_max_epoch(),
                         }
                         .encode()
                         .into(),

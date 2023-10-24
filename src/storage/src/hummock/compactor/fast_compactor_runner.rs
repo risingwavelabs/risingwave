@@ -24,7 +24,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{can_concat, EpochWithGap, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{can_concat, EpochWithGap, LocalSstableInfo};
 use risingwave_pb::hummock::{CompactTask, SstableInfo};
 
 use crate::filter_key_extractor::FilterKeyExtractorImpl;
@@ -129,7 +129,7 @@ impl BlockStreamIterator {
                     .as_ref(),
             );
             // do not include this key because it is the smallest key of next block.
-            largest_key.epoch_with_gap = EpochWithGap::new_from_epoch(HummockEpoch::MAX);
+            largest_key.epoch_with_gap = EpochWithGap::new_max_epoch();
             largest_key.encode()
         } else {
             self.sstable.value().meta.largest_key.clone()

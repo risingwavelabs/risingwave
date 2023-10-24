@@ -1024,7 +1024,7 @@ mod tests {
                 inserts.iter().map(|(time, value)| {
                     let full_key = FullKey {
                         user_key: key.clone(),
-                        epoch_with_gap: EpochWithGap::new_from_epoch(time.0),
+                        epoch_with_gap: EpochWithGap::new_for_test(time.0),
                     };
                     (full_key, value.clone())
                 })
