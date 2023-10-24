@@ -183,6 +183,7 @@ impl_downcast!(PlanNode);
 
 // Using a new type wrapper allows direct function implementation on `PlanRef`,
 // and we currently need a manual implementation of `PartialEq` for `PlanRef`.
+#[allow(clippy::derived_hash_with_manual_eq)]
 #[derive(Clone, Debug, Eq, Hash)]
 pub struct PlanRef(Rc<dyn PlanNode>);
 
@@ -528,7 +529,7 @@ impl GenericPlanRef for PlanRef {
         self.plan_base().schema()
     }
 
-    fn stream_key<'a>(&'a self) -> Option<&'a [usize]> {
+    fn stream_key(&self) -> Option<&[usize]> {
         self.plan_base().stream_key()
     }
 
