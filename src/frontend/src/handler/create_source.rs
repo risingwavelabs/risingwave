@@ -660,7 +660,7 @@ pub(crate) fn bind_all_columns(
 pub(crate) async fn bind_source_pk(
     source_schema: &SourceSchemaV2,
     source_info: &StreamSourceInfo,
-    mut columns: &mut Vec<ColumnCatalog>,
+    columns: &mut Vec<ColumnCatalog>,
     sql_defined_pk_names: Vec<String>,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<String>> {
@@ -672,7 +672,7 @@ pub(crate) async fn bind_source_pk(
             if sql_defined_pk {
                 sql_defined_pk_names
             } else {
-                add_upsert_default_key_column(&mut columns);
+                add_upsert_default_key_column(columns);
                 vec![DEFAULT_KEY_COLUMN_NAME.into()]
             }
         }
@@ -684,16 +684,14 @@ pub(crate) async fn bind_source_pk(
                     )));
                 }
                 sql_defined_pk_names
+            } else if let Some(extracted_pk_names) =
+                extract_upsert_avro_table_pk_schema(source_info, with_properties).await?
+            {
+                extracted_pk_names
             } else {
-                if let Some(extracted_pk_names) =
-                    extract_upsert_avro_table_pk_schema(source_info, with_properties).await?
-                {
-                    extracted_pk_names
-                } else {
-                    // For upsert avro, if we can't extract pk from schema, use message key as primary key
-                    add_upsert_default_key_column(&mut columns);
-                    vec![DEFAULT_KEY_COLUMN_NAME.into()]
-                }
+                // For upsert avro, if we can't extract pk from schema, use message key as primary key
+                add_upsert_default_key_column(columns);
+                vec![DEFAULT_KEY_COLUMN_NAME.into()]
             }
         }
 
@@ -707,7 +705,7 @@ pub(crate) async fn bind_source_pk(
             sql_defined_pk_names
         }
         (Format::Debezium, Encode::Avro) => {
-            let pk_names = if sql_defined_pk {
+            if sql_defined_pk {
                 sql_defined_pk_names
             } else {
                 let pk_names =
@@ -725,16 +723,14 @@ pub(crate) async fn bind_source_pk(
                         })?;
                 }
                 pk_names
-            };
-            pk_names
+            }
         }
         (Format::DebeziumMongo, Encode::Json) => {
-            let pk_names = if sql_defined_pk {
+            if sql_defined_pk {
                 sql_defined_pk_names
             } else {
                 vec!["_id".to_string()]
-            };
-            pk_names
+            }
         }
 
         (Format::Maxwell, Encode::Json) => {
