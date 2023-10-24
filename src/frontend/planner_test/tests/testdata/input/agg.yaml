@@ -912,12 +912,12 @@
   expected_outputs:
   - batch_plan
   - stream_plan
+  - stream_dist_plan # check the state table schema
 - sql: |
     create table t (x int, y int);
     select first_value(distinct x order by x asc) from t;
   expected_outputs:
-  - batch_plan
-  - stream_plan
+  - stream_dist_plan # check the state table schema
 - sql: |
     create table t (x int, y int);
     select last_value(x order by y desc nulls last) from t;
