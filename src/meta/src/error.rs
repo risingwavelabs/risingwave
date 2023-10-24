@@ -20,7 +20,6 @@ use risingwave_common::error::BoxedError;
 use risingwave_connector::sink::SinkError;
 use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
-use sqlx::Error;
 
 use crate::hummock::error::Error as HummockError;
 use crate::manager::WorkerId;
@@ -178,12 +177,6 @@ impl From<HummockError> for MetaError {
 impl From<etcd_client::Error> for MetaError {
     fn from(e: etcd_client::Error) -> Self {
         MetaErrorInner::Election(e.to_string()).into()
-    }
-}
-
-impl From<sqlx::Error> for MetaError {
-    fn from(value: Error) -> Self {
-        MetaErrorInner::Election(value.to_string()).into()
     }
 }
 

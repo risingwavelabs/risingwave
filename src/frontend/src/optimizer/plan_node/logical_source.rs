@@ -212,7 +212,7 @@ impl LogicalSource {
                 false,
                 FixedBitSet::with_capacity(logical_source.column_catalog.len()),
             ),
-            logical: logical_source,
+            core: logical_source,
         }
         .into();
         new_s3_plan = RequiredDist::shard_by_key(3, &[0])

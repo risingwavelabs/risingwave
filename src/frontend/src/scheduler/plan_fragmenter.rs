@@ -918,11 +918,11 @@ impl BatchPlanFragmenter {
         }
 
         if let Some(scan_node) = node.as_batch_seq_scan() {
-            let name = scan_node.logical().table_name.to_owned();
-            let info = if scan_node.logical().is_sys_table {
+            let name = scan_node.core().table_name.to_owned();
+            let info = if scan_node.core().is_sys_table {
                 TableScanInfo::system_table(name)
             } else {
-                let table_desc = &*scan_node.logical().table_desc;
+                let table_desc = &*scan_node.core().table_desc;
                 let table_catalog = self
                     .catalog_reader
                     .read_guard()
@@ -951,11 +951,11 @@ impl BatchPlanFragmenter {
             return None;
         }
         if let Some(insert) = node.as_batch_insert() {
-            Some(insert.logical.table_id)
+            Some(insert.core.table_id)
         } else if let Some(update) = node.as_batch_update() {
-            Some(update.logical.table_id)
+            Some(update.core.table_id)
         } else if let Some(delete) = node.as_batch_delete() {
-            Some(delete.logical.table_id)
+            Some(delete.core.table_id)
         } else {
             node.inputs()
                 .into_iter()
