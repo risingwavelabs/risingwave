@@ -84,7 +84,7 @@ impl ClickHouseEngine {
         }
     }
 
-    pub fn form_query_engine(engine_name: &ClickhouseQueryEngine) -> Result<Self> {
+    pub fn from_query_engine(engine_name: &ClickhouseQueryEngine) -> Result<Self> {
         match engine_name.engine.as_str() {
             "MergeTree" => Ok(ClickHouseEngine::MergeTree),
             "ReplacingMergeTree" => Ok(ClickHouseEngine::ReplacingMergeTree),
@@ -482,7 +482,7 @@ impl ClickHouseSinkWriter {
             }
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    if self.clickhouse_engine.is_collapsing_engine() {
+                    if self.clickhouse_engine.get_sign_name().is_some() {
                         clickhouse_filed_vec.push(ClickHouseFieldWithNull::WithoutSome(
                             ClickHouseField::Int8(1),
                         ));
@@ -566,7 +566,7 @@ async fn query_column_engine_from_ck(
         )));
     }
 
-    let clickhouse_engine = ClickHouseEngine::form_query_engine(clickhouse_engine.get(0).unwrap())?;
+    let clickhouse_engine = ClickHouseEngine::from_query_engine(clickhouse_engine.get(0).unwrap())?;
 
     if let Some(sign) = &clickhouse_engine.get_sign_name() {
         clickhouse_column.retain(|a| sign.ne(&a.name))
@@ -740,8 +740,6 @@ impl ClickHouseFieldWithNull {
                 ))
             }
         };
-        // Insert needs to be serialized with `Some`, update doesn't need to be serialized with
-        // `Some`
         let data = if clickhouse_schema_feature.can_null {
             vec![ClickHouseFieldWithNull::WithSome(data)]
         } else {
