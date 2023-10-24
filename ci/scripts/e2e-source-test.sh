@@ -81,6 +81,7 @@ echo "waiting for connector node to start"
 wait_for_connector_node_start
 
 echo "--- inline cdc test"
+export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc_inline/**/*.slt'
 
 echo "--- mysql & postgres cdc validate test"
