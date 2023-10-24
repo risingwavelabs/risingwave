@@ -789,10 +789,6 @@ impl CatalogManager {
                 && table.table_type != TableType::Internal as i32
             // || table.create_type == CreateType::Unspecified as i32
             {
-                assert!(
-                    table.table_type == TableType::Table as i32
-                        || table.table_type == TableType::MaterializedView as i32
-                );
                 tracing::debug!("cleaning table_id for foreground: {:#?}", table.id);
                 tables_to_clean.push(table);
                 continue;
