@@ -35,11 +35,13 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
     let mut binder = Binder::new_for_system(&session);
     let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
     // For Source, it doesn't have table catalog so use get source to get column descs.
-    let (columns, pk_columns, dist_columns, indices): (
+    let (columns, pk_columns, dist_columns, indices, relname, description): (
         Vec<ColumnCatalog>,
         Vec<ColumnDesc>,
         Vec<ColumnDesc>,
         Vec<Arc<IndexCatalog>>,
+        String,
+        Option<String>,
     ) = match relation {
         Relation::Source(s) => {
             let pk_column_catalogs = s
@@ -56,7 +58,14 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                         .unwrap()
                 })
                 .collect_vec();
-            (s.catalog.columns, pk_column_catalogs, vec![], vec![])
+            (
+                s.catalog.columns,
+                pk_column_catalogs,
+                vec![],
+                vec![],
+                s.catalog.name,
+                None, // Description
+            )
         }
         Relation::BaseTable(t) => {
             let pk_column_catalogs = t
@@ -76,6 +85,8 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                 pk_column_catalogs,
                 dist_columns,
                 t.table_indexes,
+                t.table_catalog.name,
+                t.table_catalog.description,
             )
         }
         Relation::SystemTable(t) => {
@@ -90,6 +101,8 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                 pk_column_catalogs,
                 vec![],
                 vec![],
+                t.sys_table_catalog.name.clone(),
+                None, // Description
             )
         }
         _ => {
@@ -163,6 +176,13 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
             None,
         ])
     }));
+
+    rows.push(Row::new(vec![
+        Some("table description".into()),
+        Some(relname.into()),
+        None,                        // Is Hidden
+        description.map(Into::into), // Description
+    ]));
 
     // TODO: table name and description as title of response
     // TODO: recover the original user statement
