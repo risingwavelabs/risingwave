@@ -4115,7 +4115,7 @@ dependencies = [
 [[package]]
 name = "jsonbb"
 version = "0.1.0"
-source = "git+https://github.com/risingwavelabs/jsonbb.git?rev=493fa2f#493fa2fe864c6b5789dc6014969f820679dfef09"
+source = "git+https://github.com/risingwavelabs/jsonbb.git?rev=6ac9354#6ac93543309780c300fcecaec0e8269645cd3111"
 dependencies = [
  "bytes",
  "serde",
@@ -7433,6 +7433,7 @@ dependencies = [
  "futures-util",
  "hex",
  "itertools 0.11.0",
+ "jsonbb",
  "madsim-tokio",
  "md5",
  "num-traits",

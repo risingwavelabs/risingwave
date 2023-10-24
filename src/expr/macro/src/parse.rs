@@ -123,6 +123,7 @@ impl From<&syn::Signature> for UserFunctionAttr {
             context: sig.inputs.iter().any(arg_is_context),
             retract: last_arg_is_retract(sig),
             arg_option: args_contain_option(sig),
+            first_mut_ref_arg: first_mut_ref_arg(sig),
             return_type_kind,
             iterator_item_kind,
             core_return_type,
@@ -223,24 +224,41 @@ fn last_arg_is_retract(sig: &syn::Signature) -> bool {
 
 /// Check if any argument is `Option`.
 fn args_contain_option(sig: &syn::Signature) -> bool {
-    if sig.inputs.is_empty() {
-        return false;
-    }
     for arg in &sig.inputs {
         let syn::FnArg::Typed(arg) = arg else {
-            return false;
+            continue;
         };
         let syn::Type::Path(path) = arg.ty.as_ref() else {
-            return false;
+            continue;
         };
         let Some(seg) = path.path.segments.last() else {
-            return false;
+            continue;
         };
         if seg.ident == "Option" {
             return true;
         }
     }
     false
+}
+
+/// Returns `T` if the first argument (except `self`) is `&mut T`.
+fn first_mut_ref_arg(sig: &syn::Signature) -> Option<String> {
+    let arg = match sig.inputs.first()? {
+        syn::FnArg::Typed(arg) => arg,
+        syn::FnArg::Receiver(_) => match sig.inputs.iter().nth(1)? {
+            syn::FnArg::Typed(arg) => arg,
+            _ => return None,
+        },
+    };
+    let syn::Type::Reference(syn::TypeReference {
+        elem,
+        mutability: Some(_),
+        ..
+    }) = arg.ty.as_ref()
+    else {
+        return None;
+    };
+    Some(elem.to_token_stream().to_string())
 }
 
 /// Check the return type.

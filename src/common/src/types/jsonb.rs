@@ -297,6 +297,18 @@ impl From<JsonbRef<'_>> for JsonbVal {
     }
 }
 
+impl From<Value> for JsonbVal {
+    fn from(v: Value) -> Self {
+        Self(v)
+    }
+}
+
+impl<'a> From<JsonbRef<'a>> for ValueRef<'a> {
+    fn from(v: JsonbRef<'a>) -> Self {
+        v.0
+    }
+}
+
 impl<'a> JsonbRef<'a> {
     pub fn memcmp_serialize(
         &self,
