@@ -46,8 +46,8 @@ tar xvf risingwave-v1.3.0-x86_64-unknown-linux.tar.gz
 ```
 **Mac**
 ```
-brew tap risingwavelabs/risingwave  
-brew install risingwave  
+brew tap risingwavelabs/risingwave
+brew install risingwave
 risingwave playground
 ```
 Now connect to RisingWave using `psql`:
