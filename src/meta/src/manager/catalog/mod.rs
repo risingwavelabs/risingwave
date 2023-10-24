@@ -853,14 +853,18 @@ impl CatalogManager {
         database_core.clear_creating_stream_jobs();
         let user_core = &mut core.user;
         for table in &tables_to_clean {
-            // Recovered when init database manager.
-            for relation_id in &table.dependent_relations {
-                database_core.decrease_ref_count(*relation_id);
+            // If table type is internal, no need to update the ref count OR
+            // user ref count.
+            if table.table_type != TableType::Internal as i32 {
+                // Recovered when init database manager.
+                for relation_id in &table.dependent_relations {
+                    database_core.decrease_ref_count(*relation_id);
+                }
+                // Recovered when init user manager.
+                tracing::debug!("decrease ref for {}", table.id);
+                user_core.decrease_ref(table.owner);
             }
-            // Recovered when init user manager.
-            user_core.decrease_ref(table.owner);
         }
-
         Ok(())
     }
 
@@ -919,10 +923,11 @@ impl CatalogManager {
             let database_core = &mut core.database;
             let tables = &mut database_core.tables;
             let Some(table) = tables.get(&table_id).cloned() else {
-                bail!(
-                    "table_id {} missing when attempting to cancel job",
+                tracing::warn!(
+                    "table_id {} missing when attempting to cancel job, could be cleaned on recovery",
                     table_id
-                )
+                );
+                return Ok(());
             };
             table
         };
@@ -938,7 +943,8 @@ impl CatalogManager {
             let tables = &mut database_core.tables;
             let mut tables = BTreeMapTransaction::new(tables);
             for table_id in table_ids {
-                tables.remove(table_id);
+                let res = tables.remove(table_id);
+                assert!(res.is_some());
             }
             commit_meta!(self, tables)?;
         }
@@ -2032,8 +2038,7 @@ impl CatalogManager {
         let user_core = &mut core.user;
         let key = (index.database_id, index.schema_id, index.name.clone());
         assert!(
-            !database_core.indexes.contains_key(&index.id)
-                && database_core.has_in_progress_creation(&key),
+            !database_core.indexes.contains_key(&index.id),
             "index must be in creating procedure"
         );
 
@@ -2188,8 +2193,7 @@ impl CatalogManager {
         let user_core = &mut core.user;
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         assert!(
-            !database_core.sinks.contains_key(&sink.id)
-                && database_core.has_in_progress_creation(&key),
+            !database_core.sinks.contains_key(&sink.id),
             "sink must be in creating procedure"
         );
 
