@@ -20,7 +20,8 @@ use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbInequalityPair};
 
-use super::generic::Join;
+use super::generic::{GenericPlanRef, Join};
+use super::stream::StreamPlanRef;
 use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
@@ -178,7 +179,7 @@ impl StreamHashJoin {
         };
 
         // TODO: derive from input
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             dist,
             append_only,
@@ -291,7 +292,7 @@ impl Distill for StreamHashJoin {
             { "interval", self.clean_left_state_conjunction_idx.is_some() && self.clean_right_state_conjunction_idx.is_some() },
             { "append_only", self.is_append_only },
         );
-        let verbose = self.base.ctx.is_explain_verbose();
+        let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(6);
         vec.push(("type", Pretty::debug(&self.core.join_type)));
 
@@ -316,7 +317,7 @@ impl Distill for StreamHashJoin {
         if let Some(i) = self.clean_right_state_conjunction_idx {
             vec.push(("conditions_to_clean_right_state_table", get_cond(i)));
         }
-        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+        if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             vec.push(("output_watermarks", ow));
         }
 

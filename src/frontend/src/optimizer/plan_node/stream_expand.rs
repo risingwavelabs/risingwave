@@ -48,7 +48,7 @@ impl StreamExpand {
                 .map(|idx| idx + input.schema().len()),
         );
 
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             dist,
             input.append_only(),

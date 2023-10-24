@@ -21,6 +21,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, ScalarImpl};
 
+use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{
     BatchValues, ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,
@@ -144,7 +145,7 @@ impl ColPrunable for LogicalValues {
             .iter()
             .map(|i| self.schema().fields[*i].clone())
             .collect();
-        Self::new(rows, Schema { fields }, self.base.ctx.clone()).into()
+        Self::new(rows, Schema { fields }, self.base.ctx().clone()).into()
     }
 }
 

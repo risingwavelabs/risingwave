@@ -16,6 +16,8 @@ use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::PbStreamNode;
 
+use super::generic::GenericPlanRef;
+use super::stream::StreamPlanRef;
 use super::utils::Distill;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamExchange, StreamNode};
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
@@ -34,7 +36,7 @@ impl StreamShare {
         let input = core.input.borrow().0.clone();
         let dist = input.distribution().clone();
         // Filter executor won't change the append-only behavior of the stream.
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             dist,
             input.append_only(),
@@ -79,7 +81,7 @@ impl StreamNode for StreamShare {
 
 impl StreamShare {
     pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> PbStreamNode {
-        let operator_id = self.base.id.0 as u32;
+        let operator_id = self.base.id().0 as u32;
 
         match state.get_share_stream_node(operator_id) {
             None => {

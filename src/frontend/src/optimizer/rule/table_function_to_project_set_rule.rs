@@ -18,6 +18,7 @@ use risingwave_common::types::DataType;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     LogicalProject, LogicalProjectSet, LogicalTableFunction, LogicalValues, PlanTreeNodeUnary,
 };
@@ -51,7 +52,7 @@ impl Rule for TableFunctionToProjectSetRule {
         let logical_values = LogicalValues::create(
             vec![vec![]],
             Schema::new(vec![]),
-            logical_table_function.base.ctx.clone(),
+            logical_table_function.base.ctx().clone(),
         );
         let logical_project_set = LogicalProjectSet::create(logical_values, vec![table_function]);
         // We need a project to align schema type because

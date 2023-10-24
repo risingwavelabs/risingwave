@@ -18,7 +18,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::{self, PlanWindowFunction};
+use super::generic::{self, GenericPlanRef, PlanWindowFunction};
 use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -50,7 +50,7 @@ impl StreamEowcOverWindow {
         // ancient rows in some rarely updated partitions that are emitted at the end of time.
         let watermark_columns = FixedBitSet::with_capacity(core.output_len());
 
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             input.distribution().clone(),
             true,
