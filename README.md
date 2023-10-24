@@ -99,7 +99,7 @@ RisingWave adaptly tackles some of the most challenging problems in stream proce
 * **Simple to maintain and operate**
   * RisingWave abstracts away unnecessary low-level details, allowing users to concentrate solely on SQL code-level issues.
 * **Rich ecosystem**
-  * RisingWave offers a robust ecosystem, seamlessly integrating with a wide range of cloud systems and the PostgreSQL ecosystem.
+  * With integrations to a diverse range of cloud systems and the PostgreSQL ecosystem, RisingWave boasts a rich and expansive ecosystem.
 
 ## RisingWave's limitations
 RisingWave isn’t a panacea for all data engineering hurdles. It has its own set of limitations:
