@@ -516,11 +516,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 // we use materialized input state for non-retractable aggregate function.
                 // for backward compatibility, the state type is same as the return type.
                 // its values in the intermediate state table are always null.
-            } else {
-                field.data_type = sig
-                    .state_type
-                    .clone()
-                    .unwrap_or(sig.ret_type.as_exact().clone());
+            } else if let Some(state_type) = &sig.state_type {
+                field.data_type = state_type.clone();
             }
         }
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
