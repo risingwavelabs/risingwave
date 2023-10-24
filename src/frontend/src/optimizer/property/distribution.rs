@@ -295,10 +295,12 @@ impl RequiredDist {
 
     pub fn enforce_if_not_satisfies(
         &self,
-        plan: PlanRef,
+        mut plan: PlanRef,
         required_order: &Order,
     ) -> Result<PlanRef> {
-        let plan = required_order.enforce_if_not_satisfies(plan)?;
+        if let Convention::Batch = plan.convention() {
+            plan = required_order.enforce_if_not_satisfies(plan)?;
+        }
         if !plan.distribution().satisfies(self) {
             Ok(self.enforce(plan, required_order))
         } else {
@@ -329,7 +331,7 @@ impl RequiredDist {
         }
     }
 
-    fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
+    pub fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
         let dist = self.to_dist();
         match plan.convention() {
             Convention::Batch => BatchExchange::new(plan, required_order.clone(), dist).into(),

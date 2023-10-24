@@ -106,6 +106,7 @@ enum EncodeType {
   ENCODE_TYPE_PROTOBUF = 4;
   ENCODE_TYPE_JSON = 5;
   ENCODE_TYPE_BYTES = 6;
+  ENCODE_TYPE_TEMPLATE = 7;
 }
 
 enum RowFormatType {
