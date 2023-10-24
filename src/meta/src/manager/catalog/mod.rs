@@ -853,6 +853,8 @@ impl CatalogManager {
         database_core.clear_creating_stream_jobs();
         let user_core = &mut core.user;
         for table in &tables_to_clean {
+            // If table type is internal, no need to update the ref count OR
+            // user ref count.
             if table.table_type != TableType::Internal as i32 {
                 // Recovered when init database manager.
                 for relation_id in &table.dependent_relations {
