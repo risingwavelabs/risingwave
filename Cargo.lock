@@ -3015,7 +3015,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
+source = "git+https://github.com/mrcroxx/foyer?rev=5d0134b#5d0134b28c0edb03277b01ce08b035ef52c1b783"
 dependencies = [
  "foyer-common",
  "foyer-intrusive",
@@ -3026,10 +3026,11 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
+source = "git+https://github.com/mrcroxx/foyer?rev=5d0134b#5d0134b28c0edb03277b01ce08b035ef52c1b783"
 dependencies = [
  "bytes",
  "foyer-workspace-hack",
+ "itertools 0.11.0",
  "madsim-tokio",
  "parking_lot 0.12.1",
  "paste",
@@ -3040,13 +3041,13 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
+source = "git+https://github.com/mrcroxx/foyer?rev=5d0134b#5d0134b28c0edb03277b01ce08b035ef52c1b783"
 dependencies = [
  "bytes",
  "cmsketch",
  "foyer-common",
  "foyer-workspace-hack",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "memoffset",
  "parking_lot 0.12.1",
  "paste",
@@ -3057,7 +3058,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
+source = "git+https://github.com/mrcroxx/foyer?rev=5d0134b#5d0134b28c0edb03277b01ce08b035ef52c1b783"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -3086,7 +3087,7 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
+source = "git+https://github.com/mrcroxx/foyer?rev=5d0134b#5d0134b28c0edb03277b01ce08b035ef52c1b783"
 dependencies = [
  "crossbeam-utils",
  "either",
@@ -3095,7 +3096,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "hyper",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "libc",
  "memchr",
  "parking_lot 0.12.1",
