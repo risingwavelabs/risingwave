@@ -19,7 +19,7 @@
 #![feature(result_option_inspect)]
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_defaults)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(iterator_try_collect)]
 #![feature(hash_extract_if)]
 #![feature(try_blocks)]
