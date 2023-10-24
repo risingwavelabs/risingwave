@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
 use sea_orm::{DeriveActiveEnum, EnumIter, FromJsonQueryResult};
@@ -104,10 +104,18 @@ macro_rules! derive_from_json_struct {
         #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize, Default)]
         pub struct $struct_name(pub $field_type);
         impl Eq for $struct_name {}
+
+        impl $struct_name {
+            pub fn into_inner(self) -> $field_type {
+                self.0
+            }
+        }
     };
 }
 
 derive_from_json_struct!(I32Array, Vec<i32>);
+derive_from_json_struct!(ActorUpstreamActors, BTreeMap<i32, Vec<i32>>);
+
 derive_from_json_struct!(DataType, risingwave_pb::data::DataType);
 derive_from_json_struct!(DataTypeArray, Vec<risingwave_pb::data::DataType>);
 derive_from_json_struct!(FieldArray, Vec<risingwave_pb::plan_common::Field>);
