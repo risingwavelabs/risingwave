@@ -18,6 +18,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::InsertNode;
 use risingwave_pb::plan_common::{DefaultColumns, IndexAndExpr};
 
+use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::expr::Expr;
@@ -34,11 +35,8 @@ pub struct BatchInsert {
 impl BatchInsert {
     pub fn new(core: generic::Insert<PlanRef>) -> Self {
         assert_eq!(core.input.distribution(), &Distribution::Single);
-        let base: PlanBase = PlanBase::new_batch_from_logical(
-            &core,
-            core.input.distribution().clone(),
-            Order::any(),
-        );
+        let base: PlanBase =
+            PlanBase::new_batch_with_core(&core, core.input.distribution().clone(), Order::any());
 
         BatchInsert { base, core }
     }
@@ -46,7 +44,9 @@ impl BatchInsert {
 
 impl Distill for BatchInsert {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let vec = self.core.fields_pretty(self.base.ctx.is_explain_verbose());
+        let vec = self
+            .core
+            .fields_pretty(self.base.ctx().is_explain_verbose());
         childless_record("BatchInsert", vec)
     }
 }
