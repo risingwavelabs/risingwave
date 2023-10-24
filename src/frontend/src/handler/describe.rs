@@ -100,14 +100,13 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
     // Convert all column descs to rows
     let mut rows = col_descs_to_rows(columns);
 
-    fn fmt_col_project<T, C>(columns: &[ColumnDesc], cb: C) -> String
+    fn concat<T>(display_elems: impl IntoIterator<Item = T>) -> String
     where
-        T: Display + ?Sized,
-        C: FnMut(&ColumnDesc) -> &T,
+        T: Display,
     {
         format!(
             "{}",
-            display_comma_separated(&columns.iter().map(cb).collect::<Vec<_>>())
+            display_comma_separated(&display_elems.into_iter().collect::<Vec<_>>())
         )
     }
 
@@ -115,7 +114,7 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
     if !pk_columns.is_empty() {
         rows.push(Row::new(vec![
             Some("primary key".into()),
-            Some(fmt_col_project(&pk_columns, |x| &x.name).into()),
+            Some(concat(pk_columns.iter().map(|x| &x.name)).into()),
             None, // Is Hidden
             None, // Description
         ]));
@@ -125,7 +124,7 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
     if !dist_columns.is_empty() {
         rows.push(Row::new(vec![
             Some("distribution key".into()),
-            Some(fmt_col_project(&dist_columns, |x| &x.name).into()),
+            Some(concat(dist_columns.iter().map(|x| &x.name)).into()),
             None, // Is Hidden
             None, // Description
         ]));
