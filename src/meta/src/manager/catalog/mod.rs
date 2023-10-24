@@ -737,7 +737,6 @@ impl CatalogManager {
         for &dependent_relation_id in &table.dependent_relations {
             database_core.increase_ref_count(dependent_relation_id);
         }
-        tracing::debug!("increase ref for {}", table.id);
         user_core.increase_ref(table.owner);
         Ok(())
     }
@@ -1410,7 +1409,6 @@ impl CatalogManager {
 
         // `tables_removed` contains both index table and mv.
         for table in &tables_removed {
-            tracing::debug!("decrease ref for {}", table.id);
             user_core.decrease_ref(table.owner);
         }
 
