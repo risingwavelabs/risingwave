@@ -181,34 +181,38 @@
             └─BatchScan { table: auction, columns: [auction.id, auction.seller, auction.category], distribution: UpstreamHashShard(auction.id) }
   stream_plan: |-
     StreamMaterialize { columns: [name, city, state, id, auction.seller(hidden), person.id(hidden)], stream_key: [id, auction.seller], pk_columns: [id, auction.seller], pk_conflict: NoCheck }
-    └─StreamHashJoin { type: Inner, predicate: auction.seller = person.id, output: [person.name, person.city, person.state, auction.id, auction.seller, person.id] }
-      ├─StreamExchange { dist: HashShard(auction.seller) }
-      │ └─StreamProject { exprs: [auction.id, auction.seller] }
-      │   └─StreamFilter { predicate: (auction.category = 10:Int32) }
-      │     └─StreamTableScan { table: auction, columns: [auction.id, auction.seller, auction.category], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
-      └─StreamExchange { dist: HashShard(person.id) }
-        └─StreamFilter { predicate: (((person.state = 'or':Varchar) OR (person.state = 'id':Varchar)) OR (person.state = 'ca':Varchar)) }
-          └─StreamTableScan { table: person, columns: [person.id, person.name, person.city, person.state], pk: [person.id], dist: UpstreamHashShard(person.id) }
+    └─StreamExchange { dist: HashShard(auction.id, auction.seller) }
+      └─StreamHashJoin { type: Inner, predicate: auction.seller = person.id, output: [person.name, person.city, person.state, auction.id, auction.seller, person.id] }
+        ├─StreamExchange { dist: HashShard(auction.seller) }
+        │ └─StreamProject { exprs: [auction.id, auction.seller] }
+        │   └─StreamFilter { predicate: (auction.category = 10:Int32) }
+        │     └─StreamTableScan { table: auction, columns: [auction.id, auction.seller, auction.category], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+        └─StreamExchange { dist: HashShard(person.id) }
+          └─StreamFilter { predicate: (((person.state = 'or':Varchar) OR (person.state = 'id':Varchar)) OR (person.state = 'ca':Varchar)) }
+            └─StreamTableScan { table: person, columns: [person.id, person.name, person.city, person.state], pk: [person.id], dist: UpstreamHashShard(person.id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [name, city, state, id, auction.seller(hidden), person.id(hidden)], stream_key: [id, auction.seller], pk_columns: [id, auction.seller], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── StreamHashJoin { type: Inner, predicate: auction.seller = person.id, output: [person.name, person.city, person.state, auction.id, auction.seller, person.id] }
-        ├── left table: 0
-        ├── right table: 2
-        ├── left degree table: 1
-        ├── right degree table: 3
-        ├── StreamExchange Hash([1]) from 1
-        └── StreamExchange Hash([0]) from 2
+    └── StreamExchange Hash([3, 4]) from 1
 
     Fragment 1
+    StreamHashJoin { type: Inner, predicate: auction.seller = person.id, output: [person.name, person.city, person.state, auction.id, auction.seller, person.id] }
+    ├── left table: 0
+    ├── right table: 2
+    ├── left degree table: 1
+    ├── right degree table: 3
+    ├── StreamExchange Hash([1]) from 2
+    └── StreamExchange Hash([0]) from 3
+
+    Fragment 2
     StreamProject { exprs: [auction.id, auction.seller] }
     └── StreamFilter { predicate: (auction.category = 10:Int32) }
         └── Chain { table: auction, columns: [auction.id, auction.seller, auction.category], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 4 }
             ├── Upstream
             └── BatchPlanNode
 
-    Fragment 2
+    Fragment 3
     StreamFilter { predicate: (((person.state = 'or':Varchar) OR (person.state = 'id':Varchar)) OR (person.state = 'ca':Varchar)) }
     └── Chain { table: person, columns: [person.id, person.name, person.city, person.state], pk: [person.id], dist: UpstreamHashShard(person.id) } { state table: 5 }
         ├── Upstream
@@ -242,7 +246,7 @@
     ├── columns: [ name, city, state, id, auction.seller, person.id ]
     ├── primary key: [ $3 ASC, $4 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
-    ├── distribution key: [ 4 ]
+    ├── distribution key: [ 3, 4 ]
     └── read pk prefix len hint: 2
 
 - id: nexmark_q4
@@ -847,34 +851,38 @@
               └─BatchScan { table: auction, columns: [auction.date_time, auction.seller], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [id, name, starttime, $expr2(hidden), auction.seller(hidden), $expr3(hidden), $expr4(hidden)], stream_key: [id, starttime, $expr2], pk_columns: [id, starttime, $expr2], pk_conflict: NoCheck }
-    └─StreamHashJoin { type: Inner, predicate: person.id = auction.seller AND $expr1 = $expr3 AND $expr2 = $expr4, output: [person.id, internal_last_seen_value(person.name), $expr1, $expr2, auction.seller, $expr3, $expr4] }
-      ├─StreamExchange { dist: HashShard(person.id, $expr1, $expr2) }
-      │ └─StreamProject { exprs: [person.id, $expr1, $expr2, internal_last_seen_value(person.name)] }
-      │   └─StreamHashAgg { group_key: [person.id, $expr1, $expr2], aggs: [internal_last_seen_value(person.name), count] }
-      │     └─StreamProject { exprs: [person.id, person.name, $expr1, ($expr1 + '00:00:10':Interval) as $expr2] }
-      │       └─StreamProject { exprs: [person.id, person.name, person.date_time, TumbleStart(person.date_time, '00:00:10':Interval) as $expr1] }
-      │         └─StreamTableScan { table: person, columns: [person.id, person.name, person.date_time], pk: [person.id], dist: UpstreamHashShard(person.id) }
-      └─StreamProject { exprs: [auction.seller, $expr3, $expr4] }
-        └─StreamHashAgg { group_key: [auction.seller, $expr3, $expr4], aggs: [count] }
-          └─StreamExchange { dist: HashShard(auction.seller, $expr3, $expr4) }
-            └─StreamProject { exprs: [auction.seller, $expr3, ($expr3 + '00:00:10':Interval) as $expr4, auction.id] }
-              └─StreamProject { exprs: [auction.date_time, auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval) as $expr3, auction.id] }
-                └─StreamTableScan { table: auction, columns: [auction.date_time, auction.seller, auction.id], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+    └─StreamExchange { dist: HashShard(person.id, $expr1, $expr2) }
+      └─StreamHashJoin { type: Inner, predicate: person.id = auction.seller AND $expr1 = $expr3 AND $expr2 = $expr4, output: [person.id, internal_last_seen_value(person.name), $expr1, $expr2, auction.seller, $expr3, $expr4] }
+        ├─StreamExchange { dist: HashShard(person.id, $expr1, $expr2) }
+        │ └─StreamProject { exprs: [person.id, $expr1, $expr2, internal_last_seen_value(person.name)] }
+        │   └─StreamHashAgg { group_key: [person.id, $expr1, $expr2], aggs: [internal_last_seen_value(person.name), count] }
+        │     └─StreamProject { exprs: [person.id, person.name, $expr1, ($expr1 + '00:00:10':Interval) as $expr2] }
+        │       └─StreamProject { exprs: [person.id, person.name, person.date_time, TumbleStart(person.date_time, '00:00:10':Interval) as $expr1] }
+        │         └─StreamTableScan { table: person, columns: [person.id, person.name, person.date_time], pk: [person.id], dist: UpstreamHashShard(person.id) }
+        └─StreamProject { exprs: [auction.seller, $expr3, $expr4] }
+          └─StreamHashAgg { group_key: [auction.seller, $expr3, $expr4], aggs: [count] }
+            └─StreamExchange { dist: HashShard(auction.seller, $expr3, $expr4) }
+              └─StreamProject { exprs: [auction.seller, $expr3, ($expr3 + '00:00:10':Interval) as $expr4, auction.id] }
+                └─StreamProject { exprs: [auction.date_time, auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval) as $expr3, auction.id] }
+                  └─StreamTableScan { table: auction, columns: [auction.date_time, auction.seller, auction.id], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [id, name, starttime, $expr2(hidden), auction.seller(hidden), $expr3(hidden), $expr4(hidden)], stream_key: [id, starttime, $expr2], pk_columns: [id, starttime, $expr2], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── StreamHashJoin { type: Inner, predicate: person.id = auction.seller AND $expr1 = $expr3 AND $expr2 = $expr4, output: [person.id, internal_last_seen_value(person.name), $expr1, $expr2, auction.seller, $expr3, $expr4] }
-        ├── left table: 0
-        ├── right table: 2
-        ├── left degree table: 1
-        ├── right degree table: 3
-        ├── StreamExchange Hash([0, 1, 2]) from 1
-        └── StreamProject { exprs: [auction.seller, $expr3, $expr4] }
-            └── StreamHashAgg { group_key: [auction.seller, $expr3, $expr4], aggs: [count] } { intermediate state table: 6, state tables: [], distinct tables: [] }
-                └── StreamExchange Hash([0, 1, 2]) from 2
+    └── StreamExchange Hash([0, 2, 3]) from 1
 
     Fragment 1
+    StreamHashJoin { type: Inner, predicate: person.id = auction.seller AND $expr1 = $expr3 AND $expr2 = $expr4, output: [person.id, internal_last_seen_value(person.name), $expr1, $expr2, auction.seller, $expr3, $expr4] }
+    ├── left table: 0
+    ├── right table: 2
+    ├── left degree table: 1
+    ├── right degree table: 3
+    ├── StreamExchange Hash([0, 1, 2]) from 2
+    └── StreamProject { exprs: [auction.seller, $expr3, $expr4] }
+        └── StreamHashAgg { group_key: [auction.seller, $expr3, $expr4], aggs: [count] } { intermediate state table: 6, state tables: [], distinct tables: [] }
+            └── StreamExchange Hash([0, 1, 2]) from 3
+
+    Fragment 2
     StreamProject { exprs: [person.id, $expr1, $expr2, internal_last_seen_value(person.name)] }
     └── StreamHashAgg { group_key: [person.id, $expr1, $expr2], aggs: [internal_last_seen_value(person.name), count] } { intermediate state table: 4, state tables: [], distinct tables: [] }
         └── StreamProject { exprs: [person.id, person.name, $expr1, ($expr1 + '00:00:10':Interval) as $expr2] }
@@ -883,7 +891,7 @@
                     ├── Upstream
                     └── BatchPlanNode
 
-    Fragment 2
+    Fragment 3
     StreamProject { exprs: [auction.seller, $expr3, ($expr3 + '00:00:10':Interval) as $expr4, auction.id] }
     └── StreamProject { exprs: [auction.date_time, auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval) as $expr3, auction.id] }
         └── Chain { table: auction, columns: [auction.date_time, auction.seller, auction.id], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 7 }
@@ -1133,27 +1141,31 @@
         └─StreamTableScan { table: side_input, columns: [side_input.key, side_input.value], pk: [side_input.key], dist: UpstreamHashShard(side_input.key) }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, date_time, value, bid._row_id(hidden), $expr1(hidden), side_input.key(hidden)], stream_key: [bid._row_id, $expr1], pk_columns: [bid._row_id, $expr1], pk_conflict: NoCheck }
-    └─StreamTemporalJoin { type: Inner, predicate: $expr1 = side_input.key, output: [bid.auction, bid.bidder, bid.price, bid.date_time, side_input.value, bid._row_id, $expr1, side_input.key] }
-      ├─StreamExchange { dist: HashShard($expr1) }
-      │ └─StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.date_time, (bid.auction % 10000:Int32) as $expr1, bid._row_id] }
-      │   └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
-      └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(side_input.key) }
-        └─StreamTableScan { table: side_input, columns: [side_input.key, side_input.value], pk: [side_input.key], dist: UpstreamHashShard(side_input.key) }
+    └─StreamExchange { dist: HashShard(bid._row_id, $expr1) }
+      └─StreamTemporalJoin { type: Inner, predicate: $expr1 = side_input.key, output: [bid.auction, bid.bidder, bid.price, bid.date_time, side_input.value, bid._row_id, $expr1, side_input.key] }
+        ├─StreamExchange { dist: HashShard($expr1) }
+        │ └─StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.date_time, (bid.auction % 10000:Int32) as $expr1, bid._row_id] }
+        │   └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+        └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(side_input.key) }
+          └─StreamTableScan { table: side_input, columns: [side_input.key, side_input.value], pk: [side_input.key], dist: UpstreamHashShard(side_input.key) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction, bidder, price, date_time, value, bid._row_id(hidden), $expr1(hidden), side_input.key(hidden)], stream_key: [bid._row_id, $expr1], pk_columns: [bid._row_id, $expr1], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── StreamTemporalJoin { type: Inner, predicate: $expr1 = side_input.key, output: [bid.auction, bid.bidder, bid.price, bid.date_time, side_input.value, bid._row_id, $expr1, side_input.key] }
-        ├── StreamExchange Hash([4]) from 1
-        └── StreamExchange NoShuffle from 2
+    └── StreamExchange Hash([5, 6]) from 1
 
     Fragment 1
+    StreamTemporalJoin { type: Inner, predicate: $expr1 = side_input.key, output: [bid.auction, bid.bidder, bid.price, bid.date_time, side_input.value, bid._row_id, $expr1, side_input.key] }
+    ├── StreamExchange Hash([4]) from 2
+    └── StreamExchange NoShuffle from 3
+
+    Fragment 2
     StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.date_time, (bid.auction % 10000:Int32) as $expr1, bid._row_id] }
     └── Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 0 }
         ├── Upstream
         └── BatchPlanNode
 
-    Fragment 2
+    Fragment 3
     Chain { table: side_input, columns: [side_input.key, side_input.value], pk: [side_input.key], dist: UpstreamHashShard(side_input.key) } { state table: 1 }
     ├── Upstream
     └── BatchPlanNode
@@ -1166,7 +1178,7 @@
     ├── columns: [ auction, bidder, price, date_time, value, bid._row_id, $expr1, side_input.key ]
     ├── primary key: [ $5 ASC, $6 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
-    ├── distribution key: [ 6 ]
+    ├── distribution key: [ 5, 6 ]
     └── read pk prefix len hint: 2
 
 - id: nexmark_q14
@@ -1795,30 +1807,34 @@
         └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_timeb, item_name, description, initial_bid, reserve, date_timea, expires, seller, category, bid._row_id(hidden), auction.id(hidden)], stream_key: [bid._row_id, auction], pk_columns: [bid._row_id, auction], pk_conflict: NoCheck }
-    └─StreamHashJoin { type: Inner, predicate: bid.auction = auction.id, output: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid._row_id, auction.id] }
-      ├─StreamExchange { dist: HashShard(bid.auction) }
-      │ └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
-      └─StreamExchange { dist: HashShard(auction.id) }
-        └─StreamFilter { predicate: (auction.category = 10:Int32) }
-          └─StreamTableScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+    └─StreamExchange { dist: HashShard(bid.auction, bid._row_id) }
+      └─StreamHashJoin { type: Inner, predicate: bid.auction = auction.id, output: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid._row_id, auction.id] }
+        ├─StreamExchange { dist: HashShard(bid.auction) }
+        │ └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+        └─StreamExchange { dist: HashShard(auction.id) }
+          └─StreamFilter { predicate: (auction.category = 10:Int32) }
+            └─StreamTableScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_timeb, item_name, description, initial_bid, reserve, date_timea, expires, seller, category, bid._row_id(hidden), auction.id(hidden)], stream_key: [bid._row_id, auction], pk_columns: [bid._row_id, auction], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── StreamHashJoin { type: Inner, predicate: bid.auction = auction.id, output: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid._row_id, auction.id] }
-        ├── left table: 0
-        ├── right table: 2
-        ├── left degree table: 1
-        ├── right degree table: 3
-        ├── StreamExchange Hash([0]) from 1
-        └── StreamExchange Hash([0]) from 2
+    └── StreamExchange Hash([0, 14]) from 1
 
     Fragment 1
+    StreamHashJoin { type: Inner, predicate: bid.auction = auction.id, output: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, bid._row_id, auction.id] }
+    ├── left table: 0
+    ├── right table: 2
+    ├── left degree table: 1
+    ├── right degree table: 3
+    ├── StreamExchange Hash([0]) from 2
+    └── StreamExchange Hash([0]) from 3
+
+    Fragment 2
     Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 4 }
     ├── Upstream
     └── BatchPlanNode
 
-    Fragment 2
+    Fragment 3
     StreamFilter { predicate: (auction.category = 10:Int32) }
     └── Chain { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 5 }
         ├── Upstream
@@ -1840,7 +1856,7 @@
     ├── columns: [ auction, bidder, price, channel, url, date_timeb, item_name, description, initial_bid, reserve, date_timea, expires, seller, category, bid._row_id, auction.id ]
     ├── primary key: [ $14 ASC, $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ]
-    ├── distribution key: [ 0 ]
+    ├── distribution key: [ 0, 14 ]
     └── read pk prefix len hint: 2
 
 - id: nexmark_q21
@@ -1946,33 +1962,37 @@
           └─BatchScan { table: bid, columns: [bid.auction, bid.price], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [auction_id, auction_item_name, current_highest_bid, bid.auction(hidden)], stream_key: [auction_id], pk_columns: [auction_id], pk_conflict: NoCheck }
-    └─StreamHashJoin { type: LeftOuter, predicate: auction.id = bid.auction, output: [auction.id, auction.item_name, max(bid.price), bid.auction] }
-      ├─StreamExchange { dist: HashShard(auction.id) }
-      │ └─StreamTableScan { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
-      └─StreamProject { exprs: [bid.auction, max(bid.price)] }
-        └─StreamHashAgg [append_only] { group_key: [bid.auction], aggs: [max(bid.price), count] }
-          └─StreamExchange { dist: HashShard(bid.auction) }
-            └─StreamTableScan { table: bid, columns: [bid.auction, bid.price, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+    └─StreamExchange { dist: HashShard(auction.id) }
+      └─StreamHashJoin { type: LeftOuter, predicate: auction.id = bid.auction, output: [auction.id, auction.item_name, max(bid.price), bid.auction] }
+        ├─StreamExchange { dist: HashShard(auction.id) }
+        │ └─StreamTableScan { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+        └─StreamProject { exprs: [bid.auction, max(bid.price)] }
+          └─StreamHashAgg [append_only] { group_key: [bid.auction], aggs: [max(bid.price), count] }
+            └─StreamExchange { dist: HashShard(bid.auction) }
+              └─StreamTableScan { table: bid, columns: [bid.auction, bid.price, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction_id, auction_item_name, current_highest_bid, bid.auction(hidden)], stream_key: [auction_id], pk_columns: [auction_id], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── StreamHashJoin { type: LeftOuter, predicate: auction.id = bid.auction, output: [auction.id, auction.item_name, max(bid.price), bid.auction] }
-        ├── left table: 0
-        ├── right table: 2
-        ├── left degree table: 1
-        ├── right degree table: 3
-        ├── StreamExchange Hash([0]) from 1
-        └── StreamProject { exprs: [bid.auction, max(bid.price)] }
-            └── StreamHashAgg [append_only] { group_key: [bid.auction], aggs: [max(bid.price), count] } { intermediate state table: 5, state tables: [], distinct tables: [] }
-                └── StreamExchange Hash([0]) from 2
+    └── StreamExchange Hash([0]) from 1
 
     Fragment 1
+    StreamHashJoin { type: LeftOuter, predicate: auction.id = bid.auction, output: [auction.id, auction.item_name, max(bid.price), bid.auction] }
+    ├── left table: 0
+    ├── right table: 2
+    ├── left degree table: 1
+    ├── right degree table: 3
+    ├── StreamExchange Hash([0]) from 2
+    └── StreamProject { exprs: [bid.auction, max(bid.price)] }
+        └── StreamHashAgg [append_only] { group_key: [bid.auction], aggs: [max(bid.price), count] } { intermediate state table: 5, state tables: [], distinct tables: [] }
+            └── StreamExchange Hash([0]) from 3
+
+    Fragment 2
     Chain { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 4 }
     ├── Upstream
     └── BatchPlanNode
 
-    Fragment 2
+    Fragment 3
     Chain { table: bid, columns: [bid.auction, bid.price, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 6 }
     ├── Upstream
     └── BatchPlanNode
@@ -2215,39 +2235,43 @@
               └─BatchScan { table: bid, columns: [bid.auction], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [auction_id, auction_item_name], stream_key: [auction_id], pk_columns: [auction_id], pk_conflict: NoCheck }
-    └─StreamHashJoin { type: LeftSemi, predicate: auction.id = bid.auction, output: all }
-      ├─StreamExchange { dist: HashShard(auction.id) }
-      │ └─StreamTableScan { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
-      └─StreamProject { exprs: [bid.auction] }
-        └─StreamFilter { predicate: (count >= 20:Int32) }
-          └─StreamHashAgg [append_only] { group_key: [bid.auction], aggs: [count] }
-            └─StreamExchange { dist: HashShard(bid.auction) }
-              └─StreamTableScan { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+    └─StreamExchange { dist: HashShard(auction.id) }
+      └─StreamHashJoin { type: LeftSemi, predicate: auction.id = bid.auction, output: all }
+        ├─StreamExchange { dist: HashShard(auction.id) }
+        │ └─StreamTableScan { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+        └─StreamProject { exprs: [bid.auction] }
+          └─StreamFilter { predicate: (count >= 20:Int32) }
+            └─StreamHashAgg [append_only] { group_key: [bid.auction], aggs: [count] }
+              └─StreamExchange { dist: HashShard(bid.auction) }
+                └─StreamTableScan { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction_id, auction_item_name], stream_key: [auction_id], pk_columns: [auction_id], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── StreamHashJoin { type: LeftSemi, predicate: auction.id = bid.auction, output: all }
-        ├── left table: 0
-        ├── right table: 2
-        ├── left degree table: 1
-        ├── right degree table: 3
-        ├── StreamExchange Hash([0]) from 1
-        └── StreamProject { exprs: [bid.auction] }
-            └── StreamFilter { predicate: (count >= 20:Int32) }
-                └── StreamHashAgg [append_only] { group_key: [bid.auction], aggs: [count] }
-                    ├── intermediate state table: 5
-                    ├── state tables: []
-                    ├── distinct tables: []
-                    └── StreamExchange Hash([0]) from 2
+    └── StreamExchange Hash([0]) from 1
 
     Fragment 1
+    StreamHashJoin { type: LeftSemi, predicate: auction.id = bid.auction, output: all }
+    ├── left table: 0
+    ├── right table: 2
+    ├── left degree table: 1
+    ├── right degree table: 3
+    ├── StreamExchange Hash([0]) from 2
+    └── StreamProject { exprs: [bid.auction] }
+        └── StreamFilter { predicate: (count >= 20:Int32) }
+            └── StreamHashAgg [append_only] { group_key: [bid.auction], aggs: [count] }
+                ├── intermediate state table: 5
+                ├── state tables: []
+                ├── distinct tables: []
+                └── StreamExchange Hash([0]) from 3
+
+    Fragment 2
     Chain { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
     ├── state table: 4
     ├── Upstream
     └── BatchPlanNode
 
-    Fragment 2
+    Fragment 3
     Chain { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 6 }
     ├── Upstream
     └── BatchPlanNode
@@ -2333,39 +2357,43 @@
               └─BatchScan { table: bid, columns: [bid.auction], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [auction_id, auction_item_name], stream_key: [auction_id], pk_columns: [auction_id], pk_conflict: NoCheck }
-    └─StreamHashJoin { type: LeftAnti, predicate: auction.id = bid.auction, output: all }
-      ├─StreamExchange { dist: HashShard(auction.id) }
-      │ └─StreamTableScan { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
-      └─StreamProject { exprs: [bid.auction] }
-        └─StreamFilter { predicate: (count < 20:Int32) }
-          └─StreamHashAgg [append_only] { group_key: [bid.auction], aggs: [count] }
-            └─StreamExchange { dist: HashShard(bid.auction) }
-              └─StreamTableScan { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+    └─StreamExchange { dist: HashShard(auction.id) }
+      └─StreamHashJoin { type: LeftAnti, predicate: auction.id = bid.auction, output: all }
+        ├─StreamExchange { dist: HashShard(auction.id) }
+        │ └─StreamTableScan { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+        └─StreamProject { exprs: [bid.auction] }
+          └─StreamFilter { predicate: (count < 20:Int32) }
+            └─StreamHashAgg [append_only] { group_key: [bid.auction], aggs: [count] }
+              └─StreamExchange { dist: HashShard(bid.auction) }
+                └─StreamTableScan { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction_id, auction_item_name], stream_key: [auction_id], pk_columns: [auction_id], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── StreamHashJoin { type: LeftAnti, predicate: auction.id = bid.auction, output: all }
-        ├── left table: 0
-        ├── right table: 2
-        ├── left degree table: 1
-        ├── right degree table: 3
-        ├── StreamExchange Hash([0]) from 1
-        └── StreamProject { exprs: [bid.auction] }
-            └── StreamFilter { predicate: (count < 20:Int32) }
-                └── StreamHashAgg [append_only] { group_key: [bid.auction], aggs: [count] }
-                    ├── intermediate state table: 5
-                    ├── state tables: []
-                    ├── distinct tables: []
-                    └── StreamExchange Hash([0]) from 2
+    └── StreamExchange Hash([0]) from 1
 
     Fragment 1
+    StreamHashJoin { type: LeftAnti, predicate: auction.id = bid.auction, output: all }
+    ├── left table: 0
+    ├── right table: 2
+    ├── left degree table: 1
+    ├── right degree table: 3
+    ├── StreamExchange Hash([0]) from 2
+    └── StreamProject { exprs: [bid.auction] }
+        └── StreamFilter { predicate: (count < 20:Int32) }
+            └── StreamHashAgg [append_only] { group_key: [bid.auction], aggs: [count] }
+                ├── intermediate state table: 5
+                ├── state tables: []
+                ├── distinct tables: []
+                └── StreamExchange Hash([0]) from 3
+
+    Fragment 2
     Chain { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
     ├── state table: 4
     ├── Upstream
     └── BatchPlanNode
 
-    Fragment 2
+    Fragment 3
     Chain { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 6 }
     ├── Upstream
     └── BatchPlanNode

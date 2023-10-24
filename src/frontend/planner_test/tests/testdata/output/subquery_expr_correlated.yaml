@@ -717,15 +717,16 @@
                 └─BatchScan { table: t2, columns: [t2.x], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, t1._row_id(hidden)], stream_key: [t1._row_id, x], pk_columns: [t1._row_id, x], pk_conflict: NoCheck }
-    └─StreamHashJoin { type: LeftSemi, predicate: t1.x IS NOT DISTINCT FROM t2.x, output: all }
-      ├─StreamExchange { dist: HashShard(t1.x) }
-      │ └─StreamTableScan { table: t1, columns: [t1.x, t1.y, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamProject { exprs: [t2.x] }
-        └─StreamGroupTopN { order: [t2.x ASC], limit: 1, offset: 0, group_key: [t2.x] }
-          └─StreamExchange { dist: HashShard(t2.x) }
-            └─StreamProject { exprs: [t2.x, t2.x, t2._row_id] }
-              └─StreamFilter { predicate: IsNotNull(t2.x) }
-                └─StreamTableScan { table: t2, columns: [t2.x, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+    └─StreamExchange { dist: HashShard(t1.x, t1._row_id) }
+      └─StreamHashJoin { type: LeftSemi, predicate: t1.x IS NOT DISTINCT FROM t2.x, output: all }
+        ├─StreamExchange { dist: HashShard(t1.x) }
+        │ └─StreamTableScan { table: t1, columns: [t1.x, t1.y, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamProject { exprs: [t2.x] }
+          └─StreamGroupTopN { order: [t2.x ASC], limit: 1, offset: 0, group_key: [t2.x] }
+            └─StreamExchange { dist: HashShard(t2.x) }
+              └─StreamProject { exprs: [t2.x, t2.x, t2._row_id] }
+                └─StreamFilter { predicate: IsNotNull(t2.x) }
+                  └─StreamTableScan { table: t2, columns: [t2.x, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);
@@ -883,14 +884,15 @@
               └─BatchScan { table: t2, columns: [t2.v2, t2.k2], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [v1, k1, t1._row_id(hidden)], stream_key: [t1._row_id, v1, k1], pk_columns: [t1._row_id, v1, k1], pk_conflict: NoCheck }
-    └─StreamHashJoin { type: LeftSemi, predicate: t1.v1 = t2.v2 AND t1.k1 IS NOT DISTINCT FROM t2.k2, output: all }
-      ├─StreamExchange { dist: HashShard(t1.k1) }
-      │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.k1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamGroupTopN { order: [t2.v2 ASC], limit: 1, offset: 0, group_key: [t2.k2] }
-        └─StreamExchange { dist: HashShard(t2.k2) }
-          └─StreamProject { exprs: [t2.k2, t2.v2, t2._row_id] }
-            └─StreamFilter { predicate: IsNotNull(t2.k2) }
-              └─StreamTableScan { table: t2, columns: [t2.v2, t2.k2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+    └─StreamExchange { dist: HashShard(t1.v1, t1.k1, t1._row_id) }
+      └─StreamHashJoin { type: LeftSemi, predicate: t1.v1 = t2.v2 AND t1.k1 IS NOT DISTINCT FROM t2.k2, output: all }
+        ├─StreamExchange { dist: HashShard(t1.k1) }
+        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.k1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamGroupTopN { order: [t2.v2 ASC], limit: 1, offset: 0, group_key: [t2.k2] }
+          └─StreamExchange { dist: HashShard(t2.k2) }
+            └─StreamProject { exprs: [t2.k2, t2.v2, t2._row_id] }
+              └─StreamFilter { predicate: IsNotNull(t2.k2) }
+                └─StreamTableScan { table: t2, columns: [t2.v2, t2.k2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: test ApplyTopNTransposeRule case 2
   sql: |
     create table t1 (v1 int, k1 int);
@@ -908,16 +910,17 @@
               └─BatchScan { table: t2, columns: [t2.v2], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [v1, k1, t1._row_id(hidden)], stream_key: [t1._row_id, v1], pk_columns: [t1._row_id, v1], pk_conflict: NoCheck }
-    └─StreamHashJoin { type: LeftSemi, predicate: t1.v1 = t2.v2, output: all }
-      ├─StreamExchange { dist: HashShard(t1.v1) }
-      │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.k1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamExchange { dist: HashShard(t2.v2) }
-        └─StreamProject { exprs: [t2.v2, t2._row_id] }
-          └─StreamTopN { order: [t2.v2 ASC], limit: 1, offset: 0 }
-            └─StreamExchange { dist: Single }
-              └─StreamGroupTopN { order: [t2.v2 ASC], limit: 1, offset: 0, group_key: [$expr1] }
-                └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as $expr1] }
-                  └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+    └─StreamExchange { dist: HashShard(t1.v1, t1._row_id) }
+      └─StreamHashJoin { type: LeftSemi, predicate: t1.v1 = t2.v2, output: all }
+        ├─StreamExchange { dist: HashShard(t1.v1) }
+        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.k1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: HashShard(t2.v2) }
+          └─StreamProject { exprs: [t2.v2, t2._row_id] }
+            └─StreamTopN { order: [t2.v2 ASC], limit: 1, offset: 0 }
+              └─StreamExchange { dist: Single }
+                └─StreamGroupTopN { order: [t2.v2 ASC], limit: 1, offset: 0, group_key: [$expr1] }
+                  └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as $expr1] }
+                    └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: test ApplyLimitTransposeRule case 1
   sql: |
     create table t1 (v1 int, k1 int);
@@ -935,11 +938,12 @@
               └─BatchScan { table: t2, columns: [t2.v2, t2.k2], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [v1, k1, t1._row_id(hidden)], stream_key: [t1._row_id, v1, k1], pk_columns: [t1._row_id, v1, k1], pk_conflict: NoCheck }
-    └─StreamHashJoin { type: LeftSemi, predicate: t1.v1 = t2.v2 AND t1.k1 IS NOT DISTINCT FROM t2.k2, output: all }
-      ├─StreamExchange { dist: HashShard(t1.k1) }
-      │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.k1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamGroupTopN { order: [t2.k2 ASC], limit: 1, offset: 0, group_key: [t2.k2] }
-        └─StreamExchange { dist: HashShard(t2.k2) }
-          └─StreamProject { exprs: [t2.k2, t2.v2, t2._row_id] }
-            └─StreamFilter { predicate: IsNotNull(t2.k2) }
-              └─StreamTableScan { table: t2, columns: [t2.v2, t2.k2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
+    └─StreamExchange { dist: HashShard(t1.v1, t1.k1, t1._row_id) }
+      └─StreamHashJoin { type: LeftSemi, predicate: t1.v1 = t2.v2 AND t1.k1 IS NOT DISTINCT FROM t2.k2, output: all }
+        ├─StreamExchange { dist: HashShard(t1.k1) }
+        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1.k1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamGroupTopN { order: [t2.k2 ASC], limit: 1, offset: 0, group_key: [t2.k2] }
+          └─StreamExchange { dist: HashShard(t2.k2) }
+            └─StreamProject { exprs: [t2.k2, t2.v2, t2._row_id] }
+              └─StreamFilter { predicate: IsNotNull(t2.k2) }
+                └─StreamTableScan { table: t2, columns: [t2.v2, t2.k2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }

@@ -331,7 +331,7 @@ impl RequiredDist {
         }
     }
 
-    fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
+    pub fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
         let dist = self.to_dist();
         match plan.convention() {
             Convention::Batch => BatchExchange::new(plan, required_order.clone(), dist).into(),
