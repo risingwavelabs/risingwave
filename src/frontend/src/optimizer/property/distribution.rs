@@ -295,10 +295,12 @@ impl RequiredDist {
 
     pub fn enforce_if_not_satisfies(
         &self,
-        plan: PlanRef,
+        mut plan: PlanRef,
         required_order: &Order,
     ) -> Result<PlanRef> {
-        let plan = required_order.enforce_if_not_satisfies(plan)?;
+        if let Convention::Batch = plan.convention() {
+            plan = required_order.enforce_if_not_satisfies(plan)?;
+        }
         if !plan.distribution().satisfies(self) {
             Ok(self.enforce(plan, required_order))
         } else {

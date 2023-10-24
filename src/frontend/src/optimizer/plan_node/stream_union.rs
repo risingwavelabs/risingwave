@@ -19,6 +19,8 @@ use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::UnionNode;
 
+use super::generic::GenericPlanRef;
+use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanRef};
 use crate::optimizer::plan_node::generic::GenericPlanNode;
@@ -46,7 +48,7 @@ impl StreamUnion {
             |acc_watermark_columns, input| acc_watermark_columns.bitand(input.watermark_columns()),
         );
 
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             dist,
             inputs.iter().all(|x| x.append_only()),
@@ -60,7 +62,7 @@ impl StreamUnion {
 impl Distill for StreamUnion {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let mut vec = self.core.fields_pretty();
-        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+        if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             vec.push(("output_watermarks", ow));
         }
         childless_record("StreamUnion", vec)

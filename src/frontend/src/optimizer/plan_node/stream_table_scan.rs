@@ -24,11 +24,13 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 
+use super::generic::PhysicalPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, FunctionCall};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -66,7 +68,7 @@ impl StreamTableScan {
                 None => Distribution::SomeShard,
             }
         };
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
             core.table_desc.append_only,
@@ -192,7 +194,7 @@ impl_plan_tree_node_for_leaf! { StreamTableScan }
 
 impl Distill for StreamTableScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let verbose = self.base.ctx.is_explain_verbose();
+        let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(4);
         vec.push(("table", Pretty::from(self.core.table_name.clone())));
         vec.push(("columns", self.core.columns_pretty(verbose)));
@@ -200,12 +202,12 @@ impl Distill for StreamTableScan {
         if verbose {
             let pk = IndicesDisplay {
                 indices: self.stream_key().unwrap_or_default(),
-                schema: &self.base.schema,
+                schema: self.base.schema(),
             };
             vec.push(("pk", pk.distill()));
             let dist = Pretty::display(&DistributionDisplay {
                 distribution: self.distribution(),
-                input_schema: &self.base.schema,
+                input_schema: self.base.schema(),
             });
             vec.push(("dist", dist));
         }
@@ -325,7 +327,7 @@ impl StreamTableScan {
                 ..Default::default()
             })),
             stream_key,
-            operator_id: self.base.id.0 as u64,
+            operator_id: self.base.id().0 as u64,
             identity: {
                 let s = self.distill_to_string();
                 s.replace("StreamTableScan", "Chain")

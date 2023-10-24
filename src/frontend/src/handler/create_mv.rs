@@ -26,6 +26,7 @@ use crate::binder::{Binder, BoundQuery, BoundSetExpr};
 use crate::catalog::{check_valid_column_name, CatalogError};
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::planner::Planner;
@@ -175,7 +176,7 @@ It only indicates the physical clustering of the data, which may improve the per
 
         let (plan, table) =
             gen_create_mv_plan(&session, context.into(), query, name, columns, emit_mode)?;
-        let context = plan.plan_base().ctx.clone();
+        let context = plan.plan_base().ctx().clone();
         let mut graph = build_graph(plan);
         graph.parallelism = session
             .config()

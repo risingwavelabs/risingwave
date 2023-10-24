@@ -17,7 +17,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::DedupNode;
 
-use super::generic::{self, GenericPlanNode, GenericPlanRef};
+use super::generic::{self, GenericPlanNode, GenericPlanRef, PhysicalPlanRef};
 use super::stream::StreamPlanRef;
 use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
@@ -37,7 +37,7 @@ impl StreamDedup {
         // A dedup operator must be append-only.
         assert!(input.append_only());
 
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             input.distribution().clone(),
             true,

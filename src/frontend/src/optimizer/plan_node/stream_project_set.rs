@@ -66,7 +66,7 @@ impl StreamProjectSet {
 
         // ProjectSet executor won't change the append-only behavior of the stream, so it depends on
         // input's `append_only`.
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
             input.append_only(),

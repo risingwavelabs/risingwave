@@ -15,6 +15,7 @@
 use risingwave_common::catalog::TableVersionId;
 use risingwave_common::error::Result;
 
+use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchUpdate, ColPrunable, ExprRewritable, LogicalProject,
