@@ -21,7 +21,7 @@ use crate::session::SessionImpl;
 
 pub(super) async fn handle_wait(handler_args: HandlerArgs) -> Result<RwPgResponse> {
     do_wait(&handler_args.session).await?;
-    Ok(PgResponse::empty_result(StatementType::FLUSH))
+    Ok(PgResponse::empty_result(StatementType::WAIT))
 }
 
 pub(crate) async fn do_wait(session: &SessionImpl) -> Result<()> {

@@ -92,6 +92,7 @@ pub enum StatementType {
     ROLLBACK,
     SET_TRANSACTION,
     CANCEL_COMMAND,
+    WAIT,
 }
 
 impl std::fmt::Display for StatementType {
@@ -278,7 +279,7 @@ impl StatementType {
             },
             Statement::Explain { .. } => Ok(StatementType::EXPLAIN),
             Statement::Flush => Ok(StatementType::FLUSH),
-            Statement::Wait => Ok(StatementType::OTHER),
+            Statement::Wait => Ok(StatementType::WAIT),
             _ => Err("unsupported statement type".to_string()),
         }
     }
