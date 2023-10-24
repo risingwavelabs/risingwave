@@ -347,10 +347,7 @@ impl CatalogManager {
                     tables_to_drop
                         .iter()
                         .filter(|table| valid_table_name(&table.name))
-                        .map(|table| {
-                            tracing::debug!("decrease ref for {}", table.id);
-                            table.owner
-                        }),
+                        .map(|table| table.owner),
                 )
                 .chain(indexes_to_drop.iter().map(|index| index.owner))
                 .chain(views_to_drop.iter().map(|view| view.owner))
