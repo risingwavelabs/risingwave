@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use jsonbb::{Value, ValueRef};
 use risingwave_common::types::{JsonbRef, JsonbVal};
 use risingwave_expr::function;
 
@@ -58,5 +59,35 @@ use risingwave_expr::function;
 /// ```
 #[function("jsonb_cat(jsonb, jsonb) -> jsonb")]
 pub fn jsonb_cat(left: JsonbRef<'_>, right: JsonbRef<'_>) -> JsonbVal {
-    left.concat(right)
+    match (left.into(), right.into()) {
+        // left and right are object based.
+        // This would have left:{'a':1}, right:{'b':2} -> {'a':1,'b':2}
+        (ValueRef::Object(left), ValueRef::Object(right)) => {
+            JsonbVal::from(Value::object(left.iter().chain(right.iter())))
+        }
+
+        // left and right are array-based.
+        // This would merge both arrays into one array.
+        // This would have left:[1,2], right:[3,4] -> [1,2,3,4]
+        (ValueRef::Array(left), ValueRef::Array(right)) => {
+            JsonbVal::from(Value::array(left.iter().chain(right.iter())))
+        }
+
+        // One operand is an array, and the other is a single element.
+        // This would insert the non-array value as another element into the array
+        // Eg left:[1,2] right: {'a':1} -> [1,2,{'a':1}]
+        (ValueRef::Array(left), value) => JsonbVal::from(Value::array(left.iter().chain([value]))),
+
+        // One operand is an array, and the other is a single element.
+        // This would insert the non-array value as another element into the array
+        // Eg left:{'a':1} right:[1,2] -> [{'a':1},1,2]
+        (value, ValueRef::Array(right)) => {
+            JsonbVal::from(Value::array([value].into_iter().chain(right.iter())))
+        }
+
+        // Both are non-array inputs.
+        // Both elements would be placed together in an array
+        // Eg left:1 right: 2 -> [1,2]
+        (left, right) => JsonbVal::from(Value::array([left, right])),
+    }
 }

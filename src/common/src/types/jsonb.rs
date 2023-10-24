@@ -192,38 +192,6 @@ impl JsonbVal {
     pub fn take(self) -> serde_json::Value {
         self.0.into()
     }
-
-    /// Push a value to the end of this json array.
-    ///
-    /// # Panics
-    ///
-    /// Panics if this is not a json array.
-    pub fn array_push(&mut self, v: Self) {
-        self.0.array_push(v.0.as_ref());
-    }
-
-    /// Insert a key-value pair to this json object.
-    ///
-    /// # Panics
-    ///
-    /// Panics if this is not a json object.
-    pub fn object_insert(&mut self, key: &str, value: Self) {
-        // TODO(runji): using `Builder` to rebuild a value is inefficient
-        //              we may support `Value::object_insert` in the future
-        let mut builder = jsonbb::Builder::<Vec<u8>>::with_capacity(self.0.capacity());
-        builder.begin_object();
-        for (k, v) in self.0.as_object().unwrap().iter() {
-            if k == key {
-                continue;
-            }
-            builder.add_string(k);
-            builder.add_value(v);
-        }
-        builder.add_string(key);
-        builder.add_value(value.0.as_ref());
-        builder.end_object();
-        self.0 = builder.finish();
-    }
 }
 
 impl From<serde_json::Value> for JsonbVal {
@@ -443,53 +411,6 @@ impl<'a> JsonbRef<'a> {
             .as_object()
             .ok_or_else(|| format!("cannot deconstruct a jsonb {}", self.type_name()))?;
         Ok(object.iter().map(|(k, v)| (k, Self(v))))
-    }
-
-    /// Concat two jsonb values.
-    ///
-    /// This is part of the `||` syntax to concat two jsonb values.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// {'a':1} || {'b':2}  -> {'a':1,'b':2}
-    /// [1,2]   || [3,4]    -> [1,2,3,4]
-    /// [1,2]   || {'a':1}  -> [1,2,{'a':1}]
-    /// {'a':1} || [1,2]    -> [{'a':1},1,2]
-    /// 1       || 2        -> [1,2]
-    /// ```
-    pub fn concat(self, other: Self) -> JsonbVal {
-        match (self.0, other.0) {
-            // left and right are object based.
-            // This would have left:{'a':1}, right:{'b':2} -> {'a':1,'b':2}
-            (ValueRef::Object(left), ValueRef::Object(right)) => {
-                JsonbVal(Value::object(left.iter().chain(right.iter())))
-            }
-
-            // left and right are array-based.
-            // This would merge both arrays into one array.
-            // This would have left:[1,2], right:[3,4] -> [1,2,3,4]
-            (ValueRef::Array(left), ValueRef::Array(right)) => {
-                JsonbVal(Value::array(left.iter().chain(right.iter())))
-            }
-
-            // One operand is an array, and the other is a single element.
-            // This would insert the non-array value as another element into the array
-            // Eg left:[1,2] right: {'a':1} -> [1,2,{'a':1}]
-            (ValueRef::Array(left), value) => JsonbVal(Value::array(left.iter().chain([value]))),
-
-            // One operand is an array, and the other is a single element.
-            // This would insert the non-array value as another element into the array
-            // Eg left:{'a':1} right:[1,2] -> [{'a':1},1,2]
-            (value, ValueRef::Array(right)) => {
-                JsonbVal(Value::array([value].into_iter().chain(right.iter())))
-            }
-
-            // Both are non-array inputs.
-            // Both elements would be placed together in an array
-            // Eg left:1 right: 2 -> [1,2]
-            (left, right) => JsonbVal(Value::array([left, right])),
-        }
     }
 }
 
