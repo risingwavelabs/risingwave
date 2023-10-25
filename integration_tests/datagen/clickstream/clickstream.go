@@ -138,7 +138,7 @@ func (g *clickStreamGen) generate() sink.SinkRecord {
 		UserId:           fmt.Sprint(userId),
 		TargetId:         string(target) + fmt.Sprint(targetId),
 		TargetType:       string(target),
-		EventTimestamp:   time.Now().Format(gen.RwTimestampLayout),
+		EventTimestamp:   time.Now().Format(gen.RwTimestamptzLayout),
 		BehaviorType:     behavior,
 		ParentTargetType: parentTargetType,
 		ParentTargetId:   parentTargetId,

@@ -36,7 +36,8 @@ use uuid::Uuid;
 use super::info::BarrierActorInfo;
 use super::trace::TracedEpoch;
 use crate::barrier::CommandChanges;
-use crate::manager::{FragmentManagerRef, WorkerId};
+use crate::hummock::HummockManagerRef;
+use crate::manager::{CatalogManagerRef, FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::stream::{build_actor_connector_splits, SourceManagerRef, SplitAssignment};
 use crate::MetaResult;
@@ -139,6 +140,7 @@ pub enum Command {
         new_table_fragments: TableFragments,
         merge_updates: Vec<MergeUpdate>,
         dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+        init_split_assignment: SplitAssignment,
     },
 
     /// `SourceSplitAssignment` generates Plain(Mutation::Splits) for pushing initialized splits or
@@ -215,7 +217,9 @@ impl Command {
 /// [`CommandContext`] is used for generating barrier and doing post stuffs according to the given
 /// [`Command`].
 pub struct CommandContext {
-    fragment_manager: FragmentManagerRef,
+    pub fragment_manager: FragmentManagerRef,
+    catalog_manager: CatalogManagerRef,
+    hummock_manager: HummockManagerRef,
 
     client_pool: StreamClientPoolRef,
 
@@ -246,6 +250,8 @@ impl CommandContext {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         fragment_manager: FragmentManagerRef,
+        catalog_manager: CatalogManagerRef,
+        hummock_manager: HummockManagerRef,
         client_pool: StreamClientPoolRef,
         info: BarrierActorInfo,
         prev_epoch: TracedEpoch,
@@ -258,6 +264,8 @@ impl CommandContext {
     ) -> Self {
         Self {
             fragment_manager,
+            catalog_manager,
+            hummock_manager,
             client_pool,
             info: Arc::new(info),
             prev_epoch,
@@ -352,6 +360,7 @@ impl CommandContext {
                 old_table_fragments,
                 merge_updates,
                 dispatchers,
+                init_split_assignment,
                 ..
             } => {
                 let dropped_actors = old_table_fragments.actor_ids();
@@ -368,10 +377,16 @@ impl CommandContext {
                     })
                     .collect();
 
+                let actor_splits = init_split_assignment
+                    .values()
+                    .flat_map(build_actor_connector_splits)
+                    .collect();
+
                 Some(Mutation::Update(UpdateMutation {
                     actor_new_dispatchers,
                     merge_update: merge_updates.clone(),
                     dropped_actors,
+                    actor_splits,
                     ..Default::default()
                 }))
             }
@@ -655,7 +670,51 @@ impl CommandContext {
             Command::CancelStreamingJob(table_fragments) => {
                 let node_actors = table_fragments.worker_actor_ids();
                 self.clean_up(node_actors).await?;
-                // Drop fragment info in meta store.
+
+                // NOTE(kwannoel): At this point, meta has already registered the table ids.
+                // We should unregister them.
+                // This is required for background ddl, for foreground ddl this is a no-op.
+                // Foreground ddl is handled entirely by stream manager, so it will unregister
+                // the table ids on failure.
+                // On the other hand background ddl could be handled by barrier manager.
+                // It won't clean the tables on failure,
+                // since the failure could be recoverable.
+                // As such it needs to be handled here.
+                let table_id = table_fragments.table_id().table_id;
+                let mut table_ids = table_fragments.internal_table_ids();
+                table_ids.push(table_id);
+                if let Err(e) = self.hummock_manager.unregister_table_ids(&table_ids).await {
+                    tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", &table_ids, e);
+                }
+
+                // NOTE(kwannoel): At this point, catalog manager has persisted the tables already.
+                // We need to cleanup the table state. So we can do it here.
+                // The logic is the same as above, for hummock_manager.unregister_table_ids.
+                if let Err(e) = self
+                    .catalog_manager
+                    .cancel_create_table_procedure(
+                        table_fragments.table_id().table_id,
+                        table_fragments.internal_table_ids(),
+                    )
+                    .await
+                {
+                    let table_id = table_fragments.table_id().table_id;
+                    tracing::warn!(
+                        table_id,
+                        reason=?e,
+                        "cancel_create_table_procedure failed for CancelStreamingJob",
+                    );
+                    // If failed, check that table is not in meta store.
+                    // If any table is, just panic, let meta do bootstrap recovery.
+                    // Otherwise our persisted state is dirty.
+                    let mut table_ids = table_fragments.internal_table_ids();
+                    table_ids.push(table_id);
+                    self.catalog_manager.assert_tables_deleted(table_ids).await;
+                }
+
+                // We need to drop table fragments here,
+                // since this is not done in stream manager (foreground ddl)
+                // OR barrier manager (background ddl)
                 self.fragment_manager
                     .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(
                         table_fragments.table_id(),
@@ -761,6 +820,7 @@ impl CommandContext {
                 new_table_fragments,
                 merge_updates,
                 dispatchers,
+                ..
             } => {
                 let table_ids = HashSet::from_iter(std::iter::once(old_table_fragments.table_id()));
 
@@ -778,26 +838,6 @@ impl CommandContext {
                     )
                     .await?;
             }
-        }
-
-        Ok(())
-    }
-
-    /// Do some stuffs before the barrier is `finish`ed. Only used for `CreateStreamingJob`.
-    pub async fn pre_finish(&self) -> MetaResult<()> {
-        #[allow(clippy::single_match)]
-        match &self.command {
-            Command::CreateStreamingJob {
-                table_fragments, ..
-            } => {
-                // Update the state of the table fragments from `Creating` to `Created`, so that the
-                // fragments can be scaled.
-                self.fragment_manager
-                    .mark_table_fragments_created(table_fragments.table_id())
-                    .await?;
-            }
-
-            _ => {}
         }
 
         Ok(())

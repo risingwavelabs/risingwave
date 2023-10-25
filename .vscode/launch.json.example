@@ -13,6 +13,21 @@
             ],
             "cwd": "${workspaceRoot}",
             "preLaunchTask": "build rw bin"
+        },
+        {
+            "name": "Open playground coredump",
+            "type": "lldb",
+            "request": "custom",
+            "targetCreateCommands": [
+                "target create ${workspaceFolder}/target/debug/risingwave --core ${input:coreFileName}"
+            ],
+        }
+    ],
+    "inputs": [
+        {
+            "id": "coreFileName",
+            "type": "promptString",
+            "description": "Enter core file path"
         }
     ]
 }

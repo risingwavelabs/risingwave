@@ -14,10 +14,11 @@
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::DataType;
-use risingwave_expr::function::window::WindowFuncKind;
+use risingwave_expr::window_function::WindowFuncKind;
 
 use super::Rule;
 use crate::expr::{collect_input_refs, ExprImpl, ExprType};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalTopN, PlanTreeNodeUnary};
 use crate::optimizer::property::Order;
 use crate::planner::LIMIT_ALL_COUNT;

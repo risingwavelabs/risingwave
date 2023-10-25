@@ -23,6 +23,8 @@ use serde_with::{serde_as, DisplayFromStr};
 pub use source::*;
 pub use split::*;
 
+use crate::source::SourceProperties;
+
 pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
 
 #[serde_as]
@@ -68,6 +70,14 @@ pub struct PubsubProperties {
     /// more details.
     #[serde(rename = "pubsub.start_snapshot")]
     pub start_snapshot: Option<String>,
+}
+
+impl SourceProperties for PubsubProperties {
+    type Split = PubsubSplit;
+    type SplitEnumerator = PubsubSplitEnumerator;
+    type SplitReader = PubsubSplitReader;
+
+    const SOURCE_NAME: &'static str = GOOGLE_PUBSUB_CONNECTOR;
 }
 
 impl PubsubProperties {

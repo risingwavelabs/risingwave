@@ -85,3 +85,22 @@
     AS max_sale on true;
   expected_outputs:
     - binder_error
+- name: implicit lateral subquery of correlated table function
+  sql: |
+    create table t(x int , arr int[]);
+    select * from t cross join unnest(arr);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: https://github.com/risingwavelabs/risingwave/issues/12298
+  sql: |
+    create table t1(c varchar, n varchar, id varchar, d varchar);
+    create table t2(c varchar, p varchar, id varchar, d varchar);
+    select array_agg(t1.n order by path_idx) from t1
+    join t2
+    on t1.c = 'abc'
+    and t2.c = 'abc'
+    cross join unnest((case when t2.p <> '' then (string_to_array(trim(t2.p, ','), ',') || t2.d) else ARRAY[t2.d] end)) WITH ORDINALITY AS path_cols(path_val, path_idx)
+    where path_val = t1.id;
+  expected_outputs:
+    - stream_plan

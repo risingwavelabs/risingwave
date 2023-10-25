@@ -112,14 +112,14 @@ impl ManagedBarrierState {
                 .into_iter()
                 .map(|(actor, state)| CreateMviewProgress {
                     chain_actor_id: actor,
-                    done: matches!(state, ChainState::Done),
+                    done: matches!(state, ChainState::Done(_)),
                     consumed_epoch: match state {
                         ChainState::ConsumingUpstream(consumed_epoch, _) => consumed_epoch,
-                        ChainState::Done => epoch,
+                        ChainState::Done(_) => epoch,
                     },
                     consumed_rows: match state {
                         ChainState::ConsumingUpstream(_, consumed_rows) => consumed_rows,
-                        ChainState::Done => 0,
+                        ChainState::Done(consumed_rows) => consumed_rows,
                     },
                 })
                 .collect();
@@ -193,12 +193,10 @@ impl ManagedBarrierState {
 
     /// Collect a `barrier` from the actor with `actor_id`.
     pub(super) fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) {
-        tracing::trace!(
+        tracing::debug!(
             target: "events::stream::barrier::manager::collect",
-            "collect_barrier: epoch = {}, actor_id = {}, state = {:#?}",
-            barrier.epoch.curr,
-            actor_id,
-            self
+            epoch = barrier.epoch.curr, actor_id, state = ?self,
+            "collect_barrier",
         );
 
         match self.epoch_barrier_state_map.get_mut(&barrier.epoch.curr) {

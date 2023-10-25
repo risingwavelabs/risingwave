@@ -19,6 +19,7 @@ use arrow_flight::error::FlightError;
 use arrow_flight::flight_service_client::FlightServiceClient;
 use arrow_flight::{FlightData, FlightDescriptor};
 use arrow_schema::Schema;
+use cfg_or_panic::cfg_or_panic;
 use futures_util::{stream, Stream, StreamExt, TryStreamExt};
 use tonic::transport::Channel;
 
@@ -30,11 +31,19 @@ pub struct ArrowFlightUdfClient {
     client: FlightServiceClient<Channel>,
 }
 
-#[cfg(not(madsim))]
+// TODO: support UDF in simulation
+#[cfg_or_panic(not(madsim))]
 impl ArrowFlightUdfClient {
     /// Connect to a UDF service.
     pub async fn connect(addr: &str) -> Result<Self> {
         let client = FlightServiceClient::connect(addr.to_string()).await?;
+        Ok(Self { client })
+    }
+
+    /// Connect to a UDF service lazily (i.e. only when the first request is sent).
+    pub fn connect_lazy(addr: &str) -> Result<Self> {
+        let conn = tonic::transport::Endpoint::new(addr.to_string())?.connect_lazy();
+        let client = FlightServiceClient::new(conn);
         Ok(Self { client })
     }
 
@@ -49,6 +58,15 @@ impl ArrowFlightUdfClient {
         let input_num = info.total_records as usize;
         let full_schema = Schema::try_from(info)
             .map_err(|e| FlightError::DecodeError(format!("Error decoding schema: {e}")))?;
+        if input_num > full_schema.fields.len() {
+            return Err(Error::ServiceError(format!(
+                "function {:?} schema info not consistency: input_num: {}, total_fields: {}",
+                id,
+                input_num,
+                full_schema.fields.len()
+            )));
+        }
+
         let (input_fields, return_fields) = full_schema.fields.split_at(input_num);
         let actual_input_types: Vec<_> = input_fields.iter().map(|f| f.data_type()).collect();
         let actual_result_types: Vec<_> = return_fields.iter().map(|f| f.data_type()).collect();
@@ -89,6 +107,7 @@ impl ArrowFlightUdfClient {
     }
 
     /// Call a function with streaming input and output.
+    #[panic_return = "Result<stream::Empty<_>>"]
     pub async fn call_stream(
         &self,
         id: &str,
@@ -117,35 +136,6 @@ impl ArrowFlightUdfClient {
             stream.map_err(|e| e.into()),
         );
         Ok(record_batch_stream.map_err(|e| e.into()))
-    }
-}
-
-// TODO: support UDF in simulation
-#[cfg(madsim)]
-impl ArrowFlightUdfClient {
-    /// Connect to a UDF service.
-    pub async fn connect(_addr: &str) -> Result<Self> {
-        panic!("UDF is not supported in simulation yet")
-    }
-
-    /// Check if the function is available.
-    pub async fn check(&self, _id: &str, _args: &Schema, _returns: &Schema) -> Result<()> {
-        panic!("UDF is not supported in simulation yet")
-    }
-
-    /// Call a function.
-    pub async fn call(&self, _id: &str, _input: RecordBatch) -> Result<RecordBatch> {
-        panic!("UDF is not supported in simulation yet")
-    }
-
-    /// Call a function with streaming input and output.
-    pub async fn call_stream(
-        &self,
-        _id: &str,
-        _inputs: impl Stream<Item = RecordBatch> + Send + 'static,
-    ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + 'static> {
-        panic!("UDF is not supported in simulation yet");
-        Ok(stream::empty())
     }
 }
 

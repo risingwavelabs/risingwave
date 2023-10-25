@@ -15,9 +15,8 @@
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::vector_op::cast::literal_parsing;
 use thiserror::Error;
 
 use super::{cast_ok, infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
@@ -129,10 +128,7 @@ impl FunctionCall {
             let datum = literal
                 .get_data()
                 .as_ref()
-                .map(|scalar| {
-                    let s = scalar.as_utf8();
-                    literal_parsing(&target, s)
-                })
+                .map(|scalar| ScalarImpl::from_literal(scalar.as_utf8(), &target))
                 .transpose();
             if let Ok(datum) = datum {
                 *child = Literal::new(datum, target).into();
@@ -215,15 +211,6 @@ impl FunctionCall {
         match expr_type {
             ExprType::Some | ExprType::All => {
                 let return_type = infer_some_all(func_types, &mut inputs)?;
-
-                if return_type != DataType::Boolean {
-                    return Err(ErrorCode::BindError(format!(
-                        "op SOME/ANY/ALL (array) requires operator to yield boolean, but got {:?}",
-                        return_type
-                    ))
-                    .into());
-                }
-
                 Ok(FunctionCall::new_unchecked(expr_type, inputs, return_type).into())
             }
             ExprType::Not | ExprType::IsNotNull | ExprType::IsNull => Ok(FunctionCall::new(

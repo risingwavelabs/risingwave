@@ -72,11 +72,45 @@ select * from t2;
 1 2
 2 2
 
-statement error db error: ERROR: QueryError: Bind error: impure default expr is not supported.
-create table tt (v1 time default now());
+# `now()` as default value
+statement ok
+alter table t2 add column v3 timestamp with time zone default now();
 
-statement error db error: ERROR: QueryError: Bind error: impure default expr is not supported.
-alter table t2 add column v3 timestamptz default now();
+query IT
+select v1, v3 >= date '2021-01-01' as later_than_2021 from t2;
+----
+1 t
+2 t
+
+# `now()` filled for historical data should be the same
+query II
+select max(v1), count(*) from t2 group by v3 order by v3;
+----
+2 2
+
+statement ok
+flush;
+
+statement ok
+insert into t2 values (3);
+
+# Newly inserted record should have a later timestamp
+query II
+select max(v1), count(*) from t2 group by v3 order by v3;
+----
+2 2
+3 1
+
+# Historical data can be correctly updated
+statement ok
+update t2 set v3 = '2000-01-01 00:00:00+00:00' where v1 = 1;
+
+query II
+select max(v1), count(*) from t2 group by v3 order by v3;
+----
+1 1
+2 1
+3 1
 
 statement ok
 drop table t1;

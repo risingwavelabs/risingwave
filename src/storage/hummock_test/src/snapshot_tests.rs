@@ -17,6 +17,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::TryStreamExt;
 use risingwave_common::cache::CachePriority;
+use risingwave_hummock_sdk::key::{map_table_key_range, TableKey};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
@@ -39,7 +40,7 @@ macro_rules! assert_count_range_scan {
         );
         let it = $storage
             .iter(
-                bounds,
+                map_table_key_range(bounds),
                 $epoch,
                 ReadOptions {
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
@@ -110,8 +111,8 @@ async fn test_snapshot_inner(
     local
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_put("test")),
-                (Bytes::from("2"), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("1")), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("2")), StorageValue::new_put("test")),
             ],
             vec![],
             WriteOptions {
@@ -145,9 +146,9 @@ async fn test_snapshot_inner(
     local
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_delete()),
-                (Bytes::from("3"), StorageValue::new_put("test")),
-                (Bytes::from("4"), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("1")), StorageValue::new_delete()),
+                (TableKey(Bytes::from("3")), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("4")), StorageValue::new_put("test")),
             ],
             vec![],
             WriteOptions {
@@ -182,9 +183,9 @@ async fn test_snapshot_inner(
     local
         .ingest_batch(
             vec![
-                (Bytes::from("2"), StorageValue::new_delete()),
-                (Bytes::from("3"), StorageValue::new_delete()),
-                (Bytes::from("4"), StorageValue::new_delete()),
+                (TableKey(Bytes::from("2")), StorageValue::new_delete()),
+                (TableKey(Bytes::from("3")), StorageValue::new_delete()),
+                (TableKey(Bytes::from("4")), StorageValue::new_delete()),
             ],
             vec![],
             WriteOptions {
@@ -232,10 +233,10 @@ async fn test_snapshot_range_scan_inner(
     local
         .ingest_batch(
             vec![
-                (Bytes::from("1"), StorageValue::new_put("test")),
-                (Bytes::from("2"), StorageValue::new_put("test")),
-                (Bytes::from("3"), StorageValue::new_put("test")),
-                (Bytes::from("4"), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("1")), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("2")), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("3")), StorageValue::new_put("test")),
+                (TableKey(Bytes::from("4")), StorageValue::new_put("test")),
             ],
             vec![],
             WriteOptions {

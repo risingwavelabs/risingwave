@@ -330,7 +330,8 @@ impl<T> ToErrorStr for tokio::sync::mpsc::error::SendError<T> {
 
 impl ToErrorStr for anyhow::Error {
     fn to_error_str(self) -> String {
-        self.to_string()
+        // Note: use alternate Display to print the source chain.
+        format!("{:#}", self)
     }
 }
 
@@ -559,13 +560,13 @@ mod tests {
     }
 
     #[test]
-    fn test_to_rw_result() {
-        let res: core::result::Result<(), anyhow::Error> = Err(anyhow::Error::new(
-            std::io::Error::new(std::io::ErrorKind::Interrupted, "abc"),
-        ));
-        assert_eq!(
-            res.to_rw_result().unwrap_err().to_string(),
-            "internal error: abc"
-        );
+    fn test_internal_sources() {
+        use anyhow::Context;
+
+        let res: Result<()> = Err(anyhow::anyhow!("inner"))
+            .context("outer")
+            .map_err(Into::into);
+
+        assert_eq!(res.unwrap_err().to_string(), "internal error: outer: inner");
     }
 }

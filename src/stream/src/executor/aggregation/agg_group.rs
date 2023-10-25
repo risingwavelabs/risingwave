@@ -17,13 +17,14 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use risingwave_common::array::stream_record::{Record, RecordType};
-use risingwave_common::array::{StreamChunk, Vis};
+use risingwave_common::array::StreamChunk;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::{AggCall, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction};
 use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
@@ -159,7 +160,7 @@ pub struct AggGroup<S: StateStore, Strtg: Strategy> {
     /// Current managed states for all [`AggCall`]s.
     states: Vec<AggState>,
 
-    /// Previous outputs of managed states. Initializing with `None`.
+    /// Previous outputs of aggregate functions. Initializing with `None`.
     prev_outputs: Option<OwnedRow>,
 
     /// Index of row count agg call (`count(*)`) in the call list.
@@ -195,17 +196,17 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         agg_calls: &[AggCall],
         agg_funcs: &[BoxedAggregateFunction],
         storages: &[AggStateStorage<S>],
-        result_table: &StateTable<S>,
+        intermediate_state_table: &StateTable<S>,
         pk_indices: &PkIndices,
         row_count_index: usize,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
-        let prev_outputs: Option<OwnedRow> = result_table
+        let encoded_states = intermediate_state_table
             .get_row(group_key.as_ref().map(GroupKey::table_pk))
             .await?;
-        if let Some(prev_outputs) = &prev_outputs {
-            assert_eq!(prev_outputs.len(), agg_calls.len());
+        if let Some(encoded_states) = &encoded_states {
+            assert_eq!(encoded_states.len(), agg_calls.len());
         }
 
         let mut states = Vec::with_capacity(agg_calls.len());
@@ -214,7 +215,50 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                 agg_call,
                 agg_func,
                 &storages[idx],
-                prev_outputs.as_ref().map(|outputs| &outputs[idx]),
+                encoded_states.as_ref().map(|outputs| &outputs[idx]),
+                pk_indices,
+                extreme_cache_size,
+                input_schema,
+            )?;
+            states.push(state);
+        }
+
+        let mut this = Self {
+            group_key,
+            states,
+            prev_outputs: None, // will be initialized later
+            row_count_index,
+            _phantom: PhantomData,
+        };
+
+        if encoded_states.is_some() {
+            let (_, outputs) = this.get_outputs(storages, agg_funcs).await?;
+            this.prev_outputs = Some(outputs);
+        }
+
+        Ok(this)
+    }
+
+    /// Create a group from encoded states for EOWC. The previous output is set to `None`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_eowc(
+        group_key: Option<GroupKey>,
+        agg_calls: &[AggCall],
+        agg_funcs: &[BoxedAggregateFunction],
+        storages: &[AggStateStorage<S>],
+        encoded_states: &OwnedRow,
+        pk_indices: &PkIndices,
+        row_count_index: usize,
+        extreme_cache_size: usize,
+        input_schema: &Schema,
+    ) -> StreamExecutorResult<Self> {
+        let mut states = Vec::with_capacity(agg_calls.len());
+        for (idx, (agg_call, agg_func)) in agg_calls.iter().zip_eq_fast(agg_funcs).enumerate() {
+            let state = AggState::create(
+                agg_call,
+                agg_func,
+                &storages[idx],
+                Some(&encoded_states[idx]),
                 pk_indices,
                 extreme_cache_size,
                 input_schema,
@@ -225,7 +269,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         Ok(Self {
             group_key,
             states,
-            prev_outputs,
+            prev_outputs: None,
             row_count_index,
             _phantom: PhantomData,
         })
@@ -286,7 +330,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         chunk: &StreamChunk,
         calls: &[AggCall],
         funcs: &[BoxedAggregateFunction],
-        visibilities: Vec<Vis>,
+        visibilities: Vec<Bitmap>,
     ) -> StreamExecutorResult<()> {
         if self.curr_row_count() == 0 {
             tracing::trace!(group = ?self.group_key_row(), "first time see this group");
@@ -312,6 +356,28 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         for (state, func) in self.states.iter_mut().zip_eq_fast(funcs) {
             state.reset(func);
         }
+    }
+
+    /// Encode intermediate states.
+    pub fn encode_states(
+        &self,
+        funcs: &[BoxedAggregateFunction],
+    ) -> StreamExecutorResult<OwnedRow> {
+        let mut encoded_states = Vec::with_capacity(self.states.len());
+        for (state, func) in self.states.iter().zip_eq_fast(funcs) {
+            let encoded = match state {
+                AggState::Value(s) => func.encode_state(s)?,
+                // For minput state, we don't need to store it in state table.
+                AggState::MaterializedInput(_) => None,
+            };
+            encoded_states.push(encoded);
+        }
+        let states = self
+            .group_key()
+            .map(GroupKey::table_row)
+            .chain(OwnedRow::new(encoded_states))
+            .into_owned_row();
+        Ok(states)
     }
 
     /// Get the outputs of all managed agg states, without group key prefix.

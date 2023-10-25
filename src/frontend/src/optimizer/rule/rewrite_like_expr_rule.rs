@@ -48,7 +48,9 @@ impl Rule for RewriteLikeExprRule {
 
 struct HasLikeExprVisitor {}
 
-impl ExprVisitor<bool> for HasLikeExprVisitor {
+impl ExprVisitor for HasLikeExprVisitor {
+    type Result = bool;
+
     fn merge(a: bool, b: bool) -> bool {
         a | b
     }

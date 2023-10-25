@@ -239,6 +239,8 @@ message ReplaceTablePlanRequest {
   stream_plan.StreamFragmentGraph fragment_graph = 2;
   // The mapping from the old columns to the new columns of the table.
   catalog.ColIndexMapping table_col_index_mapping = 3;
+  // Source catalog of table's associated source
+  catalog.Source source = 4;
 }
 
 message ReplaceTablePlanResponse {

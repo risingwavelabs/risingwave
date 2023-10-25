@@ -18,6 +18,19 @@ cd risingwave/java/udf
 mvn install
 ```
 
+Or you can add the following dependency to your `pom.xml` file:
+
+```xml
+<dependencies>
+    <dependency>
+        <groupId>com.risingwave</groupId>
+        <artifactId>risingwave-udf</artifactId>
+        <version>0.1.0</version>
+    </dependency>
+</dependencies>
+```
+
+
 ## Creating a New Project
 
 > NOTE: You can also start from the [udf-example](../udf-example) project without creating the project from scratch.
@@ -41,9 +54,9 @@ Configure your `pom.xml` file as follows:
 
     <dependencies>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
+            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-udf</artifactId>
-            <version>0.0.1</version>
+            <version>0.1.0</version>
         </dependency>
     </dependencies>
 </project>
@@ -57,7 +70,7 @@ The `--add-opens` flag must be added when running unit tests through Maven:
         <plugin>
             <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-surefire-plugin</artifactId>
-            <version>3.0.0-M7</version>
+            <version>3.0.0</version>
             <configuration>
                 <argLine>--add-opens=java.base/java.nio=ALL-UNNAMED</argLine>
             </configuration>

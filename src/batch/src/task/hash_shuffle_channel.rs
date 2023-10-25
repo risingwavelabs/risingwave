@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::ops::BitAnd;
 use std::option::Option;
 use std::sync::Arc;
 
@@ -86,12 +85,7 @@ fn generate_new_data_chunks(
     });
     let mut res = Vec::with_capacity(output_count);
     for (sink_id, vis_map_vec) in vis_maps.into_iter().enumerate() {
-        let vis_map: Bitmap = vis_map_vec.into_iter().collect();
-        let vis_map = if let Some(visibility) = chunk.visibility() {
-            vis_map.bitand(visibility)
-        } else {
-            vis_map
-        };
+        let vis_map = Bitmap::from_bool_slice(&vis_map_vec) & chunk.visibility();
         let new_data_chunk = chunk.with_visibility(vis_map);
         trace!(
             "send to sink:{}, cardinality:{}",

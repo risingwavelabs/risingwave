@@ -18,6 +18,7 @@ use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 use either::{for_both, Either};
 use enum_as_inner::EnumAsInner;
+use risingwave_pb::data::PbDatum;
 
 use crate::array::{ArrayImpl, ListRef, ListValue, StructRef, StructValue};
 use crate::row::{Row, RowDeserializer as BasicDeserializer};
@@ -162,6 +163,24 @@ pub fn estimate_serialize_datum_size(datum_ref: impl ToDatumRef) -> usize {
         1 + estimate_serialize_scalar_size(d)
     } else {
         1
+    }
+}
+
+#[easy_ext::ext(DatumFromProtoExt)]
+impl Datum {
+    /// Create a datum from the protobuf representation with the given data type.
+    pub fn from_protobuf(proto: &PbDatum, data_type: &DataType) -> Result<Datum> {
+        deserialize_datum(proto.body.as_slice(), data_type)
+    }
+}
+
+#[easy_ext::ext(DatumToProtoExt)]
+impl<D: ToDatumRef> D {
+    /// Convert the datum to the protobuf representation.
+    pub fn to_protobuf(&self) -> PbDatum {
+        PbDatum {
+            body: serialize_datum(self),
+        }
     }
 }
 

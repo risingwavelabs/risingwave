@@ -130,10 +130,12 @@ public class PostgresSourceTest {
                     while (eventStream.hasNext()) {
                         List<ConnectorServiceProto.CdcMessage> messages =
                                 eventStream.next().getEventsList();
-                        for (ConnectorServiceProto.CdcMessage ignored : messages) {
-                            count++;
+                        for (ConnectorServiceProto.CdcMessage msg : messages) {
+                            if (!msg.getPayload().isBlank()) {
+                                count++;
+                            }
                         }
-                        if (count == 10000) {
+                        if (count >= 10000) {
                             return count;
                         }
                     }

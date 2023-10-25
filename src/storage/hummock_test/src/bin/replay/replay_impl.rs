@@ -20,6 +20,7 @@ use futures_async_stream::{for_await, try_stream};
 use risingwave_common::error::Result as RwResult;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common_service::observer_manager::{Channel, NotificationClient};
+use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
     GlobalReplay, LocalReplay, LocalReplayRead, ReplayItem, ReplayRead, ReplayStateStore,
@@ -30,7 +31,7 @@ use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation as RespOperation};
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
-use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
+use risingwave_storage::hummock::store::LocalHummockStorage;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::store::{
     LocalStateStore, StateStoreIterItemStream, StateStoreRead, SyncResult,
@@ -107,8 +108,8 @@ impl ReplayRead for GlobalReplayImpl {
         read_options: TracedReadOptions,
     ) -> Result<BoxStream<'static, Result<ReplayItem>>> {
         let key_range = (
-            key_range.0.map(TracedBytes::into),
-            key_range.1.map(TracedBytes::into),
+            key_range.0.map(TracedBytes::into).map(TableKey),
+            key_range.1.map(TracedBytes::into).map(TableKey),
         );
 
         let iter = self
@@ -129,7 +130,7 @@ impl ReplayRead for GlobalReplayImpl {
     ) -> Result<Option<TracedBytes>> {
         Ok(self
             .store
-            .get(key.into(), epoch, read_options.into())
+            .get(TableKey(key.into()), epoch, read_options.into())
             .await
             .unwrap()
             .map(TracedBytes::from))
@@ -240,7 +241,10 @@ impl LocalReplayRead for LocalReplayImpl {
         key_range: (Bound<TracedBytes>, Bound<TracedBytes>),
         read_options: TracedReadOptions,
     ) -> Result<BoxStream<'static, Result<ReplayItem>>> {
-        let key_range = (key_range.0.map(|b| b.into()), key_range.1.map(|b| b.into()));
+        let key_range = (
+            key_range.0.map(|b| TableKey(b.into())),
+            key_range.1.map(|b| TableKey(b.into())),
+        );
 
         let iter = LocalStateStore::iter(&self.0, key_range, read_options.into())
             .await
@@ -257,7 +261,7 @@ impl LocalReplayRead for LocalReplayImpl {
         read_options: TracedReadOptions,
     ) -> Result<Option<TracedBytes>> {
         Ok(
-            LocalStateStore::get(&self.0, key.into(), read_options.into())
+            LocalStateStore::get(&self.0, TableKey(key.into()), read_options.into())
                 .await
                 .unwrap()
                 .map(TracedBytes::from),
@@ -275,7 +279,7 @@ impl ReplayWrite for LocalReplayImpl {
     ) -> Result<()> {
         LocalStateStore::insert(
             &mut self.0,
-            key.into(),
+            TableKey(key.into()),
             new_val.into(),
             old_val.map(|b| b.into()),
         )
@@ -284,7 +288,7 @@ impl ReplayWrite for LocalReplayImpl {
     }
 
     fn delete(&mut self, key: TracedBytes, old_val: TracedBytes) -> Result<()> {
-        LocalStateStore::delete(&mut self.0, key.into(), old_val.into()).unwrap();
+        LocalStateStore::delete(&mut self.0, TableKey(key.into()), old_val.into()).unwrap();
         Ok(())
     }
 }

@@ -17,7 +17,7 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_expr::agg::{agg_kinds, AggKind};
+use risingwave_expr::aggregate::{agg_kinds, AggKind};
 
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
@@ -28,9 +28,9 @@ use super::{
 };
 use crate::expr::{
     AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, OrderBy,
+    WindowFunction,
 };
 use crate::optimizer::plan_node::generic::GenericPlanNode;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalDedup, LogicalProject,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -57,9 +57,9 @@ impl LogicalAgg {
     /// Should only be used iff input is distributed. Input must be converted to stream form.
     fn gen_stateless_two_phase_streaming_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         debug_assert!(self.group_key().is_empty());
-        let mut logical = self.core.clone();
-        logical.input = stream_input;
-        let local_agg = StreamStatelessSimpleAgg::new(logical);
+        let mut core = self.core.clone();
+        core.input = stream_input;
+        let local_agg = StreamStatelessSimpleAgg::new(core);
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
         let global_agg = new_stream_simple_agg(Agg::new(
@@ -165,19 +165,19 @@ impl LogicalAgg {
     }
 
     fn gen_single_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
-        let mut logical = self.core.clone();
+        let mut core = self.core.clone();
         let input = RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?;
-        logical.input = input;
-        Ok(new_stream_simple_agg(logical).into())
+        core.input = input;
+        Ok(new_stream_simple_agg(core).into())
     }
 
     fn gen_shuffle_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         let input =
             RequiredDist::shard_by_key(stream_input.schema().len(), &self.group_key().to_vec())
                 .enforce_if_not_satisfies(stream_input, &Order::any())?;
-        let mut logical = self.core.clone();
-        logical.input = input;
-        Ok(new_stream_hash_agg(logical, None).into())
+        let mut core = self.core.clone();
+        core.input = input;
+        Ok(new_stream_hash_agg(core, None).into())
     }
 
     /// Generates distributed stream plan.
@@ -222,8 +222,11 @@ impl LogicalAgg {
         // so it obeys consistent hash strategy via [`Distribution::HashShard`].
         let stream_input =
             if *input_dist == Distribution::SomeShard && self.core.must_try_two_phase_agg() {
-                RequiredDist::shard_by_key(stream_input.schema().len(), stream_input.logical_pk())
-                    .enforce_if_not_satisfies(stream_input, &Order::any())?
+                RequiredDist::shard_by_key(
+                    stream_input.schema().len(),
+                    stream_input.expect_stream_key(),
+                )
+                .enforce_if_not_satisfies(stream_input, &Order::any())?
             } else {
                 stream_input
             };
@@ -361,13 +364,9 @@ impl LogicalAggBuilder {
         let logical_project = LogicalProject::with_core(self.input_proj_builder.build(input));
 
         // This LogicalAgg focuses on calculating the aggregates and grouping.
-        Agg::new_with_grouping_sets(
-            self.agg_calls,
-            self.group_key,
-            self.grouping_sets,
-            logical_project.into(),
-        )
-        .into()
+        Agg::new(self.agg_calls, self.group_key, logical_project.into())
+            .with_grouping_sets(self.grouping_sets)
+            .into()
     }
 
     fn rewrite_with_error(&mut self, expr: ExprImpl) -> Result<ExprImpl> {
@@ -735,6 +734,33 @@ impl ExprRewriter for LogicalAggBuilder {
         }
     }
 
+    /// When there is an `WindowFunction` (outside of agg call), it must refers to a group column.
+    /// Or all `InputRef`s appears in it must refer to a group column.
+    fn rewrite_window_function(&mut self, window_func: WindowFunction) -> ExprImpl {
+        let WindowFunction {
+            args,
+            partition_by,
+            order_by,
+            ..
+        } = window_func;
+        let args = args
+            .into_iter()
+            .map(|expr| self.rewrite_expr(expr))
+            .collect();
+        let partition_by = partition_by
+            .into_iter()
+            .map(|expr| self.rewrite_expr(expr))
+            .collect();
+        let order_by = order_by.rewrite_expr(self);
+        WindowFunction {
+            args,
+            partition_by,
+            order_by,
+            ..window_func
+        }
+        .into()
+    }
+
     /// When there is an `InputRef` (outside of agg call), it must refers to a group column.
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
         let expr = input_ref.into();
@@ -831,7 +857,7 @@ impl LogicalAgg {
         &self.core.grouping_sets
     }
 
-    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef) {
+    pub fn decompose(self) -> (Vec<PlanAggCall>, IndexSet, Vec<IndexSet>, PlanRef, bool) {
         self.core.decompose()
     }
 
@@ -870,8 +896,9 @@ impl LogicalAgg {
             .map(|set| set.indices().map(|key| input_col_change.map(key)).collect())
             .collect();
 
-        let new_agg =
-            Agg::new_with_grouping_sets(agg_calls, group_key.clone(), grouping_sets, input);
+        let new_agg = Agg::new(agg_calls, group_key.clone(), input)
+            .with_grouping_sets(grouping_sets)
+            .with_enable_two_phase(self.core().enable_two_phase);
 
         // group_key remapping might cause an output column change, since group key actually is a
         // `FixedBitSet`.
@@ -896,13 +923,10 @@ impl PlanTreeNodeUnary for LogicalAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Agg::new_with_grouping_sets(
-            self.agg_calls().to_vec(),
-            self.group_key().clone(),
-            self.grouping_sets().clone(),
-            input,
-        )
-        .into()
+        Agg::new(self.agg_calls().to_vec(), self.group_key().clone(), input)
+            .with_grouping_sets(self.grouping_sets().clone())
+            .with_enable_two_phase(self.core().enable_two_phase)
+            .into()
     }
 
     #[must_use]
@@ -1101,13 +1125,13 @@ fn find_or_append_row_count(mut logical: Agg<PlanRef>) -> (Agg<PlanRef>, usize) 
     (logical, row_count_idx)
 }
 
-fn new_stream_simple_agg(logical: Agg<PlanRef>) -> StreamSimpleAgg {
-    let (logical, row_count_idx) = find_or_append_row_count(logical);
+fn new_stream_simple_agg(core: Agg<PlanRef>) -> StreamSimpleAgg {
+    let (logical, row_count_idx) = find_or_append_row_count(core);
     StreamSimpleAgg::new(logical, row_count_idx)
 }
 
-fn new_stream_hash_agg(logical: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> StreamHashAgg {
-    let (logical, row_count_idx) = find_or_append_row_count(logical);
+fn new_stream_hash_agg(core: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> StreamHashAgg {
+    let (logical, row_count_idx) = find_or_append_row_count(core);
     StreamHashAgg::new(logical, vnode_col_idx, row_count_idx)
 }
 

@@ -25,6 +25,9 @@ use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 pub use split::*;
 
+use crate::source::nexmark::source::reader::NexmarkSplitReader;
+use crate::source::SourceProperties;
+
 pub const NEXMARK_CONNECTOR: &str = "nexmark";
 
 const fn identity_i32<const V: i32>() -> i32 {
@@ -215,6 +218,14 @@ pub struct NexmarkPropertiesInner {
     #[serde_as(as = "Option<DisplayFromStr>")]
     #[serde(rename = "nexmark.threads", default = "none")]
     pub threads: Option<usize>,
+}
+
+impl SourceProperties for NexmarkProperties {
+    type Split = NexmarkSplit;
+    type SplitEnumerator = NexmarkSplitEnumerator;
+    type SplitReader = NexmarkSplitReader;
+
+    const SOURCE_NAME: &'static str = NEXMARK_CONNECTOR;
 }
 
 fn default_event_num() -> u64 {

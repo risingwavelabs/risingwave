@@ -24,6 +24,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::expr::{LogReport, NonStrictExpression};
 use risingwave_expr::table_function::ProjectSetSelectItem;
 
 use super::error::StreamExecutorError;
@@ -45,7 +46,7 @@ pub struct ProjectSetExecutor {
 
 struct Inner {
     info: ExecutorInfo,
-    ctx: ActorContextRef,
+    _ctx: ActorContextRef,
     /// Expressions of the current project_section.
     select_list: Vec<ProjectSetSelectItem>,
     chunk_size: usize,
@@ -83,7 +84,7 @@ impl ProjectSetExecutor {
 
         let inner = Inner {
             info,
-            ctx,
+            _ctx: ctx,
             select_list,
             chunk_size,
             watermark_derivations,
@@ -260,12 +261,11 @@ impl Inner {
                 ProjectSetSelectItem::Expr(expr) => {
                     watermark
                         .clone()
-                        .transform_with_expr(expr, expr_idx + PROJ_ROW_ID_OFFSET, |err| {
-                            self.ctx.on_compute_error(
-                                err,
-                                &(self.info.identity.to_string() + "(when computing watermark)"),
-                            )
-                        })
+                        .transform_with_expr(
+                            // TODO: should we build `expr` in non-strict mode?
+                            &NonStrictExpression::new_topmost(expr, LogReport),
+                            expr_idx + PROJ_ROW_ID_OFFSET,
+                        )
                         .await
                 }
                 ProjectSetSelectItem::TableFunction(_) => {

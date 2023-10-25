@@ -17,6 +17,8 @@
 #![feature(lazy_cell)]
 #![feature(box_patterns)]
 
+risingwave_expr_impl::enable!();
+
 use std::collections::{HashMap, HashSet};
 
 use anyhow::{bail, Result};

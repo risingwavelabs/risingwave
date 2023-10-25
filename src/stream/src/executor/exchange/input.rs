@@ -14,7 +14,6 @@
 
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use std::time::Instant;
 
 use anyhow::Context as _;
 use futures::{pin_mut, Stream};
@@ -149,12 +148,9 @@ impl RemoteInput {
             .await?;
 
         let up_actor_id = up_down_ids.0.to_string();
-        let down_actor_id = up_down_ids.1.to_string();
         let up_fragment_id = up_down_frag.0.to_string();
         let down_fragment_id = up_down_frag.1.to_string();
 
-        let mut rr = 0;
-        const SAMPLING_FREQUENCY: u64 = 100;
         let span: await_tree::Span = format!("RemoteInput (actor {up_actor_id})").into();
 
         let mut batched_permits_accumulated = 0;
@@ -171,20 +167,7 @@ impl RemoteInput {
                         .with_label_values(&[&up_fragment_id, &down_fragment_id])
                         .inc_by(bytes as u64);
 
-                    // add deserialization duration metric with given sampling frequency
-                    let msg_res = if rr % SAMPLING_FREQUENCY == 0 {
-                        let start_time = Instant::now();
-                        let msg_res = Message::from_protobuf(&msg);
-                        metrics
-                            .actor_sampled_deserialize_duration_ns
-                            .with_label_values(&[&down_actor_id])
-                            .inc_by(start_time.elapsed().as_nanos() as u64);
-                        msg_res
-                    } else {
-                        Message::from_protobuf(&msg)
-                    };
-                    rr += 1;
-
+                    let msg_res = Message::from_protobuf(&msg);
                     if let Some(add_back_permits) = match permits.unwrap().value {
                         // For records, batch the permits we received to reduce the backward
                         // `AddPermits` messages.

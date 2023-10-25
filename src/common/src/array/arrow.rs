@@ -17,20 +17,54 @@
 use std::fmt::Write;
 
 use arrow_array::Array as ArrowArray;
-use arrow_schema::{Field, Schema, DECIMAL256_MAX_PRECISION};
+use arrow_cast::cast;
+use arrow_schema::{Field, Schema, SchemaRef, DECIMAL256_MAX_PRECISION};
 use chrono::{NaiveDateTime, NaiveTime};
 use itertools::Itertools;
 
 use super::*;
 use crate::types::{Int256, StructType};
-use crate::util::iter_util::ZipEqDebug;
+use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+
+/// Converts RisingWave array to Arrow array with the schema.
+/// This function will try to convert the array if the type is not same with the schema.
+pub fn to_record_batch_with_schema(
+    schema: SchemaRef,
+    chunk: &DataChunk,
+) -> Result<arrow_array::RecordBatch, ArrayError> {
+    if !chunk.is_compacted() {
+        let c = chunk.clone();
+        return to_record_batch_with_schema(schema, &c.compact());
+    }
+    let columns: Vec<_> = chunk
+        .columns()
+        .iter()
+        .zip_eq_fast(schema.fields().iter())
+        .map(|(column, field)| {
+            let column: arrow_array::ArrayRef = column.as_ref().try_into()?;
+            if column.data_type() == field.data_type() {
+                Ok(column)
+            } else {
+                cast(&column, field.data_type())
+                    .map_err(|err| ArrayError::FromArrow(err.to_string()))
+            }
+        })
+        .try_collect::<_, _, ArrayError>()?;
+
+    let opts = arrow_array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
+    arrow_array::RecordBatch::try_new_with_options(schema, columns, &opts)
+        .map_err(|err| ArrayError::ToArrow(err.to_string()))
+}
 
 // Implement bi-directional `From` between `DataChunk` and `arrow_array::RecordBatch`.
-
 impl TryFrom<&DataChunk> for arrow_array::RecordBatch {
     type Error = ArrayError;
 
     fn try_from(chunk: &DataChunk) -> Result<Self, Self::Error> {
+        if !chunk.is_compacted() {
+            let c = chunk.clone();
+            return Self::try_from(&c.compact());
+        }
         let columns: Vec<_> = chunk
             .columns()
             .iter()
@@ -47,8 +81,9 @@ impl TryFrom<&DataChunk> for arrow_array::RecordBatch {
             .collect();
 
         let schema = Arc::new(Schema::new(fields));
-
-        arrow_array::RecordBatch::try_new(schema, columns)
+        let opts =
+            arrow_array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
+        arrow_array::RecordBatch::try_new_with_options(schema, columns, &opts)
             .map_err(|err| ArrayError::ToArrow(err.to_string()))
     }
 }

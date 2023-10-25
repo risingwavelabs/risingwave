@@ -372,7 +372,7 @@ pub(crate) const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 
 /// Make sure the key to insert should not exist in storage.
 pub(crate) async fn do_insert_sanity_check(
-    key: Bytes,
+    key: TableKey<Bytes>,
     value: Bytes,
     inner: &impl StateStoreRead,
     epoch: u64,
@@ -400,7 +400,7 @@ pub(crate) async fn do_insert_sanity_check(
 
 /// Make sure that the key to delete should exist in storage and the value should be matched.
 pub(crate) async fn do_delete_sanity_check(
-    key: Bytes,
+    key: TableKey<Bytes>,
     old_value: Bytes,
     inner: &impl StateStoreRead,
     epoch: u64,
@@ -437,7 +437,7 @@ pub(crate) async fn do_delete_sanity_check(
 
 /// Make sure that the key to update should exist in storage and the value should be matched
 pub(crate) async fn do_update_sanity_check(
-    key: Bytes,
+    key: TableKey<Bytes>,
     old_value: Bytes,
     new_value: Bytes,
     inner: &impl StateStoreRead,
@@ -497,9 +497,9 @@ fn validate_delete_range(left: &Bound<Bytes>, right: &Bound<Bytes>) -> bool {
 }
 
 pub(crate) fn filter_with_delete_range<'a>(
-    kv_iter: impl Iterator<Item = (Bytes, KeyOp)> + 'a,
+    kv_iter: impl Iterator<Item = (TableKey<Bytes>, KeyOp)> + 'a,
     mut delete_ranges_iter: impl Iterator<Item = &'a (Bound<Bytes>, Bound<Bytes>)> + 'a,
-) -> impl Iterator<Item = (Bytes, KeyOp)> + 'a {
+) -> impl Iterator<Item = (TableKey<Bytes>, KeyOp)> + 'a {
     let mut range = delete_ranges_iter.next();
     if let Some((range_start, range_end)) = range {
         assert!(
@@ -511,10 +511,11 @@ pub(crate) fn filter_with_delete_range<'a>(
     }
     kv_iter.filter(move |(ref key, _)| {
         if let Some(range_bound) = range {
-            if cmp_delete_range_left_bounds(Included(key), range_bound.0.as_ref()) == Ordering::Less
+            if cmp_delete_range_left_bounds(Included(&key.0), range_bound.0.as_ref())
+                == Ordering::Less
             {
                 true
-            } else if range_bound.contains(key) {
+            } else if range_bound.contains(key.as_ref()) {
                 false
             } else {
                 // Key has exceeded the current key range. Advance to the next range.
@@ -532,7 +533,7 @@ pub(crate) fn filter_with_delete_range<'a>(
                         {
                             // Not fall in the next delete range
                             break true;
-                        } else if range_bound.contains(key) {
+                        } else if range_bound.contains(key.as_ref()) {
                             // Fall in the next delete range
                             break false;
                         } else {

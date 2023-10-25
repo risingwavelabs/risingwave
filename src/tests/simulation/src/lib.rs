@@ -23,3 +23,5 @@ pub mod kafka;
 pub mod nexmark;
 pub mod slt;
 pub mod utils;
+
+risingwave_expr_impl::enable!();

@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_expr::function::window::WindowFuncCall;
+use risingwave_expr::window_function::WindowFuncCall;
 use risingwave_pb::stream_plan::PbEowcOverWindowNode;
 use risingwave_storage::StateStore;
 

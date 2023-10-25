@@ -90,7 +90,7 @@ func (m *deviceTcpMonitor) newMetrics(metricName string, reportTime time.Time, v
 	return &tcpMetric{
 		DeviceId:   m.deviceId,
 		MetricName: metricName,
-		ReportTime: reportTime.Format(gen.RwTimestampLayout),
+		ReportTime: reportTime.Format(gen.RwTimestamptzLayout),
 		Value:      value,
 	}
 }

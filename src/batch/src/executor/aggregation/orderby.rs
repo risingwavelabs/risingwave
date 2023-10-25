@@ -22,7 +22,7 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr::agg::{
+use risingwave_expr::aggregate::{
     AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFunction,
 };
 use risingwave_expr::{ExprError, Result};
@@ -151,7 +151,7 @@ impl AggregateFunction for ProjectionOrderBy {
 mod tests {
     use risingwave_common::array::{ListValue, StreamChunk};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_expr::agg::AggCall;
+    use risingwave_expr::aggregate::AggCall;
 
     use super::super::build;
 

@@ -1,0 +1,45 @@
+statement ok
+set streaming_parallelism=4;
+
+statement ok
+CREATE TABLE t6 (id int, v1 int primary key, v2 bigint, v3 varchar);
+
+statement ok
+CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
+
+statement ok
+CREATE SINK s6 AS select mv6.id as id, mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3 from mv6 WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    force_append_only = 'false',
+    database.name = 'demo',
+    table.name = 'demo_db.demo_table',
+    catalog.type = 'storage',
+    warehouse.path = 's3://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    primary_key = 'v1'
+);
+
+statement ok
+INSERT INTO t6 VALUES (1, 1, 2, '1-2'), (1, 2, 2, '2-2'), (1, 3, 2, '3-2'), (1, 5, 2, '5-2'), (1, 8, 2, '8-2'), (1, 13, 2, '13-2'), (1, 21, 2, '21-2');
+
+statement ok
+FLUSH;
+
+statement ok
+INSERT INTO t6 VALUES (1, 1, 50, '1-50');
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK s6;
+
+statement ok
+DROP MATERIALIZED VIEW mv6;
+
+statement ok
+DROP TABLE t6;

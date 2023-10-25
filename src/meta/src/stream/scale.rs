@@ -97,7 +97,7 @@ pub struct RescheduleOptions {
     pub resolve_no_shuffle_upstream: bool,
 }
 
-pub(crate) struct RescheduleContext {
+pub struct RescheduleContext {
     /// Index used to map `ParallelUnitId` to `WorkerId`
     parallel_unit_id_to_worker_id: BTreeMap<ParallelUnitId, WorkerId>,
     /// Meta information for all Actors
@@ -171,7 +171,7 @@ impl RescheduleContext {
 /// assert to fail and should be skipped from the upper level.
 ///
 /// The return value is the bitmap distribution after scaling, which covers all virtual node indexes
-pub(crate) fn rebalance_actor_vnode(
+pub fn rebalance_actor_vnode(
     actors: &[StreamActor],
     actors_to_remove: &BTreeSet<ActorId>,
     actors_to_create: &BTreeSet<ActorId>,

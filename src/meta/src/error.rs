@@ -55,6 +55,9 @@ enum MetaErrorInner {
     #[error("{0} id not found: {1}")]
     CatalogIdNotFound(&'static str, u32),
 
+    #[error("table_fragment not exist: id={0}")]
+    FragmentNotFound(u32),
+
     #[error("{0} with name {1} exists")]
     Duplicated(&'static str, String),
 
@@ -62,7 +65,7 @@ enum MetaErrorInner {
     Unavailable(String),
 
     #[error("Election failed: {0}")]
-    Election(etcd_client::Error),
+    Election(String),
 
     #[error("Cancelled: {0}")]
     Cancelled(String),
@@ -73,7 +76,7 @@ enum MetaErrorInner {
     #[error("Sink error: {0}")]
     Sink(SinkError),
 
-    #[error("AWS SDK error: {}", DisplayErrorContext(&**.0))]
+    #[error("AWS SDK error: {}", DisplayErrorContext(& * *.0))]
     Aws(BoxedError),
 
     #[error(transparent)]
@@ -134,6 +137,14 @@ impl MetaError {
         MetaErrorInner::CatalogIdNotFound(relation, id.into()).into()
     }
 
+    pub fn fragment_not_found<T: Into<u32>>(id: T) -> Self {
+        MetaErrorInner::FragmentNotFound(id.into()).into()
+    }
+
+    pub fn is_fragment_not_found(&self) -> bool {
+        matches!(self.inner.as_ref(), &MetaErrorInner::FragmentNotFound(..))
+    }
+
     pub fn catalog_duplicated<T: Into<String>>(relation: &'static str, name: T) -> Self {
         MetaErrorInner::Duplicated(relation, name.into()).into()
     }
@@ -165,7 +176,7 @@ impl From<HummockError> for MetaError {
 
 impl From<etcd_client::Error> for MetaError {
     fn from(e: etcd_client::Error) -> Self {
-        MetaErrorInner::Election(e).into()
+        MetaErrorInner::Election(e.to_string()).into()
     }
 }
 

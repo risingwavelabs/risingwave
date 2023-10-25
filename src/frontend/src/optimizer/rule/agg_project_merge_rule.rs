@@ -16,7 +16,6 @@ use itertools::Itertools;
 
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
-use crate::optimizer::plan_node::generic::Agg;
 use crate::utils::IndexSet;
 
 /// Merge [`LogicalAgg`] <- [`LogicalProject`] to [`LogicalAgg`].
@@ -24,30 +23,32 @@ pub struct AggProjectMergeRule {}
 impl Rule for AggProjectMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg = plan.as_logical_agg()?;
-        let (mut agg_calls, agg_group_keys, grouping_sets, input) = agg.clone().decompose();
-        assert!(grouping_sets.is_empty());
-        let proj = input.as_logical_project()?;
-
+        let agg = agg.core().clone();
+        assert!(agg.grouping_sets.is_empty());
+        let old_input = agg.input.clone();
+        let proj = old_input.as_logical_project()?;
         // only apply when the input proj is all input-ref
         if !proj.is_all_inputref() {
             return None;
         }
-
         let proj_o2i = proj.o2i_col_mapping();
-        let new_input = proj.input();
-
-        // modify agg calls according to projection
-        agg_calls
-            .iter_mut()
-            .for_each(|x| x.rewrite_input_index(proj_o2i.clone()));
 
         // modify group key according to projection
-        let new_agg_group_keys_in_vec = agg_group_keys
+        let new_agg_group_keys_in_vec = agg
+            .group_key
             .indices()
             .map(|x| proj_o2i.map(x))
             .collect_vec();
-
         let new_agg_group_keys = IndexSet::from_iter(new_agg_group_keys_in_vec.clone());
+
+        let mut agg = agg;
+        agg.input = proj.input();
+        // modify agg calls according to projection
+        agg.agg_calls
+            .iter_mut()
+            .for_each(|x| x.rewrite_input_index(proj_o2i.clone()));
+        agg.group_key = new_agg_group_keys.clone();
+        agg.input = proj.input();
 
         if new_agg_group_keys.to_vec() != new_agg_group_keys_in_vec {
             // Need a project
@@ -57,17 +58,11 @@ impl Rule for AggProjectMergeRule {
                 .map(|x| new_agg_group_keys.indices().position(|y| y == x).unwrap())
                 .chain(
                     new_agg_group_keys_cardinality
-                        ..new_agg_group_keys_cardinality + agg_calls.len(),
+                        ..new_agg_group_keys_cardinality + agg.agg_calls.len(),
                 );
-            Some(
-                LogicalProject::with_out_col_idx(
-                    Agg::new(agg_calls, new_agg_group_keys.clone(), new_input).into(),
-                    out_col_idx,
-                )
-                .into(),
-            )
+            Some(LogicalProject::with_out_col_idx(agg.into(), out_col_idx).into())
         } else {
-            Some(Agg::new(agg_calls, new_agg_group_keys, new_input).into())
+            Some(agg.into())
         }
     }
 }

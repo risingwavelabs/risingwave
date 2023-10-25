@@ -81,6 +81,19 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         }
     }
 
+    /// Create [`UserIterator`] with maximum epoch.
+    pub fn for_test(iterator: I, key_range: UserKeyRange) -> Self {
+        let read_epoch = HummockEpoch::MAX;
+        Self::new(
+            iterator,
+            key_range,
+            read_epoch,
+            0,
+            None,
+            ForwardMergeRangeIterator::new(read_epoch),
+        )
+    }
+
     /// Gets the iterator move to the next step.
     ///
     /// Returned result:
@@ -270,19 +283,6 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
 #[cfg(test)]
 impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
-    /// Create [`UserIterator`] with maximum epoch.
-    pub(crate) fn for_test(iterator: I, key_range: UserKeyRange) -> Self {
-        let read_epoch = HummockEpoch::MAX;
-        Self::new(
-            iterator,
-            key_range,
-            read_epoch,
-            0,
-            None,
-            ForwardMergeRangeIterator::new(read_epoch),
-        )
-    }
-
     pub(crate) fn for_test_with_epoch(
         iterator: I,
         key_range: UserKeyRange,

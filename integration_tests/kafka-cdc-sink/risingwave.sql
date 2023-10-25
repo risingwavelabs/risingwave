@@ -22,6 +22,5 @@ connector = 'kafka',
 properties.bootstrap.server='message_queue:29092',
 topic = 'counts',
 type = 'debezium',
-use_transaction = 'false',
 primary_key = 'id'
 );

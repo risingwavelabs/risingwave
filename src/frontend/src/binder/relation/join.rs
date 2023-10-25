@@ -56,7 +56,14 @@ impl Binder {
             self.push_lateral_context();
             let right = self.bind_table_with_joins(t.clone())?;
             self.pop_and_merge_lateral_context()?;
-            root = if let Relation::Subquery(subquery) = &right && subquery.lateral {
+
+            let is_lateral = match &right {
+                Relation::Subquery(subquery) if subquery.lateral => true,
+                Relation::TableFunction { .. } => true,
+                _ => false,
+            };
+
+            root = if is_lateral {
                 Relation::Apply(Box::new(BoundJoin {
                     join_type: JoinType::Inner,
                     left: root,
@@ -100,14 +107,20 @@ impl Binder {
                 right = self.bind_table_factor(join.relation.clone())?;
                 (cond, _) = self.bind_join_constraint(constraint, None, join_type)?;
             }
-            root = if let Relation::Subquery(subquery) = &right && subquery.lateral {
+
+            let is_lateral = match &right {
+                Relation::Subquery(subquery) if subquery.lateral => true,
+                Relation::TableFunction { .. } => true,
+                _ => false,
+            };
+
+            root = if is_lateral {
                 match join_type {
-                    JoinType::Inner | JoinType::LeftOuter => {},
+                    JoinType::Inner | JoinType::LeftOuter => {}
                     _ => {
                         return Err(ErrorCode::InvalidInputSyntax("The combining JOIN type must be INNER or LEFT for a LATERAL reference.".to_string())
                             .into());
-
-                        }
+                    }
                 }
 
                 Relation::Apply(Box::new(BoundJoin {
@@ -123,7 +136,7 @@ impl Binder {
                     right,
                     cond,
                 }))
-            }
+            };
         }
 
         Ok(root)

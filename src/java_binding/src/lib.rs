@@ -12,9 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(error_generic_member_access)]
-#![feature(lazy_cell)]
-#![feature(once_cell_try)]
-#![feature(type_alias_impl_trait)]
+#![feature(result_option_inspect)]
 
-pub use risingwave_jni_core::*;
+use std::ffi::c_void;
+
+use jni::sys::{jint, JNI_VERSION_1_2};
+use jni::JavaVM;
+use risingwave_jni_core::register_native_method_for_jvm;
+
+#[no_mangle]
+#[allow(non_snake_case)]
+pub extern "system" fn JNI_OnLoad(jvm: JavaVM, _reserved: *mut c_void) -> jint {
+    let _ = register_native_method_for_jvm(&jvm)
+        .inspect_err(|_e| eprintln!("unable to register native method"));
+    JNI_VERSION_1_2
+}

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::Future;
 use std::sync::atomic::AtomicUsize;
 
 use futures::stream::BoxStream;
@@ -91,24 +90,21 @@ impl MockExternalTableReader {
 }
 
 impl ExternalTableReader for MockExternalTableReader {
-    type CdcOffsetFuture<'a> = impl Future<Output = ConnectorResult<CdcOffset>> + 'a;
-
     fn get_normalized_table_name(&self, _table_name: &SchemaTableName) -> String {
         "`mock_table`".to_string()
     }
 
-    fn current_cdc_offset(&self) -> Self::CdcOffsetFuture<'_> {
+    async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         static IDX: AtomicUsize = AtomicUsize::new(0);
-        async move {
-            let idx = IDX.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if idx < self.binlog_watermarks.len() {
-                Ok(CdcOffset::MySql(self.binlog_watermarks[idx].clone()))
-            } else {
-                Ok(CdcOffset::MySql(MySqlOffset {
-                    filename: "1.binlog".to_string(),
-                    position: u64::MAX,
-                }))
-            }
+
+        let idx = IDX.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if idx < self.binlog_watermarks.len() {
+            Ok(CdcOffset::MySql(self.binlog_watermarks[idx].clone()))
+        } else {
+            Ok(CdcOffset::MySql(MySqlOffset {
+                filename: "1.binlog".to_string(),
+                position: u64::MAX,
+            }))
         }
     }
 

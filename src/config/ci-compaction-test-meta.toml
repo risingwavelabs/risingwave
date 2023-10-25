@@ -28,3 +28,6 @@ data_directory = "hummock_001"
 checkpoint_frequency = 99999999
 barrier_interval_ms = 250
 max_concurrent_creating_streaming_jobs = 0
+
+[server]
+metrics_level = "Disabled"

@@ -20,7 +20,7 @@ mod filter;
 mod orderby;
 mod projection;
 
-use risingwave_expr::agg::{self, AggCall, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{build_append_only, AggCall, BoxedAggregateFunction};
 use risingwave_expr::Result;
 
 use self::distinct::Distinct;
@@ -30,7 +30,7 @@ use self::projection::Projection;
 
 /// Build an `BoxedAggregateFunction` from `AggCall`.
 pub fn build(agg: &AggCall) -> Result<BoxedAggregateFunction> {
-    let mut aggregator = agg::build(agg)?;
+    let mut aggregator = build_append_only(agg)?;
 
     if agg.distinct {
         aggregator = Box::new(Distinct::new(aggregator));

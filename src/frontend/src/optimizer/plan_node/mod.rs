@@ -46,7 +46,7 @@ use serde::Serialize;
 use smallvec::SmallVec;
 
 use self::batch::BatchPlanRef;
-use self::generic::GenericPlanRef;
+use self::generic::{GenericPlanRef, PhysicalPlanRef};
 use self::stream::StreamPlanRef;
 use self::utils::Distill;
 use super::property::{Distribution, FunctionalDependencySet, Order};
@@ -218,6 +218,15 @@ impl RewriteExprsRecursive for PlanRef {
 }
 
 impl PlanRef {
+    pub fn expect_stream_key(&self) -> &[usize] {
+        self.stream_key().unwrap_or_else(|| {
+            panic!(
+                "a stream key is expected but not exist, plan:\n{}",
+                self.explain_to_string()
+            )
+        })
+    }
+
     fn prune_col_inner(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         if let Some(logical_share) = self.as_logical_share() {
             // Check the share cache first. If cache exists, it means this is the second round of
@@ -410,33 +419,35 @@ impl PlanTreeNode for PlanRef {
     }
 }
 
-impl StreamPlanRef for PlanRef {
-    fn distribution(&self) -> &Distribution {
-        &self.plan_base().dist
+impl PlanNodeMeta for PlanRef {
+    fn node_type(&self) -> PlanNodeType {
+        self.0.node_type()
     }
 
-    fn append_only(&self) -> bool {
-        self.plan_base().append_only
+    fn plan_base(&self) -> &PlanBase {
+        self.0.plan_base()
     }
 
-    fn emit_on_window_close(&self) -> bool {
-        self.plan_base().emit_on_window_close
-    }
-}
-
-impl BatchPlanRef for PlanRef {
-    fn order(&self) -> &Order {
-        &self.plan_base().order
+    fn convention(&self) -> Convention {
+        self.0.convention()
     }
 }
 
-impl GenericPlanRef for PlanRef {
+/// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
+impl<P> GenericPlanRef for P
+where
+    P: PlanNodeMeta + Eq + Hash,
+{
+    fn id(&self) -> PlanNodeId {
+        self.plan_base().id()
+    }
+
     fn schema(&self) -> &Schema {
-        &self.plan_base().schema
+        self.plan_base().schema()
     }
 
-    fn logical_pk(&self) -> &[usize] {
-        &self.plan_base().logical_pk
+    fn stream_key(&self) -> Option<&[usize]> {
+        self.plan_base().stream_key()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -445,6 +456,47 @@ impl GenericPlanRef for PlanRef {
 
     fn functional_dependency(&self) -> &FunctionalDependencySet {
         self.plan_base().functional_dependency()
+    }
+}
+
+/// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
+// TODO: further constrain the convention to be `Stream` or `Batch`.
+impl<P> PhysicalPlanRef for P
+where
+    P: PlanNodeMeta + Eq + Hash,
+{
+    fn distribution(&self) -> &Distribution {
+        self.plan_base().distribution()
+    }
+}
+
+/// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
+// TODO: further constrain the convention to be `Stream`.
+impl<P> StreamPlanRef for P
+where
+    P: PlanNodeMeta + Eq + Hash,
+{
+    fn append_only(&self) -> bool {
+        self.plan_base().append_only()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.plan_base().emit_on_window_close()
+    }
+
+    fn watermark_columns(&self) -> &FixedBitSet {
+        self.plan_base().watermark_columns()
+    }
+}
+
+/// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
+// TODO: further constrain the convention to be `Batch`.
+impl<P> BatchPlanRef for P
+where
+    P: PlanNodeMeta + Eq + Hash,
+{
+    fn order(&self) -> &Order {
+        self.plan_base().order()
     }
 }
 
@@ -503,43 +555,44 @@ pub(crate) fn pretty_config() -> PrettyConfig {
 
 impl dyn PlanNode {
     pub fn id(&self) -> PlanNodeId {
-        self.plan_base().id
+        self.plan_base().id()
     }
 
     pub fn ctx(&self) -> OptimizerContextRef {
-        self.plan_base().ctx.clone()
+        self.plan_base().ctx().clone()
     }
 
     pub fn schema(&self) -> &Schema {
-        &self.plan_base().schema
+        self.plan_base().schema()
     }
 
-    pub fn logical_pk(&self) -> &[usize] {
-        &self.plan_base().logical_pk
+    pub fn stream_key(&self) -> Option<&[usize]> {
+        self.plan_base().stream_key()
     }
 
     pub fn order(&self) -> &Order {
-        &self.plan_base().order
+        self.plan_base().order()
     }
 
+    // TODO: avoid no manual delegation
     pub fn distribution(&self) -> &Distribution {
-        &self.plan_base().dist
+        self.plan_base().distribution()
     }
 
     pub fn append_only(&self) -> bool {
-        self.plan_base().append_only
+        self.plan_base().append_only()
     }
 
     pub fn emit_on_window_close(&self) -> bool {
-        self.plan_base().emit_on_window_close
+        self.plan_base().emit_on_window_close()
     }
 
     pub fn functional_dependency(&self) -> &FunctionalDependencySet {
-        &self.plan_base().functional_dependency
+        self.plan_base().functional_dependency()
     }
 
     pub fn watermark_columns(&self) -> &FixedBitSet {
-        &self.plan_base().watermark_columns
+        self.plan_base().watermark_columns()
     }
 
     /// Serialize the plan node and its children to a stream plan proto.
@@ -566,7 +619,12 @@ impl dyn PlanNode {
             identity: self.explain_myself_to_string(),
             node_body: node,
             operator_id: self.id().0 as _,
-            stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
+            stream_key: self
+                .stream_key()
+                .unwrap_or_default()
+                .iter()
+                .map(|x| *x as u32)
+                .collect(),
             fields: self.schema().to_prost(),
             append_only: self.append_only(),
         }
@@ -603,8 +661,6 @@ impl dyn PlanNode {
 }
 
 mod plan_base;
-#[macro_use]
-mod plan_tree_node_v2;
 pub use plan_base::*;
 #[macro_use]
 mod plan_tree_node;
@@ -627,7 +683,6 @@ pub use merge_eq_nodes::*;
 pub mod batch;
 pub mod generic;
 pub mod stream;
-pub mod stream_derive;
 
 pub use generic::{PlanAggCall, PlanAggCallDisplay};
 
@@ -689,6 +744,7 @@ mod stream_eowc_over_window;
 mod stream_exchange;
 mod stream_expand;
 mod stream_filter;
+mod stream_fs_fetch;
 mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
@@ -773,6 +829,7 @@ pub use stream_eowc_over_window::StreamEowcOverWindow;
 pub use stream_exchange::StreamExchange;
 pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
+pub use stream_fs_fetch::StreamFsFetch;
 pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
@@ -898,6 +955,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, EowcOverWindow }
             , { Stream, EowcSort }
             , { Stream, OverWindow }
+            , { Stream, FsFetch }
         }
     };
 }
@@ -1005,6 +1063,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, EowcOverWindow }
             , { Stream, EowcSort }
             , { Stream, OverWindow }
+            , { Stream, FsFetch }
         }
     };
 }

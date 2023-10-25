@@ -12,17 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound::{self};
+
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::row::RowExt;
+use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::Datum;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::agg::{AggCall, AggKind, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{AggCall, AggKind, BoxedAggregateFunction};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
@@ -137,7 +139,10 @@ impl MaterializedInputState {
                     agg_call.args.arg_types(),
                 ))
             }
-            AggKind::StringAgg | AggKind::ArrayAgg => Box::new(GenericAggStateCache::new(
+            AggKind::StringAgg
+            | AggKind::ArrayAgg
+            | AggKind::JsonbAgg
+            | AggKind::JsonbObjectAgg => Box::new(GenericAggStateCache::new(
                 OrderedStateCache::new(),
                 agg_call.args.arg_types(),
             )),
@@ -182,10 +187,12 @@ impl MaterializedInputState {
     ) -> StreamExecutorResult<Datum> {
         if !self.cache.is_synced() {
             let mut cache_filler = self.cache.begin_syncing();
-
+            let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
+                &(Bound::Unbounded, Bound::Unbounded);
             let all_data_iter = state_table
-                .iter_row_with_pk_prefix(
+                .iter_with_prefix(
                     group_key.map(GroupKey::table_pk),
+                    sub_range,
                     PrefetchOptions {
                         exhaust_iter: cache_filler.capacity().is_none(),
                     },
@@ -247,7 +254,7 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::agg::{build, AggCall};
+    use risingwave_expr::aggregate::{build_append_only, AggCall};
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
@@ -306,7 +313,7 @@ mod tests {
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
 
         let agg_call = AggCall::from_pretty("(min:int4 $2:int4)"); // min(c)
-        let agg = build(&agg_call).unwrap();
+        let agg = build_append_only(&agg_call).unwrap();
         let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
@@ -399,7 +406,7 @@ mod tests {
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
 
         let agg_call = AggCall::from_pretty("(max:int4 $2:int4)"); // max(c)
-        let agg = build(&agg_call).unwrap();
+        let agg = build_append_only(&agg_call).unwrap();
         let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
@@ -494,8 +501,8 @@ mod tests {
 
         let agg_call_1 = AggCall::from_pretty("(min:varchar $0:varchar)"); // min(a)
         let agg_call_2 = AggCall::from_pretty("(max:int4 $1:int4)"); // max(b)
-        let agg1 = build(&agg_call_1).unwrap();
-        let agg2 = build(&agg_call_2).unwrap();
+        let agg1 = build_append_only(&agg_call_1).unwrap();
+        let agg2 = build_append_only(&agg_call_2).unwrap();
         let group_key = None;
 
         let (mut table_1, mapping_1) = create_mem_state_table(
@@ -599,7 +606,7 @@ mod tests {
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
 
         let agg_call = AggCall::from_pretty("(max:int4 $1:int4)"); // max(b)
-        let agg = build(&agg_call).unwrap();
+        let agg = build_append_only(&agg_call).unwrap();
         let group_key = Some(GroupKey::new(OwnedRow::new(vec![Some(8.into())]), None));
 
         let (mut table, mapping) = create_mem_state_table(
@@ -691,7 +698,7 @@ mod tests {
         let input_schema = Schema::new(vec![field1, field2]);
 
         let agg_call = AggCall::from_pretty("(min:int4 $0:int4)"); // min(a)
-        let agg = build(&agg_call).unwrap();
+        let agg = build_append_only(&agg_call).unwrap();
         let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
@@ -793,7 +800,7 @@ mod tests {
         let input_schema = Schema::new(vec![field1, field2]);
 
         let agg_call = AggCall::from_pretty("(min:int4 $0:int4)"); // min(a)
-        let agg = build(&agg_call).unwrap();
+        let agg = build_append_only(&agg_call).unwrap();
         let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
@@ -899,7 +906,7 @@ mod tests {
         let agg_call = AggCall::from_pretty(
             "(string_agg:varchar $0:varchar $1:varchar orderby $2:asc $0:desc)",
         );
-        let agg = build(&agg_call).unwrap();
+        let agg = build_append_only(&agg_call).unwrap();
         let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(
@@ -978,7 +985,7 @@ mod tests {
         let input_schema = Schema::new(vec![field1, field2, field3, field4]);
 
         let agg_call = AggCall::from_pretty("(array_agg:int4[] $1:int4 orderby $2:asc $0:desc)");
-        let agg = build(&agg_call).unwrap();
+        let agg = build_append_only(&agg_call).unwrap();
         let group_key = None;
 
         let (mut table, mapping) = create_mem_state_table(

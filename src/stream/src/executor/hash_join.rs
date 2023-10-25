@@ -28,7 +28,7 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::ExprError;
 use risingwave_storage::StateStore;
 use tokio::time::Instant;
@@ -202,11 +202,11 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
 
 impl<K: HashKey, S: StateStore> JoinSide<K, S> {
     // WARNING: Please do not call this until we implement it.
-    #[expect(dead_code)]
     fn is_dirty(&self) -> bool {
         unimplemented!()
     }
 
+    #[expect(dead_code)]
     fn clear_cache(&mut self) {
         assert!(
             !self.is_dirty(),
@@ -242,9 +242,9 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// The parameters of the right join executor
     side_r: JoinSide<K, S>,
     /// Optional non-equi join conditions
-    cond: Option<BoxedExpression>,
+    cond: Option<NonStrictExpression>,
     /// Column indices of watermark output and offset expression of each inequality, respectively.
-    inequality_pairs: Vec<(Vec<usize>, Option<BoxedExpression>)>,
+    inequality_pairs: Vec<(Vec<usize>, Option<NonStrictExpression>)>,
     /// The output watermark of each inequality condition and its value is the minimum of the
     /// calculation result of both side. It will be used to generate watermark into downstream
     /// and do state cleaning if `clean_state` field of that inequality is `true`.
@@ -310,11 +310,10 @@ struct HashJoinChunkBuilder<const T: JoinTypePrimitive, const SIDE: SideTypePrim
 
 struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
     ctx: &'a ActorContextRef,
-    identity: &'a str,
     side_l: &'a mut JoinSide<K, S>,
     side_r: &'a mut JoinSide<K, S>,
     actual_output_data_types: &'a [DataType],
-    cond: &'a mut Option<BoxedExpression>,
+    cond: &'a mut Option<NonStrictExpression>,
     inequality_watermarks: &'a [Option<Watermark>],
     chunk: StreamChunk,
     append_only_optimize: bool,
@@ -449,8 +448,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         pk_indices: PkIndices,
         output_indices: Vec<usize>,
         executor_id: u64,
-        cond: Option<BoxedExpression>,
-        inequality_pairs: Vec<(usize, usize, bool, Option<BoxedExpression>)>,
+        cond: Option<NonStrictExpression>,
+        inequality_pairs: Vec<(usize, usize, bool, Option<NonStrictExpression>)>,
         op_info: String,
         state_table_l: StateTable<S>,
         degree_state_table_l: StateTable<S>,
@@ -640,6 +639,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     pk_contained_in_jk_l,
                     metrics.clone(),
                     ctx.id,
+                    ctx.fragment_id,
                     "left",
                 ),
                 join_key_indices: join_key_indices_l,
@@ -667,6 +667,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     pk_contained_in_jk_r,
                     metrics.clone(),
                     ctx.id,
+                    ctx.fragment_id,
                     "right",
                 ),
                 join_key_indices: join_key_indices_r,
@@ -713,6 +714,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
         let actor_id_str = self.ctx.id.to_string();
+        let fragment_id_str = self.ctx.fragment_id.to_string();
         let mut start_time = Instant::now();
 
         while let Some(msg) = aligned_stream
@@ -722,7 +724,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         {
             self.metrics
                 .join_actor_input_waiting_duration_ns
-                .with_label_values(&[&actor_id_str])
+                .with_label_values(&[&actor_id_str, &fragment_id_str])
                 .inc_by(start_time.elapsed().as_nanos() as u64);
             match msg? {
                 AlignedMessage::WatermarkLeft(watermark) => {
@@ -745,7 +747,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     #[for_await]
                     for chunk in Self::eq_join_left(EqJoinArgs {
                         ctx: &self.ctx,
-                        identity: &self.identity,
                         side_l: &mut self.side_l,
                         side_r: &mut self.side_r,
                         actual_output_data_types: &self.actual_output_data_types,
@@ -763,7 +764,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     left_time += left_start_time.elapsed();
                     self.metrics
                         .join_match_duration_ns
-                        .with_label_values(&[&actor_id_str, "left"])
+                        .with_label_values(&[&actor_id_str, &fragment_id_str, "left"])
                         .inc_by(left_time.as_nanos() as u64);
                 }
                 AlignedMessage::Right(chunk) => {
@@ -772,7 +773,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     #[for_await]
                     for chunk in Self::eq_join_right(EqJoinArgs {
                         ctx: &self.ctx,
-                        identity: &self.identity,
                         side_l: &mut self.side_l,
                         side_r: &mut self.side_r,
                         actual_output_data_types: &self.actual_output_data_types,
@@ -790,7 +790,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     right_time += right_start_time.elapsed();
                     self.metrics
                         .join_match_duration_ns
-                        .with_label_values(&[&actor_id_str, "right"])
+                        .with_label_values(&[&actor_id_str, &fragment_id_str, "right"])
                         .inc_by(right_time.as_nanos() as u64);
                 }
                 AlignedMessage::Barrier(barrier) => {
@@ -814,23 +814,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
                     // Report metrics of cached join rows/entries
                     for (side, ht) in [("left", &self.side_l.ht), ("right", &self.side_r.ht)] {
-                        // TODO(yuhao): Those two metric calculation cost too much time (>250ms).
-                        // Those will result in that barrier is always ready
-                        // in source. Since select barrier is preferred,
-                        // chunk would never be selected.
-                        // self.metrics
-                        //     .join_cached_rows
-                        //     .with_label_values(&[&actor_id_str, side])
-                        //     .set(ht.cached_rows() as i64);
                         self.metrics
-                            .join_cached_entries
-                            .with_label_values(&[&actor_id_str, side])
+                            .join_cached_entry_count
+                            .with_label_values(&[&actor_id_str, &fragment_id_str, side])
                             .set(ht.entry_count() as i64);
                     }
 
                     self.metrics
                         .join_match_duration_ns
-                        .with_label_values(&[&actor_id_str, "barrier"])
+                        .with_label_values(&[&actor_id_str, &fragment_id_str, "barrier"])
                         .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
                     yield Message::Barrier(barrier);
                 }
@@ -920,7 +912,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 // allow since we will handle error manually.
                 #[allow(clippy::disallowed_methods)]
                 let eval_result = delta_expression
-                    .eval_row(&OwnedRow::new(vec![Some(input_watermark.val)]))
+                    .inner().eval_row(&OwnedRow::new(vec![Some(input_watermark.val)]))
                     .await;
                 match eval_result {
                     Ok(value) => input_watermark.val = value.unwrap(),
@@ -990,7 +982,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     async fn eq_join_oneside<const SIDE: SideTypePrimitive>(args: EqJoinArgs<'_, K, S>) {
         let EqJoinArgs {
             ctx,
-            identity,
             side_l,
             side_r,
             actual_output_data_types,
@@ -1000,9 +991,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             append_only_optimize,
             chunk_size,
             cnt_rows_received,
+            ..
         } = args;
-
-        let chunk = chunk.compact();
 
         let (side_update, side_match) = if SIDE == SideType::Left {
             (side_l, side_r)
@@ -1039,7 +1029,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             ]);
 
         let keys = K::build(&side_update.join_key_indices, chunk.data_chunk())?;
-        for ((op, row), key) in chunk.rows().zip_eq_debug(keys.iter()) {
+        for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
+            let Some((op, row)) = r else {
+                continue;
+            };
             Self::evict_cache(side_update, side_match, cnt_rows_received);
 
             let matched_rows: Option<HashValueType> = if side_update
@@ -1079,12 +1072,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                     side_match.start_pos,
                                 );
 
-                                cond.eval_row_infallible(&new_row, |err| {
-                                    ctx.on_compute_error(err, identity)
-                                })
-                                .await
-                                .map(|s| *s.as_bool())
-                                .unwrap_or(false)
+                                cond.eval_row_infallible(&new_row)
+                                    .await
+                                    .map(|s| *s.as_bool())
+                                    .unwrap_or(false)
                             } else {
                                 true
                             };
@@ -1190,12 +1181,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                     side_match.start_pos,
                                 );
 
-                                cond.eval_row_infallible(&new_row, |err| {
-                                    ctx.on_compute_error(err, identity)
-                                })
-                                .await
-                                .map(|s| *s.as_bool())
-                                .unwrap_or(false)
+                                cond.eval_row_infallible(&new_row)
+                                    .await
+                                    .map(|s| *s.as_bool())
+                                    .unwrap_or(false)
                             } else {
                                 true
                             };
@@ -1286,11 +1275,11 @@ mod tests {
     use risingwave_common::hash::{Key128, Key64};
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::expr::build_from_pretty;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
     use crate::common::table::state_table::StateTable;
+    use crate::executor::test_utils::expr::build_from_pretty;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
     use crate::executor::{ActorContext, Barrier, EpochPair};
 
@@ -1338,7 +1327,7 @@ mod tests {
         (state_table, degree_state_table)
     }
 
-    fn create_cond(condition_text: Option<String>) -> BoxedExpression {
+    fn create_cond(condition_text: Option<String>) -> NonStrictExpression {
         build_from_pretty(
             condition_text
                 .as_deref()
@@ -1350,7 +1339,7 @@ mod tests {
         with_condition: bool,
         null_safe: bool,
         condition_text: Option<String>,
-        inequality_pairs: Vec<(usize, usize, bool, Option<BoxedExpression>)>,
+        inequality_pairs: Vec<(usize, usize, bool, Option<NonStrictExpression>)>,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         let schema = Schema {
             fields: vec![

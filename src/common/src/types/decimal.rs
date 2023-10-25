@@ -416,6 +416,12 @@ impl Decimal {
         Some(d.scale() as _)
     }
 
+    pub fn rescale(&mut self, scale: u32) {
+        if let Normalized(a) = self {
+            a.rescale(scale);
+        }
+    }
+
     #[must_use]
     pub fn round_dp_ties_away(&self, dp: u32) -> Self {
         match self {

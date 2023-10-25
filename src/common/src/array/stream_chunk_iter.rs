@@ -52,6 +52,18 @@ impl StreamChunk {
         let (row, visible) = self.data_chunk().row_at(pos);
         (op, row, visible)
     }
+
+    pub fn rows_with_holes(&self) -> impl Iterator<Item = Option<(Op, RowRef<'_>)>> {
+        self.data_chunk().rows_with_holes().map(|row| {
+            row.map(|row| {
+                (
+                    // SAFETY: index is checked since we are in the iterator.
+                    unsafe { *self.ops().get_unchecked(row.index()) },
+                    row,
+                )
+            })
+        })
+    }
 }
 
 pub struct StreamChunkRefIter<'a> {

@@ -128,7 +128,7 @@
     Bind error: failed to bind expression: array_cat('{1}', 2)
 
     Caused by:
-      Bind error: Cannot concatenate varchar and integer
+      Bind error: Cannot concatenate character varying and integer
 - sql: |
     select array_append(array[66], 123);
   logical_plan: |-
@@ -190,7 +190,7 @@
   sql: |
     create table t (v1 varchar[]);
     insert into t values ('{c,' || 'd}');
-  binder_error: 'Bind error: cannot cast type "varchar" to "varchar[]" in Assign context'
+  binder_error: 'Bind error: cannot cast type "character varying" to "character varying[]" in Assign context'
 - name: string to varchar[] in explicit context
   sql: |
     select ('{c,' || 'd}')::varchar[];

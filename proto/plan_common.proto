@@ -49,7 +49,12 @@ message GeneratedColumnDesc {
 }
 
 message DefaultColumnDesc {
+  // Expression of the `DEFAULT`. Used when inserting new records.
   expr.ExprNode expr = 1;
+  // Evaluated value of the expression at the time of the table creation or the
+  // column addition. Used when filling the default value for the records where
+  // the column is missing.
+  data.Datum snapshot_value = 2;
 }
 
 message StorageTableDesc {
@@ -101,6 +106,7 @@ enum EncodeType {
   ENCODE_TYPE_PROTOBUF = 4;
   ENCODE_TYPE_JSON = 5;
   ENCODE_TYPE_BYTES = 6;
+  ENCODE_TYPE_TEMPLATE = 7;
 }
 
 enum RowFormatType {

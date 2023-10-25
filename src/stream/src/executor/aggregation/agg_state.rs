@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{StreamChunk, Vis};
+use risingwave_common::array::StreamChunk;
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::types::Datum;
-use risingwave_expr::agg::{AggCall, AggregateState, BoxedAggregateFunction};
+use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction};
 use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
@@ -43,7 +44,7 @@ pub enum AggStateStorage<S: StateStore> {
 /// State for single aggregation call. It manages the state cache and interact with the
 /// underlying state store if necessary.
 pub enum AggState {
-    /// State as single scalar value.
+    /// State as a single scalar value.
     /// e.g. `count`, `sum`, append-only `min`/`max`.
     Value(AggregateState),
 
@@ -67,15 +68,15 @@ impl AggState {
         agg_call: &AggCall,
         agg_func: &BoxedAggregateFunction,
         storage: &AggStateStorage<impl StateStore>,
-        prev_output: Option<&Datum>,
+        encoded_state: Option<&Datum>,
         pk_indices: &PkIndices,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
         Ok(match storage {
             AggStateStorage::Value => {
-                let state = match prev_output {
-                    Some(prev) => AggregateState::Datum(prev.clone()),
+                let state = match encoded_state {
+                    Some(encoded) => agg_func.decode_state(encoded.clone())?,
                     None => agg_func.create_state(),
                 };
                 Self::Value(state)
@@ -98,7 +99,7 @@ impl AggState {
         chunk: &StreamChunk,
         call: &AggCall,
         func: &BoxedAggregateFunction,
-        visibility: Vis,
+        visibility: Bitmap,
     ) -> StreamExecutorResult<()> {
         match self {
             Self::Value(state) => {
@@ -108,7 +109,7 @@ impl AggState {
             }
             Self::MaterializedInput(state) => {
                 // the input chunk for minput is unprojected
-                let chunk = chunk.with_visibility(visibility);
+                let chunk = chunk.clone_with_vis(visibility);
                 state.apply_chunk(&chunk)
             }
         }

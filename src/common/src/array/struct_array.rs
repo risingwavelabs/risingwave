@@ -267,7 +267,7 @@ impl From<DataChunk> for StructArray {
         Self::new(
             StructType::unnamed(chunk.columns().iter().map(|c| c.data_type()).collect()),
             chunk.columns().to_vec(),
-            chunk.vis().to_bitmap(),
+            chunk.visibility().clone(),
         )
     }
 }

@@ -41,8 +41,8 @@ public class SinkUtils {
                 return new IcebergSinkFactory();
             case "deltalake":
                 return new DeltaLakeSinkFactory();
-            case "elasticsearch-7":
-                return new EsSink7Factory();
+            case "elasticsearch":
+                return new EsSinkFactory();
             case "cassandra":
                 return new CassandraFactory();
             default:

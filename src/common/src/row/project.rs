@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::hash::Hash;
+
 use super::Row;
 use crate::types::DatumRef;
 
@@ -67,6 +69,16 @@ impl<'i, R: Row> Project<'i, R> {
             );
         }
         Self { row, indices }
+    }
+
+    pub fn row(&self) -> &R {
+        &self.row
+    }
+}
+
+impl<R: Row> Hash for Project<'_, R> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash_datums_into(state);
     }
 }
 

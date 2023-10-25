@@ -42,6 +42,7 @@ use risingwave_common::catalog::{ColumnCatalog, ColumnId, ConflictBehavior, Fiel
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_connector::sink::catalog::SinkFormatDesc;
 use risingwave_pb::catalog::WatermarkDesc;
 
 use self::heuristic_optimizer::ApplyOrder;
@@ -56,7 +57,6 @@ use self::plan_visitor::{has_batch_exchange, CardinalityVisitor};
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive,
 };
@@ -448,6 +448,7 @@ impl PlanRoot {
         let exprs = LogicalSource::derive_output_exprs_from_generated_columns(&columns)?;
         if let Some(exprs) = exprs {
             let logical_project = generic::Project::new(exprs, stream_plan);
+            // The project node merges a chunk if it has an ungenerated row id as stream key.
             stream_plan = StreamProject::new(logical_project).into();
         }
 
@@ -556,6 +557,7 @@ impl PlanRoot {
         emit_on_window_close: bool,
         db_name: String,
         sink_from_table_name: String,
+        format_desc: Option<SinkFormatDesc>,
     ) -> Result<StreamSink> {
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
@@ -570,6 +572,7 @@ impl PlanRoot {
             self.out_names.clone(),
             definition,
             properties,
+            format_desc,
         )
     }
 
@@ -613,7 +616,7 @@ fn exist_and_no_exchange_before(plan: &PlanRef, is_candidate: fn(&PlanRef) -> bo
 fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> bool {
     fn is_user_table(plan: &PlanRef) -> bool {
         plan.as_batch_seq_scan()
-            .map(|node| !node.logical().is_sys_table)
+            .map(|node| !node.core().is_sys_table)
             .unwrap_or(false)
     }
 
@@ -646,7 +649,7 @@ fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> boo
 fn require_additional_exchange_on_root_in_local_mode(plan: PlanRef) -> bool {
     fn is_user_table(plan: &PlanRef) -> bool {
         plan.as_batch_seq_scan()
-            .map(|node| !node.logical().is_sys_table)
+            .map(|node| !node.core().is_sys_table)
             .unwrap_or(false)
     }
 

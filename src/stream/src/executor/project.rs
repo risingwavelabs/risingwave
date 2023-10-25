@@ -21,7 +21,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::expr::NonStrictExpression;
 
 use super::*;
 
@@ -34,11 +34,11 @@ pub struct ProjectExecutor {
 }
 
 struct Inner {
-    ctx: ActorContextRef,
+    _ctx: ActorContextRef,
     info: ExecutorInfo,
 
     /// Expressions of the current projection.
-    exprs: Vec<BoxedExpression>,
+    exprs: Vec<NonStrictExpression>,
     /// All the watermark derivations, (input_column_index, output_column_index). And the
     /// derivation expression is the project's expression itself.
     watermark_derivations: MultiMap<usize, usize>,
@@ -58,7 +58,7 @@ impl ProjectExecutor {
         ctx: ActorContextRef,
         input: Box<dyn Executor>,
         pk_indices: PkIndices,
-        exprs: Vec<BoxedExpression>,
+        exprs: Vec<NonStrictExpression>,
         executor_id: u64,
         watermark_derivations: MultiMap<usize, usize>,
         nondecreasing_expr_indices: Vec<usize>,
@@ -82,7 +82,7 @@ impl ProjectExecutor {
         Self {
             input,
             inner: Inner {
-                ctx,
+                _ctx: ctx,
                 info: ExecutorInfo {
                     schema,
                     pk_indices: info.pk_indices,
@@ -138,16 +138,11 @@ impl Inner {
         let mut projected_columns = Vec::new();
 
         for expr in &self.exprs {
-            let evaluated_expr = expr
-                .eval_infallible(&data_chunk, |err| {
-                    self.ctx.on_compute_error(err, &self.info.identity)
-                })
-                .await;
+            let evaluated_expr = expr.eval_infallible(&data_chunk).await;
             projected_columns.push(evaluated_expr);
         }
         let (_, vis) = data_chunk.into_parts();
-        let vis = vis.into_visibility();
-        let new_chunk = StreamChunk::new(ops, projected_columns, vis);
+        let new_chunk = StreamChunk::with_visibility(ops, projected_columns, vis);
         Ok(Some(new_chunk))
     }
 
@@ -161,12 +156,7 @@ impl Inner {
             let out_col_idx = *out_col_idx;
             let derived_watermark = watermark
                 .clone()
-                .transform_with_expr(&self.exprs[out_col_idx], out_col_idx, |err| {
-                    self.ctx.on_compute_error(
-                        err,
-                        &(self.info.identity.to_string() + "(when computing watermark)"),
-                    )
-                })
+                .transform_with_expr(&self.exprs[out_col_idx], out_col_idx)
                 .await;
             if let Some(derived_watermark) = derived_watermark {
                 ret.push(derived_watermark);
@@ -243,11 +233,12 @@ mod tests {
     use risingwave_common::array::{DataChunk, StreamChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, Datum};
-    use risingwave_expr::expr::{self, build_from_pretty, Expression, ValueImpl};
+    use risingwave_expr::expr::{self, Expression, ValueImpl};
 
     use super::super::test_utils::MockSource;
     use super::super::*;
     use super::*;
+    use crate::executor::test_utils::expr::build_from_pretty;
     use crate::executor::test_utils::StreamExecutorTestExt;
 
     #[tokio::test]
@@ -269,14 +260,15 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
+        let pk_indices = vec![0];
+        let (mut tx, source) = MockSource::channel(schema, pk_indices.clone());
 
         let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
 
         let project = Box::new(ProjectExecutor::new(
             ActorContext::create(123),
             Box::new(source),
-            vec![],
+            pk_indices,
             vec![test_expr],
             1,
             MultiMap::new(),
@@ -354,7 +346,7 @@ mod tests {
 
         let a_expr = build_from_pretty("(add:int8 $0:int8 1:int8)");
         let b_expr = build_from_pretty("(subtract:int8 $0:int8 1:int8)");
-        let c_expr = DummyNondecreasingExpr.boxed();
+        let c_expr = NonStrictExpression::for_test(DummyNondecreasingExpr);
 
         let project = Box::new(ProjectExecutor::new(
             ActorContext::create(123),

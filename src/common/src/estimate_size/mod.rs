@@ -15,6 +15,7 @@
 pub mod collections;
 
 use std::marker::PhantomData;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
 use fixedbitset::FixedBitSet;
@@ -186,54 +187,75 @@ impl<T: EstimateSize> IntoIterator for VecWithKvSize<T> {
     }
 }
 
-#[derive(Default, Clone)]
-pub struct KvSize(usize);
+/// The size of the collection.
+///
+/// We use an atomic value here to enable operating the size without a mutable reference.
+/// See [`collections::AtomicMutGuard`] for more details.
+///
+/// In the most cases, we have the mutable reference of this struct, so we can directly
+/// operate the underlying value.
+#[derive(Default)]
+pub struct KvSize(AtomicUsize);
+
+/// Clone the [`KvSize`] will duplicate the underlying value.
+impl Clone for KvSize {
+    fn clone(&self) -> Self {
+        Self(self.size().into())
+    }
+}
 
 impl KvSize {
     pub fn new() -> Self {
-        Self(0)
+        Self(0.into())
     }
 
     pub fn with_size(size: usize) -> Self {
-        Self(size)
+        Self(size.into())
     }
 
     pub fn add<K: EstimateSize, V: EstimateSize>(&mut self, key: &K, val: &V) {
-        self.0 = self
-            .0
-            .saturating_add(key.estimated_size() + val.estimated_size());
+        self.add_size(key.estimated_size());
+        self.add_size(val.estimated_size());
     }
 
     pub fn sub<K: EstimateSize, V: EstimateSize>(&mut self, key: &K, val: &V) {
-        self.0 = self
-            .0
-            .saturating_sub(key.estimated_size() + val.estimated_size());
+        self.sub_size(key.estimated_size());
+        self.sub_size(val.estimated_size());
     }
 
     /// Add the size of `val` and return it.
     pub fn add_val<V: EstimateSize>(&mut self, val: &V) -> usize {
         let size = val.estimated_size();
-        self.0 = self.0.saturating_add(size);
+        self.add_size(size);
         size
     }
 
     pub fn sub_val<V: EstimateSize>(&mut self, val: &V) {
-        self.0 = self.0.saturating_sub(val.estimated_size());
+        self.sub_size(val.estimated_size());
     }
 
     pub fn add_size(&mut self, size: usize) {
-        self.0 += size;
+        let this = self.0.get_mut(); // get the underlying value since we have a mutable reference
+        *this = this.saturating_add(size);
     }
 
     pub fn sub_size(&mut self, size: usize) {
-        self.0 -= size;
+        let this = self.0.get_mut(); // get the underlying value since we have a mutable reference
+        *this = this.saturating_sub(size);
+    }
+
+    /// Update the size of the collection by `to - from` atomically, i.e., without a mutable reference.
+    pub fn update_size_atomic(&self, from: usize, to: usize) {
+        let _ = (self.0).fetch_update(Ordering::Relaxed, Ordering::Relaxed, |this| {
+            Some(this.saturating_add(to).saturating_sub(from))
+        });
     }
 
     pub fn set(&mut self, size: usize) {
-        self.0 = size;
+        self.0 = size.into();
     }
 
     pub fn size(&self) -> usize {
-        self.0
+        self.0.load(Ordering::Relaxed)
     }
 }

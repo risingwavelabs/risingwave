@@ -15,6 +15,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableVersionId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -26,6 +27,7 @@ use super::{Binder, BoundBaseTable};
 use crate::catalog::TableId;
 use crate::expr::{Expr as _, ExprImpl, InputRef};
 use crate::user::UserId;
+use crate::TableCatalog;
 
 #[derive(Debug, Clone)]
 pub struct BoundUpdate {
@@ -77,6 +79,23 @@ impl RewriteExprsRecursive for BoundUpdate {
     }
 }
 
+fn get_col_referenced_by_generated_pk(table_catalog: &TableCatalog) -> Result<FixedBitSet> {
+    let column_num = table_catalog.columns().len();
+    let pk_col_id = table_catalog.pk_column_ids();
+    let mut bitset = FixedBitSet::with_capacity(column_num);
+
+    let generated_pk_col_exprs = table_catalog
+        .columns
+        .iter()
+        .filter(|c| pk_col_id.contains(&c.column_id()))
+        .flat_map(|c| c.generated_expr());
+    for expr_node in generated_pk_col_exprs {
+        let expr = ExprImpl::from_expr_proto(expr_node)?;
+        bitset.union_with(&expr.collect_input_refs(column_num));
+    }
+    Ok(bitset)
+}
+
 impl Binder {
     pub(super) fn bind_update(
         &mut self,
@@ -99,6 +118,7 @@ impl Binder {
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
+        let cols_refed_by_generated_pk = get_col_referenced_by_generated_pk(table_catalog)?;
 
         let table = self.bind_table(schema_name.as_deref(), &table_name, None)?;
 
@@ -158,6 +178,12 @@ impl Binder {
                     {
                         return Err(ErrorCode::BindError(
                             "update modifying the generated column is unsupported".to_owned(),
+                        )
+                        .into());
+                    }
+                    if cols_refed_by_generated_pk.contains(id_index) {
+                        return Err(ErrorCode::BindError(
+                            "update modifying the column referenced by generated columns that are part of the primary key is not allowed".to_owned(),
                         )
                         .into());
                     }

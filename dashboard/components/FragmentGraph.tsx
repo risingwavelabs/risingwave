@@ -117,7 +117,7 @@ export default function FragmentGraph({
         extraInfo: string
       }
     >()
-    const includedActorIds = new Set<string>()
+    const includedFragmentIds = new Set<string>()
     for (const [fragmentId, fragmentRoot] of deps) {
       const layoutRoot = treeLayoutFlip(fragmentRoot, {
         dx: nodeMarginX,
@@ -137,7 +137,7 @@ export default function FragmentGraph({
         height,
         extraInfo: `Actor ${fragmentRoot.data.actor_ids?.join(", ")}` || "",
       })
-      fragmentRoot.data.actor_ids?.forEach((id) => includedActorIds.add(id))
+      includedFragmentIds.add(fragmentId)
     }
     const fragmentLayout = layout(
       fragmentDependencyDag.map(({ width: _1, height: _2, id, ...data }) => {
@@ -169,7 +169,7 @@ export default function FragmentGraph({
       svgWidth,
       svgHeight,
       links,
-      includedActorIds,
+      includedFragmentIds,
     }
   }, [planNodeDependencies, fragmentDependency])
 
@@ -189,7 +189,7 @@ export default function FragmentGraph({
     links,
     fragmentLayout: fragmentDependencyDag,
     layoutResult: planNodeDependencyDag,
-    includedActorIds,
+    includedFragmentIds,
   } = planNodeDependencyDagCallback()
 
   useEffect(() => {
@@ -434,7 +434,7 @@ export default function FragmentGraph({
         <g className="actor-links" />
         <g className="actors" />
       </svg>
-      <BackPressureTable selectedActorIds={includedActorIds} />
+      <BackPressureTable selectedFragmentIds={includedFragmentIds} />
     </Fragment>
   )
 }

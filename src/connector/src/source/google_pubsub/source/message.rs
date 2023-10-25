@@ -50,7 +50,7 @@ impl From<TaggedReceivedMessage> for SourceMessage {
                     _ => Some(payload),
                 }
             },
-            offset: timestamp.timestamp_nanos().to_string(),
+            offset: timestamp.timestamp_nanos_opt().unwrap().to_string(),
             split_id,
             meta: SourceMeta::GooglePubsub(GooglePubsubMeta {
                 timestamp: Some(timestamp.timestamp_millis()),

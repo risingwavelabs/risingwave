@@ -7,6 +7,7 @@ source ci/scripts/common.sh
 
 # prepare environment
 export CONNECTOR_RPC_ENDPOINT="localhost:50051"
+export CONNECTOR_LIBS_PATH="./connector-node/libs"
 
 while getopts 'p:' opt; do
     case ${opt} in
@@ -44,9 +45,9 @@ echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc.sql
 
 # import data to postgres
-export PGPASSWORD='postgres';
-createdb -h db -U postgres cdc_test
-psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc.sql
+export PGHOST=db PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test
+createdb
+psql < ./e2e_test/source/cdc/postgres_cdc.sql
 
 node_port=50051
 node_timeout=10
@@ -79,6 +80,9 @@ cargo make ci-start ci-1cn-1fe-with-recovery
 echo "waiting for connector node to start"
 wait_for_connector_node_start
 
+echo "--- inline cdc test"
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc_inline/**/*.slt'
+
 echo "--- mysql & postgres cdc validate test"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.mysql.slt'
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.postgres.slt'
@@ -96,7 +100,7 @@ echo "cluster killed "
 
 # insert new rows
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc_insert.sql
-psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc_insert.sql
+psql < ./e2e_test/source/cdc/postgres_cdc_insert.sql
 echo "inserted new rows into mysql and postgres"
 
 # start cluster w/o clean-data
@@ -140,6 +144,10 @@ echo "--- e2e, kafka alter source"
 chmod +x ./scripts/source/prepare_data_after_alter.sh
 ./scripts/source/prepare_data_after_alter.sh 2
 sqllogictest -p 4566 -d dev './e2e_test/source/basic/alter/kafka_after_new_data.slt'
+
+echo "--- e2e, kafka alter source again"
+./scripts/source/prepare_data_after_alter.sh 3
+sqllogictest -p 4566 -d dev './e2e_test/source/basic/alter/kafka_after_new_data_2.slt'
 
 echo "--- Run CH-benCHmark"
 ./risedev slt -p 4566 -d dev './e2e_test/ch_benchmark/batch/ch_benchmark.slt'

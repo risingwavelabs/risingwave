@@ -19,7 +19,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
@@ -67,6 +67,7 @@ pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableSto
         0,
         FileCache::none(),
         FileCache::none(),
+        None,
     ))
 }
 
@@ -118,10 +119,10 @@ pub fn iterator_test_value_of(idx: usize) -> Vec<u8> {
 
 pub fn transform_shared_buffer(
     batches: Vec<(Vec<u8>, HummockValue<Bytes>)>,
-) -> Vec<(Bytes, HummockValue<Bytes>)> {
+) -> Vec<(TableKey<Bytes>, HummockValue<Bytes>)> {
     batches
         .into_iter()
-        .map(|(k, v)| (k.into(), v))
+        .map(|(k, v)| (TableKey(k.into()), v))
         .collect_vec()
 }
 

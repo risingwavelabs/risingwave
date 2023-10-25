@@ -2431,62 +2431,11 @@ impl Parser {
             .iter()
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
         let connector = option.map(|opt| opt.value.to_string());
-        // row format for cdc source must be debezium json
-        // row format for nexmark source must be native
-        // default row format for datagen source is native
+
         let source_schema = if let Some(connector) = connector {
-            if connector.contains("-cdc") {
-                if (self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
-                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
-                    || self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT])
-                {
-                    return Err(ParserError::ParserError("Row format for cdc connectors should not be set here because it is limited to debezium json".to_string()));
-                }
-                Some(
-                    SourceSchemaV2 {
-                        format: Format::Debezium,
-                        row_encode: Encode::Json,
-                        row_options: Default::default(),
-                    }
-                    .into(),
-                )
-            } else if connector.contains("nexmark") {
-                if (self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
-                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
-                    || self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT])
-                {
-                    return Err(ParserError::ParserError("Row format for nexmark connectors should not be set here because it is limited to internal native format".to_string()));
-                }
-                Some(
-                    SourceSchemaV2 {
-                        format: Format::Native,
-                        row_encode: Encode::Native,
-                        row_options: Default::default(),
-                    }
-                    .into(),
-                )
-            } else if connector.contains("datagen") {
-                if (self.peek_nth_any_of_keywords(0, &[Keyword::ROW])
-                    && self.peek_nth_any_of_keywords(1, &[Keyword::FORMAT]))
-                    || self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT])
-                {
-                    Some(parse_source_shcema(self)?)
-                } else {
-                    Some(
-                        SourceSchemaV2 {
-                            format: Format::Native,
-                            row_encode: Encode::Native,
-                            row_options: Default::default(),
-                        }
-                        .into(),
-                    )
-                }
-            } else {
-                Some(parse_source_shcema(self)?)
-            }
+            Some(self.parse_source_schema_with_connector(&connector)?)
         } else {
-            // Table is NOT created with an external connector.
-            None
+            None // Table is NOT created with an external connector.
         };
 
         // Parse optional `AS ( query )`
@@ -3285,6 +3234,7 @@ impl Parser {
                 // parse_interval_literal for a taste.
                 Keyword::INTERVAL => Ok(DataType::Interval),
                 Keyword::REGCLASS => Ok(DataType::Regclass),
+                Keyword::REGPROC => Ok(DataType::Regproc),
                 Keyword::TEXT => {
                     if self.consume_token(&Token::LBracket) {
                         // Note: this is postgresql-specific
@@ -4274,8 +4224,15 @@ impl Parser {
                 if !order_by.is_empty() {
                     return parser_err!("Table-valued functions do not support ORDER BY clauses");
                 }
+                let with_ordinality = self.parse_keywords(&[Keyword::WITH, Keyword::ORDINALITY]);
+
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
-                Ok(TableFactor::TableFunction { name, alias, args })
+                Ok(TableFactor::TableFunction {
+                    name,
+                    alias,
+                    args,
+                    with_ordinality,
+                })
             } else {
                 let for_system_time_as_of_proctime = self.parse_for_system_time_as_of_proctime()?;
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;

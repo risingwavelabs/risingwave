@@ -60,6 +60,8 @@ pub fn build_compaction_config_vec(
     max_space_reclaim_bytes: Option<u64>,
     level0_max_compact_file_number: Option<u64>,
     level0_overlapping_sub_level_compact_level_count: Option<u32>,
+    enable_emergency_picker: Option<bool>,
+    tombstone_reclaim_ratio: Option<u32>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -101,6 +103,13 @@ pub fn build_compaction_config_vec(
     if let Some(c) = level0_overlapping_sub_level_compact_level_count {
         configs.push(MutableConfig::Level0OverlappingSubLevelCompactLevelCount(c))
     }
+    if let Some(c) = enable_emergency_picker {
+        configs.push(MutableConfig::EnableEmergencyPicker(c))
+    }
+    if let Some(c) = tombstone_reclaim_ratio {
+        configs.push(MutableConfig::TombstoneReclaimRatio(c))
+    }
+
     configs
 }
 
@@ -218,5 +227,36 @@ pub async fn list_compaction_status(context: &CtlContext, verbose: bool) -> anyh
         println!("--- Task Progress ---");
         println!("{:#?}", progress);
     }
+    Ok(())
+}
+
+pub async fn get_compaction_score(
+    context: &CtlContext,
+    id: CompactionGroupId,
+) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    let scores = meta_client.get_compaction_score(id).await?;
+    let mut table = Table::new();
+    table.set_header({
+        let mut row = Row::new();
+        row.add_cell("Select Level".into());
+        row.add_cell("Target Level".into());
+        row.add_cell("Type".into());
+        row.add_cell("Score".into());
+        row
+    });
+    for s in scores.into_iter().sorted_by(|a, b| {
+        a.select_level
+            .cmp(&b.select_level)
+            .then_with(|| a.target_level.cmp(&b.target_level))
+    }) {
+        let mut row = Row::new();
+        row.add_cell(s.select_level.into());
+        row.add_cell(s.target_level.into());
+        row.add_cell(s.picker_type.into());
+        row.add_cell(s.score.into());
+        table.add_row(row);
+    }
+    println!("{table}");
     Ok(())
 }

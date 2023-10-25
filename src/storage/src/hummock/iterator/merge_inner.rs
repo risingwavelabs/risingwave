@@ -137,7 +137,7 @@ impl<I: HummockIterator> OrderedMergeIteratorInner<I> {
 
 impl OrderedMergeIteratorInner<SharedBufferBatchIterator<Forward>> {
     /// Used in `merge_imms_in_memory` to merge immutable memtables.
-    pub fn current_item(&self) -> (Bytes, (HummockEpoch, HummockValue<Bytes>)) {
+    pub fn current_item(&self) -> (TableKey<Bytes>, (HummockEpoch, HummockValue<Bytes>)) {
         let item = self
             .heap
             .peek()

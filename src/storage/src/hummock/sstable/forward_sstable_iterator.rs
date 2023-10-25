@@ -235,7 +235,7 @@ impl SstableIterator {
         idx: usize,
         seek_key: Option<FullKey<&[u8]>>,
     ) -> HummockResult<()> {
-        tracing::trace!(
+        tracing::debug!(
             target: "events::storage::sstable::block_seek",
             "table iterator seek: sstable_object_id = {}, block_id = {}",
             self.sst.value().id,

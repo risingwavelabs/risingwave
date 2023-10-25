@@ -163,14 +163,20 @@ impl StreamGraphFormatter {
                     self.pretty_add_table(source.get_state_table().unwrap()),
                 ));
             }
+            stream_node::NodeBody::StreamFsFetch(node) if let Some(fetch) = &node.node_inner => {
+                fields.push((
+                    "fs fetch state table",
+                    self.pretty_add_table(fetch.get_state_table().unwrap()),
+                ))
+            }
             stream_node::NodeBody::Materialize(node) => fields.push((
                 "materialized table",
                 self.pretty_add_table(node.get_table().unwrap()),
             )),
             stream_node::NodeBody::SimpleAgg(inner) => {
                 fields.push((
-                    "result table",
-                    self.pretty_add_table(inner.get_result_table().unwrap()),
+                    "intermediate state table",
+                    self.pretty_add_table(inner.get_intermediate_state_table().unwrap()),
                 ));
                 fields.push(("state tables", self.call_states(&inner.agg_call_states)));
                 fields.push((
@@ -180,8 +186,8 @@ impl StreamGraphFormatter {
             }
             stream_node::NodeBody::HashAgg(inner) => {
                 fields.push((
-                    "result table",
-                    self.pretty_add_table(inner.get_result_table().unwrap()),
+                    "intermediate state table",
+                    self.pretty_add_table(inner.get_intermediate_state_table().unwrap()),
                 ));
                 fields.push(("state tables", self.call_states(&inner.agg_call_states)));
                 fields.push((
@@ -304,6 +310,7 @@ impl StreamGraphFormatter {
             stream_node::NodeBody::BarrierRecv(_) |
             stream_node::NodeBody::Values(_) |
             stream_node::NodeBody::Source(_) |
+            stream_node::NodeBody::StreamFsFetch(_) |
             stream_node::NodeBody::NoOp(_) => {}
         };
 

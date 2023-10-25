@@ -264,7 +264,7 @@ impl ToStream for LogicalProject {
         let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
 
         // Add missing columns of input_pk into the select list.
-        let input_pk = input.logical_pk();
+        let input_pk = input.expect_stream_key();
         let i2o = proj.i2o_col_mapping();
         let col_need_to_add = input_pk
             .iter()
@@ -284,7 +284,7 @@ impl ToStream for LogicalProject {
         // But the target size of `out_col_change` should be the same as the length of the new
         // schema.
         let (map, _) = out_col_change.into_parts();
-        let out_col_change = ColIndexMapping::with_target_size(map, proj.base.schema.len());
+        let out_col_change = ColIndexMapping::with_target_size(map, proj.base.schema().len());
         Ok((proj.into(), out_col_change))
     }
 }

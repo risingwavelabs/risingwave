@@ -58,7 +58,7 @@ It will start a minio, a meta node, a compute node, a frontend, a compactor, a p
 ### s3 and other s3-compatible storage backend
 To start a RisingWave cluster with s3 backend, configure the aws credit in [aws.env](https://github.com/risingwavelabs/risingwave/blob/main/docker/aws.env).
 If you want to use some s3 compatible storage like Tencent Cloud COS, just configure one more [endpoint](https://github.com/risingwavelabs/risingwave/blob/a2684461e379ce73f8d730982147439e2379de16/docker/aws.env#L7).
-After configuring the environment and fill in your [bucket name and data directory](https://github.com/risingwavelabs/risingwave/blob/a2684461e379ce73f8d730982147439e2379de16/docker/docker-compose-with-s3.yml#L196), run
+After configuring the environment and fill in your [bucket name](https://github.com/risingwavelabs/risingwave/blob/a2684461e379ce73f8d730982147439e2379de16/docker/docker-compose-with-s3.yml#L196), run
 
 ```
 # Start all components
@@ -68,7 +68,7 @@ docker-compose -f docker-compose-with-s3.yml up
 It will run with s3 (compatible) object storage with a meta node, a compute node, a frontend, a compactor, a prometheus and a redpanda instance.
 
 ### Start with other storage products of  public cloud vendors
-To start a RisingWave cluster with other storage backend, like Google Cloud Storage, Alicloud OSS or Azure Blob Storage, configure the authentication information in [multiple_object_storage.env](https://github.com/risingwavelabs/risingwave/blob/main/docker/multiple_object_storage.env), fill in your [bucket name and data directory](https://github.com/risingwavelabs/risingwave/blob/a2684461e379ce73f8d730982147439e2379de16/docker/docker-compose-with-gcs.yml#L196).
+To start a RisingWave cluster with other storage backend, like Google Cloud Storage, Alicloud OSS or Azure Blob Storage, configure the authentication information in [multiple_object_storage.env](https://github.com/risingwavelabs/risingwave/blob/main/docker/multiple_object_storage.env), fill in your [bucket name](https://github.com/risingwavelabs/risingwave/blob/a2684461e379ce73f8d730982147439e2379de16/docker/docker-compose-with-gcs.yml#L196).
 and run
 
 ```
@@ -79,7 +79,7 @@ docker-compose -f docker-compose-with-xxx.yml up
 It will run RisingWave with corresponding (object) storage products.
 
 ### Start with HDFS backend
-To start a RisingWave cluster with HDFS, mount your `HADDOP_HOME` in [compactor node volumes](https://github.com/risingwavelabs/risingwave/blob/a2684461e379ce73f8d730982147439e2379de16/docker/docker-compose-with-hdfs.yml#L28), [compute node volumes](https://github.com/risingwavelabs/risingwave/blob/a2684461e379ce73f8d730982147439e2379de16/docker/docker-compose-with-hdfs.yml#L112) [compute node volumes](https://github.com/risingwavelabs/risingwave/blob/a2684461e379ce73f8d730982147439e2379de16/docker/docker-compose-with-hdfs.yml#L218), fill in the [cluster_name/namenode and data_path](https://github.com/risingwavelabs/risingwave/blob/a2684461e379ce73f8d730982147439e2379de16/docker/docker-compose-with-hdfs.yml#L202),
+To start a RisingWave cluster with HDFS, mount your `HADDOP_HOME` in [compactor node volumes](https://github.com/risingwavelabs/risingwave/blob/a2684461e379ce73f8d730982147439e2379de16/docker/docker-compose-with-hdfs.yml#L28), [compute node volumes](https://github.com/risingwavelabs/risingwave/blob/a2684461e379ce73f8d730982147439e2379de16/docker/docker-compose-with-hdfs.yml#L112) [compute node volumes](https://github.com/risingwavelabs/risingwave/blob/a2684461e379ce73f8d730982147439e2379de16/docker/docker-compose-with-hdfs.yml#L218), fill in the [cluster_name/namenode](https://github.com/risingwavelabs/risingwave/blob/a2684461e379ce73f8d730982147439e2379de16/docker/docker-compose-with-hdfs.yml#L202),
 and run
 
 ```

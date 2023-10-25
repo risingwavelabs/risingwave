@@ -32,8 +32,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Intersect<PlanRef> {
         self.inputs[0].schema().clone()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some(self.inputs[0].logical_pk().to_vec())
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        Some(self.inputs[0].stream_key()?.to_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {

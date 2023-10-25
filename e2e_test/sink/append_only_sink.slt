@@ -22,7 +22,7 @@ create sink invalid_sink_type from t with (connector = 'blackhole', type = 'inva
 statement error `force_append_only` must be true or false
 create sink invalid_force_append_only from t with (connector = 'blackhole', force_append_only = 'invalid');
 
-statement error invalid connector type: invalid
+statement error db error: ERROR: QueryError: Sink error: config error: unsupported sink type invalid
 create sink invalid_connector from t with (connector = 'invalid');
 
 statement ok

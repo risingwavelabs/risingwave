@@ -23,9 +23,10 @@ message SinkParam {
   uint32 sink_id = 1;
   map<string, string> properties = 2;
   TableSchema table_schema = 3;
-  catalog.SinkType sink_type = 4;
+  catalog.SinkType sink_type = 4; // to be deprecated
   string db_name = 5;
   string sink_from_name = 6;
+  catalog.SinkFormatDesc format_desc = 7;
 }
 
 enum SinkPayloadFormat {

@@ -31,6 +31,8 @@ pub static PG_TYPE: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
         (DataType::Int32, "typelem"),
         // 0
         (DataType::Int32, "typarray"),
+        // FIXME: Should be regproc type
+        (DataType::Varchar, "typinput"),
         // false
         (DataType::Boolean, "typnotnull"),
         // 0
@@ -58,6 +60,7 @@ pub static PG_TYPE: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
                 t.name AS typname, \
                 0 AS typelem, \
                 0 AS typarray, \
+                t.input_oid AS typinput, \
                 false AS typnotnull, \
                 0 AS typbasetype, \
                 -1 AS typtypmod, \

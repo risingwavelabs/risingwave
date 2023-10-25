@@ -5,6 +5,9 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
+# prepare environment
+export CONNECTOR_LIBS_PATH="./connector-node/libs"
+
 while getopts 'p:' opt; do
     case ${opt} in
         p )

@@ -169,7 +169,7 @@ impl UpdateExecutor {
                     columns.push(column);
                 }
 
-                DataChunk::new(columns, data_chunk.vis().clone())
+                DataChunk::new(columns, data_chunk.visibility().clone())
             };
 
             if self.returning {

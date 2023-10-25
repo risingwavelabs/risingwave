@@ -453,7 +453,7 @@ mod tests {
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::hummock::CompactTaskProgress;
 
-    use crate::hummock::compaction::default_level_selector;
+    use crate::hummock::compaction::selector::default_compaction_selector;
     use crate::hummock::test_utils::{
         add_ssts, register_table_ids_to_compaction_group, setup_compute_env,
     };
@@ -477,7 +477,7 @@ mod tests {
             hummock_manager
                 .get_compact_task(
                     StaticCompactionGroupId::StateDefault.into(),
-                    &mut default_level_selector(),
+                    &mut default_compaction_selector(),
                 )
                 .await
                 .unwrap()

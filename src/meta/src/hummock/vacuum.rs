@@ -164,8 +164,7 @@ impl VacuumManager {
         &self,
         objects_to_delete: &mut Vec<HummockSstableObjectId>,
     ) -> MetaResult<()> {
-        let reject: HashSet<HummockSstableObjectId> =
-            self.backup_manager.list_pinned_ssts().into_iter().collect();
+        let reject = self.backup_manager.list_pinned_ssts();
         // Ack these SSTs immediately, because they tend to be pinned for long time.
         // They will be GCed during full GC when they are no longer pinned.
         let to_ack = objects_to_delete

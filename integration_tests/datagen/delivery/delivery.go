@@ -69,7 +69,7 @@ func (g *orderEventGen) Load(ctx context.Context, outCh chan<- sink.SinkRecord) 
 			OrderId:        g.seqOrderId,
 			RestaurantId:   rand.Int63n(num_of_restaurants),
 			OrderState:     order_states[rand.Intn(len(order_states))],
-			OrderTimestamp: now.Add(time.Duration(rand.Intn(total_minutes)) * time.Minute).Format(gen.RwTimestampLayout),
+			OrderTimestamp: now.Add(time.Duration(rand.Intn(total_minutes)) * time.Minute).Format(gen.RwTimestampNaiveLayout),
 		}
 		g.seqOrderId++
 		select {

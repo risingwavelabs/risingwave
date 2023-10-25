@@ -1,3 +1,4 @@
+#![feature(result_option_inspect)]
 // Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,7 +17,7 @@ use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
 use risingwave_ctl::CliOpts as CtlOpts;
 use risingwave_frontend::FrontendOpts;
-use risingwave_meta::MetaNodeOpts;
+use risingwave_meta_node::MetaNodeOpts;
 use risingwave_rt::{init_risingwave_logger, main_okk, LoggerSettings};
 
 /// Define the `main` function for a component.
@@ -24,18 +25,20 @@ use risingwave_rt::{init_risingwave_logger, main_okk, LoggerSettings};
 macro_rules! main {
     ($component:ident) => {
         #[cfg(enable_task_local_alloc)]
-        risingwave_common::enable_task_local_jemalloc_on_unix!();
+        risingwave_common::enable_task_local_jemalloc!();
 
         #[cfg(not(enable_task_local_alloc))]
-        risingwave_common::enable_jemalloc_on_unix!();
+        risingwave_common::enable_jemalloc!();
 
-        #[cfg_attr(coverage, no_coverage)]
+        #[cfg_attr(coverage, coverage(off))]
         fn main() {
             let opts = clap::Parser::parse();
             $crate::$component(opts);
         }
     };
 }
+
+risingwave_expr_impl::enable!();
 
 // Entry point functions.
 
@@ -46,7 +49,7 @@ pub fn compute(opts: ComputeNodeOpts) {
 
 pub fn meta(opts: MetaNodeOpts) {
     init_risingwave_logger(LoggerSettings::new("meta"));
-    main_okk(risingwave_meta::start(opts));
+    main_okk(risingwave_meta_node::start(opts));
 }
 
 pub fn frontend(opts: FrontendOpts) {
@@ -70,5 +73,8 @@ pub fn ctl(opts: CtlOpts) {
         .build()
         .unwrap()
         .block_on(risingwave_ctl::start(opts))
+        .inspect_err(|e| {
+            eprintln!("{:#?}", e);
+        })
         .unwrap();
 }

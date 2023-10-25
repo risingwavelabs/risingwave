@@ -1,0 +1,46 @@
+query I
+select array_sum(array[1, 2, 3]);
+----
+6
+
+# Testing for SMALLINT with positive numbers
+query I
+select array_sum(array[10, 20, 30]::smallint[]);
+----
+60
+
+# Testing for SMALLINT with a mix of positive and negative numbers
+query I
+select array_sum(array[-10, 20, -30]::smallint[]);
+----
+-20
+
+# Testing for SMALLINT with all zeros
+query I
+select array_sum(array[0, 0, 0]::smallint[]);
+----
+0
+
+# Testing for INT with larger positive numbers
+query I
+select array_sum(array[1000, 2000, 3000]::int[]);
+----
+6000
+
+# Testing for INT with a mix of larger positive and negative numbers
+query I
+select array_sum(array[-1000, 2000, -3000]::int[]);
+----
+-2000
+
+# Testing for BIGINT with much larger numbers
+query I
+select array_sum(array[1000000000, 2000000000, 3000000000]::bigint[]);
+----
+6000000000
+
+# Testing for BIGINT with a mix of much larger positive and negative numbers
+query I
+select array_sum(array[-1000000000, 2000000000, -3000000000]::bigint[]);
+----
+-2000000000

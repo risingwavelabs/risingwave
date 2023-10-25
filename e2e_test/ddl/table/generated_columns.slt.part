@@ -149,3 +149,11 @@ CREATE TABLE t (v INT, t timestamptz as now()) WITH (
   datagen.rows.per.second='15',
   datagen.split.num = '1'
 ) FORMAT PLAIN ENCODE JSON;
+
+# create a table with impure generated column as pk.
+statement error QueryError: Bind error: Generated columns with impure expressions should not be part of the primary key. Here column "v2" is defined as part of the primary key.
+CREATE TABLE t (
+  v1 INT,
+  v2 timestamptz AS proctime(),
+  PRIMARY KEY (v1, v2)
+);

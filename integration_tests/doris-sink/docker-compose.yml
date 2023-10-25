@@ -1,0 +1,104 @@
+---
+version: "3"
+services:
+  fe:
+    image: apache/doris:2.0.0_alpha-fe-x86_64
+    hostname: fe
+    environment:
+     - FE_SERVERS=fe1:172.21.0.2:9010
+     - FE_ID=1
+    ports:
+      - "8030:8030"
+      - "9030:9030"
+    networks:
+      mynetwork:
+        ipv4_address: 172.21.0.2
+  be:
+    image: apache/doris:2.0.0_alpha-be-x86_64
+    hostname: be
+    environment:
+     - FE_SERVERS=fe1:172.21.0.2:9010
+     - BE_ADDR=172.21.0.3:9050
+    depends_on:
+      - fe
+    ports:
+      - "9050:9050"
+    networks:
+      mynetwork:
+        ipv4_address: 172.21.0.3
+  compactor-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compactor-0
+    networks:
+      mynetwork:
+        ipv4_address: 172.21.0.4
+  compute-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compute-node-0
+    networks:
+      mynetwork:
+        ipv4_address: 172.21.0.5
+  etcd-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: etcd-0
+    networks:
+      mynetwork:
+        ipv4_address: 172.21.0.6
+  frontend-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: frontend-node-0
+    networks:
+      mynetwork:
+        ipv4_address: 172.21.0.7
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+    networks:
+      mynetwork:
+        ipv4_address: 172.21.0.8
+  meta-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: meta-node-0
+    networks:
+      mynetwork:
+        ipv4_address: 172.21.0.9
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+    networks:
+      mynetwork:
+        ipv4_address: 172.21.0.10
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+    networks:
+      mynetwork:
+        ipv4_address: 172.21.0.11
+volumes:
+  compute-node-0:
+    external: false
+  etcd-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+  message_queue:
+    external: false
+name: risingwave-compose
+networks:
+  mynetwork:
+    ipam:
+      config:
+        - subnet: 172.21.80.0/16
+  default:

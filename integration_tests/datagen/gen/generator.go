@@ -9,6 +9,7 @@ import (
 	"datagen/sink/postgres"
 	"datagen/sink/pulsar"
 	"datagen/sink/s3"
+	"time"
 
 	"gonum.org/v1/gonum/stat/distuv"
 )
@@ -47,7 +48,8 @@ type LoadGenerator interface {
 	Load(ctx context.Context, outCh chan<- sink.SinkRecord)
 }
 
-const RwTimestampLayout = "2006-01-02 15:04:05.07+01:00"
+const RwTimestampNaiveLayout = time.DateTime
+const RwTimestamptzLayout = time.RFC3339
 
 type RandDist interface {
 	// Rand returns a random number ranging from [0, max].

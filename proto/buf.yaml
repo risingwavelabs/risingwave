@@ -9,6 +9,7 @@ lint:
     # This proto is copied from https://github.com/grpc/grpc/blob/v1.15.0/doc/health-checking.md
     # It violates some lint rules, so we ignore it.
     - health.proto
+  allow_comment_ignores: true
   enum_zero_value_suffix: UNSPECIFIED
   except:
     - ENUM_VALUE_PREFIX # Enum variant doesn't have to prefix with enum name.

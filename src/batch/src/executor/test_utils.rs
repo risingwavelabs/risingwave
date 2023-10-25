@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::VecDeque;
-use std::future::Future;
 
 use assert_matches::assert_matches;
 use futures::StreamExt;
@@ -220,8 +219,8 @@ pub async fn diff_executor_output(actual: BoxedExecutor, expect: BoxedExecutor) 
 }
 
 fn is_data_chunk_eq(left: &DataChunk, right: &DataChunk) {
-    assert!(left.visibility().is_none());
-    assert!(right.visibility().is_none());
+    assert!(left.is_compacted());
+    assert!(right.is_compacted());
 
     assert_eq!(
         left.cardinality(),
@@ -246,15 +245,11 @@ impl FakeExchangeSource {
 }
 
 impl ExchangeSource for FakeExchangeSource {
-    type TakeDataFuture<'a> = impl Future<Output = Result<Option<DataChunk>>> + 'a;
-
-    fn take_data(&mut self) -> Self::TakeDataFuture<'_> {
-        async {
-            if let Some(chunk) = self.chunks.pop() {
-                Ok(chunk)
-            } else {
-                Ok(None)
-            }
+    async fn take_data(&mut self) -> Result<Option<DataChunk>> {
+        if let Some(chunk) = self.chunks.pop() {
+            Ok(chunk)
+        } else {
+            Ok(None)
         }
     }
 

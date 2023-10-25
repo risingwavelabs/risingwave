@@ -38,6 +38,8 @@ public class SinkWriterStreamObserver
 
     private TableSchema tableSchema;
 
+    private boolean finished = false;
+
     private boolean epochStarted;
     private long currentEpoch;
     private Long currentBatchId;
@@ -58,6 +60,9 @@ public class SinkWriterStreamObserver
 
     @Override
     public void onNext(ConnectorServiceProto.SinkWriterStreamRequest sinkTask) {
+        if (finished) {
+            throw new RuntimeException("unexpected onNext call on a finished writer stream");
+        }
         try {
             if (sinkTask.hasStart()) {
                 if (isInitialized()) {
@@ -169,26 +174,27 @@ public class SinkWriterStreamObserver
                 throw INVALID_ARGUMENT.withDescription("invalid sink task").asRuntimeException();
             }
         } catch (Exception e) {
-            LOG.error("sink task error: ", e);
+            LOG.error("sink writer error: ", e);
+            cleanup();
             responseObserver.onError(e);
         }
     }
 
     @Override
     public void onError(Throwable throwable) {
-        LOG.error("sink task error: ", throwable);
+        LOG.error("sink writer finishes with error: ", throwable);
         cleanup();
-        responseObserver.onError(throwable);
     }
 
     @Override
     public void onCompleted() {
-        LOG.debug("sink task completed");
+        LOG.info("sink writer completed");
         cleanup();
         responseObserver.onCompleted();
     }
 
     private void cleanup() {
+        finished = true;
         if (sink != null) {
             sink.drop();
         }

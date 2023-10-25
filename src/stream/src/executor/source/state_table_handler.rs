@@ -14,8 +14,10 @@
 
 use std::collections::HashSet;
 use std::ops::{Bound, Deref};
+use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::hash::VirtualNode;
@@ -36,7 +38,7 @@ use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
-use crate::executor::StreamExecutorResult;
+use crate::executor::{StreamExecutorResult, BACKFILL_STATE_KEY_SUFFIX};
 
 const COMPLETE_SPLIT_PREFIX: &str = "SsGLdzRDqBuKzMf9bDap";
 
@@ -53,6 +55,21 @@ impl<S: StateStore> SourceStateTableHandler<S> {
 
         Self {
             state_store: StateTable::from_table_catalog(table_catalog, store, None).await,
+        }
+    }
+
+    pub async fn from_table_catalog_with_vnodes(
+        table_catalog: &PbTable,
+        store: S,
+        vnodes: Option<Arc<Bitmap>>,
+    ) -> Self {
+        // The state of source should not be cleaned up by retention_seconds
+        assert!(!table_catalog
+            .properties
+            .contains_key(&String::from(PROPERTIES_RETENTION_SECOND_KEY)));
+
+        Self {
+            state_store: StateTable::from_table_catalog(table_catalog, store, vnodes).await,
         }
     }
 
@@ -84,9 +101,9 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         // all source executor has vnode id zero
         let iter = self
             .state_store
-            .iter_row_with_pk_range(
-                &(start, end),
+            .iter_with_vnode(
                 VirtualNode::ZERO,
+                &(start, end),
                 PrefetchOptions::new_for_exhaust_iter(),
             )
             .await?;
@@ -159,7 +176,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         Ok(())
     }
 
-    async fn delete(&mut self, key: SplitId) -> StreamExecutorResult<()> {
+    pub async fn delete(&mut self, key: SplitId) -> StreamExecutorResult<()> {
         if let Some(prev_row) = self.get(key).await? {
             self.state_store.delete(prev_row);
         }
@@ -203,15 +220,40 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         &mut self,
         stream_source_split: &SplitImpl,
     ) -> StreamExecutorResult<Option<SplitImpl>> {
-        Ok(match self.get(stream_source_split.id()).await? {
+        let split_id = stream_source_split.id();
+        Ok(match self.get(split_id.clone()).await? {
             None => None,
             Some(row) => match row.datum_at(1) {
                 Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                    Some(SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?)
+                    let mut split_impl = SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?;
+                    if let SplitImpl::MysqlCdc(ref mut split) = split_impl && let Some(mysql_split) = split.mysql_split.as_mut() {
+                        // if the snapshot_done is not set, we should check whether the backfill is finished
+                        if !mysql_split.inner.snapshot_done {
+                            mysql_split.inner.snapshot_done = self.recover_cdc_snapshot_state(split_id).await?;
+                        }
+                    }
+                    Some(split_impl)
                 }
                 _ => unreachable!(),
             },
         })
+    }
+
+    async fn recover_cdc_snapshot_state(
+        &mut self,
+        split_id: SplitId,
+    ) -> StreamExecutorResult<bool> {
+        let mut key = split_id.to_string();
+        key.push_str(BACKFILL_STATE_KEY_SUFFIX);
+
+        let flag = match self.get(key.into()).await? {
+            Some(row) => match row.datum_at(1) {
+                Some(ScalarRefImpl::Jsonb(jsonb_ref)) => jsonb_ref.as_bool()?,
+                _ => unreachable!("invalid cdc backfill persistent state"),
+            },
+            None => false,
+        };
+        Ok(flag)
     }
 }
 

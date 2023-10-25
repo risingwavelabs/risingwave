@@ -7,38 +7,24 @@
     SELECT format('Testing %s, %I, %s, %%', v1, v2, v3) FROM t1;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [ConcatWs('':Varchar, 'Testing ':Varchar, t1.v1, ', ':Varchar, QuoteIdent(t1.v2), ', ':Varchar, t1.v3::Varchar, ', %':Varchar) as $expr1] }
+    └─BatchProject { exprs: [Format('Testing %s, %I, %s, %%':Varchar, t1.v1, t1.v2, t1.v3::Varchar) as $expr1] }
       └─BatchScan { table: t1, columns: [t1.v1, t1.v2, t1.v3], distribution: SomeShard }
 - sql: |
     CREATE TABLE t1(v1 varchar, v2 int, v3 int);
     SELECT format('Testing %s, %I, %s, %%', v1, v2, v3) FROM t1;
-  binder_error: |-
-    Bind error: failed to bind expression: format('Testing %s, %I, %s, %%', v1, v2, v3)
-
-    Caused by:
-      Feature is not yet implemented: QuoteIdent[Int32]
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [Format('Testing %s, %I, %s, %%':Varchar, t1.v1, t1.v2::Varchar, t1.v3::Varchar) as $expr1] }
+      └─BatchScan { table: t1, columns: [t1.v1, t1.v2, t1.v3], distribution: SomeShard }
 - sql: |
     SELECT format('Testing %s, %s, %s, %%', 'one', 'two');
-  binder_error: |-
-    Bind error: failed to bind expression: format('Testing %s, %s, %s, %%', 'one', 'two')
-
-    Caused by:
-      Bind error: Function `format` required 3 arguments based on the `formatstr`, but 2 found.
+  batch_error: 'Expr error: too few arguments for format()'
 - sql: |
     SELECT format('Testing %s, %s, %s, %', 'one', 'two', 'three');
-  binder_error: |-
-    Bind error: failed to bind expression: format('Testing %s, %s, %s, %', 'one', 'two', 'three')
-
-    Caused by:
-      Bind error: unterminated format() type specifier
+  batch_error: 'Expr error: Parse error: unterminated format() type specifier'
 - sql: |
     SELECT format('Testing %s, %f, %d, %', 'one', 'two', 'three');
-  binder_error: |-
-    Bind error: failed to bind expression: format('Testing %s, %f, %d, %', 'one', 'two', 'three')
-
-    Caused by:
-      Bind error: unrecognized format() type specifier "f"
+  batch_error: 'Expr error: Parse error: unrecognized format() type specifier "f"'
 - sql: |
     SELECT format();
   binder_error: |-

@@ -38,8 +38,6 @@ enum HummockErrorInner {
     ObjectIoError(Box<ObjectError>),
     #[error("Meta error {0}.")]
     MetaError(String),
-    #[error("Invalid WriteBatch.")]
-    InvalidWriteBatch,
     #[error("SharedBuffer error {0}.")]
     SharedBufferError(String),
     #[error("Wait epoch error {0}.")]
@@ -103,10 +101,6 @@ impl HummockError {
 
     pub fn meta_error(error: impl ToString) -> HummockError {
         HummockErrorInner::MetaError(error.to_string()).into()
-    }
-
-    pub fn invalid_write_batch() -> HummockError {
-        HummockErrorInner::InvalidWriteBatch.into()
     }
 
     pub fn shared_buffer_error(error: impl ToString) -> HummockError {

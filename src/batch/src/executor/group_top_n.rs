@@ -196,14 +196,19 @@ impl<K: HashKey> GroupTopNExecutor<K> {
 
         #[for_await]
         for chunk in self.child.execute() {
-            let chunk = Arc::new(chunk?.compact());
+            let chunk = Arc::new(chunk?);
             let keys = K::build(self.group_key.as_slice(), &chunk)?;
 
-            for (row_id, (encoded_row, key)) in encode_chunk(&chunk, &self.column_orders)?
-                .into_iter()
-                .zip_eq_fast(keys.into_iter())
-                .enumerate()
+            for (row_id, ((encoded_row, key), visible)) in
+                encode_chunk(&chunk, &self.column_orders)?
+                    .into_iter()
+                    .zip_eq_fast(keys.into_iter())
+                    .zip_eq_fast(chunk.visibility().iter())
+                    .enumerate()
             {
+                if !visible {
+                    continue;
+                }
                 let heap = groups.entry(key).or_insert_with(|| {
                     TopNHeap::new(
                         self.limit,

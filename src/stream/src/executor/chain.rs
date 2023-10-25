@@ -79,7 +79,7 @@ impl ChainExecutor {
         // If the barrier is a conf change of creating this mview, and the snapshot is not to be
         // consumed, we can finish the progress immediately.
         if barrier.is_newly_added(self.actor_id) && self.upstream_only {
-            self.progress.finish(barrier.epoch.curr);
+            self.progress.finish(barrier.epoch.curr, 0);
         }
 
         // The first barrier message should be propagated.
@@ -103,7 +103,7 @@ impl ChainExecutor {
         for msg in upstream {
             let msg = msg?;
             if to_consume_snapshot && let Message::Barrier(barrier) = &msg {
-                self.progress.finish(barrier.epoch.curr);
+                self.progress.finish(barrier.epoch.curr, 0);
             }
             yield msg;
         }

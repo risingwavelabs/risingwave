@@ -13,6 +13,9 @@ statement ok
 drop materialized view v_d;
 
 statement ok
+drop materialized view v_e;
+
+statement ok
 drop materialized view v_a_b;
 
 statement ok

@@ -261,7 +261,7 @@ unknown
 query T
 select pg_typeof('123'::varchar);
 ----
-varchar
+character varying
 
 query T
 select pg_typeof('123'::int);
@@ -276,7 +276,7 @@ unknown
 query T
 select pg_typeof(null::varchar);
 ----
-varchar
+character varying
 
 query T
 select pg_typeof(null::bool);
@@ -393,6 +393,30 @@ select regexp_match('abc01234xyz', '(?:(.*?)(\d+)(.*)){1,1}');
 {abc,01234,xyz}
 
 query T
+select regexp_match(string, 'a')
+from (values
+    ('abc'),
+    ('def'),
+    ('ghi')
+) t(string);
+----
+{a}
+NULL
+NULL
+
+query T
+select regexp_match(string, pattern, flags)
+from (values
+    ('abc', 'bc', ''),
+    ('abc', 'Bc', ''),
+    ('abc', 'Bc', 'i')
+) t(string, pattern, flags);
+----
+{bc}
+NULL
+{bc}
+
+query T
 select regexp_matches('foobarbequebazilbarfbonk', '(b[^b]+)(b[^b]+)', 'g');
 ----
 {bar,beque}
@@ -504,10 +528,10 @@ select regexp_replace('abc123', 'abc', 'prefix\&suffix');
 ----
 prefixabcsuffix123
 
-query error invalid syntax for `regexp_replace`
+query error invalid digit found in string
 select regexp_replace('foobarbaz', 'b..', 'X', 1, 'g');
 
-query error invalid parameters specified in regexp_replace
+query error invalid digit found in string
 select regexp_replace('foobarbaz', 'b..', 'X', 'g', 1);
 
 # With Unicode
@@ -545,6 +569,30 @@ query T
 select regexp_replace('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', 'baz(...)', '这是🥵', 'ic');
 ----
 💩💩💩💩💩foo🤔️bar亲爱的😭这是🥵爱情❤️‍🔥
+
+# Positive Lookahead
+query T
+select regexp_replace('foobarbaz', 'a(?=r)', 'X');
+----
+foobXrbaz
+
+# Negative Lookahead
+query T
+select regexp_replace('chocolate', 'o(?!c)', 'X');
+----
+chocXlate
+
+# Positive Lookbehind
+query T
+select regexp_replace('foobarXaz', '(?<=X)a', 'X');
+----
+foobarXXz
+
+# Negative Lookbehind
+query T
+select regexp_replace('foobarXaz', '(?<!X)a', 'X');
+----
+foobXrXaz
 
 query T
 select regexp_count('ABCABCAXYaxy', 'A.');
@@ -586,19 +634,64 @@ select regexp_count('foobarbaz', 'b..', 3);
 ----
 2
 
-query error Expected start to be a Unsigned Int32
+query error invalid digit found in string
 select regexp_count('foobarbaz', 'b..', 'g');
 
-query error Expected start to be a Unsigned Int32
+query error invalid digit found in string
 select regexp_count('foobarbaz', 'b..', 'i');
 
 query error invalid regular expression option: "a"
 select regexp_count('foobarbaz', 'b..', 3, 'a');
 
-query error `regexp_count` does not support global flag option
+query error does not support the global option
 select regexp_count('foobar', 'b..', 1, 'g');
 
 query T
 select regexp_count('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', '亲爱的😭', 1, 'i');
 ----
 1
+
+query T
+select regexp_split_to_array('apple,banana,orange', ',');
+----
+{apple,banana,orange}
+
+query T
+select regexp_split_to_array('apple.banana!orange', '[.!]');
+----
+{apple,banana,orange}
+
+query T
+select regexp_split_to_array('applebananaorange', ',');
+----
+{applebananaorange}
+
+query T
+select regexp_split_to_array('', ',');
+----
+{""}
+
+query T
+select regexp_split_to_array('the quick brown fox jumps over the lazy dog', '\s+');
+----
+{the,quick,brown,fox,jumps,over,the,lazy,dog}
+
+query T
+select regexp_split_to_array('the quick brown fox jumps over the lazy dog', '\s*');
+----
+{t,h,e,q,u,i,c,k,b,r,o,w,n,f,o,x,j,u,m,p,s,o,v,e,r,t,h,e,l,a,z,y,d,o,g}
+
+query T
+select regexp_split_to_array('apple\\banana,orange', '\\\\|,');
+----
+{apple,banana,orange}
+
+query T
+select regexp_split_to_array('apple!!!banana?orange???grape', '[!?]+');
+----
+{apple,banana,orange,grape}
+
+query T
+select regexp_split_to_array('💩💩💩💩💩foo🤔️bar亲爱的😭baz这不是爱情❤️‍🔥', '亲爱的😭');
+----
+{💩💩💩💩💩foo🤔️bar,baz这不是爱情❤️‍🔥}

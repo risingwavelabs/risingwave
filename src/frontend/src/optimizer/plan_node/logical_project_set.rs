@@ -363,7 +363,7 @@ impl ToStream for LogicalProjectSet {
             self.rewrite_with_input(input.clone(), input_col_change);
 
         // Add missing columns of input_pk into the select list.
-        let input_pk = input.logical_pk();
+        let input_pk = input.expect_stream_key();
         let i2o = self.core.i2o_col_mapping();
         let col_need_to_add = input_pk
             .iter()
@@ -427,7 +427,7 @@ mod test {
         let mut values = LogicalValues::new(vec![], Schema { fields }, ctx);
         values
             .base
-            .functional_dependency
+            .functional_dependency_mut()
             .add_functional_dependency_by_column_indices(&[1], &[2]);
         let project_set = LogicalProjectSet::new(
             values.into(),
@@ -449,8 +449,9 @@ mod test {
         );
         let fd_set: HashSet<FunctionalDependency> = project_set
             .base
-            .functional_dependency
-            .into_dependencies()
+            .functional_dependency()
+            .as_dependencies()
+            .clone()
             .into_iter()
             .collect();
         let expected_fd_set: HashSet<FunctionalDependency> =

@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use anyhow::anyhow;
-use risingwave_common::types::JsonbVal;
+use aws_sdk_s3::types::Object;
+use risingwave_common::types::{JsonbVal, Timestamp};
 use serde::{Deserialize, Serialize};
 
 use crate::source::{SplitId, SplitMetaData};
@@ -24,6 +25,16 @@ pub struct FsSplit {
     pub name: String,
     pub offset: usize,
     pub size: usize,
+}
+
+impl From<&Object> for FsSplit {
+    fn from(value: &Object) -> Self {
+        Self {
+            name: value.key().unwrap().to_owned(),
+            offset: 0,
+            size: value.size() as usize,
+        }
+    }
 }
 
 impl SplitMetaData for FsSplit {
@@ -38,6 +49,12 @@ impl SplitMetaData for FsSplit {
     fn encode_to_json(&self) -> JsonbVal {
         serde_json::to_value(self.clone()).unwrap().into()
     }
+
+    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        let offset = start_offset.parse().unwrap();
+        self.offset = offset;
+        Ok(())
+    }
 }
 
 impl FsSplit {
@@ -48,10 +65,24 @@ impl FsSplit {
             size,
         }
     }
+}
 
-    pub fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
-        let offset = start_offset.parse().unwrap();
-        self.offset = offset;
-        Ok(())
+#[derive(Clone, Debug)]
+pub struct FsPageItem {
+    pub name: String,
+    pub size: i64,
+    pub timestamp: Timestamp,
+}
+
+pub type FsPage = Vec<FsPageItem>;
+
+impl From<&Object> for FsPageItem {
+    fn from(value: &Object) -> Self {
+        let aws_ts = value.last_modified().unwrap();
+        Self {
+            name: value.key().unwrap().to_owned(),
+            size: value.size(),
+            timestamp: Timestamp::from_timestamp_uncheck(aws_ts.secs(), aws_ts.subsec_nanos()),
+        }
     }
 }

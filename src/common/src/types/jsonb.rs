@@ -345,6 +345,10 @@ impl<'a> JsonbRef<'a> {
             _ => Err(format!("cannot deconstruct a jsonb {}", self.type_name())),
         }
     }
+
+    pub fn value(&self) -> &'a Value {
+        self.0
+    }
 }
 
 /// A custom implementation for [`serde_json::ser::Formatter`] to match PostgreSQL, which adds extra

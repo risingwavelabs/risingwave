@@ -15,6 +15,7 @@
 use std::borrow::Cow;
 
 use itertools::Itertools;
+use risingwave_pb::expr::ExprNode;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 
@@ -280,6 +281,17 @@ impl ColumnCatalog {
     /// If the column is a generated column
     pub fn is_generated(&self) -> bool {
         self.column_desc.is_generated()
+    }
+
+    /// If the column is a generated column
+    pub fn generated_expr(&self) -> Option<&ExprNode> {
+        if let Some(GeneratedOrDefaultColumn::GeneratedColumn(desc)) =
+            &self.column_desc.generated_or_default_column
+        {
+            Some(desc.expr.as_ref().unwrap())
+        } else {
+            None
+        }
     }
 
     /// If the column is a column with default expr

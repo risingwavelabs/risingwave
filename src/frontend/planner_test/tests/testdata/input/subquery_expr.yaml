@@ -116,3 +116,16 @@
     select x from t1 where y not in (select y from t2);
   expected_outputs:
   - logical_plan
+- sql: |
+    create table t1 (a int);
+    create table t2 (b int);
+    SELECT *
+    FROM t1
+    WHERE EXISTS
+    (SELECT 1
+    FROM t2
+    GROUP BY a
+    ORDER BY a DESC LIMIT 90);
+  expected_outputs:
+    - logical_plan
+    - batch_plan

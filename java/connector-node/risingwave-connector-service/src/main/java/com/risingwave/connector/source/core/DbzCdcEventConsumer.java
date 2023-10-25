@@ -72,25 +72,15 @@ public class DbzCdcEventConsumer
             List<ChangeEvent<SourceRecord, SourceRecord>> events,
             DebeziumEngine.RecordCommitter<ChangeEvent<SourceRecord, SourceRecord>> committer)
             throws InterruptedException {
-        var builder = GetEventStreamResponse.newBuilder();
+        var respBuilder = GetEventStreamResponse.newBuilder();
         for (ChangeEvent<SourceRecord, SourceRecord> event : events) {
             var record = event.value();
-            if (isHeartbeatEvent(record)) {
-                // skip heartbeat events
-                continue;
-            }
-            // ignore null record
-            if (record.value() == null) {
-                committer.markProcessed(event);
-                continue;
-            }
-            byte[] payload =
-                    converter.fromConnectData(record.topic(), record.valueSchema(), record.value());
-
-            // serialize the offset to a JSON, so that kernel doesn't need to
-            // aware the layout of it
+            boolean isHeartbeat = isHeartbeatEvent(record);
             DebeziumOffset offset =
-                    new DebeziumOffset(record.sourcePartition(), record.sourceOffset());
+                    new DebeziumOffset(
+                            record.sourcePartition(), record.sourceOffset(), isHeartbeat);
+            // serialize the offset to a JSON, so that kernel doesn't need to
+            // aware its layout
             String offsetStr = "";
             try {
                 byte[] serialized = DebeziumOffsetSerializer.INSTANCE.serialize(offset);
@@ -98,19 +88,42 @@ public class DbzCdcEventConsumer
             } catch (IOException e) {
                 LOG.warn("failed to serialize debezium offset", e);
             }
-            var message =
+
+            var msgBuilder =
                     CdcMessage.newBuilder()
                             .setOffset(offsetStr)
-                            .setPartition(String.valueOf(sourceId))
-                            .setPayload(new String(payload, StandardCharsets.UTF_8))
-                            .build();
-            LOG.debug("record => {}", message.getPayload());
-            builder.addEvents(message);
-            committer.markProcessed(event);
+                            .setPartition(String.valueOf(sourceId));
+
+            if (isHeartbeat) {
+                var message = msgBuilder.build();
+                LOG.debug("heartbeat => {}", message.getOffset());
+                respBuilder.addEvents(message);
+            } else {
+                // ignore null record
+                if (record.value() == null) {
+                    committer.markProcessed(event);
+                    continue;
+                }
+                byte[] payload =
+                        converter.fromConnectData(
+                                record.topic(), record.valueSchema(), record.value());
+
+                msgBuilder.setPayload(new String(payload, StandardCharsets.UTF_8)).build();
+                var message = msgBuilder.build();
+                LOG.debug("record => {}", message.getPayload());
+
+                respBuilder.addEvents(message);
+                committer.markProcessed(event);
+            }
         }
-        builder.setSourceId(sourceId);
-        var response = builder.build();
-        outputChannel.put(response);
+
+        // skip empty batch
+        if (respBuilder.getEventsCount() > 0) {
+            respBuilder.setSourceId(sourceId);
+            var response = respBuilder.build();
+            outputChannel.put(response);
+        }
+
         committer.markBatchFinished();
     }
 

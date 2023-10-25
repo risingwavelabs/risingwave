@@ -22,15 +22,13 @@ use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
-use risingwave_common::try_match_expand;
 
 use crate::parser::ParserConfig;
-use crate::source::common::{into_chunk_stream, CommonSplitReader};
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitImpl,
-    SplitMetaData, SplitReader,
+    into_chunk_stream, BoxSourceWithStateStream, Column, CommonSplitReader, SourceContextRef,
+    SourceMessage, SplitId, SplitMetaData, SplitReader,
 };
 
 pub struct PulsarSplitReader {
@@ -88,17 +86,18 @@ fn parse_message_id(id: &str) -> Result<MessageIdData> {
 #[async_trait]
 impl SplitReader for PulsarSplitReader {
     type Properties = PulsarProperties;
+    type Split = PulsarSplit;
 
     async fn new(
         props: PulsarProperties,
-        splits: Vec<SplitImpl>,
+        splits: Vec<PulsarSplit>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         ensure!(splits.len() == 1, "only support single split");
-        let split = try_match_expand!(splits.into_iter().next().unwrap(), SplitImpl::Pulsar)?;
-        let pulsar = props.build_pulsar_client().await?;
+        let split = splits.into_iter().next().unwrap();
+        let pulsar = props.common.build_client().await?;
         let topic = split.topic.to_string();
 
         tracing::debug!("creating consumer for pulsar split topic {}", topic,);

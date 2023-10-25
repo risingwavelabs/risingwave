@@ -1,0 +1,60 @@
+statement ok
+set streaming_parallelism=4;
+
+statement ok
+CREATE TABLE t6 (
+id bigint primary key,
+v_int int,
+v_long bigint,
+v_float real,
+v_double double,
+v_varchar varchar,
+v_bool boolean,
+v_date date,
+v_timestamp timestamptz,
+v_ts_ntz timestamp
+);
+
+statement ok
+CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
+
+statement ok
+CREATE SINK s6 AS select * from mv6 WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    force_append_only = 'true',
+    database.name = 'demo',
+    table.name = 'demo_db.demo_table',
+    catalog.type = 'storage',
+    warehouse.path = 's3://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin'
+);
+
+statement ok
+INSERT INTO t6 VALUES
+(1, 1, 1000, 1.1, 1.11, '1-1', true, '2022-03-11', '2022-03-11 01:00:00Z'::timestamptz, '2022-03-11 01:00:00'),
+(2, 2, 2000, 2.2, 2.22, '2-2', false, '2022-03-12', '2022-03-12 02:00:00Z'::timestamptz, '2022-03-12 02:00:00'),
+(3, 3, 3000, 3.3, 3.33, '3-3', true, '2022-03-13', '2022-03-13 03:00:00Z'::timestamptz, '2022-03-13 03:00:00'),
+(4, 4, 4000, 4.4, 4.44, '4-4', false, '2022-03-14', '2022-03-14 04:00:00Z'::timestamptz, '2022-03-14 04:00:00');
+
+statement ok
+FLUSH;
+
+statement ok
+INSERT INTO t6 VALUES
+(5, 5, 5000, 5.5, 5.55, '5-5', true, '2022-03-15', '2022-03-15 05:00:00Z'::timestamptz, '2022-03-15 05:00:00');
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK s6;
+
+statement ok
+DROP MATERIALIZED VIEW mv6;
+
+statement ok
+DROP TABLE t6;

@@ -24,25 +24,29 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
 macro_rules! impl_pg_type_data {
-    ($( { $enum:ident | $oid:literal | $oid_array:literal | $name:ident | $len:literal } )*) => {
+    ($( { $enum:ident | $oid:literal | $oid_array:literal | $name:ident | $input:ident | $len:literal } )*) => {
         &[
             $(
-            ($oid, stringify!($name)),
+            ($oid, stringify!($name), stringify!($input)),
             )*
             // Note: rw doesn't support `text` type, returning it is just a workaround to be compatible
             // with PostgreSQL.
-            (25, "text"),
-            (1301, "rw_int256"),
+            (25, "text", "textin"),
+            (1301, "rw_int256", "rw_int256_in"),
         ]
     }
 }
-pub const RW_TYPE_DATA: &[(i32, &str)] = for_all_base_types! { impl_pg_type_data };
+pub const RW_TYPE_DATA: &[(i32, &str, &str)] = for_all_base_types! { impl_pg_type_data };
 
 /// `rw_types` stores all supported types in the database.
 pub static RW_TYPES: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
     name: "rw_types",
     schema: RW_CATALOG_SCHEMA_NAME,
-    columns: &[(DataType::Int32, "id"), (DataType::Varchar, "name")],
+    columns: &[
+        (DataType::Int32, "id"),
+        (DataType::Varchar, "name"),
+        (DataType::Varchar, "input_oid"),
+    ],
     pk: &[0],
 });
 
@@ -50,10 +54,11 @@ impl SysCatalogReaderImpl {
     pub fn read_rw_types(&self) -> Result<Vec<OwnedRow>> {
         Ok(RW_TYPE_DATA
             .iter()
-            .map(|(id, name)| {
+            .map(|(id, name, input)| {
                 OwnedRow::new(vec![
                     Some(ScalarImpl::Int32(*id)),
                     Some(ScalarImpl::Utf8(name.to_string().into())),
+                    Some(ScalarImpl::Utf8(input.to_string().into())),
                 ])
             })
             .collect_vec())

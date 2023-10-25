@@ -18,6 +18,7 @@ use std::task::{Context, Poll};
 
 use bytes::Bytes;
 use futures::Stream;
+use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockReadEpoch;
 
 use crate::error::StorageResult;
@@ -35,7 +36,7 @@ impl StateStoreRead for PanicStateStore {
     #[allow(clippy::unused_async)]
     async fn get(
         &self,
-        _key: Bytes,
+        _key: TableKey<Bytes>,
         _epoch: u64,
         _read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
@@ -45,7 +46,7 @@ impl StateStoreRead for PanicStateStore {
     #[allow(clippy::unused_async)]
     async fn iter(
         &self,
-        _key_range: IterKeyRange,
+        _key_range: TableKeyRange,
         _epoch: u64,
         _read_options: ReadOptions,
     ) -> StorageResult<Self::IterStream> {
@@ -57,11 +58,11 @@ impl StateStoreWrite for PanicStateStore {
     #[allow(clippy::unused_async)]
     async fn ingest_batch(
         &self,
-        _kv_pairs: Vec<(Bytes, StorageValue)>,
+        _kv_pairs: Vec<(TableKey<Bytes>, StorageValue)>,
         _delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         _write_options: WriteOptions,
     ) -> StorageResult<usize> {
-        panic!("should not read from the state store!");
+        panic!("should not write to the state store!");
     }
 }
 
@@ -71,21 +72,25 @@ impl LocalStateStore for PanicStateStore {
     #[allow(clippy::unused_async)]
     async fn may_exist(
         &self,
-        _key_range: IterKeyRange,
+        _key_range: TableKeyRange,
         _read_options: ReadOptions,
     ) -> StorageResult<bool> {
         panic!("should not call may_exist from the state store!");
     }
 
     #[allow(clippy::unused_async)]
-    async fn get(&self, _key: Bytes, _read_options: ReadOptions) -> StorageResult<Option<Bytes>> {
+    async fn get(
+        &self,
+        _key: TableKey<Bytes>,
+        _read_options: ReadOptions,
+    ) -> StorageResult<Option<Bytes>> {
         panic!("should not operate on the panic state store!");
     }
 
     #[allow(clippy::unused_async)]
     async fn iter(
         &self,
-        _key_range: IterKeyRange,
+        _key_range: TableKeyRange,
         _read_options: ReadOptions,
     ) -> StorageResult<Self::IterStream<'_>> {
         panic!("should not operate on the panic state store!");
@@ -93,14 +98,14 @@ impl LocalStateStore for PanicStateStore {
 
     fn insert(
         &mut self,
-        _key: Bytes,
+        _key: TableKey<Bytes>,
         _new_val: Bytes,
         _old_val: Option<Bytes>,
     ) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
     }
 
-    fn delete(&mut self, _key: Bytes, _old_val: Bytes) -> StorageResult<()> {
+    fn delete(&mut self, _key: TableKey<Bytes>, _old_val: Bytes) -> StorageResult<()> {
         panic!("should not operate on the panic state store!");
     }
 

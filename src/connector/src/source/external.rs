@@ -160,6 +160,8 @@ pub struct DebeziumOffset {
     pub source_partition: HashMap<String, String>,
     #[serde(rename = "sourceOffset")]
     pub source_offset: DebeziumSourceOffset,
+    #[serde(rename = "isHeartbeat")]
+    pub is_heartbeat: bool,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -200,13 +202,9 @@ impl MySqlOffset {
 }
 
 pub trait ExternalTableReader {
-    type CdcOffsetFuture<'a>: Future<Output = ConnectorResult<CdcOffset>> + Send + 'a
-    where
-        Self: 'a;
-
     fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String;
 
-    fn current_cdc_offset(&self) -> Self::CdcOffsetFuture<'_>;
+    fn current_cdc_offset(&self) -> impl Future<Output = ConnectorResult<CdcOffset>> + Send + '_;
 
     fn parse_binlog_offset(&self, offset: &str) -> ConnectorResult<CdcOffset>;
 
@@ -248,32 +246,28 @@ pub struct ExternalTableConfig {
 }
 
 impl ExternalTableReader for MySqlExternalTableReader {
-    type CdcOffsetFuture<'a> = impl Future<Output = ConnectorResult<CdcOffset>> + 'a;
-
     fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String {
         format!("`{}`", table_name.table_name)
     }
 
-    fn current_cdc_offset(&self) -> Self::CdcOffsetFuture<'_> {
-        async move {
-            let mut conn = self
-                .pool
-                .get_conn()
-                .await
-                .map_err(|e| ConnectorError::Connection(anyhow!(e)))?;
+    async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
+        let mut conn = self
+            .pool
+            .get_conn()
+            .await
+            .map_err(|e| ConnectorError::Connection(anyhow!(e)))?;
 
-            let sql = "SHOW MASTER STATUS".to_string();
-            let mut rs = conn.query::<mysql_async::Row, _>(sql).await?;
-            let row = rs
-                .iter_mut()
-                .exactly_one()
-                .map_err(|e| ConnectorError::Internal(anyhow!("read binlog error: {}", e)))?;
+        let sql = "SHOW MASTER STATUS".to_string();
+        let mut rs = conn.query::<mysql_async::Row, _>(sql).await?;
+        let row = rs
+            .iter_mut()
+            .exactly_one()
+            .map_err(|e| ConnectorError::Internal(anyhow!("read binlog error: {}", e)))?;
 
-            Ok(CdcOffset::MySql(MySqlOffset {
-                filename: row.take("File").unwrap(),
-                position: row.take("Position").unwrap(),
-            }))
-        }
+        Ok(CdcOffset::MySql(MySqlOffset {
+            filename: row.take("File").unwrap(),
+            position: row.take("Position").unwrap(),
+        }))
     }
 
     fn parse_binlog_offset(&self, offset: &str) -> ConnectorResult<CdcOffset> {
@@ -478,8 +472,6 @@ impl MySqlExternalTableReader {
 }
 
 impl ExternalTableReader for ExternalTableReaderImpl {
-    type CdcOffsetFuture<'a> = impl Future<Output = ConnectorResult<CdcOffset>> + 'a;
-
     fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String {
         match self {
             ExternalTableReaderImpl::MySql(mysql) => mysql.get_normalized_table_name(table_name),
@@ -487,12 +479,10 @@ impl ExternalTableReader for ExternalTableReaderImpl {
         }
     }
 
-    fn current_cdc_offset(&self) -> Self::CdcOffsetFuture<'_> {
-        async move {
-            match self {
-                ExternalTableReaderImpl::MySql(mysql) => mysql.current_cdc_offset().await,
-                ExternalTableReaderImpl::Mock(mock) => mock.current_cdc_offset().await,
-            }
+    async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
+        match self {
+            ExternalTableReaderImpl::MySql(mysql) => mysql.current_cdc_offset().await,
+            ExternalTableReaderImpl::Mock(mock) => mock.current_cdc_offset().await,
         }
     }
 
@@ -566,11 +556,11 @@ mod tests {
 
     #[test]
     fn test_mysql_binlog_offset() {
-        let off0_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000001", "pos": 105622, "snapshot": true } }"#;
-        let off1_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000007", "pos": 1062363217, "snapshot": true } }"#;
-        let off2_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000007", "pos": 659687560, "snapshot": true } }"#;
-        let off3_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000008", "pos": 7665875, "snapshot": true } }"#;
-        let off4_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000008", "pos": 7665875, "snapshot": true } }"#;
+        let off0_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000001", "pos": 105622, "snapshot": true }, "isHeartbeat": false }"#;
+        let off1_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000007", "pos": 1062363217, "snapshot": true }, "isHeartbeat": false }"#;
+        let off2_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000007", "pos": 659687560, "snapshot": true }, "isHeartbeat": false }"#;
+        let off3_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000008", "pos": 7665875, "snapshot": true }, "isHeartbeat": false }"#;
+        let off4_str = r#"{ "sourcePartition": { "server": "test" }, "sourceOffset": { "ts_sec": 1670876905, "file": "binlog.000008", "pos": 7665875, "snapshot": true }, "isHeartbeat": false }"#;
 
         let off0 = CdcOffset::MySql(MySqlOffset::parse_str(off0_str).unwrap());
         let off1 = CdcOffset::MySql(MySqlOffset::parse_str(off1_str).unwrap());
@@ -597,8 +587,9 @@ mod tests {
                 ColumnDesc::unnamed(ColumnId::new(3), DataType::Varchar),
                 ColumnDesc::unnamed(ColumnId::new(4), DataType::Date),
             ],
-            pk_indices: vec![0],
+            downstream_pk: vec![0],
             sink_type: SinkType::AppendOnly,
+            format_desc: None,
             db_name: "db".into(),
             sink_from_name: "table".into(),
         };

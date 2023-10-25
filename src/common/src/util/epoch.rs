@@ -73,6 +73,10 @@ impl Epoch {
         Epoch(time << EPOCH_PHYSICAL_SHIFT_BITS)
     }
 
+    pub fn from_unix_millis(mi: u64) -> Self {
+        Epoch((mi - UNIX_RISINGWAVE_DATE_SEC * 1000) << EPOCH_PHYSICAL_SHIFT_BITS)
+    }
+
     pub fn physical_now() -> u64 {
         UNIX_RISINGWAVE_DATE_EPOCH
             .elapsed()
@@ -84,11 +88,14 @@ impl Epoch {
         UNIX_RISINGWAVE_DATE_SEC * 1000 + self.physical_time()
     }
 
+    /// Returns the epoch in a Timestamptz.
+    pub fn as_timestamptz(&self) -> Timestamptz {
+        Timestamptz::from_millis(self.as_unix_millis() as i64).expect("epoch is out of range")
+    }
+
     /// Returns the epoch in a Timestamptz scalar.
     pub fn as_scalar(&self) -> ScalarImpl {
-        Timestamptz::from_millis(self.as_unix_millis() as i64)
-            .expect("epoch is out of range")
-            .into()
+        self.as_timestamptz().into()
     }
 
     /// Returns the epoch in real system time.

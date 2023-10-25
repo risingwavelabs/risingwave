@@ -1,0 +1,145 @@
+# name: test/sql/cte/test_cte.test
+# description: Test Common Table Expressions (CTE)
+# group: [cte]
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO TRUE;
+
+statement ok
+create table a(i integer);
+
+statement ok
+insert into a values (42);
+
+query I
+with cte1 as (Select i as j from a) select * from cte1;
+----
+42
+
+query I
+with cte1 as (Select i as j from a) select x from cte1 t1(x);
+----
+42
+
+query I
+with cte1(xxx) as (Select i as j from a) select xxx from cte1;
+----
+42
+
+query I
+with cte1(xxx) as (Select i as j from a) select x from cte1 t1(x);
+----
+42
+
+query II
+with cte1 as (Select i as j from a), cte2 as (select ref.j as k from cte1 as ref), cte3 as (select ref2.j+1 as i from cte1 as ref2) select * from cte2 , cte3;
+----
+42	43
+
+query I rowsort
+with cte1 as (select i as j from a), cte2 as (select ref.j as k from cte1 as ref), cte3 as (select ref2.j+1 as i from cte1 as ref2) select * from cte2 union all select * FROM cte3;
+----
+42
+43
+
+
+# FIXME: this should be an error
+# duplicate CTE alias
+query I
+with cte1 as (select 42), cte1 as (select 43) select * FROM cte1;
+----
+43
+
+# reference to CTE before its actually defined
+# duckdb is ok
+# postgres: query failed: db error: ERROR: relation "cte1" does not exist
+#    DETAIL: There is a WITH item named "cte1", but it cannot be referenced from this part of the query.
+#    HINT: Use WITH RECURSIVE, or re-order the WITH items to remove forward references.
+query error table or source not found: cte1
+with cte3 as (select ref2.j as i from cte1 as ref2), cte1 as (Select i as j from a), cte2 as (select ref.j+1 as k from cte1 as ref) select * from cte2 union all select * FROM cte3;
+
+
+# multiple uses of same CTE
+query II
+with cte1 as (Select i as j from a) select * from cte1 cte11, cte1 cte12;
+----
+42	42
+
+# refer to CTE in subquery
+query I
+with cte1 as (Select i as j from a) select * from cte1 where j = (select max(j) from cte1 as cte2);
+----
+42
+
+# multi-column name alias
+query II
+with cte1(x, y) as (select 42 a, 84 b) select zzz, y from cte1 t1(zzz);
+----
+42	84
+
+# use a CTE in a view definition
+statement ok
+create view va AS (with cte as (Select i as j from a) select * from cte);
+
+query I
+select * from va
+----
+42
+
+# nested CTE views that re-use CTE aliases
+query I
+with cte AS (SELECT * FROM va) SELECT * FROM cte;
+----
+42
+
+# multiple ctes in a view definition
+statement ok
+create view vb AS (with cte1 as (Select i as j from a), cte2 as (select ref.j+1 as k from cte1 as ref) select * from cte2);
+
+query I
+select * from vb
+----
+43
+
+# cte in set operation node
+query I
+SELECT 1 UNION ALL (WITH cte AS (SELECT 42) SELECT * FROM cte);
+----
+1
+42
+
+# # cte in recursive cte
+# query I
+# WITH RECURSIVE cte(d) AS (
+# 		SELECT 1
+# 	UNION ALL
+# 		(WITH c(d) AS (SELECT * FROM cte)
+# 			SELECT d + 1
+# 			FROM c
+# 			WHERE FALSE
+# 		)
+# )
+# SELECT max(d) FROM cte;
+# ----
+# 1
+
+# test CTE with nested aliases in where clause
+# Note: postgres doesn't support this: column "alias1" does not exist
+query error failed to bind expression: alias1
+with cte (a) as (
+    select 1
+)
+select
+    a as alias1,
+    alias1 as alias2
+from cte
+where alias2 > 0;
+
+statement ok
+drop view vb;
+
+statement ok
+drop view va;
+
+statement ok
+drop table a;

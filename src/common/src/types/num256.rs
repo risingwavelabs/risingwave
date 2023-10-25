@@ -36,7 +36,7 @@ use crate::types::{to_text, Buf, DataType, Scalar, ScalarRef, F64};
 
 /// A 256-bit signed integer.
 #[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
-pub struct Int256(Box<i256>);
+pub struct Int256(pub(crate) Box<i256>);
 
 /// A reference to an `Int256` value.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]

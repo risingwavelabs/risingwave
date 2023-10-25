@@ -209,6 +209,13 @@ impl NonOverlapSubLevelPicker {
                 break;
             }
 
+            // more than 1 sub_level
+            if ret.total_file_count > 1 && ret.total_file_size >= self.max_compaction_bytes
+                || ret.total_file_count >= self.max_file_count as usize
+            {
+                break;
+            }
+
             let mut overlap_files_range =
                 overlap_info.check_multiple_include(&target_level.table_infos);
             if overlap_files_range.is_empty() {
@@ -287,15 +294,6 @@ impl NonOverlapSubLevelPicker {
                     .iter()
                     .map(|(_, files)| files.len())
                     .sum::<usize>();
-
-            // more than 1 sub_level
-            if ret.total_file_count > 1
-                && (ret.total_file_size + (add_files_size + current_level_size)
-                    >= self.max_compaction_bytes
-                    || ret.total_file_count + add_files_count >= self.max_file_count as usize)
-            {
-                break;
-            }
 
             if ret
                 .sstable_infos
@@ -379,10 +377,10 @@ pub mod tests {
     pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
 
     use super::*;
-    use crate::hummock::compaction::level_selector::tests::{
+    use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
+    use crate::hummock::compaction::selector::tests::{
         generate_l0_nonoverlapping_sublevels, generate_table,
     };
-    use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;
 
     #[test]
     fn test_compact_l1() {

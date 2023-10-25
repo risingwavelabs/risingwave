@@ -1,0 +1,92 @@
+control substitution on
+
+system ok
+psql -c "
+CREATE TABLE alter_test (k BIGINT PRIMARY KEY, v CHARACTER VARYING);
+INSERT INTO alter_test VALUES (1, 'a'), (2, 'b');
+"
+
+statement ok
+CREATE TABLE alter_test (k BIGINT PRIMARY KEY, v CHARACTER VARYING)
+WITH (
+    connector = 'postgres-cdc',
+    hostname = '${PGHOST:localhost}',
+    port = '${PGPORT:5432}',
+    username = '${PGUSER:$USER}',
+    password = '${PGPASSWORD:}',
+    database.name = '${PGDATABASE:postgres}',
+    schema.name = 'public',
+    table.name = 'alter_test',
+    slot.name = 'alter_test'
+)
+
+sleep 5s
+
+query IT
+SELECT * FROM alter_test ORDER BY k
+----
+1 a
+2 b
+
+statement ok
+ALTER TABLE alter_test ADD COLUMN v2 CHARACTER VARYING
+
+system ok
+psql -c "
+INSERT INTO alter_test VALUES (3, 'c');
+"
+
+# FIXME: after schema change in RisingWave, why does it take so long to get the new data?
+sleep 20s
+
+query ITT
+SELECT * FROM alter_test ORDER BY k
+----
+1 a NULL
+2 b NULL
+3 c NULL
+
+system ok
+psql -c "
+ALTER TABLE alter_test ADD COLUMN v2 CHARACTER VARYING;
+INSERT INTO alter_test VALUES (4, 'd', 'dd');
+"
+
+sleep 5s
+
+query ITT
+SELECT * FROM alter_test ORDER BY k
+----
+1 a NULL
+2 b NULL
+3 c NULL
+4 d dd
+
+statement ok
+ALTER TABLE alter_test DROP COLUMN v
+
+system ok
+psql -c "
+ALTER TABLE alter_test DROP COLUMN v;
+INSERT INTO alter_test VALUES (5, 'ee');
+"
+
+# FIXME: after schema change in RisingWave, why does it take so long to get the new data?
+sleep 20s
+
+query IT
+SELECT * FROM alter_test ORDER BY k
+----
+1 NULL
+2 NULL
+3 NULL
+4 dd
+5 ee
+
+statement ok
+DROP TABLE alter_test
+
+system ok
+psql -c "
+DROP TABLE alter_test;
+"

@@ -120,7 +120,7 @@ func NewTwitterGen() gen.LoadGenerator {
 			endTime, _ := time.Parse("2006-01-01", fmt.Sprintf("%d-01-01", endYear))
 			startTime, _ := time.Parse("2006-01-01", fmt.Sprintf("%d-01-01", startYear))
 			users[id] = &twitterUser{
-				CreatedAt: faker.DateRange(startTime, endTime).Format(gen.RwTimestampLayout),
+				CreatedAt: faker.DateRange(startTime, endTime).Format(gen.RwTimestamptzLayout),
 				Id:        id,
 				Name:      fmt.Sprintf("%s %s", faker.Name(), faker.Adverb()),
 				UserName:  faker.Username(),
@@ -152,7 +152,7 @@ func (t *twitterGen) generate() twitterEvent {
 	return twitterEvent{
 		Data: tweetData{
 			Id:        id,
-			CreatedAt: time.Now().Format(gen.RwTimestampLayout),
+			CreatedAt: time.Now().Format(gen.RwTimestamptzLayout),
 			Text:      sentence,
 			Lang:      gofakeit.Language(),
 		},

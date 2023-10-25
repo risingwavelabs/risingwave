@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::future::Future;
 
 use anyhow::anyhow;
@@ -65,18 +65,22 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
         // hummock_version and version_stats is guaranteed to exist in a initialized cluster.
         let hummock_version = {
             let mut redo_state = hummock_version;
-            let hummock_version_deltas =
-                HummockVersionDelta::list_at_snapshot::<S>(&meta_store_snapshot).await?;
-            for version_delta in &hummock_version_deltas {
+            let hummock_version_deltas: BTreeMap<_, _> =
+                HummockVersionDelta::list_at_snapshot::<S>(&meta_store_snapshot)
+                    .await?
+                    .into_iter()
+                    .map(|d| (d.id, d))
+                    .collect();
+            for version_delta in hummock_version_deltas.values() {
                 if version_delta.prev_id == redo_state.id {
                     redo_state.apply_version_delta(version_delta);
                 }
             }
-            if let Some(log) = hummock_version_deltas.iter().next_back() {
-                if log.id != redo_state.id {
+            if let Some((max_log_id, _)) = hummock_version_deltas.last_key_value() {
+                if *max_log_id != redo_state.id {
                     return Err(BackupError::Other(anyhow::anyhow!(format!(
                         "inconsistent hummock version: expected {}, actual {}",
-                        log.id, redo_state.id
+                        max_log_id, redo_state.id
                     ))));
                 }
             }
@@ -187,7 +191,6 @@ mod tests {
             let v_ = v.clone();
             async move { v_ }
         };
-        hummock_version.insert(&meta_store).await.unwrap();
         let err = builder
             .build(1, get_ckpt_builder(&hummock_version))
             .await

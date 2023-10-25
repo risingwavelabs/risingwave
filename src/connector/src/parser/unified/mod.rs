@@ -32,7 +32,7 @@ pub mod protobuf;
 pub mod upsert;
 pub mod util;
 
-pub type AccessResult = std::result::Result<Datum, AccessError>;
+pub type AccessResult<T = Datum> = std::result::Result<T, AccessError>;
 
 /// Access a certain field in an object according to the path
 pub trait Access {
@@ -87,14 +87,16 @@ where
 
 #[derive(Error, Debug)]
 pub enum AccessError {
-    #[error("Undefined {name} at {path}")]
+    #[error("Undefined field `{name}` at `{path}`")]
     Undefined { name: String, path: String },
-    #[error("TypeError {expected} expected, got {got} {value}")]
+    #[error("Expected type `{expected}` but got `{got}` for `{value}`")]
     TypeError {
         expected: String,
         got: String,
         value: String,
     },
+    #[error("Unsupported data type `{ty}`")]
+    UnsupportedType { ty: String },
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }

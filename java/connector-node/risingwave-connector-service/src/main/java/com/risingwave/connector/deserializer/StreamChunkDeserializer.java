@@ -251,14 +251,12 @@ public class StreamChunkDeserializer implements Deserializer {
 
     static class StreamChunkRowWrapper implements SinkRow {
 
-        private boolean isClosed;
         private final StreamChunkRow inner;
         private final ValueGetter[] valueGetters;
 
         StreamChunkRowWrapper(StreamChunkRow inner, ValueGetter[] valueGetters) {
             this.inner = inner;
             this.valueGetters = valueGetters;
-            this.isClosed = false;
         }
 
         @Override
@@ -274,14 +272,6 @@ public class StreamChunkDeserializer implements Deserializer {
         @Override
         public int size() {
             return valueGetters.length;
-        }
-
-        @Override
-        public void close() {
-            if (!isClosed) {
-                this.isClosed = true;
-                inner.close();
-            }
         }
     }
 
@@ -299,13 +289,6 @@ public class StreamChunkDeserializer implements Deserializer {
         @Override
         public void close() {
             iter.close();
-            try {
-                if (row != null) {
-                    row.close();
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
         }
 
         @Override

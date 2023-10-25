@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
+
 use futures::{pin_mut, StreamExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
@@ -81,9 +83,10 @@ impl<S: StateStore> ManagedTopNState<S> {
         offset: usize,
         limit: Option<usize>,
     ) -> StreamExecutorResult<Vec<TopNStateRow>> {
+        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let state_table_iter = self
             .state_table
-            .iter_row_with_pk_prefix(&group_key, Default::default())
+            .iter_with_prefix(&group_key, sub_range, Default::default())
             .await?;
         pin_mut!(state_table_iter);
 
@@ -118,10 +121,12 @@ impl<S: StateStore> ManagedTopNState<S> {
         cache_size_limit: usize,
     ) -> StreamExecutorResult<()> {
         let cache = &mut topn_cache.high;
+        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let state_table_iter = self
             .state_table
-            .iter_row_with_pk_prefix(
+            .iter_with_prefix(
                 &group_key,
+                sub_range,
                 PrefetchOptions {
                     exhaust_iter: cache_size_limit == usize::MAX,
                 },
@@ -165,11 +170,12 @@ impl<S: StateStore> ManagedTopNState<S> {
         assert!(topn_cache.low.is_empty());
         assert!(topn_cache.middle.is_empty());
         assert!(topn_cache.high.is_empty());
-
+        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         let state_table_iter = self
             .state_table
-            .iter_row_with_pk_prefix(
+            .iter_with_prefix(
                 &group_key,
+                sub_range,
                 PrefetchOptions {
                     exhaust_iter: topn_cache.limit == usize::MAX,
                 },

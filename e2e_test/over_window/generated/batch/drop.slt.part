@@ -13,6 +13,9 @@ statement ok
 drop view v_d;
 
 statement ok
+drop view v_e;
+
+statement ok
 drop view v_a_b;
 
 statement ok

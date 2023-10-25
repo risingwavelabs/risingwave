@@ -70,6 +70,33 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
         return runner;
     }
 
+    public static CdcEngineRunner newCdcEngineRunner(DbzConnectorConfig config) {
+        DbzCdcEngineRunner runner = null;
+        try {
+            var sourceId = config.getSourceId();
+            var engine =
+                    new DbzCdcEngine(
+                            config.getSourceId(),
+                            config.getResolvedDebeziumProps(),
+                            (success, message, error) -> {
+                                if (!success) {
+                                    LOG.error(
+                                            "engine#{} terminated with error. message: {}",
+                                            sourceId,
+                                            message,
+                                            error);
+                                } else {
+                                    LOG.info("engine#{} stopped normally. {}", sourceId, message);
+                                }
+                            });
+
+            runner = new DbzCdcEngineRunner(engine);
+        } catch (Exception e) {
+            LOG.error("failed to create the CDC engine", e);
+        }
+        return runner;
+    }
+
     /** Start to run the cdc engine */
     public void start() {
         if (isRunning()) {

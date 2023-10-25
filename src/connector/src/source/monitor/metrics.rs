@@ -62,6 +62,8 @@ pub struct SourceMetrics {
     /// Report latest message id
     pub latest_message_id: GenericGaugeVec<AtomicI64>,
     pub rdkafka_native_metric: Arc<RdKafkaStats>,
+
+    pub connector_source_rows_received: GenericCounterVec<AtomicU64>,
 }
 
 pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
@@ -103,6 +105,15 @@ impl SourceMetrics {
             registry,
         )
         .unwrap();
+
+        let connector_source_rows_received = register_int_counter_vec_with_registry!(
+            "connector_source_rows_received",
+            "Number of rows received by source",
+            &["source_type", "source_id"],
+            registry
+        )
+        .unwrap();
+
         let rdkafka_native_metric = Arc::new(RdKafkaStats::new(registry.clone()));
         SourceMetrics {
             partition_input_count,
@@ -110,6 +121,7 @@ impl SourceMetrics {
             user_source_error_count,
             latest_message_id,
             rdkafka_native_metric,
+            connector_source_rows_received,
         }
     }
 }

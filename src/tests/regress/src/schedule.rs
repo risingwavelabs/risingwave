@@ -221,7 +221,6 @@ impl TestCase {
             DatabaseMode::Risingwave => {
                 vec![
                     "SET RW_IMPLICIT_FLUSH TO true;\n",
-                    "SET CREATE_COMPACTION_GROUP_FOR_MV TO true;\n",
                     "SET QUERY_MODE TO LOCAL;\n",
                 ]
             }

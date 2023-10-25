@@ -46,7 +46,10 @@ impl Planner {
             Relation::Apply(join) => self.plan_apply(*join),
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
             Relation::Source(s) => self.plan_source(*s),
-            Relation::TableFunction(tf) => self.plan_table_function(tf),
+            Relation::TableFunction {
+                expr: tf,
+                with_ordinality,
+            } => self.plan_table_function(tf, with_ordinality),
             Relation::Watermark(tf) => self.plan_watermark(*tf),
             Relation::Share(share) => self.plan_share(*share),
         }
@@ -150,16 +153,33 @@ impl Planner {
         }
     }
 
-    pub(super) fn plan_table_function(&mut self, table_function: ExprImpl) -> Result<PlanRef> {
+    pub(super) fn plan_table_function(
+        &mut self,
+        table_function: ExprImpl,
+        with_ordinality: bool,
+    ) -> Result<PlanRef> {
         // TODO: maybe we can unify LogicalTableFunction with LogicalValues
         match table_function {
-            ExprImpl::TableFunction(tf) => Ok(LogicalTableFunction::new(*tf, self.ctx()).into()),
+            ExprImpl::TableFunction(tf) => {
+                Ok(LogicalTableFunction::new(*tf, with_ordinality, self.ctx()).into())
+            }
             expr => {
-                let schema = Schema {
+                let mut schema = Schema {
                     // TODO: should be named
                     fields: vec![Field::unnamed(expr.return_type())],
                 };
-                Ok(LogicalValues::create(vec![vec![expr]], schema, self.ctx()))
+                if with_ordinality {
+                    schema
+                        .fields
+                        .push(Field::with_name(DataType::Int64, "ordinality"));
+                    Ok(LogicalValues::create(
+                        vec![vec![expr, ExprImpl::literal_bigint(1)]],
+                        schema,
+                        self.ctx(),
+                    ))
+                } else {
+                    Ok(LogicalValues::create(vec![vec![expr]], schema, self.ctx()))
+                }
             }
         }
     }

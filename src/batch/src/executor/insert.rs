@@ -157,8 +157,7 @@ impl InsertExecutor {
                 columns.insert(row_id_index, Arc::new(row_id_col.into()))
             }
 
-            let stream_chunk =
-                StreamChunk::new(vec![Op::Insert; cap], columns, vis.into_visibility());
+            let stream_chunk = StreamChunk::with_visibility(vec![Op::Insert; cap], columns, vis);
 
             #[cfg(debug_assertions)]
             table_dml_handle.check_chunk_schema(&stream_chunk);

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::expr::build_from_prost;
+use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::FilterNode;
 
 use super::*;
@@ -31,7 +31,8 @@ impl ExecutorBuilder for FilterExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
-        let search_condition = build_from_prost(node.get_search_condition()?)?;
+        let search_condition =
+            build_non_strict_from_prost(node.get_search_condition()?, params.eval_error_report)?;
 
         Ok(FilterExecutor::new(
             params.actor_context,

@@ -1,0 +1,19 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t1 (k int primary key, ts timestamp);
+
+statement ok
+insert into t1 values (1, '2021-01-01 10:15:00');
+
+query IITTT rowsort
+select * from (select 1 as col union select 2) u , lateral(select * from hop(t1, ts, interval '10' minute, interval '30' minute) where col = k);
+----
+1 1 2021-01-01 10:15:00 2021-01-01 09:50:00 2021-01-01 10:20:00
+1 1 2021-01-01 10:15:00 2021-01-01 10:00:00 2021-01-01 10:30:00
+1 1 2021-01-01 10:15:00 2021-01-01 10:10:00 2021-01-01 10:40:00
+
+statement ok
+drop table t1;
+

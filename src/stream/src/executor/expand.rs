@@ -67,7 +67,7 @@ impl ExpandExecutor {
                 let (mut columns, vis) = input.data_chunk().keep_columns(subsets).into_parts();
                 columns.extend(input.columns().iter().cloned());
                 columns.push(flags);
-                let chunk = StreamChunk::new(input.ops(), columns, vis.into_visibility());
+                let chunk = StreamChunk::with_visibility(input.ops(), columns, vis);
                 yield Message::Chunk(chunk);
             }
         }

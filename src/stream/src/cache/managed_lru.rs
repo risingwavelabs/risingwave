@@ -17,7 +17,6 @@ use std::borrow::Borrow;
 use std::cmp::min;
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Deref, DerefMut};
-use std::ptr::NonNull;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -42,7 +41,7 @@ pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Globa
     /// The metrics of memory usage
     memory_usage_metrics: IntGauge,
     // The metrics of evicted watermark time
-    lru_evicted_watermark_time_diff_ms: IntGauge,
+    lru_evicted_watermark_time_ms: IntGauge,
     // Metrics info
     metrics_info: MetricsInfo,
     /// The size reported last time
@@ -66,11 +65,11 @@ impl<K, V, S, A: Clone + Allocator> Drop for ManagedLruCache<K, V, S, A> {
         };
         if let Err(e) = info
             .metrics
-            .lru_evicted_watermark_time_diff_ms
+            .lru_evicted_watermark_time_ms
             .remove_label_values(&[&info.table_id, &info.actor_id, &info.desc])
         {
             warn!(
-                "unable to remove lru_evicted_watermark_time_diff_ms of {} {} {}: {:?}",
+                "unable to remove lru_evicted_watermark_time_ms of {} {} {}: {:?}",
                 info.table_id, info.actor_id, info.desc, e
             );
         }
@@ -95,22 +94,21 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
             ]);
         memory_usage_metrics.set(0.into());
 
-        let lru_evicted_watermark_time_diff_ms = metrics_info
+        let lru_evicted_watermark_time_ms = metrics_info
             .metrics
-            .lru_evicted_watermark_time_diff_ms
+            .lru_evicted_watermark_time_ms
             .with_label_values(&[
                 &metrics_info.table_id,
                 &metrics_info.actor_id,
                 &metrics_info.desc,
             ]);
-        lru_evicted_watermark_time_diff_ms.set(watermark_epoch.load(Ordering::Relaxed) as _);
 
         Self {
             inner,
             watermark_epoch,
             kv_heap_size: 0,
             memory_usage_metrics,
-            lru_evicted_watermark_time_diff_ms,
+            lru_evicted_watermark_time_ms,
             metrics_info,
             last_reported_size_bytes: 0,
         }
@@ -163,18 +161,6 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
         let v = self.inner.get_mut(k);
         v.map(|inner| {
             MutGuard::new(
-                inner,
-                &mut self.kv_heap_size,
-                &mut self.last_reported_size_bytes,
-                &mut self.memory_usage_metrics,
-            )
-        })
-    }
-
-    pub fn get_mut_unsafe(&mut self, k: &K) -> Option<UnsafeMutGuard<V>> {
-        let v = self.inner.get_mut(k);
-        v.map(|inner| {
-            UnsafeMutGuard::new(
                 inner,
                 &mut self.kv_heap_size,
                 &mut self.last_reported_size_bytes,
@@ -257,9 +243,8 @@ impl<K: Hash + Eq + EstimateSize, V: EstimateSize, S: BuildHasher, A: Clone + Al
     }
 
     fn report_evicted_watermark_time(&self, epoch: u64) {
-        self.lru_evicted_watermark_time_diff_ms.set(
-            (Epoch(self.load_cur_epoch()).physical_time() - Epoch(epoch).physical_time()) as _,
-        );
+        self.lru_evicted_watermark_time_ms
+            .set(Epoch(epoch).physical_time() as _);
     }
 
     fn load_cur_epoch(&self) -> u64 {
@@ -365,47 +350,5 @@ impl<'a, V: EstimateSize> Deref for MutGuard<'a, V> {
 impl<'a, V: EstimateSize> DerefMut for MutGuard<'a, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.inner
-    }
-}
-
-pub struct UnsafeMutGuard<V: EstimateSize> {
-    inner: NonNull<V>,
-    // The size of the original value
-    original_val_size: usize,
-    // The total size of a collection
-    total_size: NonNull<usize>,
-    last_reported_size_bytes: NonNull<usize>,
-    memory_usage_metrics: NonNull<IntGauge>,
-}
-
-impl<V: EstimateSize> UnsafeMutGuard<V> {
-    pub fn new(
-        inner: &mut V,
-        total_size: &mut usize,
-        last_reported_size_bytes: &mut usize,
-        memory_usage_metrics: &mut IntGauge,
-    ) -> Self {
-        let original_val_size = inner.estimated_size();
-        Self {
-            inner: inner.into(),
-            original_val_size,
-            total_size: total_size.into(),
-            last_reported_size_bytes: last_reported_size_bytes.into(),
-            memory_usage_metrics: memory_usage_metrics.into(),
-        }
-    }
-
-    /// # Safety
-    ///
-    /// 1. Only 1 `MutGuard` should be held for each value.
-    /// 2. The returned `MutGuard` should not be moved to other threads.
-    pub unsafe fn as_mut_guard<'a>(&mut self) -> MutGuard<'a, V> {
-        MutGuard {
-            inner: self.inner.as_mut(),
-            original_val_size: self.original_val_size,
-            total_size: self.total_size.as_mut(),
-            last_reported_size_bytes: self.last_reported_size_bytes.as_mut(),
-            memory_usage_metrics: self.memory_usage_metrics.as_mut(),
-        }
     }
 }

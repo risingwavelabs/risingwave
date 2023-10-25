@@ -13,26 +13,66 @@
 // limitations under the License.
 
 use std::ops::{Deref, DerefMut};
-use std::ptr::NonNull;
 
 use super::{EstimateSize, KvSize};
 
 mod heap;
 pub mod lru;
 pub use heap::*;
-mod vecdeque;
+pub mod vecdeque;
 pub use vecdeque::EstimatedVecDeque as VecDeque;
+pub mod hashmap;
+pub use hashmap::EstimatedHashMap as HashMap;
 
-pub struct MutGuard<'a, V: EstimateSize> {
+mod private {
+    use super::*;
+
+    /// A trait that dispatches the size update method regarding the mutability of the reference
+    /// to the [`KvSize`].
+    pub trait GenericKvSize {
+        fn update_size(&mut self, from: usize, to: usize);
+    }
+
+    /// For mutable references, the size can be directly updated.
+    impl GenericKvSize for &'_ mut KvSize {
+        fn update_size(&mut self, from: usize, to: usize) {
+            self.add_size(to);
+            self.sub_size(from);
+        }
+    }
+
+    /// For immutable references, the size is updated atomically.
+    impl GenericKvSize for &'_ KvSize {
+        fn update_size(&mut self, from: usize, to: usize) {
+            self.update_size_atomic(from, to)
+        }
+    }
+}
+
+/// A guard holding a mutable reference to a value in a collection. When dropped, the size of the
+/// collection will be updated.
+pub struct MutGuard<'a, V, S = &'a mut KvSize>
+where
+    V: EstimateSize,
+    S: private::GenericKvSize,
+{
     inner: &'a mut V,
     // The size of the original value
     original_val_size: usize,
     // The total size of a collection
-    total_size: &'a mut KvSize,
+    total_size: S,
 }
 
-impl<'a, V: EstimateSize> MutGuard<'a, V> {
-    pub fn new(inner: &'a mut V, total_size: &'a mut KvSize) -> Self {
+/// Similar to [`MutGuard`], but the size is updated atomically. Useful for creating shared
+/// references to the entries in a collection.
+pub type AtomicMutGuard<'a, V> = MutGuard<'a, V, &'a KvSize>;
+
+impl<'a, V, S> MutGuard<'a, V, S>
+where
+    V: EstimateSize,
+    S: private::GenericKvSize,
+{
+    pub fn new(inner: &'a mut V, total_size: S) -> Self {
         let original_val_size = inner.estimated_size();
         Self {
             inner,
@@ -42,14 +82,22 @@ impl<'a, V: EstimateSize> MutGuard<'a, V> {
     }
 }
 
-impl<'a, V: EstimateSize> Drop for MutGuard<'a, V> {
+impl<'a, V, S> Drop for MutGuard<'a, V, S>
+where
+    V: EstimateSize,
+    S: private::GenericKvSize,
+{
     fn drop(&mut self) {
-        self.total_size.add_size(self.inner.estimated_size());
-        self.total_size.sub_size(self.original_val_size);
+        self.total_size
+            .update_size(self.original_val_size, self.inner.estimated_size());
     }
 }
 
-impl<'a, V: EstimateSize> Deref for MutGuard<'a, V> {
+impl<'a, V, S> Deref for MutGuard<'a, V, S>
+where
+    V: EstimateSize,
+    S: private::GenericKvSize,
+{
     type Target = V;
 
     fn deref(&self) -> &Self::Target {
@@ -57,39 +105,12 @@ impl<'a, V: EstimateSize> Deref for MutGuard<'a, V> {
     }
 }
 
-impl<'a, V: EstimateSize> DerefMut for MutGuard<'a, V> {
+impl<'a, V, S> DerefMut for MutGuard<'a, V, S>
+where
+    V: EstimateSize,
+    S: private::GenericKvSize,
+{
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.inner
-    }
-}
-
-pub struct UnsafeMutGuard<V: EstimateSize> {
-    inner: NonNull<V>,
-    // The size of the original value
-    original_val_size: usize,
-    // The total size of a collection
-    total_size: NonNull<KvSize>,
-}
-
-impl<V: EstimateSize> UnsafeMutGuard<V> {
-    pub fn new(inner: &mut V, total_size: &mut KvSize) -> Self {
-        let original_val_size = inner.estimated_size();
-        Self {
-            inner: inner.into(),
-            original_val_size,
-            total_size: total_size.into(),
-        }
-    }
-
-    /// # Safety
-    ///
-    /// 1. Only 1 `MutGuard` should be held for each value.
-    /// 2. The returned `MutGuard` should not be moved to other threads.
-    pub unsafe fn as_mut_guard<'a>(&mut self) -> MutGuard<'a, V> {
-        MutGuard {
-            inner: self.inner.as_mut(),
-            original_val_size: self.original_val_size,
-            total_size: self.total_size.as_mut(),
-        }
     }
 }

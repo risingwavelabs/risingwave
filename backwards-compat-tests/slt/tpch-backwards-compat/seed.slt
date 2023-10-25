@@ -4,9 +4,6 @@ SET RW_IMPLICIT_FLUSH TO true;
 statement ok
 SET QUERY_MODE TO distributed;
 
-statement ok
-SET CREATE_COMPACTION_GROUP_FOR_MV TO true;
-
 include ../tpch/create_tables.slt.part
 
 include ../tpch/insert_customer.slt.part

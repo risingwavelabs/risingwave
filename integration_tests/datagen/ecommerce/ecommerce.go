@@ -103,7 +103,7 @@ func (g *ecommerceGen) KafkaTopics() []string {
 }
 
 func (g *ecommerceGen) generate() []sink.SinkRecord {
-	ts := time.Now().Format(gen.RwTimestampLayout)
+	ts := time.Now().Format(gen.RwTimestampNaiveLayout)
 
 	if g.faker.Bool() && g.seqShipId >= g.seqOrderId {
 		// New order.

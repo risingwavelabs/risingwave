@@ -523,32 +523,30 @@ impl Binder {
             // TODO: Add generic expr support when needed
             AstDataType::Regclass => {
                 let input = self.bind_expr_inner(expr)?;
-                let class_name = match &input {
-                    ExprImpl::Literal(literal)
-                        if literal.return_type() == DataType::Varchar
-                            && let Some(scalar) = literal.get_data() =>
-                    {
-                        match scalar {
-                            risingwave_common::types::ScalarImpl::Utf8(s) => s,
-                            _ => {
-                                return Err(ErrorCode::BindError(
-                                    "Unsupported input type".to_string(),
-                                )
-                                .into())
-                            }
-                        }
-                    }
-                    ExprImpl::Literal(literal) if literal.return_type().is_int() => {
-                        return Ok(ExprImpl::Literal(literal.clone()))
-                    }
-                    _ => {
-                        return Err(
-                            ErrorCode::BindError("Unsupported input type".to_string()).into()
-                        )
-                    }
-                };
-                self.resolve_regclass(class_name)
-                    .map(|id| ExprImpl::literal_int(id as i32))
+                match input.return_type() {
+                    DataType::Varchar => Ok(ExprImpl::FunctionCall(Box::new(
+                        FunctionCall::new_unchecked(
+                            ExprType::CastRegclass,
+                            vec![input],
+                            DataType::Int32,
+                        ),
+                    ))),
+                    DataType::Int32 => Ok(input),
+                    dt if dt.is_int() => Ok(input.cast_explicit(DataType::Int32)?),
+                    _ => Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
+                }
+            }
+            AstDataType::Regproc => {
+                let lhs = self.bind_expr_inner(expr)?;
+                let lhs_ty = lhs.return_type();
+                if lhs_ty == DataType::Varchar {
+                    // FIXME: Currently, we only allow VARCHAR to be casted to Regproc.
+                    // FIXME: Check whether it's a valid proc
+                    // FIXME: The return type should be casted to Regproc, but we don't have this type.
+                    Ok(lhs)
+                } else {
+                    Err(ErrorCode::BindError(format!("Can't cast {} to regproc", lhs_ty)).into())
+                }
             }
             _ => self.bind_cast_inner(expr, bind_data_type(&data_type)?),
         }
@@ -655,6 +653,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         }
         AstDataType::Bytea => DataType::Bytea,
         AstDataType::Regclass
+        | AstDataType::Regproc
         | AstDataType::Uuid
         | AstDataType::Custom(_)
         | AstDataType::Decimal(_, _)

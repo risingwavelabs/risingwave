@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::aggregate::AggCall;
 use risingwave_storage::StateStore;
 
 use super::aggregation::AggStateStorage;
@@ -40,7 +40,7 @@ pub struct AggExecutorArgs<S: StateStore, E: AggExecutorExtraArgs> {
     pub agg_calls: Vec<AggCall>,
     pub row_count_index: usize,
     pub storages: Vec<AggStateStorage<S>>,
-    pub result_table: StateTable<S>,
+    pub intermediate_state_table: StateTable<S>,
     pub distinct_dedup_tables: HashMap<usize, StateTable<S>>,
     pub watermark_epoch: AtomicU64Ref,
     pub metrics: Arc<StreamingMetrics>,
@@ -57,6 +57,7 @@ impl AggExecutorExtraArgs for SimpleAggExecutorExtraArgs {}
 pub struct HashAggExecutorExtraArgs {
     pub group_key_indices: Vec<usize>,
     pub chunk_size: usize,
+    pub max_dirty_groups_heap_size: usize,
     pub emit_on_window_close: bool,
 }
 impl AggExecutorExtraArgs for HashAggExecutorExtraArgs {}

@@ -42,8 +42,8 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Limit<PlanRef> {
         self.input.functional_dependency().clone()
     }
 
-    fn logical_pk(&self) -> Option<Vec<usize>> {
-        Some(self.input.logical_pk().to_vec())
+    fn stream_key(&self) -> Option<Vec<usize>> {
+        Some(self.input.stream_key()?.to_vec())
     }
 }
 impl<PlanRef> Limit<PlanRef> {

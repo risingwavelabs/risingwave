@@ -274,7 +274,7 @@
     Bind error: failed to bind expression: (country + country)
 
     Caused by:
-      Feature is not yet implemented: Add[Struct, Struct]
+      Feature is not yet implemented: Add[Struct(StructType { field_names: ["address", "zipcode"], field_types: [Varchar, Varchar] }), Struct(StructType { field_names: ["address", "zipcode"], field_types: [Varchar, Varchar] })]
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
   create_source:
     format: plain
@@ -300,7 +300,7 @@
     Bind error: failed to bind expression: avg(country)
 
     Caused by:
-      Invalid input syntax: Invalid aggregation: avg(struct<address varchar,zipcode varchar>)
+      Invalid input syntax: Invalid aggregation: avg(struct<address character varying,zipcode character varying>)
   create_source:
     format: plain
     encode: protobuf
@@ -346,7 +346,7 @@
 - sql: |
     create materialized view t as select * from s;
     select (country).address.* from t;
-  binder_error: 'Bind error: type "varchar" is not composite'
+  binder_error: 'Bind error: type "character varying" is not composite'
   create_source:
     format: plain
     encode: protobuf

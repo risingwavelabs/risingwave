@@ -7,7 +7,10 @@ updates:
   open-pull-requests-limit: 10
   # Disable auto rebase to reduce cost. Use `@dependabot rebase` manually instead.
   rebase-strategy: "disabled"
-
+  # Ignore patch to reduce spam. Manually run `cargo update` regularly instead.
+  ignore:
+    - dependency-name: "*"
+      update-types: ["version-update:semver-patch"]
   # Create a group of dependencies to be updated together in one pull request
   groups:
     arrow:
@@ -16,3 +19,7 @@ updates:
     aws:
       patterns:
         - "aws*"
+    tonic:
+      patterns:
+        - "tonic*"
+        - "prost*"

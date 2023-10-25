@@ -15,12 +15,21 @@ CREATE SOURCE s2 (v2 varchar) with (
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
+CREATE TABLE t (v1 int) with (
+  connector = 'kafka',
+  topic = 'kafka_alter',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+
+statement ok
 create materialized view mv1 as select * from s1;
 
 statement ok
 create materialized view mv2 as select * from s2;
 
-sleep 10s
+sleep 5s
 
 statement ok
 flush;
@@ -34,6 +43,11 @@ query T
 select * from s2;
 ----
 11
+
+query I
+select * from t;
+----
+1
 
 # alter source
 statement ok
@@ -49,7 +63,10 @@ create materialized view mv3 as select * from s1;
 statement ok
 create materialized view mv4 as select * from s2;
 
-sleep 10s
+statement ok
+alter table t add column v2 varchar;
+
+sleep 5s
 
 statement ok
 flush;
@@ -84,6 +101,11 @@ select * from mv4
 ----
 11 NULL
 
+query IT
+select * from t
+----
+1 NULL
+
 # alter source again
 statement ok
 alter source s1 add column v3 int;
@@ -91,7 +113,7 @@ alter source s1 add column v3 int;
 statement ok
 create materialized view mv5 as select * from s1;
 
-sleep 10s
+sleep 5s
 
 statement ok
 flush;

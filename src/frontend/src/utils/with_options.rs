@@ -18,6 +18,9 @@ use std::num::NonZeroU32;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
+use risingwave_connector::source::kafka::{
+    insert_privatelink_broker_rewrite_map, PRIVATELINK_ENDPOINT_KEY,
+};
 use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_sqlparser::ast::{
     CompatibleSourceSchema, CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
@@ -56,6 +59,10 @@ impl WithOptions {
         Self {
             inner: inner.into_iter().collect(),
         }
+    }
+
+    pub fn from_inner(inner: BTreeMap<String, String>) -> Self {
+        Self { inner }
     }
 
     /// Get the reference of the inner map.
@@ -122,13 +129,27 @@ fn is_kafka_connector(with_options: &WithOptions) -> bool {
     connector == KAFKA_CONNECTOR
 }
 
-pub(crate) fn resolve_connection_in_with_option(
+pub(crate) fn resolve_privatelink_in_with_option(
     with_options: &mut WithOptions,
     schema_name: &Option<String>,
     session: &SessionImpl,
 ) -> RwResult<Option<ConnectionId>> {
-    let connection_name = get_connection_name(with_options);
     let is_kafka = is_kafka_connector(with_options);
+    let privatelink_endpoint = with_options.get(PRIVATELINK_ENDPOINT_KEY).cloned();
+
+    // if `privatelink.endpoint` is provided in WITH, use it to rewrite broker address directly
+    if let Some(endpoint) = privatelink_endpoint {
+        if !is_kafka {
+            return Err(RwError::from(ErrorCode::ProtocolError(
+                "Privatelink is only supported in kafka connector".to_string(),
+            )));
+        }
+        insert_privatelink_broker_rewrite_map(with_options.inner_mut(), None, Some(endpoint))
+            .map_err(RwError::from)?;
+        return Ok(None);
+    }
+
+    let connection_name = get_connection_name(with_options);
     let connection_id = match connection_name {
         Some(connection_name) => {
             let connection = session

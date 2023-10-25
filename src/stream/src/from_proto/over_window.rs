@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::session_config::OverWindowCachePolicy;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_expr::function::window::WindowFuncCall;
+use risingwave_expr::window_function::WindowFuncCall;
 use risingwave_pb::stream_plan::PbOverWindowNode;
 use risingwave_storage::StateStore;
 

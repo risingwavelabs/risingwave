@@ -15,7 +15,6 @@
 mod compactor_service;
 mod compute_node_service;
 mod configure_tmux_service;
-mod connector_service;
 mod ensure_stop_service;
 mod etcd_service;
 mod frontend_service;
@@ -52,7 +51,6 @@ pub use utils::*;
 pub use self::compactor_service::*;
 pub use self::compute_node_service::*;
 pub use self::configure_tmux_service::*;
-pub use self::connector_service::*;
 pub use self::ensure_stop_service::*;
 pub use self::etcd_service::*;
 pub use self::frontend_service::*;
