@@ -11,6 +11,7 @@ chmod +x ./risingwave_simulation
 
 export RUST_LOG="info,\
 risingwave_meta::barrier::recovery=debug,\
+risingwave_meta::manager::catalog=debug,\
 risingwave_meta::rpc::ddl_controller=debug,\
 risingwave_meta::barrier::mod=debug,\
 risingwave_simulation=debug"

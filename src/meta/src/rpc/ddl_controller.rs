@@ -15,6 +15,7 @@
 use std::cmp::Ordering;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
@@ -29,6 +30,7 @@ use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use tokio::sync::Semaphore;
+use tokio::time::sleep;
 use tracing::log::warn;
 use tracing::Instrument;
 
@@ -429,6 +431,7 @@ impl DdlController {
 
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
 
+        // Persist tables
         tracing::debug!(id = stream_job.id(), "preparing stream job");
         let fragment_graph = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
@@ -1093,5 +1096,20 @@ impl DdlController {
                     .await
             }
         }
+    }
+
+    pub async fn wait(&self) -> MetaResult<()> {
+        for _ in 0..30 * 60 {
+            if self
+                .catalog_manager
+                .list_creating_background_mvs()
+                .await
+                .is_empty()
+            {
+                return Ok(());
+            }
+            sleep(Duration::from_secs(1)).await;
+        }
+        Err(MetaError::cancelled("timeout".into()))
     }
 }

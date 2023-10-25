@@ -16,6 +16,8 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
+use super::generic::{GenericPlanRef, PhysicalPlanRef};
+use super::stream::StreamPlanRef;
 use super::utils::{childless_record, plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
@@ -78,7 +80,7 @@ impl StreamExchange {
 impl Distill for StreamExchange {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let distribution_display = DistributionDisplay {
-            distribution: &self.base.dist,
+            distribution: self.base.distribution(),
             input_schema: self.input.schema(),
         };
         childless_record(
@@ -117,13 +119,13 @@ impl StreamNode for StreamExchange {
                 })
             } else {
                 Some(DispatchStrategy {
-                    r#type: match &self.base.dist {
+                    r#type: match &self.base.distribution() {
                         Distribution::HashShard(_) => DispatcherType::Hash,
                         Distribution::Single => DispatcherType::Simple,
                         Distribution::Broadcast => DispatcherType::Broadcast,
                         _ => panic!("Do not allow Any or AnyShard in serialization process"),
                     } as i32,
-                    dist_key_indices: match &self.base.dist {
+                    dist_key_indices: match &self.base.distribution() {
                         Distribution::HashShard(keys) => {
                             keys.iter().map(|num| *num as u32).collect()
                         }

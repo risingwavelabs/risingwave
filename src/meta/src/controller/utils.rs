@@ -13,7 +13,13 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use model_migration::WithQuery;
+use risingwave_meta_model_migration::WithQuery;
+use risingwave_meta_model_v2::object::ObjectType;
+use risingwave_meta_model_v2::prelude::*;
+use risingwave_meta_model_v2::{
+    connection, function, index, object, object_dependency, schema, sink, source, table, view,
+    DataTypeArray, DatabaseId, ObjectId, SchemaId, UserId,
+};
 use risingwave_pb::catalog::{PbConnection, PbFunction};
 use sea_orm::sea_query::{
     Alias, CommonTableExpression, Expr, Query, QueryStatementBuilder, SelectStatement, UnionType,
@@ -24,12 +30,6 @@ use sea_orm::{
     Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
 };
 
-use crate::model_v2::object::ObjectType;
-use crate::model_v2::prelude::*;
-use crate::model_v2::{
-    connection, function, index, object, object_dependency, schema, sink, source, table, view,
-    DataTypeArray, DatabaseId, ObjectId, SchemaId, UserId,
-};
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -115,8 +115,11 @@ pub struct PartialObject {
     pub database_id: Option<DatabaseId>,
 }
 
-/// List all objects that are using the given one. It runs a recursive CTE to find all the dependencies.
-pub async fn list_used_by<C>(obj_id: ObjectId, db: &C) -> MetaResult<Vec<PartialObject>>
+/// List all objects that are using the given one in a cascade way. It runs a recursive CTE to find all the dependencies.
+pub async fn get_referring_objects_cascade<C>(
+    obj_id: ObjectId,
+    db: &C,
+) -> MetaResult<Vec<PartialObject>>
 where
     C: ConnectionTrait,
 {
@@ -316,6 +319,24 @@ where
         )));
     }
     Ok(())
+}
+
+/// List all objects that are using the given one.
+pub async fn get_referring_objects<C>(object_id: ObjectId, db: &C) -> MetaResult<Vec<PartialObject>>
+where
+    C: ConnectionTrait,
+{
+    let objs = ObjectDependency::find()
+        .filter(object_dependency::Column::Oid.eq(object_id))
+        .join(
+            JoinType::InnerJoin,
+            object_dependency::Relation::Object1.def(),
+        )
+        .into_partial_model()
+        .all(db)
+        .await?;
+
+    Ok(objs)
 }
 
 /// `ensure_schema_empty` ensures that the schema is empty, used by `DROP SCHEMA`.

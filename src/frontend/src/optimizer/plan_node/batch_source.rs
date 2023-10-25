@@ -19,6 +19,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
 
+use super::generic::GenericPlanRef;
 use super::utils::{childless_record, column_names_pretty, Distill};
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch,
@@ -35,7 +36,7 @@ pub struct BatchSource {
 
 impl BatchSource {
     pub fn new(core: generic::Source) -> Self {
-        let base = PlanBase::new_batch_from_logical(
+        let base = PlanBase::new_batch_with_core(
             &core,
             // Use `Single` by default, will be updated later with `clone_with_dist`.
             Distribution::Single,
@@ -58,8 +59,9 @@ impl BatchSource {
     }
 
     pub fn clone_with_dist(&self) -> Self {
-        let mut base = self.base.clone();
-        base.dist = Distribution::SomeShard;
+        let base = self
+            .base
+            .clone_with_new_distribution(Distribution::SomeShard);
         Self {
             base,
             core: self.core.clone(),
