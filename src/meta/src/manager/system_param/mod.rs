@@ -89,7 +89,7 @@ impl SystemParamsManager {
         set_system_param(mem_txn.deref_mut(), name, value).map_err(MetaError::system_param)?;
 
         let mut store_txn = Transaction::default();
-        mem_txn.apply_to_txn(&mut store_txn)?;
+        mem_txn.apply_to_txn(&mut store_txn).await?;
         self.meta_store.txn(store_txn).await?;
 
         mem_txn.commit();

@@ -28,7 +28,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorSuppressor, RwError};
 use risingwave_common::types::{JsonbVal, Scalar};
-use risingwave_pb::catalog::PbSource;
+use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
@@ -251,6 +251,67 @@ impl SourceStruct {
     pub fn new(format: SourceFormat, encode: SourceEncode) -> Self {
         Self { format, encode }
     }
+}
+
+// Only return valid (format, encode)
+pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> {
+    use risingwave_pb::plan_common::{PbEncodeType, PbFormatType, RowFormatType};
+
+    // old version meta.
+    if let Ok(format) = info.get_row_format() {
+        let (format, encode) = match format {
+            RowFormatType::Json => (SourceFormat::Plain, SourceEncode::Json),
+            RowFormatType::Protobuf => (SourceFormat::Plain, SourceEncode::Protobuf),
+            RowFormatType::DebeziumJson => (SourceFormat::Debezium, SourceEncode::Json),
+            RowFormatType::Avro => (SourceFormat::Plain, SourceEncode::Avro),
+            RowFormatType::Maxwell => (SourceFormat::Maxwell, SourceEncode::Json),
+            RowFormatType::CanalJson => (SourceFormat::Canal, SourceEncode::Json),
+            RowFormatType::Csv => (SourceFormat::Plain, SourceEncode::Csv),
+            RowFormatType::Native => (SourceFormat::Native, SourceEncode::Native),
+            RowFormatType::DebeziumAvro => (SourceFormat::Debezium, SourceEncode::Avro),
+            RowFormatType::UpsertJson => (SourceFormat::Upsert, SourceEncode::Json),
+            RowFormatType::UpsertAvro => (SourceFormat::Upsert, SourceEncode::Avro),
+            RowFormatType::DebeziumMongoJson => (SourceFormat::DebeziumMongo, SourceEncode::Json),
+            RowFormatType::Bytes => (SourceFormat::Plain, SourceEncode::Bytes),
+            RowFormatType::RowUnspecified => unreachable!(),
+        };
+        return Ok(SourceStruct::new(format, encode));
+    }
+    let source_format = info.get_format().map_err(|e| anyhow!("{e:?}"))?;
+    let source_encode = info.get_row_encode().map_err(|e| anyhow!("{e:?}"))?;
+    let (format, encode) = match (source_format, source_encode) {
+        (PbFormatType::Plain, PbEncodeType::Json) => (SourceFormat::Plain, SourceEncode::Json),
+        (PbFormatType::Plain, PbEncodeType::Protobuf) => {
+            (SourceFormat::Plain, SourceEncode::Protobuf)
+        }
+        (PbFormatType::Debezium, PbEncodeType::Json) => {
+            (SourceFormat::Debezium, SourceEncode::Json)
+        }
+        (PbFormatType::Plain, PbEncodeType::Avro) => (SourceFormat::Plain, SourceEncode::Avro),
+        (PbFormatType::Maxwell, PbEncodeType::Json) => (SourceFormat::Maxwell, SourceEncode::Json),
+        (PbFormatType::Canal, PbEncodeType::Json) => (SourceFormat::Canal, SourceEncode::Json),
+        (PbFormatType::Plain, PbEncodeType::Csv) => (SourceFormat::Plain, SourceEncode::Csv),
+        (PbFormatType::Native, PbEncodeType::Native) => {
+            (SourceFormat::Native, SourceEncode::Native)
+        }
+        (PbFormatType::Debezium, PbEncodeType::Avro) => {
+            (SourceFormat::Debezium, SourceEncode::Avro)
+        }
+        (PbFormatType::Upsert, PbEncodeType::Json) => (SourceFormat::Upsert, SourceEncode::Json),
+        (PbFormatType::Upsert, PbEncodeType::Avro) => (SourceFormat::Upsert, SourceEncode::Avro),
+        (PbFormatType::DebeziumMongo, PbEncodeType::Json) => {
+            (SourceFormat::DebeziumMongo, SourceEncode::Json)
+        }
+        (PbFormatType::Plain, PbEncodeType::Bytes) => (SourceFormat::Plain, SourceEncode::Bytes),
+        (format, encode) => {
+            return Err(anyhow!(
+                "Unsupported combination of format {:?} and encode {:?}",
+                format,
+                encode
+            ));
+        }
+    };
+    Ok(SourceStruct::new(format, encode))
 }
 
 pub type BoxSourceStream = BoxStream<'static, Result<Vec<SourceMessage>>>;

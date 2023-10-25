@@ -159,9 +159,9 @@ pub async fn playground(opts: PlaygroundOpts) -> Result<()> {
             RisingWaveService::Meta(mut opts) => {
                 opts.insert(0, "meta-node".into());
                 tracing::info!("starting meta-node thread with cli args: {:?}", opts);
-                let opts = risingwave_meta::MetaNodeOpts::parse_from(opts);
+                let opts = risingwave_meta_node::MetaNodeOpts::parse_from(opts);
                 let _meta_handle = tokio::spawn(async move {
-                    risingwave_meta::start(opts).await;
+                    risingwave_meta_node::start(opts).await;
                     tracing::warn!("meta is stopped, shutdown all nodes");
                     // As a playground, it's fine to just kill everything.
                     if idle_exit {

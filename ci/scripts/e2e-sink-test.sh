@@ -57,7 +57,7 @@ node_port=50051
 node_timeout=10
 
 echo "--- starting risingwave cluster with connector node"
-cargo make ci-start ci-kafka
+cargo make ci-start ci-1cn-1fe
 ./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-node.log 2>&1 &
 
 echo "waiting for connector node to start"

@@ -863,6 +863,7 @@ mod test {
     use super::*;
     use crate::expr::{FunctionCall, InputRef};
     use crate::optimizer::optimizer_context::OptimizerContext;
+    use crate::optimizer::plan_node::generic::GenericPlanRef;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
     #[tokio::test]
@@ -883,7 +884,7 @@ mod test {
             // 0 --> 1
             values
                 .base
-                .functional_dependency
+                .functional_dependency_mut()
                 .add_functional_dependency_by_column_indices(&[0], &[1]);
             values
         };
@@ -897,7 +898,7 @@ mod test {
             // 0 --> 1, 2
             values
                 .base
-                .functional_dependency
+                .functional_dependency_mut()
                 .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
             values
         };
@@ -910,7 +911,7 @@ mod test {
             // {} --> 0
             values
                 .base
-                .functional_dependency
+                .functional_dependency_mut()
                 .add_functional_dependency_by_column_indices(&[], &[0]);
             values
         };

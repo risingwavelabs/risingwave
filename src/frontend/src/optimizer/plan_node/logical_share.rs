@@ -69,7 +69,7 @@ impl LogicalShare {
     }
 
     pub(super) fn pretty_fields<'a>(base: &PlanBase, name: &'a str) -> XmlNode<'a> {
-        childless_record(name, vec![("id", Pretty::debug(&base.id.0))])
+        childless_record(name, vec![("id", Pretty::debug(&base.id().0))])
     }
 }
 

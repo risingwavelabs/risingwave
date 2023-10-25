@@ -21,8 +21,8 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use url::Url;
 
-use crate::parser::schema_registry::Client;
 use crate::parser::util::download_from_http;
+use crate::schema::schema_registry::Client;
 
 const PB_SCHEMA_LOCATION_S3_REGION: &str = "region";
 

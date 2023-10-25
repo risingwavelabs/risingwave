@@ -1816,7 +1816,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "35ed6e9d84f0b51a7f52daf1c7d71dd136fd7a3f41a8462b8cdb8c78d920fad4"
 dependencies = [
  "bytes",
+ "futures-core",
  "memchr",
+ "pin-project-lite",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -2444,10 +2448,11 @@ dependencies = [
 
 [[package]]
 name = "deranged"
-version = "0.3.8"
+version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2696e8a945f658fd14dc3b87242e6b80cd0f36ff04ea560fa39082368847946"
+checksum = "0f32d04922c60427da6f9fef14d042d9edddef64cb9d4ce0d64d0685fbeb1fd3"
 dependencies = [
+ "powerfmt",
  "serde",
 ]
 
@@ -2550,8 +2555,7 @@ checksum = "86e3bdc80eee6e16b2b6b0f87fbc98c04bee3455e35174c0de1a125d0688c632"
 [[package]]
 name = "dlv-list"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8aead04dc46b5f263c25721cf25c9e595951d15055f8063f92392fa0d7f64cf4"
+source = "git+https://github.com/sgodwincs/dlv-list-rs.git?rev=5bbc5d0#5bbc5d0cc84f257e173d851f8dc1674fb6e46f95"
 dependencies = [
  "const-random",
 ]
@@ -3014,7 +3018,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
+source = "git+https://github.com/MrCroxx/foyer?rev=2261151#2261151107ad362851f5fff9ce4fa56e61911b10"
 dependencies = [
  "foyer-common",
  "foyer-intrusive",
@@ -3025,10 +3029,11 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
+source = "git+https://github.com/MrCroxx/foyer?rev=2261151#2261151107ad362851f5fff9ce4fa56e61911b10"
 dependencies = [
  "bytes",
  "foyer-workspace-hack",
+ "itertools 0.11.0",
  "madsim-tokio",
  "parking_lot 0.12.1",
  "paste",
@@ -3039,13 +3044,13 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
+source = "git+https://github.com/MrCroxx/foyer?rev=2261151#2261151107ad362851f5fff9ce4fa56e61911b10"
 dependencies = [
  "bytes",
  "cmsketch",
  "foyer-common",
  "foyer-workspace-hack",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "memoffset",
  "parking_lot 0.12.1",
  "paste",
@@ -3056,7 +3061,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
+source = "git+https://github.com/MrCroxx/foyer?rev=2261151#2261151107ad362851f5fff9ce4fa56e61911b10"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -3085,7 +3090,7 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/mrcroxx/foyer?rev=438eec8#438eec87e90c7a80cb53a06b711c6ea1ad7a0f41"
+source = "git+https://github.com/MrCroxx/foyer?rev=2261151#2261151107ad362851f5fff9ce4fa56e61911b10"
 dependencies = [
  "crossbeam-utils",
  "either",
@@ -3094,7 +3099,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "hyper",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "libc",
  "memchr",
  "parking_lot 0.12.1",
@@ -3223,9 +3228,9 @@ dependencies = [
 
 [[package]]
 name = "futures-async-stream"
-version = "0.2.7"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f529ccdeacfa2446a9577041686cf1abb839b1b3e15fee4c1b1232ab3b7d799f"
+checksum = "379790776b0d953337df4ab7ecc51936c66ea112484cad7912907b1d34253ebf"
 dependencies = [
  "futures-async-stream-macro",
  "futures-core",
@@ -3234,13 +3239,13 @@ dependencies = [
 
 [[package]]
 name = "futures-async-stream-macro"
-version = "0.2.7"
+version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca2b48ee06dc8d2808ba5ebad075d06c3406085bb19deaac33be64c39113bf80"
+checksum = "5df2c13d48c8cb8a3ec093ede6f0f4482f327d7bb781120c5fb483ef0f17e758"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 1.0.109",
+ "syn 2.0.37",
 ]
 
 [[package]]
@@ -4037,12 +4042,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "iter-chunks"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7abddfc4e19bc38f3922e41b341fedb4e1470e922f024c4e5ae5922f56c7593"
-
-[[package]]
 name = "itertools"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4593,9 +4592,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-tonic-build"
-version = "0.4.1+0.10.0"
+version = "0.4.2+0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3434b3d59001abcce56b9170fbd7982377858d8b931e8472056bf0c894ab257"
+checksum = "4a2ad2776ba20221ccbe4e136e2fa0f7ab90eebd608373177f3e74a198a288ec"
 dependencies = [
  "prettyplease 0.2.15",
  "proc-macro2",
@@ -5496,8 +5495,7 @@ dependencies = [
 [[package]]
 name = "ordered-multimap"
 version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ed8acf08e98e744e5384c8bc63ceb0364e68a6854187221c18df61c4797690e"
+source = "git+https://github.com/risingwavelabs/ordered-multimap-rs.git?rev=19c743f#19c743f3e3d106c99ba37628f06a2ca6faa2284f"
 dependencies = [
  "dlv-list",
  "hashbrown 0.13.2",
@@ -6028,6 +6026,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "powerfmt"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
+
+[[package]]
 name = "pprof"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6214,7 +6218,7 @@ dependencies = [
  "byteorder",
  "hex",
  "lazy_static",
- "rustix 0.36.15",
+ "rustix 0.36.16",
 ]
 
 [[package]]
@@ -6227,7 +6231,7 @@ dependencies = [
  "byteorder",
  "hex",
  "lazy_static",
- "rustix 0.36.15",
+ "rustix 0.36.16",
 ]
 
 [[package]]
@@ -6357,7 +6361,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.37",
- "workspace-hack",
 ]
 
 [[package]]
@@ -6638,12 +6641,19 @@ version = "0.23.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f49cdc0bb3f412bf8e7d1bd90fe1d9eb10bc5c399ba90973c14662a27b3f8ba"
 dependencies = [
+ "async-std",
+ "async-trait",
+ "bytes",
  "combine",
+ "futures-util",
  "itoa",
  "percent-encoding",
+ "pin-project-lite",
  "ryu",
  "sha1_smol",
  "socket2 0.4.9",
+ "tokio",
+ "tokio-util",
  "url",
 ]
 
@@ -6893,7 +6903,6 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "async-recursion",
- "async-stream",
  "async-trait",
  "criterion",
  "either",
@@ -6927,7 +6936,6 @@ dependencies = [
  "tokio-metrics",
  "tokio-stream",
  "tracing",
- "uuid",
  "workspace-hack",
 ]
 
@@ -6977,7 +6985,7 @@ dependencies = [
  "risingwave_ctl",
  "risingwave_expr_impl",
  "risingwave_frontend",
- "risingwave_meta",
+ "risingwave_meta_node",
  "risingwave_rt",
  "task_stats_alloc",
  "tikv-jemallocator",
@@ -7003,7 +7011,7 @@ dependencies = [
  "risingwave_ctl",
  "risingwave_expr_impl",
  "risingwave_frontend",
- "risingwave_meta",
+ "risingwave_meta_node",
  "risingwave_rt",
  "shell-words",
  "strum 0.25.0",
@@ -7133,7 +7141,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
- "workspace-hack",
 ]
 
 [[package]]
@@ -7172,6 +7179,7 @@ dependencies = [
  "risingwave_hummock_sdk",
  "risingwave_hummock_test",
  "risingwave_meta",
+ "risingwave_meta_node",
  "risingwave_object_store",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -7185,14 +7193,12 @@ dependencies = [
 name = "risingwave_compactor"
 version = "1.3.0-alpha"
 dependencies = [
- "anyhow",
  "async-trait",
  "await-tree",
  "clap",
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",
- "prometheus",
  "risingwave_common",
  "risingwave_common_heap_profiling",
  "risingwave_common_service",
@@ -7201,7 +7207,6 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_storage",
  "serde",
- "serde_json",
  "tracing",
  "workspace-hack",
 ]
@@ -7232,6 +7237,7 @@ dependencies = [
  "risingwave_common_service",
  "risingwave_connector",
  "risingwave_hummock_sdk",
+ "risingwave_jni_core",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_source",
@@ -7266,7 +7272,6 @@ dependencies = [
  "aws-smithy-http",
  "aws-types",
  "base64 0.21.4",
- "bincode 1.3.3",
  "byteorder",
  "bytes",
  "chrono",
@@ -7290,15 +7295,12 @@ dependencies = [
  "jsonschema-transpiler",
  "madsim-rdkafka",
  "madsim-tokio",
- "madsim-tonic",
  "maplit",
  "moka",
  "mysql_async",
  "mysql_common",
  "nexmark",
- "nkeys",
  "num-bigint",
- "opendal 0.39.0",
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
@@ -7309,6 +7311,8 @@ dependencies = [
  "protobuf-native",
  "pulsar",
  "rand",
+ "redis",
+ "regex",
  "reqwest",
  "risingwave_common",
  "risingwave_jni_core",
@@ -7493,7 +7497,6 @@ dependencies = [
  "madsim-tonic",
  "maplit",
  "md5",
- "more-asserts",
  "num-integer",
  "parking_lot 0.12.1",
  "parse-display",
@@ -7672,17 +7675,14 @@ dependencies = [
  "num-integer",
  "num-traits",
  "parking_lot 0.12.1",
- "parse-display",
  "prometheus",
  "prometheus-http-query",
  "prost 0.12.1",
  "rand",
- "regex",
  "reqwest",
  "risingwave_backup",
  "risingwave_common",
  "risingwave_common_heap_profiling",
- "risingwave_common_service",
  "risingwave_connector",
  "risingwave_hummock_sdk",
  "risingwave_object_store",
@@ -7694,10 +7694,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
- "sqlx",
- "static_assertions",
  "sync-point",
- "tempfile",
  "thiserror",
  "tokio-retry",
  "tokio-stream",
@@ -7706,6 +7703,56 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_meta_node"
+version = "1.3.0-alpha"
+dependencies = [
+ "anyhow",
+ "clap",
+ "either",
+ "futures",
+ "itertools 0.11.0",
+ "madsim-etcd-client",
+ "madsim-tokio",
+ "madsim-tonic",
+ "model_migration",
+ "prometheus-http-query",
+ "regex",
+ "risingwave_common",
+ "risingwave_common_heap_profiling",
+ "risingwave_common_service",
+ "risingwave_meta",
+ "risingwave_meta_service",
+ "risingwave_pb",
+ "risingwave_rpc_client",
+ "sea-orm",
+ "tracing",
+ "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_meta_service"
+version = "1.3.0-alpha"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "either",
+ "futures",
+ "itertools 0.11.0",
+ "madsim-tokio",
+ "madsim-tonic",
+ "regex",
+ "risingwave_common",
+ "risingwave_connector",
+ "risingwave_meta",
+ "risingwave_pb",
+ "sea-orm",
+ "sync-point",
+ "tokio-stream",
+ "tracing",
  "workspace-hack",
 ]
 
@@ -7824,7 +7871,6 @@ name = "risingwave_rt"
 version = "1.3.0-alpha"
 dependencies = [
  "await-tree",
- "chrono",
  "console",
  "console-subscriber",
  "either",
@@ -7836,7 +7882,6 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "parking_lot 0.12.1",
  "pprof",
- "prometheus",
  "risingwave_common",
  "risingwave_variables",
  "rlimit",
@@ -7878,7 +7923,7 @@ dependencies = [
  "risingwave_e2e_extended_mode_test",
  "risingwave_expr_impl",
  "risingwave_frontend",
- "risingwave_meta",
+ "risingwave_meta_node",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_sqlparser",
@@ -7902,7 +7947,6 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "criterion",
- "easy-ext",
  "futures",
  "futures-async-stream",
  "itertools 0.11.0",
@@ -7996,7 +8040,6 @@ dependencies = [
 name = "risingwave_storage"
 version = "1.3.0-alpha"
 dependencies = [
- "anyhow",
  "arc-swap",
  "async-trait",
  "auto_enums",
@@ -8069,7 +8112,6 @@ dependencies = [
  "await-tree",
  "bytes",
  "criterion",
- "dyn-clone",
  "educe",
  "either",
  "enum-as-inner",
@@ -8078,7 +8120,6 @@ dependencies = [
  "futures-async-stream",
  "governor",
  "hytra",
- "iter-chunks",
  "itertools 0.11.0",
  "local_stats_alloc",
  "lru 0.7.6",
@@ -8087,9 +8128,7 @@ dependencies = [
  "maplit",
  "memcomparable",
  "multimap 0.9.0",
- "num-traits",
  "parking_lot 0.12.1",
- "parse-display",
  "pin-project",
  "prometheus",
  "prost 0.12.1",
@@ -8108,7 +8147,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "smallvec",
- "spin 0.9.8",
  "static_assertions",
  "task_stats_alloc",
  "thiserror",
@@ -8267,9 +8305,9 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.36.15"
+version = "0.36.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c37f1bd5ef1b5422177b7646cba67430579cfe2ace80f284fee876bca52ad941"
+checksum = "6da3636faa25820d8648e0e31c5d519bbb01f72fdf57131f0f5f7da5fed36eab"
 dependencies = [
  "bitflags 1.3.2",
  "errno",
@@ -9773,14 +9811,15 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.28"
+version = "0.3.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17f6bb557fd245c28e6411aa56b6403c689ad95061f50e4be16c274e70a17e48"
+checksum = "c4a34ab300f2dee6e562c10a046fc05e358b29f9bf92277f30c3c8d82275f6f5"
 dependencies = [
  "deranged",
  "itoa",
  "libc",
  "num_threads",
+ "powerfmt",
  "serde",
  "time-core",
  "time-macros",
@@ -9788,15 +9827,15 @@ dependencies = [
 
 [[package]]
 name = "time-core"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7300fbefb4dadc1af235a9cef3737cea692a9d97e1b9cbcd4ebdae6f8868e6fb"
+checksum = "ef927ca75afb808a4d64dd374f00a2adf8d0fcff8e7b184af886c3c87ec4a3f3"
 
 [[package]]
 name = "time-macros"
-version = "0.2.14"
+version = "0.2.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a942f44339478ef67935ab2bbaec2fb0322496cf3cbe84b261e06ac3814c572"
+checksum = "4ad70d68dba9e1f8aceda7aa6711965dfec1cac869f311a51bd08b3a2ccbce20"
 dependencies = [
  "time-core",
 ]
@@ -10458,9 +10497,9 @@ checksum = "711b9620af191e0cdc7468a8d14e709c3dcdb115b36f838e601583af800a370a"
 
 [[package]]
 name = "uuid"
-version = "1.4.1"
+version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79daa5ed5740825c40b389c5e50312b9c86df53fccd33f281df655642b43869d"
+checksum = "88ad59a7560b41a70d191093a945f0b87bc1deeda46fb237479708a1d6b6cdfc"
 dependencies = [
  "getrandom",
  "rand",
@@ -10911,6 +10950,7 @@ dependencies = [
  "ahash 0.8.3",
  "allocator-api2",
  "anyhow",
+ "async-std",
  "auto_enums",
  "aws-credential-types",
  "aws-sdk-s3",
@@ -10944,7 +10984,6 @@ dependencies = [
  "futures-util",
  "hashbrown 0.12.3",
  "hashbrown 0.14.0",
- "heck 0.4.1",
  "hyper",
  "indexmap 1.9.3",
  "itertools 0.10.5",
@@ -10986,6 +11025,7 @@ dependencies = [
  "rand",
  "rand_chacha",
  "rand_core",
+ "redis",
  "regex",
  "regex-automata 0.4.1",
  "regex-syntax 0.8.0",

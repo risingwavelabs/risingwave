@@ -427,7 +427,7 @@ mod test {
         let mut values = LogicalValues::new(vec![], Schema { fields }, ctx);
         values
             .base
-            .functional_dependency
+            .functional_dependency_mut()
             .add_functional_dependency_by_column_indices(&[1], &[2]);
         let project_set = LogicalProjectSet::new(
             values.into(),
@@ -449,8 +449,9 @@ mod test {
         );
         let fd_set: HashSet<FunctionalDependency> = project_set
             .base
-            .functional_dependency
-            .into_dependencies()
+            .functional_dependency()
+            .as_dependencies()
+            .clone()
             .into_iter()
             .collect();
         let expected_fd_set: HashSet<FunctionalDependency> =

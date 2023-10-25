@@ -69,7 +69,7 @@ pub struct SinkCoordinatorManager {
 }
 
 impl SinkCoordinatorManager {
-    pub(crate) fn start_worker() -> (Self, (JoinHandle<()>, Sender<()>)) {
+    pub fn start_worker() -> (Self, (JoinHandle<()>, Sender<()>)) {
         Self::start_worker_with_spawn_worker(|writer_request, manager_request_stream| {
             tokio::spawn(CoordinatorWorker::run(
                 writer_request,
@@ -91,7 +91,7 @@ impl SinkCoordinatorManager {
         )
     }
 
-    pub(crate) async fn handle_new_request(
+    pub async fn handle_new_request(
         &self,
         mut request_stream: SinkWriterRequestStream,
     ) -> Result<impl Stream<Item = Result<CoordinateResponse, Status>>, Status> {
@@ -143,11 +143,11 @@ impl SinkCoordinatorManager {
         info!("successfully stop coordinator: {:?}", sink_id);
     }
 
-    pub(crate) async fn reset(&self) {
+    pub async fn reset(&self) {
         self.stop_coordinator(None).await;
     }
 
-    pub(crate) async fn stop_sink_coordinator(&self, sink_id: SinkId) {
+    pub async fn stop_sink_coordinator(&self, sink_id: SinkId) {
         self.stop_coordinator(Some(sink_id)).await;
     }
 }

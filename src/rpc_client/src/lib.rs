@@ -16,11 +16,10 @@
 //! response gRPC message structs.
 
 #![feature(trait_alias)]
-#![feature(binary_heap_drain_sorted)]
 #![feature(result_option_inspect)]
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_defaults)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(iterator_try_collect)]
 #![feature(hash_extract_if)]
 #![feature(try_blocks)]
