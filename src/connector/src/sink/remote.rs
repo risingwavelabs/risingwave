@@ -227,6 +227,7 @@ async fn await_future_with_monitor_receiver_err<O, F: Future<Output = Result<O>>
     }
 }
 
+#[async_trait]
 impl<R: RemoteSinkTrait> LogSinker for RemoteLogSinker<R> {
     async fn consume_log_and_sink(self, mut log_reader: impl LogReader) -> Result<()> {
         // Note: this is a total copy of the implementation of LogSinkerOf<impl SinkWriter>,

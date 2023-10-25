@@ -540,6 +540,7 @@ define_keywords!(
     VIEWS,
     VIRTUAL,
     VOLATILE,
+    WAIT,
     WATERMARK,
     WHEN,
     WHENEVER,
