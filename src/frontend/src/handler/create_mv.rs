@@ -166,6 +166,8 @@ pub async fn handle_create_mv(
     let (mut table, graph) = {
         let context = OptimizerContext::from_handler_args(handler_args);
 
+        tracing::info!("get overwrite options, {:?}", context.overwrite_options());
+
         let has_order_by = !query.order_by.is_empty();
         if has_order_by {
             context.warn_to_user(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.

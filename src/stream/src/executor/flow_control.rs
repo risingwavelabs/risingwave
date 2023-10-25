@@ -40,6 +40,8 @@ impl FlowControlExecutor {
     pub fn new(input: Box<dyn Executor>, rate_limit: u32) -> Self {
         #[cfg(madsim)]
         println!("FlowControlExecutor rate limiter is disabled in madsim as it will spawn system threads");
+
+        tracing::info!("FlowControlExecutor rate limit: {}", rate_limit);
         Self { input, rate_limit }
     }
 
