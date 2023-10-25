@@ -113,7 +113,7 @@ fn jsonb_object_2d(array: ListRef<'_>) -> Result<JsonbVal> {
     Ok(builder.finish().into())
 }
 
-/// This form of `jsonb_object`` takes keys and values pairwise from separate text arrays.
+/// This form of `jsonb_object` takes keys and values pairwise from separate text arrays.
 /// Otherwise it is identical to the one-argument form.
 ///
 /// # Examples
