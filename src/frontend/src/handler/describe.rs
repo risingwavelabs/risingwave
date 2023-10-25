@@ -257,6 +257,7 @@ mod tests {
             "primary key".into() => "v3".into(),
             "distribution key".into() => "v3".into(),
             "idx1".into() => "index(v1 DESC, v2 ASC, v3 ASC) include(v4) distributed by(v1)".into(),
+            "table description".into() => "t".into(),
         };
 
         assert_eq!(columns, expected_columns);

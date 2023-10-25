@@ -48,6 +48,7 @@ v3                integer  false  NULL
 _row_id           serial    true  NULL
 primary key       _row_id   NULL  NULL
 distribution key  _row_id   NULL  NULL
+table description t3        NULL  NUll
 
 query TTT
 show columns from t3;
