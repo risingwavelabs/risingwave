@@ -25,14 +25,14 @@ use risingwave_pb::plan_common::ColumnDesc;
 
 use crate::parser::avro::schema_resolver::ConfluentSchemaResolver;
 use crate::parser::avro::util::avro_schema_to_column_descs;
-use crate::parser::schema_registry::{
-    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
-};
 use crate::parser::unified::avro::{
     avro_extract_field_schema, avro_schema_skip_union, AvroAccess, AvroParseOptions,
 };
 use crate::parser::unified::AccessImpl;
 use crate::parser::{AccessBuilder, EncodingProperties, EncodingType};
+use crate::schema::schema_registry::{
+    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
+};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";

@@ -685,6 +685,21 @@ message RiseCtlRebuildTableStatsRequest {}
 
 message RiseCtlRebuildTableStatsResponse {}
 
+message GetCompactionScoreRequest {
+  uint64 compaction_group_id = 1;
+}
+
+message GetCompactionScoreResponse {
+  message PickerInfo {
+    uint64 score = 1;
+    uint64 select_level = 2;
+    uint64 target_level = 3;
+    string picker_type = 4;
+  }
+  uint64 compaction_group_id = 1;
+  repeated PickerInfo scores = 2;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -720,6 +735,7 @@ service HummockManagerService {
   rpc ListBranchedObject(ListBranchedObjectRequest) returns (ListBranchedObjectResponse);
   rpc ListActiveWriteLimit(ListActiveWriteLimitRequest) returns (ListActiveWriteLimitResponse);
   rpc ListHummockMetaConfig(ListHummockMetaConfigRequest) returns (ListHummockMetaConfigResponse);
+  rpc GetCompactionScore(GetCompactionScoreRequest) returns (GetCompactionScoreResponse);
 }
 
 message CompactionConfig {

@@ -33,7 +33,6 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::{
     SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy, StreamSourceInfo,
 };
-pub use schema_registry::name_strategy_from_str;
 use tracing_futures::Instrument;
 
 use self::avro::AvroAccessBuilder;
@@ -46,6 +45,7 @@ use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
 use crate::aws_auth::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
+use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::{
     extract_source_struct, BoxSourceStream, SourceColumnDesc, SourceColumnType, SourceContext,
     SourceContextRef, SourceEncode, SourceFormat, SourceMeta, SourceWithStateStream, SplitId,
@@ -63,7 +63,6 @@ mod maxwell;
 mod mysql;
 mod plain_parser;
 mod protobuf;
-mod schema_registry;
 mod unified;
 mod upsert_parser;
 mod util;
@@ -781,24 +780,6 @@ impl SpecificParserConfig {
         }),
         protocol_config: ProtocolProperties::Plain,
     };
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SchemaRegistryAuth {
-    username: Option<String>,
-    password: Option<String>,
-}
-
-impl From<&HashMap<String, String>> for SchemaRegistryAuth {
-    fn from(props: &HashMap<String, String>) -> Self {
-        const SCHEMA_REGISTRY_USERNAME: &str = "schema.registry.username";
-        const SCHEMA_REGISTRY_PASSWORD: &str = "schema.registry.password";
-
-        SchemaRegistryAuth {
-            username: props.get(SCHEMA_REGISTRY_USERNAME).cloned(),
-            password: props.get(SCHEMA_REGISTRY_PASSWORD).cloned(),
-        }
-    }
 }
 
 #[derive(Debug, Default, Clone)]

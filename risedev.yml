@@ -270,6 +270,21 @@ profile:
         exporter-port: 21250
       - use: compactor
 
+  3meta:
+    steps:
+      - use: meta-node
+        port: 5690
+        dashboard-port: 5691
+        exporter-port: 1250
+      - use: meta-node
+        port: 15690
+        dashboard-port: 15691
+        exporter-port: 11250
+      - use: meta-node
+        port: 25690
+        dashboard-port: 25691
+        exporter-port: 21250
+
   3etcd-3meta-1cn-1fe:
     steps:
       - use: minio

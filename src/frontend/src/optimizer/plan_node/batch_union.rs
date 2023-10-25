@@ -25,12 +25,12 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchUnion {
     pub base: PlanBase,
-    logical: generic::Union<PlanRef>,
+    core: generic::Union<PlanRef>,
 }
 
 impl BatchUnion {
-    pub fn new(logical: generic::Union<PlanRef>) -> Self {
-        let dist = if logical
+    pub fn new(core: generic::Union<PlanRef>) -> Self {
+        let dist = if core
             .inputs
             .iter()
             .all(|input| *input.distribution() == Distribution::Single)
@@ -40,21 +40,21 @@ impl BatchUnion {
             Distribution::SomeShard
         };
 
-        let base = PlanBase::new_batch_from_logical(&logical, dist, Order::any());
-        BatchUnion { base, logical }
+        let base = PlanBase::new_batch_with_core(&core, dist, Order::any());
+        BatchUnion { base, core }
     }
 }
 
-impl_distill_by_unit!(BatchUnion, logical, "BatchUnion");
+impl_distill_by_unit!(BatchUnion, core, "BatchUnion");
 
 impl PlanTreeNode for BatchUnion {
     fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
-        smallvec::SmallVec::from_vec(self.logical.inputs.clone())
+        smallvec::SmallVec::from_vec(self.core.inputs.clone())
     }
 
     fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
         // For batch query, we don't need to clone `source_col`, so just use new.
-        let mut new = self.logical.clone();
+        let mut new = self.core.clone();
         new.inputs = inputs.to_vec();
         Self::new(new).into()
     }
