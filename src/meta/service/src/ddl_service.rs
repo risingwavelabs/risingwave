@@ -821,14 +821,7 @@ fn fill_cdc_mysql_server_id(server_id: u64, fragment_graph: &mut PbStreamFragmen
         visit_fragment(fragment, |node_body| {
             if let NodeBody::Source(source_node) = node_body {
                 let props = &mut source_node.source_inner.as_mut().unwrap().properties;
-
-                // Modify properties for cdc sources if needed
-                if props.contains_key("server.id") {
-                    return;
-                }
-                props
-                    .entry("server.id".to_string())
-                    .or_insert(server_id.to_string());
+                props.insert("server.id".to_string(), server_id.to_string());
                 tracing::debug!("server.id no set, generate one {}", server_id);
             }
         });

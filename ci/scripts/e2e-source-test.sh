@@ -103,6 +103,13 @@ mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cd
 psql < ./e2e_test/source/cdc/postgres_cdc_insert.sql
 echo "inserted new rows into mysql and postgres"
 
+# start cluster w/o clean-data
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+touch .risingwave/log/connector-node.log
+./connector-node/start-service.sh -p $node_port >> .risingwave/log/connector-node.log 2>&1 &
+echo "(recovery) waiting for connector node to start"
+wait_for_connector_node_start
+
 cargo make dev ci-1cn-1fe-with-recovery
 echo "wait for cluster recovery finish"
 sleep 20
