@@ -25,7 +25,7 @@ const ROOT_TABLE_CREATE: &str = "create table t1 (v1 int);";
 const MV1: &str = "create materialized view m1 as select * from t1 where v1 > 5;";
 const MV2: &str = "create materialized view m2 as select * from t1 where v1 > 10;";
 const MV3: &str = "create materialized view m3 as select * from m2 where v1 < 15;";
-const MV4: &str = "create materialized view m4 as select m1.v1 as m1v, m3.v1 as m3v from m1 join m3 on m1.v1 = m3.v1;";
+const MV4: &str = "create materialized view m4 as select m1.v1 as m1v, m3.v1 as m3v from m1 join m3 on m1.v1 = m3.v1 limit 100;";
 const MV5: &str = "create materialized view m5 as select * from m4;";
 
 #[tokio::test]
@@ -40,6 +40,7 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
         .locate_one_fragment([
             identity_contains("materialize"),
             no_identity_contains("chain"),
+            no_identity_contains("topn"),
             no_identity_contains("hashjoin"),
         ])
         .await?;
@@ -129,6 +130,7 @@ async fn test_diamond_cascade_materialized_view() -> Result<()> {
         .locate_one_fragment([
             identity_contains("materialize"),
             no_identity_contains("chain"),
+            no_identity_contains("topn"),
             no_identity_contains("hashjoin"),
         ])
         .await?;

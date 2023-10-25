@@ -16,6 +16,7 @@ updates:
     arrow:
       patterns:
         - "arrow*"
+        - "parquet"
     aws:
       patterns:
         - "aws*"

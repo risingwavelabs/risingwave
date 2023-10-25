@@ -717,7 +717,7 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn get_tables(
         &self,
         request: Request<GetTablesRequest>,
@@ -731,6 +731,11 @@ impl DdlService for DdlServiceImpl {
             tables.insert(table.id, table);
         }
         Ok(Response::new(GetTablesResponse { tables }))
+    }
+
+    async fn wait(&self, _request: Request<WaitRequest>) -> Result<Response<WaitResponse>, Status> {
+        self.ddl_controller.wait().await;
+        Ok(Response::new(WaitResponse {}))
     }
 }
 
