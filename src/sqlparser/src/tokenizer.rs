@@ -168,6 +168,12 @@ pub enum Token {
     AtArrow,
     /// `<@`, does the right JSON value contain the left JSON path/value entries at the top level
     ArrowAt,
+    /// `?`, does the string exist as a top-level key within the JSON value
+    QuestionMark,
+    /// `?|`, do any of the strings exist as top-level keys or array elements?
+    QuestionMarkPipe,
+    /// `?&`, do all of the strings exist as top-level keys or array elements?
+    QuestionMarkAmpersand,
 }
 
 impl fmt::Display for Token {
@@ -237,6 +243,9 @@ impl fmt::Display for Token {
             Token::HashLongArrow => f.write_str("#>>"),
             Token::AtArrow => f.write_str("@>"),
             Token::ArrowAt => f.write_str("<@"),
+            Token::QuestionMark => f.write_str("?"),
+            Token::QuestionMarkPipe => f.write_str("?|"),
+            Token::QuestionMarkAmpersand => f.write_str("?&"),
         }
     }
 }
@@ -772,6 +781,15 @@ impl<'a> Tokenizer<'a> {
                         Some('>') => self.consume_and_return(chars, Token::AtArrow),
                         // a regular '@' operator
                         _ => Ok(Some(Token::AtSign)),
+                    }
+                }
+                '?' => {
+                    chars.next(); // consume the '?'
+                    match chars.peek() {
+                        Some('|') => self.consume_and_return(chars, Token::QuestionMarkPipe),
+                        Some('&') => self.consume_and_return(chars, Token::QuestionMarkAmpersand),
+                        // a regular '?' operator
+                        _ => Ok(Some(Token::QuestionMark)),
                     }
                 }
                 other => self.consume_and_return(chars, Token::Char(other)),

@@ -101,6 +101,9 @@ pub enum BinaryOperator {
     HashLongArrow,
     Contains,
     ContainedBy,
+    ContainsKey,
+    ContainsAnyKey,
+    ContainsAllKeys,
     PGQualified(Box<QualifiedOperator>),
 }
 
@@ -147,6 +150,9 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::HashLongArrow => "#>>",
             BinaryOperator::Contains => "@>",
             BinaryOperator::ContainedBy => "<@",
+            BinaryOperator::ContainsKey => "?",
+            BinaryOperator::ContainsAnyKey => "?|",
+            BinaryOperator::ContainsAllKeys => "?&",
             BinaryOperator::PGQualified(_) => unreachable!(),
         })
     }
