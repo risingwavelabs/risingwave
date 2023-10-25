@@ -16,6 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use risingwave_common::config::{CompactionConfig, DefaultParallelism};
+use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{ConnectorClient, StreamClientPool, StreamClientPoolRef};
 use sea_orm::EntityTrait;
@@ -28,7 +29,6 @@ use crate::manager::{
     NotificationManagerRef,
 };
 use crate::model::ClusterId;
-use crate::model_v2::prelude::Cluster;
 use crate::storage::MetaStoreRef;
 #[cfg(any(test, feature = "test"))]
 use crate::storage::{MemStore, MetaStoreBoxExt};
