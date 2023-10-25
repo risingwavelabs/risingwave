@@ -26,12 +26,16 @@ use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
-use super::catalog::{SinkFormat, SinkFormatDesc};
+use super::catalog::SinkFormatDesc;
 use super::SinkParam;
 use crate::common::KinesisCommon;
 use crate::dispatch_sink_formatter_impl;
+use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::formatter::SinkFormatterImpl;
-use crate::sink::writer::{FormattedSink, LogSinkerOf, SinkWriter, SinkWriterExt};
+use crate::sink::log_store::DeliveryFutureManagerAddFuture;
+use crate::sink::writer::{
+    AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
+};
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkWriterParam};
 
 pub const KINESIS_SINK: &str = "kinesis";
@@ -67,18 +71,31 @@ impl TryFrom<SinkParam> for KinesisSink {
 
 impl Sink for KinesisSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = LogSinkerOf<KinesisSinkWriter>;
+    type LogSinker = AsyncTruncateLogSinkerOf<KinesisSinkWriter>;
 
     const SINK_NAME: &'static str = KINESIS_SINK;
 
+    fn default_sink_decouple(desc: &SinkDesc) -> bool {
+        desc.sink_type.is_append_only()
+    }
+
     async fn validate(&self) -> Result<()> {
-        // For upsert Kafka sink, the primary key must be defined.
-        if self.format_desc.format != SinkFormat::AppendOnly && self.pk_indices.is_empty() {
+        // Kinesis requires partition key. There is no builtin support for round-robin as in kafka/pulsar.
+        // https://docs.aws.amazon.com/kinesis/latest/APIReference/API_PutRecord.html#Streams-PutRecord-request-PartitionKey
+        if self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
-                "primary key not defined for {:?} kafka sink (please define in `primary_key` field)",
-                self.format_desc.format
+                "kinesis sink requires partition key (please define in `primary_key` field)",
             )));
         }
+        // Check for formatter constructor error, before it is too late for error reporting.
+        SinkFormatterImpl::new(
+            &self.format_desc,
+            self.schema.clone(),
+            self.pk_indices.clone(),
+            self.db_name.clone(),
+            self.sink_from_name.clone(),
+        )
+        .await?;
 
         // check reachability
         let client = self.config.common.build_client().await?;
@@ -94,7 +111,7 @@ impl Sink for KinesisSink {
         Ok(())
     }
 
-    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(KinesisSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
@@ -104,7 +121,7 @@ impl Sink for KinesisSink {
             self.sink_from_name.clone(),
         )
         .await?
-        .into_log_sinker(writer_param.sink_metrics))
+        .into_log_sinker(usize::MAX))
     }
 }
 
@@ -145,7 +162,8 @@ impl KinesisSinkWriter {
         sink_from_name: String,
     ) -> Result<Self> {
         let formatter =
-            SinkFormatterImpl::new(format_desc, schema, pk_indices, db_name, sink_from_name)?;
+            SinkFormatterImpl::new(format_desc, schema, pk_indices, db_name, sink_from_name)
+                .await?;
         let client = config
             .common
             .build_client()
@@ -195,26 +213,25 @@ impl FormattedSink for KinesisSinkPayloadWriter {
     type V = Vec<u8>;
 
     async fn write_one(&mut self, k: Option<Self::K>, v: Option<Self::V>) -> Result<()> {
-        self.put_record(&k.unwrap(), v.unwrap_or_default())
-            .await
-            .map(|_| ())
+        self.put_record(
+            &k.ok_or_else(|| SinkError::Kinesis(anyhow!("no key provided")))?,
+            v.unwrap_or_default(),
+        )
+        .await
+        .map(|_| ())
     }
 }
 
-#[async_trait::async_trait]
-impl SinkWriter for KinesisSinkWriter {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        dispatch_sink_formatter_impl!(&self.formatter, formatter, {
+impl AsyncTruncateSinkWriter for KinesisSinkWriter {
+    async fn write_chunk<'a>(
+        &'a mut self,
+        chunk: StreamChunk,
+        _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
+    ) -> Result<()> {
+        dispatch_sink_formatter_impl!(
+            &self.formatter,
+            formatter,
             self.payload_writer.write_chunk(chunk, formatter).await
-        })
-    }
-
-    async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
-        // Kinesis offers no transactional guarantees, so we do nothing here.
-        Ok(())
-    }
-
-    async fn barrier(&mut self, _is_checkpoint: bool) -> Result<()> {
-        Ok(())
+        )
     }
 }

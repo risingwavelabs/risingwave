@@ -50,6 +50,7 @@ use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
+use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Register;
@@ -697,6 +698,12 @@ impl MetaClient {
         Ok(resp.snapshot.unwrap())
     }
 
+    pub async fn wait(&self) -> Result<()> {
+        let request = WaitRequest {};
+        self.inner.wait(request).await?;
+        Ok(())
+    }
+
     pub async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>> {
         let request = CancelCreatingJobsRequest { jobs: Some(jobs) };
         let resp = self.inner.cancel_creating_jobs(request).await?;
@@ -1043,6 +1050,23 @@ impl MetaClient {
             resp.task_assignment,
             resp.task_progress,
         ))
+    }
+
+    pub async fn get_compaction_score(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> Result<Vec<PickerInfo>> {
+        let req = GetCompactionScoreRequest {
+            compaction_group_id,
+        };
+        let resp = self.inner.get_compaction_score(req).await?;
+        Ok(resp.scores)
+    }
+
+    pub async fn risectl_rebuild_table_stats(&self) -> Result<()> {
+        let req = RiseCtlRebuildTableStatsRequest {};
+        let _resp = self.inner.rise_ctl_rebuild_table_stats(req).await?;
+        Ok(())
     }
 
     pub async fn list_branched_object(&self) -> Result<Vec<BranchedObject>> {
@@ -1701,6 +1725,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, list_connections, ListConnectionsRequest, ListConnectionsResponse }
             ,{ ddl_client, drop_connection, DropConnectionRequest, DropConnectionResponse }
             ,{ ddl_client, get_tables, GetTablesRequest, GetTablesResponse }
+            ,{ ddl_client, wait, WaitRequest, WaitResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
@@ -1728,6 +1753,8 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
             ,{ hummock_client, split_compaction_group, SplitCompactionGroupRequest, SplitCompactionGroupResponse }
             ,{ hummock_client, rise_ctl_list_compaction_status, RiseCtlListCompactionStatusRequest, RiseCtlListCompactionStatusResponse }
+            ,{ hummock_client, get_compaction_score, GetCompactionScoreRequest, GetCompactionScoreResponse }
+            ,{ hummock_client, rise_ctl_rebuild_table_stats, RiseCtlRebuildTableStatsRequest, RiseCtlRebuildTableStatsResponse }
             ,{ hummock_client, subscribe_compaction_event, impl tonic::IntoStreamingRequest<Message = SubscribeCompactionEventRequest>, Streaming<SubscribeCompactionEventResponse> }
             ,{ hummock_client, list_branched_object, ListBranchedObjectRequest, ListBranchedObjectResponse }
             ,{ hummock_client, list_active_write_limit, ListActiveWriteLimitRequest, ListActiveWriteLimitResponse }

@@ -67,6 +67,7 @@ pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableSto
         0,
         FileCache::none(),
         FileCache::none(),
+        None,
     ))
 }
 

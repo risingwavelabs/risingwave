@@ -25,6 +25,7 @@ use super::{
     SourceStreamChunkRowWriter, SpecificParserConfig,
 };
 use crate::extract_key_config;
+use crate::parser::ParserFormat;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
@@ -128,6 +129,10 @@ impl ByteStreamSourceParser for UpsertParser {
 
     fn source_ctx(&self) -> &SourceContext {
         &self.source_ctx
+    }
+
+    fn parser_format(&self) -> ParserFormat {
+        ParserFormat::Upsert
     }
 
     async fn parse_one<'a>(

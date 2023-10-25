@@ -29,35 +29,32 @@ use crate::utils::ColIndexMappingRewriteExt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchProjectSet {
     pub base: PlanBase,
-    logical: generic::ProjectSet<PlanRef>,
+    core: generic::ProjectSet<PlanRef>,
 }
 
 impl BatchProjectSet {
-    pub fn new(logical: generic::ProjectSet<PlanRef>) -> Self {
-        let distribution = logical
+    pub fn new(core: generic::ProjectSet<PlanRef>) -> Self {
+        let distribution = core
             .i2o_col_mapping()
-            .rewrite_provided_distribution(logical.input.distribution());
+            .rewrite_provided_distribution(core.input.distribution());
 
-        let base = PlanBase::new_batch_from_logical(
-            &logical,
-            distribution,
-            logical.get_out_column_index_order(),
-        );
-        BatchProjectSet { base, logical }
+        let base =
+            PlanBase::new_batch_with_core(&core, distribution, core.get_out_column_index_order());
+        BatchProjectSet { base, core }
     }
 }
 
-impl_distill_by_unit!(BatchProjectSet, logical, "BatchProjectSet");
+impl_distill_by_unit!(BatchProjectSet, core, "BatchProjectSet");
 
 impl PlanTreeNodeUnary for BatchProjectSet {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
-        logical.input = input;
-        Self::new(logical)
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 
@@ -76,7 +73,7 @@ impl ToBatchPb for BatchProjectSet {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::ProjectSet(ProjectSetNode {
             select_list: self
-                .logical
+                .core
                 .select_list
                 .iter()
                 .map(|select_item| select_item.to_project_set_select_item_proto())
@@ -98,8 +95,8 @@ impl ExprRewritable for BatchProjectSet {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.logical.clone();
-        logical.rewrite_exprs(r);
-        Self::new(logical).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::new(core).into()
     }
 }

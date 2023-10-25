@@ -55,7 +55,7 @@ pub struct S3FileReader {
 
 impl S3FileReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
-    async fn stream_read_object(
+    pub async fn stream_read_object(
         client_for_s3: s3_client::Client,
         bucket_name: String,
         split: FsSplit,
@@ -137,7 +137,7 @@ impl S3FileReader {
         }
     }
 
-    async fn get_object(
+    pub async fn get_object(
         client_for_s3: &s3_client::Client,
         bucket_name: &str,
         object_name: &str,

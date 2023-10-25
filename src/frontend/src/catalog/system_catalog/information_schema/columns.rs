@@ -63,7 +63,8 @@ pub static INFORMATION_SCHEMA_COLUMNS: LazyLock<BuiltinView> = LazyLock::new(|| 
                 c.udt_type AS udt_name \
             FROM rw_catalog.rw_columns c \
             LEFT JOIN rw_catalog.rw_relations r ON c.relation_id = r.id \
-            JOIN rw_catalog.rw_schemas s ON s.id = r.schema_id\
+            JOIN rw_catalog.rw_schemas s ON s.id = r.schema_id \
+            WHERE c.is_hidden = false\
     "
     .to_string(),
 });

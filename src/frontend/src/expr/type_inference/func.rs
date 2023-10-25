@@ -537,6 +537,10 @@ fn infer_type_for_special(
             ensure_arity!("vnode", 1 <= | inputs |);
             Ok(Some(DataType::Int16))
         }
+        ExprType::Greatest | ExprType::Least => {
+            ensure_arity!("greatest/least", 1 <= | inputs |);
+            Ok(Some(align_types(inputs.iter_mut())?))
+        }
         _ => Ok(None),
     }
 }

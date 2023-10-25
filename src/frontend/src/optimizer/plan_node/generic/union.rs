@@ -33,7 +33,13 @@ pub struct Union<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Union<PlanRef> {
     fn schema(&self) -> Schema {
-        self.inputs[0].schema().clone()
+        let mut schema = self.inputs[0].schema().clone();
+        if let Some(source_col) = self.source_col {
+            schema.fields[source_col].name = "$src".to_string();
+            schema
+        } else {
+            schema
+        }
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {

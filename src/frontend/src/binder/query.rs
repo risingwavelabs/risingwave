@@ -262,7 +262,7 @@ impl Binder {
                 Ok(index) if 1 <= index && index <= visible_output_num => index - 1,
                 _ => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "Invalid value in ORDER BY: {}",
+                        "Invalid ordinal number in ORDER BY: {}",
                         number
                     ))
                     .into())

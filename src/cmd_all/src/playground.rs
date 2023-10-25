@@ -59,10 +59,8 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "hummock_001",
                 "--advertise-addr",
                 "127.0.0.1:5690",
-                "--connector-rpc-endpoint",
-                "127.0.0.1:50051",
             ])),
-            RisingWaveService::Compute(osstrs(["--connector-rpc-endpoint", "127.0.0.1:50051"])),
+            RisingWaveService::Compute(osstrs([])),
             RisingWaveService::Frontend(osstrs([])),
             RisingWaveService::ConnectorNode(osstrs([])),
         ],
@@ -76,32 +74,24 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "hummock+memory-shared",
                 "--data-directory",
                 "hummock_001",
-                "--connector-rpc-endpoint",
-                "127.0.0.1:50051",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5687",
                 "--parallelism",
                 "4",
-                "--connector-rpc-endpoint",
-                "127.0.0.1:50051",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5688",
                 "--parallelism",
                 "4",
-                "--connector-rpc-endpoint",
-                "127.0.0.1:50051",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "127.0.0.1:5689",
                 "--parallelism",
                 "4",
-                "--connector-rpc-endpoint",
-                "127.0.0.1:50051",
             ])),
             RisingWaveService::Frontend(osstrs([])),
         ],
@@ -117,16 +107,12 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "hummock+memory",
                 "--data-directory",
                 "hummock_001",
-                "--connector-rpc-endpoint",
-                "127.0.0.1:50051",
             ])),
             RisingWaveService::Compute(osstrs([
                 "--listen-addr",
                 "0.0.0.0:5688",
                 "--advertise-addr",
                 "127.0.0.1:5688",
-                "--connector-rpc-endpoint",
-                "127.0.0.1:50051",
             ])),
             RisingWaveService::Frontend(osstrs([
                 "--listen-addr",
@@ -173,9 +159,9 @@ pub async fn playground(opts: PlaygroundOpts) -> Result<()> {
             RisingWaveService::Meta(mut opts) => {
                 opts.insert(0, "meta-node".into());
                 tracing::info!("starting meta-node thread with cli args: {:?}", opts);
-                let opts = risingwave_meta::MetaNodeOpts::parse_from(opts);
+                let opts = risingwave_meta_node::MetaNodeOpts::parse_from(opts);
                 let _meta_handle = tokio::spawn(async move {
-                    risingwave_meta::start(opts).await;
+                    risingwave_meta_node::start(opts).await;
                     tracing::warn!("meta is stopped, shutdown all nodes");
                     // As a playground, it's fine to just kill everything.
                     if idle_exit {

@@ -523,32 +523,18 @@ impl Binder {
             // TODO: Add generic expr support when needed
             AstDataType::Regclass => {
                 let input = self.bind_expr_inner(expr)?;
-                let class_name = match &input {
-                    ExprImpl::Literal(literal)
-                        if literal.return_type() == DataType::Varchar
-                            && let Some(scalar) = literal.get_data() =>
-                    {
-                        match scalar {
-                            risingwave_common::types::ScalarImpl::Utf8(s) => s,
-                            _ => {
-                                return Err(ErrorCode::BindError(
-                                    "Unsupported input type".to_string(),
-                                )
-                                .into())
-                            }
-                        }
-                    }
-                    ExprImpl::Literal(literal) if literal.return_type().is_int() => {
-                        return Ok(ExprImpl::Literal(literal.clone()))
-                    }
-                    _ => {
-                        return Err(
-                            ErrorCode::BindError("Unsupported input type".to_string()).into()
-                        )
-                    }
-                };
-                self.resolve_regclass(class_name)
-                    .map(|id| ExprImpl::literal_int(id as i32))
+                match input.return_type() {
+                    DataType::Varchar => Ok(ExprImpl::FunctionCall(Box::new(
+                        FunctionCall::new_unchecked(
+                            ExprType::CastRegclass,
+                            vec![input],
+                            DataType::Int32,
+                        ),
+                    ))),
+                    DataType::Int32 => Ok(input),
+                    dt if dt.is_int() => Ok(input.cast_explicit(DataType::Int32)?),
+                    _ => Err(ErrorCode::BindError("Unsupported input type".to_string()).into()),
+                }
             }
             AstDataType::Regproc => {
                 let lhs = self.bind_expr_inner(expr)?;

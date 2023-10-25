@@ -23,7 +23,9 @@ pub struct CseExprCounter {
     pub counter: HashMap<FunctionCall, usize>,
 }
 
-impl ExprVisitor<()> for CseExprCounter {
+impl ExprVisitor for CseExprCounter {
+    type Result = ();
+
     fn merge(_: (), _: ()) {}
 
     fn visit_expr(&mut self, expr: &ExprImpl) {

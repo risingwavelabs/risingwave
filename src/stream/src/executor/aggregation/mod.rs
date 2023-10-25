@@ -21,6 +21,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::aggregate::{AggCall, AggKind};
+use risingwave_expr::expr::{LogReport, NonStrictExpression};
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
@@ -74,7 +75,12 @@ pub async fn agg_call_filter_res(
     }
 
     if let Some(ref filter) = agg_call.filter {
-        if let Bool(filter_res) = filter.eval_infallible(chunk).await.as_ref() {
+        // TODO: should we build `filter` in non-strict mode?
+        if let Bool(filter_res) = NonStrictExpression::new_topmost(&**filter, LogReport)
+            .eval_infallible(chunk)
+            .await
+            .as_ref()
+        {
             vis &= filter_res.to_bitmap();
         } else {
             bail!("Filter can only receive bool array");

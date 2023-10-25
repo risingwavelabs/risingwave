@@ -14,13 +14,15 @@
 
 use sea_orm::entity::prelude::*;
 
+use crate::model_v2::{ObjectId, UserId};
+
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "object_dependency")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
-    pub oid: i32,
-    pub used_by: i32,
+    pub oid: ObjectId,
+    pub used_by: UserId,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

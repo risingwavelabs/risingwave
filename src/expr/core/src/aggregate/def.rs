@@ -233,6 +233,9 @@ pub enum AggKind {
     PercentileDisc,
     Mode,
     Grouping,
+
+    /// Return last seen one of the input values.
+    InternalLastSeenValue,
 }
 
 impl AggKind {
@@ -264,6 +267,7 @@ impl AggKind {
             PbType::PercentileDisc => Ok(AggKind::PercentileDisc),
             PbType::Mode => Ok(AggKind::Mode),
             PbType::Grouping => Ok(AggKind::Grouping),
+            PbType::InternalLastSeenValue => Ok(AggKind::InternalLastSeenValue),
             PbType::Unspecified => bail!("Unrecognized agg."),
         }
     }
@@ -294,8 +298,9 @@ impl AggKind {
             Self::VarSamp => PbType::VarSamp,
             Self::PercentileCont => PbType::PercentileCont,
             Self::PercentileDisc => PbType::PercentileDisc,
-            Self::Grouping => PbType::Grouping,
             Self::Mode => PbType::Mode,
+            Self::Grouping => PbType::Grouping,
+            Self::InternalLastSeenValue => PbType::InternalLastSeenValue,
         }
     }
 }
@@ -308,11 +313,7 @@ pub mod agg_kinds {
     #[macro_export]
     macro_rules! unimplemented_in_stream {
         () => {
-            AggKind::JsonbAgg
-                | AggKind::JsonbObjectAgg
-                | AggKind::PercentileCont
-                | AggKind::PercentileDisc
-                | AggKind::Mode
+            AggKind::PercentileCont | AggKind::PercentileDisc | AggKind::Mode
         };
     }
     pub use unimplemented_in_stream;
@@ -426,6 +427,7 @@ pub mod agg_kinds {
                 | AggKind::BoolAnd
                 | AggKind::BoolOr
                 | AggKind::ApproxCountDistinct
+                | AggKind::InternalLastSeenValue
         };
     }
     pub use single_value_state;
@@ -454,7 +456,11 @@ impl AggKind {
     /// Get the total phase agg kind from the partial phase agg kind.
     pub fn partial_to_total(self) -> Option<Self> {
         match self {
-            AggKind::BitXor | AggKind::Min | AggKind::Max | AggKind::Sum => Some(self),
+            AggKind::BitXor
+            | AggKind::Min
+            | AggKind::Max
+            | AggKind::Sum
+            | AggKind::InternalLastSeenValue => Some(self),
             AggKind::Sum0 | AggKind::Count => Some(AggKind::Sum0),
             agg_kinds::simply_cannot_two_phase!() => None,
             agg_kinds::rewritten!() => None,

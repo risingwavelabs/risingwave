@@ -544,6 +544,7 @@ impl UpsertWriter {
     }
 
     fn partition_ops(ops: &[Op]) -> Vec<(usize, usize)> {
+        assert!(!ops.is_empty());
         let mut res = vec![];
         let mut start = 0;
         let mut prev_op = ops[0];
@@ -560,6 +561,9 @@ impl UpsertWriter {
 
     pub async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
         let (chunk, ops) = chunk.compact().into_parts();
+        if ops.len() == 0 {
+            return Ok(());
+        }
         let chunk = to_record_batch_with_schema(self.schema.clone(), &chunk.compact())
             .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
         let ranges = Self::partition_ops(&ops);

@@ -163,6 +163,12 @@ impl StreamGraphFormatter {
                     self.pretty_add_table(source.get_state_table().unwrap()),
                 ));
             }
+            stream_node::NodeBody::StreamFsFetch(node) if let Some(fetch) = &node.node_inner => {
+                fields.push((
+                    "fs fetch state table",
+                    self.pretty_add_table(fetch.get_state_table().unwrap()),
+                ))
+            }
             stream_node::NodeBody::Materialize(node) => fields.push((
                 "materialized table",
                 self.pretty_add_table(node.get_table().unwrap()),
@@ -304,6 +310,7 @@ impl StreamGraphFormatter {
             stream_node::NodeBody::BarrierRecv(_) |
             stream_node::NodeBody::Values(_) |
             stream_node::NodeBody::Source(_) |
+            stream_node::NodeBody::StreamFsFetch(_) |
             stream_node::NodeBody::NoOp(_) => {}
         };
 

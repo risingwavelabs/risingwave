@@ -77,7 +77,7 @@ const CONFIG_KEYS: [&str; 39] = [
     "CDC_BACKFILL",
     "RW_STREAMING_OVER_WINDOW_CACHE_POLICY",
     "BACKGROUND_DDL",
-    "BACKFILL_SNAPSHOT_BARRIER_INTERVAL",
+    "SERVER_ENCODING",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -120,7 +120,7 @@ const STREAMING_RATE_LIMIT: usize = 34;
 const CDC_BACKFILL: usize = 35;
 const STREAMING_OVER_WINDOW_CACHE_POLICY: usize = 36;
 const BACKGROUND_DDL: usize = 37;
-const BACKFILL_SNAPSHOT_BARRIER_INTERVAL: usize = 38;
+const SERVER_ENCODING: usize = 38;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -345,7 +345,7 @@ type StandardConformingStrings = ConfigString<STANDARD_CONFORMING_STRINGS>;
 type StreamingRateLimit = ConfigU64<STREAMING_RATE_LIMIT, 0>;
 type CdcBackfill = ConfigBool<CDC_BACKFILL, false>;
 type BackgroundDdl = ConfigBool<BACKGROUND_DDL, false>;
-type BackfillSnapshotBarrierInterval = ConfigU64<BACKFILL_SNAPSHOT_BARRIER_INTERVAL, 1>;
+type ServerEncoding = ConfigString<SERVER_ENCODING>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {
@@ -496,7 +496,9 @@ pub struct ConfigMap {
 
     background_ddl: BackgroundDdl,
 
-    backfill_snapshot_barrier_interval: BackfillSnapshotBarrierInterval,
+    /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
+    #[educe(Default(expression = "ConfigString::<SERVER_ENCODING>(String::from(\"UTF8\"))"))]
+    server_encoding: ServerEncoding,
 }
 
 impl ConfigMap {
@@ -616,8 +618,20 @@ impl ConfigMap {
             self.streaming_over_window_cache_policy = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(BackgroundDdl::entry_name()) {
             self.background_ddl = val.as_slice().try_into()?;
-        } else if key.eq_ignore_ascii_case(BackfillSnapshotBarrierInterval::entry_name()) {
-            self.backfill_snapshot_barrier_interval = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(ServerEncoding::entry_name()) {
+            let enc: ServerEncoding = val.as_slice().try_into()?;
+            // https://github.com/postgres/postgres/blob/REL_15_3/src/common/encnames.c#L525
+            let clean = enc
+                .as_str()
+                .replace(|c: char| !c.is_ascii_alphanumeric(), "");
+            if !clean.eq_ignore_ascii_case("UTF8") {
+                return Err(ErrorCode::InvalidConfigValue {
+                    config_entry: ServerEncoding::entry_name().into(),
+                    config_value: enc.0,
+                }
+                .into());
+            }
+            // No actual assignment because we only support UTF8.
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -707,8 +721,8 @@ impl ConfigMap {
             Ok(self.streaming_over_window_cache_policy.to_string())
         } else if key.eq_ignore_ascii_case(BackgroundDdl::entry_name()) {
             Ok(self.background_ddl.to_string())
-        } else if key.eq_ignore_ascii_case(BackfillSnapshotBarrierInterval::entry_name()) {
-            Ok(self.backfill_snapshot_barrier_interval.to_string())
+        } else if key.eq_ignore_ascii_case(ServerEncoding::entry_name()) {
+            Ok(self.server_encoding.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -906,10 +920,10 @@ impl ConfigMap {
                 setting: self.background_ddl.to_string(),
                 description: String::from("Run DDL statements in background"),
             },
-            VariableInfo {
-                name: BackfillSnapshotBarrierInterval::entry_name().to_lowercase(),
-                setting: self.backfill_snapshot_barrier_interval.to_string(),
-                description: String::from("Read from snapshot every N barriers"),
+            VariableInfo{
+                name : ServerEncoding::entry_name().to_lowercase(),
+                setting : self.server_encoding.to_string(),
+                description : String::from("Sets the server character set encoding.")
             },
         ]
     }
@@ -1054,7 +1068,7 @@ impl ConfigMap {
         self.background_ddl.0
     }
 
-    pub fn get_backfill_snapshot_barrier_interval(&self) -> u64 {
-        self.backfill_snapshot_barrier_interval.0
+    pub fn get_server_encoding(&self) -> &str {
+        &self.server_encoding
     }
 }

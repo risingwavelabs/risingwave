@@ -22,6 +22,7 @@ pub enum RisingWaveService {
     Compute(Vec<OsString>),
     Meta(Vec<OsString>),
     Frontend(Vec<OsString>),
+    #[allow(dead_code)]
     Compactor(Vec<OsString>),
     ConnectorNode(Vec<OsString>),
 }

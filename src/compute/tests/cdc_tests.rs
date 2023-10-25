@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #![feature(let_chains)]
-#![feature(generators)]
+#![feature(coroutines)]
 
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
@@ -83,6 +83,7 @@ impl MockOffsetGenExecutor {
                 txid: None,
                 tx_usec: None,
             },
+            is_heartbeat: false,
         };
 
         self.start_offset += 1;

@@ -109,7 +109,10 @@ impl TryFrom<RwCastSig> for CastSig {
 /// effectiveness, e.g. cause it to crash.
 static FUNC_BAN_LIST: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
     [
-        ExprType::Repeat, // FIXME: https://github.com/risingwavelabs/risingwave/issues/8003
+        // FIXME: https://github.com/risingwavelabs/risingwave/issues/8003
+        ExprType::Repeat,
+        // The format argument needs to be handled specially. It is still generated in `gen_special_func`.
+        ExprType::Decode,
     ]
     .into_iter()
     .collect()
@@ -117,6 +120,9 @@ static FUNC_BAN_LIST: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
 
 /// Table which maps functions' return types to possible function signatures.
 // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
+// TODO: Create a `SPECIAL_FUNC` table.
+// Otherwise when we dump the function table, we won't include those functions in
+// gen_special_func.
 pub(crate) static FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSign>>> =
     LazyLock::new(|| {
         let mut funcs = HashMap::<DataType, Vec<&'static FuncSign>>::new();

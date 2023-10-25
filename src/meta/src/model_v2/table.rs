@@ -12,49 +12,93 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::catalog::table::PbTableType;
+use risingwave_pb::catalog::PbHandleConflictBehavior;
 use sea_orm::entity::prelude::*;
 
-use crate::model_v2::I32Array;
+use crate::model_v2::{
+    Cardinality, ColumnCatalogArray, ColumnOrderArray, CreateType, I32Array, JobStatus, Property,
+    SourceId, TableId, TableVersion,
+};
+
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "String(None)")]
+pub enum TableType {
+    #[sea_orm(string_value = "TABLE")]
+    Table,
+    #[sea_orm(string_value = "MATERIALIZED_VIEW")]
+    MaterializedView,
+    #[sea_orm(string_value = "INDEX")]
+    Index,
+    #[sea_orm(string_value = "INTERNAL")]
+    Internal,
+}
+
+impl From<TableType> for PbTableType {
+    fn from(table_type: TableType) -> Self {
+        match table_type {
+            TableType::Table => Self::Table,
+            TableType::MaterializedView => Self::MaterializedView,
+            TableType::Index => Self::Index,
+            TableType::Internal => Self::Internal,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "String(None)")]
+pub enum HandleConflictBehavior {
+    #[sea_orm(string_value = "OVERWRITE")]
+    Overwrite,
+    #[sea_orm(string_value = "IGNORE")]
+    Ignore,
+    #[sea_orm(string_value = "NO_CHECK")]
+    NoCheck,
+}
+
+impl From<HandleConflictBehavior> for PbHandleConflictBehavior {
+    fn from(handle_conflict_behavior: HandleConflictBehavior) -> Self {
+        match handle_conflict_behavior {
+            HandleConflictBehavior::Overwrite => Self::Overwrite,
+            HandleConflictBehavior::Ignore => Self::Ignore,
+            HandleConflictBehavior::NoCheck => Self::NoCheck,
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "table")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub table_id: i32,
+    pub table_id: TableId,
     pub name: String,
-    pub schema_id: i32,
-    pub database_id: i32,
-    pub optional_associated_source_id: Option<i32>,
-    pub table_type: Option<String>,
-    pub columns: Option<Json>,
-    pub pk: Option<Json>,
-    pub distribution_key: Option<I32Array>,
-    pub append_only: Option<bool>,
-    pub properties: Option<Json>,
-    pub fragment_id: Option<i32>,
-    pub vnode_col_index: Option<i32>,
-    pub value_indices: Option<I32Array>,
-    pub definition: Option<String>,
-    pub handle_pk_conflict_behavior: Option<i32>,
-    pub read_prefix_len_hint: Option<i32>,
-    pub watermark_indices: Option<I32Array>,
-    pub dist_key_in_pk: Option<I32Array>,
+    pub optional_associated_source_id: Option<SourceId>,
+    pub table_type: TableType,
+    pub columns: ColumnCatalogArray,
+    pub pk: ColumnOrderArray,
+    pub distribution_key: I32Array,
+    pub stream_key: I32Array,
+    pub append_only: bool,
+    pub properties: Property,
+    pub fragment_id: i32,
+    pub vnode_col_index: Option<u32>,
+    pub row_id_index: Option<u32>,
+    pub value_indices: I32Array,
+    pub definition: String,
+    pub handle_pk_conflict_behavior: HandleConflictBehavior,
+    pub read_prefix_len_hint: u32,
+    pub watermark_indices: I32Array,
+    pub dist_key_in_pk: I32Array,
     pub dml_fragment_id: Option<i32>,
-    pub cardinality: Option<I32Array>,
-    pub cleaned_by_watermark: Option<bool>,
-    pub version: Option<Json>,
+    pub cardinality: Option<Cardinality>,
+    pub cleaned_by_watermark: bool,
+    pub job_status: JobStatus,
+    pub create_type: CreateType,
+    pub version: TableVersion,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::database::Entity",
-        from = "Column::DatabaseId",
-        to = "super::database::Column::DatabaseId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Database,
     #[sea_orm(
         belongs_to = "super::fragment::Entity",
         from = "Column::DmlFragmentId",
@@ -80,14 +124,6 @@ pub enum Relation {
     )]
     Object,
     #[sea_orm(
-        belongs_to = "super::schema::Entity",
-        from = "Column::SchemaId",
-        to = "super::schema::Column::SchemaId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Schema,
-    #[sea_orm(
         belongs_to = "super::source::Entity",
         from = "Column::OptionalAssociatedSourceId",
         to = "super::source::Column::SourceId",
@@ -97,21 +133,9 @@ pub enum Relation {
     Source,
 }
 
-impl Related<super::database::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Database.def()
-    }
-}
-
 impl Related<super::object::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Object.def()
-    }
-}
-
-impl Related<super::schema::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Schema.def()
     }
 }
 

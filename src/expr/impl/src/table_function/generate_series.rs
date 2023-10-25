@@ -159,7 +159,7 @@ mod tests {
     use risingwave_common::array::DataChunk;
     use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::types::{DataType, Decimal, Interval, ScalarImpl, Timestamp};
-    use risingwave_expr::expr::{BoxedExpression, Expression, LiteralExpression};
+    use risingwave_expr::expr::{BoxedExpression, ExpressionBoxExt, LiteralExpression};
     use risingwave_expr::table_function::build;
     use risingwave_expr::ExprError;
     use risingwave_pb::expr::table_function::PbType;

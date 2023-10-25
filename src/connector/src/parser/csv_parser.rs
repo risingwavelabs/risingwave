@@ -19,7 +19,7 @@ use risingwave_common::types::{Date, Decimal, Time, Timestamp, Timestamptz};
 use super::unified::{AccessError, AccessResult};
 use super::{ByteStreamSourceParser, CsvProperties};
 use crate::only_parse_payload;
-use crate::parser::SourceStreamChunkRowWriter;
+use crate::parser::{ParserFormat, SourceStreamChunkRowWriter};
 use crate::source::{DataType, SourceColumnDesc, SourceContext, SourceContextRef};
 
 macro_rules! parse {
@@ -150,6 +150,10 @@ impl ByteStreamSourceParser for CsvParser {
 
     fn source_ctx(&self) -> &SourceContext {
         &self.source_ctx
+    }
+
+    fn parser_format(&self) -> ParserFormat {
+        ParserFormat::Csv
     }
 
     async fn parse_one<'a>(

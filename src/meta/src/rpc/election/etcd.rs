@@ -23,9 +23,9 @@ use tokio::sync::{oneshot, watch};
 use tokio::time;
 use tokio_stream::StreamExt;
 
-use crate::rpc::election::META_ELECTION_KEY;
+use crate::rpc::election::{ElectionClient, ElectionMember, META_ELECTION_KEY};
 use crate::storage::WrappedEtcdClient;
-use crate::{ElectionClient, ElectionMember, MetaResult};
+use crate::MetaResult;
 
 pub struct EtcdElectionClient {
     id: String,

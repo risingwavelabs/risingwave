@@ -49,6 +49,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 4 => self.gen_overlay(context),
                 _ => unreachable!(),
             },
+            T::Bytea => self.gen_decode(context),
             _ => match self.rng.gen_bool(0.5) {
                 true => self.gen_case(ret, context),
                 false => self.gen_coalesce(ret, context),
@@ -119,6 +120,16 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 }
             })
             .collect()
+    }
+
+    fn gen_decode(&mut self, context: SqlGeneratorContext) -> Expr {
+        let input_string = self.gen_expr(&DataType::Varchar, context);
+        let encoding = &["base64", "hex", "escape"].choose(&mut self.rng).unwrap();
+        let args = vec![
+            input_string,
+            Expr::Value(Value::SingleQuotedString(encoding.to_string())),
+        ];
+        Expr::Function(make_simple_func("decode", &args))
     }
 
     fn gen_fixed_func(&mut self, ret: &DataType, context: SqlGeneratorContext) -> Expr {

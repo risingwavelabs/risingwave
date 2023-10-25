@@ -15,6 +15,7 @@
 use std::fmt::Debug;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
@@ -23,10 +24,11 @@ use risingwave_object_store::object::parse_remote_object_store;
 
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{RemoteTableAccessor, RpcFilterKeyExtractorManager};
+use crate::hummock::file_cache::preclude::*;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::{
-    set_foyer_metrics_registry, FileCache, FoyerRuntimeConfig, FoyerStoreConfig, HummockError,
-    HummockStorage, SstableStore,
+    set_foyer_metrics_registry, FileCache, FileCacheConfig, HummockError, HummockStorage,
+    RecentFilter, SstableStore,
 };
 use crate::memory::sled::SledStateStore;
 use crate::memory::MemoryStateStore;
@@ -525,12 +527,12 @@ impl StateStoreImpl {
     ) -> StorageResult<Self> {
         set_foyer_metrics_registry(GLOBAL_METRICS_REGISTRY.clone());
 
-        let data_file_cache = if opts.data_file_cache_dir.is_empty() {
-            FileCache::none()
+        let (data_file_cache, recent_filter) = if opts.data_file_cache_dir.is_empty() {
+            (FileCache::none(), None)
         } else {
             const MB: usize = 1024 * 1024;
 
-            let foyer_store_config = FoyerStoreConfig {
+            let config = FileCacheConfig {
                 name: "data".to_string(),
                 dir: PathBuf::from(opts.data_file_cache_dir.clone()),
                 capacity: opts.data_file_cache_capacity_mb * MB,
@@ -540,22 +542,27 @@ impl StateStoreImpl {
                 device_io_size: opts.data_file_cache_device_io_size,
                 lfu_window_to_cache_size_ratio: opts.data_file_cache_lfu_window_to_cache_size_ratio,
                 lfu_tiny_lru_capacity_ratio: opts.data_file_cache_lfu_tiny_lru_capacity_ratio,
-                rated_random_rate: opts.data_file_cache_rated_random_rate_mb * MB,
+                insert_rate_limit: opts.data_file_cache_insert_rate_limit_mb * MB,
                 flushers: opts.data_file_cache_flushers,
                 reclaimers: opts.data_file_cache_reclaimers,
                 flush_rate_limit: opts.data_file_cache_flush_rate_limit_mb * MB,
                 reclaim_rate_limit: opts.data_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.data_file_cache_recover_concurrency,
-                event_listener: vec![],
-                enable_filter: !opts.cache_refill_data_refill_levels.is_empty(),
+                allocator_bits: opts.data_file_cache_allocation_bits,
+                allocation_timeout: Duration::from_millis(
+                    opts.data_file_cache_allocation_timeout_ms as u64,
+                ),
+                admissions: vec![],
+                reinsertions: vec![],
             };
-            let config = FoyerRuntimeConfig {
-                foyer_store_config,
-                runtime_worker_threads: None,
-            };
-            FileCache::foyer(config)
+            let cache = FileCache::open(config)
                 .await
-                .map_err(HummockError::file_cache)?
+                .map_err(HummockError::file_cache)?;
+            let filter = Some(Arc::new(RecentFilter::new(
+                opts.cache_refill_recent_filter_layers,
+                Duration::from_millis(opts.cache_refill_recent_filter_rotate_interval_ms as u64),
+            )));
+            (cache, filter)
         };
 
         let meta_file_cache = if opts.meta_file_cache_dir.is_empty() {
@@ -563,7 +570,7 @@ impl StateStoreImpl {
         } else {
             const MB: usize = 1024 * 1024;
 
-            let foyer_store_config = FoyerStoreConfig {
+            let config = FileCacheConfig {
                 name: "meta".to_string(),
                 dir: PathBuf::from(opts.meta_file_cache_dir.clone()),
                 capacity: opts.meta_file_cache_capacity_mb * MB,
@@ -573,20 +580,20 @@ impl StateStoreImpl {
                 device_io_size: opts.meta_file_cache_device_io_size,
                 lfu_window_to_cache_size_ratio: opts.meta_file_cache_lfu_window_to_cache_size_ratio,
                 lfu_tiny_lru_capacity_ratio: opts.meta_file_cache_lfu_tiny_lru_capacity_ratio,
-                rated_random_rate: opts.meta_file_cache_rated_random_rate_mb * MB,
+                insert_rate_limit: opts.meta_file_cache_insert_rate_limit_mb * MB,
                 flushers: opts.meta_file_cache_flushers,
                 reclaimers: opts.meta_file_cache_reclaimers,
                 flush_rate_limit: opts.meta_file_cache_flush_rate_limit_mb * MB,
                 reclaim_rate_limit: opts.meta_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.meta_file_cache_recover_concurrency,
-                event_listener: vec![],
-                enable_filter: false,
+                allocator_bits: opts.meta_file_cache_allocation_bits,
+                allocation_timeout: Duration::from_millis(
+                    opts.meta_file_cache_allocation_timeout_ms as u64,
+                ),
+                admissions: vec![],
+                reinsertions: vec![],
             };
-            let config = FoyerRuntimeConfig {
-                foyer_store_config,
-                runtime_worker_threads: None,
-            };
-            FileCache::foyer(config)
+            FileCache::open(config)
                 .await
                 .map_err(HummockError::file_cache)?
         };
@@ -614,6 +621,7 @@ impl StateStoreImpl {
                     opts.high_priority_ratio,
                     data_file_cache,
                     meta_file_cache,
+                    recent_filter,
                 ));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());

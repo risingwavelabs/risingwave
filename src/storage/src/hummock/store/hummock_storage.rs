@@ -183,6 +183,8 @@ impl HummockStorage {
                     .copied()
                     .collect(),
                 concurrency: options.cache_refill_concurrency,
+                unit: options.cache_refill_unit,
+                threshold: options.cache_refill_threshold,
             },
         );
 

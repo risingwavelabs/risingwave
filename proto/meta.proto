@@ -221,6 +221,7 @@ message ListFragmentDistributionResponse {
     repeated uint32 state_table_ids = 4;
     repeated uint32 upstream_fragment_ids = 5;
     uint32 fragment_type_mask = 6;
+    uint32 parallelism = 7;
   }
   repeated FragmentDistribution distributions = 1;
 }

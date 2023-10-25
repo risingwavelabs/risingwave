@@ -1591,6 +1591,38 @@ def section_batch(outer_panels):
                         ),
                     ],
                 ),
+
+                panels.timeseries_bytes(
+            "Mem Table Size",
+            "This metric shows the memory usage of mem_table.",
+            [
+                panels.target(
+                    f"sum({metric('state_store_mem_table_memory_size')}) by (job,instance)",
+                    "mem_table size total - {{job}} @ {{instance}}",
+                ),
+
+                panels.target(
+                    f"{metric('state_store_mem_table_memory_size')}",
+                    "mem_table size - table id {{table_id}} instance id {{instance_id}} {{job}} @ {{instance}}",
+                ),
+            ],
+        ),
+
+        panels.timeseries_count(
+            "Mem Table Count",
+            "This metric shows the item counts in mem_table.",
+            [
+                panels.target(
+                    f"sum({metric('state_store_mem_table_item_count')}) by (job,instance)",
+                    "mem_table counts total - {{job}} @ {{instance}}",
+                ),
+
+                panels.target(
+                    f"{metric('state_store_mem_table_item_count')}",
+                    "mem_table count - table id {{table_id}} instance id {{instance_id}} {{job}} @ {{instance}}",
+                ),
+            ],
+        ),
                 panels.timeseries_latency(
                     "Row SeqScan Next Duration",
                     "",
@@ -2180,12 +2212,17 @@ def section_hummock_write(outer_panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Mem Table Size (Max)",
+                    "Write Batch Size",
                     "This metric shows the statistics of mem_table size on flush. By default only max (p100) is shown.",
                     [
                         panels.target(
                             f"histogram_quantile(1.0, sum(rate({metric('state_store_write_batch_size_bucket')}[$__rate_interval])) by (le, table_id, job, instance))",
                             "pmax - {{table_id}} @ {{job}} @ {{instance}}",
+                        ),
+
+                        panels.target(
+                            f"sum by(le, job, instance) (rate({metric('state_store_write_batch_size_sum')}[$__rate_interval])) / sum by(le, table_id, job, instance) (rate({metric('state_store_write_batch_size_count')}[$__rate_interval]))",
+                            "avg - {{table_id}} {{job}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -3179,6 +3216,26 @@ def section_memory_manager(outer_panels):
                     [
                         panels.target(
                             f"{metric('jemalloc_active_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
+                    "The allocated memory of jvm",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jvm_allocated_bytes')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
+                    "The active memory of jvm",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('jvm_active_bytes')}",
                             "",
                         ),
                     ],

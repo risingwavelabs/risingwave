@@ -18,7 +18,7 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
@@ -34,65 +34,66 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
     let mut binder = Binder::new_for_system(&session);
     let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
     // For Source, it doesn't have table catalog so use get source to get column descs.
-    let (columns, pk_columns, indices): (Vec<ColumnDesc>, Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>) = {
-        let (column_catalogs, pk_column_catalogs, indices) = match relation {
-            Relation::Source(s) => {
-                let pk_column_catalogs = s
-                    .catalog
-                    .pk_col_ids
-                    .iter()
-                    .map(|&column_id| {
-                        s.catalog
-                            .columns
-                            .iter()
-                            .filter(|x| x.column_id() == column_id)
-                            .exactly_one()
-                            .unwrap()
-                            .clone()
-                    })
-                    .collect_vec();
-                (s.catalog.columns, pk_column_catalogs, vec![])
-            }
-            Relation::BaseTable(t) => {
-                let pk_column_catalogs = t
-                    .table_catalog
-                    .pk()
-                    .iter()
-                    .map(|x| t.table_catalog.columns[x.column_index].clone())
-                    .collect_vec();
-                (t.table_catalog.columns, pk_column_catalogs, t.table_indexes)
-            }
-            Relation::SystemTable(t) => {
-                let pk_column_catalogs = t
-                    .sys_table_catalog
-                    .pk
-                    .iter()
-                    .map(|idx| t.sys_table_catalog.columns[*idx].clone())
-                    .collect_vec();
-                (
-                    t.sys_table_catalog.columns.clone(),
-                    pk_column_catalogs,
-                    vec![],
-                )
-            }
-            _ => {
-                return Err(
-                    CatalogError::NotFound("table or source", table_name.to_string()).into(),
-                );
-            }
-        };
-        (
-            column_catalogs
-                .into_iter()
-                .filter(|c| !c.is_hidden)
-                .map(|c| c.column_desc)
-                .collect(),
-            pk_column_catalogs
-                .into_iter()
-                .map(|c| c.column_desc)
-                .collect(),
-            indices,
-        )
+    let (columns, pk_columns, dist_columns, indices): (
+        Vec<ColumnCatalog>,
+        Vec<ColumnDesc>,
+        Vec<ColumnDesc>,
+        Vec<Arc<IndexCatalog>>,
+    ) = match relation {
+        Relation::Source(s) => {
+            let pk_column_catalogs = s
+                .catalog
+                .pk_col_ids
+                .iter()
+                .map(|&column_id| {
+                    s.catalog
+                        .columns
+                        .iter()
+                        .filter(|x| x.column_id() == column_id)
+                        .map(|x| x.column_desc.clone())
+                        .exactly_one()
+                        .unwrap()
+                })
+                .collect_vec();
+            (s.catalog.columns, pk_column_catalogs, vec![], vec![])
+        }
+        Relation::BaseTable(t) => {
+            let pk_column_catalogs = t
+                .table_catalog
+                .pk()
+                .iter()
+                .map(|x| t.table_catalog.columns[x.column_index].column_desc.clone())
+                .collect_vec();
+            let dist_columns = t
+                .table_catalog
+                .distribution_key()
+                .iter()
+                .map(|idx| t.table_catalog.columns[*idx].column_desc.clone())
+                .collect_vec();
+            (
+                t.table_catalog.columns,
+                pk_column_catalogs,
+                dist_columns,
+                t.table_indexes,
+            )
+        }
+        Relation::SystemTable(t) => {
+            let pk_column_catalogs = t
+                .sys_table_catalog
+                .pk
+                .iter()
+                .map(|idx| t.sys_table_catalog.columns[*idx].column_desc.clone())
+                .collect_vec();
+            (
+                t.sys_table_catalog.columns.clone(),
+                pk_column_catalogs,
+                vec![],
+                vec![],
+            )
+        }
+        _ => {
+            return Err(CatalogError::NotFound("table or source", table_name.to_string()).into());
+        }
     };
 
     // Convert all column descs to rows
@@ -109,6 +110,22 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                 )
                 .into(),
             ),
+            None,
+        ]));
+    }
+
+    // Convert distribution keys to rows
+    if !dist_columns.is_empty() {
+        rows.push(Row::new(vec![
+            Some("distribution key".into()),
+            Some(
+                display_comma_separated(
+                    &dist_columns.into_iter().map(|col| col.name).collect_vec(),
+                )
+                .to_string()
+                .into(),
+            ),
+            None,
         ]));
     }
 
@@ -138,6 +155,7 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                     .into(),
                 )
             },
+            None,
         ])
     }));
 
@@ -153,6 +171,11 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                 ),
                 PgFieldDescriptor::new(
                     "Type".to_owned(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+                PgFieldDescriptor::new(
+                    "Is Hidden".to_owned(),
                     DataType::Varchar.to_oid(),
                     DataType::Varchar.type_len(),
                 ),
@@ -208,6 +231,7 @@ mod tests {
             "v3".into() => "integer".into(),
             "v4".into() => "integer".into(),
             "primary key".into() => "v3".into(),
+            "distribution key".into() => "v3".into(),
             "idx1".into() => "index(v1 DESC, v2 ASC, v3 ASC) include(v4) distributed by(v1)".into(),
         };
 

@@ -18,8 +18,10 @@ use crate::optimizer::plan_visitor::PlanVisitor;
 
 pub struct HasMaxOneRowApply();
 
-impl PlanVisitor<bool> for HasMaxOneRowApply {
-    type DefaultBehavior = impl DefaultBehavior<bool>;
+impl PlanVisitor for HasMaxOneRowApply {
+    type Result = bool;
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     fn default_behavior() -> Self::DefaultBehavior {
         Merge(|a, b| a | b)
