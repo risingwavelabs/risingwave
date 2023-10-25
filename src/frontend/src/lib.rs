@@ -38,6 +38,9 @@
 #[cfg(test)]
 risingwave_expr_impl::enable!();
 
+#[cfg(test)]
+risingwave_sink_impl::enable!();
+
 #[macro_use]
 mod catalog;
 pub use catalog::TableCatalog;

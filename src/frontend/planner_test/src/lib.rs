@@ -18,6 +18,7 @@
 //! Data-driven tests.
 
 risingwave_expr_impl::enable!();
+risingwave_sink_impl::enable!();
 
 mod resolve_id;
 
