@@ -4118,6 +4118,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonbb"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44376417b2ff0cd879b5c84976fa9e0855c316321b4e0502e33e52963bf84f74"
+dependencies = [
+ "bytes",
+ "serde",
+ "serde_json",
+ "smallvec",
+]
+
+[[package]]
 name = "jsonschema-transpiler"
 version = "1.10.0"
 source = "git+https://github.com/mozilla/jsonschema-transpiler?rev=c1a89d720d118843d8bcca51084deb0ed223e4b4#c1a89d720d118843d8bcca51084deb0ed223e4b4"
@@ -7073,6 +7085,7 @@ dependencies = [
  "hytra",
  "itertools 0.11.0",
  "itoa",
+ "jsonbb",
  "libc",
  "lru 0.7.6",
  "mach2",
@@ -7450,6 +7463,7 @@ dependencies = [
  "futures-util",
  "hex",
  "itertools 0.11.0",
+ "jsonbb",
  "madsim-tokio",
  "md5",
  "num-traits",

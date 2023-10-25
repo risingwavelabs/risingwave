@@ -431,6 +431,7 @@ impl DdlController {
 
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
 
+        // Persist tables
         tracing::debug!(id = stream_job.id(), "preparing stream job");
         let fragment_graph = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
@@ -1097,7 +1098,7 @@ impl DdlController {
         }
     }
 
-    pub async fn wait(&self) {
+    pub async fn wait(&self) -> MetaResult<()> {
         for _ in 0..30 * 60 {
             if self
                 .catalog_manager
@@ -1105,9 +1106,10 @@ impl DdlController {
                 .await
                 .is_empty()
             {
-                break;
+                return Ok(());
             }
             sleep(Duration::from_secs(1)).await;
         }
+        Err(MetaError::cancelled("timeout".into()))
     }
 }
