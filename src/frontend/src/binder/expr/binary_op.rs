@@ -92,6 +92,8 @@ impl Binder {
             BinaryOperator::Arrow => ExprType::JsonbAccessInner,
             BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
             BinaryOperator::Prefix => ExprType::StartsWith,
+            BinaryOperator::Contains => ExprType::JsonbContains,
+            BinaryOperator::ContainedBy => ExprType::JsonbContainedBy,
             BinaryOperator::Concat => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());

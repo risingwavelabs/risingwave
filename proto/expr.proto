@@ -218,6 +218,10 @@ message ExprNode {
     JSONB_ARRAY_LENGTH = 603;
     IS_JSON = 604;
     JSONB_CAT = 605;
+    // jsonb @> jsonb
+    JSONB_CONTAINS = 608;
+    // jsonb <@ jsonb
+    JSONB_CONTAINED_BY = 609;
 
     // Non-pure functions below (> 1000)
     // ------------------------
