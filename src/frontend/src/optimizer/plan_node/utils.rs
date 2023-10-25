@@ -180,6 +180,7 @@ impl TableCatalogBuilder {
             // NOTE(kwannoel): This may not match the create type of the materialized table.
             // It should be ignored for internal tables.
             create_type: CreateType::Foreground,
+            description: None,
         }
     }
 

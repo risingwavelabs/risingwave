@@ -131,6 +131,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
                 .0
                 .optional_associated_source_id
                 .map(PbOptionalAssociatedSourceId::AssociatedSourceId),
+            description: None,
         }
     }
 }
