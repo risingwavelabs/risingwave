@@ -844,9 +844,10 @@ impl CatalogManager {
         let tables = &mut database_core.tables;
         let mut tables = BTreeMapTransaction::new(tables);
         for table in &tables_to_clean {
-            tracing::debug!("cleaning table_id: {}", table.id);
-            let table = tables.remove(table.id);
-            assert!(table.is_some())
+            let table_id = table.id;
+            tracing::debug!("cleaning table_id: {}", table_id);
+            let table = tables.remove(table_id);
+            assert!(table.is_some(), "table_id {} missing", table_id)
         }
         commit_meta!(self, tables)?;
 
@@ -938,7 +939,7 @@ impl CatalogManager {
             let mut tables = BTreeMapTransaction::new(tables);
             for table_id in table_ids {
                 let res = tables.remove(table_id);
-                assert!(res.is_some());
+                assert!(res.is_some(), "table_id {} missing", table_id);
             }
             commit_meta!(self, tables)?;
             table
