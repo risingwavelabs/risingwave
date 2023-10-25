@@ -31,7 +31,7 @@ use crate::barrier::{
 };
 use crate::manager::{FragmentManager, FragmentManagerRef};
 use crate::model::{ActorId, TableFragments};
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 type ConsumedRows = u64;
 
@@ -196,6 +196,20 @@ impl TrackingJob {
             }
             TrackingJob::Recovered(recovered) => {
                 recovered.finished.notify_finished();
+            }
+        }
+    }
+
+    pub(crate) fn notify_finish_failed(self, err: MetaError) {
+        match self {
+            TrackingJob::New(command) => {
+                command
+                    .notifiers
+                    .into_iter()
+                    .for_each(|n| n.notify_finish_failed(err.clone()));
+            }
+            TrackingJob::Recovered(recovered) => {
+                recovered.finished.notify_finish_failed(err);
             }
         }
     }

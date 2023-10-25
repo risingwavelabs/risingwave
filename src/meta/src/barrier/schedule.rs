@@ -280,7 +280,7 @@ impl BarrierScheduler {
             // Wait for this command to be finished.
             finish_rx
                 .await
-                .map_err(|e| anyhow!("failed to finish command: {}", e))?;
+                .map_err(|e| anyhow!("failed to finish command: {}", e))??;
         }
 
         Ok(infos)

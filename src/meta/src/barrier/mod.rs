@@ -458,8 +458,8 @@ impl CheckpointControl {
         }
     }
 
-    /// We need to make sure there are no changes when doing recovery
-    pub fn clear_changes(&mut self) {
+    /// We need to notify finish commands with the error and make sure there are no changes when doing recovery
+    pub fn clear_changes(&mut self, err: MetaError) {
         if !self.creating_tables.is_empty() {
             tracing::warn!("there are some changes in creating_tables");
             self.creating_tables.clear();
@@ -476,7 +476,10 @@ impl CheckpointControl {
             tracing::warn!("there are some changes in dropping_tables");
             self.dropping_tables.clear();
         }
-        self.finished_commands.clear();
+        // self.finished_commands.clear();
+        self.finished_commands
+            .drain(..)
+            .for_each(|cmd| cmd.notify_finish_failed(err.clone()));
     }
 }
 
@@ -955,7 +958,7 @@ impl GlobalBarrierManager {
         state: &mut BarrierManagerState,
         checkpoint_control: &mut CheckpointControl,
     ) {
-        checkpoint_control.clear_changes();
+        checkpoint_control.clear_changes(err.clone());
 
         for node in fail_nodes {
             if let Some(timer) = node.timer {
@@ -964,9 +967,10 @@ impl GlobalBarrierManager {
             if let Some(wait_commit_timer) = node.wait_commit_timer {
                 wait_commit_timer.observe_duration();
             }
-            node.notifiers
-                .into_iter()
-                .for_each(|notifier| notifier.notify_collection_failed(err.clone()));
+            node.notifiers.into_iter().for_each(|notifier|
+                // some of the fail nodes may be notified as collected before, we should notify them
+                // as failed using the specified error.
+                notifier.notify_failed(err.clone()));
         }
 
         if self.enable_recovery {

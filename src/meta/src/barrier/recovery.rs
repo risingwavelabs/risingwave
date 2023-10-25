@@ -181,7 +181,7 @@ impl GlobalBarrierManager {
                     tracing::debug!("recovering stream job {}", table.id);
                     finished
                         .await
-                        .map_err(|e| anyhow!("failed to finish command: {}", e))?;
+                        .map_err(|e| anyhow!("failed to finish command: {}", e))??;
 
                     tracing::debug!("finished stream job {}", table.id);
                     // Once notified that job is finished we need to notify frontend.
