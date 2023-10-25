@@ -29,6 +29,7 @@ pub use upsert::UpsertFormatter;
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
 use super::encoder::template::TemplateEncoder;
 use super::encoder::KafkaConnectParams;
+use super::redis::{KEY_FORMAT, VALUE_FORMAT};
 use crate::sink::encoder::{
     AvroEncoder, AvroHeader, JsonEncoder, ProtoEncoder, TimestampHandlingMode,
 };
@@ -96,7 +97,7 @@ impl SinkFormatterImpl {
                 let key_encoder = (!pk_indices.is_empty()).then(|| {
                     JsonEncoder::new(
                         schema.clone(),
-                        Some(pk_indices),
+                        Some(pk_indices.clone()),
                         TimestampHandlingMode::Milli,
                     )
                 });
@@ -119,6 +120,28 @@ impl SinkFormatterImpl {
                         Ok(SinkFormatterImpl::AppendOnlyProto(formatter))
                     }
                     SinkEncode::Avro => err_unsupported(),
+                    SinkEncode::Template => {
+                        let key_format = format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
+                            SinkError::Config(anyhow!(
+                                "Cannot find 'key_format',please set it or use JSON"
+                            ))
+                        })?;
+                        let value_format =
+                            format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
+                                SinkError::Config(anyhow!(
+                                    "Cannot find 'redis_value_format',please set it or use JSON"
+                                ))
+                            })?;
+                        let key_encoder = TemplateEncoder::new(
+                            schema.clone(),
+                            Some(pk_indices),
+                            key_format.clone(),
+                        );
+                        let val_encoder = TemplateEncoder::new(schema, None, value_format.clone());
+                        Ok(SinkFormatterImpl::AppendOnlyTemplate(
+                            AppendOnlyFormatter::new(Some(key_encoder), val_encoder),
+                        ))
+                    }
                 }
             }
             SinkFormat::Debezium => {
@@ -169,6 +192,29 @@ impl SinkFormatterImpl {
                         let formatter = UpsertFormatter::new(key_encoder, val_encoder);
                         Ok(SinkFormatterImpl::UpsertJson(formatter))
                     }
+                    SinkEncode::Template => {
+                        let key_format = format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
+                            SinkError::Config(anyhow!(
+                                "Cannot find 'key_format',please set it or use JSON"
+                            ))
+                        })?;
+                        let value_format =
+                            format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
+                                SinkError::Config(anyhow!(
+                                    "Cannot find 'redis_value_format',please set it or use JSON"
+                                ))
+                            })?;
+                        let key_encoder = TemplateEncoder::new(
+                            schema.clone(),
+                            Some(pk_indices),
+                            key_format.clone(),
+                        );
+                        let val_encoder = TemplateEncoder::new(schema, None, value_format.clone());
+                        Ok(SinkFormatterImpl::UpsertTemplate(UpsertFormatter::new(
+                            key_encoder,
+                            val_encoder,
+                        )))
+                    }
                     SinkEncode::Avro => {
                         let (key_schema, val_schema) =
                             crate::schema::avro::fetch_schema(&format_desc.options, topic)
@@ -191,51 +237,6 @@ impl SinkFormatterImpl {
                     }
                     SinkEncode::Protobuf => err_unsupported(),
                 }
-            }
-        }
-    }
-
-    pub fn new_with_redis(
-        schema: Schema,
-        pk_indices: Vec<usize>,
-        is_append_only: bool,
-        key_format: Option<String>,
-        value_format: Option<String>,
-    ) -> Result<Self> {
-        match (key_format, value_format) {
-            (Some(k), Some(v)) => {
-                let key_encoder = TemplateEncoder::new(
-                    schema.clone(),
-                    Some(pk_indices),
-                    k,
-                );
-                let val_encoder =
-                    TemplateEncoder::new(schema, None, v);
-                if is_append_only {
-                    Ok(SinkFormatterImpl::AppendOnlyTemplate(AppendOnlyFormatter::new(Some(key_encoder), val_encoder)))
-                } else {
-                    Ok(SinkFormatterImpl::UpsertTemplate(UpsertFormatter::new(key_encoder, val_encoder)))
-                }
-            }
-            (None, None) => {
-                let key_encoder = JsonEncoder::new(
-                    schema.clone(),
-                    Some(pk_indices),
-                    TimestampHandlingMode::Milli,
-                );
-                let val_encoder = JsonEncoder::new(
-                    schema,
-                    None,
-                    TimestampHandlingMode::Milli,
-                );
-                if is_append_only {
-                    Ok(SinkFormatterImpl::AppendOnlyJson(AppendOnlyFormatter::new(Some(key_encoder), val_encoder)))
-                } else {
-                    Ok(SinkFormatterImpl::UpsertJson(UpsertFormatter::new(key_encoder, val_encoder)))
-                }
-            }
-            _ => {
-                Err(SinkError::Encode("Please provide template formats for both key and value, or choose the JSON format.".to_string()))
             }
         }
     }

@@ -36,6 +36,19 @@ get_commit() {
   | sed 's/\"//g'
 }
 
+get_machine() {
+  buildkite-agent artifact download microbench_instance_type.txt ./
+  cat ./microbench_instance_type.txt
+}
+
+echo "--- Checking microbench_instance_type"
+INSTANCE_TYPE=$(get_machine)
+echo "instance type: $INSTANCE_TYPE"
+if [[ $INSTANCE_TYPE != "m6i.4xlarge" ]]; then
+  echo "Only m6i.4xlarge is supported, microbenchmark was skipped"
+  exit 0
+fi
+
 setup
 
 BUILDKITE_BUILD_URL="https://buildkite.com/risingwavelabs/main-cron/builds/$BUILDKITE_BUILD_NUMBER"

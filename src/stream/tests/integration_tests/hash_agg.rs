@@ -284,7 +284,7 @@ async fn test_hash_agg_emit_on_window_close() {
     };
 
     check_with_script(
-        || create_executor(),
+        create_executor,
         &format!(
             r###"
             - !barrier 1

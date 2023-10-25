@@ -26,13 +26,12 @@
 #![feature(error_generic_member_access)]
 #![feature(assert_matches)]
 #![feature(try_blocks)]
-#![cfg_attr(coverage, feature(no_coverage))]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 #![feature(custom_test_frameworks)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(is_sorted)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(type_name_of_val)]
-#![feature(async_fn_in_trait)]
 
 pub mod backup_restore;
 pub mod barrier;
