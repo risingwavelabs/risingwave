@@ -647,7 +647,8 @@ impl CatalogManager {
                     self.start_create_table_procedure_with_source(source, table)
                         .await
                 } else {
-                    self.start_create_table_procedure(table, internal_tables).await
+                    self.start_create_table_procedure(table, internal_tables)
+                        .await
                 }
             }
         }
