@@ -314,6 +314,10 @@ message GetTablesResponse {
   map<uint32, catalog.Table> tables = 1;
 }
 
+message WaitRequest {}
+
+message WaitResponse {}
+
 message CommentOnRequest {
   catalog.Comment comment = 1;
 }
@@ -352,5 +356,6 @@ service DdlService {
   rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
   rpc DropConnection(DropConnectionRequest) returns (DropConnectionResponse);
   rpc GetTables(GetTablesRequest) returns (GetTablesResponse);
+  rpc Wait(WaitRequest) returns (WaitResponse);
   rpc CommentOn(CommentOnRequest) returns (CommentOnResponse);
 }

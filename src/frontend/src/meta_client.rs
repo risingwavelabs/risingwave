@@ -43,6 +43,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot>;
 
+    async fn wait(&self) -> Result<()>;
+
     async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>>;
 
     async fn list_table_fragments(
@@ -109,6 +111,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot> {
         self.0.flush(checkpoint).await
+    }
+
+    async fn wait(&self) -> Result<()> {
+        self.0.wait().await
     }
 
     async fn cancel_creating_jobs(&self, infos: PbJobs) -> Result<Vec<u32>> {
