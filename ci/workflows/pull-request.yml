@@ -352,7 +352,7 @@ steps:
     retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
-    command: "TEST_NUM=8 KILL_RATE=0.5 ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=12 KILL_RATE=1.0 timeout 55m ci/scripts/deterministic-recovery-test.sh"
     if: (!build.pull_request.labels includes "ci/skip-ci" || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation")
     depends_on: "build-simulation"
     plugins:
