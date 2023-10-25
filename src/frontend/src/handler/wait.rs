@@ -12,7 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub(crate) mod checked;
-pub(crate) mod non_strict;
+use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::error::Result;
 
-pub use non_strict::{EvalErrorReport, LogReport};
+use super::RwPgResponse;
+use crate::handler::HandlerArgs;
+use crate::session::SessionImpl;
+
+pub(super) async fn handle_wait(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    do_wait(&handler_args.session).await?;
+    Ok(PgResponse::empty_result(StatementType::WAIT))
+}
+
+pub(crate) async fn do_wait(session: &SessionImpl) -> Result<()> {
+    let client = session.env().meta_client();
+    client.wait().await?;
+    Ok(())
+}

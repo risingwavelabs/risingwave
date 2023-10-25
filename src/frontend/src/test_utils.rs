@@ -773,6 +773,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         })
     }
 
+    async fn wait(&self) -> RpcResult<()> {
+        Ok(())
+    }
+
     async fn cancel_creating_jobs(&self, _infos: PbJobs) -> RpcResult<Vec<u32>> {
         Ok(vec![])
     }

@@ -59,7 +59,7 @@ impl ScaleServiceImpl {
 
 #[async_trait::async_trait]
 impl ScaleService for ScaleServiceImpl {
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn get_cluster_info(
         &self,
         _: Request<GetClusterInfoRequest>,
@@ -110,7 +110,7 @@ impl ScaleService for ScaleServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn reschedule(
         &self,
         request: Request<RescheduleRequest>,
@@ -174,7 +174,7 @@ impl ScaleService for ScaleServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn get_reschedule_plan(
         &self,
         request: Request<GetReschedulePlanRequest>,
