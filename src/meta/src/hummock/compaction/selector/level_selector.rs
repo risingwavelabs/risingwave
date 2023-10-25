@@ -224,7 +224,18 @@ impl DynamicLevelSelectorCore {
             // range at each level, so the number of levels is the most important factor affecting
             // the read performance. At the same time, the size factor is also added to the score
             // calculation rule to avoid unbalanced compact task due to large size.
-            let total_size = levels.l0.as_ref().unwrap().total_file_size
+            let total_size = levels
+                .l0
+                .as_ref()
+                .unwrap()
+                .sub_levels
+                .iter()
+                .filter(|level| {
+                    level.vnode_partition_count == levels.vnode_partition_count
+                        && level.level_type() == LevelType::Nonoverlapping
+                })
+                .map(|level| level.total_file_size)
+                .sum::<u64>()
                 - handlers[0].get_pending_output_file_size(ctx.base_level as u32);
             let base_level_size = levels.get_level(ctx.base_level).total_file_size;
             let base_level_sst_count = levels.get_level(ctx.base_level).table_infos.len() as u64;
