@@ -670,6 +670,12 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::allocation_bits")]
     pub allocation_bits: usize,
 
+    #[serde(default = "default::file_cache::ring_buffer_blocks")]
+    pub ring_buffer_blocks: usize,
+
+    #[serde(default = "default::file_cache::catalog_bits")]
+    pub catalog_bits: usize,
+
     #[serde(default = "default::file_cache::allocation_timeout_ms")]
     pub allocation_timeout_ms: usize,
 
@@ -1173,6 +1179,14 @@ pub mod default {
 
         pub fn allocation_bits() -> usize {
             0
+        }
+
+        pub fn ring_buffer_blocks() -> usize {
+            32768
+        }
+
+        pub fn catalog_bits() -> usize {
+            6
         }
 
         pub fn allocation_timeout_ms() -> usize {

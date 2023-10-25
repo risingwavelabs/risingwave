@@ -79,6 +79,8 @@ pub struct StorageOpts {
     pub data_file_cache_flush_rate_limit_mb: usize,
     pub data_file_cache_reclaim_rate_limit_mb: usize,
     pub data_file_cache_allocation_bits: usize,
+    pub data_file_cache_ring_buffer_blocks: usize,
+    pub data_file_cache_catalog_bits: usize,
     pub data_file_cache_allocation_timeout_ms: usize,
 
     pub cache_refill_data_refill_levels: Vec<u32>,
@@ -104,6 +106,8 @@ pub struct StorageOpts {
     pub meta_file_cache_flush_rate_limit_mb: usize,
     pub meta_file_cache_reclaim_rate_limit_mb: usize,
     pub meta_file_cache_allocation_bits: usize,
+    pub meta_file_cache_ring_buffer_blocks: usize,
+    pub meta_file_cache_catalog_bits: usize,
     pub meta_file_cache_allocation_timeout_ms: usize,
 
     /// The storage url for storing backups.
@@ -185,6 +189,8 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             data_file_cache_flush_rate_limit_mb: c.storage.data_file_cache.flush_rate_limit_mb,
             data_file_cache_reclaim_rate_limit_mb: c.storage.data_file_cache.reclaim_rate_limit_mb,
             data_file_cache_allocation_bits: c.storage.data_file_cache.allocation_bits,
+            data_file_cache_ring_buffer_blocks: c.storage.data_file_cache.ring_buffer_blocks,
+            data_file_cache_catalog_bits: c.storage.data_file_cache.catalog_bits,
             data_file_cache_allocation_timeout_ms: c.storage.data_file_cache.allocation_timeout_ms,
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
             meta_file_cache_capacity_mb: c.storage.meta_file_cache.capacity_mb,
@@ -207,6 +213,8 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_file_cache_flush_rate_limit_mb: c.storage.meta_file_cache.flush_rate_limit_mb,
             meta_file_cache_reclaim_rate_limit_mb: c.storage.meta_file_cache.reclaim_rate_limit_mb,
             meta_file_cache_allocation_bits: c.storage.meta_file_cache.allocation_bits,
+            meta_file_cache_ring_buffer_blocks: c.storage.meta_file_cache.ring_buffer_blocks,
+            meta_file_cache_catalog_bits: c.storage.meta_file_cache.catalog_bits,
             meta_file_cache_allocation_timeout_ms: c.storage.meta_file_cache.allocation_timeout_ms,
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
             cache_refill_timeout_ms: c.storage.cache_refill.timeout_ms,

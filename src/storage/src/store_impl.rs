@@ -549,6 +549,8 @@ impl StateStoreImpl {
                 reclaim_rate_limit: opts.data_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.data_file_cache_recover_concurrency,
                 allocator_bits: opts.data_file_cache_allocation_bits,
+                ring_buffer_blocks: opts.data_file_cache_ring_buffer_blocks,
+                catalog_bits: opts.data_file_cache_catalog_bits,
                 allocation_timeout: Duration::from_millis(
                     opts.data_file_cache_allocation_timeout_ms as u64,
                 ),
@@ -587,6 +589,8 @@ impl StateStoreImpl {
                 reclaim_rate_limit: opts.meta_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.meta_file_cache_recover_concurrency,
                 allocator_bits: opts.meta_file_cache_allocation_bits,
+                ring_buffer_blocks: opts.meta_file_cache_ring_buffer_blocks,
+                catalog_bits: opts.meta_file_cache_catalog_bits,
                 allocation_timeout: Duration::from_millis(
                     opts.meta_file_cache_allocation_timeout_ms as u64,
                 ),
