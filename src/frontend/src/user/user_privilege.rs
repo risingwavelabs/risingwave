@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::LazyLock;
-
 use itertools::Itertools;
 use risingwave_common::acl;
 use risingwave_common::acl::{AclMode, AclModeSet};
@@ -44,9 +42,7 @@ pub fn check_privilege_type(privilege: &Privileges, objects: &GrantObjects) -> R
     }
 }
 
-fn get_all_available_modes(
-    object: &GrantObjects,
-) -> Result<&LazyLock<AclModeSet, fn() -> AclModeSet>> {
+fn get_all_available_modes(object: &GrantObjects) -> Result<&AclModeSet> {
     match object {
         GrantObjects::Databases(_) => Ok(&acl::ALL_AVAILABLE_DATABASE_MODES),
         GrantObjects::Schemas(_) => Ok(&acl::ALL_AVAILABLE_SCHEMA_MODES),
