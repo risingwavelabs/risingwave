@@ -416,8 +416,7 @@ impl TestCase {
                     source_schema,
                     source_watermarks,
                     append_only,
-                    cdc_source_name,
-                    external_table_name,
+                    cdc_table_info,
                     ..
                 } => {
                     // TODO(st1page): refacor it
@@ -435,8 +434,7 @@ impl TestCase {
                         source_watermarks,
                         append_only,
                         notice,
-                        cdc_source_name,
-                        external_table_name,
+                        cdc_table_info,
                     )
                     .await?;
                 }

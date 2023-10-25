@@ -123,7 +123,7 @@ pub fn offset_column_name() -> String {
 
 pub const CDC_SOURCE_COLUMN_NUM: u32 = 4;
 pub const TABLE_NAME_COLUMN_NAME: &str = "_rw_table_name";
-pub fn table_name_column_name() -> String {
+pub fn cdc_table_name_column_name() -> String {
     TABLE_NAME_COLUMN_NAME.to_string()
 }
 
@@ -131,6 +131,7 @@ pub fn is_offset_column_name(name: &str) -> bool {
     name.starts_with(OFFSET_COLUMN_NAME)
 }
 /// Creates a offset column for storing upstream offset
+/// Used in cdc source currently
 pub fn offset_column_desc() -> ColumnDesc {
     ColumnDesc {
         data_type: DataType::Varchar,
@@ -142,11 +143,12 @@ pub fn offset_column_desc() -> ColumnDesc {
     }
 }
 
-pub fn table_name_column_desc() -> ColumnDesc {
+/// A column to store the upstream table name of the cdc table
+pub fn cdc_table_name_column_desc() -> ColumnDesc {
     ColumnDesc {
         data_type: DataType::Varchar,
         column_id: ColumnId::placeholder(),
-        name: table_name_column_name(),
+        name: cdc_table_name_column_name(),
         field_descs: vec![],
         type_name: "".to_string(),
         generated_or_default_column: None,

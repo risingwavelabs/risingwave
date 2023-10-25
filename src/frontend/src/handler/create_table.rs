@@ -39,8 +39,8 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    ColumnDef, ColumnOption, DataType as AstDataType, Format, ObjectName, SourceSchemaV2,
-    SourceWatermark, TableConstraint,
+    CdcTableInfo, ColumnDef, ColumnOption, DataType as AstDataType, Format, ObjectName,
+    SourceSchemaV2, SourceWatermark, TableConstraint,
 };
 
 use super::RwPgResponse;
@@ -510,7 +510,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let table_type = CdcTableType::from_properties(&properties);
     if table_type.can_backfill() && context.session_ctx().config().get_cdc_backfill() {
         // Add a column for storing the event offset
-        let offset_column = ColumnCatalog::offset_column();
+        let offset_column = ColumnCatalog::cdc_offset_column();
         let _offset_index = columns.len();
         columns.push(offset_column);
 
@@ -887,8 +887,7 @@ pub async fn handle_create_table(
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
     notice: Option<String>,
-    cdc_source: Option<ObjectName>,
-    external_table: Option<String>,
+    cdc_table_info: Option<CdcTableInfo>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
     // TODO(st1page): refactor it
@@ -916,7 +915,7 @@ pub async fn handle_create_table(
         let col_id_gen = ColumnIdGenerator::new_initial();
         let properties = context.with_options().inner().clone().into_iter().collect();
 
-        let ((plan, source, table), job_type) = match (source_schema, cdc_source.as_ref()) {
+        let ((plan, source, table), job_type) = match (source_schema, cdc_table_info.as_ref()) {
             (Some(source_schema), None) => (
                 gen_create_table_plan_with_source(
                     context,
@@ -944,12 +943,12 @@ pub async fn handle_create_table(
                 TableJobType::Unspecified,
             ),
 
-            (None, Some(source_name)) => (
+            (None, Some(cdc_table)) => (
                 gen_create_table_plan_for_cdc_source(
                     context.into(),
-                    source_name.clone(),
+                    cdc_table.source_name.clone(),
                     table_name.clone(),
-                    external_table.unwrap_or(table_name.real_value()),
+                    cdc_table.external_table_name.clone(),
                     column_defs,
                     constraints,
                     col_id_gen,
@@ -964,15 +963,16 @@ pub async fn handle_create_table(
             .into()),
         };
         let mut graph = build_graph(plan);
-        graph.parallelism =
-            if cdc_source.is_some() || CdcTableType::from_properties(&properties).can_backfill() {
-                Some(Parallelism { parallelism: 1 })
-            } else {
-                session
-                    .config()
-                    .get_streaming_parallelism()
-                    .map(|parallelism| Parallelism { parallelism })
-            };
+        graph.parallelism = if cdc_table_info.is_some()
+            || CdcTableType::from_properties(&properties).can_backfill()
+        {
+            Some(Parallelism { parallelism: 1 })
+        } else {
+            session
+                .config()
+                .get_streaming_parallelism()
+                .map(|parallelism| Parallelism { parallelism })
+        };
         (graph, source, table, job_type)
     };
 

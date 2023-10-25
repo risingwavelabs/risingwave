@@ -55,7 +55,7 @@ public class DbzConnectorConfig {
     public static final String PG_SCHEMA_NAME = "schema.name";
 
     /* RisingWave configs */
-    public static final String CDC_SHARING_MODE = "rw.sharing.mode";
+    public static final String CDC_SHARING_MODE = "rw.sharing.mode.enable";
 
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";

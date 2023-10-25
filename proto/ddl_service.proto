@@ -328,7 +328,6 @@ service DdlService {
   rpc CreateSchema(CreateSchemaRequest) returns (CreateSchemaResponse);
   rpc DropSchema(DropSchemaRequest) returns (DropSchemaResponse);
   rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
-  // rpc CreateSourceWithGraph(CreateSourceRequest) returns (CreateSourceResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
   rpc CreateSink(CreateSinkRequest) returns (CreateSinkResponse);
   rpc DropSink(DropSinkRequest) returns (DropSinkResponse);

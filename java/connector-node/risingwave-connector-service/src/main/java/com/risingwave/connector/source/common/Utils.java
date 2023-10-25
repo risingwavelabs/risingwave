@@ -19,9 +19,9 @@ import java.util.Map;
 public class Utils {
 
     public static CdcSourceMode getCdcSourceMode(Map<String, String> props) {
-        if (props.containsKey(DbzConnectorConfig.CDC_SHARING_MODE)) {
-            return CdcSourceMode.SHARING_MODE;
-        }
-        return CdcSourceMode.SINGLE_MODE;
+        var isSharing =
+                Boolean.parseBoolean(
+                        props.getOrDefault(DbzConnectorConfig.CDC_SHARING_MODE, "false"));
+        return isSharing ? CdcSourceMode.SHARING_MODE : CdcSourceMode.SINGLE_MODE;
     }
 }

@@ -110,8 +110,8 @@ pub fn debezium_cdc_source_schema() -> Vec<ColumnCatalog> {
         .collect_vec();
 
     // Add offset column to the end
-    columns.push(ColumnCatalog::offset_column());
-    columns.push(ColumnCatalog::table_name_column());
+    columns.push(ColumnCatalog::cdc_offset_column());
+    columns.push(ColumnCatalog::cdc_table_name_column());
     columns
 }
 
@@ -1129,7 +1129,7 @@ pub async fn handle_create_source(
     if create_cdc_source_job {
         // set connector to backfill mode
         with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
-        // ignore table name option, default to capture all tables
+        // enable cdc sharing mode, which will capture all tables in the given `database.name`
         with_properties.insert(CDC_SHARING_MODE_KEY.into(), "true".into());
     }
 
@@ -1239,7 +1239,7 @@ pub mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{
-        offset_column_name, row_id_column_name, table_name_column_name, DEFAULT_DATABASE_NAME,
+        cdc_table_name_column_name, offset_column_name, row_id_column_name, DEFAULT_DATABASE_NAME,
         DEFAULT_SCHEMA_NAME,
     };
     use risingwave_common::types::DataType;
@@ -1324,7 +1324,7 @@ pub mod tests {
 
         let row_id_col_name = row_id_column_name();
         let offset_col_name = offset_column_name();
-        let table_name_col_name = table_name_column_name();
+        let table_name_col_name = cdc_table_name_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Serial,
             "payload" => DataType::Jsonb,
