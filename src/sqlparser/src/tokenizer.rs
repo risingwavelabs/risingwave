@@ -164,6 +164,10 @@ pub enum Token {
     HashArrow,
     /// `#>>`, extract JSON sub-object at the specified path as text in PostgreSQL
     HashLongArrow,
+    /// `@>`, does the left JSON value contain the right JSON path/value entries at the top level
+    Contains,
+    /// `<@`, does the right JSON value contain the left JSON path/value entries at the top level
+    ContainedBy,
 }
 
 impl fmt::Display for Token {
@@ -231,6 +235,8 @@ impl fmt::Display for Token {
             Token::LongArrow => f.write_str("->>"),
             Token::HashArrow => f.write_str("#>"),
             Token::HashLongArrow => f.write_str("#>>"),
+            Token::Contains => f.write_str("@>"),
+            Token::ContainedBy => f.write_str("<@"),
         }
     }
 }
@@ -693,6 +699,7 @@ impl<'a> Tokenizer<'a> {
                         }
                         Some('>') => self.consume_and_return(chars, Token::Neq),
                         Some('<') => self.consume_and_return(chars, Token::ShiftLeft),
+                        Some('@') => self.consume_and_return(chars, Token::ContainedBy),
                         _ => Ok(Some(Token::Lt)),
                     }
                 }
@@ -759,7 +766,14 @@ impl<'a> Tokenizer<'a> {
                         _ => Ok(Some(Token::Sharp)),
                     }
                 }
-                '@' => self.consume_and_return(chars, Token::AtSign),
+                '@' => {
+                    chars.next(); // consume the '@'
+                    match chars.peek() {
+                        Some('>') => self.consume_and_return(chars, Token::Contains),
+                        // a regular '@' operator
+                        _ => Ok(Some(Token::AtSign)),
+                    }
+                }
                 other => self.consume_and_return(chars, Token::Char(other)),
             },
             None => Ok(None),
