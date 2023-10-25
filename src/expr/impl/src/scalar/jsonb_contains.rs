@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use jsonbb::ValueRef;
-use risingwave_common::types::JsonbRef;
+use risingwave_common::types::{JsonbRef, ListRef};
 use risingwave_expr::function;
 
 /// Does the first JSON value contain the second?
@@ -138,4 +138,78 @@ fn jsonbb_contains(left: ValueRef<'_>, right: ValueRef<'_>) -> bool {
 #[function("jsonb_contained_by(jsonb, jsonb) -> boolean")]
 fn jsonb_contained_by(left: JsonbRef<'_>, right: JsonbRef<'_>) -> bool {
     jsonb_contains(right, left)
+}
+
+/// Does the text string exist as a top-level key or array element within the JSON value?
+///
+/// Examples:
+///
+/// ```slt
+/// query B
+/// select '{"a":1, "b":2}'::jsonb ? 'b';
+/// ----
+/// t
+///
+/// query B
+/// select '["a", "b", "c"]'::jsonb ? 'b';
+/// ----
+/// t
+/// ```
+#[function("jsonb_contains_key(jsonb, varchar) -> boolean")]
+fn jsonb_contains_key(left: JsonbRef<'_>, key: &str) -> bool {
+    match left.into() {
+        ValueRef::Object(object) => object.get(key).is_some(),
+        ValueRef::Array(array) => array.iter().any(|val| val.as_str() == Some(key)),
+        _ => false,
+    }
+}
+
+/// Do any of the strings in the text array exist as top-level keys or array elements?
+///
+/// Examples:
+///
+/// ```slt
+/// query B
+/// select '{"a":1, "b":2, "c":3}'::jsonb ?| array['b', 'd'];
+/// ----
+/// t
+///
+/// query B
+/// select '["a", "b", "c"]'::jsonb ?| array['b', 'd'];
+/// ----
+/// t
+/// ```
+#[function("jsonb_contains_any_key(jsonb, varchar[]) -> boolean")]
+fn jsonb_contains_any_key(left: JsonbRef<'_>, keys: ListRef<'_>) -> bool {
+    let mut keys = keys.iter().flatten().map(|val| val.into_utf8());
+    match left.into() {
+        ValueRef::Object(object) => keys.any(|key| object.get(key).is_some()),
+        ValueRef::Array(array) => keys.any(|key| array.iter().any(|val| val.as_str() == Some(key))),
+        _ => false,
+    }
+}
+
+/// Do all of the strings in the text array exist as top-level keys or array elements?
+///
+/// Examples:
+///
+/// ```slt
+/// query B
+/// select '{"a":1, "b":2, "c":3}'::jsonb ?& array['a', 'b'];
+/// ----
+/// t
+///
+/// query B
+/// select '["a", "b", "c"]'::jsonb ?& array['a', 'b'];
+/// ----
+/// t
+/// ```
+#[function("jsonb_contains_all_keys(jsonb, varchar[]) -> boolean")]
+fn jsonb_contains_all_keys(left: JsonbRef<'_>, keys: ListRef<'_>) -> bool {
+    let mut keys = keys.iter().flatten().map(|val| val.into_utf8());
+    match left.into() {
+        ValueRef::Object(object) => keys.all(|key| object.get(key).is_some()),
+        ValueRef::Array(array) => keys.all(|key| array.iter().any(|val| val.as_str() == Some(key))),
+        _ => false,
+    }
 }

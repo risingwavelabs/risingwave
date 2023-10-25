@@ -222,6 +222,12 @@ message ExprNode {
     JSONB_CONTAINS = 608;
     // jsonb <@ jsonb
     JSONB_CONTAINED_BY = 609;
+    // jsonb ? text
+    JSONB_CONTAINS_KEY = 610;
+    // jsonb ?| text[]
+    JSONB_CONTAINS_ANY_KEY = 611;
+    // jsonb ?& text[]
+    JSONB_CONTAINS_ALL_KEYS = 612;
 
     // Non-pure functions below (> 1000)
     // ------------------------
