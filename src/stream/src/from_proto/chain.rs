@@ -179,6 +179,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
             ChainType::ChainUnspecified => unreachable!(),
         };
         if let Ok(rate_limit) = node.get_rate_limit() {
+            tracing::debug!(rate_limit, "flow control enabled");
             Ok(FlowControlExecutor::new(executor, *rate_limit).boxed())
         } else {
             Ok(executor)

@@ -318,7 +318,7 @@ impl StreamTableScan {
                 // The table desc used by backfill executor
                 table_desc: Some(self.core.table_desc.to_protobuf()),
                 state_table: Some(catalog),
-                rate_limit: self.base.ctx.overwrite_options().stream_rate_control,
+                rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
                 ..Default::default()
             })),
             stream_key,

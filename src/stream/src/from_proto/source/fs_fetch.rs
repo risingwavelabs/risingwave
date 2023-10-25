@@ -113,6 +113,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         .boxed();
 
         if let Ok(rate_limit) = source.get_rate_limit() {
+            tracing::debug!(rate_limit, "flow control enabled");
             return Ok(FlowControlExecutor::new(executor, *rate_limit).boxed());
         }
         Ok(executor)

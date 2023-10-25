@@ -16,19 +16,18 @@ use crate::handler::HandlerArgs;
 
 #[derive(Debug, Clone, Default)]
 pub struct OverwriteOptions {
-    pub stream_rate_control: Option<u32>,
+    pub streaming_rate_limit: Option<u32>,
 }
 
 impl OverwriteOptions {
-    const STREAM_RATE_LIMIT_KEY: &'static str = "streaming_rate_limit";
+    const STREAMING_RATE_LIMIT_KEY: &'static str = "streaming_rate_limit";
 
     pub fn new(args: &mut HandlerArgs) -> Self {
-        let stream_rate_control = {
-            tracing::info!("with props: {:?}", args.with_options);
+        let streaming_rate_limit = {
             if let Some(x) = args
                 .with_options
                 .inner_mut()
-                .remove(Self::STREAM_RATE_LIMIT_KEY)
+                .remove(Self::STREAMING_RATE_LIMIT_KEY)
             {
                 // TODO: validate the value
                 Some(x.parse::<u32>().unwrap())
@@ -37,7 +36,7 @@ impl OverwriteOptions {
             }
         };
         Self {
-            stream_rate_control,
+            streaming_rate_limit,
         }
     }
 }
