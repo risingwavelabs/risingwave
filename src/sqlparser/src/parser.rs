@@ -259,6 +259,7 @@ impl Parser {
                 Keyword::PREPARE => Ok(self.parse_prepare()?),
                 Keyword::COMMENT => Ok(self.parse_comment()?),
                 Keyword::FLUSH => Ok(Statement::Flush),
+                Keyword::WAIT => Ok(Statement::Wait),
                 _ => self.expected(
                     "an SQL statement",
                     Token::Word(w).with_location(token.location),

@@ -2,7 +2,7 @@ statement ok
 create table from_kafka with (
   connector = 'kafka',
   topic = 'test-rw-sink-append-only-protobuf',
-  properties.bootstrap.server = '127.0.0.1:29092')
+  properties.bootstrap.server = 'message_queue:29092')
 format plain encode protobuf (
   schema.location = 'file:///risingwave/proto-recursive',
   message = 'recursive.AllTypes');
@@ -37,7 +37,7 @@ statement ok
 create sink sink0 from into_kafka with (
   connector = 'kafka',
   topic = 'test-rw-sink-append-only-protobuf',
-  properties.bootstrap.server = '127.0.0.1:29092')
+  properties.bootstrap.server = 'message_queue:29092')
 format plain encode protobuf (
   force_append_only = true,
   schema.location = 'file:///risingwave/proto-recursive',
@@ -70,7 +70,7 @@ statement error failed to read file
 create sink sink_err from into_kafka with (
   connector = 'kafka',
   topic = 'test-rw-sink-append-only-protobuf',
-  properties.bootstrap.server = '127.0.0.1:29092')
+  properties.bootstrap.server = 'message_queue:29092')
 format plain encode protobuf (
   force_append_only = true,
   schema.location = 'file:///risingwave/proto-recursiv',
@@ -80,7 +80,7 @@ statement error encode extra_column error: field not in proto
 create sink sink_err as select 1 as extra_column with (
   connector = 'kafka',
   topic = 'test-rw-sink-append-only-protobuf',
-  properties.bootstrap.server = '127.0.0.1:29092')
+  properties.bootstrap.server = 'message_queue:29092')
 format plain encode protobuf (
   force_append_only = true,
   schema.location = 'file:///risingwave/proto-recursive',
@@ -90,7 +90,7 @@ statement error s3 URL not supported yet
 create sink sink_err from into_kafka with (
   connector = 'kafka',
   topic = 'test-rw-sink-append-only-protobuf',
-  properties.bootstrap.server = '127.0.0.1:29092')
+  properties.bootstrap.server = 'message_queue:29092')
 format plain encode protobuf (
   force_append_only = true,
   schema.location = 's3:///risingwave/proto-recursive',

@@ -14,7 +14,7 @@
 
 #![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
 #![feature(box_patterns)]
@@ -25,11 +25,9 @@
 #![feature(let_chains)]
 #![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
-#![feature(return_position_impl_trait_in_trait)]
-#![feature(async_fn_in_trait)]
 #![feature(associated_type_defaults)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(iter_from_generator)]
+#![feature(iter_from_coroutine)]
 #![feature(if_let_guard)]
 #![feature(iterator_try_collect)]
 

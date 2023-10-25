@@ -219,7 +219,6 @@ impl GlobalBarrierManager {
         &self,
         prev_epoch: TracedEpoch,
         paused_reason: Option<PausedReason>,
-        bootstrap_recovery: bool,
     ) -> BarrierManagerState {
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
@@ -227,11 +226,9 @@ impl GlobalBarrierManager {
             .await;
 
         tracing::info!("recovery start!");
-        if bootstrap_recovery {
-            self.clean_dirty_tables()
-                .await
-                .expect("clean dirty tables should not fail");
-        }
+        self.clean_dirty_tables()
+            .await
+            .expect("clean dirty tables should not fail");
         self.clean_dirty_fragments()
             .await
             .expect("clean dirty fragments");

@@ -244,6 +244,7 @@ fn bind_sink_format_desc(value: SinkSchema) -> Result<SinkFormatDesc> {
         E::Json => SinkEncode::Json,
         E::Protobuf => SinkEncode::Protobuf,
         E::Avro => SinkEncode::Avro,
+        E::Template => SinkEncode::Template,
         e @ (E::Native | E::Csv | E::Bytes) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into())
         }
@@ -263,6 +264,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
         use risingwave_sink_impl::sink::kafka::KafkaSink;
         use risingwave_sink_impl::sink::kinesis::KinesisSink;
         use risingwave_sink_impl::sink::pulsar::PulsarSink;
+        use risingwave_sink_impl::sink::redis::RedisSink;
 
         convert_args!(hashmap!(
                 KafkaSink::SINK_NAME => hashmap!(
@@ -279,6 +281,10 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Json],
                     Format::Upsert => vec![Encode::Json],
                     Format::Debezium => vec![Encode::Json],
+                ),
+                RedisSink::SINK_NAME => hashmap!(
+                    Format::Plain => vec![Encode::Json,Encode::Template],
+                    Format::Upsert => vec![Encode::Json,Encode::Template],
                 ),
         ))
     });

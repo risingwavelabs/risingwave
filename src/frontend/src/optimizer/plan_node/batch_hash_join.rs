@@ -36,7 +36,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchHashJoin {
     pub base: PlanBase,
-    logical: generic::Join<PlanRef>,
+    core: generic::Join<PlanRef>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
     /// non-equal parts to facilitate execution later
@@ -44,17 +44,13 @@ pub struct BatchHashJoin {
 }
 
 impl BatchHashJoin {
-    pub fn new(logical: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
-        let dist = Self::derive_dist(
-            logical.left.distribution(),
-            logical.right.distribution(),
-            &logical,
-        );
-        let base = PlanBase::new_batch_from_logical(&logical, dist, Order::any());
+    pub fn new(core: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
+        let dist = Self::derive_dist(core.left.distribution(), core.right.distribution(), &core);
+        let base = PlanBase::new_batch_with_core(&core, dist, Order::any());
 
         Self {
             base,
-            logical,
+            core,
             eq_join_predicate,
         }
     }
@@ -62,25 +58,21 @@ impl BatchHashJoin {
     pub(super) fn derive_dist(
         left: &Distribution,
         right: &Distribution,
-        logical: &generic::Join<PlanRef>,
+        join: &generic::Join<PlanRef>,
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
             // we can not derive the hash distribution from the side where outer join can generate a
             // NULL row
-            (Distribution::HashShard(_), Distribution::HashShard(_)) => match logical.join_type {
+            (Distribution::HashShard(_), Distribution::HashShard(_)) => match join.join_type {
                 JoinType::Unspecified => unreachable!(),
                 JoinType::FullOuter => Distribution::SomeShard,
                 JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => {
-                    let l2o = logical
-                        .l2i_col_mapping()
-                        .composite(&logical.i2o_col_mapping());
+                    let l2o = join.l2i_col_mapping().composite(&join.i2o_col_mapping());
                     l2o.rewrite_provided_distribution(left)
                 }
                 JoinType::RightSemi | JoinType::RightAnti | JoinType::RightOuter => {
-                    let r2o = logical
-                        .r2i_col_mapping()
-                        .composite(&logical.i2o_col_mapping());
+                    let r2o = join.r2i_col_mapping().composite(&join.i2o_col_mapping());
                     r2o.rewrite_provided_distribution(right)
                 }
             },
@@ -99,11 +91,11 @@ impl BatchHashJoin {
 
 impl Distill for BatchHashJoin {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let verbose = self.base.ctx.is_explain_verbose();
+        let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
-        vec.push(("type", Pretty::debug(&self.logical.join_type)));
+        vec.push(("type", Pretty::debug(&self.core.join_type)));
 
-        let concat_schema = self.logical.concat_schema();
+        let concat_schema = self.core.concat_schema();
         vec.push((
             "predicate",
             Pretty::debug(&EqJoinPredicateDisplay {
@@ -112,7 +104,7 @@ impl Distill for BatchHashJoin {
             }),
         ));
         if verbose {
-            let data = IndicesDisplay::from_join(&self.logical, &concat_schema);
+            let data = IndicesDisplay::from_join(&self.core, &concat_schema);
             vec.push(("output", data));
         }
         childless_record("BatchHashJoin", vec)
@@ -121,18 +113,18 @@ impl Distill for BatchHashJoin {
 
 impl PlanTreeNodeBinary for BatchHashJoin {
     fn left(&self) -> PlanRef {
-        self.logical.left.clone()
+        self.core.left.clone()
     }
 
     fn right(&self) -> PlanRef {
-        self.logical.right.clone()
+        self.core.right.clone()
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
-        logical.left = left;
-        logical.right = right;
-        Self::new(logical, self.eq_join_predicate.clone())
+        let mut core = self.core.clone();
+        core.left = left;
+        core.right = right;
+        Self::new(core, self.eq_join_predicate.clone())
     }
 }
 
@@ -200,7 +192,7 @@ impl ToDistributedBatch for BatchHashJoin {
 impl ToBatchPb for BatchHashJoin {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::HashJoin(HashJoinNode {
-            join_type: self.logical.join_type as i32,
+            join_type: self.core.join_type as i32,
             left_key: self
                 .eq_join_predicate
                 .left_eq_indexes()
@@ -219,12 +211,7 @@ impl ToBatchPb for BatchHashJoin {
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
-            output_indices: self
-                .logical
-                .output_indices
-                .iter()
-                .map(|&x| x as u32)
-                .collect(),
+            output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
         })
     }
 }
@@ -246,8 +233,8 @@ impl ExprRewritable for BatchHashJoin {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.logical.clone();
-        logical.rewrite_exprs(r);
-        Self::new(logical, self.eq_join_predicate.rewrite_exprs(r)).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::new(core, self.eq_join_predicate.rewrite_exprs(r)).into()
     }
 }

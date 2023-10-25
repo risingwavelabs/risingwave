@@ -49,7 +49,7 @@ impl ExchangeService for ExchangeServiceImpl {
     type GetDataStream = BatchDataStream;
     type GetStreamStream = StreamDataStream;
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn get_data(
         &self,
         request: Request<GetDataRequest>,

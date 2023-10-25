@@ -66,6 +66,7 @@ use crate::expr::{
     FunctionCall, InputRef,
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     generic, ColumnPruningContext, LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode,
     PlanTreeNodeBinary, PredicatePushdown, PredicatePushdownContext,

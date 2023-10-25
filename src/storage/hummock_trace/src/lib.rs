@@ -16,7 +16,7 @@
 #![feature(cursor_remaining)]
 #![feature(bound_map)]
 #![feature(trait_alias)]
-#![feature(generators)]
+#![feature(coroutines)]
 
 mod collector;
 mod error;

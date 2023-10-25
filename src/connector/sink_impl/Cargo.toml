@@ -80,6 +80,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
 ] }
 tokio-retry = "0.3"
+tokio-stream = "0.1"
 tracing = "0.1"
 url = "2"
 

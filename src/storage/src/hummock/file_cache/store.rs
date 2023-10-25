@@ -256,6 +256,7 @@ where
                     io_size: config.device_io_size,
                 },
                 allocator_bits: config.allocator_bits,
+                catalog_bits: 6,
                 admissions,
                 reinsertions: config.reinsertions,
                 buffer_pool_size: config.buffer_pool_size,

@@ -12,18 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use sea_orm::entity::prelude::*;
+use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::error::Result;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "election_member")]
-pub struct Model {
-    pub service: String,
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub id: String,
-    pub last_heartbeat: DateTime,
+use super::RwPgResponse;
+use crate::handler::HandlerArgs;
+use crate::session::SessionImpl;
+
+pub(super) async fn handle_wait(handler_args: HandlerArgs) -> Result<RwPgResponse> {
+    do_wait(&handler_args.session).await?;
+    Ok(PgResponse::empty_result(StatementType::WAIT))
 }
 
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
-
-impl ActiveModelBehavior for ActiveModel {}
+pub(crate) async fn do_wait(session: &SessionImpl) -> Result<()> {
+    let client = session.env().meta_client();
+    client.wait().await?;
+    Ok(())
+}

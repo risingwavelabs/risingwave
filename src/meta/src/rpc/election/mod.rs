@@ -29,6 +29,10 @@ pub struct ElectionMember {
 
 #[async_trait::async_trait]
 pub trait ElectionClient: Send + Sync + 'static {
+    async fn init(&self) -> MetaResult<()> {
+        Ok(())
+    }
+
     fn id(&self) -> MetaResult<String>;
     async fn run_once(&self, ttl: i64, stop: Receiver<()>) -> MetaResult<()>;
     fn subscribe(&self) -> Receiver<bool>;
