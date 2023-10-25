@@ -46,6 +46,7 @@ END;
 pg_catalog 1000 _bool b f NULL
 pg_catalog 1001 _bytea b f NULL
 pg_catalog 1005 _int2 b f NULL
+pg_catalog 1007 _int4 b f NULL
 pg_catalog 1015 _varchar b f NULL
 pg_catalog 1016 _int8 b f NULL
 pg_catalog 1021 _float4 b f NULL
