@@ -39,7 +39,7 @@ use crate::sink::{
 };
 
 pub const BIGQUERY_SINK: &str = "bigquery";
-const BIGQUERY_INSERT_MAX_NUMS: usize = 500;
+const BIGQUERY_INSERT_MAX_NUMS: usize = 1024;
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct BigQueryCommon {
@@ -286,7 +286,7 @@ impl BigQuerySinkWriter {
     }
 
     async fn append_only(&mut self, chunk: StreamChunk) -> Result<()> {
-        let mut insert_vec = vec![];
+        let mut insert_vec = Vec::with_capacity(chunk.capacity());
         for (op, row) in chunk.rows() {
             if op != Op::Insert {
                 return Err(SinkError::BigQuery(anyhow::anyhow!(
