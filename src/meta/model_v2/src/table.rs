@@ -16,7 +16,7 @@ use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::catalog::PbHandleConflictBehavior;
 use sea_orm::entity::prelude::*;
 
-use crate::model_v2::{
+use crate::{
     Cardinality, ColumnCatalogArray, ColumnOrderArray, CreateType, I32Array, JobStatus, Property,
     SourceId, TableId, TableVersion,
 };

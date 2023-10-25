@@ -14,7 +14,7 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::model_v2::{DatabaseId, ObjectId, SchemaId, UserId};
+use crate::{DatabaseId, ObjectId, SchemaId, UserId};
 
 #[derive(Clone, Debug, PartialEq, Eq, Copy, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]

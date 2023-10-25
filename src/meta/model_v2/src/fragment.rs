@@ -14,34 +14,48 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::model_v2::{I32Array, WorkerId};
+use crate::I32Array;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "worker_property")]
+#[sea_orm(table_name = "fragment")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub worker_id: WorkerId,
-    pub parallel_unit_ids: I32Array,
-    pub is_streaming: bool,
-    pub is_serving: bool,
-    pub is_unschedulable: bool,
+    #[sea_orm(primary_key)]
+    pub fragment_id: i32,
+    pub table_id: i32,
+    pub fragment_type_mask: i32,
+    pub distribution_type: String,
+    pub stream_node: Json,
+    pub vnode_mapping: Option<Json>,
+    pub state_table_ids: Option<I32Array>,
+    pub upstream_fragment_id: Option<I32Array>,
+    pub dispatcher_type: Option<String>,
+    pub dist_key_indices: Option<I32Array>,
+    pub output_indices: Option<I32Array>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(has_many = "super::actor::Entity")]
+    Actor,
     #[sea_orm(
-        belongs_to = "super::worker::Entity",
-        from = "Column::WorkerId",
-        to = "super::worker::Column::WorkerId",
+        belongs_to = "super::object::Entity",
+        from = "Column::TableId",
+        to = "super::object::Column::Oid",
         on_update = "NoAction",
         on_delete = "Cascade"
     )]
-    Worker,
+    Object,
 }
 
-impl Related<super::worker::Entity> for Entity {
+impl Related<super::actor::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::Worker.def()
+        Relation::Actor.def()
+    }
+}
+
+impl Related<super::object::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Object.def()
     }
 }
 

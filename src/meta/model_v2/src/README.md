@@ -1,6 +1,6 @@
 # How to define changes between versions and generate migration and model files
 
-- Generate a new migration file and apply it to the database, check [migration](./migration/README.md) for more details. Let's take a local PG database as an example(`postgres://postgres:@localhost:5432/postgres`):
+- Generate a new migration file and apply it to the database, check [migration](../migration/README.md) for more details. Let's take a local PG database as an example(`postgres://postgres:@localhost:5432/postgres`):
     ```sh
     export DATABASE_URL=postgres://postgres:@localhost:5432/postgres;
     cargo run -- generate MIGRATION_NAME
