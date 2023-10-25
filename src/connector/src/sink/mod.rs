@@ -246,6 +246,7 @@ pub struct SinkWriterParam {
     pub vnode_bitmap: Option<Bitmap>,
     pub meta_client: Option<MetaClient>,
     pub sink_metrics: SinkMetrics,
+    pub connector_name: String,
 }
 
 impl SinkWriterParam {
@@ -256,6 +257,7 @@ impl SinkWriterParam {
             vnode_bitmap: Default::default(),
             meta_client: Default::default(),
             sink_metrics: SinkMetrics::for_test(),
+            connector_name: "for_test".to_string(),
         }
     }
 }

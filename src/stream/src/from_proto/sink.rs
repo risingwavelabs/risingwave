@@ -119,6 +119,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             vnode_bitmap: params.vnode_bitmap.clone(),
             meta_client: params.env.meta_client(),
             sink_metrics,
+            connector_name: connector.to_string(),
         };
 
         match node.log_store_type() {
