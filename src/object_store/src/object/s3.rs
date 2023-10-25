@@ -530,12 +530,7 @@ impl S3ObjectStore {
 
     pub fn new_http_connector(config: &S3ObjectStoreConfig) -> impl Into<HttpConnector> {
         // Customize http connector to set keepalive.
-        let native_tls = {
-            let mut tls = hyper_tls::native_tls::TlsConnector::builder();
-            let tls = tls
-                .min_protocol_version(Some(hyper_tls::native_tls::Protocol::Tlsv12))
-                .build()
-                .unwrap_or_else(|e| panic!("Error while creating TLS connector: {}", e));
+        let connector = {
             let mut http = hyper::client::HttpConnector::new();
 
             // connection config
@@ -556,13 +551,13 @@ impl S3ObjectStore {
             }
 
             http.enforce_http(false);
-            hyper_tls::HttpsConnector::from((http, tls.into()))
+            http
         };
 
         aws_smithy_client::hyper_ext::Adapter::builder()
             .hyper_builder(hyper::client::Builder::default())
             .connector_settings(ConnectorSettings::builder().build())
-            .build(monitor_connector(native_tls, "S3"))
+            .build(monitor_connector(connector, "S3"))
     }
 
     pub async fn new_with_config(
