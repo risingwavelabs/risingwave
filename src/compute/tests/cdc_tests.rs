@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #![feature(let_chains)]
-#![feature(generators)]
+#![feature(coroutines)]
 
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;

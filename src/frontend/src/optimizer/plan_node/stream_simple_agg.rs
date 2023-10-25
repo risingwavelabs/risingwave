@@ -21,6 +21,8 @@ use super::generic::{self, PlanAggCall};
 use super::utils::{childless_record, plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;
+use crate::optimizer::plan_node::generic::PhysicalPlanRef;
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -48,7 +50,7 @@ impl StreamSimpleAgg {
         let watermark_columns = FixedBitSet::with_capacity(core.output_len());
 
         // Simple agg executor might change the append-only behavior of the stream.
-        let base = PlanBase::new_stream_with_logical(&core, dist, false, false, watermark_columns);
+        let base = PlanBase::new_stream_with_core(&core, dist, false, false, watermark_columns);
         StreamSimpleAgg {
             base,
             core,
@@ -99,7 +101,7 @@ impl StreamNode for StreamSimpleAgg {
                 .collect(),
             distribution_key: self
                 .base
-                .dist
+                .distribution()
                 .dist_column_indices()
                 .iter()
                 .map(|idx| *idx as u32)

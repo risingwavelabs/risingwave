@@ -15,7 +15,7 @@
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(map_try_insert)]
 #![feature(negative_impls)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(trait_alias)]
 #![feature(extract_if)]
@@ -32,7 +32,6 @@
 #![feature(extend_one)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(async_fn_in_trait)]
 #![feature(result_flattening)]
 #![recursion_limit = "256"]
 
