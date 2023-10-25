@@ -1109,6 +1109,6 @@ impl DdlController {
             }
             sleep(Duration::from_secs(1)).await;
         }
-        return Err(MetaError::cancelled("timeout".into()));
+        Err(MetaError::cancelled("timeout".into()))
     }
 }
