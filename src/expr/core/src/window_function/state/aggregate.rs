@@ -140,7 +140,6 @@ impl WindowState for AggregateState {
                 wrapper.update(state, self.buffer.consume_curr_window_values_delta())
             }
         }?;
-        println!("[rc] output: {:?}", output);
         let evict_hint = self.slide_inner();
         Ok((output, evict_hint))
     }
@@ -219,7 +218,6 @@ impl AggregatorWrapper<'_> {
             .map(|builder| builder.finish().into())
             .collect::<Vec<_>>();
         let chunk = StreamChunk::from_parts(ops, DataChunk::new(columns, n_rows));
-        println!("[rc] delta: \n{}", chunk.to_pretty());
 
         self.agg_func
             .update(state, &chunk)
