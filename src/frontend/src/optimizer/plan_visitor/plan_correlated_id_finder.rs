@@ -40,11 +40,13 @@ impl PlanCorrelatedIdFinder {
     }
 }
 
-impl PlanVisitor<()> for PlanCorrelatedIdFinder {
+impl PlanVisitor for PlanCorrelatedIdFinder {
     /// `correlated_input_ref` can only appear in `LogicalProject`, `LogicalFilter`,
     /// `LogicalJoin` or the `filter` clause of `PlanAggCall` of `LogicalAgg` now.
 
-    type DefaultBehavior = impl DefaultBehavior<()>;
+    type Result = ();
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     fn default_behavior() -> Self::DefaultBehavior {
         DefaultValue

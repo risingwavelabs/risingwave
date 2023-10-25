@@ -12,15 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::EitherOrBoth;
-use risingwave_common::catalog::Schema;
+use itertools::{EitherOrBoth, Itertools};
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{EqJoinPredicate, GenericPlanNode, GenericPlanRef};
 use crate::expr::ExprRewriter;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::stream;
+use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
+use crate::TableCatalog;
 
 /// [`Join`] combines two relations according to some condition.
 ///
@@ -62,6 +67,75 @@ impl<PlanRef> Join<PlanRef> {
             join_type,
             output_indices,
         }
+    }
+}
+
+impl<PlanRef: stream::StreamPlanRef> Join<PlanRef> {
+    /// Return stream hash join internal table catalog and degree table catalog.
+    pub fn infer_internal_and_degree_table_catalog(
+        input: &PlanRef,
+        join_key_indices: Vec<usize>,
+        dk_indices_in_jk: Vec<usize>,
+    ) -> (TableCatalog, TableCatalog, Vec<usize>) {
+        let schema = input.schema();
+
+        let internal_table_dist_keys = dk_indices_in_jk
+            .iter()
+            .map(|idx| join_key_indices[*idx])
+            .collect_vec();
+
+        let degree_table_dist_keys = dk_indices_in_jk.clone();
+
+        // The pk of hash join internal and degree table should be join_key + input_pk.
+        let join_key_len = join_key_indices.len();
+        let mut pk_indices = join_key_indices;
+
+        // dedup the pk in dist key..
+        let mut deduped_input_pk_indices = vec![];
+        for input_pk_idx in input.stream_key().unwrap() {
+            if !pk_indices.contains(input_pk_idx)
+                && !deduped_input_pk_indices.contains(input_pk_idx)
+            {
+                deduped_input_pk_indices.push(*input_pk_idx);
+            }
+        }
+
+        pk_indices.extend(deduped_input_pk_indices.clone());
+
+        // Build internal table
+        let mut internal_table_catalog_builder =
+            TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
+        let internal_columns_fields = schema.fields().to_vec();
+
+        internal_columns_fields.iter().for_each(|field| {
+            internal_table_catalog_builder.add_column(field);
+        });
+        pk_indices.iter().for_each(|idx| {
+            internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending())
+        });
+
+        // Build degree table.
+        let mut degree_table_catalog_builder =
+            TableCatalogBuilder::new(input.ctx().with_options().internal_table_subset());
+
+        let degree_column_field = Field::with_name(DataType::Int64, "_degree");
+
+        pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
+            degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
+            degree_table_catalog_builder.add_order_column(order_idx, OrderType::ascending());
+        });
+        degree_table_catalog_builder.add_column(&degree_column_field);
+        degree_table_catalog_builder
+            .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
+
+        internal_table_catalog_builder.set_dist_key_in_pk(dk_indices_in_jk.clone());
+        degree_table_catalog_builder.set_dist_key_in_pk(dk_indices_in_jk);
+
+        (
+            internal_table_catalog_builder.build(internal_table_dist_keys, join_key_len),
+            degree_table_catalog_builder.build(degree_table_dist_keys, join_key_len),
+            deduped_input_pk_indices,
+        )
     }
 }
 

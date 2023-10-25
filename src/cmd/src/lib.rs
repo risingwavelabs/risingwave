@@ -1,3 +1,4 @@
+#![feature(result_option_inspect)]
 // Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -29,7 +30,7 @@ macro_rules! main {
         #[cfg(not(enable_task_local_alloc))]
         risingwave_common::enable_jemalloc!();
 
-        #[cfg_attr(coverage, no_coverage)]
+        #[cfg_attr(coverage, coverage(off))]
         fn main() {
             let opts = clap::Parser::parse();
             $crate::$component(opts);
@@ -72,5 +73,8 @@ pub fn ctl(opts: CtlOpts) {
         .build()
         .unwrap()
         .block_on(risingwave_ctl::start(opts))
+        .inspect_err(|e| {
+            eprintln!("{:#?}", e);
+        })
         .unwrap();
 }

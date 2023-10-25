@@ -216,7 +216,11 @@ impl Planner {
     /// `LeftSemi/LeftAnti` [`LogicalApply`]
     /// For other subqueries, we plan it as `LeftOuter` [`LogicalApply`] using
     /// [`Self::substitute_subqueries`].
-    fn plan_where(&mut self, mut input: PlanRef, where_clause: ExprImpl) -> Result<PlanRef> {
+    pub(super) fn plan_where(
+        &mut self,
+        mut input: PlanRef,
+        where_clause: ExprImpl,
+    ) -> Result<PlanRef> {
         if !where_clause.has_subquery() {
             return Ok(LogicalFilter::create_with_expr(input, where_clause));
         }

@@ -46,7 +46,7 @@ use serde::Serialize;
 use smallvec::SmallVec;
 
 use self::batch::BatchPlanRef;
-use self::generic::GenericPlanRef;
+use self::generic::{GenericPlanRef, PhysicalPlanRef};
 use self::stream::StreamPlanRef;
 use self::utils::Distill;
 use super::property::{Distribution, FunctionalDependencySet, Order};
@@ -419,29 +419,31 @@ impl PlanTreeNode for PlanRef {
     }
 }
 
-impl StreamPlanRef for PlanRef {
-    fn distribution(&self) -> &Distribution {
-        &self.plan_base().dist
+impl PlanNodeMeta for PlanRef {
+    fn node_type(&self) -> PlanNodeType {
+        self.0.node_type()
     }
 
-    fn append_only(&self) -> bool {
-        self.plan_base().append_only
+    fn plan_base(&self) -> &PlanBase {
+        self.0.plan_base()
     }
 
-    fn emit_on_window_close(&self) -> bool {
-        self.plan_base().emit_on_window_close
-    }
-}
-
-impl BatchPlanRef for PlanRef {
-    fn order(&self) -> &Order {
-        &self.plan_base().order
+    fn convention(&self) -> Convention {
+        self.0.convention()
     }
 }
 
-impl GenericPlanRef for PlanRef {
+/// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
+impl<P> GenericPlanRef for P
+where
+    P: PlanNodeMeta + Eq + Hash,
+{
+    fn id(&self) -> PlanNodeId {
+        self.plan_base().id()
+    }
+
     fn schema(&self) -> &Schema {
-        &self.plan_base().schema
+        self.plan_base().schema()
     }
 
     fn stream_key(&self) -> Option<&[usize]> {
@@ -454,6 +456,47 @@ impl GenericPlanRef for PlanRef {
 
     fn functional_dependency(&self) -> &FunctionalDependencySet {
         self.plan_base().functional_dependency()
+    }
+}
+
+/// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
+// TODO: further constrain the convention to be `Stream` or `Batch`.
+impl<P> PhysicalPlanRef for P
+where
+    P: PlanNodeMeta + Eq + Hash,
+{
+    fn distribution(&self) -> &Distribution {
+        self.plan_base().distribution()
+    }
+}
+
+/// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
+// TODO: further constrain the convention to be `Stream`.
+impl<P> StreamPlanRef for P
+where
+    P: PlanNodeMeta + Eq + Hash,
+{
+    fn append_only(&self) -> bool {
+        self.plan_base().append_only()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.plan_base().emit_on_window_close()
+    }
+
+    fn watermark_columns(&self) -> &FixedBitSet {
+        self.plan_base().watermark_columns()
+    }
+}
+
+/// Implement for every type that provides [`PlanBase`] through [`PlanNodeMeta`].
+// TODO: further constrain the convention to be `Batch`.
+impl<P> BatchPlanRef for P
+where
+    P: PlanNodeMeta + Eq + Hash,
+{
+    fn order(&self) -> &Order {
+        self.plan_base().order()
     }
 }
 
@@ -512,15 +555,15 @@ pub(crate) fn pretty_config() -> PrettyConfig {
 
 impl dyn PlanNode {
     pub fn id(&self) -> PlanNodeId {
-        self.plan_base().id
+        self.plan_base().id()
     }
 
     pub fn ctx(&self) -> OptimizerContextRef {
-        self.plan_base().ctx.clone()
+        self.plan_base().ctx().clone()
     }
 
     pub fn schema(&self) -> &Schema {
-        &self.plan_base().schema
+        self.plan_base().schema()
     }
 
     pub fn stream_key(&self) -> Option<&[usize]> {
@@ -528,27 +571,28 @@ impl dyn PlanNode {
     }
 
     pub fn order(&self) -> &Order {
-        &self.plan_base().order
+        self.plan_base().order()
     }
 
+    // TODO: avoid no manual delegation
     pub fn distribution(&self) -> &Distribution {
-        &self.plan_base().dist
+        self.plan_base().distribution()
     }
 
     pub fn append_only(&self) -> bool {
-        self.plan_base().append_only
+        self.plan_base().append_only()
     }
 
     pub fn emit_on_window_close(&self) -> bool {
-        self.plan_base().emit_on_window_close
+        self.plan_base().emit_on_window_close()
     }
 
     pub fn functional_dependency(&self) -> &FunctionalDependencySet {
-        &self.plan_base().functional_dependency
+        self.plan_base().functional_dependency()
     }
 
     pub fn watermark_columns(&self) -> &FixedBitSet {
-        &self.plan_base().watermark_columns
+        self.plan_base().watermark_columns()
     }
 
     /// Serialize the plan node and its children to a stream plan proto.
@@ -617,8 +661,6 @@ impl dyn PlanNode {
 }
 
 mod plan_base;
-#[macro_use]
-mod plan_tree_node_v2;
 pub use plan_base::*;
 #[macro_use]
 mod plan_tree_node;
@@ -641,7 +683,6 @@ pub use merge_eq_nodes::*;
 pub mod batch;
 pub mod generic;
 pub mod stream;
-pub mod stream_derive;
 
 pub use generic::{PlanAggCall, PlanAggCallDisplay};
 

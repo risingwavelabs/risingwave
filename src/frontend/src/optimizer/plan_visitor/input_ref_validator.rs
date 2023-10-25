@@ -103,8 +103,10 @@ macro_rules! visit_project {
     };
 }
 
-impl PlanVisitor<Option<String>> for InputRefValidator {
-    type DefaultBehavior = impl DefaultBehavior<Option<String>>;
+impl PlanVisitor for InputRefValidator {
+    type Result = Option<String>;
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     visit_filter!(logical, batch, stream);
 

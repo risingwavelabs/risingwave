@@ -12,18 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use sea_orm::entity::prelude::*;
+pub mod protobuf;
+pub mod schema_registry;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "election_member")]
-pub struct Model {
-    pub service: String,
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub id: String,
-    pub last_heartbeat: DateTime,
-}
+const MESSAGE_NAME_KEY: &str = "message";
+const SCHEMA_LOCATION_KEY: &str = "schema.location";
 
-#[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
-
-impl ActiveModelBehavior for ActiveModel {}
+#[derive(Debug)]
+pub struct SchemaFetchError(pub String);

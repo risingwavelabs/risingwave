@@ -156,6 +156,8 @@ pub struct StreamingMetrics {
     pub lru_evicted_watermark_time_ms: GenericGaugeVec<AtomicI64>,
     pub jemalloc_allocated_bytes: IntGauge,
     pub jemalloc_active_bytes: IntGauge,
+    pub jvm_allocated_bytes: IntGauge,
+    pub jvm_active_bytes: IntGauge,
 
     /// User compute error reporting
     pub user_compute_error_count: GenericCounterVec<AtomicU64>,
@@ -865,6 +867,20 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let jvm_allocated_bytes = register_int_gauge_with_registry!(
+            "jvm_allocated_bytes",
+            "The allocated jvm memory",
+            registry
+        )
+        .unwrap();
+
+        let jvm_active_bytes = register_int_gauge_with_registry!(
+            "jvm_active_bytes",
+            "The active jvm memory",
+            registry
+        )
+        .unwrap();
+
         let user_compute_error_count = register_int_counter_vec_with_registry!(
             "user_compute_error_count",
             "Compute errors in the system, queryable by tags",
@@ -994,6 +1010,8 @@ impl StreamingMetrics {
             lru_evicted_watermark_time_ms,
             jemalloc_allocated_bytes,
             jemalloc_active_bytes,
+            jvm_allocated_bytes,
+            jvm_active_bytes,
             user_compute_error_count,
             user_source_reader_error_count,
             materialize_cache_hit_count,

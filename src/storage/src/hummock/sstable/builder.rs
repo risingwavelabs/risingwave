@@ -364,9 +364,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
     /// Finish building sst.
     ///
-    /// Unlike most LSM-Tree implementations, sstable meta and data are encoded separately.
-    /// Both meta and data has its own object (file).
-    ///
     /// # Format
     ///
     /// data:

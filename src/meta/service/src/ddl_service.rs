@@ -717,7 +717,7 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn get_tables(
         &self,
         request: Request<GetTablesRequest>,
