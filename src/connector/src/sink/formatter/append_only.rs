@@ -40,7 +40,7 @@ impl<KE: RowEncoder, VE: RowEncoder> SinkFormatter for AppendOnlyFormatter<KE, V
         &self,
         chunk: &StreamChunk,
     ) -> impl Iterator<Item = Result<(Option<Self::K>, Option<Self::V>)>> {
-        std::iter::from_generator(|| {
+        std::iter::from_coroutine(|| {
             for (op, row) in chunk.rows() {
                 if op != Op::Insert {
                     continue;
