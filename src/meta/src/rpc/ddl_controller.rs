@@ -431,6 +431,7 @@ impl DdlController {
 
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
 
+        // Persist tables
         tracing::debug!(id = stream_job.id(), "preparing stream job");
         let fragment_graph = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
