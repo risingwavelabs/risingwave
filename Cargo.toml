@@ -116,7 +116,7 @@ arrow-array = "48"
 arrow-cast = "48"
 arrow-schema = "48"
 arrow-buffer = "48"
-arrow-flight = "47"
+arrow-flight = "48"
 arrow-select = "48"
 arrow-ord = "48"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
