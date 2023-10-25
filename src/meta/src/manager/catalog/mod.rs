@@ -765,7 +765,9 @@ impl CatalogManager {
     ///    2. Not belonging to a background stream job.
     ///    Clean up these hanging tables by the id.
     pub async fn clean_dirty_tables(&self, fragment_manager: FragmentManagerRef) -> MetaResult<()> {
-        let creating_tables: Vec<Table> = self.list_persisted_creating_tables().await;
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let creating_tables: Vec<Table> = database_core.list_persisted_creating_tables();
         tracing::debug!(
             "creating_tables ids: {:#?}",
             creating_tables.iter().map(|t| t.id).collect_vec()
@@ -839,8 +841,6 @@ impl CatalogManager {
             }
         }
 
-        let core = &mut *self.core.lock().await;
-        let database_core = &mut core.database;
         let tables = &mut database_core.tables;
         let mut tables = BTreeMapTransaction::new(tables);
         for table in &tables_to_clean {
