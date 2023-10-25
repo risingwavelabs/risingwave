@@ -162,7 +162,10 @@ impl SourceExecutor {
         for chunk in stream {
             match chunk {
                 Ok(chunk) => {
-                    yield covert_stream_chunk_to_batch_chunk(chunk.chunk)?;
+                    let data_chunk = covert_stream_chunk_to_batch_chunk(chunk.chunk)?;
+                    if data_chunk.capacity() > 0 {
+                        yield data_chunk;
+                    }
                 }
                 Err(e) => {
                     return Err(e);
