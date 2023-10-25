@@ -734,7 +734,7 @@ impl DdlService for DdlServiceImpl {
     }
 
     async fn wait(&self, _request: Request<WaitRequest>) -> Result<Response<WaitResponse>, Status> {
-        self.ddl_controller.wait().await;
+        self.ddl_controller.wait().await?;
         Ok(Response::new(WaitResponse {}))
     }
 }

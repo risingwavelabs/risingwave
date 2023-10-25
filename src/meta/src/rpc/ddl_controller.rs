@@ -1097,7 +1097,7 @@ impl DdlController {
         }
     }
 
-    pub async fn wait(&self) {
+    pub async fn wait(&self) -> MetaResult<()> {
         for _ in 0..30 * 60 {
             if self
                 .catalog_manager
@@ -1105,9 +1105,10 @@ impl DdlController {
                 .await
                 .is_empty()
             {
-                break;
+                return Ok(());
             }
             sleep(Duration::from_secs(1)).await;
         }
+        Err(MetaError::cancelled("timeout".into()))
     }
 }
