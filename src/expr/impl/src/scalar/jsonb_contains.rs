@@ -145,13 +145,33 @@ fn jsonb_contained_by(left: JsonbRef<'_>, right: JsonbRef<'_>) -> bool {
 /// Examples:
 ///
 /// ```slt
+/// # String exists as array element:
 /// query B
-/// select '{"a":1, "b":2}'::jsonb ? 'b';
+/// SELECT '["foo", "bar", "baz"]'::jsonb ? 'bar';
 /// ----
 /// t
 ///
+/// # String exists as object key:
 /// query B
-/// select '["a", "b", "c"]'::jsonb ? 'b';
+/// SELECT '{"foo": "bar"}'::jsonb ? 'foo';
+/// ----
+/// t
+///
+/// # Object values are not considered:
+/// query B
+/// SELECT '{"foo": "bar"}'::jsonb ? 'bar';
+/// ----
+/// f
+///
+/// # As with containment, existence must match at the top level:
+/// query B
+/// SELECT '{"foo": {"bar": "baz"}}'::jsonb ? 'bar';
+/// ----
+/// f
+///
+/// # A string is considered to exist if it matches a primitive JSON string:
+/// query B
+/// SELECT '"foo"'::jsonb ? 'foo';
 /// ----
 /// t
 /// ```
@@ -160,6 +180,7 @@ fn jsonb_contains_key(left: JsonbRef<'_>, key: &str) -> bool {
     match left.into() {
         ValueRef::Object(object) => object.get(key).is_some(),
         ValueRef::Array(array) => array.iter().any(|val| val.as_str() == Some(key)),
+        ValueRef::String(str) => str == key,
         _ => false,
     }
 }
@@ -178,6 +199,11 @@ fn jsonb_contains_key(left: JsonbRef<'_>, key: &str) -> bool {
 /// select '["a", "b", "c"]'::jsonb ?| array['b', 'd'];
 /// ----
 /// t
+///
+/// query B
+/// select '"b"'::jsonb ?| array['b', 'd'];
+/// ----
+/// t
 /// ```
 #[function("jsonb_contains_any_key(jsonb, varchar[]) -> boolean")]
 fn jsonb_contains_any_key(left: JsonbRef<'_>, keys: ListRef<'_>) -> bool {
@@ -185,6 +211,7 @@ fn jsonb_contains_any_key(left: JsonbRef<'_>, keys: ListRef<'_>) -> bool {
     match left.into() {
         ValueRef::Object(object) => keys.any(|key| object.get(key).is_some()),
         ValueRef::Array(array) => keys.any(|key| array.iter().any(|val| val.as_str() == Some(key))),
+        ValueRef::String(str) => keys.any(|key| str == key),
         _ => false,
     }
 }
@@ -203,6 +230,11 @@ fn jsonb_contains_any_key(left: JsonbRef<'_>, keys: ListRef<'_>) -> bool {
 /// select '["a", "b", "c"]'::jsonb ?& array['a', 'b'];
 /// ----
 /// t
+///
+/// query B
+/// select '"b"'::jsonb ?& array['b'];
+/// ----
+/// t
 /// ```
 #[function("jsonb_contains_all_keys(jsonb, varchar[]) -> boolean")]
 fn jsonb_contains_all_keys(left: JsonbRef<'_>, keys: ListRef<'_>) -> bool {
@@ -210,6 +242,7 @@ fn jsonb_contains_all_keys(left: JsonbRef<'_>, keys: ListRef<'_>) -> bool {
     match left.into() {
         ValueRef::Object(object) => keys.all(|key| object.get(key).is_some()),
         ValueRef::Array(array) => keys.all(|key| array.iter().any(|val| val.as_str() == Some(key))),
+        ValueRef::String(str) => keys.all(|key| str == key),
         _ => false,
     }
 }
