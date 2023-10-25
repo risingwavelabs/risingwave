@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, FunctionCall, UserDefinedFunction};
@@ -23,33 +22,6 @@ use risingwave_sqlparser::ast::{
     TableAlias, TableFactor, TableWithJoins,
 };
 use risingwave_sqlparser::parser::Parser;
-
-use crate::manager::{ConnectionId, DatabaseManager};
-
-pub fn refcnt_inc_connection(
-    database_mgr: &mut DatabaseManager,
-    connection_id: Option<ConnectionId>,
-) -> anyhow::Result<()> {
-    if let Some(connection_id) = connection_id {
-        if let Some(_conn) = database_mgr.get_connection(connection_id) {
-            // TODO(weili): wait for yezizp to refactor ref cnt
-            database_mgr.increase_ref_count(connection_id);
-        } else {
-            bail!("connection {} not found.", connection_id);
-        }
-    }
-    Ok(())
-}
-
-pub fn refcnt_dec_connection(
-    database_mgr: &mut DatabaseManager,
-    connection_id: Option<ConnectionId>,
-) {
-    if let Some(connection_id) = connection_id {
-        // TODO: wait for yezizp to refactor ref cnt
-        database_mgr.decrease_ref_count(connection_id);
-    }
-}
 
 /// `alter_relation_rename` renames a relation to a new name in its `Create` statement, and returns
 /// the updated definition raw sql. Note that the `definition` must be a `Create` statement and the
@@ -105,20 +77,20 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
         | Statement::Query(query) // Used by view, actually we store a query as the definition of view.
         | Statement::CreateSink {
             stmt:
-                CreateSinkStatement {
-                    sink_from: CreateSink::AsQuery(query),
-                    ..
-                },
+            CreateSinkStatement {
+                sink_from: CreateSink::AsQuery(query),
+                ..
+            },
         } => {
             QueryRewriter::rewrite_query(query, from, to);
         }
         Statement::CreateIndex { table_name, .. }
         | Statement::CreateSink {
             stmt:
-                CreateSinkStatement {
-                    sink_from: CreateSink::From(table_name),
-                    ..
-                },
+            CreateSinkStatement {
+                sink_from: CreateSink::From(table_name),
+                ..
+            },
         } => replace_table_name(table_name, to),
         _ => unreachable!(),
     };

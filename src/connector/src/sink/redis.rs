@@ -18,15 +18,16 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use redis::aio::Connection;
 use redis::{Client as RedisClient, Pipeline};
-use regex::Regex;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::serde_as;
 
+use super::catalog::SinkFormatDesc;
+use super::encoder::template::TemplateEncoder;
 use super::formatter::SinkFormatterImpl;
 use super::writer::FormattedSink;
-use super::{SinkError, SinkParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
+use super::{SinkError, SinkParam};
 use crate::dispatch_sink_formatter_impl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
@@ -35,15 +36,12 @@ use crate::sink::writer::{
 use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriterParam};
 
 pub const REDIS_SINK: &str = "redis";
-
+pub const KEY_FORMAT: &str = "key_format";
+pub const VALUE_FORMAT: &str = "value_format";
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct RedisCommon {
     #[serde(rename = "redis.url")]
     pub url: String,
-    #[serde(rename = "redis.keyformat")]
-    pub key_format: Option<String>,
-    #[serde(rename = "redis.valueformat")]
-    pub value_format: Option<String>,
 }
 
 impl RedisCommon {
@@ -57,23 +55,13 @@ impl RedisCommon {
 pub struct RedisConfig {
     #[serde(flatten)]
     pub common: RedisCommon,
-
-    pub r#type: String, // accept "append-only" or "upsert"
 }
 
 impl RedisConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
         let config =
             serde_json::from_value::<RedisConfig>(serde_json::to_value(properties).unwrap())
-                .map_err(|e| SinkError::Config(anyhow!(e)))?;
-        if config.r#type != SINK_TYPE_APPEND_ONLY && config.r#type != SINK_TYPE_UPSERT {
-            return Err(SinkError::Config(anyhow!(
-                "`{}` must be {}, or {}",
-                SINK_TYPE_OPTION,
-                SINK_TYPE_APPEND_ONLY,
-                SINK_TYPE_UPSERT
-            )));
-        }
+                .map_err(|e| SinkError::Config(anyhow!("{:?}", e)))?;
         Ok(config)
     }
 }
@@ -82,28 +70,10 @@ impl RedisConfig {
 pub struct RedisSink {
     config: RedisConfig,
     schema: Schema,
-    is_append_only: bool,
     pk_indices: Vec<usize>,
-}
-
-fn check_string_format(format: &Option<String>, set: &HashSet<String>) -> Result<()> {
-    if let Some(format) = format {
-        // We will check if the string inside {} corresponds to a column name in rw.
-        // In other words, the content within {} should exclusively consist of column names from rw,
-        // which means '{{column_name}}' or '{{column_name1},{column_name2}}' would be incorrect.
-        let re = Regex::new(r"\{([^}]*)\}").unwrap();
-        if !re.is_match(format) {
-            return Err(SinkError::Redis(
-                "Can't find {} in key_format or value_format".to_string(),
-            ));
-        }
-        for capture in re.captures_iter(format) {
-            if let Some(inner_content) = capture.get(1) && !set.contains(inner_content.as_str()){
-                return Err(SinkError::Redis(format!("Can't find field({:?}) in key_format or value_format",inner_content.as_str())))
-            }
-        }
-    }
-    Ok(())
+    format_desc: SinkFormatDesc,
+    db_name: String,
+    sink_from_name: String,
 }
 
 #[async_trait]
@@ -120,8 +90,12 @@ impl TryFrom<SinkParam> for RedisSink {
         Ok(Self {
             config,
             schema: param.schema(),
-            is_append_only: param.sink_type.is_append_only(),
             pk_indices: param.downstream_pk,
+            format_desc: param
+                .format_desc
+                .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
+            db_name: param.db_name,
+            sink_from_name: param.sink_from_name,
         })
     }
 }
@@ -137,7 +111,9 @@ impl Sink for RedisSink {
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
-            self.is_append_only,
+            &self.format_desc,
+            self.db_name.clone(),
+            self.sink_from_name.clone(),
         )
         .await?
         .into_log_sinker(usize::MAX))
@@ -160,8 +136,23 @@ impl Sink for RedisSink {
             .filter(|(k, _)| self.pk_indices.contains(k))
             .map(|(_, v)| v.name.clone())
             .collect();
-        check_string_format(&self.config.common.key_format, &pk_set)?;
-        check_string_format(&self.config.common.value_format, &all_set)?;
+        if matches!(
+            self.format_desc.encode,
+            super::catalog::SinkEncode::Template
+        ) {
+            let key_format = self.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
+                SinkError::Config(anyhow!(
+                    "Cannot find 'key_format',please set it or use JSON"
+                ))
+            })?;
+            let value_format = self.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
+                SinkError::Config(anyhow!(
+                    "Cannot find 'value_format',please set it or use JSON"
+                ))
+            })?;
+            TemplateEncoder::check_string_format(key_format, &pk_set)?;
+            TemplateEncoder::check_string_format(value_format, &all_set)?;
+        }
         Ok(())
     }
 }
@@ -169,7 +160,6 @@ impl Sink for RedisSink {
 pub struct RedisSinkWriter {
     epoch: u64,
     schema: Schema,
-    is_append_only: bool,
     pk_indices: Vec<usize>,
     formatter: SinkFormatterImpl,
     payload_writer: RedisSinkPayloadWriter,
@@ -223,21 +213,23 @@ impl RedisSinkWriter {
         config: RedisConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
-        is_append_only: bool,
+        format_desc: &SinkFormatDesc,
+        db_name: String,
+        sink_from_name: String,
     ) -> Result<Self> {
         let payload_writer = RedisSinkPayloadWriter::new(config.clone()).await?;
-        let formatter = SinkFormatterImpl::new_with_redis(
+        let formatter = SinkFormatterImpl::new(
+            format_desc,
             schema.clone(),
             pk_indices.clone(),
-            is_append_only,
-            config.common.key_format,
-            config.common.value_format,
-        )?;
+            db_name,
+            sink_from_name,
+        )
+        .await?;
 
         Ok(Self {
             schema,
             pk_indices,
-            is_append_only,
             epoch: 0,
             formatter,
             payload_writer,
@@ -245,24 +237,22 @@ impl RedisSinkWriter {
     }
 
     #[cfg(test)]
-    pub fn mock(
+    pub async fn mock(
         schema: Schema,
         pk_indices: Vec<usize>,
-        is_append_only: bool,
-        key_format: Option<String>,
-        value_format: Option<String>,
+        format_desc: &SinkFormatDesc,
     ) -> Result<Self> {
-        let formatter = SinkFormatterImpl::new_with_redis(
+        let formatter = SinkFormatterImpl::new(
+            format_desc,
             schema.clone(),
             pk_indices.clone(),
-            is_append_only,
-            key_format,
-            value_format,
-        )?;
+            "d1".to_string(),
+            "t1".to_string(),
+        )
+        .await?;
         Ok(Self {
             schema,
             pk_indices,
-            is_append_only,
             epoch: 0,
             formatter,
             payload_writer: RedisSinkPayloadWriter::mock(),
@@ -284,6 +274,8 @@ impl AsyncTruncateSinkWriter for RedisSinkWriter {
 
 #[cfg(test)]
 mod test {
+    use std::collections::BTreeMap;
+
     use rdkafka::message::FromBytes;
     use risingwave_common::array::{Array, I32Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::catalog::{Field, Schema};
@@ -291,6 +283,7 @@ mod test {
     use risingwave_common::util::iter_util::ZipEqDebug;
 
     use super::*;
+    use crate::sink::catalog::{SinkEncode, SinkFormat};
     use crate::sink::log_store::DeliveryFutureManager;
 
     #[tokio::test]
@@ -310,8 +303,15 @@ mod test {
             },
         ]);
 
-        let mut redis_sink_writer =
-            RedisSinkWriter::mock(schema, vec![0], true, None, None).unwrap();
+        let format_desc = SinkFormatDesc {
+            format: SinkFormat::AppendOnly,
+            encode: SinkEncode::Json,
+            options: BTreeMap::default(),
+        };
+
+        let mut redis_sink_writer = RedisSinkWriter::mock(schema, vec![0], &format_desc)
+            .await
+            .unwrap();
 
         let chunk_a = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],
@@ -364,14 +364,21 @@ mod test {
             },
         ]);
 
-        let mut redis_sink_writer = RedisSinkWriter::mock(
-            schema,
-            vec![0],
-            true,
-            Some("key-{id}".to_string()),
-            Some("values:{id:{id},name:{name}}".to_string()),
-        )
-        .unwrap();
+        let mut btree_map = BTreeMap::default();
+        btree_map.insert(KEY_FORMAT.to_string(), "key-{id}".to_string());
+        btree_map.insert(
+            VALUE_FORMAT.to_string(),
+            "values:{id:{id},name:{name}}".to_string(),
+        );
+        let format_desc = SinkFormatDesc {
+            format: SinkFormat::AppendOnly,
+            encode: SinkEncode::Template,
+            options: btree_map,
+        };
+
+        let mut redis_sink_writer = RedisSinkWriter::mock(schema, vec![0], &format_desc)
+            .await
+            .unwrap();
 
         let mut future_manager = DeliveryFutureManager::new(0);
 

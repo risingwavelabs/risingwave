@@ -18,6 +18,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
+use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{
     ColPrunable, ColumnPruningContext, ExprRewritable, LogicalFilter, PlanBase, PlanRef,
@@ -53,7 +54,7 @@ impl LogicalNow {
 
 impl Distill for LogicalNow {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let vec = if self.base.ctx.is_explain_verbose() {
+        let vec = if self.base.ctx().is_explain_verbose() {
             vec![("output", column_names_pretty(self.schema()))]
         } else {
             vec![]

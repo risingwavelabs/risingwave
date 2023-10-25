@@ -130,9 +130,9 @@ impl LogicalTopN {
 
     fn gen_single_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         let input = RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?;
-        let mut logical = self.core.clone();
-        logical.input = input;
-        Ok(StreamTopN::new(logical).into())
+        let mut core = self.core.clone();
+        core.input = input;
+        Ok(StreamTopN::new(core).into())
     }
 
     fn gen_vnode_two_phase_stream_top_n_plan(
@@ -336,9 +336,9 @@ impl ToStream for LogicalTopN {
             let input = self.input().to_stream(ctx)?;
             let input = RequiredDist::hash_shard(self.group_key())
                 .enforce_if_not_satisfies(input, &Order::any())?;
-            let mut logical = self.core.clone();
-            logical.input = input;
-            StreamGroupTopN::new(logical, None).into()
+            let mut core = self.core.clone();
+            core.input = input;
+            StreamGroupTopN::new(core, None).into()
         } else {
             self.gen_dist_stream_top_n_plan(self.input().to_stream(ctx)?)?
         })

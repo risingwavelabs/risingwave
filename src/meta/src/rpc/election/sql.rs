@@ -15,7 +15,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use sqlx::{MySql, MySqlPool, PgPool, Postgres, Sqlite, SqlitePool};
+use anyhow::anyhow;
+use sea_orm::{
+    ConnectionTrait, DatabaseBackend, DatabaseConnection, FromQueryResult, Statement,
+    TransactionTrait, Value,
+};
 use tokio::sync::watch;
 use tokio::sync::watch::Receiver;
 use tokio::time;
@@ -29,7 +33,18 @@ pub struct SqlBackendElectionClient<T: SqlDriver> {
     is_leader_sender: watch::Sender<bool>,
 }
 
-#[derive(sqlx::FromRow, Debug)]
+impl<T: SqlDriver> SqlBackendElectionClient<T> {
+    pub fn new(id: String, driver: Arc<T>) -> Self {
+        let (sender, _) = watch::channel(false);
+        Self {
+            id,
+            driver,
+            is_leader_sender: sender,
+        }
+    }
+}
+
+#[derive(Debug, FromQueryResult)]
 pub struct ElectionRow {
     service: String,
     id: String,
@@ -37,6 +52,8 @@ pub struct ElectionRow {
 
 #[async_trait::async_trait]
 pub trait SqlDriver: Send + Sync + 'static {
+    async fn init_database(&self) -> MetaResult<()>;
+
     async fn update_heartbeat(&self, service_name: &str, id: &str) -> MetaResult<()>;
 
     async fn try_campaign(&self, service_name: &str, id: &str, ttl: i64)
@@ -50,7 +67,7 @@ pub trait SqlDriver: Send + Sync + 'static {
 
 pub trait SqlDriverCommon {
     const ELECTION_LEADER_TABLE_NAME: &'static str = "election_leader";
-    const ELECTION_MEMBER_TABLE_NAME: &'static str = "election_members";
+    const ELECTION_MEMBER_TABLE_NAME: &'static str = "election_member";
 
     fn election_table_name() -> &'static str {
         Self::ELECTION_LEADER_TABLE_NAME
@@ -67,34 +84,69 @@ impl SqlDriverCommon for PostgresDriver {}
 impl SqlDriverCommon for SqliteDriver {}
 
 pub struct MySqlDriver {
-    pool: MySqlPool,
+    pub(crate) conn: DatabaseConnection,
+}
+
+impl MySqlDriver {
+    pub fn new(conn: DatabaseConnection) -> Arc<Self> {
+        Arc::new(Self { conn })
+    }
 }
 
 pub struct PostgresDriver {
-    pool: PgPool,
+    pub(crate) conn: DatabaseConnection,
+}
+
+impl PostgresDriver {
+    pub fn new(conn: DatabaseConnection) -> Arc<Self> {
+        Arc::new(Self { conn })
+    }
 }
 
 pub struct SqliteDriver {
-    pool: SqlitePool,
+    pub(crate) conn: DatabaseConnection,
+}
+
+impl SqliteDriver {
+    pub fn new(conn: DatabaseConnection) -> Arc<Self> {
+        Arc::new(Self { conn })
+    }
 }
 
 #[async_trait::async_trait]
 impl SqlDriver for SqliteDriver {
+    async fn init_database(&self) -> MetaResult<()> {
+        self.conn.execute(
+            Statement::from_string(DatabaseBackend::Sqlite, format!(
+                r#"CREATE TABLE IF NOT EXISTS {table} (service VARCHAR(256), id VARCHAR(256), last_heartbeat DATETIME, PRIMARY KEY (service, id));"#,
+                table = Self::member_table_name()
+            ))).await?;
+
+        self.conn.execute(
+            Statement::from_string(DatabaseBackend::Sqlite, format!(
+                r#"CREATE TABLE IF NOT EXISTS {table} (service VARCHAR(256), id VARCHAR(256), last_heartbeat DATETIME, PRIMARY KEY (service));"#,
+                table = Self::election_table_name()
+            ))).await?;
+
+        Ok(())
+    }
+
     async fn update_heartbeat(&self, service_name: &str, id: &str) -> MetaResult<()> {
-        sqlx::query(&format!(
-            r#"INSERT INTO {table} (id, service, last_heartbeat)
+        self.conn
+            .execute(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                format!(
+                    r#"INSERT INTO {table} (id, service, last_heartbeat)
 VALUES($1, $2, CURRENT_TIMESTAMP)
 ON CONFLICT (id, service)
 DO
    UPDATE SET last_heartbeat = EXCLUDED.last_heartbeat;
 "#,
-            table = Self::member_table_name()
-        ))
-        .bind(id)
-        .bind(service_name)
-        .execute(&self.pool)
-        .await?;
-
+                    table = Self::member_table_name()
+                ),
+                vec![Value::from(id), Value::from(service_name)],
+            ))
+            .await?;
         Ok(())
     }
 
@@ -104,79 +156,106 @@ DO
         id: &str,
         ttl: i64,
     ) -> MetaResult<ElectionRow> {
-        let row = sqlx::query_as::<Sqlite, ElectionRow>(&format!(
-            r#"INSERT INTO {table} (service, id, last_heartbeat)
-VALUES ($1, $2, CURRENT_TIMESTAMP)
-ON CONFLICT (service)
-    DO UPDATE
-    SET id             = CASE
-                             WHEN DATETIME({table}.last_heartbeat, '+' || $3 || ' second') < CURRENT_TIMESTAMP THEN EXCLUDED.id
-                             ELSE {table}.id
-        END,
-        last_heartbeat = CASE
-                             WHEN DATETIME({table}.last_heartbeat, '+' || $3 || ' seconds') < CURRENT_TIMESTAMP THEN EXCLUDED.last_heartbeat
-                             WHEN {table}.id = EXCLUDED.id THEN EXCLUDED.last_heartbeat
-                             ELSE {table}.last_heartbeat
-            END
-RETURNING service, id, last_heartbeat;
-"#,
-            table = Self::election_table_name()
-        ))
-            .bind(service_name)
-            .bind(id)
-            .bind(ttl)
-            .fetch_one(&self.pool)
+        let query_result = self.conn
+            .query_one(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                format!(
+                    r#"INSERT INTO {table} (service, id, last_heartbeat)
+        VALUES ($1, $2, CURRENT_TIMESTAMP)
+        ON CONFLICT (service)
+            DO UPDATE
+            SET id             = CASE
+                                     WHEN DATETIME({table}.last_heartbeat, '+' || $3 || ' second') < CURRENT_TIMESTAMP THEN EXCLUDED.id
+                                     ELSE {table}.id
+                END,
+                last_heartbeat = CASE
+                                     WHEN DATETIME({table}.last_heartbeat, '+' || $3 || ' seconds') < CURRENT_TIMESTAMP THEN EXCLUDED.last_heartbeat
+                                     WHEN {table}.id = EXCLUDED.id THEN EXCLUDED.last_heartbeat
+                                     ELSE {table}.last_heartbeat
+                    END
+        RETURNING service, id, last_heartbeat;
+        "#,
+                    table = Self::election_table_name()
+                ),
+                vec![Value::from(service_name), Value::from(id), Value::from(ttl)],
+            ))
             .await?;
+
+        let row = query_result
+            .map(|query_result| ElectionRow::from_query_result(&query_result, ""))
+            .transpose()?;
+
+        let row = row.ok_or_else(|| anyhow!("bad result from sqlite"))?;
 
         Ok(row)
     }
 
     async fn leader(&self, service_name: &str) -> MetaResult<Option<ElectionRow>> {
-        let row = sqlx::query_as::<_, ElectionRow>(&format!(
-            r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = $1;"#,
-            table = Self::election_table_name()
-        ))
-        .bind(service_name)
-        .fetch_optional(&self.pool)
-        .await?;
+        let query_result = self
+            .conn
+            .query_one(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                format!(
+                    r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = $1;"#,
+                    table = Self::election_table_name()
+                ),
+                vec![Value::from(service_name)],
+            ))
+            .await?;
+
+        let row = query_result
+            .map(|query_result| ElectionRow::from_query_result(&query_result, ""))
+            .transpose()?;
 
         Ok(row)
     }
 
     async fn candidates(&self, service_name: &str) -> MetaResult<Vec<ElectionRow>> {
-        let row = sqlx::query_as::<_, ElectionRow>(&format!(
-            r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = $1;"#,
-            table = Self::member_table_name()
-        ))
-        .bind(service_name)
-        .fetch_all(&self.pool)
-        .await?;
+        let all = self
+            .conn
+            .query_all(Statement::from_sql_and_values(
+                DatabaseBackend::Sqlite,
+                format!(
+                    r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = $1;"#,
+                    table = Self::member_table_name()
+                ),
+                vec![Value::from(service_name)],
+            ))
+            .await?;
 
-        Ok(row)
+        let rows = all
+            .into_iter()
+            .map(|query_result| ElectionRow::from_query_result(&query_result, ""))
+            .collect::<Result<_, sea_orm::DbErr>>()?;
+
+        Ok(rows)
     }
 
     async fn resign(&self, service_name: &str, id: &str) -> MetaResult<()> {
-        let mut txn = self.pool.begin().await?;
-        sqlx::query(&format!(
-            r#"
-        DELETE FROM {table} WHERE service = $1 AND id = $2;
-        "#,
-            table = Self::election_table_name()
+        let txn = self.conn.begin().await?;
+
+        txn.execute(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            format!(
+                r#"
+            DELETE FROM {table} WHERE service = $1 AND id = $2;
+            "#,
+                table = Self::election_table_name()
+            ),
+            vec![Value::from(service_name), Value::from(id)],
         ))
-        .bind(service_name)
-        .bind(id)
-        .execute(&mut *txn)
         .await?;
 
-        sqlx::query(&format!(
-            r#"
-        DELETE FROM {table} WHERE service = $1 AND id = $2;
-        "#,
-            table = Self::member_table_name()
+        txn.execute(Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            format!(
+                r#"
+            DELETE FROM {table} WHERE service = $1 AND id = $2;
+            "#,
+                table = Self::member_table_name()
+            ),
+            vec![Value::from(service_name), Value::from(id)],
         ))
-        .bind(service_name)
-        .bind(id)
-        .execute(&mut *txn)
         .await?;
 
         txn.commit().await?;
@@ -187,19 +266,37 @@ RETURNING service, id, last_heartbeat;
 
 #[async_trait::async_trait]
 impl SqlDriver for MySqlDriver {
+    async fn init_database(&self) -> MetaResult<()> {
+        self.conn.execute(
+            Statement::from_string(DatabaseBackend::MySql, format!(
+                r#"CREATE TABLE IF NOT EXISTS {table} (service VARCHAR(256), id VARCHAR(256), last_heartbeat DATETIME, PRIMARY KEY (service, id));"#,
+                table = Self::member_table_name()
+            ))).await?;
+
+        self.conn.execute(
+            Statement::from_string(DatabaseBackend::MySql, format!(
+                r#"CREATE TABLE IF NOT EXISTS {table} (service VARCHAR(256), id VARCHAR(256), last_heartbeat DATETIME, PRIMARY KEY (service));"#,
+                table = Self::election_table_name()
+            ))).await?;
+
+        Ok(())
+    }
+
     async fn update_heartbeat(&self, service_name: &str, id: &str) -> MetaResult<()> {
-        sqlx::query(&format!(
-            r#"INSERT INTO {table} (id, service, last_heartbeat)
-VALUES(?, ?, NOW())
-ON duplicate KEY
-   UPDATE last_heartbeat = VALUES(last_heartbeat);
-"#,
-            table = Self::member_table_name()
-        ))
-        .bind(id)
-        .bind(service_name)
-        .execute(&self.pool)
-        .await?;
+        self.conn
+            .execute(Statement::from_sql_and_values(
+                DatabaseBackend::MySql,
+                format!(
+                    r#"INSERT INTO {table} (id, service, last_heartbeat)
+        VALUES(?, ?, NOW())
+        ON duplicate KEY
+           UPDATE last_heartbeat = VALUES(last_heartbeat);
+        "#,
+                    table = Self::member_table_name()
+                ),
+                vec![Value::from(id), Value::from(service_name)],
+            ))
+            .await?;
 
         Ok(())
     }
@@ -210,82 +307,113 @@ ON duplicate KEY
         id: &str,
         ttl: i64,
     ) -> MetaResult<ElectionRow> {
-        let _ = sqlx::query::<MySql>(&format!(
-            r#"INSERT
-    IGNORE
-INTO {table} (service, id, last_heartbeat)
-VALUES (?, ?, NOW())
-ON duplicate KEY
-    UPDATE id             = if(last_heartbeat < NOW() - INTERVAL ? SECOND,
-                               VALUES(id), id),
-           last_heartbeat = if(id =
-                               VALUES(id),
-                               VALUES(last_heartbeat), last_heartbeat);"#,
-            table = Self::election_table_name()
-        ))
-        .bind(service_name)
-        .bind(id)
-        .bind(ttl)
-        .execute(&self.pool)
-        .await?;
+        self.conn
+            .execute(Statement::from_sql_and_values(
+                DatabaseBackend::MySql,
+                format!(
+                    r#"INSERT
+            IGNORE
+        INTO {table} (service, id, last_heartbeat)
+        VALUES (?, ?, NOW())
+        ON duplicate KEY
+            UPDATE id             = if(last_heartbeat < NOW() - INTERVAL ? SECOND,
+                                       VALUES(id), id),
+                   last_heartbeat = if(id =
+                                       VALUES(id),
+                                       VALUES(last_heartbeat), last_heartbeat);"#,
+                    table = Self::election_table_name()
+                ),
+                vec![Value::from(service_name), Value::from(id), Value::from(ttl)],
+            ))
+            .await?;
 
-        let row = sqlx::query_as::<MySql, ElectionRow>(&format!(
-            r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = ?;"#,
-            table = Self::election_table_name(),
-        ))
-        .bind(service_name)
-        .fetch_one(&self.pool)
-        .await?;
+        let query_result = self
+            .conn
+            .query_one(Statement::from_sql_and_values(
+                DatabaseBackend::MySql,
+                format!(
+                    r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = ?;"#,
+                    table = Self::election_table_name(),
+                ),
+                vec![Value::from(service_name)],
+            ))
+            .await?;
+
+        let row = query_result
+            .map(|query_result| ElectionRow::from_query_result(&query_result, ""))
+            .transpose()?;
+
+        let row = row.ok_or_else(|| anyhow!("bad result from mysql"))?;
 
         Ok(row)
     }
 
     async fn leader(&self, service_name: &str) -> MetaResult<Option<ElectionRow>> {
-        let row = sqlx::query_as::<MySql, ElectionRow>(&format!(
-            r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = ?;"#,
-            table = Self::election_table_name()
-        ))
-        .bind(service_name)
-        .fetch_optional(&self.pool)
-        .await?;
+        let query_result = self
+            .conn
+            .query_one(Statement::from_sql_and_values(
+                DatabaseBackend::MySql,
+                format!(
+                    r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = ?;"#,
+                    table = Self::election_table_name()
+                ),
+                vec![Value::from(service_name)],
+            ))
+            .await?;
+
+        let row = query_result
+            .map(|query_result| ElectionRow::from_query_result(&query_result, ""))
+            .transpose()?;
 
         Ok(row)
     }
 
     async fn candidates(&self, service_name: &str) -> MetaResult<Vec<ElectionRow>> {
-        let row = sqlx::query_as::<MySql, ElectionRow>(&format!(
-            r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = ?;"#,
-            table = Self::member_table_name()
-        ))
-        .bind(service_name)
-        .fetch_all(&self.pool)
-        .await?;
+        let all = self
+            .conn
+            .query_all(Statement::from_sql_and_values(
+                DatabaseBackend::MySql,
+                format!(
+                    r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = ?;"#,
+                    table = Self::member_table_name()
+                ),
+                vec![Value::from(service_name)],
+            ))
+            .await?;
 
-        Ok(row)
+        let rows = all
+            .into_iter()
+            .map(|query_result| ElectionRow::from_query_result(&query_result, ""))
+            .collect::<Result<_, sea_orm::DbErr>>()?;
+
+        Ok(rows)
     }
 
     async fn resign(&self, service_name: &str, id: &str) -> MetaResult<()> {
-        let mut txn = self.pool.begin().await?;
-        sqlx::query(&format!(
-            r#"
-        DELETE FROM {table} WHERE service = ? AND id = ?;
-        "#,
-            table = Self::election_table_name()
+        let txn = self.conn.begin().await?;
+
+        txn.execute(Statement::from_sql_and_values(
+            DatabaseBackend::MySql,
+            format!(
+                r#"
+            DELETE FROM {table} WHERE service = ? AND id = ?;
+            "#,
+                table = Self::election_table_name()
+            ),
+            vec![Value::from(service_name), Value::from(id)],
         ))
-        .bind(service_name)
-        .bind(id)
-        .execute(&mut *txn)
         .await?;
 
-        sqlx::query(&format!(
-            r#"
-        DELETE FROM {table} WHERE service = ? AND id = ?;
-        "#,
-            table = Self::member_table_name()
+        txn.execute(Statement::from_sql_and_values(
+            DatabaseBackend::MySql,
+            format!(
+                r#"
+            DELETE FROM {table} WHERE service = ? AND id = ?;
+            "#,
+                table = Self::member_table_name()
+            ),
+            vec![Value::from(service_name), Value::from(id)],
         ))
-        .bind(service_name)
-        .bind(id)
-        .execute(&mut *txn)
         .await?;
 
         txn.commit().await?;
@@ -296,20 +424,38 @@ ON duplicate KEY
 
 #[async_trait::async_trait]
 impl SqlDriver for PostgresDriver {
+    async fn init_database(&self) -> MetaResult<()> {
+        self.conn.execute(
+            Statement::from_string(DatabaseBackend::Postgres, format!(
+                r#"CREATE TABLE IF NOT EXISTS {table} (service VARCHAR, id VARCHAR, last_heartbeat TIMESTAMPTZ, PRIMARY KEY (service, id));"#,
+                table = Self::member_table_name()
+            ))).await?;
+
+        self.conn.execute(
+            Statement::from_string(DatabaseBackend::Postgres, format!(
+                r#"CREATE TABLE IF NOT EXISTS {table} (service VARCHAR, id VARCHAR, last_heartbeat TIMESTAMPTZ, PRIMARY KEY (service));"#,
+                table = Self::election_table_name()
+            ))).await?;
+
+        Ok(())
+    }
+
     async fn update_heartbeat(&self, service_name: &str, id: &str) -> MetaResult<()> {
-        sqlx::query(&format!(
-            r#"INSERT INTO {table} (id, service, last_heartbeat)
-VALUES($1, $2, NOW())
-ON CONFLICT (id, service)
-DO
-   UPDATE SET last_heartbeat = EXCLUDED.last_heartbeat;
-"#,
-            table = Self::member_table_name()
-        ))
-        .bind(id)
-        .bind(service_name)
-        .execute(&self.pool)
-        .await?;
+        self.conn
+            .execute(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                format!(
+                    r#"INSERT INTO {table} (id, service, last_heartbeat)
+        VALUES($1, $2, NOW())
+        ON CONFLICT (id, service)
+        DO
+           UPDATE SET last_heartbeat = EXCLUDED.last_heartbeat;
+        "#,
+                    table = Self::member_table_name()
+                ),
+                vec![Value::from(id), Value::from(service_name)],
+            ))
+            .await?;
 
         Ok(())
     }
@@ -320,79 +466,112 @@ DO
         id: &str,
         ttl: i64,
     ) -> MetaResult<ElectionRow> {
-        let row = sqlx::query_as::<Postgres, ElectionRow>(&format!(
-            r#"INSERT INTO {table} (service, id, last_heartbeat)
-VALUES ($1, $2, NOW())
-ON CONFLICT (service)
-    DO UPDATE
-    SET id             = CASE
-                             WHEN {table}.last_heartbeat < NOW() - $3::INTERVAL THEN EXCLUDED.id
-                             ELSE {table}.id
-        END,
-        last_heartbeat = CASE
-                             WHEN {table}.last_heartbeat < NOW() - $3::INTERVAL THEN EXCLUDED.last_heartbeat
-                             WHEN {table}.id = EXCLUDED.id THEN EXCLUDED.last_heartbeat
-                             ELSE {table}.last_heartbeat
-            END
-RETURNING service, id, last_heartbeat;
-"#,
-            table = Self::election_table_name()
-        ))
-            .bind(service_name)
-            .bind(id)
-            .bind(Duration::from_secs(ttl as u64))
-            .fetch_one(&self.pool)
+        let query_result = self
+            .conn
+            .query_one(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                format!(
+                    r#"INSERT INTO {table} (service, id, last_heartbeat)
+        VALUES ($1, $2, NOW())
+        ON CONFLICT (service)
+            DO UPDATE
+            SET id             = CASE
+                                     WHEN {table}.last_heartbeat < NOW() - $3::INTERVAL THEN EXCLUDED.id
+                                     ELSE {table}.id
+                END,
+                last_heartbeat = CASE
+                                     WHEN {table}.last_heartbeat < NOW() - $3::INTERVAL THEN EXCLUDED.last_heartbeat
+                                     WHEN {table}.id = EXCLUDED.id THEN EXCLUDED.last_heartbeat
+                                     ELSE {table}.last_heartbeat
+                    END
+        RETURNING service, id, last_heartbeat;
+        "#,
+                    table = Self::election_table_name()
+                ),
+                vec![
+                    Value::from(service_name),
+                    Value::from(id),
+                    // special handling for interval
+                    Value::from(ttl.to_string()),
+                ],
+            ))
             .await?;
+
+        let row = query_result
+            .map(|query_result| ElectionRow::from_query_result(&query_result, ""))
+            .transpose()?;
+
+        let row = row.ok_or_else(|| anyhow!("bad result from postgres"))?;
 
         Ok(row)
     }
 
     async fn leader(&self, service_name: &str) -> MetaResult<Option<ElectionRow>> {
-        let row = sqlx::query_as::<Postgres, ElectionRow>(&format!(
-            r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = $1;"#,
-            table = Self::election_table_name()
-        ))
-        .bind(service_name)
-        .fetch_optional(&self.pool)
-        .await?;
+        let query_result = self
+            .conn
+            .query_one(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                format!(
+                    r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = $1;"#,
+                    table = Self::election_table_name()
+                ),
+                vec![Value::from(service_name)],
+            ))
+            .await?;
+
+        let row = query_result
+            .map(|query_result| ElectionRow::from_query_result(&query_result, ""))
+            .transpose()?;
 
         Ok(row)
     }
 
     async fn candidates(&self, service_name: &str) -> MetaResult<Vec<ElectionRow>> {
-        let row = sqlx::query_as::<Postgres, ElectionRow>(&format!(
-            r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = $1;"#,
-            table = Self::member_table_name()
-        ))
-        .bind(service_name)
-        .fetch_all(&self.pool)
-        .await?;
+        let all = self
+            .conn
+            .query_all(Statement::from_sql_and_values(
+                DatabaseBackend::Postgres,
+                format!(
+                    r#"SELECT service, id, last_heartbeat FROM {table} WHERE service = $1;"#,
+                    table = Self::member_table_name()
+                ),
+                vec![Value::from(service_name)],
+            ))
+            .await?;
 
-        Ok(row)
+        let rows = all
+            .into_iter()
+            .map(|query_result| ElectionRow::from_query_result(&query_result, ""))
+            .collect::<Result<_, sea_orm::DbErr>>()?;
+
+        Ok(rows)
     }
 
     async fn resign(&self, service_name: &str, id: &str) -> MetaResult<()> {
-        let mut txn = self.pool.begin().await?;
-        sqlx::query(&format!(
-            r#"
-        DELETE FROM {table} WHERE service = $1 AND id = $2;
-        "#,
-            table = Self::election_table_name()
+        let txn = self.conn.begin().await?;
+
+        txn.execute(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            format!(
+                r#"
+            DELETE FROM {table} WHERE service = $1 AND id = $2;
+            "#,
+                table = Self::election_table_name()
+            ),
+            vec![Value::from(service_name), Value::from(id)],
         ))
-        .bind(service_name)
-        .bind(id)
-        .execute(&mut *txn)
         .await?;
 
-        sqlx::query(&format!(
-            r#"
-        DELETE FROM {table} WHERE service = $1 AND id = $2;
-        "#,
-            table = Self::member_table_name()
+        txn.execute(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            format!(
+                r#"
+            DELETE FROM {table} WHERE service = $1 AND id = $2;
+            "#,
+                table = Self::member_table_name()
+            ),
+            vec![Value::from(service_name), Value::from(id)],
         ))
-        .bind(service_name)
-        .bind(id)
-        .execute(&mut *txn)
         .await?;
 
         txn.commit().await?;
@@ -406,6 +585,11 @@ impl<T> ElectionClient for SqlBackendElectionClient<T>
 where
     T: SqlDriver + Send + Sync + 'static,
 {
+    async fn init(&self) -> MetaResult<()> {
+        tracing::info!("initializing database for Sql backend election client");
+        self.driver.init_database().await
+    }
+
     fn id(&self) -> MetaResult<String> {
         Ok(self.id.clone())
     }
@@ -540,34 +724,40 @@ where
 mod tests {
     use std::sync::Arc;
 
-    use sqlx::sqlite::SqlitePoolOptions;
-    use sqlx::SqlitePool;
+    use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, Statement};
     use tokio::sync::watch;
 
     use crate::rpc::election::sql::{SqlBackendElectionClient, SqlDriverCommon, SqliteDriver};
     use crate::{ElectionClient, MetaResult};
 
-    async fn prepare_sqlite_env() -> MetaResult<SqlitePool> {
-        let pool = SqlitePoolOptions::new().connect("sqlite::memory:").await?;
-        let _ = sqlx::query(
-            &format!("CREATE TABLE {table} (service VARCHAR(256) PRIMARY KEY, id VARCHAR(256), last_heartbeat DATETIME)",
-                     table = SqliteDriver::election_table_name()))
-            .execute(&pool).await?;
+    async fn prepare_sqlite_env() -> MetaResult<DatabaseConnection> {
+        let db: DatabaseConnection = Database::connect("sqlite::memory:").await?;
 
-        let _ = sqlx::query(
-            &format!("CREATE TABLE {table} (service VARCHAR(256), id VARCHAR(256), last_heartbeat DATETIME, PRIMARY KEY (service, id))",
-                     table = SqliteDriver::member_table_name()))
-            .execute(&pool).await?;
+        db.execute(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            format!("CREATE TABLE {table} (service VARCHAR(256) PRIMARY KEY, id VARCHAR(256), last_heartbeat DATETIME)",
+                    table = SqliteDriver::election_table_name()),
+            vec![],
+        ))
+            .await?;
 
-        Ok(pool)
+        db.execute(Statement::from_sql_and_values(
+            DbBackend::Sqlite,
+            format!("CREATE TABLE {table} (service VARCHAR(256), id VARCHAR(256), last_heartbeat DATETIME, PRIMARY KEY (service, id))",
+                    table = SqliteDriver::member_table_name()),
+            vec![],
+        ))
+            .await?;
+
+        Ok(db)
     }
 
     #[tokio::test]
     async fn test_sql_election() {
         let id = "test_id".to_string();
-        let pool = prepare_sqlite_env().await.unwrap();
+        let conn = prepare_sqlite_env().await.unwrap();
 
-        let provider = SqliteDriver { pool };
+        let provider = SqliteDriver { conn };
         let (sender, _) = watch::channel(false);
         let sql_election_client: Arc<dyn ElectionClient> = Arc::new(SqlBackendElectionClient {
             id,
@@ -597,10 +787,10 @@ mod tests {
 
         let mut clients = vec![];
 
-        let pool = prepare_sqlite_env().await.unwrap();
+        let conn = prepare_sqlite_env().await.unwrap();
         for i in 1..3 {
             let id = format!("test_id_{}", i);
-            let provider = SqliteDriver { pool: pool.clone() };
+            let provider = SqliteDriver { conn: conn.clone() };
             let (sender, _) = watch::channel(false);
             let sql_election_client: Arc<dyn ElectionClient> = Arc::new(SqlBackendElectionClient {
                 id,
