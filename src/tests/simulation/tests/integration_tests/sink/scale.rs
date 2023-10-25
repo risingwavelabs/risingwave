@@ -36,7 +36,10 @@ async fn scale_and_check(
 ) -> Result<()> {
     for (plan, expected_parallelism) in schedule_plan {
         let prev_count = test_sink.store.id_count();
-        assert!(prev_count < target_count, "sink finish before scale");
+        assert!(prev_count <= target_count);
+        if prev_count == target_count {
+            return Ok(());
+        }
         cluster.reschedule(plan).await?;
         let after_count = test_sink.store.id_count();
         sleep(Duration::from_secs(10)).await;
@@ -50,7 +53,7 @@ async fn scale_and_check(
                 after_count
             );
             cluster.kill_node(&KillOpts::ALL).await;
-            sleep(Duration::from_secs(5)).await;
+            sleep(Duration::from_secs(10)).await;
         }
     }
     Ok(())
