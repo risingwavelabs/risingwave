@@ -150,8 +150,18 @@ impl LevelCompactionPicker {
             overlap_strategy.clone(),
         );
 
-        let l0_select_tables_vec = non_overlap_sub_level_picker
-            .pick_l0_multi_non_overlap_level(&l0.sub_levels, &level_handlers[0]);
+        let mut max_vnode_partition_idx = 0;
+        for (idx, level) in l0.sub_levels.iter().enumerate() {
+            if level.vnode_partition_count < vnode_partition_count {
+                break;
+            }
+            max_vnode_partition_idx = idx;
+        }
+
+        let l0_select_tables_vec = non_overlap_sub_level_picker.pick_l0_multi_non_overlap_level(
+            &l0.sub_levels[..=max_vnode_partition_idx],
+            &level_handlers[0],
+        );
         if l0_select_tables_vec.is_empty() {
             stats.skip_by_pending_files += 1;
             return None;

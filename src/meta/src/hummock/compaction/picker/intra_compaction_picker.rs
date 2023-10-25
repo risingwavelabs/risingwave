@@ -180,13 +180,23 @@ impl IntraCompactionPicker {
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
+        let mut max_vnode_partition_idx = 0;
+        for (idx, level) in l0.sub_levels.iter().enumerate() {
+            if level.vnode_partition_count < vnode_partition_count {
+                break;
+            }
+            max_vnode_partition_idx = idx;
+        }
 
         for (idx, level) in l0.sub_levels.iter().enumerate() {
             if level.level_type() != LevelType::Nonoverlapping
                 || level.total_file_size > self.config.sub_level_max_compaction_bytes
-                || level.vnode_partition_count < vnode_partition_count
             {
                 continue;
+            }
+
+            if idx > max_vnode_partition_idx {
+                break;
             }
 
             if level_handler.is_level_all_pending_compact(level) {
@@ -207,7 +217,10 @@ impl IntraCompactionPicker {
             );
 
             let l0_select_tables_vec = non_overlap_sub_level_picker
-                .pick_l0_multi_non_overlap_level(&l0.sub_levels[idx..], level_handler);
+                .pick_l0_multi_non_overlap_level(
+                    &l0.sub_levels[idx..=max_vnode_partition_idx],
+                    level_handler,
+                );
 
             if l0_select_tables_vec.is_empty() {
                 continue;
