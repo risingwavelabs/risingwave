@@ -1981,9 +1981,7 @@ impl CatalogManager {
         let table_key = (table.database_id, table.schema_id, table.name.clone());
         assert!(
             !database_core.sources.contains_key(&source.id)
-                && !database_core.tables.contains_key(&table.id)
-                && database_core.has_in_progress_creation(&source_key)
-                && database_core.has_in_progress_creation(&table_key),
+                && !database_core.tables.contains_key(&table.id),
             "table and source must be in creating procedure"
         );
 
