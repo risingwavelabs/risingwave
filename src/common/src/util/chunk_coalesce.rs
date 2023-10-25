@@ -285,7 +285,12 @@ impl SlicedDataChunk {
     }
 
     pub fn with_offset_checked(data_chunk: DataChunk, offset: usize) -> Self {
-        assert!(offset < data_chunk.capacity());
+        assert!(
+            offset < data_chunk.capacity(),
+            "offset {}, data_chunk capacity {}",
+            offset,
+            data_chunk.capacity()
+        );
         Self { data_chunk, offset }
     }
 

@@ -647,7 +647,8 @@ impl CatalogManager {
                     self.start_create_table_procedure_with_source(source, table)
                         .await
                 } else {
-                    self.start_create_table_procedure(table, vec![]).await
+                    self.start_create_table_procedure(table, internal_tables)
+                        .await
                 }
             }
         }
@@ -765,7 +766,9 @@ impl CatalogManager {
     ///    2. Not belonging to a background stream job.
     ///    Clean up these hanging tables by the id.
     pub async fn clean_dirty_tables(&self, fragment_manager: FragmentManagerRef) -> MetaResult<()> {
-        let creating_tables: Vec<Table> = self.list_persisted_creating_tables().await;
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let creating_tables: Vec<Table> = database_core.list_persisted_creating_tables();
         tracing::debug!(
             "creating_tables ids: {:#?}",
             creating_tables.iter().map(|t| t.id).collect_vec()
@@ -839,14 +842,13 @@ impl CatalogManager {
             }
         }
 
-        let core = &mut *self.core.lock().await;
-        let database_core = &mut core.database;
         let tables = &mut database_core.tables;
         let mut tables = BTreeMapTransaction::new(tables);
         for table in &tables_to_clean {
-            tracing::debug!("cleaning table_id: {}", table.id);
-            let table = tables.remove(table.id);
-            assert!(table.is_some())
+            let table_id = table.id;
+            tracing::debug!("cleaning table_id: {}", table_id);
+            let table = tables.remove(table_id);
+            assert!(table.is_some(), "table_id {} missing", table_id)
         }
         commit_meta!(self, tables)?;
 
@@ -929,14 +931,8 @@ impl CatalogManager {
                 );
                 return Ok(());
             };
-            table
-        };
 
-        tracing::trace!("cleanup tables for {}", table.id);
-        {
-            let core = &mut self.core.lock().await;
-            let database_core = &mut core.database;
-
+            tracing::trace!("cleanup tables for {}", table.id);
             let mut table_ids = vec![table.id];
             table_ids.extend(internal_table_ids);
 
@@ -944,10 +940,11 @@ impl CatalogManager {
             let mut tables = BTreeMapTransaction::new(tables);
             for table_id in table_ids {
                 let res = tables.remove(table_id);
-                assert!(res.is_some());
+                assert!(res.is_some(), "table_id {} missing", table_id);
             }
             commit_meta!(self, tables)?;
-        }
+            table
+        };
 
         {
             let core = &mut self.core.lock().await;
@@ -1984,9 +1981,7 @@ impl CatalogManager {
         let table_key = (table.database_id, table.schema_id, table.name.clone());
         assert!(
             !database_core.sources.contains_key(&source.id)
-                && !database_core.tables.contains_key(&table.id)
-                && database_core.has_in_progress_creation(&source_key)
-                && database_core.has_in_progress_creation(&table_key),
+                && !database_core.tables.contains_key(&table.id),
             "table and source must be in creating procedure"
         );
 
