@@ -75,7 +75,7 @@ impl AggregateFunction for Filter {
 mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_expr::aggregate::{build_append_only, AggCall};
-    use risingwave_expr::expr::{build_from_pretty, Expression, LiteralExpression};
+    use risingwave_expr::expr::{build_from_pretty, ExpressionBoxExt, LiteralExpression};
 
     use super::*;
 

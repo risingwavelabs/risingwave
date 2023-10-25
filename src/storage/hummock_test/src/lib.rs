@@ -17,7 +17,6 @@
 #![feature(bound_map)]
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_bounds)]
-#![feature(return_position_impl_trait_in_trait)]
 
 #[cfg(test)]
 mod compactor_tests;
