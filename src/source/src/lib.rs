@@ -16,7 +16,7 @@
 #![feature(trait_alias)]
 #![feature(lint_reasons)]
 #![feature(result_option_inspect)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(hash_extract_if)]
 #![feature(type_alias_impl_trait)]
 #![feature(box_patterns)]
