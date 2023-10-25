@@ -12,23 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::LazyLock;
 
 use itertools::Itertools;
-use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
 use risingwave_connector::sink::{
-    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    sink_compatible_format, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
+    SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    CreateSink, CreateSinkStatement, EmitMode, Encode, Format, ObjectName, Query, Select,
-    SelectItem, SetExpr, SinkSchema, TableFactor, TableWithJoins,
+    CreateSink, CreateSinkStatement, EmitMode, ObjectName, Query, Select, SelectItem, SetExpr,
+    SinkSchema, TableFactor, TableWithJoins,
 };
 
 use super::create_mv::get_column_names;
@@ -258,45 +256,13 @@ fn bind_sink_format_desc(value: SinkSchema) -> Result<SinkFormatDesc> {
     })
 }
 
-static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, Vec<Encode>>>> =
-    LazyLock::new(|| {
-        use risingwave_connector::sink::Sink as _;
-        use risingwave_sink_impl::sink::kafka::KafkaSink;
-        use risingwave_sink_impl::sink::kinesis::KinesisSink;
-        use risingwave_sink_impl::sink::pulsar::PulsarSink;
-        use risingwave_sink_impl::sink::redis::RedisSink;
-
-        convert_args!(hashmap!(
-                KafkaSink::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Json, Encode::Protobuf],
-                    Format::Upsert => vec![Encode::Json],
-                    Format::Debezium => vec![Encode::Json],
-                ),
-                KinesisSink::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Json],
-                    Format::Upsert => vec![Encode::Json],
-                    Format::Debezium => vec![Encode::Json],
-                ),
-                PulsarSink::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Json],
-                    Format::Upsert => vec![Encode::Json],
-                    Format::Debezium => vec![Encode::Json],
-                ),
-                RedisSink::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Json,Encode::Template],
-                    Format::Upsert => vec![Encode::Json,Encode::Template],
-                ),
-        ))
-    });
 pub fn validate_compatibility(connector: &str, format_desc: &SinkSchema) -> Result<()> {
-    let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS
-        .get(connector)
-        .ok_or_else(|| {
-            ErrorCode::BindError(format!(
-                "connector {} is not supported by FORMAT ... ENCODE ... syntax",
-                connector
-            ))
-        })?;
+    let compatible_formats = sink_compatible_format().get(connector).ok_or_else(|| {
+        ErrorCode::BindError(format!(
+            "connector {} is not supported by FORMAT ... ENCODE ... syntax",
+            connector
+        ))
+    })?;
     let compatible_encodes = compatible_formats.get(&format_desc.format).ok_or_else(|| {
         ErrorCode::BindError(format!(
             "connector {} does not support format {:?}",

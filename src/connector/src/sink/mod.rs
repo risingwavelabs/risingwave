@@ -20,7 +20,7 @@ pub mod log_store;
 pub mod utils;
 pub mod writer;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -36,6 +36,7 @@ use risingwave_pb::catalog::{PbSink, PbSinkType};
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
+use risingwave_sqlparser::ast::{Encode, Format};
 use thiserror::Error;
 
 use crate::sink::boxed::BoxCoordinator;
@@ -52,47 +53,82 @@ pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
 pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
+/// Here we define a function entry point to calling some functions implemented
+/// in crate `risingwave_sink_impl`. The functions are only declared here rather
+/// than implemented, so that building the current crate does not depend on the
+/// implementation of all sinks.
+///
+/// Functions implemented in `risingwave_sink_impl` can call `set_fn` function
+/// to inject its implementation of these functions at runtime.
+///
+/// In `risingwave_sink_impl`, there is a mechanism via `ctor` to call `set_fn`
+/// when program starts running. Use the `risingwave_sink_impl::enable!()` macro
+/// to enable the functions implemented in it.
 pub mod __sink_impl_functions {
+    use std::collections::{HashMap, HashSet};
+    use std::fmt::{Debug, Formatter};
     use std::sync::OnceLock;
 
     use futures::future::BoxFuture;
     use risingwave_pb::catalog::PbSink;
+    use risingwave_sqlparser::ast::{Encode, Format};
 
     use crate::sink::boxed::BoxCoordinator;
+    use crate::sink::catalog::desc::SinkDesc;
     use crate::sink::{SinkError, SinkParam};
 
-    pub type BuildBoxCoordinatorFn =
-        fn(SinkParam) -> BoxFuture<'static, Result<BoxCoordinator, SinkError>>;
-    pub type ValidateSinkFn = for<'a> fn(&'a PbSink) -> BoxFuture<'a, Result<(), SinkError>>;
+    pub struct SinkImplItems {
+        // functions
+        pub build_box_coordinator:
+            fn(SinkParam) -> BoxFuture<'static, Result<BoxCoordinator, SinkError>>,
+        pub validate_sink: for<'a> fn(&'a PbSink) -> BoxFuture<'a, Result<(), SinkError>>,
+        pub default_sink_decouple: fn(&str, &SinkDesc) -> Result<bool, SinkError>,
 
-    pub(super) static BUILD_BOX_COORDINATOR_FN: OnceLock<BuildBoxCoordinatorFn> = OnceLock::new();
+        // structs
+        pub sink_names: HashSet<&'static str>,
+        pub sink_compatible_format: HashMap<String, HashMap<Format, Vec<Encode>>>,
+    }
 
-    pub(super) static VALIDATE_SINK_FN: OnceLock<ValidateSinkFn> = OnceLock::new();
+    impl Debug for SinkImplItems {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("SinkImplItems").finish()
+        }
+    }
 
-    pub fn set_fn(build_box_coordinator: BuildBoxCoordinatorFn, validate_sink: ValidateSinkFn) {
-        let expect_msg = "should not set build_box_coordinator for multiple times";
-        BUILD_BOX_COORDINATOR_FN
-            .set(build_box_coordinator)
-            .expect(expect_msg);
-        VALIDATE_SINK_FN.set(validate_sink).expect(expect_msg);
+    pub(super) static SINK_IMPL_ITEMS: OnceLock<SinkImplItems> = OnceLock::new();
+
+    pub fn set(item: SinkImplItems) {
+        SINK_IMPL_ITEMS
+            .set(item)
+            .expect("should not set_fn for multiple times")
+    }
+
+    const EXPECT_STR: &str = "functions in risingwave_sink_impl not imported. \
+            Please add risingwave_sink_impl as a dependency and use `risingwave_sink_impl::enable!()`";
+
+    pub(super) fn get_items() -> &'static SinkImplItems {
+        SINK_IMPL_ITEMS.get().expect(EXPECT_STR)
     }
 }
 
-const GET_FN_EXPECT_MSG: &str = "functions in risingwave_sink_impl not imported. \
-            Please add risingwave_sink_impl as a dependency";
+pub fn default_sink_decouple(name: &str, desc: &SinkDesc) -> Result<bool> {
+    (__sink_impl_functions::get_items().default_sink_decouple)(name, desc)
+}
 
 pub async fn build_box_coordinator(param: SinkParam) -> Result<BoxCoordinator> {
-    (__sink_impl_functions::BUILD_BOX_COORDINATOR_FN
-        .get()
-        .expect(GET_FN_EXPECT_MSG))(param)
-    .await
+    (__sink_impl_functions::get_items().build_box_coordinator)(param).await
 }
 
 pub async fn validate_sink(prost_sink_catalog: &PbSink) -> std::result::Result<(), SinkError> {
-    (__sink_impl_functions::VALIDATE_SINK_FN
-        .get()
-        .expect(GET_FN_EXPECT_MSG))(prost_sink_catalog)
-    .await
+    (__sink_impl_functions::get_items().validate_sink)(prost_sink_catalog).await
+}
+
+pub fn sink_names() -> &'static HashSet<&'static str> {
+    &__sink_impl_functions::get_items().sink_names
+}
+
+pub fn sink_compatible_format() -> &'static HashMap<String, HashMap<Format, Vec<Encode>>> {
+    &__sink_impl_functions::get_items().sink_compatible_format
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

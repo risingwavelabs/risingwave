@@ -29,11 +29,10 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::{
-    SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    default_sink_decouple, sink_names, SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY,
+    SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_sink_impl::match_sink_name_str;
 use tracing::info;
 
 use super::derive::{derive_columns, derive_pk};
@@ -100,21 +99,19 @@ impl StreamSink {
 
         // check and ensure that the sink connector is specified and supported
         match sink.properties.get(CONNECTOR_TYPE_KEY) {
-            Some(connector) => match_sink_name_str!(
-                connector.to_lowercase().as_str(),
-                SinkType,
-                Ok(()),
-                |other| Err(SinkError::Config(anyhow!(
-                    "unsupported sink type {}",
-                    other
-                )))
-            )?,
+            Some(connector) => {
+                if !sink_names().contains(connector.to_lowercase().as_str()) {
+                    return Err(
+                        SinkError::Config(anyhow!("unsupported sink type {}", connector)).into(),
+                    );
+                }
+            }
             None => {
                 return Err(
                     SinkError::Config(anyhow!("connector not specified when create sink")).into(),
                 );
             }
-        }
+        };
 
         Ok(Self::new(input, sink))
     }
@@ -412,17 +409,19 @@ impl StreamNode for StreamSink {
             table: Some(table.to_internal_table_prost()),
             log_store_type: match self.base.ctx().session_ctx().config().get_sink_decouple() {
                 SinkDecouple::Default => {
-                    let enable_sink_decouple =
-                        match_sink_name_str!(
-                        self.sink_desc.properties.get(CONNECTOR_TYPE_KEY).expect(
-                            "have checked connector is contained when create the `StreamSink`"
-                        ).to_lowercase().as_str(),
-                        SinkTypeName,
-                        SinkTypeName::default_sink_decouple(&self.sink_desc),
-                        |_unsupported| unreachable!(
-                            "have checked connector is supported when create the `StreamSink`"
-                        )
-                    );
+                    let enable_sink_decouple = default_sink_decouple(
+                        self.sink_desc
+                            .properties
+                            .get(CONNECTOR_TYPE_KEY)
+                            .expect(
+                                "have checked connector is contained when create the `StreamSink`",
+                            )
+                            .to_lowercase()
+                            .as_str(),
+                        &self.sink_desc,
+                    )
+                    .expect("have checked connector is supported when create the `StreamSink`");
+
                     if enable_sink_decouple {
                         SinkLogStoreType::KvLogStore as i32
                     } else {
