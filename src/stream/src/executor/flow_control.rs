@@ -50,11 +50,7 @@ impl FlowControlExecutor {
             let clock = MonotonicClock;
             RateLimiter::direct_with_clock(quota, &clock)
         };
-        let rate_limiter = if let Some(rate_limit) = self.rate_limit {
-            Some(get_rate_limiter(rate_limit))
-        } else {
-            None
-        };
+        let rate_limiter = self.rate_limit.map(get_rate_limiter);
         #[for_await]
         for msg in self.input.execute() {
             let msg = msg?;
@@ -68,7 +64,7 @@ impl FlowControlExecutor {
                                 .await;
                             if let Err(InsufficientCapacity(n)) = result {
                                 tracing::error!(
-                                    "Rate Limit {} smaller than chunk cardinality {n}",
+                                    "Rate Limit {:?} smaller than chunk cardinality {n}",
                                     self.rate_limit,
                                 );
                             }
