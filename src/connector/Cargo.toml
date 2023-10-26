@@ -22,7 +22,6 @@ apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "idx0de
     "xz",
 ] }
 arrow-array = { workspace = true }
-arrow-json = { workspace = true }
 arrow-schema = { workspace = true }
 async-nats = "0.32"
 async-trait = "0.1"
