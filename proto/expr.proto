@@ -259,6 +259,7 @@ message ExprNode {
     COL_DESCRIPTION = 2100;
     CAST_REGCLASS = 2101;
   }
+  // Only use this field for function call. For other types of expression, it should be UNSPECIFIED.
   Type function_type = 1;
   data.DataType return_type = 3;
   oneof rex_node {
@@ -443,15 +444,39 @@ message WindowFunction {
   WindowFrame frame = 5;
 }
 
+// Note: due to historic reasons, UserDefinedFunction is a oneof variant parallel to FunctionCall,
+// while UserDefinedTableFunction is embedded as a field in TableFunction.
+
 message UserDefinedFunction {
   repeated ExprNode children = 1;
   string name = 2;
   repeated data.DataType arg_types = 3;
   string language = 4;
+  // external function service only
   string link = 5;
+  // An unique identifier for the function. Different kinds of UDF may handle this field differently.
+  // - For external UDF, it's the name of the function in the external function service.
+  //   It doesn't need to be unique across different external function servers.
+  // - For wasm UDF, it's the name of the function stored in remote object store, and needs to be globally unique.
   string identifier = 6;
+
+  oneof extra {
+    ExternalUdfExtra external = 7;
+    WasmUdfExtra wasm = 8;
+  }
 }
 
+// extra information for external functions
+message ExternalUdfExtra {}
+
+// extra information for wasm functions
+message WasmUdfExtra {
+  // We store the url of the remote object store here, as it's inconvenient to pass it to build expr.
+  // Maybe we can deprecate it in the future.
+  string wasm_storage_url = 1;
+}
+
+// Additional information for user defined table functions.
 message UserDefinedTableFunction {
   repeated data.DataType arg_types = 3;
   string language = 4;

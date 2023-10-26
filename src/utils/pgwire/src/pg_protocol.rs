@@ -52,7 +52,7 @@ static RW_QUERY_LOG_TRUNCATE_LEN: LazyLock<usize> =
         Ok(len) if len.parse::<usize>().is_ok() => len.parse::<usize>().unwrap(),
         _ => {
             if cfg!(debug_assertions) {
-                usize::MAX
+                65536
             } else {
                 1024
             }

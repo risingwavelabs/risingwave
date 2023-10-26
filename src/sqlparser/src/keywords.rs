@@ -92,6 +92,7 @@ define_keywords!(
     ATOMIC,
     AUTHORIZATION,
     AVG,
+    BASE64,
     BEGIN,
     BEGIN_FRAME,
     BEGIN_PARTITION,

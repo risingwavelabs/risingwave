@@ -80,6 +80,10 @@ impl SystemParamsReader {
         self.prost.pause_on_next_bootstrap.unwrap_or(false)
     }
 
+    pub fn wasm_storage_url(&self) -> &str {
+        self.prost.wasm_storage_url.as_ref().unwrap()
+    }
+
     pub fn to_kv(&self) -> Vec<(String, String)> {
         system_params_to_kv(&self.prost).unwrap()
     }

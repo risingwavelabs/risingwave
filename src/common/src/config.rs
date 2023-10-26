@@ -844,6 +844,9 @@ pub struct SystemConfig {
     /// Whether to pause all data sources on next bootstrap.
     #[serde(default = "default::system::pause_on_next_bootstrap")]
     pub pause_on_next_bootstrap: Option<bool>,
+
+    #[serde(default = "default::system::wasm_storage_url")]
+    pub wasm_storage_url: Option<String>,
 }
 
 impl SystemConfig {
@@ -863,6 +866,7 @@ impl SystemConfig {
             max_concurrent_creating_streaming_jobs: self.max_concurrent_creating_streaming_jobs,
             pause_on_next_bootstrap: self.pause_on_next_bootstrap,
             telemetry_enabled: None, // deprecated
+            wasm_storage_url: self.wasm_storage_url,
         }
     }
 }

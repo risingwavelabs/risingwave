@@ -80,7 +80,9 @@ pub enum ExprError {
     Internal(#[from] anyhow::Error),
 
     #[error("UDF error: {0}")]
-    Udf(#[from] risingwave_udf::Error),
+    ExternalUdf(#[from] risingwave_udf::Error),
+    #[error("UDF error: {0}")]
+    WasmUdf(#[from] risingwave_udf::wasm::WasmUdfError),
 
     #[error("not a constant")]
     NotConstant,
@@ -98,7 +100,7 @@ pub enum ExprError {
     InvalidState(String),
 }
 
-static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);
+static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 48);
 
 impl From<ExprError> for RwError {
     fn from(s: ExprError) -> Self {

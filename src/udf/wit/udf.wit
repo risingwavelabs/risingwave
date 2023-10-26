@@ -1,0 +1,49 @@
+package risingwave:udf // Maybe we can use a different package name? udf as a world name is enough.
+
+world udf {
+  use types.{schema, record-batch, eval-errno}
+
+  // TODO: is schema needed? since record-batch already contains schema.
+  export input-schema: func() -> schema
+  export output-schema: func() -> schema
+
+  // export init: func(inputs: list<scalar>) -> result<_, init-errno>
+  export eval: func(batch: record-batch) -> result<record-batch, eval-errno>
+}
+
+interface types {
+  // in Arrow IPC Streaming Format
+  type record-batch = list<u8>
+
+  enum data-type {
+    dt-i16,
+    dt-i32,
+    dt-i64,
+    dt-bool,
+    dt-string,
+  }
+
+  type schema = list<field>
+
+  record field {
+    name: string,
+    data-type: data-type,
+  }
+
+  enum init-errno {
+    invalid-params,
+  }
+
+  enum eval-errno {
+    numeric-overflow,
+    division-by-zero,
+  }
+
+  union scalar {
+    s16,
+    s32,
+    s64,
+    bool,
+    string,
+  }
+}

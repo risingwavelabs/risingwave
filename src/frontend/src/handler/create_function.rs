@@ -18,12 +18,15 @@ use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
-use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
+use risingwave_pb::catalog::function::{Kind, PbExtra, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
+use risingwave_pb::expr::{PbExternalUdfExtra, PbWasmUdfExtra};
 use risingwave_sqlparser::ast::{
     CreateFunctionBody, FunctionDefinition, ObjectName, OperateFunctionArg,
 };
+use risingwave_udf::wasm::WasmEngine;
 use risingwave_udf::ArrowFlightUdfClient;
+use tracing::Instrument;
 
 use super::*;
 use crate::catalog::CatalogError;
@@ -56,7 +59,7 @@ pub async fn handle_create_function(
         Some(lang) => {
             let lang = lang.real_value().to_lowercase();
             match &*lang {
-                "python" | "java" => lang,
+                "python" | "java" | "wasm_v1" => lang,
                 _ => {
                     return Err(ErrorCode::InvalidParameterValue(format!(
                         "language {} is not supported",
@@ -70,12 +73,6 @@ pub async fn handle_create_function(
         // correct protocol.
         None => "".to_string(),
     };
-    let Some(FunctionDefinition::SingleQuotedDef(identifier)) = params.as_ else {
-        return Err(ErrorCode::InvalidParameterValue("AS must be specified".to_string()).into());
-    };
-    let Some(CreateFunctionUsing::Link(link)) = params.using else {
-        return Err(ErrorCode::InvalidParameterValue("USING must be specified".to_string()).into());
-    };
     let return_type;
     let kind = match returns {
         Some(CreateFunctionReturns::Value(data_type)) => {
@@ -88,14 +85,10 @@ pub async fn handle_create_function(
                 return_type = bind_data_type(&columns[0].data_type)?;
             } else {
                 // return type is a struct for multiple columns
-                let datatypes = columns
-                    .iter()
-                    .map(|c| bind_data_type(&c.data_type))
-                    .collect::<Result<Vec<_>>>()?;
-                let names = columns
-                    .iter()
-                    .map(|c| c.name.real_value())
-                    .collect::<Vec<_>>();
+                let it = columns
+                    .into_iter()
+                    .map(|c| bind_data_type(&c.data_type).map(|ty| (ty, c.name.real_value())));
+                let (datatypes, names) = itertools::process_results(it, |it| it.unzip())?;
                 return_type = DataType::new_struct(datatypes, names);
             }
             Kind::Table(TableFunction {})
@@ -106,6 +99,10 @@ pub async fn handle_create_function(
             )
             .into())
         }
+    };
+
+    let Some(using) = params.using else {
+        return Err(ErrorCode::InvalidParameterValue("USING must be specified".to_string()).into());
     };
 
     let mut arg_types = vec![];
@@ -119,7 +116,7 @@ pub async fn handle_create_function(
     let (schema_name, function_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
-    // check if function exists
+    // check if the function exists in the catalog
     if (session.env().catalog_reader().read_guard())
         .get_schema_by_id(&database_id, &schema_id)?
         .get_function_by_name_args(&function_name, &arg_types)
@@ -132,32 +129,80 @@ pub async fn handle_create_function(
         return Err(CatalogError::Duplicated("function", name).into());
     }
 
-    // check the service
-    let client = ArrowFlightUdfClient::connect(&link)
-        .await
-        .map_err(|e| anyhow!(e))?;
-    /// A helper function to create a unnamed field from data type.
-    fn to_field(data_type: arrow_schema::DataType) -> arrow_schema::Field {
-        arrow_schema::Field::new("", data_type, true)
-    }
-    let args = arrow_schema::Schema::new(
-        arg_types
-            .iter()
-            .map::<Result<_>, _>(|t| Ok(to_field(t.try_into()?)))
-            .try_collect::<_, Fields, _>()?,
-    );
-    let returns = arrow_schema::Schema::new(match kind {
-        Kind::Scalar(_) => vec![to_field(return_type.clone().try_into()?)],
-        Kind::Table(_) => vec![
-            arrow_schema::Field::new("row_index", arrow_schema::DataType::Int32, true),
-            to_field(return_type.clone().try_into()?),
-        ],
-        _ => unreachable!(),
-    });
-    client
-        .check(&identifier, &args, &returns)
-        .await
-        .map_err(|e| anyhow!(e))?;
+    let link;
+    let identifier;
+
+    // judge the type of the UDF, and do some type-specific checks correspondingly.
+    let extra = match using {
+        CreateFunctionUsing::Link(l) => {
+            let Some(FunctionDefinition::SingleQuotedDef(id)) = params.as_ else {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "AS must be specified for USING link".to_string(),
+                )
+                .into());
+            };
+            identifier = id;
+            link = l;
+
+            // check UDF server
+            {
+                let client = ArrowFlightUdfClient::connect(&link)
+                    .await
+                    .map_err(|e| anyhow!(e))?;
+                /// A helper function to create a unnamed field from data type.
+                fn to_field(data_type: arrow_schema::DataType) -> arrow_schema::Field {
+                    arrow_schema::Field::new("", data_type, true)
+                }
+                let args = arrow_schema::Schema::new(
+                    arg_types
+                        .iter()
+                        .map::<Result<_>, _>(|t| Ok(to_field(t.try_into()?)))
+                        .try_collect::<_, Fields, _>()?,
+                );
+                let returns = arrow_schema::Schema::new(match kind {
+                    Kind::Scalar(_) => vec![to_field(return_type.clone().try_into()?)],
+                    Kind::Table(_) => vec![
+                        arrow_schema::Field::new("row_index", arrow_schema::DataType::Int32, true),
+                        to_field(return_type.clone().try_into()?),
+                    ],
+                    _ => unreachable!(),
+                });
+                client
+                    .check(&identifier, &args, &returns)
+                    .await
+                    .map_err(|e| anyhow!(e))?;
+            }
+
+            PbExtra::External(PbExternalUdfExtra {})
+        }
+        CreateFunctionUsing::Base64(module) => {
+            link = String::new();
+            identifier = format!("{}.{}.{}", database_id, schema_id, function_name);
+            if language != "wasm_v1" {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "LANGUAGE should be wasm_v1 for USING base64".to_string(),
+                )
+                .into());
+            }
+
+            use base64::prelude::{Engine, BASE64_STANDARD};
+            let module = BASE64_STANDARD.decode(module).map_err(|e| anyhow!(e))?;
+
+            let system_params = session.env().meta_client().get_system_params().await?;
+            let wasm_storage_url = system_params.wasm_storage_url();
+
+            let wasm_engine = WasmEngine::get_or_create();
+            wasm_engine
+                .compile_and_upload_component(module, wasm_storage_url, &identifier)
+                .instrument(tracing::info_span!("compile_and_upload_component", %identifier))
+                .await
+                .map_err(|e| anyhow!(e))?;
+
+            PbExtra::Wasm(PbWasmUdfExtra {
+                wasm_storage_url: wasm_storage_url.to_string(),
+            })
+        }
+    };
 
     let function = Function {
         id: FunctionId::placeholder().0,
@@ -171,6 +216,7 @@ pub async fn handle_create_function(
         identifier,
         link,
         owner: session.user_id(),
+        extra: Some(extra),
     };
 
     let catalog_writer = session.catalog_writer()?;

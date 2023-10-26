@@ -101,6 +101,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("data.Datum", "#[derive(Eq, Hash)]")
         .type_attribute("expr.FunctionCall", "#[derive(Eq, Hash)]")
         .type_attribute("expr.UserDefinedFunction", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.UserDefinedFunction.extra", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.ExternalUdfExtra", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.WasmUdfExtra", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.ColumnDesc.generated_or_default_column",
             "#[derive(Eq, Hash)]",

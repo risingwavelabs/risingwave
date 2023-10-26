@@ -1,0 +1,25 @@
+[package]
+name = "my_udf"
+version = "0.1.0"
+edition = "2021"
+homepage = "https://github.com/risingwavelabs/risingwave"
+license = "Apache-2.0"
+repository = "https://github.com/risingwavelabs/risingwave"
+
+[workspace]
+
+[dependencies]
+wit-bindgen = "0.8"
+arrow-array = "43"
+arrow-schema = "43"
+arrow-ipc = "43"
+arrow = "43"
+arrow-data = "43"
+arrow-buffer = "43"
+
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+debug = 1

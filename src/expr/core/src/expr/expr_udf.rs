@@ -22,8 +22,11 @@ use cfg_or_panic::cfg_or_panic;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_pb::expr::ExprNode;
+use risingwave_pb::expr::user_defined_function::PbExtra;
+use risingwave_pb::expr::{ExprNode, PbExternalUdfExtra, PbWasmUdfExtra};
+use risingwave_udf::wasm::{InstantiatedComponent, WasmEngine};
 use risingwave_udf::ArrowFlightUdfClient;
+use tracing::Instrument;
 
 use super::{BoxedExpression, Build};
 use crate::expr::Expression;
@@ -35,9 +38,34 @@ pub struct UdfExpression {
     arg_types: Vec<DataType>,
     return_type: DataType,
     arg_schema: Arc<Schema>,
-    client: Arc<ArrowFlightUdfClient>,
-    identifier: String,
+    imp: UdfImpl,
     span: await_tree::Span,
+}
+
+enum UdfImpl {
+    External {
+        client: Arc<ArrowFlightUdfClient>,
+        identifier: String,
+    },
+    Wasm {
+        component: InstantiatedComponent,
+    },
+}
+
+impl std::fmt::Debug for UdfImpl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::External { client, identifier } => f
+                .debug_struct("External")
+                .field("client", client)
+                .field("identifier", identifier)
+                .finish(),
+            Self::Wasm { component: _ } => f
+                .debug_struct("Wasm")
+                // .field("component", component)
+                .finish(),
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -98,11 +126,20 @@ impl UdfExpression {
         )
         .expect("failed to build record batch");
 
-        let output = self
-            .client
-            .call(&self.identifier, input)
-            .instrument_await(self.span.clone())
-            .await?;
+        let output: arrow_array::RecordBatch = match &self.imp {
+            UdfImpl::Wasm { component } => {
+                component
+                    .eval(input)
+                    .instrument_await(self.span.clone())
+                    .await?
+            }
+            UdfImpl::External { client, identifier } => {
+                client
+                    .call(identifier, input)
+                    .instrument_await(self.span.clone())
+                    .await?
+            }
+        };
         if output.num_rows() != vis.count_ones() {
             bail!(
                 "UDF returned {} rows, but expected {}",
@@ -110,7 +147,6 @@ impl UdfExpression {
                 vis.len(),
             );
         }
-
         let data_chunk =
             DataChunk::try_from(&output).expect("failed to convert UDF output to DataChunk");
         let output = data_chunk.uncompact(vis.clone());
@@ -139,8 +175,26 @@ impl Build for UdfExpression {
         let return_type = DataType::from(prost.get_return_type().unwrap());
         let udf = prost.get_rex_node().unwrap().as_udf().unwrap();
 
-        // connect to UDF service
-        let client = get_or_create_client(&udf.link)?;
+        let imp = match &udf.extra {
+            None | Some(PbExtra::External(PbExternalUdfExtra {})) => UdfImpl::External {
+                client: get_or_create_flight_client(&udf.link)?,
+                identifier: udf.identifier.clone(),
+            },
+            Some(PbExtra::Wasm(PbWasmUdfExtra { wasm_storage_url })) => {
+                let wasm_engine = WasmEngine::get_or_create();
+                // Use `block_in_place` as an escape hatch to run async code here in sync context.
+                // Calling `block_on` directly will panic.
+                let component = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on({
+                        wasm_engine
+                            .load_component(wasm_storage_url, &udf.identifier)
+                            .instrument(tracing::info_span!("load_component", %udf.identifier))
+                    })
+                })?;
+
+                UdfImpl::Wasm { component }
+            }
+        };
 
         let arg_schema = Arc::new(Schema::new(
             udf.arg_types
@@ -162,8 +216,7 @@ impl Build for UdfExpression {
             arg_types: udf.arg_types.iter().map(|t| t.into()).collect(),
             return_type,
             arg_schema,
-            client,
-            identifier: udf.identifier.clone(),
+            imp,
             span: format!("expr_udf_call ({})", udf.identifier).into(),
         })
     }
@@ -173,7 +226,7 @@ impl Build for UdfExpression {
 /// Get or create a client for the given UDF service.
 ///
 /// There is a global cache for clients, so that we can reuse the same client for the same service.
-pub(crate) fn get_or_create_client(link: &str) -> Result<Arc<ArrowFlightUdfClient>> {
+pub(crate) fn get_or_create_flight_client(link: &str) -> Result<Arc<ArrowFlightUdfClient>> {
     static CLIENTS: LazyLock<Mutex<HashMap<String, Weak<ArrowFlightUdfClient>>>> =
         LazyLock::new(Default::default);
     let mut clients = CLIENTS.lock().unwrap();

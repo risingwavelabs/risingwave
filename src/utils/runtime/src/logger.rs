@@ -156,7 +156,6 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("aws_sdk_ec2", Level::INFO)
             .with_target("aws_sdk_s3", Level::INFO)
             .with_target("aws_config", Level::WARN)
-            // Only enable WARN and ERROR for 3rd-party crates
             .with_target("aws_endpoint", Level::WARN)
             .with_target("aws_credential_types::cache::lazy_caching", Level::WARN)
             .with_target("hyper", Level::WARN)
@@ -166,7 +165,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("isahc", Level::WARN)
             .with_target("console_subscriber", Level::WARN)
             .with_target("reqwest", Level::WARN)
-            .with_target("sled", Level::INFO);
+            .with_target("sled", Level::INFO)
+            .with_target("cranelift", Level::INFO)
+            .with_target("wasmtime", Level::INFO);
 
         // For all other crates, apply default level depending on the deployment and `debug_assertions` flag.
         let default_level = match deployment {

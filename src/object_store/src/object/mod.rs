@@ -46,7 +46,7 @@ pub trait ObjectRangeBounds = RangeBounds<usize> + Clone + Send + Sync + std::fm
 
 /// Partitions a set of given paths into two vectors. The first vector contains all local paths, and
 /// the second contains all remote paths.
-pub fn partition_object_store_paths(paths: &[String]) -> Vec<String> {
+fn partition_object_store_paths(paths: &[String]) -> Vec<String> {
     // ToDo: Currently the result is a copy of the input. Would it be worth it to use an in-place
     //       partition instead?
     let mut vec_rem = vec![];
@@ -780,6 +780,11 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 }
 
+/// Creates a new [`ObjectStore`] from the given `url`. Credentials are configured via environment
+/// variables.
+///
+/// # Panics
+/// If the `url` is invalid. Therefore, it is only suitable to be used during startup.
 pub async fn parse_remote_object_store(
     url: &str,
     metrics: Arc<ObjectStoreMetrics>,
