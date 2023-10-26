@@ -137,6 +137,8 @@ test_background_ddl_recovery() {
   # Recover the mview progress
   sleep 5
 
+  run_sql "SHOW JOBS;" < /dev/null
+
   NEW_PROGRESS=$(run_sql "SHOW JOBS;" | grep -E -o "[0-9]{1,2}\.[0-9]{1,2}")
 
   if [[ ${OLD_PROGRESS%.*} -le ${NEW_PROGRESS%.*} ]]; then
