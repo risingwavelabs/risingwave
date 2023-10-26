@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use core::fmt;
-use std::collections::BTreeMap;
 use std::fmt::Write;
 
 use itertools::Itertools;
@@ -525,22 +524,6 @@ impl ConnectorSchema {
             row_encode: Encode::Native,
             row_options: Vec::new(),
         }
-    }
-
-    pub fn gen_options(&self) -> Result<BTreeMap<String, String>, ParserError> {
-        self.row_options
-            .iter()
-            .cloned()
-            .map(|x| match x.value {
-                Value::CstyleEscapedString(s) => Ok((x.name.real_value(), s.value)),
-                Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
-                Value::Number(n) => Ok((x.name.real_value(), n)),
-                Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
-                _ => Err(ParserError::ParserError(
-                    "`row format options` only support single quoted string value and C style escaped string".to_owned(),
-                )),
-            })
-            .try_collect()
     }
 
     pub fn row_options(&self) -> &[SqlOption] {

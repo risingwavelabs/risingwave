@@ -32,7 +32,7 @@ use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::handler::create_table::gen_create_table_plan_with_source;
-use crate::{build_graph, Binder, OptimizerContext, TableCatalog};
+use crate::{build_graph, Binder, OptimizerContext, TableCatalog, WithOptions};
 
 /// Handle `ALTER TABLE [ADD|DROP] COLUMN` statements. The `operation` must be either `AddColumn` or
 /// `DropColumn`.
@@ -266,8 +266,8 @@ fn schema_has_schema_registry(schema: &ConnectorSchema) -> bool {
     match schema.row_encode {
         Encode::Avro | Encode::Protobuf => true,
         Encode::Json => {
-            let mut options = schema.gen_options().unwrap();
-            matches!(get_json_schema_location(&mut options), Ok(Some(_)))
+            let mut options = WithOptions::try_from(schema.row_options()).unwrap();
+            matches!(get_json_schema_location(options.inner_mut()), Ok(Some(_)))
         }
         _ => false,
     }
