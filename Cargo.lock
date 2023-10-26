@@ -7778,6 +7778,7 @@ dependencies = [
  "itertools 0.11.0",
  "madsim-tokio",
  "madsim-tonic",
+ "rand",
  "regex",
  "risingwave_common",
  "risingwave_connector",
