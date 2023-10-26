@@ -106,21 +106,6 @@ fn make_stream_iter() -> impl Iterator<Item = StreamChunkWithState> {
 }
 
 fn bench(c: &mut Criterion) {
-    let dispatch: tracing::dispatcher::Dispatch = tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .with(
-            tracing_subscriber::filter::Targets::new()
-                .with_target("risingwave_connector", Level::INFO),
-        )
-        .into();
-
-    // Enable tracing globally.
-    //
-    // TODO: we should use `tracing::with_default` to set the dispatch in the scope,
-    // so that we can compare the performance with/without tracing side by side.
-    // However, why the global dispatch performs much worse than the scoped one?
-    dispatch.init();
-
     c.bench_function("parse_nexmark", |b| {
         b.iter_batched(
             make_stream_iter,
@@ -129,13 +114,24 @@ fn bench(c: &mut Criterion) {
         )
     });
 
-    // c.bench_function("parse_nexmark_with_tracing_scoped", |b| {
-    //     b.iter_batched(
-    //         make_stream_iter,
-    //         |mut iter| tracing::with_default(&dispatch, || iter.next().unwrap()),
-    //         BatchSize::SmallInput,
-    //     )
-    // });
+    c.bench_function("parse_nexmark_with_tracing", |b| {
+        // Note: `From<S> for Dispatch` has global side effects. Moving this out of `bench_function`
+        // does not work. Why?
+        let dispatch: tracing::dispatcher::Dispatch = tracing_subscriber::registry()
+            .with(
+                tracing_subscriber::fmt::layer().with_filter(
+                    tracing_subscriber::filter::Targets::new()
+                        .with_target("risingwave_connector", Level::INFO),
+                ),
+            )
+            .into();
+
+        b.iter_batched(
+            make_stream_iter,
+            |mut iter| tracing::dispatcher::with_default(&dispatch, || iter.next().unwrap()),
+            BatchSize::SmallInput,
+        )
+    });
 }
 
 criterion_group!(benches, bench);
