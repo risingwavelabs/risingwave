@@ -42,7 +42,7 @@ format upsert encode avro (
 
 sleep 2s
 
-query TTTRRIITTTTTTTT
+query TTTRRIITTTTTTTT rowsort
 select
   bool_field,
   string_field,

@@ -45,7 +45,7 @@ format plain encode protobuf (
 
 sleep 2s
 
-query TTTRRIIIIIITTTI
+query TTTRRIIIIIITTTI rowsort
 select
   bool_field,
   string_field,
