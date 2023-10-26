@@ -46,8 +46,8 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_sqlparser::ast::{
-    self, get_delimiter, AstString, AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement,
-    DebeziumAvroSchema, Encode, Format, ProtobufSchema, SourceSchemaV2, SourceWatermark,
+    self, get_delimiter, AstString, AvroSchema, ColumnDef, ColumnOption, ConnectorSchema,
+    CreateSourceStatement, DebeziumAvroSchema, Encode, Format, ProtobufSchema, SourceWatermark,
 };
 
 use super::RwPgResponse;
@@ -278,7 +278,7 @@ fn get_name_strategy_or_default(name_strategy: Option<AstString>) -> Result<Opti
 /// resolve the schema of the source from external schema file, return the relation's columns. see <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
 /// return `(columns, pk_names, source info)`
 pub(crate) async fn try_bind_columns_from_source(
-    source_schema: &SourceSchemaV2,
+    source_schema: &ConnectorSchema,
     sql_defined_pk_names: Vec<String>,
     sql_defined_columns: &[ColumnDef],
     with_properties: &HashMap<String, String>,
@@ -904,7 +904,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
     });
 
 pub fn validate_compatibility(
-    source_schema: &SourceSchemaV2,
+    source_schema: &ConnectorSchema,
     props: &mut HashMap<String, String>,
 ) -> Result<()> {
     let connector = get_connector(props)

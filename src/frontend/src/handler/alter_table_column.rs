@@ -22,7 +22,7 @@ use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
-    AlterTableOperation, ColumnOption, Encode, ObjectName, SourceSchemaV2, Statement,
+    AlterTableOperation, ColumnOption, ConnectorSchema, Encode, ObjectName, Statement,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -262,7 +262,7 @@ pub async fn handle_alter_table_column(
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
 }
 
-fn schema_has_schema_registry(schema: &SourceSchemaV2) -> bool {
+fn schema_has_schema_registry(schema: &ConnectorSchema) -> bool {
     match schema.row_encode {
         Encode::Avro | Encode::Protobuf => true,
         Encode::Json => {
