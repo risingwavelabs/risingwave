@@ -392,6 +392,8 @@ pub fn from_protobuf_value(
         }
         Value::Message(dyn_msg) => {
             if dyn_msg.descriptor().full_name() == "google.protobuf.Any" {
+                println!("current dyn_msg: {:#?}", dyn_msg);
+
                 // Sanity check
                 debug_assert!(
                     dyn_msg.has_field_by_name("type_url") && dyn_msg.has_field_by_name("value"),
