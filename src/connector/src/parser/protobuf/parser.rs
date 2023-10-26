@@ -270,9 +270,15 @@ fn extract_any_info(dyn_msg: &DynamicMessage) -> (String, Value) {
 /// Possible solution, maintaining a global id map, for the same types
 /// In the same level of fields, add the unique id at the tail of the name.
 /// e.g., "Int32.1" & "Int32.2" in the above example
-fn recursive_parse_json(fields: &[Datum], full_name_vec: Option<Vec<String>>) -> serde_json::Value {
+fn recursive_parse_json(fields: &[Datum], full_name_vec: Option<Vec<String>>, full_name: Option<String>) -> serde_json::Value {
     // Note that the key is of no order
     let mut ret: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+
+    // The hidden type hint for user's convenience
+    // i.e., `"_type": message.full_name()`
+    if let Some(full_name) = full_name {
+        ret.insert("_type".to_string(), serde_json::Value::String(full_name));
+    }
 
     for (idx, field) in fields.iter().enumerate() {
         let mut key;
@@ -346,7 +352,9 @@ fn recursive_parse_json(fields: &[Datum], full_name_vec: Option<Vec<String>>) ->
                 if key.is_empty() {
                     key = "Struct".to_string();
                 }
-                ret.insert(key, recursive_parse_json(v.fields(), None));
+                // Unfortunately we don't support type hint for nested any message at present
+                // TODO: Support type hint and name mapping for nested any type
+                ret.insert(key, recursive_parse_json(v.fields(), None, None));
             }
             Some(ScalarImpl::Jsonb(v)) => {
                 if key.is_empty() {
@@ -393,6 +401,7 @@ pub fn from_protobuf_value(
         Value::Message(dyn_msg) => {
             if dyn_msg.descriptor().full_name() == "google.protobuf.Any" {
                 println!("current dyn_msg: {:#?}", dyn_msg);
+                println!("type_url status: {} value status: {}", dyn_msg.has_field_by_name("type_url"), dyn_msg.has_field_by_name("value"));
 
                 // Sanity check
                 debug_assert!(
@@ -427,6 +436,8 @@ pub fn from_protobuf_value(
                     .map(|f| f.name().to_string())
                     .collect::<Vec<String>>();
 
+                let full_name = msg_desc.clone().full_name().to_string();
+
                 // Decode the payload based on the `msg_desc`
                 let decoded_value = DynamicMessage::decode(msg_desc, payload.as_ref()).unwrap();
                 let decoded_value = from_protobuf_value(
@@ -443,7 +454,8 @@ pub fn from_protobuf_value(
 
                 ScalarImpl::Jsonb(JsonbVal::from(serde_json::json!(recursive_parse_json(
                     v.fields(),
-                    Some(f)
+                    Some(f),
+                    Some(full_name),
                 ))))
             } else {
                 let mut rw_values = Vec::with_capacity(dyn_msg.descriptor().fields().len());
