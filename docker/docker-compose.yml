@@ -1,9 +1,10 @@
 ---
 version: "3"
-x-default-rw-image: &default-rw-image 'risingwavelabs/risingwave:v1.3.0'
+x-rw-image: &image
+  image: ${RW_IMAGE:-risingwavelabs/risingwave:v1.3.0}
 services:
   compactor-0:
-    image: ${RW_IMAGE:-*default-rw-image}
+    <<: *rw-image
     command:
       - compactor-node
       - "--listen-addr"
@@ -38,7 +39,7 @@ services:
       timeout: 5s
       retries: 5
   compute-node-0:
-    image: ${RW_IMAGE:-*default-rw-image
+    <<: *rw-image
     command:
       - compute-node
       - "--listen-addr"
@@ -123,7 +124,7 @@ services:
       timeout: 5s
       retries: 5
   frontend-node-0:
-    image: ${RW_IMAGE:-*default-rw-image
+    <<: *rw-image
     command:
       - frontend-node
       - "--listen-addr"
@@ -180,7 +181,7 @@ services:
       timeout: 5s
       retries: 5
   meta-node-0:
-    image: ${RW_IMAGE:-*default-rw-image
+    <<: *rw-image
     command:
       - meta-node
       - "--listen-addr"
