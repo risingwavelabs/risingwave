@@ -160,7 +160,6 @@ pub struct IdGeneratorManager {
     parallel_unit: Arc<StoredIdGenerator>,
     compaction_group: Arc<StoredIdGenerator>,
     connection: Arc<StoredIdGenerator>,
-    mysql_cdc: Arc<StoredIdGenerator>,
 }
 
 impl IdGeneratorManager {
@@ -217,9 +216,6 @@ impl IdGeneratorManager {
             connection: Arc::new(
                 StoredIdGenerator::new(meta_store.clone(), "connection", None).await,
             ),
-            mysql_cdc: Arc::new(
-                StoredIdGenerator::new(meta_store.clone(), "mysql_cdc", Some(20210401)).await,
-            ),
         }
     }
 
@@ -241,7 +237,6 @@ impl IdGeneratorManager {
             IdCategory::HummockCompactionTask => &self.hummock_compaction_task,
             IdCategory::CompactionGroup => &self.compaction_group,
             IdCategory::Connection => &self.connection,
-            IdCategory::MySqlCdc => &self.mysql_cdc,
             _ => unreachable!(),
         }
     }

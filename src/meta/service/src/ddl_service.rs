@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use rand::Rng;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_connector::sink::catalog::SinkId;
@@ -437,12 +438,7 @@ impl DdlService for DdlServiceImpl {
                     CdcSourceType::from(connector.as_str()),
                     CdcSourceType::Mysql
                 ) {
-                    let server_id = self
-                        .env
-                        .id_gen_manager()
-                        .generate::<{ IdCategory::MySqlCdc }>()
-                        .await?;
-                    fill_cdc_mysql_server_id(server_id, &mut fragment_graph);
+                    fill_cdc_mysql_server_id(&mut fragment_graph);
                 }
             }
         }
@@ -816,13 +812,16 @@ fn fill_table_source(
         Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
 }
 
-fn fill_cdc_mysql_server_id(server_id: u64, fragment_graph: &mut PbStreamFragmentGraph) {
+// `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
+// group (that is, different from any other server id being used by any master or slave)
+fn fill_cdc_mysql_server_id(fragment_graph: &mut PbStreamFragmentGraph) {
+    let rand_server_id = rand::thread_rng().gen_range(1..4294967295u32);
     for fragment in fragment_graph.fragments.values_mut() {
         visit_fragment(fragment, |node_body| {
             if let NodeBody::Source(source_node) = node_body {
                 let props = &mut source_node.source_inner.as_mut().unwrap().properties;
-                props.insert("server.id".to_string(), server_id.to_string());
-                tracing::debug!("server.id no set, generate one {}", server_id);
+                props.insert("server.id".to_string(), rand_server_id.to_string());
+                tracing::debug!("generated `server.id` for mysql-cdc: {}", rand_server_id);
             }
         });
     }
