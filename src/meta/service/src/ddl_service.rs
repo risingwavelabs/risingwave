@@ -28,7 +28,7 @@ use risingwave_pb::catalog::connection::private_link_service::{
 use risingwave_pb::catalog::connection::PbPrivateLinkService;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{connection, Connection, CreateType, PbSource, PbTable};
+use risingwave_pb::catalog::{connection, Comment, Connection, CreateType, PbSource, PbTable};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
@@ -730,7 +730,31 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    async fn comment_on(
+        &self,
+        request: Request<CommentOnRequest>,
+    ) -> Result<Response<CommentOnResponse>, Status> {
+        let req = request.into_inner();
+        let comment = req.get_comment()?.clone();
+
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::CommentOn(Comment {
+                table_id: comment.table_id,
+                schema_id: comment.schema_id,
+                database_id: comment.database_id,
+                column_index: comment.column_index,
+                description: comment.description,
+            }))
+            .await?;
+
+        Ok(Response::new(CommentOnResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
     async fn get_tables(
         &self,
         request: Request<GetTablesRequest>,
@@ -744,6 +768,11 @@ impl DdlService for DdlServiceImpl {
             tables.insert(table.id, table);
         }
         Ok(Response::new(GetTablesResponse { tables }))
+    }
+
+    async fn wait(&self, _request: Request<WaitRequest>) -> Result<Response<WaitResponse>, Status> {
+        self.ddl_controller.wait().await?;
+        Ok(Response::new(WaitResponse {}))
     }
 }
 

@@ -260,6 +260,7 @@ services:
       MINIO_PROMETHEUS_URL: "http://prometheus-0:9500"
       MINIO_ROOT_PASSWORD: hummockadmin
       MINIO_ROOT_USER: hummockadmin
+      MINIO_DOMAIN: "minio-0"
     container_name: minio-0
     healthcheck:
       test:

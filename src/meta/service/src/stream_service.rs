@@ -59,7 +59,7 @@ impl StreamServiceImpl {
 
 #[async_trait::async_trait]
 impl StreamManagerService for StreamServiceImpl {
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
         self.env.idle_manager().record_activity();
         let req = request.into_inner();
@@ -71,7 +71,7 @@ impl StreamManagerService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn pause(&self, _: Request<PauseRequest>) -> Result<Response<PauseResponse>, Status> {
         let i = self
             .barrier_scheduler
@@ -83,7 +83,7 @@ impl StreamManagerService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn resume(&self, _: Request<ResumeRequest>) -> Result<Response<ResumeResponse>, Status> {
         let i = self
             .barrier_scheduler
@@ -122,7 +122,7 @@ impl StreamManagerService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn list_table_fragments(
         &self,
         request: Request<ListTableFragmentsRequest>,
@@ -165,7 +165,7 @@ impl StreamManagerService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn list_table_fragment_states(
         &self,
         _request: Request<ListTableFragmentStatesRequest>,
@@ -186,7 +186,7 @@ impl StreamManagerService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn list_fragment_distribution(
         &self,
         _request: Request<ListFragmentDistributionRequest>,
@@ -215,7 +215,7 @@ impl StreamManagerService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn list_actor_states(
         &self,
         _request: Request<ListActorStatesRequest>,
