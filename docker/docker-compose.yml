@@ -1,10 +1,10 @@
 ---
 version: "3"
-x-rw-image: &image
+x-image: &image
   image: ${RW_IMAGE:-risingwavelabs/risingwave:v1.3.0}
 services:
   compactor-0:
-    <<: *rw-image
+    <<: *image
     command:
       - compactor-node
       - "--listen-addr"
