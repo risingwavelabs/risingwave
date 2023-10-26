@@ -802,6 +802,16 @@ impl Binder {
                 ("sha512", raw_call(ExprType::Sha512)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
+                ("int8send", raw_call(ExprType::PgwireSend)),
+                ("int8recv", guard_by_len(1, raw(|_binder, inputs| {
+                    // Similar to `cast` from string, return type is set explicitly rather than inferred.
+                    let t = inputs[0].return_type();
+                    if t != DataType::Bytea {
+                        let hint = if t == DataType::Varchar { " Consider `decode` or cast." } else { "" };
+                        return Err(ErrorCode::BindError(format!("`recv` takes bytea but got {t}.{hint}")).into());
+                    }
+                    Ok(FunctionCall::new_unchecked(ExprType::PgwireRecv, inputs, DataType::Int64).into())
+                }))),
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),

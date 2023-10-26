@@ -173,6 +173,8 @@ message ExprNode {
     LEFT = 317;
     RIGHT = 318;
     FORMAT = 319;
+    PGWIRE_SEND = 320;
+    PGWIRE_RECV = 321;
 
     // Unary operators
     NEG = 401;

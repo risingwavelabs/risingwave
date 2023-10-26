@@ -200,6 +200,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::ArrayPositions
             | expr_node::Type::StringToArray
             | expr_node::Type::Format
+            | expr_node::Type::PgwireSend
+            | expr_node::Type::PgwireRecv
             | expr_node::Type::ArrayTransform
             | expr_node::Type::Greatest
             | expr_node::Type::Least =>
