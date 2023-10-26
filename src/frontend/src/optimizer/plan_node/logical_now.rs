@@ -18,9 +18,10 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
+use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{
-    ColPrunable, ColumnPruningContext, ExprRewritable, LogicalFilter, PlanBase, PlanRef,
+    ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalFilter, PlanBase, PlanRef,
     PredicatePushdown, RewriteStreamContext, StreamNow, ToBatch, ToStream, ToStreamContext,
 };
 use crate::optimizer::plan_node::utils::column_names_pretty;
@@ -30,7 +31,7 @@ use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalNow {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
 }
 
 impl LogicalNow {
@@ -53,7 +54,7 @@ impl LogicalNow {
 
 impl Distill for LogicalNow {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let vec = if self.base.ctx.is_explain_verbose() {
+        let vec = if self.base.ctx().is_explain_verbose() {
             vec![("output", column_names_pretty(self.schema()))]
         } else {
             vec![]

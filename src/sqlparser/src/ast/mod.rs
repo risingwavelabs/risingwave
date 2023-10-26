@@ -1303,6 +1303,9 @@ pub enum Statement {
     ///
     /// Note: RisingWave specific statement.
     Flush,
+    /// WAIT for ALL running stream jobs to finish.
+    /// It will block the current session the condition is met.
+    Wait,
 }
 
 impl fmt::Display for Statement {
@@ -1800,6 +1803,9 @@ impl fmt::Display for Statement {
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
+            }
+            Statement::Wait => {
+                write!(f, "WAIT")
             }
             Statement::Begin { modes } => {
                 write!(f, "BEGIN")?;

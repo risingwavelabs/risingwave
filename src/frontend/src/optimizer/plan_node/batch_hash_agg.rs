@@ -17,6 +17,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
 
+use super::batch::prelude::*;
 use super::generic::{self, GenericPlanRef, PlanAggCall};
 use super::utils::impl_distill_by_unit;
 use super::{
@@ -30,7 +31,7 @@ use crate::utils::{ColIndexMappingRewriteExt, IndexSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchHashAgg {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::Agg<PlanRef>,
 }
 
@@ -42,7 +43,7 @@ impl BatchHashAgg {
         let dist = core
             .i2o_col_mapping()
             .rewrite_provided_distribution(input_dist);
-        let base = PlanBase::new_batch_from_logical(&core, dist, Order::any());
+        let base = PlanBase::new_batch_with_core(&core, dist, Order::any());
         BatchHashAgg { base, core }
     }
 

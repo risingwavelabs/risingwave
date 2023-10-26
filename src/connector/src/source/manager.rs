@@ -125,6 +125,7 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             field_descs: s.fields.clone(),
             type_name: "".to_string(),
             generated_or_default_column: None,
+            description: None,
         }
     }
 }

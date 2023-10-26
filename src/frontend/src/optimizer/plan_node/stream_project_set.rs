@@ -17,6 +17,7 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ProjectSetNode;
 
+use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{try_derive_watermark, ExprRewriter, WatermarkDerivation};
@@ -25,7 +26,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamProjectSet {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::ProjectSet<PlanRef>,
     /// All the watermark derivations, (input_column_idx, expr_idx). And the
     /// derivation expression is the project_set's expression itself.
@@ -66,7 +67,7 @@ impl StreamProjectSet {
 
         // ProjectSet executor won't change the append-only behavior of the stream, so it depends on
         // input's `append_only`.
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
             input.append_only(),

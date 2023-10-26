@@ -17,6 +17,9 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::HopWindowNode;
 
+use super::generic::GenericPlanRef;
+use super::stream::prelude::*;
+use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
@@ -26,7 +29,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// [`StreamHopWindow`] represents a hop window table function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHopWindow {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::HopWindow<PlanRef>,
     window_start_exprs: Vec<ExprImpl>,
     window_end_exprs: Vec<ExprImpl>,
@@ -56,7 +59,7 @@ impl StreamHopWindow {
         )
         .rewrite_bitset(&watermark_columns);
 
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             dist,
             input.append_only(),
@@ -75,7 +78,7 @@ impl StreamHopWindow {
 impl Distill for StreamHopWindow {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let mut vec = self.core.fields_pretty();
-        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+        if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             vec.push(("output_watermarks", ow));
         }
         childless_record("StreamHopWindow", vec)

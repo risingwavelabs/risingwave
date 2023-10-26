@@ -17,6 +17,13 @@ use std::iter;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
+use risingwave_meta_model_v2::object::ObjectType;
+use risingwave_meta_model_v2::prelude::*;
+use risingwave_meta_model_v2::{
+    connection, database, function, index, object, object_dependency, schema, sink, source, table,
+    view, ConnectionId, DatabaseId, FunctionId, ObjectId, PrivateLinkService, SchemaId, SourceId,
+    TableId, UserId,
+};
 use risingwave_pb::catalog::{
     PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
@@ -40,13 +47,6 @@ use crate::controller::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::manager::{MetaSrvEnv, NotificationVersion};
-use crate::model_v2::object::ObjectType;
-use crate::model_v2::prelude::*;
-use crate::model_v2::{
-    connection, database, function, index, object, object_dependency, schema, sink, source, table,
-    view, ConnectionId, DatabaseId, FunctionId, ObjectId, PrivateLinkService, SchemaId, SourceId,
-    TableId, UserId,
-};
 use crate::rpc::ddl_controller::DropMode;
 use crate::{MetaError, MetaResult};
 

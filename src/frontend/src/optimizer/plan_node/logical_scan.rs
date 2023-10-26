@@ -26,7 +26,7 @@ use risingwave_pb::stream_plan::ChainType;
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
     PredicatePushdown, StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
@@ -44,7 +44,7 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalScan {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Scan,
 }
 
@@ -302,7 +302,7 @@ impl LogicalScan {
             self.core.table_desc.clone(),
             self.core.cdc_table_desc.clone(),
             self.indexes().to_vec(),
-            self.base.ctx.clone(),
+            self.base.ctx().clone(),
             predicate,
             self.for_system_time_as_of_proctime(),
             self.table_cardinality(),
@@ -318,7 +318,7 @@ impl LogicalScan {
             self.core.table_desc.clone(),
             self.core.cdc_table_desc.clone(),
             self.indexes().to_vec(),
-            self.base.ctx.clone(),
+            self.base.ctx().clone(),
             self.predicate().clone(),
             self.for_system_time_as_of_proctime(),
             self.table_cardinality(),
@@ -339,7 +339,7 @@ impl_plan_tree_node_for_leaf! {LogicalScan}
 
 impl Distill for LogicalScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let verbose = self.base.ctx.is_explain_verbose();
+        let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(5);
         vec.push(("table", Pretty::from(self.table_name().to_owned())));
         let key_is_columns =
@@ -476,7 +476,7 @@ impl LogicalScan {
             let (scan_ranges, predicate) = self.predicate().clone().split_to_scan_ranges(
                 self.core.table_desc.clone(),
                 self.base
-                    .ctx
+                    .ctx()
                     .session_ctx()
                     .config()
                     .get_max_split_range_gap(),
@@ -602,7 +602,7 @@ impl ToStream for LogicalScan {
             ));
         }
 
-        match self.base.stream_key.is_none() {
+        match self.base.stream_key().is_none() {
             true => {
                 let mut col_ids = HashSet::new();
 

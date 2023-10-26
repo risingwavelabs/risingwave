@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #![feature(let_chains)]
-#![feature(generators)]
+#![feature(coroutines)]
 
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;

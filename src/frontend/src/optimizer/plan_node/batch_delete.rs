@@ -16,28 +16,27 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::DeleteNode;
 
+use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
+use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchDelete` implements [`super::LogicalDelete`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchDelete {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     pub core: generic::Delete<PlanRef>,
 }
 
 impl BatchDelete {
     pub fn new(core: generic::Delete<PlanRef>) -> Self {
         assert_eq!(core.input.distribution(), &Distribution::Single);
-        let base: PlanBase = PlanBase::new_batch_from_logical(
-            &core,
-            core.input.distribution().clone(),
-            Order::any(),
-        );
+        let base =
+            PlanBase::new_batch_with_core(&core, core.input.distribution().clone(), Order::any());
         Self { base, core }
     }
 }

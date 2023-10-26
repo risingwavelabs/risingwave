@@ -24,6 +24,7 @@ use risingwave_pb::batch_plan::row_seq_scan_node::ChunkSize;
 use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
 use risingwave_pb::plan_common::PbColumnDesc;
 
+use super::batch::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
 use crate::catalog::ColumnId;
@@ -34,7 +35,7 @@ use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSeqScan {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::Scan,
     scan_ranges: Vec<ScanRange>,
 }
@@ -46,7 +47,7 @@ impl BatchSeqScan {
         } else {
             core.get_out_column_index_order()
         };
-        let base = PlanBase::new_batch_from_logical(&core, dist, order);
+        let base = PlanBase::new_batch_with_core(&core, dist, order);
 
         {
             // validate scan_range
@@ -180,7 +181,7 @@ fn range_to_string(name: &str, range: &(Bound<ScalarImpl>, Bound<ScalarImpl>)) -
 
 impl Distill for BatchSeqScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let verbose = self.base.ctx.is_explain_verbose();
+        let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(4);
         vec.push(("table", Pretty::from(self.core.table_name.clone())));
         vec.push(("columns", self.core.columns_pretty(verbose)));
@@ -196,7 +197,7 @@ impl Distill for BatchSeqScan {
         if verbose {
             let dist = Pretty::display(&DistributionDisplay {
                 distribution: self.distribution(),
-                input_schema: &self.base.schema,
+                input_schema: self.base.schema(),
             });
             vec.push(("distribution", dist));
         }

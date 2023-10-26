@@ -21,10 +21,11 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, ScalarImpl};
 
+use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{
-    BatchValues, ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,
-    StreamValues, ToBatch, ToStream,
+    BatchValues, ColPrunable, ExprRewritable, Logical, LogicalFilter, PlanBase, PlanRef,
+    PredicatePushdown, StreamValues, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
@@ -37,7 +38,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// `LogicalValues` builds rows according to a list of expressions
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalValues {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     rows: Arc<[Vec<ExprImpl>]>,
 }
 
@@ -144,7 +145,7 @@ impl ColPrunable for LogicalValues {
             .iter()
             .map(|i| self.schema().fields[*i].clone())
             .collect();
-        Self::new(rows, Schema { fields }, self.base.ctx.clone()).into()
+        Self::new(rows, Schema { fields }, self.base.ctx().clone()).into()
     }
 }
 

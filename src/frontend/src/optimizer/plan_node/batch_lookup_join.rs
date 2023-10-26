@@ -18,7 +18,8 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LocalLookupJoinNode};
 
-use super::generic::{self};
+use super::batch::prelude::*;
+use super::generic::{self, GenericPlanRef};
 use super::utils::{childless_record, Distill};
 use super::ExprRewritable;
 use crate::expr::{Expr, ExprRewriter};
@@ -33,7 +34,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchLookupJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::Join<PlanRef>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
@@ -68,7 +69,7 @@ impl BatchLookupJoin {
         assert!(eq_join_predicate.has_eq());
         assert!(eq_join_predicate.eq_keys_are_type_aligned());
         let dist = Self::derive_dist(core.left.distribution(), &core);
-        let base = PlanBase::new_batch_from_logical(&core, dist, Order::any());
+        let base = PlanBase::new_batch_with_core(&core, dist, Order::any());
         Self {
             base,
             core,
@@ -112,7 +113,7 @@ impl BatchLookupJoin {
 
 impl Distill for BatchLookupJoin {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let verbose = self.base.ctx.is_explain_verbose();
+        let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
         vec.push(("type", Pretty::debug(&self.core.join_type)));
 

@@ -15,6 +15,7 @@
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::FilterNode;
 
+use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
@@ -25,7 +26,7 @@ use crate::utils::Condition;
 /// `StreamFilter` implements [`super::LogicalFilter`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamFilter {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::Filter<PlanRef>,
 }
 
@@ -34,7 +35,7 @@ impl StreamFilter {
         let input = core.input.clone();
         let dist = input.distribution().clone();
         // Filter executor won't change the append-only behavior of the stream.
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             dist,
             input.append_only(),
