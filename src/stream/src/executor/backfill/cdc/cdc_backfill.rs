@@ -51,7 +51,7 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     /// Upstream external table
     upstream_table: ExternalStorageTable,
 
-    /// Upstream changelog with the same schema with the external table.
+    /// Upstream changelog stream which may contain metadata columns, e.g. `_rw_offset`
     upstream: BoxedExecutor,
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.

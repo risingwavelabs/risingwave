@@ -507,13 +507,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
         .into());
     }
 
-    let table_type = CdcTableType::from_properties(&properties);
-    if table_type.can_backfill() && context.session_ctx().config().get_cdc_backfill() {
-        // Add a column for storing the event offset
-        let offset_column = ColumnCatalog::cdc_offset_column();
-        let _offset_index = columns.len();
-        columns.push(offset_column);
-
+    let cdc_table_type = CdcTableType::from_properties(&properties);
+    if cdc_table_type.can_backfill() && context.session_ctx().config().get_cdc_backfill() {
         // debezium connector will only consume changelogs from latest offset on this mode
         properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
 
@@ -558,6 +553,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         Some(source_info),
         definition,
         watermark_descs,
+        Some(cdc_table_type),
         append_only,
         Some(col_id_gen.into_version()),
     )
@@ -636,6 +632,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         None,
         definition,
         watermark_descs,
+        None,
         append_only,
         version,
     )
@@ -652,6 +649,7 @@ fn gen_table_plan_inner(
     source_info: Option<StreamSourceInfo>,
     definition: String,
     watermark_descs: Vec<WatermarkDesc>,
+    cdc_table_type: Option<CdcTableType>,
     append_only: bool,
     version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
                                     * TABLE` for `CREATE TABLE AS`. */
@@ -673,10 +671,18 @@ fn gen_table_plan_inner(
         database_id,
         name: name.clone(),
         row_id_index: row_id_index.map(|i| i as _),
-        columns: columns
-            .iter()
-            .map(|column| column.to_protobuf())
-            .collect_vec(),
+        columns: {
+            let mut source_columns = columns.clone();
+            if let Some(t) = cdc_table_type && t.can_backfill() {
+                // Append the offset column to be used in the cdc backfill
+                let offset_column = ColumnCatalog::cdc_offset_column();
+                source_columns.push(offset_column);
+            }
+            source_columns
+                .iter()
+                .map(|column| column.to_protobuf())
+                .collect_vec()
+        },
         pk_column_ids: pk_column_ids.iter().map(Into::into).collect_vec(),
         properties: with_options.into_inner().into_iter().collect(),
         info: Some(source_info),

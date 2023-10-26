@@ -161,6 +161,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
 
                     let table_type = CdcTableType::from_properties(&source.properties);
                     if table_type.can_backfill() && let Some(table_desc) = source_info.external_table.clone() {
+                        let table_schema = Schema::new(table_desc.columns.iter().map(Into::into).collect());
                         let upstream_table_name = SchemaTableName::from_properties(&source.properties);
                         let table_pk_indices = table_desc
                             .pk
@@ -173,15 +174,15 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
                             .collect_vec();
 
-                        let table_reader = table_type.create_table_reader(source.properties.clone(), schema.clone())?;
+                        let table_reader = table_type.create_table_reader(source.properties.clone(), table_schema.clone())?;
                         let external_table = ExternalStorageTable::new(
                             TableId::new(source.source_id),
                             upstream_table_name,
                             table_reader,
-                            schema.clone(),
+                            table_schema.clone(),
                             table_pk_order_types,
                             table_pk_indices,
-                            (0..table_desc.columns.len()).collect_vec(),
+                            (0..table_schema.len()).collect_vec(),
                         );
 
                         // use the state table from source to store the backfill state (may refactor in future)
@@ -189,13 +190,14 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             source.state_table.as_ref().unwrap(),
                             store.clone(),
                         ).await;
+                        // use schema from table_desc
                         let cdc_backfill = CdcBackfillExecutor::new(
                             params.actor_context.clone(),
                             external_table,
                             Box::new(source_exec),
-                            (0..source.columns.len()).collect_vec(),    // eliminate the last column (_rw_offset)
+                            (0..table_schema.len()).collect_vec(),
                             None,
-                            schema.clone(),
+                            table_schema,
                             params.pk_indices,
                             params.executor_stats,
                             source_state_handler,
