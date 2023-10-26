@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel};
+use tracing::warn;
 
 use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
 use super::{
@@ -156,6 +157,13 @@ impl LevelCompactionPicker {
                 break;
             }
             max_vnode_partition_idx = idx;
+        }
+        if l0.sub_levels.len() > 30 {
+            warn!(
+                "sub levels count: {}, max_vnode_partition_idx: {}",
+                l0.sub_levels.len(),
+                max_vnode_partition_idx
+            );
         }
 
         let l0_select_tables_vec = non_overlap_sub_level_picker.pick_l0_multi_non_overlap_level(

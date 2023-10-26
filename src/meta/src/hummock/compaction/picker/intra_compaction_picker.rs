@@ -116,27 +116,27 @@ impl IntraCompactionPicker {
                 self.config.sub_level_max_compaction_bytes
                     * (self.config.level0_sub_level_compact_level_count as u64),
             );
-            let max_level_count = self.config.level0_sub_level_compact_level_count as usize;
 
             let mut select_input_size = 0;
 
             let mut select_level_inputs = vec![];
             let mut total_file_count = 0;
+            let mut wait_enough = false;
             for next_level in l0.sub_levels.iter().skip(idx) {
                 if select_input_size > max_compaction_bytes
-                    || level_handler.is_level_pending_compact(next_level)
+                    || total_file_count > self.config.level0_max_compact_file_number
+                    || next_level.vnode_partition_count == partition_count
                 {
+                    wait_enough = true;
                     break;
                 }
 
-                if select_input_size > self.config.sub_level_max_compaction_bytes
-                    && next_level.vnode_partition_count == partition_count
-                    && select_level_inputs.len() > max_level_count
-                {
+                if level_handler.is_level_pending_compact(next_level) {
                     break;
                 }
+
                 select_input_size += next_level.total_file_size;
-                total_file_count += next_level.table_infos.len();
+                total_file_count += next_level.table_infos.len() as u64;
 
                 select_level_inputs.push(InputLevel {
                     level_idx: 0,
@@ -159,11 +159,13 @@ impl IntraCompactionPicker {
                     vnode_partition_count,
                     ..Default::default()
                 };
-                if self.compaction_task_validator.valid_compact_task(
-                    &result,
-                    ValidationRuleType::Intra,
-                    stats,
-                ) {
+                if wait_enough
+                    || self.compaction_task_validator.valid_compact_task(
+                        &result,
+                        ValidationRuleType::Intra,
+                        stats,
+                    )
+                {
                     return Some(result);
                 }
             }
