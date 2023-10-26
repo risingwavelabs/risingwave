@@ -294,6 +294,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .meta
                     .compaction_task_max_heartbeat_interval_secs,
                 compaction_config: Some(config.meta.compaction_config),
+                cut_table_size_limit: config.meta.cut_table_size_limit,
             },
             config.system.into_init_system_params(),
         )

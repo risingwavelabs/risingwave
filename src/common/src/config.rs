@@ -258,6 +258,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::split_group_size_limit")]
     pub split_group_size_limit: u64,
 
+    #[serde(default = "default::meta::cut_table_size_limit")]
+    pub cut_table_size_limit: u64,
+
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
 
@@ -961,6 +964,10 @@ pub mod default {
 
         pub fn compaction_task_max_heartbeat_interval_secs() -> u64 {
             60 // 1min
+        }
+
+        pub fn cut_table_size_limit() -> u64 {
+            1024 * 1024 * 1024 // 1GB
         }
     }
 

@@ -80,7 +80,8 @@ use crate::hummock::metrics_utils::{
 };
 use crate::hummock::{CompactorManagerRef, TASK_NORMAL};
 use crate::manager::{
-    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv, META_NODE_ID,
+    CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv, TableId,
+    META_NODE_ID,
 };
 use crate::model::{
     BTreeMapEntryTransaction, BTreeMapTransaction, ClusterId, MetadataModel, ValTransaction,
@@ -144,6 +145,9 @@ pub struct HummockManager {
     // `compaction_state` will record the types of compact tasks that can be triggered in `hummock`
     // and suggest types with a certain priority.
     pub compaction_state: CompactionState,
+
+    group_to_table_vnode_partition:
+        parking_lot::RwLock<HashMap<CompactionGroupId, HashMap<TableId, u32>>>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -390,6 +394,7 @@ impl HummockManager {
             history_table_throughput: parking_lot::RwLock::new(HashMap::default()),
             compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
+            group_to_table_vnode_partition: parking_lot::RwLock::new(HashMap::default()),
         };
         let instance = Arc::new(instance);
         instance.start_worker(rx).await;
@@ -813,6 +818,14 @@ impl HummockManager {
         // lock in compaction_guard, take out all table_options in advance there may be a
         // waste of resources here, need to add a more efficient filter in catalog_manager
         let all_table_id_to_option = self.catalog_manager.get_all_table_options().await;
+        let mut table_to_vnode_partition = match self
+            .group_to_table_vnode_partition
+            .read()
+            .get(&compaction_group_id)
+        {
+            Some(table_to_vnode_partition) => table_to_vnode_partition.clone(),
+            None => HashMap::default(),
+        };
 
         let mut compaction_guard = write_lock!(self, compaction).await;
         let compaction = compaction_guard.deref_mut();
@@ -903,6 +916,7 @@ impl HummockManager {
             .unwrap()
             .member_table_ids
             .clone();
+
         let is_trivial_reclaim = CompactStatus::is_trivial_reclaim(&compact_task);
         let is_trivial_move = CompactStatus::is_trivial_move_task(&compact_task);
 
@@ -963,6 +977,9 @@ impl HummockManager {
             compact_task.current_epoch_time = Epoch::now().0;
             compact_task.compaction_filter_mask =
                 group_config.compaction_config.compaction_filter_mask;
+            table_to_vnode_partition
+                .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
+            compact_task.table_vnode_partition = table_to_vnode_partition;
 
             let mut compact_task_assignment =
                 BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
@@ -2484,15 +2501,19 @@ impl HummockManager {
         let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
         let partition_vnode_count = self.env.opts.partition_vnode_count;
         let window_size = HISTORY_TABLE_INFO_STATISTIC_TIME / (checkpoint_secs as usize);
+
+        let mut group_to_table_vnode_partition = HashMap::default();
+
         for group in &group_infos {
+            let table_vnode_partition_mapping = group_to_table_vnode_partition
+                .entry(group.group_id)
+                .or_insert(HashMap::default());
+
             if group.table_statistic.len() == 1 {
                 continue;
             }
 
             for (table_id, table_size) in &group.table_statistic {
-                if !created_tables.contains(table_id) {
-                    continue;
-                }
                 let mut is_high_write_throughput = false;
                 let mut is_low_write_throughput = true;
                 if let Some(history) = table_write_throughput.get(table_id) {
@@ -2508,6 +2529,18 @@ impl HummockManager {
                     }
                 }
                 let state_table_size = *table_size;
+
+                {
+                    if is_high_write_throughput {
+                        table_vnode_partition_mapping.insert(*table_id, 8_u32);
+                    } else if state_table_size > self.env.opts.cut_table_size_limit {
+                        table_vnode_partition_mapping.insert(*table_id, 4_u32);
+                    }
+                }
+
+                if !created_tables.contains(table_id) {
+                    continue;
+                }
 
                 if is_low_write_throughput {
                     continue;
@@ -2532,6 +2565,7 @@ impl HummockManager {
                     }
                 }
 
+                table_vnode_partition_mapping.insert(*table_id, partition_vnode_count);
                 let ret = self
                     .move_state_table_to_compaction_group(
                         parent_group_id,
@@ -2557,6 +2591,8 @@ impl HummockManager {
                 }
             }
         }
+
+        *self.group_to_table_vnode_partition.write() = group_to_table_vnode_partition;
     }
 
     #[named]

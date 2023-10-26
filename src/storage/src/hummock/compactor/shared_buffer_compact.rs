@@ -474,7 +474,7 @@ impl SharedBufferCompactRunner {
                 stats_target_table_ids: None,
                 task_type: compact_task::TaskType::SharedBuffer,
                 is_target_l0_or_lbase: true,
-                split_by_table: false,
+                table_vnode_partition: HashMap::default(),
                 split_weight_by_vnode,
                 use_block_based_filter,
             },

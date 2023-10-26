@@ -167,6 +167,9 @@ pub struct MetaOpts {
 
     pub compaction_task_max_heartbeat_interval_secs: u64,
     pub compaction_config: Option<CompactionConfig>,
+
+    /// The size limit to split a state-table to independent sstable.
+    pub cut_table_size_limit: u64,
 }
 
 impl MetaOpts {
@@ -206,6 +209,7 @@ impl MetaOpts {
             partition_vnode_count: 32,
             compaction_task_max_heartbeat_interval_secs: 0,
             compaction_config: None,
+            cut_table_size_limit: 1024 * 1024 * 1024,
         }
     }
 }
