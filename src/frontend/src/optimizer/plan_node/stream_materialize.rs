@@ -250,6 +250,7 @@ impl StreamMaterialize {
             initialized_at_epoch: None,
             cleaned_by_watermark: false,
             create_type: CreateType::Foreground, // Will be updated in the handler itself.
+            description: None,
         })
     }
 

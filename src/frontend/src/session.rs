@@ -1148,6 +1148,11 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
                 DataType::Varchar.to_oid(),
                 DataType::Varchar.type_len(),
             ),
+            PgFieldDescriptor::new(
+                "Description".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
         ]),
         Statement::Explain { .. } => Ok(vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),

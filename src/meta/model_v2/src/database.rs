@@ -12,37 +12,46 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::catalog::PbDatabase;
 use sea_orm::entity::prelude::*;
+use sea_orm::ActiveValue;
 
-use crate::model_v2::{ObjectId, UserId};
+use crate::DatabaseId;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "object_dependency")]
+#[sea_orm(table_name = "database")]
 pub struct Model {
-    #[sea_orm(primary_key)]
-    pub id: i32,
-    pub oid: ObjectId,
-    pub used_by: UserId,
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub database_id: DatabaseId,
+    #[sea_orm(unique)]
+    pub name: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
         belongs_to = "super::object::Entity",
-        from = "Column::Oid",
+        from = "Column::DatabaseId",
         to = "super::object::Column::Oid",
         on_update = "NoAction",
         on_delete = "Cascade"
     )]
-    Object2,
-    #[sea_orm(
-        belongs_to = "super::object::Entity",
-        from = "Column::UsedBy",
-        to = "super::object::Column::Oid",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    Object1,
+    Object,
+}
+
+impl Related<super::object::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::Object.def()
+    }
 }
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<PbDatabase> for ActiveModel {
+    fn from(db: PbDatabase) -> Self {
+        Self {
+            database_id: ActiveValue::Set(db.id),
+            name: ActiveValue::Set(db.name),
+        }
+    }
+}
