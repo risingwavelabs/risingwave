@@ -54,5 +54,8 @@ workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
 
+[lib]
+test = false
+
 [lints]
 workspace = true
