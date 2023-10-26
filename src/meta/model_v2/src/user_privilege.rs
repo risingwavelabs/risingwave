@@ -14,47 +14,46 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::model_v2::{ExprNodeArray, I32Array, IndexId, JobStatus, TableId};
+use crate::{ObjectId, UserId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "index")]
+#[sea_orm(table_name = "user_privilege")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub index_id: IndexId,
-    pub name: String,
-    pub index_table_id: TableId,
-    pub primary_table_id: TableId,
-    pub index_items: ExprNodeArray,
-    pub original_columns: I32Array,
-    pub job_status: JobStatus,
+    #[sea_orm(primary_key)]
+    pub id: i32,
+    pub user_id: UserId,
+    pub oid: ObjectId,
+    pub granted_by: UserId,
+    pub actions: String,
+    pub with_grant_option: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
         belongs_to = "super::object::Entity",
-        from = "Column::IndexId",
+        from = "Column::Oid",
         to = "super::object::Column::Oid",
         on_update = "NoAction",
-        on_delete = "Cascade"
+        on_delete = "NoAction"
     )]
     Object,
     #[sea_orm(
-        belongs_to = "super::table::Entity",
-        from = "Column::IndexTableId",
-        to = "super::table::Column::TableId",
+        belongs_to = "super::user::Entity",
+        from = "Column::GrantedBy",
+        to = "super::user::Column::UserId",
         on_update = "NoAction",
         on_delete = "NoAction"
     )]
-    Table2,
+    User2,
     #[sea_orm(
-        belongs_to = "super::table::Entity",
-        from = "Column::PrimaryTableId",
-        to = "super::table::Column::TableId",
+        belongs_to = "super::user::Entity",
+        from = "Column::UserId",
+        to = "super::user::Column::UserId",
         on_update = "NoAction",
-        on_delete = "NoAction"
+        on_delete = "Cascade"
     )]
-    Table1,
+    User1,
 }
 
 impl Related<super::object::Entity> for Entity {

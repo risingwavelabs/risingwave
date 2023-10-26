@@ -12,36 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::catalog::connection::PbInfo;
-use risingwave_pb::catalog::PbConnection;
+use risingwave_pb::catalog::PbSchema;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue;
 
-use crate::model_v2::{ConnectionId, PrivateLinkService};
+use crate::SchemaId;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "connection")]
+#[sea_orm(table_name = "schema")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub connection_id: ConnectionId,
+    pub schema_id: SchemaId,
     pub name: String,
-    pub info: PrivateLinkService,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
         belongs_to = "super::object::Entity",
-        from = "Column::ConnectionId",
+        from = "Column::SchemaId",
         to = "super::object::Column::Oid",
         on_update = "NoAction",
         on_delete = "Cascade"
     )]
     Object,
-    #[sea_orm(has_many = "super::sink::Entity")]
-    Sink,
-    #[sea_orm(has_many = "super::source::Entity")]
-    Source,
 }
 
 impl Related<super::object::Entity> for Entity {
@@ -50,30 +44,13 @@ impl Related<super::object::Entity> for Entity {
     }
 }
 
-impl Related<super::sink::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Sink.def()
-    }
-}
-
-impl Related<super::source::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Source.def()
-    }
-}
-
 impl ActiveModelBehavior for ActiveModel {}
 
-impl From<PbConnection> for ActiveModel {
-    fn from(conn: PbConnection) -> Self {
-        let Some(PbInfo::PrivateLinkService(private_link_srv)) = conn.info else {
-            unreachable!("private link not provided.")
-        };
-
+impl From<PbSchema> for ActiveModel {
+    fn from(schema: PbSchema) -> Self {
         Self {
-            connection_id: ActiveValue::Set(conn.id as _),
-            name: ActiveValue::Set(conn.name),
-            info: ActiveValue::Set(PrivateLinkService(private_link_srv)),
+            schema_id: ActiveValue::Set(schema.id),
+            name: ActiveValue::Set(schema.name),
         }
     }
 }

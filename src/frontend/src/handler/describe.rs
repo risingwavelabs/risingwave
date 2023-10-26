@@ -12,20 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+use std::fmt::Display;
 
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
 use super::RwPgResponse;
 use crate::binder::{Binder, Relation};
-use crate::catalog::{CatalogError, IndexCatalog};
+use crate::catalog::CatalogError;
 use crate::handler::util::col_descs_to_rows;
 use crate::handler::HandlerArgs;
 
@@ -34,12 +33,9 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
     let mut binder = Binder::new_for_system(&session);
     let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
     // For Source, it doesn't have table catalog so use get source to get column descs.
-    let (columns, pk_columns, dist_columns, indices): (
-        Vec<ColumnCatalog>,
-        Vec<ColumnDesc>,
-        Vec<ColumnDesc>,
-        Vec<Arc<IndexCatalog>>,
-    ) = match relation {
+
+    // Vec<ColumnCatalog>, Vec<ColumnDesc>, Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>, String, Option<String>
+    let (columns, pk_columns, dist_columns, indices, relname, description) = match relation {
         Relation::Source(s) => {
             let pk_column_catalogs = s
                 .catalog
@@ -55,7 +51,14 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                         .unwrap()
                 })
                 .collect_vec();
-            (s.catalog.columns, pk_column_catalogs, vec![], vec![])
+            (
+                s.catalog.columns,
+                pk_column_catalogs,
+                vec![],
+                vec![],
+                s.catalog.name,
+                None, // Description
+            )
         }
         Relation::BaseTable(t) => {
             let pk_column_catalogs = t
@@ -75,6 +78,8 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                 pk_column_catalogs,
                 dist_columns,
                 t.table_indexes,
+                t.table_catalog.name,
+                t.table_catalog.description,
             )
         }
         Relation::SystemTable(t) => {
@@ -89,6 +94,8 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                 pk_column_catalogs,
                 vec![],
                 vec![],
+                t.sys_table_catalog.name.clone(),
+                None, // Description
             )
         }
         _ => {
@@ -99,18 +106,23 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
     // Convert all column descs to rows
     let mut rows = col_descs_to_rows(columns);
 
+    fn concat<T>(display_elems: impl IntoIterator<Item = T>) -> String
+    where
+        T: Display,
+    {
+        format!(
+            "{}",
+            display_comma_separated(&display_elems.into_iter().collect::<Vec<_>>())
+        )
+    }
+
     // Convert primary key to rows
     if !pk_columns.is_empty() {
         rows.push(Row::new(vec![
             Some("primary key".into()),
-            Some(
-                format!(
-                    "{}",
-                    display_comma_separated(&pk_columns.into_iter().map(|x| x.name).collect_vec()),
-                )
-                .into(),
-            ),
-            None,
+            Some(concat(pk_columns.iter().map(|x| &x.name)).into()),
+            None, // Is Hidden
+            None, // Description
         ]));
     }
 
@@ -118,14 +130,9 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
     if !dist_columns.is_empty() {
         rows.push(Row::new(vec![
             Some("distribution key".into()),
-            Some(
-                display_comma_separated(
-                    &dist_columns.into_iter().map(|col| col.name).collect_vec(),
-                )
-                .to_string()
-                .into(),
-            ),
-            None,
+            Some(concat(dist_columns.iter().map(|x| &x.name)).into()),
+            None, // Is Hidden
+            None, // Description
         ]));
     }
 
@@ -155,10 +162,22 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                     .into(),
                 )
             },
+            // Is Hidden
+            None,
+            // Description
+            // TODO: index description
             None,
         ])
     }));
 
+    rows.push(Row::new(vec![
+        Some("table description".into()),
+        Some(relname.into()),
+        None,                        // Is Hidden
+        description.map(Into::into), // Description
+    ]));
+
+    // TODO: table name and description as title of response
     // TODO: recover the original user statement
     Ok(PgResponse::builder(StatementType::DESCRIBE)
         .values(
@@ -176,6 +195,11 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                 ),
                 PgFieldDescriptor::new(
                     "Is Hidden".to_owned(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+                PgFieldDescriptor::new(
+                    "Description".to_owned(),
                     DataType::Varchar.to_oid(),
                     DataType::Varchar.type_len(),
                 ),
@@ -233,6 +257,7 @@ mod tests {
             "primary key".into() => "v3".into(),
             "distribution key".into() => "v3".into(),
             "idx1".into() => "index(v1 DESC, v2 ASC, v3 ASC) include(v4) distributed by(v1)".into(),
+            "table description".into() => "t".into(),
         };
 
         assert_eq!(columns, expected_columns);

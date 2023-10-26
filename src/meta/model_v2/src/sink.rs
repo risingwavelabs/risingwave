@@ -15,7 +15,7 @@
 use risingwave_pb::catalog::PbSinkType;
 use sea_orm::entity::prelude::*;
 
-use crate::model_v2::{
+use crate::{
     ColumnCatalogArray, ColumnOrderArray, ConnectionId, I32Array, JobStatus, Property,
     SinkFormatDesc, SinkId,
 };

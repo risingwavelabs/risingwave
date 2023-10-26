@@ -21,6 +21,8 @@ use risingwave_common::system_param::{
     check_missing_params, derive_missing_fields, set_system_param,
 };
 use risingwave_common::{for_all_params, key_of};
+use risingwave_meta_model_v2::prelude::SystemParameter;
+use risingwave_meta_model_v2::system_parameter;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::PbSystemParams;
 use sea_orm::{ActiveModelTrait, ActiveValue, DatabaseConnection, EntityTrait, TransactionTrait};
@@ -31,8 +33,6 @@ use tracing::info;
 
 use crate::controller::SqlMetaStore;
 use crate::manager::{LocalNotification, NotificationManagerRef};
-use crate::model_v2::prelude::SystemParameter;
-use crate::model_v2::system_parameter;
 use crate::{MetaError, MetaResult};
 
 pub type SystemParamsControllerRef = Arc<SystemParamsController>;

@@ -24,7 +24,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
 use risingwave_pb::catalog::{
-    connection, Connection, CreateType, Database, Function, Schema, Source, Table, View,
+    connection, Comment, Connection, CreateType, Database, Function, Schema, Source, Table, View,
 };
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -103,6 +103,7 @@ pub enum DdlCommand {
     AlterSourceColumn(Source),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
+    CommentOn(Comment),
 }
 
 #[derive(Clone)]
@@ -260,6 +261,7 @@ impl DdlController {
                     ctrl.drop_connection(connection_id).await
                 }
                 DdlCommand::AlterSourceColumn(source) => ctrl.alter_source_column(source).await,
+                DdlCommand::CommentOn(comment) => ctrl.comment_on(comment).await,
             }
         }
         .in_current_span();
@@ -1111,5 +1113,9 @@ impl DdlController {
             sleep(Duration::from_secs(1)).await;
         }
         Err(MetaError::cancelled("timeout".into()))
+    }
+
+    async fn comment_on(&self, comment: Comment) -> MetaResult<NotificationVersion> {
+        self.catalog_manager.comment_on(comment).await
     }
 }

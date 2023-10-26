@@ -14,31 +14,34 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::model_v2::UserId;
+use crate::{I32Array, WorkerId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "user")]
+#[sea_orm(table_name = "worker_property")]
 pub struct Model {
-    #[sea_orm(primary_key)]
-    pub user_id: UserId,
-    pub name: String,
-    pub is_super: bool,
-    pub can_create_db: bool,
-    pub can_create_user: bool,
-    pub can_login: bool,
-    pub auth_type: Option<String>,
-    pub auth_value: Option<String>,
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub worker_id: WorkerId,
+    pub parallel_unit_ids: I32Array,
+    pub is_streaming: bool,
+    pub is_serving: bool,
+    pub is_unschedulable: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::object::Entity")]
-    Object,
+    #[sea_orm(
+        belongs_to = "super::worker::Entity",
+        from = "Column::WorkerId",
+        to = "super::worker::Column::WorkerId",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    Worker,
 }
 
-impl Related<super::object::Entity> for Entity {
+impl Related<super::worker::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::Object.def()
+        Relation::Worker.def()
     }
 }
 

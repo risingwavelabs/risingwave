@@ -19,9 +19,10 @@ members = [
   "src/java_binding",
   "src/jni_core",
   "src/meta",
+  "src/meta/model_v2",
+  "src/meta/model_v2/migration",
   "src/meta/node",
   "src/meta/service",
-  "src/meta/src/model_v2/migration",
   "src/object_store",
   "src/prost",
   "src/prost/helpers",
@@ -143,6 +144,8 @@ risingwave_hummock_test = { path = "./src/storage/hummock_test" }
 risingwave_hummock_trace = { path = "./src/storage/hummock_trace" }
 risingwave_meta = { path = "./src/meta" }
 risingwave_meta_service = { path = "./src/meta/service" }
+risingwave_meta_model_migration = { path = "src/meta/model_v2/migration" }
+risingwave_meta_model_v2 = { path = "./src/meta/model_v2" }
 risingwave_meta_node = { path = "./src/meta/node" }
 risingwave_object_store = { path = "./src/object_store" }
 risingwave_pb = { path = "./src/prost" }
