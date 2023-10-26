@@ -271,6 +271,7 @@ fn extract_any_info(dyn_msg: &DynamicMessage) -> (String, Value) {
 /// In the same level of fields, add the unique id at the tail of the name.
 /// e.g., "Int32.1" & "Int32.2" in the above example
 fn recursive_parse_json(fields: &[Datum], full_name_vec: Option<Vec<String>>) -> serde_json::Value {
+    // Note that the key is of no order
     let mut ret: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
 
     for (idx, field) in fields.iter().enumerate() {
