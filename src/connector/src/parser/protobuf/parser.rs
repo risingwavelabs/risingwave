@@ -270,7 +270,11 @@ fn extract_any_info(dyn_msg: &DynamicMessage) -> (String, Value) {
 /// Possible solution, maintaining a global id map, for the same types
 /// In the same level of fields, add the unique id at the tail of the name.
 /// e.g., "Int32.1" & "Int32.2" in the above example
-fn recursive_parse_json(fields: &[Datum], full_name_vec: Option<Vec<String>>, full_name: Option<String>) -> serde_json::Value {
+fn recursive_parse_json(
+    fields: &[Datum],
+    full_name_vec: Option<Vec<String>>,
+    full_name: Option<String>,
+) -> serde_json::Value {
     // Note that the key is of no order
     let mut ret: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
 
@@ -352,8 +356,6 @@ fn recursive_parse_json(fields: &[Datum], full_name_vec: Option<Vec<String>>, fu
                 if key.is_empty() {
                     key = "Struct".to_string();
                 }
-                // Unfortunately we don't support type hint for nested any message at present
-                // TODO: Support type hint and name mapping for nested any type
                 ret.insert(key, recursive_parse_json(v.fields(), None, None));
             }
             Some(ScalarImpl::Jsonb(v)) => {
@@ -401,7 +403,11 @@ pub fn from_protobuf_value(
         Value::Message(dyn_msg) => {
             if dyn_msg.descriptor().full_name() == "google.protobuf.Any" {
                 println!("current dyn_msg: {:#?}", dyn_msg);
-                println!("type_url status: {} value status: {}", dyn_msg.has_field_by_name("type_url"), dyn_msg.has_field_by_name("value"));
+                println!(
+                    "type_url status: {} value status: {}",
+                    dyn_msg.has_field_by_name("type_url"),
+                    dyn_msg.has_field_by_name("value")
+                );
 
                 // Sanity check
                 debug_assert!(
@@ -1115,10 +1121,13 @@ mod test {
                     assert_eq!(
                         jv,
                         JsonbVal::from(json!({
+                            "_type": "test.AnyValue",
                             "any_value_1": {
+                                "_type": "test.StringValue",
                                 "value": "114514",
                             },
                             "any_value_2": {
+                                "_type": "test.Int32Value",
                                 "value": 114514,
                             }
                         }))
