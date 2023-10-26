@@ -125,7 +125,8 @@ impl IntraCompactionPicker {
             for next_level in l0.sub_levels.iter().skip(idx) {
                 if select_input_size > max_compaction_bytes
                     || total_file_count > self.config.level0_max_compact_file_number
-                    || next_level.vnode_partition_count == partition_count
+                    || (next_level.vnode_partition_count == partition_count
+                        && select_level_inputs.len() > 1)
                 {
                     wait_enough = true;
                     break;
