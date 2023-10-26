@@ -6,5 +6,5 @@ metrics_level = "Disabled"
 #stream_chunk_size = 1
 
 [system]
-barrier_interval_ms = 50
+barrier_interval_ms = 1000
 max_concurrent_creating_streaming_jobs = 4

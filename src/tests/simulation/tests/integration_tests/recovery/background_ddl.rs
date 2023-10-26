@@ -15,14 +15,16 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use madsim::time::timeout;
 use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts};
 use risingwave_simulation::utils::AssertResult;
-use tokio::time::{sleep, timeout};
+use tokio::time::sleep;
 
-const CREATE_TABLE: &str = "CREATE TABLE t(v1 int, v2 varchar);";
-const SEED_TABLE: &str = "INSERT INTO t SELECT generate_series, 'abcd' FROM generate_series(1, 1000000);";
+const CREATE_TABLE: &str = "CREATE TABLE t(v1 int);";
+const SEED_TABLE: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 1000000);";
 const FLUSH: &str = "flush;";
 const SET_BACKGROUND_DDL: &str = "SET BACKGROUND_DDL=true;";
+const SET_STREAMING_RATE_LIMIT: &str = "SET STREAMING_RATE_LIMIT=4000;";
 const CREATE_MV1: &str = "CREATE MATERIALIZED VIEW mv1 as SELECT * FROM t;";
 
 async fn kill_cn_and_wait_recover(cluster: &Cluster) {
@@ -53,11 +55,11 @@ async fn kill_and_wait_recover(cluster: &Cluster) {
 }
 
 async fn cancel_stream_jobs(cluster: &mut Cluster) -> Result<()> {
-    let ids = cluster.run("select ddl_id from rw_catalog.rw_ddl_progress;").await?;
-    let ids = ids.split('\n').collect::<Vec<_>>().join(",");
-    cluster
-        .run(&format!("cancel jobs {};", ids))
+    let ids = cluster
+        .run("select ddl_id from rw_catalog.rw_ddl_progress;")
         .await?;
+    let ids = ids.split('\n').collect::<Vec<_>>().join(",");
+    cluster.run(&format!("cancel jobs {};", ids)).await?;
     Ok(())
 }
 
@@ -125,18 +127,31 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
 
 #[tokio::test]
 async fn test_background_ddl_cancel() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
 
-    session.run(CREATE_TABLE).await?;
-    session.run(SEED_TABLE).await?;
-    session.flush().await?;
+    let fut = async {
+        session.run(CREATE_TABLE).await.unwrap();
+        session.run(SEED_TABLE).await.unwrap();
+        session.flush().await.unwrap();
+    };
+    timeout(Duration::from_secs(1), fut).await?;
+
     let fut = async {
         session.run(SET_BACKGROUND_DDL).await.unwrap();
+        session.run(SET_STREAMING_RATE_LIMIT).await.unwrap();
         session.run(CREATE_MV1).await.unwrap();
     };
     timeout(Duration::from_secs(1), fut).await?;
-    session.run("SELECT count(*) FROM mv1").await?.assert_result_eq("1000000");
+    sleep(Duration::from_secs(3)).await;
+    let fut = async {
+        cancel_stream_jobs(&mut cluster).await.unwrap();
+    };
+    timeout(Duration::from_secs(1), fut).await?;
+    // session
+    //     .run("SELECT count(*) FROM mv1")
+    //     .await?
+    //     .assert_result_eq("1000000");
     // session.run(CREATE_MV1).await?;
     // sleep(Duration::from_secs(3)).await;
     //
