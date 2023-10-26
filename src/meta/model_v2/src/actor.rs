@@ -14,51 +14,37 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::model_v2::{ObjectId, UserId};
+use crate::I32Array;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "user_privilege")]
+#[sea_orm(table_name = "actor")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: i32,
-    pub user_id: UserId,
-    pub oid: ObjectId,
-    pub granted_by: UserId,
-    pub actions: String,
-    pub with_grant_option: bool,
+    pub actor_id: i32,
+    pub fragment_id: i32,
+    pub status: Option<String>,
+    pub splits: Option<Json>,
+    pub parallel_unit_id: i32,
+    pub upstream_actor_ids: Option<I32Array>,
+    pub dispatchers: Option<Json>,
+    pub vnode_bitmap: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "super::object::Entity",
-        from = "Column::Oid",
-        to = "super::object::Column::Oid",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Object,
-    #[sea_orm(
-        belongs_to = "super::user::Entity",
-        from = "Column::GrantedBy",
-        to = "super::user::Column::UserId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    User2,
-    #[sea_orm(
-        belongs_to = "super::user::Entity",
-        from = "Column::UserId",
-        to = "super::user::Column::UserId",
+        belongs_to = "super::fragment::Entity",
+        from = "Column::FragmentId",
+        to = "super::fragment::Column::FragmentId",
         on_update = "NoAction",
         on_delete = "Cascade"
     )]
-    User1,
+    Fragment,
 }
 
-impl Related<super::object::Entity> for Entity {
+impl Related<super::fragment::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::Object.def()
+        Relation::Fragment.def()
     }
 }
 

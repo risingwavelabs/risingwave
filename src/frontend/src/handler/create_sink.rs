@@ -25,8 +25,8 @@ use risingwave_connector::sink::{
 };
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    CreateSink, CreateSinkStatement, EmitMode, ObjectName, Query, Select, SelectItem, SetExpr,
-    SinkSchema, TableFactor, TableWithJoins,
+    ConnectorSchema, CreateSink, CreateSinkStatement, EmitMode, ObjectName, Query, Select,
+    SelectItem, SetExpr, TableFactor, TableWithJoins,
 };
 
 use super::create_mv::get_column_names;
@@ -226,7 +226,7 @@ pub async fn handle_create_sink(
 /// Transforms the (format, encode, options) from sqlparser AST into an internal struct `SinkFormatDesc`.
 /// This is an analogy to (part of) [`crate::handler::create_source::try_bind_columns_from_source`]
 /// which transforms sqlparser AST `SourceSchemaV2` into `StreamSourceInfo`.
-fn bind_sink_format_desc(value: SinkSchema) -> Result<SinkFormatDesc> {
+fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
     use risingwave_connector::sink::catalog::{SinkEncode, SinkFormat};
     use risingwave_sqlparser::ast::{Encode as E, Format as F};
 
@@ -256,7 +256,7 @@ fn bind_sink_format_desc(value: SinkSchema) -> Result<SinkFormatDesc> {
     })
 }
 
-pub fn validate_compatibility(connector: &str, format_desc: &SinkSchema) -> Result<()> {
+pub fn validate_compatibility(connector: &str, format_desc: &ConnectorSchema) -> Result<()> {
     let compatible_formats = sink_compatible_format().get(connector).ok_or_else(|| {
         ErrorCode::BindError(format!(
             "connector {} is not supported by FORMAT ... ENCODE ... syntax",

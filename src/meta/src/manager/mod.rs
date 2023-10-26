@@ -28,7 +28,6 @@ pub use env::{MetaSrvEnv, *};
 pub use id::*;
 pub use idle::*;
 pub use notification::{LocalNotification, MessageStatus, NotificationManagerRef, *};
+pub use risingwave_meta_model_v2::prelude;
 pub use streaming_job::*;
 pub use system_param::*;
-
-pub use super::model_v2::prelude;

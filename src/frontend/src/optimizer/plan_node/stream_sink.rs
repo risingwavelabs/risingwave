@@ -37,6 +37,7 @@ use tracing::info;
 
 use super::derive::{derive_columns, derive_pk};
 use super::generic::GenericPlanRef;
+use super::stream::prelude::*;
 use super::utils::{childless_record, Distill, IndicesDisplay, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
@@ -49,7 +50,7 @@ const DOWNSTREAM_PK_KEY: &str = "primary_key";
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSink {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     input: PlanRef,
     sink_desc: SinkDesc,
 }
@@ -57,7 +58,11 @@ pub struct StreamSink {
 impl StreamSink {
     #[must_use]
     pub fn new(input: PlanRef, sink_desc: SinkDesc) -> Self {
-        let base = input.plan_base().clone_with_new_plan_id();
+        let base = input
+            .plan_base()
+            .into_stream()
+            .expect("input should be stream plan")
+            .clone_with_new_plan_id();
         Self {
             base,
             input,

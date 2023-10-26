@@ -51,7 +51,7 @@ use crate::{
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
-const UPSTREAM_SOURCE_KEY: &str = "connector";
+pub const UPSTREAM_SOURCE_KEY: &str = "connector";
 
 pub trait TryFromHashmap: Sized {
     fn try_from_hashmap(props: HashMap<String, String>) -> Result<Self>;

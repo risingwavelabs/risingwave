@@ -14,32 +14,35 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::model_v2::SchemaId;
+use crate::{ObjectId, UserId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "schema")]
+#[sea_orm(table_name = "object_dependency")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub schema_id: SchemaId,
-    pub name: String,
+    #[sea_orm(primary_key)]
+    pub id: i32,
+    pub oid: ObjectId,
+    pub used_by: UserId,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
         belongs_to = "super::object::Entity",
-        from = "Column::SchemaId",
+        from = "Column::Oid",
         to = "super::object::Column::Oid",
         on_update = "NoAction",
         on_delete = "Cascade"
     )]
-    Object,
-}
-
-impl Related<super::object::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Object.def()
-    }
+    Object2,
+    #[sea_orm(
+        belongs_to = "super::object::Entity",
+        from = "Column::UsedBy",
+        to = "super::object::Column::Oid",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    Object1,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

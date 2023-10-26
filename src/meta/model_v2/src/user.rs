@@ -14,37 +14,31 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::model_v2::I32Array;
+use crate::UserId;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "actor")]
+#[sea_orm(table_name = "user")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub actor_id: i32,
-    pub fragment_id: i32,
-    pub status: Option<String>,
-    pub splits: Option<Json>,
-    pub parallel_unit_id: i32,
-    pub upstream_actor_ids: Option<I32Array>,
-    pub dispatchers: Option<Json>,
-    pub vnode_bitmap: Option<String>,
+    pub user_id: UserId,
+    pub name: String,
+    pub is_super: bool,
+    pub can_create_db: bool,
+    pub can_create_user: bool,
+    pub can_login: bool,
+    pub auth_type: Option<String>,
+    pub auth_value: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(
-        belongs_to = "super::fragment::Entity",
-        from = "Column::FragmentId",
-        to = "super::fragment::Column::FragmentId",
-        on_update = "NoAction",
-        on_delete = "Cascade"
-    )]
-    Fragment,
+    #[sea_orm(has_many = "super::object::Entity")]
+    Object,
 }
 
-impl Related<super::fragment::Entity> for Entity {
+impl Related<super::object::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::Fragment.def()
+        Relation::Object.def()
     }
 }
 
