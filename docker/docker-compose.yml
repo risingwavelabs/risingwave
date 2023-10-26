@@ -39,7 +39,7 @@ services:
       timeout: 5s
       retries: 5
   compute-node-0:
-    <<: *rw-image
+    <<: *image
     command:
       - compute-node
       - "--listen-addr"
@@ -124,7 +124,7 @@ services:
       timeout: 5s
       retries: 5
   frontend-node-0:
-    <<: *rw-image
+    <<: *image
     command:
       - frontend-node
       - "--listen-addr"
@@ -181,7 +181,7 @@ services:
       timeout: 5s
       retries: 5
   meta-node-0:
-    <<: *rw-image
+    <<: *image
     command:
       - meta-node
       - "--listen-addr"
