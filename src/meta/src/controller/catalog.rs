@@ -14,6 +14,7 @@
 
 use std::iter;
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
@@ -25,7 +26,8 @@ use risingwave_meta_model_v2::{
     TableId, UserId,
 };
 use risingwave_pb::catalog::{
-    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+    PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
+    PbView,
 };
 use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
@@ -487,6 +489,65 @@ impl CatalogController {
                 PbRelationInfo::View(pb_view),
             )
             .await;
+        Ok(version)
+    }
+
+    pub async fn comment_on(&self, comment: PbComment) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        ensure_object_id(ObjectType::Database, comment.database_id, &txn).await?;
+        ensure_object_id(ObjectType::Schema, comment.schema_id, &txn).await?;
+        ensure_object_id(ObjectType::Table, comment.table_id, &txn).await?;
+
+        let mut table = Table::find_by_id(comment.table_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("table", comment.table_id))?;
+        let table_obj = Object::find_by_id(comment.table_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("table", comment.table_id))?;
+
+        if let Some(col_idx) = comment.column_index {
+            let column = table
+                .columns
+                .0
+                .get_mut(col_idx as usize)
+                .ok_or_else(|| MetaError::catalog_id_not_found("column", col_idx))?;
+            let column_desc = column.column_desc.as_mut().ok_or_else(|| {
+                anyhow!(
+                    "column desc at index {} for table id {} not found",
+                    col_idx,
+                    comment.table_id
+                )
+            })?;
+            column_desc.description = comment.description;
+            table::ActiveModel {
+                table_id: ActiveValue::Set(comment.table_id),
+                columns: ActiveValue::Set(table.columns.clone()),
+                ..Default::default()
+            }
+            .update(&txn)
+            .await?;
+        } else {
+            table.description = comment.description.clone();
+            table::ActiveModel {
+                table_id: ActiveValue::Set(comment.table_id),
+                description: ActiveValue::Set(comment.description),
+                ..Default::default()
+            }
+            .update(&txn)
+            .await?;
+        };
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend_relation_info(
+                NotificationOperation::Update,
+                PbRelationInfo::Table(ObjectModel(table, table_obj).into()),
+            )
+            .await;
+
         Ok(version)
     }
 
