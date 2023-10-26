@@ -738,12 +738,12 @@ SELECT chr(65);
 SELECT repeat('Pg', 4);
 SELECT repeat('Pg', -4);
 
---@ SELECT SUBSTRING('1234567890'::bytea FROM 3) "34567890";
---@ SELECT SUBSTRING('1234567890'::bytea FROM 4 FOR 3) AS "456";
---@ SELECT SUBSTRING('string'::bytea FROM 2 FOR 2147483646) AS "tring";
---@ SELECT SUBSTRING('string'::bytea FROM -10 FOR 2147483646) AS "string";
---@ SELECT SUBSTRING('string'::bytea FROM -10 FOR -2147483646) AS "error";
---@ 
+SELECT SUBSTRING('1234567890'::bytea FROM 3) "34567890";
+SELECT SUBSTRING('1234567890'::bytea FROM 4 FOR 3) AS "456";
+SELECT SUBSTRING('string'::bytea FROM 2 FOR 2147483646) AS "tring";
+SELECT SUBSTRING('string'::bytea FROM -10 FOR 2147483646) AS "string";
+SELECT SUBSTRING('string'::bytea FROM -10 FOR -2147483646) AS "error";
+
 --@ SELECT trim(E'\\000'::bytea from E'\\000Tom\\000'::bytea);
 --@ SELECT trim(leading E'\\000'::bytea from E'\\000Tom\\000'::bytea);
 --@ SELECT trim(trailing E'\\000'::bytea from E'\\000Tom\\000'::bytea);
