@@ -215,6 +215,7 @@ impl StreamNode for StreamHashAgg {
                 .collect(),
             row_count_index: self.row_count_idx as u32,
             emit_on_window_close: self.base.emit_on_window_close,
+            version: PbAggNodeVersion::Issue12140 as _,
         })
     }
 }
