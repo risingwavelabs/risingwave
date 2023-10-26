@@ -31,6 +31,7 @@ use crate::MetaError;
 #[allow(dead_code)]
 pub mod catalog;
 pub mod cluster;
+pub mod fragment;
 pub mod rename;
 pub mod system_param;
 pub mod utils;

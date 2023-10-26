@@ -25,8 +25,6 @@ use risingwave_meta_model_v2::{
     view, ColumnCatalogArray, ConnectionId, DatabaseId, FunctionId, ObjectId, PrivateLinkService,
     SchemaId, SourceId, TableId, UserId,
 };
-use risingwave_common::util::stream_graph_visitor::visit_stream_node;
-
 use risingwave_pb::catalog::{
     PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
     PbView,
@@ -35,10 +33,7 @@ use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
-use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::{PbRelation, PbRelationGroup};
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{StreamActor, StreamNode};
 use sea_orm::{
     ActiveModelTrait, ActiveValue, ColumnTrait, DatabaseConnection, DatabaseTransaction,
     EntityTrait, QueryFilter, QuerySelect, TransactionTrait,
@@ -54,20 +49,13 @@ use crate::controller::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::manager::{MetaSrvEnv, NotificationVersion};
-use crate::model_v2::object::ObjectType;
-use crate::model_v2::prelude::*;
-use crate::model_v2::{
-    actor, connection, database, fragment, function, index, object, object_dependency, schema,
-    sink, source, table, view, ConnectionId, DatabaseId, FunctionId, ObjectId, PrivateLinkService,
-    SchemaId, SourceId, TableId, UserId,
-};
 use crate::rpc::ddl_controller::DropMode;
 use crate::{MetaError, MetaResult};
 
 /// `CatalogController` is the controller for catalog related operations, including database, schema, table, view, etc.
 pub struct CatalogController {
-    env: MetaSrvEnv,
-    inner: RwLock<CatalogControllerInner>,
+    pub(crate) env: MetaSrvEnv,
+    pub(crate) inner: RwLock<CatalogControllerInner>,
 }
 
 #[derive(Clone, Default)]
@@ -91,8 +79,8 @@ impl CatalogController {
     }
 }
 
-struct CatalogControllerInner {
-    db: DatabaseConnection,
+pub(crate) struct CatalogControllerInner {
+    pub(crate) db: DatabaseConnection,
 }
 
 impl CatalogController {
@@ -723,109 +711,6 @@ impl CatalogController {
         ))
     }
 
-    pub async fn load_fragment(
-        &self,
-        fragment_id: crate::model::FragmentId,
-    ) -> MetaResult<PbFragment> {
-        // let inner = self.inner.read().await;
-        //
-        // let all = Fragment::find_by_id(fragment_id)
-        //     .find_also_related(Actor)
-        //     .all(&inner.db)
-        //     .await?;
-        //
-        // fn uname(fragment: Fragment, actors: Vec<Actor>) -> PbFragment {
-        //     let Fragment {} = fragment;
-        // };
-        //
-        // let actors = vec![];
-        //
-
-        fn uname(fragment: fragment::Model, actors: Vec<actor::Model>) -> MetaResult<PbFragment> {
-            let fragment::Model {
-                fragment_id,
-                table_id,
-                fragment_type_mask,
-                distribution_type,
-                stream_node,
-                vnode_mapping,
-                state_table_ids,
-                upstream_fragment_id,
-                dispatcher_type,
-                dist_key_indices,
-                output_indices,
-            } = fragment;
-
-            let mut stream_node_template = stream_node.into_inner();
-
-            let mut stream_actors = vec![];
-
-            for actor in actors {
-                let actor::Model {
-                    actor_id,
-                    fragment_id,
-                    upstream_actor_ids,
-                    dispatchers,
-                    vnode_bitmap,
-                    ..
-                } = actor;
-
-                let mut nodes = stream_node_template.clone();
-
-                let mut upstream_fragment_actors = upstream_actor_ids.into_inner();
-
-                visit_stream_node(&mut nodes, |body| {
-                    if let NodeBody::Merge(m) = body
-                        && let Some(upstream_actor_ids) = upstream_fragment_actors.get(&(m.upstream_fragment_id as i32))
-                    {
-                        m.upstream_actor_id = upstream_actor_ids.into_iter().map(|actor_id| *actor_id as _).collect();
-                    }
-                });
-
-                let vnode_bitmap = vnode_bitmap.map(|vnode_bitmap| vnode_bitmap.into_inner());
-
-                let upstream_actor_id = upstream_fragment_actors
-                    .values()
-                    .flatten()
-                    .map(|actor_id| *actor_id as _)
-                    .collect();
-
-                stream_actors.push(StreamActor {
-                    actor_id: actor_id as _,
-                    fragment_id: fragment_id as _,
-                    nodes: Some(nodes),
-                    dispatcher: dispatchers.into_inner(),
-                    upstream_actor_id,
-                    vnode_bitmap,
-                    mview_definition: "".to_string(),
-                })
-            }
-
-            let upstream_fragment_ids = upstream_fragment_id
-                .map(|upstream_fragment_id| upstream_fragment_id.into_inner())
-                .unwrap_or_default()
-                .into_iter()
-                .map(|id| id as u32)
-                .collect();
-
-            let fragment = PbFragment {
-                fragment_id: fragment_id as _,
-                fragment_type_mask: 0,
-                distribution_type: 0,
-                actors: stream_actors,
-                vnode_mapping: None,
-                state_table_ids: vec![],
-                upstream_fragment_ids,
-            };
-
-            Ok(fragment)
-        }
-
-        todo!()
-
-        // Ok(ObjectModel(conn, obj.unwrap()).into())
-    }
-
     pub async fn alter_relation_name(
         &self,
         object_type: ObjectType,
@@ -967,16 +852,12 @@ impl CatalogController {
 #[cfg(not(madsim))]
 mod tests {
     use risingwave_common::catalog::DEFAULT_SUPER_USER_ID;
-    use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
-    use risingwave_pb::stream_plan::PbFragmentTypeFlag;
 
     use super::*;
 
     const TEST_DATABASE_ID: DatabaseId = 1;
     const TEST_SCHEMA_ID: SchemaId = 2;
     const TEST_OWNER_ID: UserId = 1;
-
-    const TEST_FRAGMENT_ID: i32 = 1;
 
     #[tokio::test]
     async fn test_create_database() -> MetaResult<()> {
@@ -1060,38 +941,6 @@ mod tests {
             .one(&mgr.inner.read().await.db)
             .await?
             .is_none());
-
-        Ok(())
-    }
-
-    #[tokio::test]
-    async fn test_load_fragment() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
-
-        let pb_fragment = PbFragment {
-            fragment_id: TEST_FRAGMENT_ID as _,
-            fragment_type_mask: PbFragmentTypeFlag::Source as _,
-            distribution_type: PbFragmentDistributionType::Hash as _,
-            actors: vec![],
-            vnode_mapping: None,
-            state_table_ids: vec![],
-            upstream_fragment_ids: vec![],
-        };
-        // let pb_view = PbView {
-        //     schema_id: TEST_SCHEMA_ID,
-        //     database_id: TEST_DATABASE_ID,
-        //     name: "view".to_string(),
-        //     owner: TEST_OWNER_ID,
-        //     sql: "CREATE VIEW view AS SELECT 1".to_string(),
-        //     ..Default::default()
-        // };
-
-        mgr.create_view(pb_view.clone()).await?;
-        assert!(mgr.create_view(pb_view).await.is_err());
-
-        let view = View::find().one(&mgr.inner.read().await.db).await?.unwrap();
-        mgr.drop_relation(ObjectType::View, view.view_id, DropMode::Cascade)
-            .await?;
 
         Ok(())
     }

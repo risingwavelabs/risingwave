@@ -14,18 +14,18 @@
 
 use sea_orm::entity::prelude::*;
 
-use crate::I32Array;
-use crate::model_v2::{Dispatchers, ConnectorSplits, VnodeBitmap, I32Array};
-
-use crate::model_v2::{ActorUpstreamActors, ConnectorSplits, Dispatchers, I32Array, VnodeBitmap};
+use crate::{
+    ActorId, ActorStatus, ActorUpstreamActors, ConnectorSplits, Dispatchers, FragmentId,
+    VnodeBitmap,
+};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "actor")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub actor_id: i32,
-    pub fragment_id: i32,
-    pub status: Option<String>,
+    pub actor_id: ActorId,
+    pub fragment_id: FragmentId,
+    pub status: ActorStatus,
     pub splits: Option<ConnectorSplits>,
     pub parallel_unit_id: i32,
     pub upstream_actor_ids: ActorUpstreamActors,
