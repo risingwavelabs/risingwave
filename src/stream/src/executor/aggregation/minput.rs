@@ -107,7 +107,7 @@ impl MaterializedInputState {
         if agg_call.distinct {
             if version < PbAggNodeVersion::Issue12140 {
                 panic!(
-                    "RisingWave versions before issue #12140 is resolved has critical bug, you may need to re-create current MV to ensure correctness."
+                    "RisingWave versions before issue #12140 is resolved has critical bug, you must re-create current MV to ensure correctness."
                 );
             }
 
