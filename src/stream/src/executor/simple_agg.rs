@@ -262,6 +262,19 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             table.init_epoch(barrier.epoch);
         });
 
+        let mut distinct_dedup = DistinctDeduplicater::new(
+            &this.agg_calls,
+            &this.watermark_epoch,
+            &this.distinct_dedup_tables,
+            this.actor_ctx.id,
+            this.metrics.clone(),
+        );
+        distinct_dedup.dedup_caches_mut().for_each(|cache| {
+            cache.update_epoch(barrier.epoch.curr);
+        });
+
+        yield Message::Barrier(barrier);
+
         let mut vars = ExecutionVars {
             // This will fetch previous agg states from the intermediate state table.
             agg_group: AggGroup::create(
@@ -277,21 +290,9 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 &this.input_schema,
             )
             .await?,
-            distinct_dedup: DistinctDeduplicater::new(
-                &this.agg_calls,
-                &this.watermark_epoch,
-                &this.distinct_dedup_tables,
-                this.actor_ctx.id,
-                this.metrics.clone(),
-            ),
+            distinct_dedup,
             state_changed: false,
         };
-
-        vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
-            cache.update_epoch(barrier.epoch.curr);
-        });
-
-        yield Message::Barrier(barrier);
 
         #[for_await]
         for msg in input {
