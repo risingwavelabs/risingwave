@@ -23,6 +23,8 @@ docker compose exec clickhouse-server bash /opt/clickhouse/clickhouse-sql/run-sq
 - create_mv.sql
 - create_sink.sql
 
+We only support `upsert` with clickhouse' `CollapsingMergeTree` and `VersionedCollapsingMergeTree`
+
 4. Execute a simple query:
 
 ```sh

@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use jsonbb::{Value, ValueRef};
 use risingwave_common::types::{JsonbRef, JsonbVal};
 use risingwave_expr::function;
-use serde_json::{json, Value};
 
 /// Concatenates the two jsonbs.
 ///
@@ -59,43 +59,35 @@ use serde_json::{json, Value};
 /// ```
 #[function("jsonb_cat(jsonb, jsonb) -> jsonb")]
 pub fn jsonb_cat(left: JsonbRef<'_>, right: JsonbRef<'_>) -> JsonbVal {
-    let left_val = left.value().clone();
-    let right_val = right.value().clone();
-    match (left_val, right_val) {
+    match (left.into(), right.into()) {
         // left and right are object based.
         // This would have left:{'a':1}, right:{'b':2} -> {'a':1,'b':2}
-        (Value::Object(mut left_map), Value::Object(right_map)) => {
-            left_map.extend(right_map);
-            JsonbVal::from(Value::Object(left_map))
+        (ValueRef::Object(left), ValueRef::Object(right)) => {
+            JsonbVal::from(Value::object(left.iter().chain(right.iter())))
         }
 
         // left and right are array-based.
         // This would merge both arrays into one array.
         // This would have left:[1,2], right:[3,4] -> [1,2,3,4]
-        (Value::Array(mut left_arr), Value::Array(right_arr)) => {
-            left_arr.extend(right_arr);
-            JsonbVal::from(Value::Array(left_arr))
+        (ValueRef::Array(left), ValueRef::Array(right)) => {
+            JsonbVal::from(Value::array(left.iter().chain(right.iter())))
         }
 
         // One operand is an array, and the other is a single element.
         // This would insert the non-array value as another element into the array
         // Eg left:[1,2] right: {'a':1} -> [1,2,{'a':1}]
-        (Value::Array(mut left_arr), single_val) => {
-            left_arr.push(single_val);
-            JsonbVal::from(Value::Array(left_arr))
-        }
+        (ValueRef::Array(left), value) => JsonbVal::from(Value::array(left.iter().chain([value]))),
 
         // One operand is an array, and the other is a single element.
         // This would insert the non-array value as another element into the array
         // Eg left:{'a':1} right:[1,2] -> [{'a':1},1,2]
-        (single_val, Value::Array(mut right_arr)) => {
-            right_arr.insert(0, single_val);
-            JsonbVal::from(Value::Array(right_arr))
+        (value, ValueRef::Array(right)) => {
+            JsonbVal::from(Value::array([value].into_iter().chain(right.iter())))
         }
 
         // Both are non-array inputs.
         // Both elements would be placed together in an array
         // Eg left:1 right: 2 -> [1,2]
-        (left, right) => JsonbVal::from(json!([left, right])),
+        (left, right) => JsonbVal::from(Value::array([left, right])),
     }
 }
