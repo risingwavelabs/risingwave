@@ -21,8 +21,8 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use prometheus::core::{
-    Atomic, AtomicI64, AtomicU64, Collector, Desc, GenericCounter, GenericCounterVec, GenericGauge,
-    GenericGaugeVec, MetricVec, MetricVecBuilder,
+    Atomic, AtomicF64, AtomicI64, AtomicU64, Collector, Desc, GenericCounter, GenericCounterVec,
+    GenericGauge, GenericGaugeVec, MetricVec, MetricVecBuilder,
 };
 use prometheus::proto::MetricFamily;
 use prometheus::{Histogram, HistogramVec};
@@ -66,6 +66,20 @@ macro_rules! register_guarded_histogram_vec_with_registry {
 }
 
 #[macro_export]
+macro_rules! register_guarded_gauge_vec_with_registry {
+    ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
+        let inner = prometheus::GaugeVec::new(prometheus::opts!($NAME, $HELP), $LABELS_NAMES);
+        inner.and_then(|inner| {
+            let inner = $crate::metrics::__extract_gauge_builder(inner);
+            let label_guarded =
+                $crate::metrics::LabelGuardedGaugeVec::new(inner, { $LABELS_NAMES });
+            let result = ($REGISTRY).register(Box::new(label_guarded.clone()));
+            result.map(move |()| label_guarded)
+        })
+    }};
+}
+
+#[macro_export]
 macro_rules! register_guarded_int_gauge_vec_with_registry {
     ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
         let inner = prometheus::IntGaugeVec::new(prometheus::opts!($NAME, $HELP), $LABELS_NAMES);
@@ -102,11 +116,14 @@ pub type LabelGuardedIntCounterVec<const N: usize> =
     LabelGuardedMetricVec<VecBuilderOfCounter<AtomicU64>, N>;
 pub type LabelGuardedIntGaugeVec<const N: usize> =
     LabelGuardedMetricVec<VecBuilderOfGauge<AtomicI64>, N>;
+pub type LabelGuardedGaugeVec<const N: usize> =
+    LabelGuardedMetricVec<VecBuilderOfGauge<AtomicF64>, N>;
 
 pub type LabelGuardedHistogram<const N: usize> = LabelGuardedMetric<VecBuilderOfHistogram, N>;
 pub type LabelGuardedIntCounter<const N: usize> =
     LabelGuardedMetric<VecBuilderOfCounter<AtomicU64>, N>;
 pub type LabelGuardedIntGauge<const N: usize> = LabelGuardedMetric<VecBuilderOfGauge<AtomicI64>, N>;
+pub type LabelGuardedGauge<const N: usize> = LabelGuardedMetric<VecBuilderOfGauge<AtomicF64>, N>;
 
 fn gen_test_label<const N: usize>() -> [&'static str; N] {
     const TEST_LABELS: [&str; 5] = ["test1", "test2", "test3", "test4", "test5"];
@@ -219,6 +236,14 @@ impl<const N: usize> LabelGuardedIntGaugeVec<N> {
     }
 }
 
+impl<const N: usize> LabelGuardedGaugeVec<N> {
+    pub fn test_gauge_vec() -> Self {
+        let registry = prometheus::Registry::new();
+        register_guarded_gauge_vec_with_registry!("test", "test", &gen_test_label::<N>(), &registry)
+            .unwrap()
+    }
+}
+
 impl<const N: usize> LabelGuardedHistogramVec<N> {
     pub fn test_histogram_vec() -> Self {
         let registry = prometheus::Registry::new();
@@ -290,6 +315,12 @@ impl<const N: usize> LabelGuardedIntCounter<N> {
 impl<const N: usize> LabelGuardedIntGauge<N> {
     pub fn test_int_gauge() -> Self {
         LabelGuardedIntGaugeVec::<N>::test_int_gauge_vec().with_test_label()
+    }
+}
+
+impl<const N: usize> LabelGuardedGauge<N> {
+    pub fn test_gauge() -> Self {
+        LabelGuardedGaugeVec::<N>::test_gauge_vec().with_test_label()
     }
 }
 
