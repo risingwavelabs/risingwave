@@ -919,7 +919,7 @@ impl BatchPlanFragmenter {
 
         if let Some(scan_node) = node.as_batch_seq_scan() {
             let name = scan_node.core().table_name.to_owned();
-            let info = if scan_node.core().is_sys_table {
+            let info = if scan_node.core().is_sys_table() {
                 TableScanInfo::system_table(name)
             } else {
                 let table_desc = &*scan_node.core().table_desc;

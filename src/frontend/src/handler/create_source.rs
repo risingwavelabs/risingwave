@@ -93,25 +93,21 @@ async fn extract_json_table_schema(
 }
 
 pub fn debezium_cdc_source_schema() -> Vec<ColumnCatalog> {
-    let debezium_columns = vec![("payload", DataType::Jsonb)];
-    let mut columns = debezium_columns
-        .into_iter()
-        .map(|(name, data_type)| ColumnCatalog {
+    let columns = vec![
+        ColumnCatalog {
             column_desc: ColumnDesc {
-                data_type,
+                data_type: DataType::Jsonb,
                 column_id: ColumnId::placeholder(),
-                name: name.to_string(),
+                name: "payload".to_string(),
                 field_descs: vec![],
                 type_name: "".to_string(),
                 generated_or_default_column: None,
             },
             is_hidden: false,
-        })
-        .collect_vec();
-
-    // Add offset column to the end
-    columns.push(ColumnCatalog::cdc_offset_column());
-    columns.push(ColumnCatalog::cdc_table_name_column());
+        },
+        ColumnCatalog::offset_column(),
+        ColumnCatalog::cdc_table_name_column(),
+    ];
     columns
 }
 
@@ -1171,7 +1167,6 @@ pub async fn handle_create_source(
 
     check_source_schema(&with_properties, row_id_index, &columns)?;
 
-    // let row_id_index = row_id_index.map(|index| index as _);
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
 
     let mut with_options = WithOptions::new(with_properties);

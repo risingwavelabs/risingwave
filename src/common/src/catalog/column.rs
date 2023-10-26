@@ -341,7 +341,7 @@ impl ColumnCatalog {
         }
     }
 
-    pub fn cdc_offset_column() -> Self {
+    pub fn offset_column() -> Self {
         Self {
             column_desc: offset_column_desc(),
             is_hidden: true,

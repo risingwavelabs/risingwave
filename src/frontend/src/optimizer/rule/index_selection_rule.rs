@@ -66,6 +66,7 @@ use crate::expr::{
     FunctionCall, InputRef,
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{
     generic, ColumnPruningContext, LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode,
     PlanTreeNodeBinary, PredicatePushdown, PredicatePushdownContext,
@@ -221,8 +222,7 @@ impl IndexSelectionRule {
 
         let index_scan = LogicalScan::create(
             index.index_table.name.clone(),
-            false,
-            false,
+            ScanTableType::default(),
             index.index_table.table_desc().into(),
             vec![],
             logical_scan.ctx(),
@@ -232,8 +232,7 @@ impl IndexSelectionRule {
 
         let primary_table_scan = LogicalScan::create(
             index.primary_table.name.clone(),
-            false,
-            false,
+            ScanTableType::default(),
             index.primary_table.table_desc().into(),
             vec![],
             logical_scan.ctx(),
@@ -333,8 +332,7 @@ impl IndexSelectionRule {
 
         let primary_table_scan = LogicalScan::create(
             logical_scan.table_name().to_string(),
-            false,
-            false,
+            ScanTableType::default(),
             primary_table_desc.clone().into(),
             vec![],
             logical_scan.ctx(),
@@ -562,8 +560,7 @@ impl IndexSelectionRule {
 
         let primary_access = generic::Scan::new(
             logical_scan.table_name().to_string(),
-            false,
-            false,
+            ScanTableType::default(),
             primary_table_desc
                 .pk
                 .iter()
@@ -606,8 +603,7 @@ impl IndexSelectionRule {
         Some(
             generic::Scan::new(
                 index.index_table.name.to_string(),
-                false,
-                false,
+                ScanTableType::default(),
                 index
                     .primary_table_pk_ref_to_index_table()
                     .iter()

@@ -29,13 +29,21 @@ use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
 
+#[derive(Debug, Default, Clone, Educe)]
+#[educe(PartialEq, Eq, Hash)]
+pub enum ScanTableType {
+    #[default]
+    General,
+    SysTable,
+    CdcTable,
+}
+
 /// [`Scan`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
 pub struct Scan {
     pub table_name: String,
-    pub is_sys_table: bool,
-    pub is_cdc_table: bool,
+    pub scan_table_type: ScanTableType,
     /// Include `output_col_idx` and columns required in `predicate`
     pub required_col_idx: Vec<usize>,
     pub output_col_idx: Vec<usize>,
@@ -70,7 +78,7 @@ impl Scan {
     ///
     /// Return `None` if the table's distribution key are not all in the `output_col_idx`.
     pub fn distribution_key(&self) -> Option<Vec<usize>> {
-        if self.is_cdc_table {
+        if self.is_cdc_table() {
             return None;
         }
 
@@ -96,7 +104,7 @@ impl Scan {
     }
 
     pub fn primary_key(&self) -> &[ColumnOrder] {
-        if self.is_cdc_table {
+        if self.is_cdc_table() {
             &self.cdc_table_desc.pk
         } else {
             &self.table_desc.pk
@@ -104,7 +112,7 @@ impl Scan {
     }
 
     pub fn watermark_columns(&self) -> FixedBitSet {
-        if self.is_cdc_table {
+        if self.is_cdc_table() {
             FixedBitSet::with_capacity(self.get_table_columns().len())
         } else {
             let watermark_columns = &self.table_desc.watermark_columns;
@@ -234,8 +242,7 @@ impl Scan {
 
         Self::new(
             index_name.to_string(),
-            false,
-            false,
+            ScanTableType::default(),
             new_output_col_idx,
             index_table_desc,
             vec![],
@@ -250,8 +257,7 @@ impl Scan {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         table_name: String,
-        is_sys_table: bool,
-        is_cdc_table: bool,
+        scan_table_type: ScanTableType,
         output_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
         indexes: Vec<Rc<IndexCatalog>>,
@@ -262,8 +268,7 @@ impl Scan {
     ) -> Self {
         Self::new_inner(
             table_name,
-            is_sys_table,
-            is_cdc_table,
+            scan_table_type,
             output_col_idx,
             table_desc,
             Rc::new(CdcTableDesc::default()),
@@ -284,8 +289,7 @@ impl Scan {
     ) -> Self {
         Self::new_inner(
             table_name,
-            false,
-            true,
+            ScanTableType::CdcTable,
             output_col_idx,
             Rc::new(TableDesc::default()),
             cdc_table_desc,
@@ -300,8 +304,7 @@ impl Scan {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_inner(
         table_name: String,
-        is_sys_table: bool,
-        is_cdc_table: bool,
+        scan_table_type: ScanTableType,
         output_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
         cdc_table_desc: Rc<CdcTableDesc>,
@@ -329,8 +332,7 @@ impl Scan {
 
         Self {
             table_name,
-            is_sys_table,
-            is_cdc_table,
+            scan_table_type,
             required_col_idx,
             output_col_idx,
             table_desc,
@@ -382,7 +384,7 @@ impl GenericPlanNode for Scan {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        if self.is_cdc_table {
+        if self.is_cdc_table() {
             Some(self.cdc_table_desc.stream_key.clone())
         } else {
             let id_to_op_idx =
@@ -415,11 +417,19 @@ impl GenericPlanNode for Scan {
 
 impl Scan {
     pub fn get_table_columns(&self) -> &[ColumnDesc] {
-        if self.is_cdc_table {
+        if self.is_cdc_table() {
             &self.cdc_table_desc.columns
         } else {
             &self.table_desc.columns
         }
+    }
+
+    pub fn is_sys_table(&self) -> bool {
+        matches!(self.scan_table_type, ScanTableType::SysTable)
+    }
+
+    pub fn is_cdc_table(&self) -> bool {
+        matches!(self.scan_table_type, ScanTableType::CdcTable)
     }
 
     /// Get the descs of the output columns.

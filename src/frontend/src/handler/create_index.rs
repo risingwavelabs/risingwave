@@ -34,6 +34,7 @@ use crate::catalog::CatalogError;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
@@ -323,8 +324,7 @@ fn assemble_materialize(
 
     let logical_scan = LogicalScan::create(
         table_name,
-        false,
-        false,
+        ScanTableType::default(),
         table_desc.clone(),
         // Index table has no indexes.
         vec![],

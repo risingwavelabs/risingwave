@@ -26,9 +26,7 @@ use risingwave_common::catalog::{
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
-use risingwave_connector::source::cdc::{
-    CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, MYSQL_CDC_CONNECTOR,
-};
+use risingwave_connector::source::cdc::{CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY};
 use risingwave_connector::source::external::{
     CdcTableType, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
 };
@@ -675,7 +673,7 @@ fn gen_table_plan_inner(
             let mut source_columns = columns.clone();
             if let Some(t) = cdc_table_type && t.can_backfill() {
                 // Append the offset column to be used in the cdc backfill
-                let offset_column = ColumnCatalog::cdc_offset_column();
+                let offset_column = ColumnCatalog::offset_column();
                 source_columns.push(offset_column);
             }
             source_columns
@@ -855,7 +853,7 @@ fn derive_connect_properties(
     let mut connect_properties = source.properties.clone();
     if let Some(connector) = source.properties.get(UPSTREAM_SOURCE_KEY) {
         let table_name = match connector.as_str() {
-            MYSQL_CDC_CONNECTOR => {
+            "mysql-cdc" => {
                 let db_name = connect_properties.get(DATABASE_NAME_KEY).ok_or_else(|| {
                     anyhow!("{} not found in source properties", DATABASE_NAME_KEY)
                 })?;
@@ -865,8 +863,7 @@ fn derive_connect_properties(
                     .strip_prefix(prefix.as_str())
                     .ok_or_else(|| anyhow!("external table name must contain database prefix"))?
             }
-            #[allow(unused_variables, non_snake_case)]
-            POSTGRES_CDC_CONNECTOR => {
+            "postgres-cdc" => {
                 let schema_name = connect_properties
                     .get(SCHEMA_NAME_KEY)
                     .ok_or_else(|| anyhow!("{} not found in source properties", SCHEMA_NAME_KEY))?;
@@ -875,6 +872,12 @@ fn derive_connect_properties(
                 external_table_name
                     .strip_prefix(prefix.as_str())
                     .ok_or_else(|| anyhow!("external table name must contain schema prefix"))?
+            }
+            _ => {
+                return Err(RwError::from(anyhow!(
+                    "connector {} is not supported for cdc table",
+                    connector
+                )));
             }
         };
         connect_properties.insert(TABLE_NAME_KEY.into(), table_name.into());

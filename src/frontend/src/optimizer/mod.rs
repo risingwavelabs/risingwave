@@ -291,7 +291,7 @@ impl PlanRoot {
     }
 
     /// Generate optimized stream plan
-    pub fn gen_optimized_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
+    fn gen_optimized_stream_plan(&mut self, emit_on_window_close: bool) -> Result<PlanRef> {
         let ctx = self.plan.ctx();
         let _explain_trace = ctx.is_explain_trace();
 
@@ -385,8 +385,6 @@ impl PlanRoot {
                     ctx.trace("Logical Rewrite For Stream:");
                     ctx.trace(plan.explain_to_string());
                 }
-
-                tracing::info!("Logical Rewrite For Stream: {}", plan.explain_to_string());
 
                 self.required_dist =
                     out_col_change.rewrite_required_distribution(&self.required_dist);
@@ -618,7 +616,7 @@ fn exist_and_no_exchange_before(plan: &PlanRef, is_candidate: fn(&PlanRef) -> bo
 fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> bool {
     fn is_user_table(plan: &PlanRef) -> bool {
         plan.as_batch_seq_scan()
-            .map(|node| !node.core().is_sys_table)
+            .map(|node| !node.core().is_sys_table())
             .unwrap_or(false)
     }
 
@@ -651,7 +649,7 @@ fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> boo
 fn require_additional_exchange_on_root_in_local_mode(plan: PlanRef) -> bool {
     fn is_user_table(plan: &PlanRef) -> bool {
         plan.as_batch_seq_scan()
-            .map(|node| !node.core().is_sys_table)
+            .map(|node| !node.core().is_sys_table())
             .unwrap_or(false)
     }
 

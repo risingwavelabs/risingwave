@@ -32,6 +32,7 @@ use super::{
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -64,8 +65,7 @@ impl LogicalScan {
     /// Create a [`LogicalScan`] node. Used by planner.
     pub fn create(
         table_name: String, // explain-only
-        is_sys_table: bool,
-        is_cdc_table: bool,
+        scan_table_type: ScanTableType,
         table_desc: Rc<TableDesc>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
@@ -74,8 +74,7 @@ impl LogicalScan {
     ) -> Self {
         generic::Scan::new(
             table_name,
-            is_sys_table,
-            is_cdc_table,
+            scan_table_type,
             (0..table_desc.columns.len()).collect(),
             table_desc,
             indexes,
@@ -105,12 +104,16 @@ impl LogicalScan {
         &self.core.table_name
     }
 
+    pub fn scan_table_type(&self) -> &ScanTableType {
+        &self.core.scan_table_type
+    }
+
     pub fn is_sys_table(&self) -> bool {
-        self.core.is_sys_table
+        self.core.is_sys_table()
     }
 
     pub fn is_cdc_table(&self) -> bool {
-        self.core.is_cdc_table
+        matches!(self.core.scan_table_type, ScanTableType::CdcTable)
     }
 
     pub fn for_system_time_as_of_proctime(&self) -> bool {
@@ -274,8 +277,7 @@ impl LogicalScan {
 
         let scan_without_predicate = generic::Scan::new(
             self.table_name().to_string(),
-            self.is_sys_table(),
-            self.is_cdc_table(),
+            self.scan_table_type().clone(),
             self.required_col_idx().to_vec(),
             self.core.table_desc.clone(),
             self.indexes().to_vec(),
@@ -295,8 +297,7 @@ impl LogicalScan {
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
         generic::Scan::new_inner(
             self.table_name().to_string(),
-            self.is_sys_table(),
-            self.is_cdc_table(),
+            self.scan_table_type().clone(),
             self.output_col_idx().to_vec(),
             self.core.table_desc.clone(),
             self.core.cdc_table_desc.clone(),
@@ -312,8 +313,7 @@ impl LogicalScan {
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
         generic::Scan::new_inner(
             self.table_name().to_string(),
-            self.is_sys_table(),
-            self.is_cdc_table(),
+            self.scan_table_type().clone(),
             output_col_idx,
             self.core.table_desc.clone(),
             self.core.cdc_table_desc.clone(),
@@ -427,7 +427,6 @@ impl PredicatePushdown for LogicalScan {
         // skip pushdown if the table is cdc table
         if self.is_cdc_table() {
             return self.clone().into();
-            // return LogicalScan::from(self.core.clone()).into();
         }
 
         // If the predicate contains `CorrelatedInputRef` or `now()`. We don't push down.
@@ -449,14 +448,10 @@ impl PredicatePushdown for LogicalScan {
             .extract_if(|expr| expr.count_nows() > 0 || HasCorrelated {}.visit_expr(expr))
             .collect();
 
-        let predicate = if predicate.always_true() {
-            predicate
-        } else {
-            predicate.rewrite_expr(&mut ColIndexMapping::with_target_size(
-                self.output_col_idx().iter().map(|i| Some(*i)).collect(),
-                self.table_desc().columns.len(),
-            ))
-        };
+        let predicate = predicate.rewrite_expr(&mut ColIndexMapping::with_target_size(
+            self.output_col_idx().iter().map(|i| Some(*i)).collect(),
+            self.table_desc().columns.len(),
+        ));
         if non_pushable_predicate.is_empty() {
             self.clone_with_predicate(predicate.and(self.predicate().clone()))
                 .into()
