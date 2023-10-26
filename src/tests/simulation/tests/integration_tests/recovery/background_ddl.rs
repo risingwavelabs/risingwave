@@ -17,7 +17,13 @@ use std::time::Duration;
 use anyhow::Result;
 use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts};
 use risingwave_simulation::utils::AssertResult;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
+
+const CREATE_TABLE: &str = "CREATE TABLE t(v1 int, v2 varchar);";
+const SEED_TABLE: &str = "INSERT INTO t SELECT generate_series, 'abcd' FROM generate_series(1, 1000000);";
+const FLUSH: &str = "flush;";
+const SET_BACKGROUND_DDL: &str = "SET BACKGROUND_DDL=true;";
+const CREATE_MV1: &str = "CREATE MATERIALIZED VIEW mv1 as SELECT * FROM t;";
 
 async fn kill_cn_and_wait_recover(cluster: &Cluster) {
     // Kill it again
@@ -46,9 +52,18 @@ async fn kill_and_wait_recover(cluster: &Cluster) {
     sleep(Duration::from_secs(20)).await;
 }
 
+async fn cancel_stream_jobs(cluster: &mut Cluster) -> Result<()> {
+    let ids = cluster.run("select ddl_id from rw_catalog.rw_ddl_progress;").await?;
+    let ids = ids.split('\n').collect::<Vec<_>>().join(",");
+    cluster
+        .run(&format!("cancel jobs {};", ids))
+        .await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn test_background_mv_barrier_recovery() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_backfill()).await?;
+    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
 
     session.run("CREATE TABLE t1 (v1 int);").await?;
@@ -73,8 +88,16 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
     cluster.run("flush;").await?;
 
     kill_cn_and_wait_recover(&cluster).await;
+    kill_and_wait_recover(&cluster).await;
+
+    // Send some upstream updates.
+    cluster
+        .run("INSERT INTO t1 select * from generate_series(1, 100000);")
+        .await?;
+    cluster.run("flush;").await?;
 
     kill_and_wait_recover(&cluster).await;
+    kill_cn_and_wait_recover(&cluster).await;
 
     // Send some upstream updates.
     cluster
@@ -86,14 +109,44 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
 
     sleep(Duration::from_secs(10)).await;
 
-    // Make sure after finished, we should have 5000_000 rows.
     session
         .run("SELECT COUNT(v1) FROM m1")
         .await?
-        .assert_result_eq("600000");
+        .assert_result_eq("700000");
+
+    // Make sure that if MV killed and restarted
+    // it will not be dropped.
 
     session.run("DROP MATERIALIZED VIEW m1").await?;
     session.run("DROP TABLE t1").await?;
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_background_ddl_cancel() -> Result<()> {
+    let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
+    let mut session = cluster.start_session();
+
+    session.run(CREATE_TABLE).await?;
+    session.run(SEED_TABLE).await?;
+    session.flush().await?;
+    let fut = async {
+        session.run(SET_BACKGROUND_DDL).await.unwrap();
+        session.run(CREATE_MV1).await.unwrap();
+    };
+    timeout(Duration::from_secs(1), fut).await?;
+    session.run("SELECT count(*) FROM mv1").await?.assert_result_eq("1000000");
+    // session.run(CREATE_MV1).await?;
+    // sleep(Duration::from_secs(3)).await;
+    //
+    // // Kill the CN
+    // kill_cn_and_wait_recover(&cluster).await;
+    //
+    // // Kill the cluster
+    // kill_and_wait_recover(&cluster).await;
+    //
+    // cancel_stream_jobs(&mut cluster).await?;
+    // session.run(CREATE_MV1).await?;
     Ok(())
 }
