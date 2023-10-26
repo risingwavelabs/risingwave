@@ -630,6 +630,7 @@ pub(crate) async fn try_bind_columns_from_source(
                         field_descs: vec![],
                         type_name: "".to_string(),
                         generated_or_default_column: None,
+                        description: None,
                     },
                     is_hidden: false,
                 },
@@ -641,6 +642,7 @@ pub(crate) async fn try_bind_columns_from_source(
                         field_descs: vec![],
                         type_name: "".to_string(),
                         generated_or_default_column: None,
+                        description: None,
                     },
                     is_hidden: false,
                 },
@@ -775,6 +777,7 @@ fn check_and_add_timestamp_column(
                 field_descs: vec![],
                 type_name: "".to_string(),
                 generated_or_default_column: None,
+                description: None,
             },
 
             is_hidden: true,
@@ -792,6 +795,7 @@ fn add_upsert_default_key_column(columns: &mut Vec<ColumnCatalog>) {
             field_descs: vec![],
             type_name: "".to_string(),
             generated_or_default_column: None,
+            description: None,
         },
         is_hidden: true,
     };
