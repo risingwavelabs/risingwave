@@ -31,7 +31,7 @@ use risingwave_connector::source::{
 use tracing::Level;
 use tracing_subscriber::prelude::*;
 
-const BATCH: LazyLock<Vec<SourceMessage>> = LazyLock::new(make_batch);
+static BATCH: LazyLock<Vec<SourceMessage>> = LazyLock::new(make_batch);
 
 fn make_batch() -> Vec<SourceMessage> {
     let mut generator = nexmark::EventGenerator::default()
