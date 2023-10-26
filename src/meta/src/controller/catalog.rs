@@ -22,8 +22,8 @@ use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     connection, database, function, index, object, object_dependency, schema, sink, source, table,
-    view, ConnectionId, DatabaseId, FunctionId, ObjectId, PrivateLinkService, SchemaId, SourceId,
-    TableId, UserId,
+    view, ColumnCatalogArray, ConnectionId, DatabaseId, FunctionId, ObjectId, PrivateLinkService,
+    SchemaId, SourceId, TableId, UserId,
 };
 use risingwave_pb::catalog::{
     PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
@@ -497,20 +497,20 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
         ensure_object_id(ObjectType::Database, comment.database_id, &txn).await?;
         ensure_object_id(ObjectType::Schema, comment.schema_id, &txn).await?;
-        ensure_object_id(ObjectType::Table, comment.table_id, &txn).await?;
-
-        let mut table = Table::find_by_id(comment.table_id)
-            .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("table", comment.table_id))?;
         let table_obj = Object::find_by_id(comment.table_id)
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("table", comment.table_id))?;
 
-        if let Some(col_idx) = comment.column_index {
-            let column = table
-                .columns
+        let table = if let Some(col_idx) = comment.column_index {
+            let mut columns: ColumnCatalogArray = Table::find_by_id(comment.table_id)
+                .select_only()
+                .column(table::Column::Columns)
+                .into_tuple()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", comment.table_id))?;
+            let column = columns
                 .0
                 .get_mut(col_idx as usize)
                 .ok_or_else(|| MetaError::catalog_id_not_found("column", col_idx))?;
@@ -524,20 +524,19 @@ impl CatalogController {
             column_desc.description = comment.description;
             table::ActiveModel {
                 table_id: ActiveValue::Set(comment.table_id),
-                columns: ActiveValue::Set(table.columns.clone()),
+                columns: ActiveValue::Set(columns),
                 ..Default::default()
             }
             .update(&txn)
-            .await?;
+            .await?
         } else {
-            table.description = comment.description.clone();
             table::ActiveModel {
                 table_id: ActiveValue::Set(comment.table_id),
                 description: ActiveValue::Set(comment.description),
                 ..Default::default()
             }
             .update(&txn)
-            .await?;
+            .await?
         };
         txn.commit().await?;
 
