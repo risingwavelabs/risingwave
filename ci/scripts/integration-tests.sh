@@ -44,8 +44,8 @@ echo "--- case: ${case}, format: ${format}"
 if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
   # Use ghcr nightly image for scheduled build. If not specified, we use dockerhub's 'risingwavelabs/risingwave'.
   export RW_IMAGE="ghcr.io/risingwavelabs/risingwave:nightly-$(date '+%Y%m%d')"
+  echo Docker image: $RW_IMAGE
 fi
-echo Docker image: $RW_IMAGE
 
 echo "--- rewrite docker compose for protobuf"
 if [ "${format}" == "protobuf" ]; then
