@@ -274,11 +274,12 @@ fn recursive_parse_json(fields: &[Datum], full_name_vec: Option<Vec<String>>) ->
     let mut ret: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
 
     for (idx, field) in fields.iter().enumerate() {
-        let mut key = if full_name_vec.is_some() {
-            full_name_vec.as_ref().unwrap()[idx].to_string()
+        let mut key;
+        if let Some(k) = full_name_vec.as_ref() {
+            key = k[idx].to_string();
         } else {
-            "".to_string()
-        };
+            key = "".to_string();
+        }
 
         match field.clone() {
             Some(ScalarImpl::Int16(v)) => {
