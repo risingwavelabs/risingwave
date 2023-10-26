@@ -418,7 +418,7 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
         create_type: CreateType,
     ) -> MetaResult<NotificationVersion> {
-        tracing::debug!(
+        tracing::info!(
             id = stream_job.id(),
             definition = stream_job.definition(),
             "starting stream job",
@@ -434,7 +434,7 @@ impl DdlController {
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
 
         // Persist tables
-        tracing::debug!(id = stream_job.id(), "preparing stream job");
+        tracing::info!(id = stream_job.id(), "preparing stream job");
         let fragment_graph = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
             .await?;
@@ -444,7 +444,7 @@ impl DdlController {
 
         let mut internal_tables = vec![];
         let result = try {
-            tracing::debug!(id = stream_job.id(), "building stream job");
+            tracing::info!(id = stream_job.id(), "building stream job");
             let (ctx, table_fragments) = self
                 .build_stream_job(env, &stream_job, fragment_graph)
                 .await?;

@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use madsim::time::timeout;
-use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts};
+use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts, Session};
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
@@ -54,12 +54,16 @@ async fn kill_and_wait_recover(cluster: &Cluster) {
     sleep(Duration::from_secs(20)).await;
 }
 
-async fn cancel_stream_jobs(cluster: &mut Cluster) -> Result<()> {
-    let ids = cluster
+async fn cancel_stream_jobs(session: &mut Session) -> Result<()> {
+    tracing::info!("finding streaming jobs to cancel");
+    let ids = session
         .run("select ddl_id from rw_catalog.rw_ddl_progress;")
         .await?;
+    tracing::info!("selected streaming jobs to cancel {:?}", ids);
+    tracing::info!("cancelling streaming jobs");
     let ids = ids.split('\n').collect::<Vec<_>>().join(",");
-    cluster.run(&format!("cancel jobs {};", ids)).await?;
+    session.run(&format!("cancel jobs {};", ids)).await?;
+    tracing::info!("cancelled streaming jobs");
     Ok(())
 }
 
@@ -127,27 +131,24 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
 
 #[tokio::test]
 async fn test_background_ddl_cancel() -> Result<()> {
+    use std::env;
+    env::set_var("RUST_LOG", "debug");
+    tracing_subscriber::fmt().init();
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
+    session.run(CREATE_TABLE).await?;
+    session.run(SEED_TABLE).await?;
+    session.flush().await?;
 
-    let fut = async {
-        session.run(CREATE_TABLE).await.unwrap();
-        session.run(SEED_TABLE).await.unwrap();
-        session.flush().await.unwrap();
-    };
-    timeout(Duration::from_secs(1), fut).await?;
-
-    let fut = async {
-        session.run(SET_BACKGROUND_DDL).await.unwrap();
-        session.run(SET_STREAMING_RATE_LIMIT).await.unwrap();
-        session.run(CREATE_MV1).await.unwrap();
-    };
-    timeout(Duration::from_secs(1), fut).await?;
-    sleep(Duration::from_secs(3)).await;
-    let fut = async {
-        cancel_stream_jobs(&mut cluster).await.unwrap();
-    };
-    timeout(Duration::from_secs(1), fut).await?;
+    session.run(SET_BACKGROUND_DDL).await?;
+    session.run(SET_STREAMING_RATE_LIMIT).await?;
+    session.run(CREATE_MV1).await?;
+    tracing::info!("Created mv1 stream job");
+    session
+        .run("INSERT INTO t SELECT generate_series FROM generate_series(1, 10000);")
+        .await?;
+    tracing::info!("inserted 10000 rows");
+    cancel_stream_jobs(&mut session).await?;
     // session
     //     .run("SELECT count(*) FROM mv1")
     //     .await?
