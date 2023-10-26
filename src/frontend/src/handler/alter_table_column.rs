@@ -22,7 +22,7 @@ use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
-    AlterTableOperation, ColumnOption, Encode, ObjectName, SourceSchemaV2, Statement,
+    AlterTableOperation, ColumnOption, ConnectorSchema, Encode, ObjectName, Statement,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -32,7 +32,7 @@ use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::handler::create_table::gen_create_table_plan_with_source;
-use crate::{build_graph, Binder, OptimizerContext, TableCatalog};
+use crate::{build_graph, Binder, OptimizerContext, TableCatalog, WithOptions};
 
 /// Handle `ALTER TABLE [ADD|DROP] COLUMN` statements. The `operation` must be either `AddColumn` or
 /// `DropColumn`.
@@ -262,12 +262,12 @@ pub async fn handle_alter_table_column(
     Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
 }
 
-fn schema_has_schema_registry(schema: &SourceSchemaV2) -> bool {
+fn schema_has_schema_registry(schema: &ConnectorSchema) -> bool {
     match schema.row_encode {
         Encode::Avro | Encode::Protobuf => true,
         Encode::Json => {
-            let mut options = schema.gen_options().unwrap();
-            matches!(get_json_schema_location(&mut options), Ok(Some(_)))
+            let mut options = WithOptions::try_from(schema.row_options()).unwrap();
+            matches!(get_json_schema_location(options.inner_mut()), Ok(Some(_)))
         }
         _ => false,
     }

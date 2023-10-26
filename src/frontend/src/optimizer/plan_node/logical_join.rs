@@ -26,8 +26,8 @@ use super::generic::{
 };
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown,
-    StreamHashJoin, StreamProject, ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeBinary,
+    PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::DynamicFilter;
@@ -49,7 +49,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Condit
 /// right columns, dependent on the output indices provided. A repeat output index is illegal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Join<PlanRef>,
 }
 
@@ -866,6 +866,8 @@ impl LogicalJoin {
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
     ) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         assert!(predicate.has_eq());
         let mut right = self.right().to_stream_with_dist_required(
             &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
@@ -1009,6 +1011,8 @@ impl LogicalJoin {
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
     ) -> Result<StreamTemporalJoin> {
+        use super::stream::prelude::*;
+
         assert!(predicate.has_eq());
 
         let right = self.right();
@@ -1179,6 +1183,8 @@ impl LogicalJoin {
         predicate: Condition,
         ctx: &mut ToStreamContext,
     ) -> Result<Option<PlanRef>> {
+        use super::stream::prelude::*;
+
         // If there is exactly one predicate, it is a comparison (<, <=, >, >=), and the
         // join is a `Inner` or `LeftSemi` join, we can convert the scalar subquery into a
         // `StreamDynamicFilter`
