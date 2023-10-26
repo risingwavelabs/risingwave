@@ -32,7 +32,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
+    PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
 use risingwave_pb::ddl_service::{create_connection_request, DdlProgress};
 use risingwave_pb::hummock::write_limits::WriteLimit;
@@ -315,6 +315,10 @@ impl CatalogWriter for MockCatalogWriter {
         _owner_id: u32,
         _connection: create_connection_request::Payload,
     ) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn comment_on(&self, _comment: PbComment) -> Result<()> {
         unreachable!()
     }
 
@@ -771,6 +775,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
             committed_epoch: 0,
             current_epoch: 0,
         })
+    }
+
+    async fn wait(&self) -> RpcResult<()> {
+        Ok(())
     }
 
     async fn cancel_creating_jobs(&self, _infos: PbJobs) -> RpcResult<Vec<u32>> {

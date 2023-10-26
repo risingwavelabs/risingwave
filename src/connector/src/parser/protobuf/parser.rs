@@ -212,6 +212,7 @@ impl ProtobufParserConfig {
                 field_descs,
                 type_name: m.full_name().to_string(),
                 generated_or_default_column: None,
+                description: None,
             })
         } else {
             *index += 1;

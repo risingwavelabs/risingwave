@@ -6,13 +6,13 @@
   </picture>
 </p>
 
-[![Slack](https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack)](https://risingwave.com/slack)
-[![Build status](https://badge.buildkite.com/9394d2bca0f87e2e97aa78b25f765c92d4207c0b65e7f6648f.svg)](https://buildkite.com/risingwavelabs/main)
-[![codecov](https://codecov.io/gh/risingwavelabs/risingwave/branch/main/graph/badge.svg?token=EB44K9K38B)](https://codecov.io/gh/risingwavelabs/risingwave)
 
-<p align="center">
-  <b>Stream Processing Redefined.</b>
-</p>
+<div align="center">
+
+### 🌊Stream Processing Redefined.
+
+</div>
+
 <p align="center">
   <a
     href="https://docs.risingwave.com/"
@@ -21,7 +21,7 @@
   <a
     href="https://tutorials.risingwave.com/"
     target="_blank"
-  ><b>Hands-on Tutorials</b></a>&nbsp;&nbsp;&nbsp;🌊&nbsp;&nbsp;&nbsp;
+  ><b>Hands-on Tutorials</b></a>&nbsp;&nbsp;&nbsp;🎯&nbsp;&nbsp;&nbsp;
   <a
     href="https://cloud.risingwave.com/"
     target="_blank"
@@ -33,6 +33,27 @@
     <b>Get Instant Help</b>
   </a>
 </p>
+<div align="center">
+  <a
+    href="https://risingwave.com/slack"
+    target="_blank"
+  >
+    <img alt="Slack" src="https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack" />
+  </a>
+  <a
+    href="https://buildkite.com/risingwavelabs/main"
+    target="_blank"
+  >
+    <img alt="Build status" src="https://badge.buildkite.com/9394d2bca0f87e2e97aa78b25f765c92d4207c0b65e7f6648f.svg" />
+  </a>
+  <a
+    href="https://codecov.io/gh/risingwavelabs/risingwave"
+    target="_blank"
+  >
+    <img alt="codecov" src="https://codecov.io/gh/risingwavelabs/risingwave/branch/main/graph/badge.svg?token=EB44K9K38B" />
+  </a>
+</div>
+
 RisingWave is a distributed SQL streaming database that enables <b>simple</b>, <b>efficient</b>, and <b>reliable</b> processing of streaming data.
 
 ![RisingWave](https://github.com/risingwavelabs/risingwave-docs/blob/0f7e1302b22493ba3c1c48e78810750ce9a5ff42/docs/images/archi_simple.png)
@@ -46,8 +67,8 @@ tar xvf risingwave-v1.3.0-x86_64-unknown-linux.tar.gz
 ```
 **Mac**
 ```
-brew tap risingwavelabs/risingwave  
-brew install risingwave  
+brew tap risingwavelabs/risingwave
+brew install risingwave
 risingwave playground
 ```
 Now connect to RisingWave using `psql`:
@@ -59,22 +80,35 @@ Learn more at [Quick Start](https://docs.risingwave.com/docs/current/get-started
 
 ## Why RisingWave for stream processing?
 RisingWave adaptly tackles some of the most challenging problems in stream processing. Compared to existing stream processing systems, RisingWave shines through with the following key features:
-* **Easy to learn:** RisingWave speaks PostgreSQL-style SQL, enabling users to dive into stream processing in much the same way as operating a PostgreSQL database.
-* **Highly efficient in multi-stream joins:** RisingWave has made significant optimizations for multiple stream join scenarios. Users can easily join 10-20 streams (or more) efficiently in a production environment.
-* **High resource utilization:** Queries within RisingWave benefit from shared computational resources, obviating the need for users to manually allocate resources for individual queries.
-* **No compromise on large state management:**: The decoupled compute-storage architecture of RisingWave ensures remote persistence of internal states, and users never need to worry about the size of internal states when handling complex queries.
-* **Transparent dynamic scaling:** RisingWave supports near-instantaneous dynamic scaling without any service interruptions.
-* **Instant failure recovery:** RisingWave's state management mechanism allows it to recover from failure in seconds, not minutes or hours.
-* **Easy to verify correctness:** RisingWave persists results in materialized views and allow users to break down complex stream computation programs into stacked materialized views, simplifying program development and result verification.
-* **Simplified data stack:** RisingWave's ability to store data and serve queries eliminates the need for separate maintenance of stream processors and databases. Users can effortlessly link RisingWave to their preferred BI tools or through client libraries.
-* **Simple to maintain and operate:** -   RisingWave abstracts away unnecessary low-level details, allowing users to concentrate solely on SQL code-level issues.
-* **Rich ecosystem:** With integrations to a diverse range of cloud systems and the PostgreSQL ecosystem, RisingWave boasts a rich and expansive ecosystem.
+* **Easy to learn**
+  * RisingWave speaks PostgreSQL-style SQL, enabling users to dive into stream processing in much the same way as operating a PostgreSQL database.
+* **Highly efficient in multi-stream joins**
+  * RisingWave has made significant optimizations for multiple stream join scenarios. Users can easily join 10-20 streams (or more) efficiently in a production environment.
+* **High resource utilization**
+  * Queries in RisingWave leverage shared computational resources, eliminating the need for users to manually allocate resources for each query.
+* **No compromise on large state management**
+  * The decoupled compute-storage architecture of RisingWave ensures remote persistence of internal states, and users never need to worry about the size of internal states when handling complex queries.
+* **Transparent dynamic scaling**
+  * RisingWave supports near-instantaneous dynamic scaling without any service interruptions.
+* **Instant failure recovery**
+  * RisingWave's state management mechanism allows it to recover from failure in seconds, not minutes or hours.
+* **Easy to verify correctness**
+  * RisingWave persists results in materialized views and allow users to break down complex stream computation programs into stacked materialized views, simplifying program development and result verification.
+* **Simplified data stack**
+  * RisingWave's ability to store data and serve queries eliminates the need for separate maintenance of stream processors and databases. Users can effortlessly connect RisingWave to their preferred BI tools or through client libraries.
+* **Simple to maintain and operate**
+  * RisingWave abstracts away unnecessary low-level details, allowing users to concentrate solely on SQL code-level issues.
+* **Rich ecosystem**
+  * With integrations to a diverse range of cloud systems and the PostgreSQL ecosystem, RisingWave boasts a rich and expansive ecosystem.
 
 ## RisingWave's limitations
 RisingWave isn’t a panacea for all data engineering hurdles. It has its own set of limitations:
-* **No programmable interfaces:** RisingWave does not provide low-level APIs in languages like Java and Scala, and does not allow users to manage internal states manually (unless you want to hack!). For coding in Java, Scala, and other languages, please consider using RisingWave's User-Defined Functions (UDF).
-* **No support for transaction processing:** RisingWave isn’t cut out for transactional workloads, thus it’s not a viable substitute for operational databases dedicated to transaction processing. However, it supports read-only transactions, ensuring data freshness and consistency. It also comprehends the transactional semantics of upstream database Change Data Capture (CDC).
-* **Not tailored for ad-hoc analytical queries:** RisingWave's row store design is tailored for optimal stream processing performance rather than interactive analytical workloads. Hence, it's not a suitable replacement for OLAP databases. Yet, a reliable integration with many OLAP databases exists, and a collaborative use of RisingWave and OLAP databases is a common practice among many users.
+* **No programmable interfaces**
+  * RisingWave does not provide low-level APIs in languages like Java and Scala, and does not allow users to manage internal states manually (unless you want to hack!). For coding in Java, Scala, and other languages, please consider using RisingWave's User-Defined Functions (UDF).
+* **No support for transaction processing**
+  * RisingWave isn’t cut out for transactional workloads, thus it’s not a viable substitute for operational databases dedicated to transaction processing. However, it supports read-only transactions, ensuring data freshness and consistency. It also comprehends the transactional semantics of upstream database Change Data Capture (CDC).
+* **Not tailored for ad-hoc analytical queries**
+  * RisingWave's row store design is tailored for optimal stream processing performance rather than interactive analytical workloads. Hence, it's not a suitable replacement for OLAP databases. Yet, a reliable integration with many OLAP databases exists, and a collaborative use of RisingWave and OLAP databases is a common practice among many users.
 
 
 ## RisingWave Cloud

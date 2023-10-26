@@ -152,7 +152,7 @@ async fn test_merger_sum_aggr() {
         vec![],
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
-            Box::new(InputRefExpression::new(DataType::Int64, 1)),
+            NonStrictExpression::for_test(InputRefExpression::new(DataType::Int64, 1)),
         ],
         3,
         MultiMap::new(),
