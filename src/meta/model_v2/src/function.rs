@@ -17,7 +17,7 @@ use risingwave_pb::catalog::PbFunction;
 use sea_orm::entity::prelude::*;
 use sea_orm::ActiveValue;
 
-use crate::model_v2::{DataType, DataTypeArray, FunctionId};
+use crate::{DataType, DataTypeArray, FunctionId};
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]

@@ -12,57 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::catalog::PbView;
 use sea_orm::entity::prelude::*;
+use sea_orm::ActiveValue;
 
-use crate::model_v2::{
-    ColumnCatalogArray, ConnectionId, I32Array, Property, SourceId, StreamSourceInfo, TableId,
-    WatermarkDescArray,
-};
+use crate::{FieldArray, Property, ViewId};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "source")]
+#[sea_orm(table_name = "view")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub source_id: SourceId,
+    pub view_id: ViewId,
     pub name: String,
-    pub row_id_index: Option<u32>,
-    pub columns: ColumnCatalogArray,
-    pub pk_column_ids: I32Array,
     pub properties: Property,
     pub definition: String,
-    pub source_info: Option<StreamSourceInfo>,
-    pub watermark_descs: WatermarkDescArray,
-    pub optional_associated_table_id: Option<TableId>,
-    pub connection_id: Option<ConnectionId>,
-    pub version: u64,
+    pub columns: FieldArray,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "super::connection::Entity",
-        from = "Column::ConnectionId",
-        to = "super::connection::Column::ConnectionId",
-        on_update = "NoAction",
-        on_delete = "NoAction"
-    )]
-    Connection,
-    #[sea_orm(
         belongs_to = "super::object::Entity",
-        from = "Column::SourceId",
+        from = "Column::ViewId",
         to = "super::object::Column::Oid",
         on_update = "NoAction",
         on_delete = "Cascade"
     )]
     Object,
-    #[sea_orm(has_many = "super::table::Entity")]
-    Table,
-}
-
-impl Related<super::connection::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Connection.def()
-    }
 }
 
 impl Related<super::object::Entity> for Entity {
@@ -71,10 +47,16 @@ impl Related<super::object::Entity> for Entity {
     }
 }
 
-impl Related<super::table::Entity> for Entity {
-    fn to() -> RelationDef {
-        Relation::Table.def()
+impl ActiveModelBehavior for ActiveModel {}
+
+impl From<PbView> for ActiveModel {
+    fn from(view: PbView) -> Self {
+        Self {
+            view_id: ActiveValue::Set(view.id as _),
+            name: ActiveValue::Set(view.name),
+            properties: ActiveValue::Set(Property(view.properties)),
+            definition: ActiveValue::Set(view.sql),
+            columns: ActiveValue::Set(FieldArray(view.columns)),
+        }
     }
 }
-
-impl ActiveModelBehavior for ActiveModel {}
