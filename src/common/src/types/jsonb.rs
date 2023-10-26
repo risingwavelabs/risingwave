@@ -16,10 +16,13 @@ use std::fmt;
 use std::hash::Hash;
 
 use bytes::Buf;
-use jsonbb::{Value, ValueRef};
+use jsonbb::{Builder, Value, ValueRef};
 
 use crate::estimate_size::EstimateSize;
-use crate::types::{Scalar, ScalarRef, F32, F64};
+use crate::types::{
+    Date, Decimal, Int256Ref, Interval, Scalar, ScalarRef, Serial, Time, Timestamp, ToText, F32,
+    F64,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JsonbVal(pub(crate) Value);
@@ -184,71 +187,6 @@ impl JsonbVal {
 impl From<serde_json::Value> for JsonbVal {
     fn from(v: serde_json::Value) -> Self {
         Self(v.into())
-    }
-}
-
-impl From<bool> for JsonbVal {
-    fn from(v: bool) -> Self {
-        Self(v.into())
-    }
-}
-
-impl From<i16> for JsonbVal {
-    fn from(v: i16) -> Self {
-        Self(v.into())
-    }
-}
-
-impl From<i32> for JsonbVal {
-    fn from(v: i32) -> Self {
-        Self(v.into())
-    }
-}
-
-impl From<i64> for JsonbVal {
-    fn from(v: i64) -> Self {
-        Self(v.into())
-    }
-}
-
-impl From<F32> for JsonbVal {
-    fn from(v: F32) -> Self {
-        if v.0 == f32::INFINITY {
-            Self("Infinity".into())
-        } else if v.0 == f32::NEG_INFINITY {
-            Self("-Infinity".into())
-        } else if v.0.is_nan() {
-            Self("NaN".into())
-        } else {
-            Self(v.0.into())
-        }
-    }
-}
-
-// NOTE: Infinite or NaN values are not JSON numbers. They are stored as strings in Postgres.
-impl From<F64> for JsonbVal {
-    fn from(v: F64) -> Self {
-        if v.0 == f64::INFINITY {
-            Self("Infinity".into())
-        } else if v.0 == f64::NEG_INFINITY {
-            Self("-Infinity".into())
-        } else if v.0.is_nan() {
-            Self("NaN".into())
-        } else {
-            Self(v.0.into())
-        }
-    }
-}
-
-impl From<&str> for JsonbVal {
-    fn from(v: &str) -> Self {
-        Self(v.into())
-    }
-}
-
-impl From<JsonbRef<'_>> for JsonbVal {
-    fn from(v: JsonbRef<'_>) -> Self {
-        Self(v.0.to_owned())
     }
 }
 
@@ -478,3 +416,100 @@ impl<F: std::fmt::Write> std::io::Write for FmtToIoUnchecked<F> {
         Ok(())
     }
 }
+impl From<F32> for Value {
+    fn from(v: F32) -> Self {
+        if v.0 == f32::INFINITY {
+            "Infinity".into()
+        } else if v.0 == f32::NEG_INFINITY {
+            "-Infinity".into()
+        } else if v.0.is_nan() {
+            "NaN".into()
+        } else {
+            v.0.into()
+        }
+    }
+}
+
+// NOTE: Infinite or NaN values are not JSON numbers. They are stored as strings in Postgres.
+impl From<F64> for Value {
+    fn from(v: F64) -> Self {
+        if v.0 == f64::INFINITY {
+            "Infinity".into()
+        } else if v.0 == f64::NEG_INFINITY {
+            "-Infinity".into()
+        } else if v.0.is_nan() {
+            "NaN".into()
+        } else {
+            v.0.into()
+        }
+    }
+}
+
+impl From<JsonbRef<'_>> for Value {
+    fn from(v: JsonbRef<'_>) -> Self {
+        v.0.to_owned()
+    }
+}
+
+impl From<Decimal> for Value {
+    fn from(v: Decimal) -> Self {
+        // Make it numeric if it can be converted to IEEE 754 double, otherwise a string.
+        // May loss precision here.
+        let res: Result<F64, _> = v.try_into();
+        if let Ok(value) = res {
+            value.into()
+        } else {
+            v.to_text().as_str().into()
+        }
+    }
+}
+
+impl From<Timestamp> for Value {
+    fn from(v: Timestamp) -> Self {
+        let mut builder = Builder::default();
+        builder.display(format!("{}T{}", v.0.date(), v.0.time()));
+        builder.finish()
+    }
+}
+
+macro_rules! impl_convert_to_value {
+    ($scalar_type:ty) => {
+        impl From<$scalar_type> for Value {
+            fn from(v: $scalar_type) -> Self {
+                v.to_text().as_str().into()
+            }
+        }
+    };
+}
+
+impl_convert_to_value!(Serial);
+impl_convert_to_value!(Int256Ref<'_>);
+impl_convert_to_value!(Date);
+impl_convert_to_value!(Time);
+impl_convert_to_value!(Interval);
+
+macro_rules! impl_convert_to_jsonb_val {
+    ($scalar_ref:ty) => {
+        impl<'scalar> From<$scalar_ref> for JsonbVal {
+            fn from(val: $scalar_ref) -> Self {
+                Self(val.into())
+            }
+        }
+    };
+}
+
+impl_convert_to_jsonb_val!(bool);
+impl_convert_to_jsonb_val!(i16);
+impl_convert_to_jsonb_val!(i32);
+impl_convert_to_jsonb_val!(i64);
+impl_convert_to_jsonb_val!(Int256Ref<'_>);
+impl_convert_to_jsonb_val!(F32);
+impl_convert_to_jsonb_val!(F64);
+impl_convert_to_jsonb_val!(Decimal);
+impl_convert_to_jsonb_val!(Serial);
+impl_convert_to_jsonb_val!(Date);
+impl_convert_to_jsonb_val!(Time);
+impl_convert_to_jsonb_val!(Timestamp);
+impl_convert_to_jsonb_val!(Interval);
+impl_convert_to_jsonb_val!(&str);
+impl_convert_to_jsonb_val!(JsonbRef<'_>);

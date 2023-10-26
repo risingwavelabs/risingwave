@@ -924,6 +924,7 @@ impl Binder {
                 ("jsonb_delete", raw_call(ExprType::Subtract)),
                 ("jsonb_delete_path", raw_call(ExprType::JsonbDeletePath)),
                 ("jsonb_strip_nulls", raw_call(ExprType::JsonbStripNulls)),
+                ("to_jsonb", raw_call(ExprType::ToJsonb)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least
