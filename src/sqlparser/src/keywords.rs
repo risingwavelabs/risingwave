@@ -280,6 +280,7 @@ define_keywords!(
     JOBS,
     JOIN,
     JSON,
+    JSONB,
     KEY,
     KEYS,
     LANGUAGE,

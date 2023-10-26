@@ -3247,6 +3247,7 @@ impl Parser {
                 }
                 Keyword::STRUCT => Ok(DataType::Struct(self.parse_struct_data_type()?)),
                 Keyword::BYTEA => Ok(DataType::Bytea),
+                Keyword::JSONB => Ok(DataType::Jsonb),
                 Keyword::NUMERIC | Keyword::DECIMAL | Keyword::DEC => {
                     let (precision, scale) = self.parse_optional_precision_scale()?;
                     Ok(DataType::Decimal(precision, scale))

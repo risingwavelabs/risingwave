@@ -33,6 +33,12 @@ null
 true
 NULL
 
+# typed string
+query T
+select jsonb 'true';
+----
+true
+
 query T
 select 'true'::jsonb::bool;
 ----
