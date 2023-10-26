@@ -238,16 +238,12 @@ impl StreamTableScan {
             .collect_vec();
 
         // A flag to mark whether the upstream is a cdc source job
-        let mut cdc_upstream = false;
+        let cdc_upstream = matches!(self.chain_type, ChainType::CdcBackfill);
 
         // The required columns from the table (both scan and upstream).
         let upstream_column_ids = match self.chain_type {
-            ChainType::CdcBackfill => {
-                cdc_upstream = true;
-                self.core.output_and_pk_column_ids()
-            }
             // For backfill, we additionally need the primary key columns.
-            ChainType::Backfill => self.core.output_and_pk_column_ids(),
+            ChainType::Backfill | ChainType::CdcBackfill => self.core.output_and_pk_column_ids(),
             ChainType::Chain | ChainType::Rearrange | ChainType::UpstreamOnly => {
                 self.core.output_column_ids()
             }
