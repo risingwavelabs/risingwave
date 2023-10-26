@@ -2736,6 +2736,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "enumflags2"
+version = "0.7.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5998b4f30320c9d93aed72f63af821bfdac50465b75428fce77b48ec482c3939"
+dependencies = [
+ "enumflags2_derive",
+]
+
+[[package]]
+name = "enumflags2_derive"
+version = "0.7.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f95e2801cd355d4a1a3e3953ce6ee5ae9603a5c833455343a8bfe3f44d418246"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.37",
+]
+
+[[package]]
 name = "env_logger"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3852,7 +3872,7 @@ dependencies = [
 [[package]]
 name = "icelake"
 version = "0.0.10"
-source = "git+https://github.com/icelake-io/icelake?rev=16dab0e36ab337e58ee8002d828def2d212fa116#16dab0e36ab337e58ee8002d828def2d212fa116"
+source = "git+https://github.com/icelake-io/icelake?rev=186fde7663545d1d6a5856ce9fbbc541224eadfb#186fde7663545d1d6a5856ce9fbbc541224eadfb"
 dependencies = [
  "anyhow",
  "apache-avro 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -3869,6 +3889,7 @@ dependencies = [
  "bytes",
  "chrono",
  "csv",
+ "derive_builder",
  "enum-display",
  "faster-hex",
  "futures",
@@ -6645,6 +6666,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "redact"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b97c0a6319ae55341eb213c8ef97002630a3a5bd6f287f0124d077121d3f2a5"
+
+[[package]]
 name = "redis"
 version = "0.23.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7061,6 +7088,7 @@ dependencies = [
  "educe",
  "either",
  "enum-as-inner",
+ "enumflags2",
  "ethnum",
  "fixedbitset",
  "fs-err",
@@ -7491,6 +7519,7 @@ dependencies = [
  "async-recursion",
  "async-trait",
  "auto_enums",
+ "auto_impl",
  "bk-tree",
  "bytes",
  "clap",
@@ -7751,6 +7780,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "prometheus-http-query",
+ "redact",
  "regex",
  "risingwave_common",
  "risingwave_common_heap_profiling",
@@ -7776,6 +7806,7 @@ dependencies = [
  "itertools 0.11.0",
  "madsim-tokio",
  "madsim-tonic",
+ "rand",
  "regex",
  "risingwave_common",
  "risingwave_connector",

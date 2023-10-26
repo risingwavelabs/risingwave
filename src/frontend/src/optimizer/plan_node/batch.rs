@@ -23,6 +23,14 @@ use crate::optimizer::property::Order;
 /// [`PhysicalPlanRef`].
 ///
 /// [`GenericPlanRef`]: super::generic::GenericPlanRef
+#[auto_impl::auto_impl(&)]
 pub trait BatchPlanRef: PhysicalPlanRef {
     fn order(&self) -> &Order;
+}
+
+/// Prelude for batch plan nodes.
+pub mod prelude {
+    pub use super::super::generic::{GenericPlanRef, PhysicalPlanRef};
+    pub use super::super::Batch;
+    pub use super::BatchPlanRef;
 }
