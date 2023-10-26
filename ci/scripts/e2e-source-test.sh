@@ -96,6 +96,7 @@ sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
 
 # kill cluster and the connector node
 cargo make kill
+pkill -f connector-node
 echo "cluster killed "
 
 # insert new rows
