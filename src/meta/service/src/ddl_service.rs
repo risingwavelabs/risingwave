@@ -844,13 +844,14 @@ fn fill_table_source(
 // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
 // group (that is, different from any other server id being used by any master or slave)
 fn fill_cdc_mysql_server_id(fragment_graph: &mut PbStreamFragmentGraph) {
-    let rand_server_id = rand::thread_rng().gen_range(1..4294967295u32);
     for fragment in fragment_graph.fragments.values_mut() {
         visit_fragment(fragment, |node_body| {
             if let NodeBody::Source(source_node) = node_body {
                 let props = &mut source_node.source_inner.as_mut().unwrap().properties;
-                props.insert("server.id".to_string(), rand_server_id.to_string());
-                tracing::debug!("generated `server.id` for mysql-cdc: {}", rand_server_id);
+                let rand_server_id = rand::thread_rng().gen_range(1..u32::MAX);
+                props
+                    .entry("server.id".to_string())
+                    .or_insert(rand_server_id.to_string());
             }
         });
     }
