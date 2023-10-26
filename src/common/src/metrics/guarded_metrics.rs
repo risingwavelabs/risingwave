@@ -303,19 +303,23 @@ mod tests {
     fn test_label_guarded_metrics_drop() {
         let vec = LabelGuardedIntCounterVec::<3>::test_int_counter_vec();
         let m1_1 = vec.with_label_values(&["1", "2", "3"]);
-        assert_eq!(1, vec.inner.collect().pop().unwrap().get_metric().len());
+        assert_eq!(1, vec.collect().pop().unwrap().get_metric().len());
         let m1_2 = vec.with_label_values(&["1", "2", "3"]);
         let m1_3 = m1_2.clone();
-        assert_eq!(1, vec.inner.collect().pop().unwrap().get_metric().len());
+        assert_eq!(1, vec.collect().pop().unwrap().get_metric().len());
         let m2 = vec.with_label_values(&["2", "2", "3"]);
-        assert_eq!(2, vec.inner.collect().pop().unwrap().get_metric().len());
+        assert_eq!(2, vec.collect().pop().unwrap().get_metric().len());
         drop(m1_3);
-        assert_eq!(2, vec.inner.collect().pop().unwrap().get_metric().len());
+        assert_eq!(2, vec.collect().pop().unwrap().get_metric().len());
+        assert_eq!(2, vec.collect().pop().unwrap().get_metric().len());
         drop(m2);
-        assert_eq!(1, vec.inner.collect().pop().unwrap().get_metric().len());
+        assert_eq!(2, vec.collect().pop().unwrap().get_metric().len());
+        assert_eq!(1, vec.collect().pop().unwrap().get_metric().len());
         drop(m1_1);
-        assert_eq!(1, vec.inner.collect().pop().unwrap().get_metric().len());
+        assert_eq!(1, vec.collect().pop().unwrap().get_metric().len());
+        assert_eq!(1, vec.collect().pop().unwrap().get_metric().len());
         drop(m1_2);
-        assert_eq!(0, vec.inner.collect().pop().unwrap().get_metric().len());
+        assert_eq!(1, vec.collect().pop().unwrap().get_metric().len());
+        assert_eq!(0, vec.collect().pop().unwrap().get_metric().len());
     }
 }
