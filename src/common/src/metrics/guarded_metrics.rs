@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::any::type_name;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::ops::Deref;
 use std::sync::Arc;
@@ -21,9 +21,10 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use prometheus::core::{
-    Atomic, AtomicI64, AtomicU64, Collector, GenericCounter, GenericCounterVec, GenericGauge,
+    Atomic, AtomicI64, AtomicU64, Collector, Desc, GenericCounter, GenericCounterVec, GenericGauge,
     GenericGaugeVec, MetricVec, MetricVecBuilder,
 };
+use prometheus::proto::MetricFamily;
 use prometheus::{Histogram, HistogramVec};
 use tracing::warn;
 
@@ -53,11 +54,13 @@ macro_rules! register_guarded_histogram_vec_with_registry {
         }
     }};
     ($HOPTS:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
-        let result =
-            prometheus::register_histogram_vec_with_registry!($HOPTS, $LABELS_NAMES, $REGISTRY);
-        result.map(|inner| {
+        let inner = prometheus::HistogramVec::new($HOPTS, $LABELS_NAMES);
+        inner.and_then(|inner| {
             let inner = $crate::metrics::__extract_histogram_builder(inner);
-            $crate::metrics::LabelGuardedHistogramVec::new(inner, { $LABELS_NAMES })
+            let label_guarded =
+                $crate::metrics::LabelGuardedHistogramVec::new(inner, { $LABELS_NAMES });
+            let result = ($REGISTRY).register(Box::new(label_guarded.clone()));
+            result.map(move |()| label_guarded)
         })
     }};
 }
@@ -65,14 +68,13 @@ macro_rules! register_guarded_histogram_vec_with_registry {
 #[macro_export]
 macro_rules! register_guarded_int_gauge_vec_with_registry {
     ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
-        let result = prometheus::register_int_gauge_vec_with_registry!(
-            prometheus::opts!($NAME, $HELP),
-            $LABELS_NAMES,
-            $REGISTRY
-        );
-        result.map(|inner| {
+        let inner = prometheus::IntGaugeVec::new(prometheus::opts!($NAME, $HELP), $LABELS_NAMES);
+        inner.and_then(|inner| {
             let inner = $crate::metrics::__extract_gauge_builder(inner);
-            $crate::metrics::LabelGuardedIntGaugeVec::new(inner, { $LABELS_NAMES })
+            let label_guarded =
+                $crate::metrics::LabelGuardedIntGaugeVec::new(inner, { $LABELS_NAMES });
+            let result = ($REGISTRY).register(Box::new(label_guarded.clone()));
+            result.map(move |()| label_guarded)
         })
     }};
 }
@@ -80,14 +82,13 @@ macro_rules! register_guarded_int_gauge_vec_with_registry {
 #[macro_export]
 macro_rules! register_guarded_int_counter_vec_with_registry {
     ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
-        let result = prometheus::register_int_counter_vec_with_registry!(
-            prometheus::opts!($NAME, $HELP),
-            $LABELS_NAMES,
-            $REGISTRY
-        );
-        result.map(|inner| {
+        let inner = prometheus::IntCounterVec::new(prometheus::opts!($NAME, $HELP), $LABELS_NAMES);
+        inner.and_then(|inner| {
             let inner = $crate::metrics::__extract_counter_builder(inner);
-            $crate::metrics::LabelGuardedIntCounterVec::new(inner, { $LABELS_NAMES })
+            let label_guarded =
+                $crate::metrics::LabelGuardedIntCounterVec::new(inner, { $LABELS_NAMES });
+            let result = ($REGISTRY).register(Box::new(label_guarded.clone()));
+            result.map(move |()| label_guarded)
         })
     }};
 }
@@ -116,10 +117,16 @@ fn gen_test_label<const N: usize>() -> [&'static str; N] {
         .unwrap()
 }
 
+#[derive(Default)]
+struct LabelGuardedMetricsInfo<const N: usize> {
+    labeled_metrics_count: HashMap<[String; N], usize>,
+    uncollected_removed_labels: HashSet<[String; N]>,
+}
+
 #[derive(Clone)]
 pub struct LabelGuardedMetricVec<T: MetricVecBuilder, const N: usize> {
     inner: MetricVec<T>,
-    labeled_metrics_count: Arc<Mutex<HashMap<[String; N], usize>>>,
+    info: Arc<Mutex<LabelGuardedMetricsInfo<N>>>,
     labels: [&'static str; N],
 }
 
@@ -131,26 +138,51 @@ impl<T: MetricVecBuilder, const N: usize> Debug for LabelGuardedMetricVec<T, N> 
     }
 }
 
+impl<T: MetricVecBuilder, const N: usize> Collector for LabelGuardedMetricVec<T, N> {
+    fn desc(&self) -> Vec<&Desc> {
+        self.inner.desc()
+    }
+
+    fn collect(&self) -> Vec<MetricFamily> {
+        let mut guard = self.info.lock();
+        let ret = self.inner.collect();
+        for labels in guard.uncollected_removed_labels.drain() {
+            if let Err(e) = self
+                .inner
+                .remove_label_values(&labels.each_ref().map(|s| s.as_str()))
+            {
+                warn!(
+                    "err when delete metrics of {:?} of labels {:?}. Err {:?}",
+                    self.inner.desc().first().expect("should have desc").fq_name,
+                    self.labels,
+                    e,
+                );
+            }
+        }
+        ret
+    }
+}
+
 impl<T: MetricVecBuilder, const N: usize> LabelGuardedMetricVec<T, N> {
     pub fn new(inner: MetricVec<T>, labels: &[&'static str; N]) -> Self {
         Self {
             inner,
-            labeled_metrics_count: Default::default(),
+            info: Default::default(),
             labels: *labels,
         }
     }
 
     pub fn with_label_values(&self, labels: &[&str; N]) -> LabelGuardedMetric<T, N> {
-        let mut count_guard = self.labeled_metrics_count.lock();
+        let mut guard = self.info.lock();
         let label_string = labels.map(|str| str.to_string());
-        *count_guard.entry(label_string).or_insert(0) += 1;
+        guard.uncollected_removed_labels.remove(&label_string);
+        *guard.labeled_metrics_count.entry(label_string).or_insert(0) += 1;
         let inner = self.inner.with_label_values(labels);
         LabelGuardedMetric {
             inner: Arc::new(LabelGuardedMetricInner {
                 inner,
                 labels: labels.map(|str| str.to_string()),
-                vec: self.inner.clone(),
-                labeled_metrics_count: self.labeled_metrics_count.clone(),
+                info: self.info.clone(),
             }),
         }
     }
@@ -204,30 +236,22 @@ impl<const N: usize> LabelGuardedHistogramVec<N> {
 struct LabelGuardedMetricInner<T: MetricVecBuilder, const N: usize> {
     inner: T::M,
     labels: [String; N],
-    vec: MetricVec<T>,
-    labeled_metrics_count: Arc<Mutex<HashMap<[String; N], usize>>>,
+    info: Arc<Mutex<LabelGuardedMetricsInfo<N>>>,
 }
 
 impl<T: MetricVecBuilder, const N: usize> Drop for LabelGuardedMetricInner<T, N> {
     fn drop(&mut self) {
-        let mut count_guard = self.labeled_metrics_count.lock();
-        let count = count_guard.get_mut(&self.labels).expect(
+        let mut guard = self.info.lock();
+        let count = guard.labeled_metrics_count.get_mut(&self.labels).expect(
             "should exist because the current existing dropping one means the count is not zero",
         );
         *count -= 1;
         if *count == 0 {
-            count_guard.remove(&self.labels).expect("should exist");
-            if let Err(e) = self
-                .vec
-                .remove_label_values(&self.labels.each_ref().map(|s| s.as_str()))
-            {
-                warn!(
-                    "err when delete metrics of {:?} of labels {:?}. Err {:?}",
-                    self.vec.desc().first().expect("should have desc").fq_name,
-                    self.labels,
-                    e,
-                );
-            }
+            guard
+                .labeled_metrics_count
+                .remove(&self.labels)
+                .expect("should exist");
+            guard.uncollected_removed_labels.insert(self.labels.clone());
         }
     }
 }
