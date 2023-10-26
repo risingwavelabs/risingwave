@@ -22,6 +22,9 @@ use std::time::{Duration, SystemTime};
 use itertools::Itertools;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_meta_model_v2::prelude::{Worker, WorkerProperty};
+use risingwave_meta_model_v2::worker::{WorkerStatus, WorkerType};
+use risingwave_meta_model_v2::{worker, worker_property, I32Array, TransactionId, WorkerId};
 use risingwave_pb::common::worker_node::{PbProperty, PbState};
 use risingwave_pb::common::{
     HostAddress, ParallelUnit, PbHostAddress, PbParallelUnit, PbWorkerNode, PbWorkerType,
@@ -39,10 +42,7 @@ use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
-use crate::manager::prelude::{Worker, WorkerProperty};
 use crate::manager::{LocalNotification, MetaSrvEnv, WorkerKey};
-use crate::model_v2::worker::{WorkerStatus, WorkerType};
-use crate::model_v2::{worker, worker_property, I32Array, TransactionId, WorkerId};
 use crate::{MetaError, MetaResult};
 
 pub type ClusterControllerRef = Arc<ClusterController>;
@@ -85,64 +85,6 @@ impl From<WorkerInfo> for PbWorkerNode {
                 is_unschedulable: p.is_unschedulable,
             }),
             transactional_id: info.0.transaction_id,
-        }
-    }
-}
-
-impl From<PbWorkerType> for WorkerType {
-    fn from(worker_type: PbWorkerType) -> Self {
-        match worker_type {
-            PbWorkerType::Unspecified => unreachable!("unspecified worker type"),
-            PbWorkerType::Frontend => Self::Frontend,
-            PbWorkerType::ComputeNode => Self::ComputeNode,
-            PbWorkerType::RiseCtl => Self::RiseCtl,
-            PbWorkerType::Compactor => Self::Compactor,
-            PbWorkerType::Meta => Self::Meta,
-        }
-    }
-}
-
-impl From<WorkerType> for PbWorkerType {
-    fn from(worker_type: WorkerType) -> Self {
-        match worker_type {
-            WorkerType::Frontend => Self::Frontend,
-            WorkerType::ComputeNode => Self::ComputeNode,
-            WorkerType::RiseCtl => Self::RiseCtl,
-            WorkerType::Compactor => Self::Compactor,
-            WorkerType::Meta => Self::Meta,
-        }
-    }
-}
-
-impl From<PbState> for WorkerStatus {
-    fn from(state: PbState) -> Self {
-        match state {
-            PbState::Unspecified => unreachable!("unspecified worker status"),
-            PbState::Starting => Self::Starting,
-            PbState::Running => Self::Running,
-        }
-    }
-}
-
-impl From<WorkerStatus> for PbState {
-    fn from(status: WorkerStatus) -> Self {
-        match status {
-            WorkerStatus::Starting => Self::Starting,
-            WorkerStatus::Running => Self::Running,
-        }
-    }
-}
-
-impl From<&PbWorkerNode> for worker::ActiveModel {
-    fn from(worker: &PbWorkerNode) -> Self {
-        let host = worker.host.clone().unwrap();
-        Self {
-            worker_id: ActiveValue::Set(worker.id),
-            worker_type: ActiveValue::Set(worker.r#type().into()),
-            host: ActiveValue::Set(host.host),
-            port: ActiveValue::Set(host.port),
-            status: ActiveValue::Set(worker.state().into()),
-            ..Default::default()
         }
     }
 }

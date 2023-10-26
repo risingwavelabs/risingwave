@@ -19,9 +19,10 @@ members = [
   "src/java_binding",
   "src/jni_core",
   "src/meta",
+  "src/meta/model_v2",
+  "src/meta/model_v2/migration",
   "src/meta/node",
   "src/meta/service",
-  "src/meta/src/model_v2/migration",
   "src/object_store",
   "src/prost",
   "src/prost/helpers",
@@ -97,7 +98,7 @@ aws-smithy-types = "0.55"
 aws-endpoint = "0.55"
 aws-types = "0.55"
 etcd-client = { package = "madsim-etcd-client", version = "0.4" }
-futures-async-stream = "0.2"
+futures-async-stream = "0.2.9"
 hytra = "0.1"
 rdkafka = { package = "madsim-rdkafka", version = "0.3.0", features = [
   "cmake-build",
@@ -111,14 +112,14 @@ criterion = { version = "0.5", features = ["async_futures"] }
 tonic = { package = "madsim-tonic", version = "0.4.0" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
 prost = { version = "0.12" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "16dab0e36ab337e58ee8002d828def2d212fa116" }
-arrow-array = "47"
-arrow-cast = "47"
-arrow-schema = "47"
-arrow-buffer = "47"
-arrow-flight = "47"
-arrow-select = "47"
-arrow-ord = "47"
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "186fde7663545d1d6a5856ce9fbbc541224eadfb" }
+arrow-array = "48"
+arrow-cast = "48"
+arrow-schema = "48"
+arrow-buffer = "48"
+arrow-flight = "48"
+arrow-select = "48"
+arrow-ord = "48"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
   "profiling",
@@ -143,6 +144,8 @@ risingwave_hummock_test = { path = "./src/storage/hummock_test" }
 risingwave_hummock_trace = { path = "./src/storage/hummock_trace" }
 risingwave_meta = { path = "./src/meta" }
 risingwave_meta_service = { path = "./src/meta/service" }
+risingwave_meta_model_migration = { path = "src/meta/model_v2/migration" }
+risingwave_meta_model_v2 = { path = "./src/meta/model_v2" }
 risingwave_meta_node = { path = "./src/meta/node" }
 risingwave_object_store = { path = "./src/object_store" }
 risingwave_pb = { path = "./src/prost" }
@@ -165,6 +168,8 @@ unused_must_use = "forbid"
 future_incompatible = "warn"
 nonstandard_style = "warn"
 rust_2018_idioms = "warn"
+# Backward compatibility is not important for an application.
+async_fn_in_trait = "allow"
 
 [workspace.lints.clippy]
 uninlined_format_args = "allow"
@@ -229,8 +234,8 @@ opt-level = 2
 incremental = false
 debug = 1
 
-# Patch third-party crates for deterministic simulation.
 [patch.crates-io]
+# Patch third-party crates for deterministic simulation.
 quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "948bdc3" }
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "8daf97e" }
 tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "fe39bb8e" }
@@ -238,3 +243,8 @@ tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev =
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "ac00d88" }
 # patch: unlimit 4MB message size for grpc client
 etcd-client = { git = "https://github.com/risingwavelabs/etcd-client.git", rev = "4e84d40" }
+
+# Patch for coverage_attribute.
+# https://github.com/sgodwincs/dlv-list-rs/pull/19#issuecomment-1774786289
+dlv-list = { git = "https://github.com/sgodwincs/dlv-list-rs.git", rev = "5bbc5d0" }
+ordered-multimap = { git = "https://github.com/risingwavelabs/ordered-multimap-rs.git", rev = "19c743f" }

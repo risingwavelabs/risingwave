@@ -47,6 +47,7 @@ use std::fmt;
 use std::fmt::Debug;
 
 use fixedbitset::FixedBitSet;
+use generic::PhysicalPlanRef;
 use itertools::Itertools;
 use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
 use risingwave_common::error::Result;
@@ -331,7 +332,7 @@ impl RequiredDist {
         }
     }
 
-    fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
+    pub fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
         let dist = self.to_dist();
         match plan.convention() {
             Convention::Batch => BatchExchange::new(plan, required_order.clone(), dist).into(),
