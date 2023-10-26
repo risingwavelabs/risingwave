@@ -7699,6 +7699,7 @@ dependencies = [
  "aws-smithy-types",
  "bytes",
  "crc32fast",
+ "either",
  "fail",
  "futures",
  "hyper",
