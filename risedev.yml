@@ -507,7 +507,7 @@ profile:
       - use: compactor
 
   ci-3cn-1fe:
-    config-path: src/config/ci.toml
+    config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
       - use: etcd

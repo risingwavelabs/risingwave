@@ -959,6 +959,7 @@ impl GlobalBarrierManager {
         checkpoint_control: &mut CheckpointControl,
     ) {
         checkpoint_control.clear_changes(err.clone());
+        self.tracker.lock().await.command_failed(err.clone());
 
         for node in fail_nodes {
             if let Some(timer) = node.timer {

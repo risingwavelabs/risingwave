@@ -352,6 +352,14 @@ impl CreateMviewProgressTracker {
         }
     }
 
+    /// Notify all tracked commands that error encountered and clear them.
+    pub fn command_failed(&mut self, err: MetaError) {
+        self.actor_map.clear();
+        self.progress_map
+            .drain()
+            .for_each(|(_, (_, job))| job.notify_finish_failed(err.clone()));
+    }
+
     /// Add a new create-mview DDL command to track.
     ///
     /// If the actors to track is empty, return the given command as it can be finished immediately.
