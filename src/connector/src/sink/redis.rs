@@ -28,7 +28,7 @@ use super::encoder::template::TemplateEncoder;
 use super::formatter::SinkFormatterImpl;
 use super::writer::FormattedSink;
 use super::{SinkError, SinkParam};
-use crate::dispatch_sink_formatter_impl;
+use crate::dispatch_sink_formatter_str_key_impl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
@@ -224,6 +224,7 @@ impl RedisSinkWriter {
             pk_indices.clone(),
             db_name,
             sink_from_name,
+            "NO_TOPIC",
         )
         .await?;
 
@@ -248,6 +249,7 @@ impl RedisSinkWriter {
             pk_indices.clone(),
             "d1".to_string(),
             "t1".to_string(),
+            "NO_TOPIC",
         )
         .await?;
         Ok(Self {
@@ -266,7 +268,7 @@ impl AsyncTruncateSinkWriter for RedisSinkWriter {
         chunk: StreamChunk,
         _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        dispatch_sink_formatter_impl!(&self.formatter, formatter, {
+        dispatch_sink_formatter_str_key_impl!(&self.formatter, formatter, {
             self.payload_writer.write_chunk(chunk, formatter).await
         })
     }

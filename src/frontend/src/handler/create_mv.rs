@@ -14,10 +14,10 @@
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::acl::AclMode;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::{CreateType, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
-use risingwave_pb::user::grant_privilege::Action;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 
 use super::privilege::resolve_relation_privileges;
@@ -66,7 +66,7 @@ pub(super) fn get_column_names(
         }
         if let Some(relation) = &select.from {
             let mut check_items = Vec::new();
-            resolve_relation_privileges(relation, Action::Select, &mut check_items);
+            resolve_relation_privileges(relation, AclMode::Select, &mut check_items);
             session.check_privileges(&check_items)?;
         }
     }

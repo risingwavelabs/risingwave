@@ -21,9 +21,9 @@ use super::generic::TopNLimit;
 use super::utils::impl_distill_by_unit;
 use super::{
     gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ColumnPruningContext,
-    ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
-    PredicatePushdownContext, RewriteStreamContext, StreamDedup, StreamGroupTopN, ToBatch,
-    ToStream, ToStreamContext,
+    ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
+    PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, StreamDedup,
+    StreamGroupTopN, ToBatch, ToStream, ToStreamContext,
 };
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::utils::Condition;
@@ -32,7 +32,7 @@ use crate::utils::Condition;
 /// an `ORDER BY`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalDedup {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Dedup<PlanRef>,
 }
 
@@ -99,6 +99,8 @@ impl ToStream for LogicalDedup {
     }
 
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         let input = self.input().to_stream(ctx)?;
         let input = RequiredDist::hash_shard(self.dedup_cols())
             .enforce_if_not_satisfies(input, &Order::any())?;

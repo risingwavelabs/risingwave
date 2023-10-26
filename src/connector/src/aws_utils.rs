@@ -24,12 +24,16 @@ use url::Url;
 
 use crate::aws_auth::AwsAuthProps;
 
+pub const REGION: &str = "region";
+pub const ACCESS_KEY: &str = "access_key";
+pub const SECRET_ACCESS: &str = "secret_access";
+
 pub const AWS_DEFAULT_CONFIG: [&str; 7] = [
-    "region",
+    REGION,
     "arn",
     "profile",
-    "access_key",
-    "secret_access",
+    ACCESS_KEY,
+    SECRET_ACCESS,
     "session_token",
     "endpoint_url",
 ];

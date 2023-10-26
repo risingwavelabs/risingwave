@@ -17,6 +17,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortOverWindowNode;
 
+use super::batch::prelude::*;
 use super::batch::BatchPlanRef;
 use super::generic::PlanWindowFunction;
 use super::utils::impl_distill_by_unit;
@@ -28,7 +29,7 @@ use crate::optimizer::property::{Order, RequiredDist};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchOverWindow {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::OverWindow<PlanRef>,
 }
 
