@@ -670,8 +670,8 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::allocation_bits")]
     pub allocation_bits: usize,
 
-    #[serde(default = "default::file_cache::ring_buffer_blocks")]
-    pub ring_buffer_blocks: usize,
+    #[serde(default = "default::file_cache::ring_buffer_capacity_mb")]
+    pub ring_buffer_capacity_mb: usize,
 
     #[serde(default = "default::file_cache::catalog_bits")]
     pub catalog_bits: usize,
@@ -1181,8 +1181,8 @@ pub mod default {
             0
         }
 
-        pub fn ring_buffer_blocks() -> usize {
-            32768
+        pub fn ring_buffer_capacity_mb() -> usize {
+            256
         }
 
         pub fn catalog_bits() -> usize {
@@ -1405,8 +1405,8 @@ pub struct StorageMemoryConfig {
     pub block_cache_capacity_mb: usize,
     pub meta_cache_capacity_mb: usize,
     pub shared_buffer_capacity_mb: usize,
-    pub data_file_cache_buffer_pool_capacity_mb: usize,
-    pub meta_file_cache_buffer_pool_capacity_mb: usize,
+    pub data_file_cache_ring_buffer_capacity_mb: usize,
+    pub meta_file_cache_ring_buffer_capacity_mb: usize,
     pub compactor_memory_limit_mb: usize,
     pub high_priority_ratio_in_percent: usize,
 }
@@ -1424,16 +1424,8 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         .storage
         .shared_buffer_capacity_mb
         .unwrap_or(default::storage::shared_buffer_capacity_mb());
-    let data_file_cache_buffer_pool_size_mb = s
-        .storage
-        .data_file_cache
-        .buffer_pool_size_mb
-        .unwrap_or(default::file_cache::buffer_pool_size_mb());
-    let meta_file_cache_buffer_pool_size_mb = s
-        .storage
-        .meta_file_cache
-        .buffer_pool_size_mb
-        .unwrap_or(default::file_cache::buffer_pool_size_mb());
+    let data_file_cache_ring_buffer_capacity_mb = s.storage.data_file_cache.ring_buffer_capacity_mb;
+    let meta_file_cache_ring_buffer_capacity_mb = s.storage.meta_file_cache.ring_buffer_capacity_mb;
     let compactor_memory_limit_mb = s
         .storage
         .compactor_memory_limit_mb
@@ -1447,8 +1439,8 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         block_cache_capacity_mb,
         meta_cache_capacity_mb,
         shared_buffer_capacity_mb,
-        data_file_cache_buffer_pool_capacity_mb: data_file_cache_buffer_pool_size_mb,
-        meta_file_cache_buffer_pool_capacity_mb: meta_file_cache_buffer_pool_size_mb,
+        data_file_cache_ring_buffer_capacity_mb,
+        meta_file_cache_ring_buffer_capacity_mb,
         compactor_memory_limit_mb,
         high_priority_ratio_in_percent,
     }
