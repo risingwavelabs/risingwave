@@ -16,6 +16,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::LimitNode;
 
+use super::batch::prelude::*;
 use super::generic::PhysicalPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
@@ -27,7 +28,7 @@ use crate::optimizer::property::{Order, RequiredDist};
 /// `BatchLimit` implements [`super::LogicalLimit`] to fetch specified rows from input
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchLimit {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::Limit<PlanRef>,
 }
 

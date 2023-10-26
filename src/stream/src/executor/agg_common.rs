@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_expr::aggregate::AggCall;
+use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
 use super::aggregation::AggStateStorage;
@@ -27,6 +28,8 @@ use crate::task::AtomicU64Ref;
 
 /// Arguments needed to construct an `XxxAggExecutor`.
 pub struct AggExecutorArgs<S: StateStore, E: AggExecutorExtraArgs> {
+    pub version: PbAggNodeVersion,
+
     // basic
     pub input: Box<dyn Executor>,
     pub actor_ctx: ActorContextRef,

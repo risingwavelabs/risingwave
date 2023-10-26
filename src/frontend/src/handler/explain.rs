@@ -30,6 +30,7 @@ use super::create_table::{
 use super::query::gen_batch_plan_by_statement;
 use super::RwPgResponse;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Convention, Explain};
 use crate::optimizer::OptimizerContext;
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
