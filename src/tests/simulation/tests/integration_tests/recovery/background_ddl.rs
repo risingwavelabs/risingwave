@@ -21,7 +21,8 @@ use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
 const CREATE_TABLE: &str = "CREATE TABLE t(v1 int);";
-const SEED_TABLE: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 1000000);";
+const SEED_TABLE: &str =
+    "INSERT INTO t SELECT generate_series FROM generate_series(1, 50000);";
 const FLUSH: &str = "flush;";
 const SET_BACKGROUND_DDL: &str = "SET BACKGROUND_DDL=true;";
 const SET_STREAMING_RATE_LIMIT: &str = "SET STREAMING_RATE_LIMIT=4000;";
@@ -144,6 +145,9 @@ async fn test_background_ddl_cancel() -> Result<()> {
     session.run(SET_STREAMING_RATE_LIMIT).await?;
     session.run(CREATE_MV1).await?;
     tracing::info!("Created mv1 stream job");
+    // session
+    //     .run("FLUSH;").await?;
+    tracing::info!("inserting 10000 rows");
     session
         .run("INSERT INTO t SELECT generate_series FROM generate_series(1, 10000);")
         .await?;
