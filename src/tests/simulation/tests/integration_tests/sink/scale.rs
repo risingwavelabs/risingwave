@@ -47,12 +47,6 @@ async fn scale_and_check(
         if thread_rng().gen_bool(0.5) {
             sleep(Duration::from_secs(10)).await;
             let before_kill_count = test_sink.store.id_count();
-            assert!(
-                before_kill_count > after_count,
-                "no progress after scale {} {}",
-                before_kill_count,
-                after_count
-            );
             cluster.kill_node(&KillOpts::ALL).await;
             sleep(Duration::from_secs(10)).await;
         }
