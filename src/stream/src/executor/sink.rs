@@ -295,7 +295,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         actor_context: ActorContextRef,
     ) -> StreamExecutorResult<Message> {
         let metrics = sink_writer_param.sink_metrics.clone();
-        let connector_name = sink_writer_param.connector_name.clone();
         let identity = format!("SinkExecutor {:X?}", sink_writer_param.executor_id);
         let log_sinker = sink.new_log_sinker(sink_writer_param).await?;
 
@@ -331,7 +330,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             }
             GLOBAL_ERROR_METRICS
                 .user_sink_error
-                .report([connector_name, identity, err_str]);
+                .report([S::SINK_NAME.to_owned(), identity, err_str]);
             return Err(e.into());
         }
         Err(anyhow!("end of stream").into())
