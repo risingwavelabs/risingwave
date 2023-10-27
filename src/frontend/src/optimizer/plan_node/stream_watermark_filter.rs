@@ -115,18 +115,8 @@ impl_plan_tree_node_for_unary! {StreamWatermarkFilter}
 pub fn infer_internal_table_catalog(watermark_type: DataType) -> TableCatalog {
     let mut builder = TableCatalogBuilder::new(WithOptions::new(HashMap::default()));
 
-    let key = Field {
-        data_type: DataType::Int16,
-        name: "vnode".to_string(),
-        sub_fields: vec![],
-        type_name: "".to_string(),
-    };
-    let value = Field {
-        data_type: watermark_type,
-        name: "offset".to_string(),
-        sub_fields: vec![],
-        type_name: "".to_string(),
-    };
+    let key = Field::with_name(DataType::Int16, "vnode");
+    let value = Field::with_name(watermark_type, "offset");
 
     let ordered_col_idx = builder.add_column(&key);
     builder.add_column(&value);

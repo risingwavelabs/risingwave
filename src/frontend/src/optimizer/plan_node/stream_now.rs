@@ -34,12 +34,7 @@ pub struct StreamNow {
 
 impl StreamNow {
     pub fn new(_logical: LogicalNow, ctx: OptimizerContextRef) -> Self {
-        let schema = Schema::new(vec![Field {
-            data_type: DataType::Timestamptz,
-            name: String::from("now"),
-            sub_fields: vec![],
-            type_name: String::default(),
-        }]);
+        let schema = Schema::new(vec![Field::with_name(DataType::Timestamptz, "now")]);
         let mut watermark_columns = FixedBitSet::with_capacity(1);
         watermark_columns.set(0, true);
         let base = PlanBase::new_stream(

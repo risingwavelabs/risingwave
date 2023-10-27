@@ -589,12 +589,10 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 // different filter conditions, so the count of occurrence of one distinct key may
                 // differ among different calls. We add one column for each call in the dedup table.
                 for (call_index, _) in indices_and_calls {
-                    table_builder.add_column(&Field {
-                        data_type: DataType::Int64,
-                        name: format!("count_for_agg_call_{}", call_index),
-                        sub_fields: vec![],
-                        type_name: String::default(),
-                    });
+                    table_builder.add_column(&Field::with_name(
+                        DataType::Int64,
+                        format!("count_for_agg_call_{}", call_index),
+                    ));
                 }
                 table_builder
                     .set_value_indices((key_cols.len()..table_builder.columns().len()).collect());
