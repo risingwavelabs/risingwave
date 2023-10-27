@@ -34,10 +34,10 @@ true
 NULL
 
 # typed string
-query T
-select jsonb 'true';
+query TT
+select jsonb 'true', JsonB '{}';
 ----
-true
+true {}
 
 query T
 select 'true'::jsonb::bool;
