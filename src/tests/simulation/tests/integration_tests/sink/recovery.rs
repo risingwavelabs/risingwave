@@ -24,8 +24,13 @@ use crate::sink::utils::{
     start_sink_test_cluster, SimulationTestSink, SimulationTestSource, CREATE_SINK, CREATE_SOURCE,
     DROP_SINK, DROP_SOURCE,
 };
+use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
 
-async fn kill_and_check(cluster: &mut Cluster, test_sink: &SimulationTestSink, target: usize) {
+async fn kill_and_check(
+    cluster: &mut Cluster,
+    test_sink: &SimulationTestSink,
+    target: usize,
+) -> anyhow::Result<()> {
     let mut prev_count = 0;
     sleep(Duration::from_secs(2)).await;
     for i in 0..5 {
@@ -45,6 +50,7 @@ async fn kill_and_check(cluster: &mut Cluster, test_sink: &SimulationTestSink, t
         cluster.kill_node(&KillOpts::ALL).await;
         sleep(Duration::from_secs(10)).await;
     }
+    Ok(())
 }
 
 async fn recovery_test_inner(is_decouple: bool) -> Result<()> {
@@ -67,9 +73,9 @@ async fn recovery_test_inner(is_decouple: bool) -> Result<()> {
 
     let count = test_source.id_list.len();
 
-    kill_and_check(&mut cluster, &test_sink, count).await;
+    kill_and_check(&mut cluster, &test_sink, count).await?;
 
-    test_sink.store.wait_for_count(count).await;
+    test_sink.store.wait_for_count(count).await?;
 
     let mut session = cluster.start_session();
     session.run(DROP_SINK).await?;
@@ -78,7 +84,7 @@ async fn recovery_test_inner(is_decouple: bool) -> Result<()> {
     assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
     assert!(test_sink.store.inner().checkpoint_count > 0);
 
-    test_sink.store.check_simple_result(&test_source.id_list);
+    test_sink.store.check_simple_result(&test_source.id_list)?;
     assert!(test_sink.store.inner().checkpoint_count > 0);
 
     Ok(())

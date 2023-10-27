@@ -23,6 +23,7 @@ use crate::sink::utils::{
     start_sink_test_cluster, SimulationTestSink, SimulationTestSource, CREATE_SINK, CREATE_SOURCE,
     DROP_SINK, DROP_SOURCE,
 };
+use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
 
 async fn basic_test_inner(is_decouple: bool) -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
@@ -45,13 +46,13 @@ async fn basic_test_inner(is_decouple: bool) -> Result<()> {
     test_sink
         .store
         .wait_for_count(test_source.id_list.len())
-        .await;
+        .await?;
 
     session.run(DROP_SINK).await?;
     session.run(DROP_SOURCE).await?;
 
     assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
-    test_sink.store.check_simple_result(&test_source.id_list);
+    test_sink.store.check_simple_result(&test_source.id_list)?;
     assert!(test_sink.store.inner().checkpoint_count > 0);
 
     Ok(())

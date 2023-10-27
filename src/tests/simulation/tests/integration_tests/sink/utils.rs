@@ -40,6 +40,8 @@ use risingwave_connector::source::StreamChunkWithState;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration};
 use tokio::time::sleep;
 
+use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
+
 pub const CREATE_SOURCE: &str = "create source test_source (id int, name varchar) with (connector = 'test') FORMAT PLAIN ENCODE JSON";
 pub const CREATE_SINK: &str = "create sink test_sink from test_source with (connector = 'test')";
 pub const DROP_SINK: &str = "drop sink test_sink";
@@ -79,7 +81,7 @@ impl TestSinkStore {
         self.inner.lock().unwrap()
     }
 
-    pub fn check_simple_result(&self, id_list: &[i32]) {
+    pub fn check_simple_result(&self, id_list: &[i32]) -> anyhow::Result<()> {
         let inner = self.inner();
         assert_eq!(inner.id_name.len(), id_list.len());
         for id in id_list {
@@ -89,13 +91,14 @@ impl TestSinkStore {
                 assert_eq!(name, &simple_name_of_id(*id));
             }
         }
+        Ok(())
     }
 
     pub fn id_count(&self) -> usize {
         self.inner().id_name.len()
     }
 
-    pub async fn wait_for_count(&self, count: usize) {
+    pub async fn wait_for_count(&self, count: usize) -> anyhow::Result<()> {
         let mut prev_count = 0;
         loop {
             sleep(Duration::from_secs(1)).await;
@@ -112,6 +115,7 @@ impl TestSinkStore {
             );
             prev_count = curr_count;
         }
+        Ok(())
     }
 }
 
@@ -206,7 +210,7 @@ pub fn build_stream_chunk(row_iter: impl Iterator<Item = (i32, String)>) -> Stre
     );
     for (id, name) in row_iter {
         let row_id = ROW_ID_GEN.fetch_add(1, Relaxed);
-        assert!(builder
+        std::assert!(builder
             .append_one_row([
                 Some(ScalarImpl::Int32(id)),
                 Some(ScalarImpl::Utf8(name.into())),
