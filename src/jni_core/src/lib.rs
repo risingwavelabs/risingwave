@@ -782,7 +782,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetArrayValu
                         let obj = env.call_static_method(
                             &class,
                             "valueOf",
-                            "(S)Ljava.lang.Short;",
+                            "(S)Ljava/lang/Short;",
                             &[JValue::from(v as jshort)],
                         )?;
                         if let JValueOwned::Object(o) = obj {
@@ -793,7 +793,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetArrayValu
                         let obj = env.call_static_method(
                             &class,
                             "valueOf",
-                            "(I)Ljava.lang.Integer;",
+                            "(I)Ljava/lang/Integer;",
                             &[JValue::from(v as jint)],
                         )?;
                         if let JValueOwned::Object(o) = obj {
@@ -804,7 +804,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetArrayValu
                         let obj = env.call_static_method(
                             &class,
                             "valueOf",
-                            "(J)Ljava.lang.Long;",
+                            "(J)Ljava/lang/Long;",
                             &[JValue::from(v as jlong)],
                         )?;
                         if let JValueOwned::Object(o) = obj {

@@ -1,0 +1,22 @@
+[package]
+name = "risingwave_meta_model_migration"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
+[dependencies]
+async-std = { version = "1", features = ["attributes", "tokio1"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dependencies.sea-orm-migration]
+version = "0.12.0"
+features = ["sqlx-mysql", "sqlx-postgres", "sqlx-sqlite", "runtime-tokio-native-tls", "with-uuid"]
