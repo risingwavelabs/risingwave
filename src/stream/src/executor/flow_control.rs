@@ -14,8 +14,6 @@
 
 use std::fmt::{Debug, Formatter};
 use std::num::NonZeroU32;
-use std::thread::sleep;
-use std::time::Duration;
 
 use governor::clock::MonotonicClock;
 use governor::{InsufficientCapacity, Quota, RateLimiter};
@@ -76,6 +74,8 @@ impl FlowControlExecutor {
                     }
                     #[cfg(madsim)]
                     {
+                        use std::thread::sleep;
+                        use std::time::Duration;
                         if let Some(quota_available) = quota_available {
                             if quota_available < chunk.cardinality() as u32 {
                                 sleep(Duration::from_secs(1));

@@ -16,14 +16,12 @@ use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
-use madsim::time::timeout;
 use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts, Session};
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
 const CREATE_TABLE: &str = "CREATE TABLE t(v1 int);";
 const SEED_TABLE: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 100000);";
-const FLUSH: &str = "flush;";
 const SET_BACKGROUND_DDL: &str = "SET BACKGROUND_DDL=true;";
 const SET_STREAMING_RATE_LIMIT: &str = "SET STREAMING_RATE_LIMIT=4000;";
 const SET_INJECT_BACKFILL_DELAY_AFTER_FIRST_BARRIER: &str =
@@ -65,7 +63,9 @@ async fn cancel_stream_jobs(session: &mut Session) -> Result<Vec<u32>> {
     tracing::info!("selected streaming jobs to cancel {:?}", ids);
     tracing::info!("cancelling streaming jobs");
     let ids = ids.split('\n').collect::<Vec<_>>();
-    session.run(&format!("cancel jobs {};", ids.join(","))).await?;
+    session
+        .run(&format!("cancel jobs {};", ids.join(",")))
+        .await?;
     tracing::info!("cancelled streaming jobs");
     let ids = ids.iter().map(|s| s.parse::<u32>().unwrap()).collect_vec();
     Ok(ids)
