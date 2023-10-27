@@ -864,3 +864,16 @@
           └─StreamHopWindow { time_col: t1.ts, slide: 00:10:00, size: 00:30:00, output: all }
             └─StreamFilter { predicate: IsNotNull(t1.ts) }
               └─StreamTableScan { table: t1, columns: [t1.k, t1.ts], pk: [t1.k], dist: UpstreamHashShard(t1.k) }
+- name: Only table-in-out functions can have subquery parameters.
+  sql: |
+    SELECT * FROM generate_series(1, (select 1));
+  binder_error: 'Invalid input syntax: Only table-in-out functions can have subquery parameters, generate_series only accepts constant parameters'
+- name: While this one is allowed.
+  sql: |
+    SELECT generate_series(1, (select 1));
+  batch_plan: |-
+    BatchProject { exprs: [GenerateSeries(1:Int32, $0)] }
+    └─BatchProjectSet { select_list: [GenerateSeries(1:Int32, $0)] }
+      └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
+        ├─BatchValues { rows: [[]] }
+        └─BatchValues { rows: [[1:Int32]] }

@@ -20,9 +20,9 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use super::generic::TopNLimit;
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ExprRewritable, PlanBase,
-    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamProject, ToBatch,
-    ToStream,
+    gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ExprRewritable, Logical,
+    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamProject,
+    ToBatch, ToStream,
 };
 use crate::expr::{ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
@@ -36,7 +36,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalTopN {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::TopN<PlanRef>,
 }
 
@@ -107,6 +107,8 @@ impl LogicalTopN {
     }
 
     fn gen_dist_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         let input_dist = stream_input.distribution().clone();
 
         // if it is append only, for now we don't generate 2-phase rules

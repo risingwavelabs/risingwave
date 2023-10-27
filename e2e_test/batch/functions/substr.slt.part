@@ -27,3 +27,13 @@ query T
 select substr('a', 2147483646, 1);
 ----
 (empty)
+
+query T
+select substr('abcde'::bytea, 2, 7);
+----
+\x62636465
+
+query T
+select substr('abcde'::bytea, -2, 5);
+----
+\x6162
