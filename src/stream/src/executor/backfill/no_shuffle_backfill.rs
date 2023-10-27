@@ -302,7 +302,7 @@ where
                                         break 'backfill_loop;
                                     }
                                     Some(chunk) => {
-                                        tokio::time::sleep(Duration::from_secs(
+                                        tokio::time::sleep(Duration::from_millis(
                                             self.snapshot_read_delay as u64,
                                         ))
                                             .await;
