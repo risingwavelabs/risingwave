@@ -38,6 +38,8 @@ pub struct FlowControlExecutor {
 impl FlowControlExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(input: Box<dyn Executor>, rate_limit: Option<u32>) -> Self {
+        #[cfg(madsim)]
+        println!("FlowControlExecutor rate limiter is disabled in madsim as it will spawn system threads");
         Self { input, rate_limit }
     }
 
@@ -49,10 +51,6 @@ impl FlowControlExecutor {
             RateLimiter::direct_with_clock(quota, &clock)
         };
         let rate_limiter = self.rate_limit.map(get_rate_limiter);
-
-        #[cfg(madsim)]
-        let mut quota_available = self.rate_limit;
-
         #[for_await]
         for msg in self.input.execute() {
             let msg = msg?;
@@ -70,18 +68,6 @@ impl FlowControlExecutor {
                                     self.rate_limit,
                                 );
                             }
-                        }
-                    }
-                    #[cfg(madsim)]
-                    {
-                        use std::thread::sleep;
-                        use std::time::Duration;
-                        if let Some(quota_available) = quota_available {
-                            if quota_available < chunk.cardinality() as u32 {
-                                sleep(Duration::from_secs(1));
-                                quota_available = self.rate_limit;
-                            }
-                            quota_available -= chunk.cardinality() as u32;
                         }
                     }
                     yield Message::Chunk(chunk);
