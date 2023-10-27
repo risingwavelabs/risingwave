@@ -155,7 +155,7 @@ impl IntraCompactionPicker {
                     input_levels: select_level_inputs,
                     target_sub_level_id: level.sub_level_id,
                     select_input_size,
-                    total_file_count: total_file_count as u64,
+                    total_file_count,
                     vnode_partition_count,
                     ..Default::default()
                 };
