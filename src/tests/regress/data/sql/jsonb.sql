@@ -465,58 +465,58 @@ SELECT jsonb_typeof('"1.0"') AS string;
 --@ SELECT jsonb_extract_path_text('{"f2":{"f3":1},"f4":[0,1,2,null]}','f4','3') IS NULL AS expect_true;
 
 -- extract_path operators
---@ SELECT '{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>array['f4','f6'];
---@ SELECT '{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>array['f2'];
---@ SELECT '{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>array['f2','0'];
---@ SELECT '{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>array['f2','1'];
---@ 
---@ SELECT '{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>>array['f4','f6'];
---@ SELECT '{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>>array['f2'];
---@ SELECT '{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>>array['f2','0'];
---@ SELECT '{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>>array['f2','1'];
---@ 
+SELECT '{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>array['f4','f6'];
+SELECT '{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>array['f2'];
+SELECT '{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>array['f2','0'];
+SELECT '{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>array['f2','1'];
+
+SELECT '{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>>array['f4','f6'];
+SELECT '{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>>array['f2'];
+SELECT '{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>>array['f2','0'];
+SELECT '{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>>array['f2','1'];
+
 --@ -- corner cases for same
 --@ select '{"a": {"b":{"c": "foo"}}}'::jsonb #> '{}';
 --@ select '[1,2,3]'::jsonb #> '{}';
 --@ select '"foo"'::jsonb #> '{}';
 --@ select '42'::jsonb #> '{}';
 --@ select 'null'::jsonb #> '{}';
---@ select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a'];
---@ select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a', null];
---@ select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a', ''];
---@ select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a','b'];
---@ select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a','b','c'];
---@ select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a','b','c','d'];
---@ select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a','z','c'];
---@ select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb #> array['a','1','b'];
---@ select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb #> array['a','z','b'];
---@ select '[{"b": "c"}, {"b": "cc"}]'::jsonb #> array['1','b'];
---@ select '[{"b": "c"}, {"b": "cc"}]'::jsonb #> array['z','b'];
---@ select '[{"b": "c"}, {"b": null}]'::jsonb #> array['1','b'];
---@ select '"foo"'::jsonb #> array['z'];
---@ select '42'::jsonb #> array['f2'];
---@ select '42'::jsonb #> array['0'];
---@ 
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a'];
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a', null];
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a', ''];
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a','b'];
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a','b','c'];
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a','b','c','d'];
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a','z','c'];
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb #> array['a','1','b'];
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb #> array['a','z','b'];
+select '[{"b": "c"}, {"b": "cc"}]'::jsonb #> array['1','b'];
+select '[{"b": "c"}, {"b": "cc"}]'::jsonb #> array['z','b'];
+select '[{"b": "c"}, {"b": null}]'::jsonb #> array['1','b'];
+select '"foo"'::jsonb #> array['z'];
+select '42'::jsonb #> array['f2'];
+select '42'::jsonb #> array['0'];
+
 --@ select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> '{}';
 --@ select '[1,2,3]'::jsonb #>> '{}';
 --@ select '"foo"'::jsonb #>> '{}';
 --@ select '42'::jsonb #>> '{}';
 --@ select 'null'::jsonb #>> '{}';
---@ select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a'];
---@ select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a', null];
---@ select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a', ''];
---@ select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a','b'];
---@ select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a','b','c'];
---@ select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a','b','c','d'];
---@ select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a','z','c'];
---@ select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb #>> array['a','1','b'];
---@ select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb #>> array['a','z','b'];
---@ select '[{"b": "c"}, {"b": "cc"}]'::jsonb #>> array['1','b'];
---@ select '[{"b": "c"}, {"b": "cc"}]'::jsonb #>> array['z','b'];
---@ select '[{"b": "c"}, {"b": null}]'::jsonb #>> array['1','b'];
---@ select '"foo"'::jsonb #>> array['z'];
---@ select '42'::jsonb #>> array['f2'];
---@ select '42'::jsonb #>> array['0'];
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a'];
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a', null];
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a', ''];
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a','b'];
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a','b','c'];
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a','b','c','d'];
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a','z','c'];
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb #>> array['a','1','b'];
+select '{"a": [{"b": "c"}, {"b": "cc"}]}'::jsonb #>> array['a','z','b'];
+select '[{"b": "c"}, {"b": "cc"}]'::jsonb #>> array['1','b'];
+select '[{"b": "c"}, {"b": "cc"}]'::jsonb #>> array['z','b'];
+select '[{"b": "c"}, {"b": null}]'::jsonb #>> array['1','b'];
+select '"foo"'::jsonb #>> array['z'];
+select '42'::jsonb #>> array['f2'];
+select '42'::jsonb #>> array['0'];
 
 -- array_elements
 --@ SELECT jsonb_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false]');
