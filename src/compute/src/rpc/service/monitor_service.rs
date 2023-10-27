@@ -53,7 +53,7 @@ impl MonitorServiceImpl {
 
 #[async_trait::async_trait]
 impl MonitorService for MonitorServiceImpl {
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn stack_trace(
         &self,
         request: Request<StackTraceRequest>,
@@ -85,7 +85,7 @@ impl MonitorService for MonitorServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn profiling(
         &self,
         request: Request<ProfilingRequest>,
@@ -115,7 +115,7 @@ impl MonitorService for MonitorServiceImpl {
         }
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn heap_profiling(
         &self,
         request: Request<HeapProfilingRequest>,
@@ -166,7 +166,7 @@ impl MonitorService for MonitorServiceImpl {
         }
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn list_heap_profiling(
         &self,
         _request: Request<ListHeapProfilingRequest>,
@@ -206,7 +206,7 @@ impl MonitorService for MonitorServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn analyze_heap(
         &self,
         request: Request<AnalyzeHeapRequest>,
@@ -244,7 +244,7 @@ pub mod grpc_middleware {
     use tower::{Layer, Service};
 
     /// Manages the await-trees of `gRPC` requests that are currently served by the compute node.
-    pub type AwaitTreeRegistryRef = Arc<Mutex<await_tree::Registry<u64>>>;
+    pub type AwaitTreeRegistryRef = Arc<Mutex<await_tree::Registry<String>>>;
 
     #[derive(Clone)]
     pub struct AwaitTreeMiddlewareLayer {
@@ -308,12 +308,14 @@ pub mod grpc_middleware {
             let mut inner = std::mem::replace(&mut self.inner, clone);
 
             let id = self.next_id.fetch_add(1, Ordering::SeqCst);
+            let key = if let Some(authority) = req.uri().authority() {
+                format!("{authority} - {id}")
+            } else {
+                format!("?? - {id}")
+            };
 
             Either::Right(async move {
-                let root = registry
-                    .lock()
-                    .await
-                    .register(id, format!("{}:{}", req.uri().path(), id));
+                let root = registry.lock().await.register(key, req.uri().path());
 
                 root.instrument(inner.call(req)).await
             })

@@ -58,8 +58,8 @@ pub static PG_TYPE: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
     ],
     sql: "SELECT t.id AS oid, \
                 t.name AS typname, \
-                0 AS typelem, \
-                0 AS typarray, \
+                t.typelem AS typelem, \
+                t.typarray AS typarray, \
                 t.input_oid AS typinput, \
                 false AS typnotnull, \
                 0 AS typbasetype, \

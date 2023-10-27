@@ -15,16 +15,16 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-tikv-jemalloc-ctl = { workspace = true }
-risingwave_common = {workspace =true}
-tokio = { version = "0.2", package = "madsim-tokio" }
-tracing = "0.1"
+anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = [
     "clock",
     "std",
 ] }
-anyhow = "1"
 parking_lot = "0.12"
+risingwave_common = { workspace = true }
+tikv-jemalloc-ctl = { workspace = true }
+tokio = { version = "0.2", package = "madsim-tokio" }
+tracing = "0.1"
 
 [lints]
 workspace = true

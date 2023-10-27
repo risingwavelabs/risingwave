@@ -42,16 +42,18 @@ impl RelationCollectorVisitor {
     }
 }
 
-impl PlanVisitor<()> for RelationCollectorVisitor {
-    type DefaultBehavior = impl DefaultBehavior<()>;
+impl PlanVisitor for RelationCollectorVisitor {
+    type Result = ();
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     fn default_behavior() -> Self::DefaultBehavior {
         DefaultValue
     }
 
     fn visit_batch_seq_scan(&mut self, plan: &crate::optimizer::plan_node::BatchSeqScan) {
-        if !plan.logical().is_sys_table {
-            self.relations.insert(plan.logical().table_desc.table_id);
+        if !plan.core().is_sys_table {
+            self.relations.insert(plan.core().table_desc.table_id);
         }
     }
 
@@ -62,7 +64,7 @@ impl PlanVisitor<()> for RelationCollectorVisitor {
     }
 
     fn visit_stream_table_scan(&mut self, plan: &StreamTableScan) {
-        let logical = plan.logical();
+        let logical = plan.core();
         if !logical.is_sys_table {
             self.relations.insert(logical.table_desc.table_id);
         }

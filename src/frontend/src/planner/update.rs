@@ -16,7 +16,6 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 
-use super::select::LogicalFilter;
 use super::Planner;
 use crate::binder::BoundUpdate;
 use crate::optimizer::plan_node::{generic, LogicalProject, LogicalUpdate};
@@ -27,7 +26,7 @@ impl Planner {
     pub(super) fn plan_update(&mut self, update: BoundUpdate) -> Result<PlanRoot> {
         let scan = self.plan_base_table(&update.table)?;
         let input = if let Some(expr) = update.selection {
-            LogicalFilter::create_with_expr(scan, expr)
+            self.plan_where(scan, expr)?
         } else {
             scan
         };

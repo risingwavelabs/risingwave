@@ -261,7 +261,7 @@ impl ClusterManager {
                             .unwrap()
                             .is_unschedulable = target;
 
-                        var_txn.apply_to_txn(&mut txn)?;
+                        var_txn.apply_to_txn(&mut txn).await?;
                         var_txns.push(var_txn);
                     }
                 }
@@ -557,7 +557,7 @@ impl ClusterManagerCore {
                     worker_id
                 );
 
-                var_txn.apply_to_txn(&mut txn)?;
+                var_txn.apply_to_txn(&mut txn).await?;
                 var_txns.push(var_txn);
             }
         }

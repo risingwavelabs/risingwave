@@ -234,12 +234,13 @@ macro_rules! impl_cdc_source_type {
             $(
                 $cdc_source_type,
             )*
+            Unspecified,
         }
 
         impl From<PbSourceType> for CdcSourceType {
             fn from(value: PbSourceType) -> Self {
                 match value {
-                    PbSourceType::Unspecified => unreachable!(),
+                    PbSourceType::Unspecified => CdcSourceType::Unspecified,
                     $(
                         PbSourceType::$cdc_source_type => CdcSourceType::$cdc_source_type,
                     )*
@@ -253,8 +254,10 @@ macro_rules! impl_cdc_source_type {
                     $(
                         CdcSourceType::$cdc_source_type => PbSourceType::$cdc_source_type,
                     )*
+                   CdcSourceType::Unspecified => PbSourceType::Unspecified,
                 }
             }
         }
+
     }
 }

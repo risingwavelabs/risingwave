@@ -112,7 +112,7 @@ impl HummockManager {
         Ok(invalid_context_ids)
     }
 
-    pub(crate) async fn commit_epoch_sanity_check(
+    pub async fn commit_epoch_sanity_check(
         &self,
         epoch: HummockEpoch,
         sstables: &Vec<ExtendedSstableInfo>,

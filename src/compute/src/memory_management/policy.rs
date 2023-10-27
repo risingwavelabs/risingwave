@@ -17,15 +17,16 @@ use std::sync::Arc;
 
 use risingwave_batch::task::BatchManager;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_jni_core::jvm_runtime::load_jvm_memory_stats;
 use risingwave_stream::task::LocalStreamManager;
 use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 
 use super::{MemoryControl, MemoryControlStats};
 
-/// `JemallocMemoryControl` is a memory control policy that uses jemalloc statistics to control. It
-/// assumes that most memory is used by streaming engine and does memory control over LRU watermark
-/// based on jemalloc statistics.
-pub struct JemallocMemoryControl {
+/// `JemallocAndJvmMemoryControl` is a memory control policy that uses jemalloc statistics and
+/// jvm memory statistics and to control. It assumes that most memory is used by streaming engine
+/// and does memory control over LRU watermark based on jemalloc statistics and jvm memory statistics.
+pub struct JemallocAndJvmMemoryControl {
     threshold_stable: usize,
     threshold_graceful: usize,
     threshold_aggressive: usize,
@@ -35,7 +36,7 @@ pub struct JemallocMemoryControl {
     jemalloc_active_mib: jemalloc_stats::active_mib,
 }
 
-impl JemallocMemoryControl {
+impl JemallocAndJvmMemoryControl {
     const THRESHOLD_AGGRESSIVE: f64 = 0.9;
     const THRESHOLD_GRACEFUL: f64 = 0.8;
     const THRESHOLD_STABLE: f64 = 0.7;
@@ -81,7 +82,7 @@ impl JemallocMemoryControl {
     }
 }
 
-impl std::fmt::Debug for JemallocMemoryControl {
+impl std::fmt::Debug for JemallocAndJvmMemoryControl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JemallocMemoryControl")
             .field("threshold_stable", &self.threshold_stable)
@@ -91,7 +92,7 @@ impl std::fmt::Debug for JemallocMemoryControl {
     }
 }
 
-impl MemoryControl for JemallocMemoryControl {
+impl MemoryControl for JemallocAndJvmMemoryControl {
     fn apply(
         &self,
         interval_ms: u32,
@@ -105,13 +106,15 @@ impl MemoryControl for JemallocMemoryControl {
             prev_memory_stats.jemalloc_active_bytes,
         );
 
+        let (jvm_allocated_bytes, jvm_active_bytes) = load_jvm_memory_stats();
+
         // Streaming memory control
         //
         // We calculate the watermark of the LRU cache, which provides hints for streaming executors
         // on cache eviction. Here we do the calculation based on jemalloc statistics.
 
         let (lru_watermark_step, lru_watermark_time_ms, lru_physical_now) = calculate_lru_watermark(
-            jemalloc_allocated_bytes,
+            jemalloc_allocated_bytes + jvm_allocated_bytes,
             self.threshold_stable,
             self.threshold_graceful,
             self.threshold_aggressive,
@@ -124,6 +127,8 @@ impl MemoryControl for JemallocMemoryControl {
         MemoryControlStats {
             jemalloc_allocated_bytes,
             jemalloc_active_bytes,
+            jvm_allocated_bytes,
+            jvm_active_bytes,
             lru_watermark_step,
             lru_watermark_time_ms,
             lru_physical_now_ms: lru_physical_now,
@@ -141,7 +146,8 @@ fn calculate_lru_watermark(
 ) -> (u64, u64, u64) {
     let mut watermark_time_ms = prev_memory_stats.lru_watermark_time_ms;
     let last_step = prev_memory_stats.lru_watermark_step;
-    let last_used_memory_bytes = prev_memory_stats.jemalloc_allocated_bytes;
+    let last_used_memory_bytes =
+        prev_memory_stats.jemalloc_allocated_bytes + prev_memory_stats.jvm_allocated_bytes;
 
     // The watermark calculation works in the following way:
     //

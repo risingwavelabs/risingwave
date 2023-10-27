@@ -15,10 +15,11 @@
 use itertools::Itertools;
 use risingwave_common::error::Result;
 
+use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, Logical, PlanBase,
+    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::{
     ColumnPruningContext, LogicalProject, PredicatePushdownContext, RewriteStreamContext,
@@ -36,7 +37,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// is used to distinguish between different `subset`s in `column_subsets`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalExpand {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Expand<PlanRef>,
 }
 
@@ -192,7 +193,7 @@ mod tests {
         let mut values = LogicalValues::new(vec![], Schema { fields }, ctx);
         values
             .base
-            .functional_dependency
+            .functional_dependency_mut()
             .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
 
         let column_subsets = vec![vec![0, 1], vec![2]];

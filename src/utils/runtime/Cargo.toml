@@ -16,10 +16,6 @@ normal = ["workspace-hack"]
 
 [dependencies]
 await-tree = { workspace = true }
-chrono = { version = "0.4", default-features = false, features = [
-    "clock",
-    "std",
-] }
 console = "0.15"
 console-subscriber = "0.2.0"
 either = "1"
@@ -29,7 +25,6 @@ opentelemetry-otlp = { version = "0.13" }
 opentelemetry-semantic-conventions = "0.12"
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 pprof = { version = "0.13", features = ["flamegraph"] }
-prometheus = { version = "0.13" }
 risingwave_common = { workspace = true }
 risingwave_variables = { workspace = true }
 rlimit = "0.10"

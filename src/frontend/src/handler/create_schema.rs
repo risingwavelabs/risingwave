@@ -13,9 +13,10 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::RESERVED_PG_SCHEMA_PREFIX;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_pb::user::grant_privilege::Object;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -63,7 +64,7 @@ pub async fn handle_create_schema(
 
     session.check_privileges(&[ObjectCheckItem::new(
         db_owner,
-        Action::Create,
+        AclMode::Create,
         Object::DatabaseId(db_id),
     )])?;
 
