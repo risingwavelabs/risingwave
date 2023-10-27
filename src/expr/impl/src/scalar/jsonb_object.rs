@@ -34,6 +34,14 @@ use risingwave_expr::{function, ExprError, Result};
 ///
 /// query error array must have even number of elements
 /// select jsonb_object('{a, 1, b, "def", c}' :: text[]);
+///
+/// query error null value not allowed for object key
+/// select jsonb_object(array[null, 'b']);
+///
+/// query T
+/// select jsonb_object(array['a', null]);
+/// ----
+/// {"a": null}
 /// ```
 #[function("jsonb_object(varchar[]) -> jsonb")]
 fn jsonb_object_1d(array: ListRef<'_>) -> Result<JsonbVal> {
@@ -45,7 +53,16 @@ fn jsonb_object_1d(array: ListRef<'_>) -> Result<JsonbVal> {
     }
     let mut builder = Builder::<Vec<u8>>::new();
     builder.begin_object();
-    for value in array.iter() {
+    for [key, value] in array.iter().array_chunks() {
+        match key {
+            Some(s) => builder.add_string(s.into_utf8()),
+            None => {
+                return Err(ExprError::InvalidParam {
+                    name: "array",
+                    reason: "null value not allowed for object key".into(),
+                })
+            }
+        }
         match value {
             Some(s) => builder.add_string(s.into_utf8()),
             None => builder.add_null(),
