@@ -363,6 +363,13 @@ impl Binder {
     }
 }
 
+/// The column name stored in [`BindContext`] for a column without an alias.
+pub const UNNAMED_COLUMN: &str = "?column?";
+/// The table name stored in [`BindContext`] for a subquery without an alias.
+const UNNAMED_SUBQUERY: &str = "?subquery?";
+/// The table name stored in [`BindContext`] for a column group.
+const COLUMN_GROUP_PREFIX: &str = "?column_group_id?";
+
 #[cfg(test)]
 pub mod test_utils {
     use risingwave_common::types::DataType;
@@ -392,10 +399,3 @@ pub mod test_utils {
         mock_binder().bind_expr(expr).unwrap()
     }
 }
-
-/// The column name stored in [`BindContext`] for a column without an alias.
-pub const UNNAMED_COLUMN: &str = "?column?";
-/// The table name stored in [`BindContext`] for a subquery without an alias.
-const UNNAMED_SUBQUERY: &str = "?subquery?";
-/// The table name stored in [`BindContext`] for a column group.
-const COLUMN_GROUP_PREFIX: &str = "?column_group_id?";

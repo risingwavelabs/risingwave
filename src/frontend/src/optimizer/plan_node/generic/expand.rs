@@ -51,8 +51,14 @@ impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Expand<PlanRef> {
     fn schema(&self) -> Schema {
-        let mut fields = self.input.schema().clone().into_fields();
-        fields.extend(fields.clone());
+        let mut fields = self
+            .input
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| Field::with_name(f.data_type(), format!("{}_expanded", f.name)))
+            .collect::<Vec<_>>();
+        fields.extend(self.input.schema().fields().iter().cloned());
         fields.push(Field::with_name(DataType::Int64, "flag"));
         Schema::new(fields)
     }

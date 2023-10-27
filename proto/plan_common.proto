@@ -37,6 +37,9 @@ message ColumnDesc {
     GeneratedColumnDesc generated_column = 6;
     DefaultColumnDesc default_column = 7;
   }
+
+  // This field is used to store the description set by the `comment on` clause.
+  optional string description = 8;
 }
 
 message ColumnCatalog {
@@ -106,6 +109,7 @@ enum EncodeType {
   ENCODE_TYPE_PROTOBUF = 4;
   ENCODE_TYPE_JSON = 5;
   ENCODE_TYPE_BYTES = 6;
+  ENCODE_TYPE_TEMPLATE = 7;
 }
 
 enum RowFormatType {

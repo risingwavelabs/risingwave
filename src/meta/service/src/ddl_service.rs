@@ -16,16 +16,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use rand::Rng;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_connector::sink::catalog::SinkId;
+use risingwave_connector::source::cdc::CdcSourceType;
+use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_pb::catalog::connection::private_link_service::{
     PbPrivateLinkProvider, PrivateLinkProvider,
 };
 use risingwave_pb::catalog::connection::PbPrivateLinkService;
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{connection, Connection, CreateType, PbSource, PbTable};
+use risingwave_pb::catalog::{connection, Comment, Connection, CreateType, PbSource, PbTable};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
@@ -428,6 +431,16 @@ impl DdlService for DdlServiceImpl {
             // Generate source id.
             let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?; // TODO: Use source category
             fill_table_source(source, source_id, &mut mview, table_id, &mut fragment_graph);
+
+            // Modify properties for cdc sources if needed
+            if let Some(connector) = source.properties.get(UPSTREAM_SOURCE_KEY) {
+                if matches!(
+                    CdcSourceType::from(connector.as_str()),
+                    CdcSourceType::Mysql
+                ) {
+                    fill_cdc_mysql_server_id(&mut fragment_graph);
+                }
+            }
         }
 
         let mut stream_job = StreamingJob::Table(source, mview);
@@ -717,7 +730,31 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    async fn comment_on(
+        &self,
+        request: Request<CommentOnRequest>,
+    ) -> Result<Response<CommentOnResponse>, Status> {
+        let req = request.into_inner();
+        let comment = req.get_comment()?.clone();
+
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::CommentOn(Comment {
+                table_id: comment.table_id,
+                schema_id: comment.schema_id,
+                database_id: comment.database_id,
+                column_index: comment.column_index,
+                description: comment.description,
+            }))
+            .await?;
+
+        Ok(Response::new(CommentOnResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
     async fn get_tables(
         &self,
         request: Request<GetTablesRequest>,
@@ -731,6 +768,11 @@ impl DdlService for DdlServiceImpl {
             tables.insert(table.id, table);
         }
         Ok(Response::new(GetTablesResponse { tables }))
+    }
+
+    async fn wait(&self, _request: Request<WaitRequest>) -> Result<Response<WaitResponse>, Status> {
+        self.ddl_controller.wait().await?;
+        Ok(Response::new(WaitResponse {}))
     }
 }
 
@@ -797,4 +839,20 @@ fn fill_table_source(
     // Fill in the correct source id for mview.
     table.optional_associated_source_id =
         Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
+}
+
+// `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
+// group (that is, different from any other server id being used by any master or slave)
+fn fill_cdc_mysql_server_id(fragment_graph: &mut PbStreamFragmentGraph) {
+    for fragment in fragment_graph.fragments.values_mut() {
+        visit_fragment(fragment, |node_body| {
+            if let NodeBody::Source(source_node) = node_body {
+                let props = &mut source_node.source_inner.as_mut().unwrap().properties;
+                let rand_server_id = rand::thread_rng().gen_range(1..u32::MAX);
+                props
+                    .entry("server.id".to_string())
+                    .or_insert(rand_server_id.to_string());
+            }
+        });
+    }
 }

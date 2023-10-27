@@ -23,7 +23,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::utils::{childless_record, Distill};
 use super::{
-    ColPrunable, ExprRewritable, LogicalFilter, LogicalJoin, LogicalProject, PlanBase,
+    ColPrunable, ExprRewritable, Logical, LogicalFilter, LogicalJoin, LogicalProject, PlanBase,
     PlanNodeType, PlanRef, PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
     ToStream,
 };
@@ -46,7 +46,7 @@ use crate::utils::{
 /// expressed as 2-way `LogicalJoin`s.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalMultiJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     inputs: Vec<PlanRef>,
     on: Condition,
     output_indices: Vec<usize>,
@@ -863,6 +863,7 @@ mod test {
     use super::*;
     use crate::expr::{FunctionCall, InputRef};
     use crate::optimizer::optimizer_context::OptimizerContext;
+    use crate::optimizer::plan_node::generic::GenericPlanRef;
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
     #[tokio::test]
@@ -883,7 +884,7 @@ mod test {
             // 0 --> 1
             values
                 .base
-                .functional_dependency
+                .functional_dependency_mut()
                 .add_functional_dependency_by_column_indices(&[0], &[1]);
             values
         };
@@ -897,7 +898,7 @@ mod test {
             // 0 --> 1, 2
             values
                 .base
-                .functional_dependency
+                .functional_dependency_mut()
                 .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
             values
         };
@@ -910,7 +911,7 @@ mod test {
             // {} --> 0
             values
                 .base
-                .functional_dependency
+                .functional_dependency_mut()
                 .add_functional_dependency_by_column_indices(&[], &[0]);
             values
         };

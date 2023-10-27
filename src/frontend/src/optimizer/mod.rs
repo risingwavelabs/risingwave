@@ -17,6 +17,7 @@ use std::ops::DerefMut;
 
 pub mod plan_node;
 pub use plan_node::{Explain, PlanRef};
+
 pub mod property;
 
 mod delta_join_solver;
@@ -46,10 +47,11 @@ use risingwave_connector::sink::catalog::SinkFormatDesc;
 use risingwave_pb::catalog::WatermarkDesc;
 
 use self::heuristic_optimizer::ApplyOrder;
+use self::plan_node::generic::{self, PhysicalPlanRef};
 use self::plan_node::{
-    generic, stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject,
-    LogicalSource, StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink,
-    StreamWatermarkFilter, ToStreamContext,
+    stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject, LogicalSource,
+    StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
+    ToStreamContext,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
@@ -57,7 +59,6 @@ use self::plan_visitor::{has_batch_exchange, CardinalityVisitor};
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive,
 };
@@ -617,7 +618,7 @@ fn exist_and_no_exchange_before(plan: &PlanRef, is_candidate: fn(&PlanRef) -> bo
 fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> bool {
     fn is_user_table(plan: &PlanRef) -> bool {
         plan.as_batch_seq_scan()
-            .map(|node| !node.logical().is_sys_table)
+            .map(|node| !node.core().is_sys_table)
             .unwrap_or(false)
     }
 
@@ -650,7 +651,7 @@ fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> boo
 fn require_additional_exchange_on_root_in_local_mode(plan: PlanRef) -> bool {
     fn is_user_table(plan: &PlanRef) -> bool {
         plan.as_batch_seq_scan()
-            .map(|node| !node.logical().is_sys_table)
+            .map(|node| !node.core().is_sys_table)
             .unwrap_or(false)
     }
 
