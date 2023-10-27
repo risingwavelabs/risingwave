@@ -289,8 +289,7 @@ impl StreamTableScan {
         let ctx = self.base.ctx();
         let config = ctx.session_ctx().config();
         let rate_limit = config.get_streaming_rate_limit();
-        let snapshot_read_delay =
-            config.get_backfill_snapshot_read_delay();
+        let snapshot_read_delay = config.get_backfill_snapshot_read_delay();
 
         PbStreamNode {
             fields: self.schema().to_prost(),

@@ -305,7 +305,7 @@ where
                                         tokio::time::sleep(Duration::from_millis(
                                             self.snapshot_read_delay as u64,
                                         ))
-                                            .await;
+                                        .await;
                                         // Raise the current position.
                                         // As snapshot read streams are ordered by pk, so we can
                                         // just use the last row to update `current_pos`.

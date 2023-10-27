@@ -24,8 +24,7 @@ const CREATE_TABLE: &str = "CREATE TABLE t(v1 int);";
 const SEED_TABLE: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 100000);";
 const SET_BACKGROUND_DDL: &str = "SET BACKGROUND_DDL=true;";
 const SET_STREAMING_RATE_LIMIT: &str = "SET STREAMING_RATE_LIMIT=4000;";
-const SET_BACKFILL_SNAPSHOT_READ_DELAY: &str =
-    "SET BACKFILL_SNAPSHOT_READ_DELAY=100;";
+const SET_BACKFILL_SNAPSHOT_READ_DELAY: &str = "SET BACKFILL_SNAPSHOT_READ_DELAY=100;";
 const CREATE_MV1: &str = "CREATE MATERIALIZED VIEW mv1 as SELECT * FROM t;";
 
 async fn kill_cn_and_wait_recover(cluster: &Cluster) {
@@ -63,11 +62,12 @@ async fn cancel_stream_jobs(session: &mut Session) -> Result<Vec<u32>> {
     tracing::info!("selected streaming jobs to cancel {:?}", ids);
     tracing::info!("cancelling streaming jobs");
     let ids = ids.split('\n').collect::<Vec<_>>().join(",");
-    let result = session
-        .run(&format!("cancel jobs {};", ids))
-        .await?;
+    let result = session.run(&format!("cancel jobs {};", ids)).await?;
     tracing::info!("cancelled streaming jobs, {:#?}", result);
-    let ids = result.split('\n').map(|s| s.parse::<u32>().unwrap()).collect_vec();
+    let ids = result
+        .split('\n')
+        .map(|s| s.parse::<u32>().unwrap())
+        .collect_vec();
     Ok(ids)
 }
 
@@ -150,9 +150,7 @@ async fn test_background_ddl_cancel() -> Result<()> {
     session.run(SEED_TABLE).await?;
     session.run(SET_BACKGROUND_DDL).await?;
     session.run(SET_STREAMING_RATE_LIMIT).await?;
-    session
-        .run(SET_BACKFILL_SNAPSHOT_READ_DELAY)
-        .await?;
+    session.run(SET_BACKFILL_SNAPSHOT_READ_DELAY).await?;
 
     for _ in 0..5 {
         session.run(CREATE_MV1).await?;
