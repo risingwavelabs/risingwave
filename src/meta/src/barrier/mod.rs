@@ -476,7 +476,6 @@ impl CheckpointControl {
             tracing::warn!("there are some changes in dropping_tables");
             self.dropping_tables.clear();
         }
-        // self.finished_commands.clear();
         self.finished_commands
             .drain(..)
             .for_each(|cmd| cmd.notify_finish_failed(err.clone()));
