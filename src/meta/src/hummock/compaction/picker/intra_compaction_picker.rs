@@ -105,7 +105,6 @@ impl IntraCompactionPicker {
         }
         for (idx, level) in l0.sub_levels.iter().enumerate() {
             if level.level_type() != LevelType::Nonoverlapping
-                || level.total_file_size > self.config.sub_level_max_compaction_bytes
                 || level.vnode_partition_count == partition_count
             {
                 continue;
@@ -147,7 +146,7 @@ impl IntraCompactionPicker {
             }
             if !select_level_inputs.is_empty() {
                 let vnode_partition_count =
-                    if select_input_size > self.config.sub_level_max_compaction_bytes {
+                    if select_input_size > self.config.sub_level_max_compaction_bytes / 2 {
                         partition_count
                     } else {
                         0

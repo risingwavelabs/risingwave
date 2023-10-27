@@ -158,13 +158,6 @@ impl LevelCompactionPicker {
             }
             max_vnode_partition_idx = idx;
         }
-        if l0.sub_levels.len() > 30 {
-            warn!(
-                "sub levels count: {}, max_vnode_partition_idx: {}",
-                l0.sub_levels.len(),
-                max_vnode_partition_idx
-            );
-        }
 
         let l0_select_tables_vec = non_overlap_sub_level_picker.pick_l0_multi_non_overlap_level(
             &l0.sub_levels[..=max_vnode_partition_idx],
