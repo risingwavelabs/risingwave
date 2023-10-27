@@ -310,6 +310,8 @@ impl SourceStreamChunkRowWriter<'_> {
                     Err(error) => {
                         // TODO: figure out a way to fill in not-null default value if user specifies one
                         // TODO: decide whether the error should not be ignored (e.g., even not a valid Debezium message)
+                        // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
+                        //       see #13105
                         tracing::warn!(
                             %error,
                             split_id = self.row_meta.as_ref().map(|m| m.split_id),
@@ -569,6 +571,8 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
                     }
 
                     if let Err(error) = res {
+                        // TODO: not using tracing span to provide `split_id` and `offset` due to performance concern,
+                        //       see #13105
                         tracing::error!(
                             %error,
                             split_id = &*msg.split_id,
