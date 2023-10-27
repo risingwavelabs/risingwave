@@ -94,21 +94,6 @@ macro_rules! register_guarded_int_gauge_vec_with_registry {
 }
 
 #[macro_export]
-macro_rules! register_guarded_gauge_vec_with_registry {
-    ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
-        let result = prometheus::register_gauge_vec_with_registry!(
-            prometheus::opts!($NAME, $HELP),
-            $LABELS_NAMES,
-            $REGISTRY
-        );
-        result.map(|inner| {
-            let inner = $crate::metrics::__extract_gauge_builder(inner);
-            $crate::metrics::LabelGuardedGaugeVec::new(inner, { $LABELS_NAMES })
-        })
-    }};
-}
-
-#[macro_export]
 macro_rules! register_guarded_int_counter_vec_with_registry {
     ($NAME:expr, $HELP:expr, $LABELS_NAMES:expr, $REGISTRY:expr $(,)?) => {{
         let inner = prometheus::IntCounterVec::new(prometheus::opts!($NAME, $HELP), $LABELS_NAMES);
