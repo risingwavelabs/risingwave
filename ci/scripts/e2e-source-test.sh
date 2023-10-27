@@ -48,9 +48,6 @@ export PGHOST=db PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test
 createdb
 psql < ./e2e_test/source/cdc/postgres_cdc.sql
 
-node_port=50051
-node_timeout=10
-
 echo "--- starting risingwave cluster"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-1cn-1fe-with-recovery
