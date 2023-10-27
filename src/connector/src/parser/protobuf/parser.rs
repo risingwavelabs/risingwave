@@ -404,7 +404,9 @@ pub fn from_protobuf_value(
             if dyn_msg.descriptor().full_name() == "google.protobuf.Any" {
                 // If the fields are not presented, default value is an empty string
                 if !dyn_msg.has_field_by_name("type_url") || !dyn_msg.has_field_by_name("value") {
-                    return Ok(Some(ScalarImpl::Jsonb(JsonbVal::from(serde_json::json!{""}))));
+                    return Ok(Some(ScalarImpl::Jsonb(JsonbVal::from(
+                        serde_json::json! {""},
+                    ))));
                 }
 
                 // Sanity check
