@@ -1397,6 +1397,7 @@ impl Parser {
             Token::LongArrow => Some(BinaryOperator::LongArrow),
             Token::HashArrow => Some(BinaryOperator::HashArrow),
             Token::HashLongArrow => Some(BinaryOperator::HashLongArrow),
+            Token::HashMinus => Some(BinaryOperator::HashMinus),
             Token::Word(w) => match w.keyword {
                 Keyword::AND => Some(BinaryOperator::And),
                 Keyword::OR => Some(BinaryOperator::Or),
@@ -1735,7 +1736,8 @@ impl Parser {
             | Token::Arrow
             | Token::LongArrow
             | Token::HashArrow
-            | Token::HashLongArrow => Ok(P::Other),
+            | Token::HashLongArrow
+            | Token::HashMinus => Ok(P::Other),
             Token::Word(w)
                 if w.keyword == Keyword::OPERATOR && self.peek_nth_token(1) == Token::LParen =>
             {

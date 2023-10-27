@@ -164,6 +164,8 @@ pub enum Token {
     HashArrow,
     /// `#>>`, extract JSON sub-object at the specified path as text in PostgreSQL
     HashLongArrow,
+    /// `#-`, delete a key from a JSON object in PostgreSQL
+    HashMinus,
 }
 
 impl fmt::Display for Token {
@@ -231,6 +233,7 @@ impl fmt::Display for Token {
             Token::LongArrow => f.write_str("->>"),
             Token::HashArrow => f.write_str("#>"),
             Token::HashLongArrow => f.write_str("#>>"),
+            Token::HashMinus => f.write_str("#-"),
         }
     }
 }
@@ -745,6 +748,7 @@ impl<'a> Tokenizer<'a> {
                 '#' => {
                     chars.next(); // consume the '#'
                     match chars.peek() {
+                        Some('-') => self.consume_and_return(chars, Token::HashMinus),
                         Some('>') => {
                             chars.next(); // consume first '>'
                             match chars.peek() {

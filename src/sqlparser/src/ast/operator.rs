@@ -99,6 +99,7 @@ pub enum BinaryOperator {
     LongArrow,
     HashArrow,
     HashLongArrow,
+    HashMinus,
     PGQualified(Box<QualifiedOperator>),
 }
 
@@ -143,6 +144,7 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::LongArrow => "->>",
             BinaryOperator::HashArrow => "#>",
             BinaryOperator::HashLongArrow => "#>>",
+            BinaryOperator::HashMinus => "#-",
             BinaryOperator::PGQualified(_) => unreachable!(),
         })
     }

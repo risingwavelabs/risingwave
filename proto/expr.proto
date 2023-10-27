@@ -222,6 +222,13 @@ message ExprNode {
     JSONB_CAT = 605;
     JSONB_OBJECT = 606;
     JSONB_PRETTY = 607;
+    // see SUBTRACT for:
+    // jsonb - text -> jsonb
+    // jsonb - text[] -> jsonb
+    // jsonb - integer -> jsonb
+    //
+    // jsonb #- text[] -> jsonb
+    JSONB_REMOVE_PATH = 613;
 
     // Non-pure functions below (> 1000)
     // ------------------------
