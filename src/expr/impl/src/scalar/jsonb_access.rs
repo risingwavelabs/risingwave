@@ -87,7 +87,7 @@ pub fn jsonb_array_element(v: JsonbRef<'_>, p: i32) -> Option<JsonbRef<'_>> {
 /// NULL
 /// ```
 #[function("jsonb_access_multi(jsonb, varchar[]) -> jsonb")]
-pub fn jsonb_access_multi<'a, 'b>(v: JsonbRef<'a>, path: ListRef<'b>) -> Option<JsonbRef<'a>> {
+pub fn jsonb_access_multi<'a>(v: JsonbRef<'a>, path: ListRef<'_>) -> Option<JsonbRef<'a>> {
     let mut jsonb = v;
     for key in path.iter() {
         // return null if any element is null
@@ -177,9 +177,9 @@ pub fn jsonb_array_element_str(v: JsonbRef<'_>, p: i32, writer: &mut impl Write)
 /// NULL
 /// ```
 #[function("jsonb_access_multi_str(jsonb, varchar[]) -> varchar")]
-pub fn jsonb_access_multi_str<'a, 'b>(
-    v: JsonbRef<'a>,
-    path: ListRef<'b>,
+pub fn jsonb_access_multi_str(
+    v: JsonbRef<'_>,
+    path: ListRef<'_>,
     writer: &mut impl Write,
 ) -> Option<()> {
     let jsonb = jsonb_access_multi(v, path)?;
