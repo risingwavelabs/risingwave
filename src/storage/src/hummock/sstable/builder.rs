@@ -326,7 +326,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             self.build_block().await?;
         }
         self.last_table_stats.total_key_count += 1;
-        self.epoch_set.insert(full_key.epoch_with_gap.as_u64());
+        self.epoch_set.insert(full_key.epoch_with_gap.pure_epoch());
 
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_empty() {

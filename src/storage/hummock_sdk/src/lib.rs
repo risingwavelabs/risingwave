@@ -268,7 +268,7 @@ pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
 }
 
 const EPOCH_AVAILABLE_BITS: u64 = 16;
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug, PartialOrd, Ord)]
 pub struct EpochWithGap(u64);
 
 impl EpochWithGap {
@@ -279,6 +279,7 @@ impl EpochWithGap {
 
     pub fn new_from_epoch(epoch_with_gap: u64) -> Self {
         // debug_assert_eq!(epoch_with_gap % EPOCH_AVAILABLE_BITS, 0);
+
         EpochWithGap(epoch_with_gap)
     }
 
@@ -290,27 +291,25 @@ impl EpochWithGap {
         EpochWithGap(HummockEpoch::MAX)
     }
 
-    pub fn as_u64(&self) -> HummockEpoch {
+    // return the epoch_with_gap(epoch + spill_offset)
+    pub(crate) fn as_u64(&self) -> HummockEpoch {
         self.0
     }
 
+    // return the pure epoch without spill offset
     pub fn pure_epoch(&self) -> HummockEpoch {
-        self.0 >> 16
+        #[cfg(test)]
+        {
+            self.0
+        }
+
+        #[cfg(not(test))]
+        {
+            self.0 >> EPOCH_AVAILABLE_BITS
+        }
     }
 
     pub fn offset(&self) -> u64 {
-        self.0 % 16
-    }
-}
-
-impl Ord for EpochWithGap {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0.cmp(&other.0)
-    }
-}
-
-impl PartialOrd for EpochWithGap {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
+        self.0 % EPOCH_AVAILABLE_BITS
     }
 }

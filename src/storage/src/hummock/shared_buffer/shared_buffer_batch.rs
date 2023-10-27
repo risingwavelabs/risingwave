@@ -288,7 +288,7 @@ impl SharedBufferBatchInner {
         table_key: TableKey<&[u8]>,
         read_epoch: HummockEpoch,
         read_options: &ReadOptions,
-    ) -> Option<(HummockValue<Bytes>, HummockEpoch)> {
+    ) -> Option<(HummockValue<Bytes>, EpochWithGap)> {
         // Perform binary search on table key to find the corresponding entry
         if let Ok(i) = self.payload.binary_search_by(|m| (m.0[..]).cmp(*table_key)) {
             let item = &self.payload[i];
@@ -299,7 +299,7 @@ impl SharedBufferBatchInner {
                 if read_epoch < e.pure_epoch() {
                     continue;
                 }
-                return Some((v.clone(), e.as_u64()));
+                return Some((v.clone(), *e));
             }
             // cannot find a visible version
         }
@@ -307,7 +307,10 @@ impl SharedBufferBatchInner {
         if !read_options.ignore_range_tombstone {
             let delete_epoch = self.get_min_delete_range_epoch(UserKey::new(table_id, table_key));
             if delete_epoch <= read_epoch {
-                Some((HummockValue::Delete, delete_epoch))
+                Some((
+                    HummockValue::Delete,
+                    EpochWithGap::new_from_epoch(delete_epoch),
+                ))
             } else {
                 None
             }
@@ -463,7 +466,7 @@ impl SharedBufferBatch {
         table_key: TableKey<&[u8]>,
         read_epoch: HummockEpoch,
         read_options: &ReadOptions,
-    ) -> Option<(HummockValue<Bytes>, HummockEpoch)> {
+    ) -> Option<(HummockValue<Bytes>, EpochWithGap)> {
         self.inner
             .get_value(self.table_id, table_key, read_epoch, read_options)
     }

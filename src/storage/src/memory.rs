@@ -320,10 +320,10 @@ mod batched_iter {
                 .collect_vec();
 
             if let Some((last_key, _)) = batch.last() {
-                let full_key = FullKey::new(
+                let full_key = FullKey::new_with_gap_epoch(
                     last_key.user_key.table_id,
                     TableKey(last_key.user_key.table_key.0.clone()),
-                    last_key.epoch_with_gap.as_u64(),
+                    last_key.epoch_with_gap,
                 );
                 self.range.0 = Bound::Excluded(full_key);
             }
