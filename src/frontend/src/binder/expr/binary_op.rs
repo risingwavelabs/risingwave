@@ -91,6 +91,8 @@ impl Binder {
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
             BinaryOperator::Arrow => ExprType::JsonbAccessInner,
             BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
+            BinaryOperator::HashArrow => ExprType::JsonbAccessInner,
+            BinaryOperator::HashLongArrow => ExprType::JsonbAccessStr,
             BinaryOperator::Prefix => ExprType::StartsWith,
             BinaryOperator::Concat => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());

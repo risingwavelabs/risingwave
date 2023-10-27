@@ -14,7 +14,7 @@
 
 use std::fmt::Write;
 
-use risingwave_common::types::JsonbRef;
+use risingwave_common::types::{JsonbRef, ListRef};
 use risingwave_expr::function;
 
 #[function("jsonb_access_inner(jsonb, varchar) -> jsonb")]
@@ -39,6 +39,20 @@ pub fn jsonb_array_element(v: JsonbRef<'_>, p: i32) -> Option<JsonbRef<'_>> {
     v.access_array_element(idx)
 }
 
+#[function("jsonb_access_inner(jsonb, varchar[]) -> jsonb")]
+pub fn jsonb_access_multi<'a, 'b>(v: JsonbRef<'a>, path: ListRef<'b>) -> Option<JsonbRef<'a>> {
+    let mut jsonb = v;
+    for key in path.iter() {
+        // return null if any element is null
+        let key = key?.into_utf8();
+        jsonb = match key.parse() {
+            Ok(idx) => jsonb_array_element(jsonb, idx)?,
+            Err(_) => jsonb_object_field(jsonb, key)?,
+        };
+    }
+    Some(jsonb)
+}
+
 #[function("jsonb_access_str(jsonb, varchar) -> varchar")]
 pub fn jsonb_object_field_str(v: JsonbRef<'_>, p: &str, writer: &mut impl Write) -> Option<()> {
     let jsonb = jsonb_object_field(v, p)?;
@@ -52,6 +66,20 @@ pub fn jsonb_object_field_str(v: JsonbRef<'_>, p: &str, writer: &mut impl Write)
 #[function("jsonb_access_str(jsonb, int4) -> varchar")]
 pub fn jsonb_array_element_str(v: JsonbRef<'_>, p: i32, writer: &mut impl Write) -> Option<()> {
     let jsonb = jsonb_array_element(v, p)?;
+    if jsonb.is_jsonb_null() {
+        return None;
+    }
+    jsonb.force_str(writer).unwrap();
+    Some(())
+}
+
+#[function("jsonb_access_str(jsonb, varchar[]) -> varchar")]
+pub fn jsonb_access_multi_str<'a, 'b>(
+    v: JsonbRef<'a>,
+    path: ListRef<'b>,
+    writer: &mut impl Write,
+) -> Option<()> {
+    let jsonb = jsonb_access_multi(v, path)?;
     if jsonb.is_jsonb_null() {
         return None;
     }
