@@ -600,8 +600,8 @@ pub(crate) fn bind_all_columns(
                 let non_generated_sql_defined_columns =
                     non_generated_sql_columns(col_defs_from_sql);
                 if non_generated_sql_defined_columns.len() != 2
-                    && non_generated_sql_defined_columns[0].name.real_value() != columns[0].name()
-                    && non_generated_sql_defined_columns[1].name.real_value() != columns[1].name()
+                    || non_generated_sql_defined_columns[0].name.real_value() != columns[0].name()
+                    || non_generated_sql_defined_columns[1].name.real_value() != columns[1].name()
                 {
                     return Err(RwError::from(ProtocolError(
                         "the not generated columns of the source with row format DebeziumMongoJson

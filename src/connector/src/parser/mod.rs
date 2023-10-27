@@ -786,7 +786,6 @@ impl SpecificParserConfig {
 pub struct AvroProperties {
     pub use_schema_registry: bool,
     pub row_schema_location: String,
-    pub upsert_primary_key: String,
     pub client_config: SchemaRegistryAuth,
     pub aws_auth_props: Option<AwsAuthProps>,
     pub topic: String,
