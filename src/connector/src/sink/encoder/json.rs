@@ -194,8 +194,8 @@ fn datum_to_json_object(
         (DataType::Timestamptz, ScalarRefImpl::Timestamptz(v)) => {
             // risingwave's timestamp with timezone is stored in UTC and does not maintain the
             // timezone info and the time is in microsecond.
-            let parsed = v.to_datetime_utc().naive_utc();
-            let v = parsed.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
+            let parsed = v.to_datetime_utc();
+            let v = parsed.to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
             json!(v)
         }
         (DataType::Time, ScalarRefImpl::Time(v)) => {
@@ -429,7 +429,7 @@ mod tests {
             &CustomJsonType::None,
         )
         .unwrap();
-        assert_eq!(tstz_value, "2018-01-26 18:30:09.453000");
+        assert_eq!(tstz_value, "2018-01-26T18:30:09.453000Z");
 
         let ts_value = datum_to_json_object(
             &Field {
