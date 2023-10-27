@@ -45,14 +45,13 @@ row schema location confluent schema registry 'http://message_queue:8081'
 # ROW FORMAT UPSERT_AVRO
 # row schema location confluent schema registry 'http://message_queue:8081'
 
-# statement ok
-# CREATE TABLE debezium_non_compact (PRIMARY KEY(order_id)) with (
-#     connector = 'kafka',
-#     kafka.topic = 'debezium_non_compact_avro_json',
-#     kafka.brokers = 'message_queue:29092',
-#     kafka.scan.startup.mode = 'earliest'
-# ) ROW FORMAT DEBEZIUM_AVRO ROW SCHEMA LOCATION CONFLUENT SCHEMA REGISTRY 'http://message_queue:8081';
-
+statement ok
+CREATE TABLE debezium_non_compact (PRIMARY KEY(order_id)) with (
+    connector = 'kafka',
+    kafka.topic = 'debezium_non_compact_avro_json',
+    kafka.brokers = 'message_queue:29092',
+    kafka.scan.startup.mode = 'earliest'
+) ROW FORMAT DEBEZIUM_AVRO ROW SCHEMA LOCATION CONFLUENT SCHEMA REGISTRY 'http://message_queue:8081';
 
 
 statement ok
