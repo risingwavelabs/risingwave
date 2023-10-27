@@ -33,7 +33,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    ColumnDef, ColumnOption, DataType as AstDataType, Format, ObjectName, SourceSchemaV2,
+    ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Format, ObjectName,
     SourceWatermark, TableConstraint,
 };
 
@@ -188,6 +188,7 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
                 field_descs,
                 type_name: "".to_string(),
                 generated_or_default_column: None,
+                description: None,
             },
             is_hidden: false,
         });
@@ -435,7 +436,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-    source_schema: SourceSchemaV2,
+    source_schema: ConnectorSchema,
     source_watermarks: Vec<SourceWatermark>,
     mut col_id_gen: ColumnIdGenerator,
     append_only: bool,
@@ -762,7 +763,7 @@ pub async fn handle_create_table(
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     if_not_exists: bool,
-    source_schema: Option<SourceSchemaV2>,
+    source_schema: Option<ConnectorSchema>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
     notice: Option<String>,
@@ -839,8 +840,8 @@ pub async fn handle_create_table(
 
 pub fn check_create_table_with_source(
     with_options: &WithOptions,
-    source_schema: Option<SourceSchemaV2>,
-) -> Result<Option<SourceSchemaV2>> {
+    source_schema: Option<ConnectorSchema>,
+) -> Result<Option<ConnectorSchema>> {
     if with_options.inner().contains_key(UPSTREAM_SOURCE_KEY) {
         source_schema.as_ref().ok_or_else(|| {
             ErrorCode::InvalidInputSyntax("Please specify a source schema using FORMAT".to_owned())

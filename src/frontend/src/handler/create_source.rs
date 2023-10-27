@@ -15,7 +15,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::LazyLock;
 
-use anyhow::anyhow;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -46,8 +45,8 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_sqlparser::ast::{
-    get_delimiter, AstString, AvroSchema, ColumnDef, CreateSourceStatement, DebeziumAvroSchema,
-    Encode, Format, ProtobufSchema, SourceSchemaV2, SourceWatermark,
+    get_delimiter, AstString, AvroSchema, ColumnDef, ConnectorSchema, CreateSourceStatement,
+    DebeziumAvroSchema, Encode, Format, ProtobufSchema, SourceWatermark,
 };
 
 use super::RwPgResponse;
@@ -264,7 +263,7 @@ fn get_name_strategy_or_default(name_strategy: Option<AstString>) -> Result<Opti
 /// resolve the schema of the source from external schema file, return the relation's columns. see <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
 /// return `(columns, source info)`
 pub(crate) async fn bind_columns_from_source(
-    source_schema: &SourceSchemaV2,
+    source_schema: &ConnectorSchema,
     with_properties: &HashMap<String, String>,
 ) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
     const MESSAGE_NAME_KEY: &str = "message";
@@ -272,7 +271,7 @@ pub(crate) async fn bind_columns_from_source(
     const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
 
     let is_kafka: bool = is_kafka_connector(with_properties);
-    let mut options = source_schema.gen_options().map_err(|e| anyhow!(e))?;
+    let mut options = WithOptions::try_from(source_schema.row_options())?.into_inner();
 
     let get_key_message_name = |options: &mut BTreeMap<String, String>| -> Option<String> {
         consume_string_from_options(options, KEY_MESSAGE_NAME_KEY)
@@ -550,7 +549,7 @@ pub(crate) async fn bind_columns_from_source(
 
 /// Bind columns from both source and sql defined.
 pub(crate) fn bind_all_columns(
-    source_schema: &SourceSchemaV2,
+    source_schema: &ConnectorSchema,
     cols_from_source: Option<Vec<ColumnCatalog>>,
     cols_from_sql: Vec<ColumnCatalog>,
     col_defs_from_sql: &[ColumnDef],
@@ -582,6 +581,7 @@ pub(crate) fn bind_all_columns(
                             field_descs: vec![],
                             type_name: "".to_string(),
                             generated_or_default_column: None,
+                            description: None,
                         },
                         is_hidden: false,
                     },
@@ -593,6 +593,7 @@ pub(crate) fn bind_all_columns(
                             field_descs: vec![],
                             type_name: "".to_string(),
                             generated_or_default_column: None,
+                            description: None,
                         },
                         is_hidden: false,
                     },
@@ -661,7 +662,7 @@ pub(crate) fn bind_all_columns(
 /// Bind column from source. Add key column to table columns if necessary.
 /// Return (columns, pks)
 pub(crate) async fn bind_source_pk(
-    source_schema: &SourceSchemaV2,
+    source_schema: &ConnectorSchema,
     source_info: &StreamSourceInfo,
     columns: &mut Vec<ColumnCatalog>,
     sql_defined_pk_names: Vec<String>,
@@ -779,6 +780,7 @@ fn check_and_add_timestamp_column(
                 field_descs: vec![],
                 type_name: "".to_string(),
                 generated_or_default_column: None,
+                description: None,
             },
 
             is_hidden: true,
@@ -796,6 +798,7 @@ fn add_upsert_default_key_column(columns: &mut Vec<ColumnCatalog>) {
             field_descs: vec![],
             type_name: "".to_string(),
             generated_or_default_column: None,
+            description: None,
         },
         is_hidden: true,
     };
@@ -904,7 +907,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
     });
 
 pub fn validate_compatibility(
-    source_schema: &SourceSchemaV2,
+    source_schema: &ConnectorSchema,
     props: &mut HashMap<String, String>,
 ) -> Result<()> {
     let connector = get_connector(props)
@@ -922,8 +925,8 @@ pub fn validate_compatibility(
     if connector != KAFKA_CONNECTOR {
         let res = match (&source_schema.format, &source_schema.row_encode) {
             (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
-                let mut options = source_schema.gen_options().map_err(|e| anyhow!(e))?;
-                let (_, use_schema_registry) = get_schema_location(&mut options)?;
+                let mut options = WithOptions::try_from(source_schema.row_options())?;
+                let (_, use_schema_registry) = get_schema_location(options.inner_mut())?;
                 use_schema_registry
             }
             (Format::Debezium, Encode::Avro) => true,

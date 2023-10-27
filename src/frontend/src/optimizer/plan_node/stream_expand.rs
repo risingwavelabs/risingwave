@@ -17,6 +17,7 @@ use risingwave_pb::stream_plan::expand_node::Subset;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ExpandNode;
 
+use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Distribution;
@@ -24,7 +25,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamExpand {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::Expand<PlanRef>,
 }
 

@@ -234,9 +234,10 @@
         └─BatchValues { rows: [] }
   stream_plan: |-
     StreamMaterialize { columns: [v, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [t._row_id, t._row_id#1, v], pk_columns: [t._row_id, t._row_id#1, v], pk_conflict: NoCheck }
-    └─StreamHashJoin { type: Inner, predicate: t.v = t.v, output: [t.v, t._row_id, t._row_id] }
-      ├─StreamExchange { dist: HashShard(t.v) }
-      │ └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-      └─StreamExchange { dist: HashShard(t.v) }
-        └─StreamFilter { predicate: false:Boolean }
-          └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamExchange { dist: HashShard(t.v, t._row_id, t._row_id) }
+      └─StreamHashJoin { type: Inner, predicate: t.v = t.v, output: [t.v, t._row_id, t._row_id] }
+        ├─StreamExchange { dist: HashShard(t.v) }
+        │ └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamExchange { dist: HashShard(t.v) }
+          └─StreamFilter { predicate: false:Boolean }
+            └─StreamTableScan { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }

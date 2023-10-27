@@ -1395,20 +1395,20 @@
         sq_1.col_2;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [max(max(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))))] }
-      └─BatchHashAgg { group_key: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))], aggs: [max(max(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))))] }
-        └─BatchExchange { order: [], dist: HashShard(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))) }
-          └─BatchHashAgg { group_key: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))], aggs: [max(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC)))] }
-            └─BatchSortAgg { group_key: [lineitem.l_orderkey], aggs: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))] }
+    └─BatchProject { exprs: [max(max(internal_last_seen_value(lineitem.l_commitdate)))] }
+      └─BatchHashAgg { group_key: [internal_last_seen_value(lineitem.l_commitdate)], aggs: [max(max(internal_last_seen_value(lineitem.l_commitdate)))] }
+        └─BatchExchange { order: [], dist: HashShard(internal_last_seen_value(lineitem.l_commitdate)) }
+          └─BatchHashAgg { group_key: [internal_last_seen_value(lineitem.l_commitdate)], aggs: [max(internal_last_seen_value(lineitem.l_commitdate))] }
+            └─BatchSortAgg { group_key: [lineitem.l_orderkey], aggs: [internal_last_seen_value(lineitem.l_commitdate)] }
               └─BatchScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_commitdate], distribution: UpstreamHashShard(lineitem.l_orderkey) }
   stream_plan: |-
-    StreamMaterialize { columns: [col_0, first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))(hidden)], stream_key: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))], pk_columns: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [max(max(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC)))), first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))] }
-      └─StreamHashAgg { group_key: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))], aggs: [max(max(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC)))), count] }
-        └─StreamExchange { dist: HashShard(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))) }
-          └─StreamHashAgg { group_key: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC)), $expr1], aggs: [max(first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC))), count] }
-            └─StreamProject { exprs: [lineitem.l_orderkey, first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC)), Vnode(lineitem.l_orderkey) as $expr1] }
-              └─StreamHashAgg { group_key: [lineitem.l_orderkey], aggs: [first_value(lineitem.l_commitdate order_by(lineitem.l_commitdate ASC)), count] }
+    StreamMaterialize { columns: [col_0, internal_last_seen_value(lineitem.l_commitdate)(hidden)], stream_key: [internal_last_seen_value(lineitem.l_commitdate)], pk_columns: [internal_last_seen_value(lineitem.l_commitdate)], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [max(max(internal_last_seen_value(lineitem.l_commitdate))), internal_last_seen_value(lineitem.l_commitdate)] }
+      └─StreamHashAgg { group_key: [internal_last_seen_value(lineitem.l_commitdate)], aggs: [max(max(internal_last_seen_value(lineitem.l_commitdate))), count] }
+        └─StreamExchange { dist: HashShard(internal_last_seen_value(lineitem.l_commitdate)) }
+          └─StreamHashAgg { group_key: [internal_last_seen_value(lineitem.l_commitdate), $expr1], aggs: [max(internal_last_seen_value(lineitem.l_commitdate)), count] }
+            └─StreamProject { exprs: [lineitem.l_orderkey, internal_last_seen_value(lineitem.l_commitdate), Vnode(lineitem.l_orderkey) as $expr1] }
+              └─StreamHashAgg { group_key: [lineitem.l_orderkey], aggs: [internal_last_seen_value(lineitem.l_commitdate), count] }
                 └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_commitdate], pk: [lineitem.l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
 - name: two phase agg on hop window input should use two phase agg
   sql: |
@@ -1613,6 +1613,108 @@
       └─StreamSimpleAgg { aggs: [first_value(t.x order_by(t.y ASC)), count] }
         └─StreamExchange { dist: Single }
           └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [first_value], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    ├── materialized table: 4294967294
+    └── StreamProject { exprs: [first_value(t.x order_by(t.y ASC))] }
+        └── StreamSimpleAgg { aggs: [first_value(t.x order_by(t.y ASC)), count] }
+            ├── intermediate state table: 1
+            ├── state tables: [ 0 ]
+            ├── distinct tables: []
+            └── StreamExchange Single from 1
+
+    Fragment 1
+    Chain { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    ├── state table: 2
+    ├── Upstream
+    └── BatchPlanNode
+
+    Table 0
+    ├── columns: [ t_y, t__row_id, t_x ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
+
+    Table 1
+    ├── columns: [ first_value(t_x order_by(t_y ASC)), count ]
+    ├── primary key: []
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
+
+    Table 2
+    ├── columns: [ vnode, _row_id, t_backfill_finished, t_row_count ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294
+    ├── columns: [ first_value ]
+    ├── primary key: []
+    ├── value indices: [ 0 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
+
+- sql: |
+    create table t (x int, y int);
+    select first_value(distinct x order by x asc) from t;
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [first_value], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
+    ├── materialized table: 4294967294
+    └── StreamProject { exprs: [first_value(distinct t.x order_by(t.x ASC))] }
+        └── StreamSimpleAgg { aggs: [first_value(distinct t.x order_by(t.x ASC)), count] }
+            ├── intermediate state table: 1
+            ├── state tables: [ 0 ]
+            ├── distinct tables: [ (distinct key: t.x, table id: 2) ]
+            └── StreamExchange Single from 1
+
+    Fragment 1
+    Chain { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    ├── state table: 3
+    ├── Upstream
+    └── BatchPlanNode
+
+    Table 0
+    ├── columns: [ t_x ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
+
+    Table 1
+    ├── columns: [ first_value(distinct t_x order_by(t_x ASC)), count ]
+    ├── primary key: []
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
+
+    Table 2
+    ├── columns: [ t_x, count_for_agg_call_0 ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 1
+
+    Table 3
+    ├── columns: [ vnode, _row_id, t_backfill_finished, t_row_count ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294
+    ├── columns: [ first_value ]
+    ├── primary key: []
+    ├── value indices: [ 0 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
+
 - sql: |
     create table t (x int, y int);
     select last_value(x order by y desc nulls last) from t;
