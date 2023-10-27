@@ -707,4 +707,12 @@ impl KillOpts {
         kill_compactor: true,
         restart_delay_secs: 20,
     };
+    pub const ALL_FAST: Self = KillOpts {
+        kill_rate: 1.0,
+        kill_meta: true,
+        kill_frontend: true,
+        kill_compute: true,
+        kill_compactor: true,
+        restart_delay_secs: 2,
+    };
 }

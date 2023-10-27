@@ -24,8 +24,8 @@ const CREATE_TABLE: &str = "CREATE TABLE t(v1 int);";
 const SEED_TABLE: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 100000);";
 const SET_BACKGROUND_DDL: &str = "SET BACKGROUND_DDL=true;";
 const SET_STREAMING_RATE_LIMIT: &str = "SET STREAMING_RATE_LIMIT=4000;";
-const SET_INJECT_BACKFILL_DELAY_AFTER_FIRST_BARRIER: &str =
-    "SET INJECT_BACKFILL_DELAY_AFTER_FIRST_BARRIER=20;";
+const SET_BACKFILL_SNAPSHOT_READ_DELAY: &str =
+    "SET BACKFILL_SNAPSHOT_READ_DELAY=100;";
 const CREATE_MV1: &str = "CREATE MATERIALIZED VIEW mv1 as SELECT * FROM t;";
 
 async fn kill_cn_and_wait_recover(cluster: &Cluster) {
@@ -48,11 +48,11 @@ async fn kill_cn_and_wait_recover(cluster: &Cluster) {
 
 async fn kill_and_wait_recover(cluster: &Cluster) {
     // Kill it again
-    for _ in 0..5 {
+    for _ in 0..3 {
         sleep(Duration::from_secs(2)).await;
-        cluster.kill_node(&KillOpts::ALL).await;
+        cluster.kill_node(&KillOpts::ALL_FAST).await;
     }
-    sleep(Duration::from_secs(20)).await;
+    sleep(Duration::from_secs(10)).await;
 }
 
 async fn cancel_stream_jobs(session: &mut Session) -> Result<Vec<u32>> {
@@ -62,12 +62,12 @@ async fn cancel_stream_jobs(session: &mut Session) -> Result<Vec<u32>> {
         .await?;
     tracing::info!("selected streaming jobs to cancel {:?}", ids);
     tracing::info!("cancelling streaming jobs");
-    let ids = ids.split('\n').collect::<Vec<_>>();
-    session
-        .run(&format!("cancel jobs {};", ids.join(",")))
+    let ids = ids.split('\n').collect::<Vec<_>>().join(",");
+    let result = session
+        .run(&format!("cancel jobs {};", ids))
         .await?;
-    tracing::info!("cancelled streaming jobs");
-    let ids = ids.iter().map(|s| s.parse::<u32>().unwrap()).collect_vec();
+    tracing::info!("cancelled streaming jobs, {:#?}", result);
+    let ids = result.split('\n').map(|s| s.parse::<u32>().unwrap()).collect_vec();
     Ok(ids)
 }
 
@@ -142,6 +142,7 @@ async fn test_background_ddl_cancel() -> Result<()> {
     );
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_ansi(false)
         .init();
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
@@ -150,7 +151,7 @@ async fn test_background_ddl_cancel() -> Result<()> {
     session.run(SET_BACKGROUND_DDL).await?;
     session.run(SET_STREAMING_RATE_LIMIT).await?;
     session
-        .run(SET_INJECT_BACKFILL_DELAY_AFTER_FIRST_BARRIER)
+        .run(SET_BACKFILL_SNAPSHOT_READ_DELAY)
         .await?;
 
     for _ in 0..5 {
@@ -169,24 +170,29 @@ async fn test_background_ddl_cancel() -> Result<()> {
 
     let ids = cancel_stream_jobs(&mut session).await?;
     assert_eq!(ids.len(), 1);
-    //
-    // session.run(CREATE_MV1).await?;
-    // sleep(Duration::from_secs(2)).await;
-    //
-    // // Test cancel after kill meta
-    // kill_and_wait_recover(&cluster).await;
-    //
-    // let ids = cancel_stream_jobs(&mut session).await?;
-    // assert_eq!(ids.len(), 1);
-    //
-    // session.run(CREATE_MV1).await?;
-    // sleep(Duration::from_secs(2)).await;
-    //
-    // // Wait for job to finish
-    // session.run("WAIT;").await?;
-    //
-    // session.run("DROP MATERIALIZED VIEW mv1").await?;
-    // session.run("DROP TABLE t").await?;
+
+    sleep(Duration::from_secs(2)).await;
+
+    session.run(CREATE_MV1).await?;
+    sleep(Duration::from_secs(2)).await;
+
+    // Test cancel after kill meta
+    kill_and_wait_recover(&cluster).await;
+
+    let ids = cancel_stream_jobs(&mut session).await?;
+    assert_eq!(ids.len(), 1);
+
+    // Make sure MV can be created after all these cancels
+    session.run(CREATE_MV1).await?;
+    sleep(Duration::from_secs(2)).await;
+
+    kill_and_wait_recover(&cluster).await;
+
+    // Wait for job to finish
+    session.run("WAIT;").await?;
+
+    session.run("DROP MATERIALIZED VIEW mv1").await?;
+    session.run("DROP TABLE t").await?;
 
     Ok(())
 }
