@@ -990,6 +990,7 @@ mod test {
                     assert_eq!(
                         jv,
                         JsonbVal::from(json!({
+                            "_type": "test.StringValue",
                             "value": "John Doe"
                         }))
                     );
@@ -1050,6 +1051,7 @@ mod test {
                     assert_eq!(
                         jv,
                         JsonbVal::from(json!({
+                            "_type": "test.Int32Value",
                             "value": 114514
                         }))
                     );
