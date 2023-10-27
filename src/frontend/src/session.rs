@@ -1120,6 +1120,24 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
                         DataType::Varchar.type_len(),
                     ),
                 ])
+            } else if name.eq_ignore_ascii_case("PARAMETERS") {
+                Ok(vec![
+                    PgFieldDescriptor::new(
+                        "Name".to_string(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Value".to_string(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Mutable".to_string(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                ])
             } else {
                 Ok(vec![PgFieldDescriptor::new(
                     name.to_ascii_lowercase(),
