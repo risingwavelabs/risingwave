@@ -3247,7 +3247,6 @@ impl Parser {
                 }
                 Keyword::STRUCT => Ok(DataType::Struct(self.parse_struct_data_type()?)),
                 Keyword::BYTEA => Ok(DataType::Bytea),
-                Keyword::JSONB => Ok(DataType::Jsonb),
                 Keyword::NUMERIC | Keyword::DECIMAL | Keyword::DEC => {
                     let (precision, scale) = self.parse_optional_precision_scale()?;
                     Ok(DataType::Decimal(precision, scale))
@@ -3255,7 +3254,12 @@ impl Parser {
                 _ => {
                     self.prev_token();
                     let type_name = self.parse_object_name()?;
-                    Ok(DataType::Custom(type_name))
+                    // JSONB is not a keyword
+                    if type_name.to_string().eq_ignore_ascii_case("jsonb") {
+                        Ok(DataType::Jsonb)
+                    } else {
+                        Ok(DataType::Custom(type_name))
+                    }
                 }
             },
             unexpected => {
