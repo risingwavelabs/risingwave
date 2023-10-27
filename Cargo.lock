@@ -3018,7 +3018,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=eb6b3db#eb6b3db0cfa17f03e79c223c2aee6df030db8a15"
+source = "git+https://github.com/MrCroxx/foyer?rev=aaa12c4#aaa12c46ffabc354f46f0ef9170b45624b144314"
 dependencies = [
  "foyer-common",
  "foyer-intrusive",
@@ -3029,7 +3029,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=eb6b3db#eb6b3db0cfa17f03e79c223c2aee6df030db8a15"
+source = "git+https://github.com/MrCroxx/foyer?rev=aaa12c4#aaa12c46ffabc354f46f0ef9170b45624b144314"
 dependencies = [
  "bytes",
  "foyer-workspace-hack",
@@ -3044,7 +3044,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=eb6b3db#eb6b3db0cfa17f03e79c223c2aee6df030db8a15"
+source = "git+https://github.com/MrCroxx/foyer?rev=aaa12c4#aaa12c46ffabc354f46f0ef9170b45624b144314"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -3061,10 +3061,9 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=eb6b3db#eb6b3db0cfa17f03e79c223c2aee6df030db8a15"
+source = "git+https://github.com/MrCroxx/foyer?rev=aaa12c4#aaa12c46ffabc354f46f0ef9170b45624b144314"
 dependencies = [
  "anyhow",
- "async-channel",
  "bitflags 2.4.0",
  "bitmaps",
  "bytes",
@@ -3090,11 +3089,12 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=eb6b3db#eb6b3db0cfa17f03e79c223c2aee6df030db8a15"
+source = "git+https://github.com/MrCroxx/foyer?rev=aaa12c4#aaa12c46ffabc354f46f0ef9170b45624b144314"
 dependencies = [
  "crossbeam-utils",
  "either",
  "futures-channel",
+ "futures-core",
  "futures-executor",
  "futures-sink",
  "futures-util",
