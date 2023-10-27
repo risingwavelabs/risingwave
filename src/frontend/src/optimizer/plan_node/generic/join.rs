@@ -70,10 +70,10 @@ impl<PlanRef> Join<PlanRef> {
     }
 }
 
-impl<PlanRef: stream::StreamPlanRef> Join<PlanRef> {
+impl<I: stream::StreamPlanRef> Join<I> {
     /// Return stream hash join internal table catalog and degree table catalog.
     pub fn infer_internal_and_degree_table_catalog(
-        input: &PlanRef,
+        input: I,
         join_key_indices: Vec<usize>,
         dk_indices_in_jk: Vec<usize>,
     ) -> (TableCatalog, TableCatalog, Vec<usize>) {

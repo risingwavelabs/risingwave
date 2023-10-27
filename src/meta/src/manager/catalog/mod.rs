@@ -34,8 +34,8 @@ use risingwave_common::catalog::{
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, TableType};
 use risingwave_pb::catalog::{
-    Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink, Source,
-    StreamJobStatus, Table, View,
+    Comment, Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink,
+    Source, StreamJobStatus, Table, View,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
@@ -647,7 +647,8 @@ impl CatalogManager {
                     self.start_create_table_procedure_with_source(source, table)
                         .await
                 } else {
-                    self.start_create_table_procedure(table, vec![]).await
+                    self.start_create_table_procedure(table, internal_tables)
+                        .await
                 }
             }
         }
@@ -765,7 +766,9 @@ impl CatalogManager {
     ///    2. Not belonging to a background stream job.
     ///    Clean up these hanging tables by the id.
     pub async fn clean_dirty_tables(&self, fragment_manager: FragmentManagerRef) -> MetaResult<()> {
-        let creating_tables: Vec<Table> = self.list_persisted_creating_tables().await;
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let creating_tables: Vec<Table> = database_core.list_persisted_creating_tables();
         tracing::debug!(
             "creating_tables ids: {:#?}",
             creating_tables.iter().map(|t| t.id).collect_vec()
@@ -839,14 +842,13 @@ impl CatalogManager {
             }
         }
 
-        let core = &mut *self.core.lock().await;
-        let database_core = &mut core.database;
         let tables = &mut database_core.tables;
         let mut tables = BTreeMapTransaction::new(tables);
         for table in &tables_to_clean {
-            tracing::debug!("cleaning table_id: {}", table.id);
-            let table = tables.remove(table.id);
-            assert!(table.is_some())
+            let table_id = table.id;
+            tracing::debug!("cleaning table_id: {}", table_id);
+            let table = tables.remove(table_id);
+            assert!(table.is_some(), "table_id {} missing", table_id)
         }
         commit_meta!(self, tables)?;
 
@@ -929,14 +931,8 @@ impl CatalogManager {
                 );
                 return Ok(());
             };
-            table
-        };
 
-        tracing::trace!("cleanup tables for {}", table.id);
-        {
-            let core = &mut self.core.lock().await;
-            let database_core = &mut core.database;
-
+            tracing::trace!("cleanup tables for {}", table.id);
             let mut table_ids = vec![table.id];
             table_ids.extend(internal_table_ids);
 
@@ -944,10 +940,11 @@ impl CatalogManager {
             let mut tables = BTreeMapTransaction::new(tables);
             for table_id in table_ids {
                 let res = tables.remove(table_id);
-                assert!(res.is_some());
+                assert!(res.is_some(), "table_id {} missing", table_id);
             }
             commit_meta!(self, tables)?;
-        }
+            table
+        };
 
         {
             let core = &mut self.core.lock().await;
@@ -1984,9 +1981,7 @@ impl CatalogManager {
         let table_key = (table.database_id, table.schema_id, table.name.clone());
         assert!(
             !database_core.sources.contains_key(&source.id)
-                && !database_core.tables.contains_key(&table.id)
-                && database_core.has_in_progress_creation(&source_key)
-                && database_core.has_in_progress_creation(&table_key),
+                && !database_core.tables.contains_key(&table.id),
             "table and source must be in creating procedure"
         );
 
@@ -2368,6 +2363,46 @@ impl CatalogManager {
         // occur after it's created. We may need to add a new tracker for `alter` procedure.s
         database_core.unmark_creating(&key);
         Ok(())
+    }
+
+    pub async fn comment_on(&self, comment: Comment) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+
+        database_core.ensure_database_id(comment.database_id)?;
+        database_core.ensure_schema_id(comment.schema_id)?;
+        database_core.ensure_table_id(comment.table_id)?;
+
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+
+        // unwrap is safe because the table id was ensured before
+        let mut table = tables.get_mut(comment.table_id).unwrap();
+        if let Some(col_idx) = comment.column_index {
+            let column = table
+                .columns
+                .get_mut(col_idx as usize)
+                .ok_or_else(|| MetaError::catalog_id_not_found("column", col_idx))?;
+            let column_desc = column.column_desc.as_mut().ok_or_else(|| {
+                anyhow!(
+                    "column desc at index {} for table id {} not found",
+                    col_idx,
+                    comment.table_id
+                )
+            })?;
+            column_desc.description = comment.description;
+        } else {
+            table.description = comment.description;
+        }
+
+        let new_table = table.clone();
+
+        commit_meta!(self, tables)?;
+
+        let version = self
+            .notify_frontend_relation_info(Operation::Update, RelationInfo::Table(new_table))
+            .await;
+
+        Ok(version)
     }
 
     pub async fn list_connections(&self) -> Vec<Connection> {

@@ -802,6 +802,19 @@ impl Binder {
                 ("sha512", raw_call(ExprType::Sha512)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
+                ("int8send", raw_call(ExprType::PgwireSend)),
+                ("int8recv", guard_by_len(1, raw(|_binder, mut inputs| {
+                    // Similar to `cast` from string, return type is set explicitly rather than inferred.
+                    let hint = if !inputs[0].is_untyped() && inputs[0].return_type() == DataType::Varchar {
+                        " Consider `decode` or cast."
+                    } else {
+                        ""
+                    };
+                    inputs[0].cast_implicit_mut(DataType::Bytea).map_err(|e| {
+                        ErrorCode::BindError(format!("{e} in `recv`.{hint}"))
+                    })?;
+                    Ok(FunctionCall::new_unchecked(ExprType::PgwireRecv, inputs, DataType::Int64).into())
+                }))),
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),
@@ -865,6 +878,7 @@ impl Binder {
                 ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
                 ("jsonb_object", raw_call(ExprType::JsonbObject)),
+                ("jsonb_pretty", raw_call(ExprType::JsonbPretty)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least

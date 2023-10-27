@@ -12,11 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod avro;
 pub mod protobuf;
 pub mod schema_registry;
 
 const MESSAGE_NAME_KEY: &str = "message";
+const KEY_MESSAGE_NAME_KEY: &str = "key.message";
 const SCHEMA_LOCATION_KEY: &str = "schema.location";
+const SCHEMA_REGISTRY_KEY: &str = "schema.registry";
+const NAME_STRATEGY_KEY: &str = "schema.registry.name.strategy";
 
 #[derive(Debug)]
 pub struct SchemaFetchError(pub String);
