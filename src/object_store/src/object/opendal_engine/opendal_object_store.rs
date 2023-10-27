@@ -20,7 +20,7 @@ use fail::fail_point;
 use futures::future::BoxFuture;
 use futures::{FutureExt, Stream, StreamExt};
 use opendal::services::Memory;
-use opendal::{Entry, Error, Lister, Metakey, Operator, Writer};
+use opendal::{Entry, Error, Lister, Operator, Writer};
 use risingwave_common::range::RangeBoundsExt;
 use tokio::io::AsyncRead;
 
@@ -84,7 +84,10 @@ impl ObjectStore for OpendalObjectStore {
         let data = if range.is_full() {
             self.op.read(path).await?
         } else {
-            self.op.range_read(path, range.map(|v| *v as u64)).await?
+            self.op
+                .read_with(path)
+                .range(range.map(|v| *v as u64))
+                .await?
         };
 
         if let Some(len) = range.len() && len != data.len() {
@@ -112,7 +115,12 @@ impl ObjectStore for OpendalObjectStore {
             ObjectError::internal("opendal streaming read error")
         ));
         let reader = match start_pos {
-            Some(start_position) => self.op.range_reader(path, start_position as u64..).await?,
+            Some(start_position) => {
+                self.op
+                    .reader_with(path)
+                    .range(start_position as u64..)
+                    .await?
+            }
             None => self.op.reader(path).await?,
         };
 
@@ -149,7 +157,7 @@ impl ObjectStore for OpendalObjectStore {
     }
 
     async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
-        let lister = self.op.scan(prefix).await?;
+        let lister = self.op.lister_with(prefix).delimiter("").await?;
         Ok(Box::pin(OpenDalObjectIter::new(lister, self.op.clone())))
     }
 
@@ -172,12 +180,12 @@ pub struct OpenDalStreamingUploader {
 }
 impl OpenDalStreamingUploader {
     pub async fn new(op: Operator, path: String) -> ObjectResult<Self> {
-        let writer = op.writer(&path).await?;
+        let writer = op.writer_with(&path).buffer(OPENDAL_BUFFER_SIZE).await?;
         Ok(Self { writer })
     }
 }
 
-const OPENDAL_BUFFER_SIZE: u64 = 8 * 1024 * 1024;
+const OPENDAL_BUFFER_SIZE: usize = 16 * 1024 * 1024;
 
 #[async_trait::async_trait]
 impl StreamingUploader for OpenDalStreamingUploader {
@@ -199,7 +207,7 @@ impl StreamingUploader for OpenDalStreamingUploader {
     }
 
     fn get_memory_usage(&self) -> u64 {
-        OPENDAL_BUFFER_SIZE
+        OPENDAL_BUFFER_SIZE as u64
     }
 }
 
@@ -258,16 +266,8 @@ impl Stream for OpenDalObjectIter {
                                 let key = object.path().to_string();
                                 // FIXME: How does opendal metadata cache work?
                                 // Will below line result in one IO per object?
-                                let om = match op
-                                    .metadata(
-                                        &object,
-                                        Metakey::LastModified | Metakey::ContentLength,
-                                    )
-                                    .await
-                                {
-                                    Ok(om) => om,
-                                    Err(e) => return (Err(e), op),
-                                };
+                                let om = object.metadata();
+
                                 let last_modified = match om.last_modified() {
                                     Some(t) => t.timestamp() as f64,
                                     None => 0_f64,
