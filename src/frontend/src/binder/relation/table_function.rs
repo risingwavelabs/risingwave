@@ -28,7 +28,7 @@ use crate::binder::bind_context::Clause;
 use crate::catalog::system_catalog::pg_catalog::{
     PG_GET_KEYWORDS_FUNC_NAME, PG_KEYWORDS_TABLE_NAME,
 };
-use crate::expr::Expr;
+use crate::expr::{Expr, ExprImpl};
 
 impl Binder {
     /// Binds a table function AST, which is a function call in a relation position.
@@ -124,6 +124,20 @@ impl Binder {
         self.context.clause = clause;
         self.pop_context()?;
         let func = func?;
+
+        if let ExprImpl::TableFunction(func) = &func {
+            if func
+                .args
+                .iter()
+                .any(|arg| matches!(arg, ExprImpl::Subquery(_)))
+            {
+                // Same error reports as DuckDB.
+                return Err(ErrorCode::InvalidInputSyntax(
+                    format!("Only table-in-out functions can have subquery parameters, {} only accepts constant parameters", func.name()),
+                )
+                    .into());
+            }
+        }
 
         // bool indicates if the field is hidden
         let mut columns = if let DataType::Struct(s) = func.return_type() {
