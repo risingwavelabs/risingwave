@@ -353,7 +353,7 @@ impl CreateMviewProgressTracker {
     }
 
     /// Notify all tracked commands that error encountered and clear them.
-    pub fn command_failed(&mut self, err: MetaError) {
+    pub fn abort_all(&mut self, err: MetaError) {
         self.actor_map.clear();
         self.progress_map
             .drain()

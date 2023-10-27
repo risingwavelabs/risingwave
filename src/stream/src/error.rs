@@ -33,17 +33,6 @@ pub struct StreamError {
     inner: Box<Inner>,
 }
 
-impl StreamError {
-    pub fn is_internal(&self) -> bool {
-        matches!(self.inner.kind, ErrorKind::Internal(_))
-            | if let ErrorKind::Executor(err) = &self.inner.kind && err.is_internal() {
-                true
-            } else {
-                false
-            }
-    }
-}
-
 #[derive(thiserror::Error, Debug)]
 #[error("{kind}")]
 struct Inner {
