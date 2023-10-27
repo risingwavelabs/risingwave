@@ -20,6 +20,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::UnionNode;
 
 use super::generic::GenericPlanRef;
+use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanRef};
@@ -30,7 +31,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// `StreamUnion` implements [`super::LogicalUnion`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamUnion {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::Union<PlanRef>,
 }
 

@@ -16,6 +16,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 
+use super::batch::prelude::*;
 use super::generic::{self, GenericPlanRef, PlanAggCall};
 use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
@@ -25,7 +26,7 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSimpleAgg {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::Agg<PlanRef>,
 }
 

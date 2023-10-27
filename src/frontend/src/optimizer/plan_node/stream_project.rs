@@ -18,6 +18,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ProjectNode;
 
 use super::generic::GenericPlanRef;
+use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
@@ -29,7 +30,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// rows.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamProject {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::Project<PlanRef>,
     /// All the watermark derivations, (input_column_index, output_column_index). And the
     /// derivation expression is the project's expression itself.

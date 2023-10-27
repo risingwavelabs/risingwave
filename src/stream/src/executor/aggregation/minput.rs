@@ -25,6 +25,7 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::aggregate::{AggCall, AggKind, BoxedAggregateFunction};
+use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
@@ -68,6 +69,7 @@ pub struct MaterializedInputState {
 impl MaterializedInputState {
     /// Create an instance from [`AggCall`].
     pub fn new(
+        version: PbAggNodeVersion,
         agg_call: &AggCall,
         pk_indices: &PkIndices,
         col_mapping: &StateTableColumnMapping,
@@ -102,9 +104,26 @@ impl MaterializedInputState {
                     .unzip()
             };
 
-        let pk_len = pk_indices.len();
-        order_col_indices.extend(pk_indices.iter());
-        order_types.extend(itertools::repeat_n(OrderType::ascending(), pk_len));
+        if agg_call.distinct {
+            if version < PbAggNodeVersion::Issue12140 {
+                panic!(
+                    "RisingWave versions before issue #12140 is resolved has critical bug, you must re-create current MV to ensure correctness."
+                );
+            }
+
+            // If distinct, we need to materialize input with the distinct keys
+            // As we only support single-column distinct for now, we use the
+            // `agg_call.args.val_indices()[0]` as the distinct key.
+            if !order_col_indices.contains(&agg_call.args.val_indices()[0]) {
+                order_col_indices.push(agg_call.args.val_indices()[0]);
+                order_types.push(OrderType::ascending());
+            }
+        } else {
+            // If not distinct, we need to materialize input with the primary keys
+            let pk_len = pk_indices.len();
+            order_col_indices.extend(pk_indices.iter());
+            order_types.extend(itertools::repeat_n(OrderType::ascending(), pk_len));
+        }
 
         // map argument columns to state table column indices
         let state_table_arg_col_indices = arg_col_indices
@@ -255,6 +274,7 @@ mod tests {
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::aggregate::{build_append_only, AggCall};
+    use risingwave_pb::stream_plan::PbAggNodeVersion;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
@@ -327,6 +347,7 @@ mod tests {
         .await;
 
         let mut state = MaterializedInputState::new(
+            PbAggNodeVersion::Max,
             &agg_call,
             &input_pk_indices,
             &mapping,
@@ -379,6 +400,7 @@ mod tests {
         {
             // test recovery (cold start)
             let mut state = MaterializedInputState::new(
+                PbAggNodeVersion::Max,
                 &agg_call,
                 &input_pk_indices,
                 &mapping,
@@ -420,6 +442,7 @@ mod tests {
         .await;
 
         let mut state = MaterializedInputState::new(
+            PbAggNodeVersion::Max,
             &agg_call,
             &input_pk_indices,
             &mapping,
@@ -472,6 +495,7 @@ mod tests {
         {
             // test recovery (cold start)
             let mut state = MaterializedInputState::new(
+                PbAggNodeVersion::Max,
                 &agg_call,
                 &input_pk_indices,
                 &mapping,
@@ -529,6 +553,7 @@ mod tests {
         table_2.init_epoch(epoch);
 
         let mut state_1 = MaterializedInputState::new(
+            PbAggNodeVersion::Max,
             &agg_call_1,
             &input_pk_indices,
             &mapping_1,
@@ -538,6 +563,7 @@ mod tests {
         .unwrap();
 
         let mut state_2 = MaterializedInputState::new(
+            PbAggNodeVersion::Max,
             &agg_call_2,
             &input_pk_indices,
             &mapping_2,
@@ -621,6 +647,7 @@ mod tests {
         .await;
 
         let mut state = MaterializedInputState::new(
+            PbAggNodeVersion::Max,
             &agg_call,
             &input_pk_indices,
             &mapping,
@@ -672,6 +699,7 @@ mod tests {
         {
             // test recovery (cold start)
             let mut state = MaterializedInputState::new(
+                PbAggNodeVersion::Max,
                 &agg_call,
                 &input_pk_indices,
                 &mapping,
@@ -715,6 +743,7 @@ mod tests {
         table.init_epoch(epoch);
 
         let mut state = MaterializedInputState::new(
+            PbAggNodeVersion::Max,
             &agg_call,
             &input_pk_indices,
             &mapping,
@@ -814,6 +843,7 @@ mod tests {
         .await;
 
         let mut state = MaterializedInputState::new(
+            PbAggNodeVersion::Max,
             &agg_call,
             &input_pk_indices,
             &mapping,
@@ -921,6 +951,7 @@ mod tests {
         .await;
 
         let mut state = MaterializedInputState::new(
+            PbAggNodeVersion::Max,
             &agg_call,
             &input_pk_indices,
             &mapping,
@@ -1000,6 +1031,7 @@ mod tests {
         .await;
 
         let mut state = MaterializedInputState::new(
+            PbAggNodeVersion::Max,
             &agg_call,
             &input_pk_indices,
             &mapping,

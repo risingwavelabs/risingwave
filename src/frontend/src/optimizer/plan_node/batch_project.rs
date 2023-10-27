@@ -18,7 +18,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ProjectNode;
 use risingwave_pb::expr::ExprNode;
 
-use super::generic::GenericPlanRef;
+use super::batch::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
@@ -31,7 +31,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// rows
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchProject {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::Project<PlanRef>,
 }
 
