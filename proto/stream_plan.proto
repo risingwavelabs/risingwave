@@ -497,8 +497,10 @@ message ChainNode {
   // Snapshot read every N barriers
   uint32 snapshot_read_barrier_interval = 9 [deprecated = true];
 
-  // Delay backfill delay, only used in madsim tests
-  uint32 inject_backfill_delay_after_first_barrier = 10;
+  // backfill snapshot read, only used in madsim tests
+  // Otherwise snapshot read will complete almost instantaneously,
+  // and the backfill can't test upstream.
+  uint32 snapshot_read_delay = 10;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.

@@ -104,7 +104,7 @@ pub struct BackfillExecutor<S: StateStore> {
     chunk_size: usize,
 
     /// The delay after the first barrier.
-    inject_backfill_delay_after_first_barrier: u32,
+    snapshot_read_delay: u32,
 }
 
 impl<S> BackfillExecutor<S>
@@ -123,7 +123,7 @@ where
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         executor_id: u64,
-        inject_backfill_delay_after_first_barrier: u32,
+        snapshot_read_delay: u32,
     ) -> Self {
         Self {
             info: ExecutorInfo {
@@ -139,7 +139,7 @@ where
             progress,
             metrics,
             chunk_size,
-            inject_backfill_delay_after_first_barrier,
+            snapshot_read_delay,
         }
     }
 
@@ -180,13 +180,8 @@ where
 
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
-
         tracing::debug!("backfill yielded first barrier");
 
-        tokio::time::sleep(Duration::from_secs(
-            self.inject_backfill_delay_after_first_barrier as u64,
-        ))
-        .await;
         // If no need backfill, but state was still "unfinished" we need to finish it.
         // So we just update the state + progress to meta at the next barrier to finish progress,
         // and forward other messages.
@@ -307,6 +302,10 @@ where
                                         break 'backfill_loop;
                                     }
                                     Some(chunk) => {
+                                        tokio::time::sleep(Duration::from_secs(
+                                            self.snapshot_read_delay as u64,
+                                        ))
+                                            .await;
                                         // Raise the current position.
                                         // As snapshot read streams are ordered by pk, so we can
                                         // just use the last row to update `current_pos`.

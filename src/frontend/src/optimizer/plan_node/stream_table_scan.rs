@@ -289,8 +289,8 @@ impl StreamTableScan {
         let ctx = self.base.ctx();
         let config = ctx.session_ctx().config();
         let rate_limit = config.get_streaming_rate_limit();
-        let inject_backfill_delay_after_first_barrier =
-            config.get_inject_backfill_delay_after_first_barrier();
+        let snapshot_read_delay =
+            config.get_backfill_snapshot_read_delay();
 
         PbStreamNode {
             fields: self.schema().to_prost(),
@@ -323,7 +323,7 @@ impl StreamTableScan {
                 table_desc: Some(self.core.table_desc.to_protobuf()),
                 state_table: Some(catalog),
                 rate_limit,
-                inject_backfill_delay_after_first_barrier,
+                snapshot_read_delay,
                 ..Default::default()
             })),
             stream_key,
