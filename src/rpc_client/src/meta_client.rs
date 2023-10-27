@@ -340,7 +340,6 @@ impl MetaClient {
             fragment_graph: Some(graph),
         };
         let resp = self.inner.create_materialized_view(request).await?;
-        tracing::info!("received frontend response in rpc client");
         // TODO: handle error in `resp.status` here
         Ok((resp.table_id.into(), resp.version))
     }

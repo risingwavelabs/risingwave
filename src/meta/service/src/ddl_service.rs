@@ -295,7 +295,6 @@ impl DdlService for DdlServiceImpl {
             ))
             .await?;
 
-        tracing::info!("sending meta response for create mv");
         Ok(Response::new(CreateMaterializedViewResponse {
             status: None,
             table_id: id,

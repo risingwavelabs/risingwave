@@ -199,9 +199,7 @@ impl CatalogWriter for CatalogWriterImpl {
             .meta_client
             .create_materialized_view(table, graph)
             .await?;
-        tracing::info!("frontend received rpc response for create mv");
         if matches!(create_type, PbCreateType::Foreground) {
-            tracing::info!("waiting for version");
             self.wait_version(version).await?
         }
         Ok(())
