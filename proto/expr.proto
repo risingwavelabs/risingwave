@@ -220,6 +220,7 @@ message ExprNode {
     JSONB_ARRAY_LENGTH = 603;
     IS_JSON = 604;
     JSONB_CAT = 605;
+    JSONB_PRETTY = 607;
 
     // Non-pure functions below (> 1000)
     // ------------------------
