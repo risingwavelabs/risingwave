@@ -599,6 +599,7 @@ pub fn to_stream_prost_body(
                     .into_iter()
                     .map(|(key_idx, table)| (key_idx as u32, table.to_internal_table_prost()))
                     .collect(),
+                version: PbAggNodeVersion::Max as _,
             })
         }
         Node::GroupTopN(me) => {
@@ -658,6 +659,7 @@ pub fn to_stream_prost_body(
                     .map(|(key_idx, table)| (key_idx as u32, table.to_internal_table_prost()))
                     .collect(),
                 emit_on_window_close: me.emit_on_window_close(),
+                version: PbAggNodeVersion::Max as _,
             })
         }
         Node::HashJoin(_) => {
@@ -701,6 +703,7 @@ pub fn to_stream_prost_body(
                 intermediate_state_table: None,
                 is_append_only: me.input.0.append_only,
                 distinct_dedup_tables: Default::default(),
+                version: PbAggNodeVersion::Max as _,
             })
         }
         Node::Materialize(me) => {
