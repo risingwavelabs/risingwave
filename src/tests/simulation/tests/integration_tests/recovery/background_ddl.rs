@@ -15,17 +15,19 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use itertools::Itertools;
 use madsim::time::timeout;
 use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts, Session};
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
 const CREATE_TABLE: &str = "CREATE TABLE t(v1 int);";
-const SEED_TABLE: &str =
-    "INSERT INTO t SELECT generate_series FROM generate_series(1, 50000);";
+const SEED_TABLE: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 100000);";
 const FLUSH: &str = "flush;";
 const SET_BACKGROUND_DDL: &str = "SET BACKGROUND_DDL=true;";
 const SET_STREAMING_RATE_LIMIT: &str = "SET STREAMING_RATE_LIMIT=4000;";
+const SET_INJECT_BACKFILL_DELAY_AFTER_FIRST_BARRIER: &str =
+    "SET INJECT_BACKFILL_DELAY_AFTER_FIRST_BARRIER=10;";
 const CREATE_MV1: &str = "CREATE MATERIALIZED VIEW mv1 as SELECT * FROM t;";
 
 async fn kill_cn_and_wait_recover(cluster: &Cluster) {
@@ -55,17 +57,18 @@ async fn kill_and_wait_recover(cluster: &Cluster) {
     sleep(Duration::from_secs(20)).await;
 }
 
-async fn cancel_stream_jobs(session: &mut Session) -> Result<()> {
+async fn cancel_stream_jobs(session: &mut Session) -> Result<Vec<u32>> {
     tracing::info!("finding streaming jobs to cancel");
     let ids = session
         .run("select ddl_id from rw_catalog.rw_ddl_progress;")
         .await?;
     tracing::info!("selected streaming jobs to cancel {:?}", ids);
     tracing::info!("cancelling streaming jobs");
-    let ids = ids.split('\n').collect::<Vec<_>>().join(",");
-    session.run(&format!("cancel jobs {};", ids)).await?;
+    let ids = ids.split('\n').collect::<Vec<_>>();
+    session.run(&format!("cancel jobs {};", ids.join(","))).await?;
     tracing::info!("cancelled streaming jobs");
-    Ok(())
+    let ids = ids.iter().map(|s| s.parse::<u32>().unwrap()).collect_vec();
+    Ok(ids)
 }
 
 #[tokio::test]
@@ -133,26 +136,28 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
 #[tokio::test]
 async fn test_background_ddl_cancel() -> Result<()> {
     use std::env;
-    env::set_var("RUST_LOG", "debug");
-    tracing_subscriber::fmt().init();
+    env::set_var(
+        "RUST_LOG",
+        "info,risingwave_meta=debug,risingwave_stream::executor::backfill=debug",
+    );
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let mut session = cluster.start_session();
     session.run(CREATE_TABLE).await?;
     session.run(SEED_TABLE).await?;
-    session.flush().await?;
-
     session.run(SET_BACKGROUND_DDL).await?;
     session.run(SET_STREAMING_RATE_LIMIT).await?;
-    session.run(CREATE_MV1).await?;
-    tracing::info!("Created mv1 stream job");
-    // session
-    //     .run("FLUSH;").await?;
-    tracing::info!("inserting 10000 rows");
     session
-        .run("INSERT INTO t SELECT generate_series FROM generate_series(1, 10000);")
+        .run(SET_INJECT_BACKFILL_DELAY_AFTER_FIRST_BARRIER)
         .await?;
-    tracing::info!("inserted 10000 rows");
-    cancel_stream_jobs(&mut session).await?;
+    session.run(CREATE_MV1).await?;
+
+    tracing::info!("Created mv1 stream job");
+    sleep(Duration::from_secs(2)).await;
+    let ids = cancel_stream_jobs(&mut session).await?;
+    assert_eq!(ids, vec![1002]);
     // session
     //     .run("SELECT count(*) FROM mv1")
     //     .await?
