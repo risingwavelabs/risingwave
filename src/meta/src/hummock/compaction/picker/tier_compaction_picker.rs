@@ -115,7 +115,7 @@ impl TierCompactionPicker {
             }
 
             select_level_inputs.reverse();
-            if compaction_bytes < self.config.sub_level_max_compaction_bytes {
+            if compaction_bytes < self.config.sub_level_max_compaction_bytes / 2 {
                 vnode_partition_count = 0;
             }
 
