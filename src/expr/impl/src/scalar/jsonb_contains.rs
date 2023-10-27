@@ -88,13 +88,33 @@ use risingwave_expr::function;
 /// SELECT '"bar"'::jsonb @> '["bar"]'::jsonb;
 /// ----
 /// f
+///
+/// # Object is not primitive:
+/// query B
+/// SELECT '[1, {"a":2}]'::jsonb @> '{"a":2}';
+/// ----
+/// f
+///
+/// # Array can be nested:
+/// query B
+/// SELECT '[1, [3, 4]]'::jsonb @> '[[3]]';
+/// ----
+/// t
+///
+/// # Recursion shall not include the special rule of array containing primitive:
+/// query B
+/// SELECT '{"a": [3, 4]}'::jsonb @> '{"a": 3}';
+/// ----
+/// f
 /// ```
 #[function("jsonb_contains(jsonb, jsonb) -> boolean")]
 fn jsonb_contains(left: JsonbRef<'_>, right: JsonbRef<'_>) -> bool {
-    jsonbb_contains(left.into(), right.into())
+    jsonbb_contains(left.into(), right.into(), true)
 }
 
-fn jsonbb_contains(left: ValueRef<'_>, right: ValueRef<'_>) -> bool {
+/// Performs `jsonb_contains` on `jsonbb::ValueRef`.
+/// `root` indicates whether the current recursion is at the root level.
+fn jsonbb_contains(left: ValueRef<'_>, right: ValueRef<'_>, root: bool) -> bool {
     match (left, right) {
         // Both left and right are objects.
         (ValueRef::Object(left_obj), ValueRef::Object(right_obj)) => {
@@ -102,20 +122,25 @@ fn jsonbb_contains(left: ValueRef<'_>, right: ValueRef<'_>) -> bool {
             right_obj.iter().all(|(key, value)| {
                 left_obj
                     .get(key)
-                    .map_or(false, |left_val| jsonbb_contains(left_val, value))
+                    .map_or(false, |left_val| jsonbb_contains(left_val, value, false))
             })
         }
 
         // Both left and right are arrays.
         (ValueRef::Array(left_arr), ValueRef::Array(right_arr)) => {
             // For every value in right, there should be an equivalent in left.
-            right_arr
-                .iter()
-                .all(|right_val| left_arr.iter().any(|left_val| left_val == right_val))
+            right_arr.iter().all(|right_val| {
+                left_arr
+                    .iter()
+                    .any(|left_val| jsonbb_contains(left_val, right_val, false))
+            })
         }
 
-        // Left is an array and right is a primitive value.
-        (ValueRef::Array(left_arr), right_val) => {
+        // Left is an array and right is an object.
+        (ValueRef::Array(_), ValueRef::Object(_)) => false,
+
+        // Left is an array and right is a primitive value. only at root level.
+        (ValueRef::Array(left_arr), right_val) if root => {
             // The right should be present in left.
             left_arr.iter().any(|left_val| left_val == right_val)
         }
