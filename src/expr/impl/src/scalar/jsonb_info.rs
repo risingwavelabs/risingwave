@@ -56,7 +56,8 @@ pub fn is_json_type(s: &str, t: &str) -> bool {
 /// Converts the given JSON value to pretty-printed, indented text.
 ///
 /// # Examples
-/// ```slt
+// TODO: enable docslt after sqllogictest supports multiline output
+/// ```text
 /// query T
 /// select jsonb_pretty('[{"f1":1,"f2":null}, 2]');
 /// ----
