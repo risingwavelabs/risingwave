@@ -29,7 +29,7 @@ use risingwave_expr::function;
 /// ----
 /// {"b": "foo"}
 /// ```
-#[function("jsonb_access_inner(jsonb, varchar) -> jsonb")]
+#[function("jsonb_access(jsonb, varchar) -> jsonb")]
 pub fn jsonb_object_field<'a>(v: JsonbRef<'a>, p: &str) -> Option<JsonbRef<'a>> {
     v.access_object_field(p)
 }
@@ -52,7 +52,7 @@ pub fn jsonb_object_field<'a>(v: JsonbRef<'a>, p: &str) -> Option<JsonbRef<'a>> 
 /// ----
 /// {"a": "foo"}
 /// ```
-#[function("jsonb_access_inner(jsonb, int4) -> jsonb")]
+#[function("jsonb_access(jsonb, int4) -> jsonb")]
 pub fn jsonb_array_element(v: JsonbRef<'_>, p: i32) -> Option<JsonbRef<'_>> {
     let idx = if p < 0 {
         let Ok(len) = v.array_len() else {
@@ -86,7 +86,7 @@ pub fn jsonb_array_element(v: JsonbRef<'_>, p: i32) -> Option<JsonbRef<'_>> {
 /// ----
 /// NULL
 /// ```
-#[function("jsonb_access_inner(jsonb, varchar[]) -> jsonb")]
+#[function("jsonb_access_multi(jsonb, varchar[]) -> jsonb")]
 pub fn jsonb_access_multi<'a, 'b>(v: JsonbRef<'a>, path: ListRef<'b>) -> Option<JsonbRef<'a>> {
     let mut jsonb = v;
     for key in path.iter() {
@@ -176,7 +176,7 @@ pub fn jsonb_array_element_str(v: JsonbRef<'_>, p: i32, writer: &mut impl Write)
 /// ----
 /// NULL
 /// ```
-#[function("jsonb_access_str(jsonb, varchar[]) -> varchar")]
+#[function("jsonb_access_multi_str(jsonb, varchar[]) -> varchar")]
 pub fn jsonb_access_multi_str<'a, 'b>(
     v: JsonbRef<'a>,
     path: ListRef<'b>,

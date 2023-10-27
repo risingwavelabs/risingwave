@@ -476,11 +476,11 @@ SELECT '{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>>array['f2','0'];
 SELECT '{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>>array['f2','1'];
 
 --@ -- corner cases for same
---@ select '{"a": {"b":{"c": "foo"}}}'::jsonb #> '{}';
---@ select '[1,2,3]'::jsonb #> '{}';
---@ select '"foo"'::jsonb #> '{}';
---@ select '42'::jsonb #> '{}';
---@ select 'null'::jsonb #> '{}';
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #> '{}';
+select '[1,2,3]'::jsonb #> '{}';
+select '"foo"'::jsonb #> '{}';
+select '42'::jsonb #> '{}';
+select 'null'::jsonb #> '{}';
 select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a'];
 select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a', null];
 select '{"a": {"b":{"c": "foo"}}}'::jsonb #> array['a', ''];
@@ -497,11 +497,11 @@ select '"foo"'::jsonb #> array['z'];
 select '42'::jsonb #> array['f2'];
 select '42'::jsonb #> array['0'];
 
---@ select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> '{}';
---@ select '[1,2,3]'::jsonb #>> '{}';
---@ select '"foo"'::jsonb #>> '{}';
---@ select '42'::jsonb #>> '{}';
---@ select 'null'::jsonb #>> '{}';
+select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> '{}';
+select '[1,2,3]'::jsonb #>> '{}';
+select '"foo"'::jsonb #>> '{}';
+select '42'::jsonb #>> '{}';
+select 'null'::jsonb #>> '{}';
 select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a'];
 select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a', null];
 select '{"a": {"b":{"c": "foo"}}}'::jsonb #>> array['a', ''];
@@ -1003,21 +1003,21 @@ SELECT '["a","b","c",[1,2],null]'::jsonb -> -5;
 SELECT '["a","b","c",[1,2],null]'::jsonb -> -6;
 
 --nested path extraction
---@ SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{0}';
---@ SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{a}';
---@ SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c}';
---@ SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,0}';
---@ SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,1}';
---@ SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,2}';
---@ SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,3}';
---@ SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,-1}';
---@ SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,-3}';
---@ SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,-4}';
---@ 
---@ SELECT '[0,1,2,[3,4],{"5":"five"}]'::jsonb #> '{0}';
---@ SELECT '[0,1,2,[3,4],{"5":"five"}]'::jsonb #> '{3}';
---@ SELECT '[0,1,2,[3,4],{"5":"five"}]'::jsonb #> '{4}';
---@ SELECT '[0,1,2,[3,4],{"5":"five"}]'::jsonb #> '{4,5}';
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{0}';
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{a}';
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c}';
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,0}';
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,1}';
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,2}';
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,3}';
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,-1}';
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,-3}';
+SELECT '{"a":"b","c":[1,2,3]}'::jsonb #> '{c,-4}';
+
+SELECT '[0,1,2,[3,4],{"5":"five"}]'::jsonb #> '{0}';
+SELECT '[0,1,2,[3,4],{"5":"five"}]'::jsonb #> '{3}';
+SELECT '[0,1,2,[3,4],{"5":"five"}]'::jsonb #> '{4}';
+SELECT '[0,1,2,[3,4],{"5":"five"}]'::jsonb #> '{4,5}';
 
 --nested exists
 --@ SELECT '{"n":null,"a":1,"b":[1,2],"c":{"1":2},"d":{"1":[2,3]}}'::jsonb ? 'n';

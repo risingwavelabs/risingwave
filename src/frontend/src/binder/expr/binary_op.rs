@@ -89,10 +89,10 @@ impl Binder {
             BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
             BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
-            BinaryOperator::Arrow => ExprType::JsonbAccessInner,
+            BinaryOperator::Arrow => ExprType::JsonbAccess,
             BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
-            BinaryOperator::HashArrow => ExprType::JsonbAccessInner,
-            BinaryOperator::HashLongArrow => ExprType::JsonbAccessStr,
+            BinaryOperator::HashArrow => ExprType::JsonbAccessMulti,
+            BinaryOperator::HashLongArrow => ExprType::JsonbAccessMultiStr,
             BinaryOperator::Prefix => ExprType::StartsWith,
             BinaryOperator::Concat => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
