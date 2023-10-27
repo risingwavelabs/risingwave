@@ -3035,7 +3035,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=acfe830#acfe830b42877abdc1b26a3d8a54fbae6a00d3ed"
+source = "git+https://github.com/MrCroxx/foyer?rev=512fdeb#512fdebca64b6d491c85e22d1d556b0c1c6abbe1"
 dependencies = [
  "foyer-common",
  "foyer-intrusive",
@@ -3046,7 +3046,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=acfe830#acfe830b42877abdc1b26a3d8a54fbae6a00d3ed"
+source = "git+https://github.com/MrCroxx/foyer?rev=512fdeb#512fdebca64b6d491c85e22d1d556b0c1c6abbe1"
 dependencies = [
  "bytes",
  "foyer-workspace-hack",
@@ -3061,7 +3061,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=acfe830#acfe830b42877abdc1b26a3d8a54fbae6a00d3ed"
+source = "git+https://github.com/MrCroxx/foyer?rev=512fdeb#512fdebca64b6d491c85e22d1d556b0c1c6abbe1"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -3078,7 +3078,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=acfe830#acfe830b42877abdc1b26a3d8a54fbae6a00d3ed"
+source = "git+https://github.com/MrCroxx/foyer?rev=512fdeb#512fdebca64b6d491c85e22d1d556b0c1c6abbe1"
 dependencies = [
  "anyhow",
  "bitflags 2.4.0",
@@ -3106,7 +3106,7 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=acfe830#acfe830b42877abdc1b26a3d8a54fbae6a00d3ed"
+source = "git+https://github.com/MrCroxx/foyer?rev=512fdeb#512fdebca64b6d491c85e22d1d556b0c1c6abbe1"
 dependencies = [
  "crossbeam-utils",
  "either",
