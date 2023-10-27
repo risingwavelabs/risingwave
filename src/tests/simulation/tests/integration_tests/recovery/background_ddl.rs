@@ -152,26 +152,41 @@ async fn test_background_ddl_cancel() -> Result<()> {
     session
         .run(SET_INJECT_BACKFILL_DELAY_AFTER_FIRST_BARRIER)
         .await?;
-    session.run(CREATE_MV1).await?;
 
-    tracing::info!("Created mv1 stream job");
+    for _ in 0..5 {
+        session.run(CREATE_MV1).await?;
+        sleep(Duration::from_secs(2)).await;
+
+        let ids = cancel_stream_jobs(&mut session).await?;
+        assert_eq!(ids.len(), 1);
+    }
+
+    session.run(CREATE_MV1).await?;
     sleep(Duration::from_secs(2)).await;
+
+    // Test cancel after kill cn
+    kill_cn_and_wait_recover(&cluster).await;
+
     let ids = cancel_stream_jobs(&mut session).await?;
-    assert_eq!(ids, vec![1002]);
-    // session
-    //     .run("SELECT count(*) FROM mv1")
-    //     .await?
-    //     .assert_result_eq("1000000");
-    // session.run(CREATE_MV1).await?;
-    // sleep(Duration::from_secs(3)).await;
-    //
-    // // Kill the CN
-    // kill_cn_and_wait_recover(&cluster).await;
-    //
-    // // Kill the cluster
-    // kill_and_wait_recover(&cluster).await;
-    //
-    // cancel_stream_jobs(&mut cluster).await?;
-    // session.run(CREATE_MV1).await?;
+    assert_eq!(ids.len(), 1);
+
+    session.run(CREATE_MV1).await?;
+    sleep(Duration::from_secs(2)).await;
+
+    // Test cancel after kill meta
+    kill_and_wait_recover(&cluster).await;
+
+    let ids = cancel_stream_jobs(&mut session).await?;
+    assert_eq!(ids.len(), 1);
+
+    session.run(CREATE_MV1).await?;
+    sleep(Duration::from_secs(2)).await;
+
+    // Wait for job to finish
+    session.run("WAIT;").await?;
+
+    session.run("DROP MATERIALIZED VIEW mv1").await?;
+    session.run("DROP TABLE t").await?;
+
     Ok(())
 }
