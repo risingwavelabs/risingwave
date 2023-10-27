@@ -385,28 +385,6 @@ mod tests {
     #[tokio::test]
     async fn test_json_parse_struct() {
         let descs = vec![
-            ColumnDesc::new_struct(
-                "data",
-                0,
-                "",
-                vec![
-                    ColumnDesc::new_atomic(DataType::Timestamp, "created_at", 1),
-                    ColumnDesc::new_atomic(DataType::Varchar, "id", 2),
-                    ColumnDesc::new_atomic(DataType::Varchar, "text", 3),
-                    ColumnDesc::new_atomic(DataType::Varchar, "lang", 4),
-                ],
-            ),
-            ColumnDesc::new_struct(
-                "author",
-                5,
-                "",
-                vec![
-                    ColumnDesc::new_atomic(DataType::Timestamp, "created_at", 6),
-                    ColumnDesc::new_atomic(DataType::Varchar, "id", 7),
-                    ColumnDesc::new_atomic(DataType::Varchar, "name", 8),
-                    ColumnDesc::new_atomic(DataType::Varchar, "username", 9),
-                ],
-            ),
             ColumnDesc::new_atomic(DataType::Varchar, "I64CastToVarchar", 10),
             ColumnDesc::new_atomic(DataType::Int64, "VarcharCastToI64", 11),
         ]
@@ -473,15 +451,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_json_parse_struct_from_string() {
-        let descs = vec![ColumnDesc::new_struct(
-            "struct",
-            0,
-            "",
-            vec![
-                ColumnDesc::new_atomic(DataType::Varchar, "varchar", 1),
-                ColumnDesc::new_atomic(DataType::Boolean, "boolean", 2),
-            ],
-        )]
+        let descs = vec![
+            ColumnDesc::new_atomic(DataType::Varchar, "varchar", 1),
+            ColumnDesc::new_atomic(DataType::Boolean, "boolean", 2),
+        ]
         .iter()
         .map(SourceColumnDesc::from)
         .collect_vec();

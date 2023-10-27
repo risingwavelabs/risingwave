@@ -604,14 +604,10 @@ mod tests {
                     is_hidden: true,
                 },
                 PbColumnCatalog {
-                    column_desc: Some(PbColumnDesc::new_struct(
-                        "country",
-                        1,
-                        ".test.Country",
-                        vec![
-                            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "address", 2),
-                            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "zipcode", 3),
-                        ],
+                    column_desc: Some(PbColumnDesc::new_atomic(
+                        DataType::Varchar.to_protobuf(),
+                        "address",
+                        2,
                     )),
                     is_hidden: false,
                 },
@@ -669,11 +665,6 @@ mod tests {
                             ),
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
-                            field_descs: vec![
-                                ColumnDesc::new_atomic(DataType::Varchar, "address", 2),
-                                ColumnDesc::new_atomic(DataType::Varchar, "zipcode", 3),
-                            ],
-                            type_name: ".test.Country".to_string(),
                             description: None,
                             generated_or_default_column: None,
                         },

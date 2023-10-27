@@ -156,8 +156,6 @@ async fn test_table_materialize() -> StreamResult<()> {
             data_type: field.data_type,
             column_id: *column_id,
             name: field.name,
-            field_descs: vec![],
-            type_name: "".to_string(),
             generated_or_default_column: None,
             description: None,
         })

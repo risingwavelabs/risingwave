@@ -174,20 +174,15 @@ pub fn col_descs_to_rows(columns: Vec<ColumnCatalog>) -> Vec<Row> {
     columns
         .iter()
         .flat_map(|col| {
-            col.column_desc
-                .flatten()
+            Some(&col.column_desc)
                 .into_iter()
                 .map(|c| {
-                    let type_name = if let DataType::Struct { .. } = c.data_type {
-                        c.type_name.clone()
-                    } else {
-                        c.data_type.to_string()
-                    };
+                    let type_name = c.data_type.to_string();
                     Row::new(vec![
-                        Some(c.name.into()),
+                        Some(c.name.clone().into()),
                         Some(type_name.into()),
                         Some(col.is_hidden.to_string().into()),
-                        c.description.map(Into::into),
+                        c.description.clone().map(Into::into),
                     ])
                 })
                 .collect_vec()

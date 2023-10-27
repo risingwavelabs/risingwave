@@ -374,8 +374,6 @@ mod tests {
         let mock_field = Field {
             data_type: DataType::Boolean,
             name: Default::default(),
-            sub_fields: Default::default(),
-            type_name: Default::default(),
         };
 
         let boolean_value = datum_to_json_object(
@@ -547,8 +545,6 @@ mod tests {
         let mock_field = Field {
             data_type: DataType::Boolean,
             name: Default::default(),
-            sub_fields: Default::default(),
-            type_name: Default::default(),
         };
         let fields = vec![
             Field {
@@ -609,38 +605,6 @@ mod tests {
                     ),
                 ])),
                 name: "v10".into(),
-                sub_fields: vec![
-                    Field {
-                        data_type: DataType::Timestamp,
-                        name: "a".into(),
-                        ..mock_field.clone()
-                    },
-                    Field {
-                        data_type: DataType::Timestamptz,
-                        name: "b".into(),
-                        ..mock_field.clone()
-                    },
-                    Field {
-                        data_type: DataType::Struct(StructType::new(vec![
-                            ("aa", DataType::Int64),
-                            ("bb", DataType::Float64),
-                        ])),
-                        name: "c".into(),
-                        sub_fields: vec![
-                            Field {
-                                data_type: DataType::Int64,
-                                name: "aa".into(),
-                                ..mock_field.clone()
-                            },
-                            Field {
-                                data_type: DataType::Float64,
-                                name: "bb".into(),
-                                ..mock_field.clone()
-                            },
-                        ],
-                        ..mock_field.clone()
-                    },
-                ],
                 ..mock_field.clone()
             },
             Field {

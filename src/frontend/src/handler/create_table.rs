@@ -33,12 +33,11 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Format, ObjectName,
-    SourceWatermark, TableConstraint,
+    ColumnDef, ColumnOption, ConnectorSchema, Format, ObjectName, SourceWatermark, TableConstraint,
 };
 
 use super::RwPgResponse;
-use crate::binder::{bind_data_type, bind_struct_field, Clause};
+use crate::binder::{bind_data_type, Clause};
 use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, CatalogError, ColumnId};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
@@ -172,21 +171,11 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
 
         check_valid_column_name(&name.real_value())?;
 
-        let field_descs: Vec<ColumnDesc> = if let AstDataType::Struct(fields) = &data_type {
-            fields
-                .iter()
-                .map(bind_struct_field)
-                .collect::<Result<Vec<_>>>()?
-        } else {
-            vec![]
-        };
         columns.push(ColumnCatalog {
             column_desc: ColumnDesc {
                 data_type: bind_data_type(&data_type)?,
                 column_id: ColumnId::placeholder(),
                 name: name.real_value(),
-                field_descs,
-                type_name: "".to_string(),
                 generated_or_default_column: None,
                 description: None,
             },

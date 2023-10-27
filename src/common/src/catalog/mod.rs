@@ -107,8 +107,6 @@ pub fn row_id_column_desc() -> ColumnDesc {
         data_type: DataType::Serial,
         column_id: ROW_ID_COLUMN_ID,
         name: row_id_column_name(),
-        field_descs: vec![],
-        type_name: "".to_string(),
         generated_or_default_column: None,
         description: None,
     }
@@ -129,8 +127,6 @@ pub fn offset_column_desc() -> ColumnDesc {
         data_type: DataType::Varchar,
         column_id: ColumnId::placeholder(),
         name: offset_column_name(),
-        field_descs: vec![],
-        type_name: "".to_string(),
         generated_or_default_column: None,
         description: None,
     }
