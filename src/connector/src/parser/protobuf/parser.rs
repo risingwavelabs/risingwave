@@ -402,11 +402,16 @@ pub fn from_protobuf_value(
         }
         Value::Message(dyn_msg) => {
             if dyn_msg.descriptor().full_name() == "google.protobuf.Any" {
-                // Strange error could happen when running `e2e_test` if this is enabled 😅
-                // debug_assert!(
-                //     dyn_msg.has_field_by_name("type_url") && dyn_msg.has_field_by_name("value"),
-                //     "`type_url` & `value` must exist in fields of `dyn_msg`"
-                // );
+                // If the fields are not presented, default value is an empty string
+                if !dyn_msg.has_field_by_name("type_url") || !dyn_msg.has_field_by_name("value") {
+                    return Ok(Some(ScalarImpl::Jsonb(JsonbVal::from(serde_json::json!{""}))));
+                }
+
+                // Sanity check
+                debug_assert!(
+                    dyn_msg.has_field_by_name("type_url") && dyn_msg.has_field_by_name("value"),
+                    "`type_url` & `value` must exist in fields of `dyn_msg`"
+                );
 
                 // The message is of type `Any`
                 let (type_url, payload) = extract_any_info(dyn_msg);
