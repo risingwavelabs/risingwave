@@ -58,7 +58,7 @@ RisingWave is a distributed SQL streaming database that enables <b>simple</b>, <
 
 ![RisingWave](https://github.com/risingwavelabs/risingwave-docs/blob/0f7e1302b22493ba3c1c48e78810750ce9a5ff42/docs/images/archi_simple.png)
 
-## How to install
+## Try it out in 5 minutes
 **Ubuntu**
 ```
 wget https://github.com/risingwavelabs/risingwave/releases/download/v1.3.0/risingwave-v1.3.0-x86_64-unknown-linux.tar.gz
@@ -75,11 +75,18 @@ Now connect to RisingWave using `psql`:
 ```
 psql -h localhost -p 4566 -d dev -U root
 ```
-
 Learn more at [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
 
+## Production deployments
+For **single-node Docker deployments**, please refer to [Docker Compose](https://docs.risingwave.com/docs/current/risingwave-trial/?method=docker-compose).
+
+For **Kubernetes deployments**, please refer to [Kubernetes with Helm](https://docs.risingwave.com/docs/current/risingwave-k8s-helm/) or [Kubernetes with Operator](https://docs.risingwave.com/docs/current/risingwave-kubernetes/).
+
+**RisingWave Cloud** the easiest way to run a fully-fledged RisingWave cluster. Try it out for free at: [cloud.risingwave.com](https://cloud.risingwave.com).
+
+
 ## Why RisingWave for stream processing?
-RisingWave adaptly tackles some of the most challenging problems in stream processing. Compared to existing stream processing systems, RisingWave shines through with the following key features:
+RisingWave adaptly tackles some of the most challenging problems in stream processing. Compared to existing stream processing systems like Apache Flink, Apache Spark Streaming, and KsqlDB, RisingWave shines through with the following key features:
 * **Easy to learn**
   * RisingWave speaks PostgreSQL-style SQL, enabling users to dive into stream processing in much the same way as operating a PostgreSQL database.
 * **Highly efficient in multi-stream joins**
@@ -111,9 +118,6 @@ RisingWave isn’t a panacea for all data engineering hurdles. It has its own se
   * RisingWave's row store design is tailored for optimal stream processing performance rather than interactive analytical workloads. Hence, it's not a suitable replacement for OLAP databases. Yet, a reliable integration with many OLAP databases exists, and a collaborative use of RisingWave and OLAP databases is a common practice among many users.
 
 
-## RisingWave Cloud
-
-RisingWave Cloud is a fully-managed and scalable stream processing platform powered by the open-source RisingWave project. Try it out for free at: [cloud.risingwave.com](https://cloud.risingwave.com).
 
 ## Notes on telemetry
 
