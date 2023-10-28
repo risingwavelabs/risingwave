@@ -59,17 +59,17 @@ RisingWave is a distributed SQL streaming database that enables <b>simple</b>, <
 ![RisingWave](https://github.com/risingwavelabs/risingwave-docs/blob/0f7e1302b22493ba3c1c48e78810750ce9a5ff42/docs/images/archi_simple.png)
 
 ## Try it out in 5 minutes
-**Ubuntu**
-```
-wget https://github.com/risingwavelabs/risingwave/releases/download/v1.3.0/risingwave-v1.3.0-x86_64-unknown-linux.tar.gz
-tar xvf risingwave-v1.3.0-x86_64-unknown-linux.tar.gz
-./risingwave playground
-```
 **Mac**
 ```
 brew tap risingwavelabs/risingwave
 brew install risingwave
 risingwave playground
+```
+**Ubuntu**
+```
+wget https://github.com/risingwavelabs/risingwave/releases/download/v1.3.0/risingwave-v1.3.0-x86_64-unknown-linux.tar.gz
+tar xvf risingwave-v1.3.0-x86_64-unknown-linux.tar.gz
+./risingwave playground
 ```
 Now connect to RisingWave using `psql`:
 ```
@@ -86,9 +86,18 @@ For **Kubernetes deployments**, please refer to [Kubernetes with Helm](https://d
 
 
 ## Why RisingWave for stream processing?
-RisingWave adaptly tackles some of the most challenging problems in stream processing. Compared to existing stream processing systems like Apache Flink, Apache Spark Streaming, and KsqlDB, RisingWave shines through with the following key features:
-* **Easy to learn**
+RisingWave adaptly addresses some of the most challenging problems in stream processing. Compared to existing stream processing systems like Apache Flink, Apache Spark Streaming, and KsqlDB, RisingWave stands out in two primary dimensions: simplicity and efficiency, thanks to its **cloud-native architectual design**.
+### Simplicity
+* **Simple to learn**
   * RisingWave speaks PostgreSQL-style SQL, enabling users to dive into stream processing in much the same way as operating a PostgreSQL database.
+* **Simple to verify correctness**
+  * RisingWave persists results in materialized views and allow users to break down complex stream computation programs into stacked materialized views, simplifying program development and result verification.
+* **Simple to maintain and operate**
+  * RisingWave abstracts away unnecessary low-level details, allowing users to concentrate solely on SQL code-level issues.
+* **Simple to integrate**
+  * With integrations to a diverse range of cloud systems and the PostgreSQL ecosystem, RisingWave boasts a rich and expansive ecosystem, making it straightforward to incorporate into existing infrastructures.
+
+### Efficiency
 * **Highly efficient in multi-stream joins**
   * RisingWave has made significant optimizations for multiple stream join scenarios. Users can easily join 10-20 streams (or more) efficiently in a production environment.
 * **High resource utilization**
@@ -99,14 +108,8 @@ RisingWave adaptly tackles some of the most challenging problems in stream proce
   * RisingWave supports near-instantaneous dynamic scaling without any service interruptions.
 * **Instant failure recovery**
   * RisingWave's state management mechanism allows it to recover from failure in seconds, not minutes or hours.
-* **Easy to verify correctness**
-  * RisingWave persists results in materialized views and allow users to break down complex stream computation programs into stacked materialized views, simplifying program development and result verification.
 * **Simplified data stack**
   * RisingWave's ability to store data and serve queries eliminates the need for separate maintenance of stream processors and databases. Users can effortlessly connect RisingWave to their preferred BI tools or through client libraries.
-* **Simple to maintain and operate**
-  * RisingWave abstracts away unnecessary low-level details, allowing users to concentrate solely on SQL code-level issues.
-* **Rich ecosystem**
-  * With integrations to a diverse range of cloud systems and the PostgreSQL ecosystem, RisingWave boasts a rich and expansive ecosystem.
 
 ## RisingWave's limitations
 RisingWave isn’t a panacea for all data engineering hurdles. It has its own set of limitations:
