@@ -86,7 +86,7 @@ For **Kubernetes deployments**, please refer to [Kubernetes with Helm](https://d
 
 
 ## Why RisingWave for stream processing?
-RisingWave adaptly addresses some of the most challenging problems in stream processing. Compared to existing stream processing systems like Apache Flink, Apache Spark Streaming, and KsqlDB, RisingWave stands out in two primary dimensions: simplicity and efficiency, thanks to its **cloud-native architectual design**.
+RisingWave adaptly addresses some of the most challenging problems in stream processing. Compared to existing stream processing systems like Apache Flink, Apache Spark Streaming, and KsqlDB, RisingWave stands out in two primary dimensions: **simplicity** and **efficiency**, thanks to its **PostgreSQL-style interaction experience** and  **cloud-native architectual design**.
 ### Simplicity
 * **Simple to learn**
   * RisingWave speaks PostgreSQL-style SQL, enabling users to dive into stream processing in much the same way as operating a PostgreSQL database.
