@@ -86,7 +86,7 @@ For **Kubernetes deployments**, please refer to [Kubernetes with Helm](https://d
 
 
 ## Why RisingWave for stream processing?
-RisingWave adaptly addresses some of the most challenging problems in stream processing. Compared to existing stream processing systems like Apache Flink, Apache Spark Streaming, and KsqlDB, RisingWave stands out in two primary dimensions: **simplicity** and **efficiency**, thanks to its **PostgreSQL-style interaction experience** and  **cloud-native architectual design**.
+RisingWave adaptly addresses some of the most challenging problems in stream processing. Compared to existing stream processing systems like [Apache Flink](https://flink.apache.org/), [Apache Spark Streaming](https://spark.apache.org/docs/latest/streaming-programming-guide.html), and [KsqlDB](https://ksqldb.io/), RisingWave stands out in two primary dimensions: **simplicity** and **efficiency**, thanks to its **[PostgreSQL](https://www.postgresql.org/)-style interaction experience** and  **[Snowflake](https://snowflake.com/)-like architectual design** (i.e., compute-storage decoupling and tiered storage).
 ### Simplicity
 * **Simple to learn**
   * RisingWave speaks PostgreSQL-style SQL, enabling users to dive into stream processing in much the same way as operating a PostgreSQL database.
@@ -98,12 +98,12 @@ RisingWave adaptly addresses some of the most challenging problems in stream pro
   * With integrations to a diverse range of cloud systems and the PostgreSQL ecosystem, RisingWave boasts a rich and expansive ecosystem, making it straightforward to incorporate into existing infrastructures.
 
 ### Efficiency
-* **Highly efficient in multi-stream joins**
-  * RisingWave has made significant optimizations for multiple stream join scenarios. Users can easily join 10-20 streams (or more) efficiently in a production environment.
 * **High resource utilization**
   * Queries in RisingWave leverage shared computational resources, eliminating the need for users to manually allocate resources for each query.
 * **No compromise on large state management**
   * The decoupled compute-storage architecture of RisingWave ensures remote persistence of internal states, and users never need to worry about the size of internal states when handling complex queries.
+* **Highly efficient in multi-stream joins**
+  * RisingWave has made significant optimizations for multiple stream join scenarios. Users can easily join 10-20 streams (or more) efficiently in a production environment.
 * **Transparent dynamic scaling**
   * RisingWave supports near-instantaneous dynamic scaling without any service interruptions.
 * **Instant failure recovery**
