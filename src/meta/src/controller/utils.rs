@@ -13,7 +13,13 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use model_migration::WithQuery;
+use risingwave_meta_model_migration::WithQuery;
+use risingwave_meta_model_v2::object::ObjectType;
+use risingwave_meta_model_v2::prelude::*;
+use risingwave_meta_model_v2::{
+    connection, function, index, object, object_dependency, schema, sink, source, table, view,
+    DataTypeArray, DatabaseId, ObjectId, SchemaId, UserId,
+};
 use risingwave_pb::catalog::{PbConnection, PbFunction};
 use sea_orm::sea_query::{
     Alias, CommonTableExpression, Expr, Query, QueryStatementBuilder, SelectStatement, UnionType,
@@ -24,12 +30,6 @@ use sea_orm::{
     Order, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, Statement,
 };
 
-use crate::model_v2::object::ObjectType;
-use crate::model_v2::prelude::*;
-use crate::model_v2::{
-    connection, function, index, object, object_dependency, schema, sink, source, table, view,
-    DataTypeArray, DatabaseId, ObjectId, SchemaId, UserId,
-};
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.

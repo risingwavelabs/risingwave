@@ -187,6 +187,7 @@ pub fn col_descs_to_rows(columns: Vec<ColumnCatalog>) -> Vec<Row> {
                         Some(c.name.into()),
                         Some(type_name.into()),
                         Some(col.is_hidden.to_string().into()),
+                        c.description.map(Into::into),
                     ])
                 })
                 .collect_vec()

@@ -259,6 +259,7 @@ impl Parser {
                 Keyword::PREPARE => Ok(self.parse_prepare()?),
                 Keyword::COMMENT => Ok(self.parse_comment()?),
                 Keyword::FLUSH => Ok(Statement::Flush),
+                Keyword::WAIT => Ok(Statement::Wait),
                 _ => self.expected(
                     "an SQL statement",
                     Token::Word(w).with_location(token.location),
@@ -3253,7 +3254,12 @@ impl Parser {
                 _ => {
                     self.prev_token();
                     let type_name = self.parse_object_name()?;
-                    Ok(DataType::Custom(type_name))
+                    // JSONB is not a keyword
+                    if type_name.to_string().eq_ignore_ascii_case("jsonb") {
+                        Ok(DataType::Jsonb)
+                    } else {
+                        Ok(DataType::Custom(type_name))
+                    }
                 }
             },
             unexpected => {

@@ -38,6 +38,7 @@ easy-ext = "1"
 educe = "0.4"
 either = "1"
 enum-as-inner = "0.6"
+enumflags2 = { version = "0.7.8" }
 ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 fs-err = "2"
@@ -49,6 +50,7 @@ hyper = "0.14"
 hytra = { workspace = true }
 itertools = "0.11"
 itoa = "1.0"
+jsonbb = "0.1"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"

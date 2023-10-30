@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 
 use std::sync::atomic::AtomicU64;
@@ -159,6 +159,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             field_descs: vec![],
             type_name: "".to_string(),
             generated_or_default_column: None,
+            description: None,
         })
         .collect_vec();
     let (barrier_tx, barrier_rx) = unbounded_channel();

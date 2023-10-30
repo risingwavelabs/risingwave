@@ -24,8 +24,16 @@ use super::generic::PhysicalPlanRef;
 /// [`PhysicalPlanRef`].
 ///
 /// [`GenericPlanRef`]: super::generic::GenericPlanRef
+#[auto_impl::auto_impl(&)]
 pub trait StreamPlanRef: PhysicalPlanRef {
     fn append_only(&self) -> bool;
     fn emit_on_window_close(&self) -> bool;
     fn watermark_columns(&self) -> &FixedBitSet;
+}
+
+/// Prelude for stream plan nodes.
+pub mod prelude {
+    pub use super::super::generic::{GenericPlanRef, PhysicalPlanRef};
+    pub use super::super::Stream;
+    pub use super::StreamPlanRef;
 }

@@ -87,6 +87,9 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                 parser_config,
                 source_ctx,
             }),
+            CdcSourceType::Unspecified => {
+                unreachable!();
+            }
         }
     }
 

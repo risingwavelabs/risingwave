@@ -28,9 +28,12 @@ use super::encoder::template::TemplateEncoder;
 use super::formatter::SinkFormatterImpl;
 use super::writer::FormattedSink;
 use super::{SinkError, SinkParam};
-use crate::dispatch_sink_formatter_impl;
-use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
-use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriter, SinkWriterParam};
+use crate::dispatch_sink_formatter_str_key_impl;
+use crate::sink::log_store::DeliveryFutureManagerAddFuture;
+use crate::sink::writer::{
+    AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
+};
+use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriterParam};
 
 pub const REDIS_SINK: &str = "redis";
 pub const KEY_FORMAT: &str = "key_format";
@@ -99,11 +102,11 @@ impl TryFrom<SinkParam> for RedisSink {
 
 impl Sink for RedisSink {
     type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = LogSinkerOf<RedisSinkWriter>;
+    type LogSinker = AsyncTruncateLogSinkerOf<RedisSinkWriter>;
 
     const SINK_NAME: &'static str = "redis";
 
-    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(RedisSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
@@ -113,7 +116,7 @@ impl Sink for RedisSink {
             self.sink_from_name.clone(),
         )
         .await?
-        .into_log_sinker(writer_param.sink_metrics))
+        .into_log_sinker(usize::MAX))
     }
 
     async fn validate(&self) -> Result<()> {
@@ -221,6 +224,7 @@ impl RedisSinkWriter {
             pk_indices.clone(),
             db_name,
             sink_from_name,
+            "NO_TOPIC",
         )
         .await?;
 
@@ -245,6 +249,7 @@ impl RedisSinkWriter {
             pk_indices.clone(),
             "d1".to_string(),
             "t1".to_string(),
+            "NO_TOPIC",
         )
         .await?;
         Ok(Self {
@@ -257,24 +262,15 @@ impl RedisSinkWriter {
     }
 }
 
-#[async_trait]
-impl SinkWriter for RedisSinkWriter {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        dispatch_sink_formatter_impl!(&self.formatter, formatter, {
+impl AsyncTruncateSinkWriter for RedisSinkWriter {
+    async fn write_chunk<'a>(
+        &'a mut self,
+        chunk: StreamChunk,
+        _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
+    ) -> Result<()> {
+        dispatch_sink_formatter_str_key_impl!(&self.formatter, formatter, {
             self.payload_writer.write_chunk(chunk, formatter).await
         })
-    }
-
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        self.epoch = epoch;
-        Ok(())
-    }
-
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
-        if is_checkpoint {
-            self.payload_writer.commit().await?;
-        }
-        Ok(())
     }
 }
 
@@ -290,6 +286,7 @@ mod test {
 
     use super::*;
     use crate::sink::catalog::{SinkEncode, SinkFormat};
+    use crate::sink::log_store::DeliveryFutureManager;
 
     #[tokio::test]
     async fn test_write() {
@@ -326,8 +323,10 @@ mod test {
             ],
         );
 
+        let mut manager = DeliveryFutureManager::new(0);
+
         redis_sink_writer
-            .write_batch(chunk_a)
+            .write_chunk(chunk_a, manager.start_write_chunk(0, 0))
             .await
             .expect("failed to write batch");
         let expected_a =
@@ -383,6 +382,8 @@ mod test {
             .await
             .unwrap();
 
+        let mut future_manager = DeliveryFutureManager::new(0);
+
         let chunk_a = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],
             vec![
@@ -392,7 +393,7 @@ mod test {
         );
 
         redis_sink_writer
-            .write_batch(chunk_a)
+            .write_chunk(chunk_a, future_manager.start_write_chunk(0, 0))
             .await
             .expect("failed to write batch");
         let expected_a = vec![

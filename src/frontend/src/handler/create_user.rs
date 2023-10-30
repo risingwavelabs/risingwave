@@ -24,11 +24,12 @@ use crate::binder::Binder;
 use crate::catalog::{CatalogError, DatabaseId};
 use crate::handler::HandlerArgs;
 use crate::user::user_authentication::encrypted_password;
+use crate::user::user_catalog::UserCatalog;
 
 fn make_prost_user_info(
     user_name: String,
     options: &UserOptions,
-    session_user: &UserInfo,
+    session_user: &UserCatalog,
     database_id: DatabaseId,
 ) -> Result<UserInfo> {
     if !session_user.is_super {

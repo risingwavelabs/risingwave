@@ -21,22 +21,25 @@ use crate::catalog::system_catalog::BuiltinView;
 
 /// The catalog `pg_description` stores description.
 /// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-description.html`]
-pub static PG_DESCRIPTION: LazyLock<BuiltinView> = LazyLock::new(|| {
-    BuiltinView {
-        name: "pg_description",
-        schema: PG_CATALOG_SCHEMA_NAME,
-        columns: &[
-            (DataType::Int32, "objoid"),
-            (DataType::Int32, "classoid"),
-            (DataType::Int32, "objsubid"),
-            (DataType::Varchar, "description"),
-        ],
-        sql: "SELECT id AS objoid, NULL::integer AS classoid, 0 AS objsubid, NULL AS description FROM rw_catalog.rw_tables \
-        UNION ALL SELECT id AS objoid, NULL::integer AS classoid, 0 AS objsubid, NULL AS description FROM rw_catalog.rw_materialized_views \
-        UNION ALL SELECT id AS objoid, NULL::integer AS classoid, 0 AS objsubid, NULL AS description FROM rw_catalog.rw_views \
-        UNION ALL SELECT id AS objoid, NULL::integer AS classoid, 0 AS objsubid, NULL AS description FROM rw_catalog.rw_indexes \
-        UNION ALL SELECT id AS objoid, NULL::integer AS classoid, 0 AS objsubid, NULL AS description FROM rw_catalog.rw_sources \
-        UNION ALL SELECT id AS objoid, NULL::integer AS classoid, 0 AS objsubid, NULL AS description FROM rw_catalog.rw_system_tables\
-            ".into(),
-    }
+pub static PG_DESCRIPTION: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: "pg_description",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "objoid"),
+        (DataType::Int32, "classoid"),
+        (DataType::Int32, "objsubid"),
+        (DataType::Varchar, "description"),
+    ],
+    // objsubid = 0     => _row_id (hidden column)
+    // objsubid is NULL => table self
+    sql: "SELECT objoid, \
+                 classoid, \
+                 CASE \
+                     WHEN objsubid = 0 THEN -1 \
+                     WHEN objsubid IS NULL THEN 0 \
+                     ELSE objsubid \
+                 END AS objsubid, \
+                 description FROM rw_catalog.rw_description \
+          WHERE description IS NOT NULL;"
+        .into(),
 });

@@ -19,6 +19,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, GenericPlanRef, PlanWindowFunction};
+use super::stream::prelude::*;
 use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -26,7 +27,7 @@ use crate::TableCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamEowcOverWindow {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::OverWindow<PlanRef>,
 }
 

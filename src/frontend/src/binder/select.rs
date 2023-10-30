@@ -905,6 +905,7 @@ fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
         AstDataType::Regproc => "regproc".to_string(),
         AstDataType::Text => "text".to_string(),
         AstDataType::Bytea => "bytea".to_string(),
+        AstDataType::Jsonb => "jsonb".to_string(),
         AstDataType::Array(ty) => return data_type_to_alias(ty),
         AstDataType::Custom(ty) => format!("{}", ty),
         AstDataType::Struct(_) => {

@@ -51,7 +51,7 @@ use crate::{
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
-const UPSTREAM_SOURCE_KEY: &str = "connector";
+pub const UPSTREAM_SOURCE_KEY: &str = "connector";
 
 pub trait TryFromHashmap: Sized {
     fn try_from_hashmap(props: HashMap<String, String>) -> Result<Self>;
@@ -561,7 +561,7 @@ pub type SplitId = Arc<str>;
 pub struct SourceMessage {
     pub key: Option<Vec<u8>>,
     pub payload: Option<Vec<u8>>,
-    pub offset: String,
+    pub offset: String, // TODO: use `Arc<str>`
     pub split_id: SplitId,
     pub meta: SourceMeta,
 }

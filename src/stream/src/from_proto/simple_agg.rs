@@ -58,6 +58,8 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
                 .await;
 
         Ok(SimpleAggExecutor::new(AggExecutorArgs {
+            version: node.version(),
+
             input,
             actor_ctx: params.actor_context,
             pk_indices: params.pk_indices,
