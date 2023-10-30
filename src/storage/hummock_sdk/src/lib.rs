@@ -56,6 +56,10 @@ pub const SPLIT_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 1u64 << 56;
 pub const SINGLE_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 2u64 << 56;
 pub const OBJECT_SUFFIX: &str = "data";
 
+pub const EPOCH_AVAILABLE_BITS: u64 = 16;
+pub const MAX_SPILL_TIMES: u64 = 1 << EPOCH_AVAILABLE_BITS;
+pub const EPOCH_MASK: u64 = (1 << EPOCH_AVAILABLE_BITS) - 1;
+
 #[macro_export]
 /// This is wrapper for `info` log.
 ///
@@ -267,8 +271,6 @@ pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
     checkpoint_path.trim_end_matches(|c| c != '/').to_string()
 }
 
-// const EPOCH_AVAILABLE_BITS: u64 = 16;
-const EPOCH_MASK: u64 = 0xFFFF;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug, PartialOrd, Ord)]
 pub struct EpochWithGap(u64);
 

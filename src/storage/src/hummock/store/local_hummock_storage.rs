@@ -22,7 +22,7 @@ use parking_lot::RwLock;
 use prometheus::IntGauge;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, MAX_SPILL_TIMES};
 use tokio::sync::mpsc;
 use tracing::{warn, Instrument};
 
@@ -48,9 +48,6 @@ use crate::monitor::{HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocal
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::StateStoreIter;
-
-const EPOCH_AVAILABLE_BITS: u64 = 16;
-const MAX_SPILL_TIMES: u64 = 1 << EPOCH_AVAILABLE_BITS;
 
 /// `LocalHummockStorage` is a handle for a state table shard to access data from and write data to
 /// the hummock state backend. It is created via `HummockStorage::new_local`.
