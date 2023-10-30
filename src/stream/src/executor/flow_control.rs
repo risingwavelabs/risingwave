@@ -50,7 +50,10 @@ impl FlowControlExecutor {
             let clock = MonotonicClock;
             RateLimiter::direct_with_clock(quota, &clock)
         };
+        #[cfg(not(madsim))]
         let rate_limiter = self.rate_limit.map(get_rate_limiter);
+        #[cfg(madsim)]
+        let mut rate_limit_quota = self.rate_limit.unwrap_or(0);
         #[for_await]
         for msg in self.input.execute() {
             let msg = msg?;
@@ -68,6 +71,26 @@ impl FlowControlExecutor {
                                     self.rate_limit,
                                 );
                             }
+                        }
+                    }
+                    #[cfg(madsim)]
+                    {
+                        if let Some(rate_limit_value) = self.rate_limit {
+                            let chunk_cardinality = chunk.cardinality();
+                            if rate_limit_quota < chunk_cardinality as u32 {
+                                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                                rate_limit_quota = rate_limit_value;
+                                // If after reset, chunk cardinality is still greater than
+                                // rate limit, we cannot apply rate limit to it.
+                                if rate_limit_quota < chunk_cardinality as u32 {
+                                    tracing::error!(
+                                        "Rate Limit {:?} smaller than chunk cardinality {}",
+                                        rate_limit_value,
+                                        chunk_cardinality,
+                                    );
+                                }
+                            }
+                            rate_limit_quota = rate_limit_quota.saturating_sub(chunk_cardinality as u32);
                         }
                     }
                     yield Message::Chunk(chunk);
