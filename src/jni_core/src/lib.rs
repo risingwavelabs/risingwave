@@ -879,12 +879,15 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToCh
     })
 }
 
+pub type JniSenderType<T> = Sender<anyhow::Result<T>>;
+pub type JniReceiverType<T> = Receiver<T>;
+
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_recvSinkWriterRequestFromChannel<
     'a,
 >(
     env: EnvParam<'a>,
-    mut channel: Pointer<'a, Receiver<SinkWriterStreamRequest>>,
+    mut channel: Pointer<'a, JniReceiverType<SinkWriterStreamRequest>>,
 ) -> JByteArray<'a> {
     execute_and_catch(env, move |env| match channel.as_mut().blocking_recv() {
         Some(msg) => {
@@ -902,7 +905,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkWriterRe
     'a,
 >(
     env: EnvParam<'a>,
-    channel: Pointer<'a, Sender<anyhow::Result<SinkWriterStreamResponse>>>,
+    channel: Pointer<'a, JniSenderType<SinkWriterStreamResponse>>,
     msg: JByteArray<'a>,
 ) -> jboolean {
     execute_and_catch(env, move |env| {
@@ -927,7 +930,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_recvSinkCoordina
     'a,
 >(
     env: EnvParam<'a>,
-    mut channel: Pointer<'a, Receiver<SinkCoordinatorStreamRequest>>,
+    mut channel: Pointer<'a, JniReceiverType<SinkCoordinatorStreamRequest>>,
 ) -> JByteArray<'a> {
     execute_and_catch(env, move |env| match channel.as_mut().blocking_recv() {
         Some(msg) => {
@@ -945,7 +948,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkCoordina
     'a,
 >(
     env: EnvParam<'a>,
-    channel: Pointer<'a, Sender<SinkCoordinatorStreamResponse>>,
+    channel: Pointer<'a, JniSenderType<SinkCoordinatorStreamResponse>>,
     msg: JByteArray<'a>,
 ) -> jboolean {
     execute_and_catch(env, move |env| {
@@ -954,7 +957,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkCoordina
 
         match channel
             .as_ref()
-            .blocking_send(sink_coordinator_stream_response)
+            .blocking_send(Ok(sink_coordinator_stream_response))
         {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {

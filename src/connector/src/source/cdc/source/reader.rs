@@ -123,8 +123,9 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
 
         let (tx, mut rx) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
 
-        // Force init, because we don't want to see initialization failure in the following thread.
-        JVM.get_or_init()?;
+        let jvm = JVM
+            .get()
+            .map_err(|e| anyhow!("jvm not initialized properly: {:?}", e))?;
 
         let get_event_stream_request = GetEventStreamRequest {
             source_id: self.source_id,
@@ -138,7 +139,7 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
         let source_type = get_event_stream_request.source_type.to_string();
 
         std::thread::spawn(move || {
-            let mut env = JVM.get_or_init().unwrap().attach_current_thread().unwrap();
+            let mut env = jvm.attach_current_thread().unwrap();
 
             let get_event_stream_request_bytes = env
                 .byte_array_from_slice(&Message::encode_to_vec(&get_event_stream_request))
