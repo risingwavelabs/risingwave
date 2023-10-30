@@ -89,7 +89,7 @@ pub fn jsonb_array_element(v: JsonbRef<'_>, p: i32) -> Option<JsonbRef<'_>> {
 /// ```
 #[function("jsonb_access_multi(jsonb, varchar[]) -> jsonb")]
 #[function("jsonb_extract_path(jsonb, ...) -> jsonb")]
-pub fn jsonb_access_multi<'a>(v: JsonbRef<'a>, path: impl Row) -> Option<JsonbRef<'a>> {
+pub fn jsonb_access_multi(v: JsonbRef<'_>, path: impl Row) -> Option<JsonbRef<'_>> {
     let mut jsonb = v;
     for key in path.iter() {
         // return null if any element is null

@@ -552,7 +552,7 @@ impl Row for ListRef<'_> {
     }
 
     fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
-        self.clone().iter()
+        (*self).iter()
     }
 }
 
