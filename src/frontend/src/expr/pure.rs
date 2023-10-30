@@ -177,6 +177,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::JsonbAccessStr
             | expr_node::Type::JsonbTypeof
             | expr_node::Type::JsonbArrayLength
+            | expr_node::Type::JsonbObject
+            | expr_node::Type::JsonbPretty
             | expr_node::Type::JsonbContains
             | expr_node::Type::JsonbContainedBy
             | expr_node::Type::JsonbContainsKey
@@ -205,6 +207,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::ArrayPositions
             | expr_node::Type::StringToArray
             | expr_node::Type::Format
+            | expr_node::Type::PgwireSend
+            | expr_node::Type::PgwireRecv
             | expr_node::Type::ArrayTransform
             | expr_node::Type::Greatest
             | expr_node::Type::Least =>

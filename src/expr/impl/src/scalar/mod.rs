@@ -46,6 +46,7 @@ mod jsonb_access;
 mod jsonb_concat;
 mod jsonb_contains;
 mod jsonb_info;
+mod jsonb_object;
 mod length;
 mod lower;
 mod md5;

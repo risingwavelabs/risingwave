@@ -16,6 +16,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::FilterNode;
 
+use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
@@ -25,7 +26,7 @@ use crate::utils::Condition;
 /// `BatchFilter` implements [`super::LogicalFilter`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchFilter {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::Filter<PlanRef>,
 }
 

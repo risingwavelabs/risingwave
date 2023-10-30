@@ -3264,7 +3264,12 @@ impl Parser {
                 _ => {
                     self.prev_token();
                     let type_name = self.parse_object_name()?;
-                    Ok(DataType::Custom(type_name))
+                    // JSONB is not a keyword
+                    if type_name.to_string().eq_ignore_ascii_case("jsonb") {
+                        Ok(DataType::Jsonb)
+                    } else {
+                        Ok(DataType::Custom(type_name))
+                    }
                 }
             },
             unexpected => {

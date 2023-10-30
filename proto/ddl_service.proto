@@ -318,6 +318,15 @@ message WaitRequest {}
 
 message WaitResponse {}
 
+message CommentOnRequest {
+  catalog.Comment comment = 1;
+}
+
+message CommentOnResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -348,4 +357,5 @@ service DdlService {
   rpc DropConnection(DropConnectionRequest) returns (DropConnectionResponse);
   rpc GetTables(GetTablesRequest) returns (GetTablesResponse);
   rpc Wait(WaitRequest) returns (WaitResponse);
+  rpc CommentOn(CommentOnRequest) returns (CommentOnResponse);
 }

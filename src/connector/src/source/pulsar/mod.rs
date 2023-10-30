@@ -19,10 +19,11 @@ pub mod topic;
 
 pub use enumerator::*;
 use serde::Deserialize;
+use serde_with::serde_as;
 pub use split::*;
 
+use self::source::reader::PulsarSplitReader;
 use crate::common::PulsarCommon;
-use crate::source::pulsar::source::reader::PulsarSplitReader;
 use crate::source::SourceProperties;
 
 pub const PULSAR_CONNECTOR: &str = "pulsar";
@@ -36,6 +37,7 @@ impl SourceProperties for PulsarProperties {
 }
 
 #[derive(Clone, Debug, Deserialize)]
+#[serde_as]
 pub struct PulsarProperties {
     #[serde(rename = "scan.startup.mode", alias = "pulsar.scan.startup.mode")]
     pub scan_startup_mode: Option<String>,
@@ -45,4 +47,11 @@ pub struct PulsarProperties {
 
     #[serde(flatten)]
     pub common: PulsarCommon,
+
+    #[serde(rename = "iceberg.enabled")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub iceberg_loader_enabled: Option<bool>,
+
+    #[serde(rename = "iceberg.bucket", default)]
+    pub iceberg_bucket: Option<String>,
 }

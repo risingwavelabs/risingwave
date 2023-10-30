@@ -35,6 +35,11 @@ pub fn infer_show_object(objects: &ShowObject) -> Vec<PgFieldDescriptor> {
                 DataType::Varchar.to_oid(),
                 DataType::Varchar.type_len(),
             ),
+            PgFieldDescriptor::new(
+                "Description".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
         ],
         ShowObject::Connection { .. } => vec![
             PgFieldDescriptor::new(

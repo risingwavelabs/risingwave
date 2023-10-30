@@ -1047,9 +1047,9 @@ SELECT '{"n":null,"a":1,"b":[1,2],"c":{"1":2},"d":{"1":[2,3]}}'::jsonb ? 'e';
 --@ select jsonb_strip_nulls('{"a": {"b": null, "c": null}, "d": {} }');
 
 
---@ select jsonb_pretty('{"a": "test", "b": [1, 2, 3], "c": "test3", "d":{"dd": "test4", "dd2":{"ddd": "test5"}}}');
---@ select jsonb_pretty('[{"f1":1,"f2":null},2,null,[[{"x":true},6,7],8],3]');
---@ select jsonb_pretty('{"a":["b", "c"], "d": {"e":"f"}}');
+select jsonb_pretty('{"a": "test", "b": [1, 2, 3], "c": "test3", "d":{"dd": "test4", "dd2":{"ddd": "test5"}}}');
+select jsonb_pretty('[{"f1":1,"f2":null},2,null,[[{"x":true},6,7],8],3]');
+select jsonb_pretty('{"a":["b", "c"], "d": {"e":"f"}}');
 --@ 
 --@ select jsonb_concat('{"d": "test", "a": [1, 2]}', '{"g": "test2", "c": {"c1":1, "c2":2}}');
 --@ 
