@@ -56,7 +56,7 @@
 
 RisingWave is a distributed SQL streaming database that enables <b>cost-efficient</b> and <b>reliable</b> processing of streaming data.
 
-![RisingWave](https://github.com/risingwavelabs/risingwave-docs/blob/0f7e1302b22493ba3c1c48e78810750ce9a5ff42/docs/images/archi_simple.png)
+![RisingWave](https://github.com/risingwavelabs/risingwave-docs/blob/main/docs/images/new_archi_grey.png)
 
 ## Try it out in 5 minutes
 **Mac**
