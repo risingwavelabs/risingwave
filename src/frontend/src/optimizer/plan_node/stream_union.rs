@@ -25,7 +25,6 @@ use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanRef};
 use crate::optimizer::plan_node::generic::GenericPlanNode;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNode, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 

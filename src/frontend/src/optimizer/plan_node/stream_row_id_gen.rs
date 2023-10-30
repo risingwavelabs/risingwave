@@ -88,7 +88,7 @@ impl PlanTreeNodeUnary for StreamRowIdGen {
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
         if self.custom_distribution {
-            return Self::new_with_dist(input, self.row_id_index, self.base.dist.clone());
+            return Self::new_with_dist(input, self.row_id_index, self.base.distribution().clone());
         }
 
         Self::new(input, self.row_id_index)
