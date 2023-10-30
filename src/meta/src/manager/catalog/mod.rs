@@ -921,12 +921,6 @@ impl CatalogManager {
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
     ) -> MetaResult<()> {
-        if self.table_is_created(table_id).await {
-            return Err(MetaError::invalid_parameter(format!(
-                "table is already created id={:#?}",
-                table_id
-            )));
-        }
         let table = {
             let core = &mut self.core.lock().await;
             let database_core = &mut core.database;
