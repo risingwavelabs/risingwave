@@ -232,8 +232,8 @@ fn jsonb_remove_index(v: JsonbRef<'_>, index: i32) -> Result<JsonbVal> {
 /// ----
 /// {"a": 1}
 /// ```
-#[function("jsonb_remove_path(jsonb, varchar[]) -> jsonb")]
-fn jsonb_remove_path(v: JsonbRef<'_>, path: ListRef<'_>) -> Result<JsonbVal> {
+#[function("jsonb_delete_path(jsonb, varchar[]) -> jsonb")]
+fn jsonb_delete_path(v: JsonbRef<'_>, path: ListRef<'_>) -> Result<JsonbVal> {
     if path.is_empty() {
         return Ok(JsonbVal::from(v));
     }

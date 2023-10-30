@@ -91,7 +91,7 @@ impl Binder {
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
             BinaryOperator::Arrow => ExprType::JsonbAccess,
             BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
-            BinaryOperator::HashMinus => ExprType::JsonbRemovePath,
+            BinaryOperator::HashMinus => ExprType::JsonbDeletePath,
             BinaryOperator::HashArrow => ExprType::JsonbAccessMulti,
             BinaryOperator::HashLongArrow => ExprType::JsonbAccessMultiStr,
             BinaryOperator::Prefix => ExprType::StartsWith,

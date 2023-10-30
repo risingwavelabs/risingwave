@@ -242,7 +242,7 @@ message ExprNode {
     // jsonb - integer -> jsonb
     //
     // jsonb #- text[] -> jsonb
-    JSONB_REMOVE_PATH = 615;
+    JSONB_DELETE_PATH = 615;
 
     // Non-pure functions below (> 1000)
     // ------------------------
