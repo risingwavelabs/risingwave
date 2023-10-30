@@ -16,7 +16,7 @@
 #![feature(hash_extract_if)]
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
 use risingwave_meta::backup_restore::RestoreOpts;
@@ -75,6 +75,8 @@ enum Commands {
     /// Commands for profilng the compute nodes
     #[clap(subcommand)]
     Profile(ProfileCommands),
+    #[clap(subcommand)]
+    Throttle(ThrottleCommands),
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -473,6 +475,18 @@ enum MetaCommands {
 }
 
 #[derive(Subcommand, Clone, Debug)]
+enum ThrottleCommands {
+    Source(ThrottleCommandArgs),
+    Mv(ThrottleCommandArgs),
+}
+
+#[derive(Clone, Debug, Args)]
+pub struct ThrottleCommandArgs {
+    id: u32,
+    rate: Option<u32>,
+}
+
+#[derive(Subcommand, Clone, Debug)]
 pub enum ProfileCommands {
     /// CPU profile
     Cpu {
@@ -691,6 +705,8 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 .await?
         }
         Commands::Debug(DebugCommands::Dump { common }) => cmd_impl::debug::dump(common).await?,
+        Commands::Throttle(ThrottleCommands::Source(args)) => todo!(),
+        Commands::Throttle(ThrottleCommands::Mv(args)) => todo!(),
     }
     Ok(())
 }

@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_meta::model::ActorId;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
@@ -93,6 +94,29 @@ impl StreamManagerService for StreamServiceImpl {
             prev: i.prev_paused_reason.map(Into::into),
             curr: i.curr_paused_reason.map(Into::into),
         }))
+    }
+
+    #[cfg_attr(coverage, coverage(off))]
+    async fn apply_throttle(
+        &self,
+        request: Request<ThrottleRequest>,
+    ) -> Result<Response<ThrottleResponse>, Status> {
+        let request = request.into_inner();
+        let actor_to_apply: Vec<ActorId>;
+        match request.kind() {
+            ThrottleTarget::Source => todo!(),
+            ThrottleTarget::Mv => {
+                actor_to_apply = self
+                    .fragment_manager
+                    .update_mv_rate_limit_by_table_id(
+                        TableId::from(request.id),
+                        request.rate.clone(),
+                    )
+                    .await?;
+            }
+        }
+
+        todo!()
     }
 
     async fn cancel_creating_jobs(

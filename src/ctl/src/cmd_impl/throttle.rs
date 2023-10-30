@@ -12,13 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod await_tree;
-pub mod bench;
-pub mod compute;
-pub mod debug;
-pub mod hummock;
-pub mod meta;
-pub mod profile;
-pub mod scale;
-pub mod table;
-pub mod throttle;
+use risingwave_pb::meta::{PbThrottleTarget, ThrottleRequest};
+
+use crate::common::CtlContext;
+use crate::ThrottleCommandArgs;
+
+pub async fn apply_throttle(
+    context: &CtlContext,
+    kind: PbThrottleTarget,
+    params: ThrottleCommandArgs,
+) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    meta_client
+        .apply_throttle(kind, params.id, params.rate)
+        .await?;
+    Ok(())
+}

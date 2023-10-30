@@ -36,7 +36,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::barrier::Reschedule;
 use crate::manager::cluster::WorkerId;
-use crate::manager::{commit_meta, commit_meta_with_trx, LocalNotification, MetaSrvEnv};
+use crate::manager::{commit_meta, commit_meta_with_trx, LocalNotification, MetaSrvEnv, SourceId};
 use crate::model::{
     ActorId, BTreeMapTransaction, FragmentId, MetadataModel, MigrationPlan, TableFragments,
     ValTransaction,
@@ -767,6 +767,38 @@ impl FragmentManager {
         }
 
         actor_maps
+    }
+
+    // edit the `rate_limit` of the `Chain` node in given `table_id`'s fragments
+    // return the actor_ids to be applied
+    pub async fn update_mv_rate_limit_by_table_id(
+        &self,
+        table_id: TableId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<Vec<ActorId>> {
+        let map = &mut self.core.write().await.table_fragments;
+
+        let mut table_fragments = BTreeMapTransaction::new(map);
+        let mut fragment = table_fragments
+            .get_mut(table_id)
+            .ok_or_else(|| MetaError::fragment_not_found(table_id))?;
+
+        let mut actor_to_apply = vec![];
+
+        for fragment in fragment.fragments.values_mut() {
+            for actor in &mut fragment.actors {
+                if let Some(stream_node) = actor.nodes.as_mut() {
+                    if let Some(NodeBody::Chain(ref mut node)) = stream_node.node_body.as_mut() {
+                        node.rate_limit = rate_limit;
+                        actor_to_apply.push(actor.actor_id);
+                    }
+                }
+            }
+        }
+
+        commit_meta!(self, table_fragments)?;
+
+        Ok(actor_to_apply)
     }
 
     pub async fn update_actor_splits_by_split_assignment(

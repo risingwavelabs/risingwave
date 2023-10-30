@@ -238,6 +238,21 @@ message ListActorStatesResponse {
   repeated ActorState states = 1;
 }
 
+enum ThrottleTarget {
+  Source = 0;
+  Mv = 1;
+}
+
+message ThrottleRequest {
+  ThrottleTarget kind = 1;
+  uint32 id = 2;
+  optional uint32 rate = 3;
+}
+
+message ThrottleResponse {
+  common.Status status = 1;
+}
+
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
@@ -247,6 +262,7 @@ service StreamManagerService {
   rpc ListTableFragmentStates(ListTableFragmentStatesRequest) returns (ListTableFragmentStatesResponse);
   rpc ListFragmentDistribution(ListFragmentDistributionRequest) returns (ListFragmentDistributionResponse);
   rpc ListActorStates(ListActorStatesRequest) returns (ListActorStatesResponse);
+  rpc ApplyThrottle(ThrottleRequest) returns (ThrottleResponse);
 }
 
 // Below for cluster service.
