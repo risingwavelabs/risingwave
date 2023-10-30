@@ -218,21 +218,21 @@ select '"foo"'::jsonb ->> 'z';
 --@ SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"c"}');
 --@ SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"b"}');
 --@ SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"b", "c":"q"}');
---@ SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"b"}';
---@ SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"b", "c":null}';
---@ SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"b", "g":null}';
---@ SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"g":null}';
---@ SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"c"}';
---@ SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"b"}';
---@ SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"b", "c":"q"}';
---@ 
---@ SELECT '[1,2]'::jsonb @> '[1,2,2]'::jsonb;
---@ SELECT '[1,1,2]'::jsonb @> '[1,2,2]'::jsonb;
---@ SELECT '[[1,2]]'::jsonb @> '[[1,2,2]]'::jsonb;
---@ SELECT '[1,2,2]'::jsonb <@ '[1,2]'::jsonb;
---@ SELECT '[1,2,2]'::jsonb <@ '[1,1,2]'::jsonb;
---@ SELECT '[[1,2,2]]'::jsonb <@ '[[1,2]]'::jsonb;
---@ 
+SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"b"}';
+SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"b", "c":null}';
+SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"b", "g":null}';
+SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"g":null}';
+SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"c"}';
+SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"b"}';
+SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"b", "c":"q"}';
+
+SELECT '[1,2]'::jsonb @> '[1,2,2]'::jsonb;
+SELECT '[1,1,2]'::jsonb @> '[1,2,2]'::jsonb;
+SELECT '[[1,2]]'::jsonb @> '[[1,2,2]]'::jsonb;
+SELECT '[1,2,2]'::jsonb <@ '[1,2]'::jsonb;
+SELECT '[1,2,2]'::jsonb <@ '[1,1,2]'::jsonb;
+SELECT '[[1,2,2]]'::jsonb <@ '[[1,2]]'::jsonb;
+
 --@ SELECT jsonb_contained('{"a":"b"}', '{"a":"b", "b":1, "c":null}');
 --@ SELECT jsonb_contained('{"a":"b", "c":null}', '{"a":"b", "b":1, "c":null}');
 --@ SELECT jsonb_contained('{"a":"b", "g":null}', '{"a":"b", "b":1, "c":null}');
@@ -240,24 +240,24 @@ select '"foo"'::jsonb ->> 'z';
 --@ SELECT jsonb_contained('{"a":"c"}', '{"a":"b", "b":1, "c":null}');
 --@ SELECT jsonb_contained('{"a":"b"}', '{"a":"b", "b":1, "c":null}');
 --@ SELECT jsonb_contained('{"a":"b", "c":"q"}', '{"a":"b", "b":1, "c":null}');
---@ SELECT '{"a":"b"}'::jsonb <@ '{"a":"b", "b":1, "c":null}';
---@ SELECT '{"a":"b", "c":null}'::jsonb <@ '{"a":"b", "b":1, "c":null}';
---@ SELECT '{"a":"b", "g":null}'::jsonb <@ '{"a":"b", "b":1, "c":null}';
---@ SELECT '{"g":null}'::jsonb <@ '{"a":"b", "b":1, "c":null}';
---@ SELECT '{"a":"c"}'::jsonb <@ '{"a":"b", "b":1, "c":null}';
---@ SELECT '{"a":"b"}'::jsonb <@ '{"a":"b", "b":1, "c":null}';
---@ SELECT '{"a":"b", "c":"q"}'::jsonb <@ '{"a":"b", "b":1, "c":null}';
---@ -- Raw scalar may contain another raw scalar, array may contain a raw scalar
---@ SELECT '[5]'::jsonb @> '[5]';
---@ SELECT '5'::jsonb @> '5';
---@ SELECT '[5]'::jsonb @> '5';
---@ -- But a raw scalar cannot contain an array
---@ SELECT '5'::jsonb @> '[5]';
---@ -- In general, one thing should always contain itself. Test array containment:
---@ SELECT '["9", ["7", "3"], 1]'::jsonb @> '["9", ["7", "3"], 1]'::jsonb;
---@ SELECT '["9", ["7", "3"], ["1"]]'::jsonb @> '["9", ["7", "3"], ["1"]]'::jsonb;
---@ -- array containment string matching confusion bug
---@ SELECT '{ "name": "Bob", "tags": [ "enim", "qui"]}'::jsonb @> '{"tags":["qu"]}';
+SELECT '{"a":"b"}'::jsonb <@ '{"a":"b", "b":1, "c":null}';
+SELECT '{"a":"b", "c":null}'::jsonb <@ '{"a":"b", "b":1, "c":null}';
+SELECT '{"a":"b", "g":null}'::jsonb <@ '{"a":"b", "b":1, "c":null}';
+SELECT '{"g":null}'::jsonb <@ '{"a":"b", "b":1, "c":null}';
+SELECT '{"a":"c"}'::jsonb <@ '{"a":"b", "b":1, "c":null}';
+SELECT '{"a":"b"}'::jsonb <@ '{"a":"b", "b":1, "c":null}';
+SELECT '{"a":"b", "c":"q"}'::jsonb <@ '{"a":"b", "b":1, "c":null}';
+-- Raw scalar may contain another raw scalar, array may contain a raw scalar
+SELECT '[5]'::jsonb @> '[5]';
+SELECT '5'::jsonb @> '5';
+SELECT '[5]'::jsonb @> '5';
+-- But a raw scalar cannot contain an array
+SELECT '5'::jsonb @> '[5]';
+-- In general, one thing should always contain itself. Test array containment:
+SELECT '["9", ["7", "3"], 1]'::jsonb @> '["9", ["7", "3"], 1]'::jsonb;
+SELECT '["9", ["7", "3"], ["1"]]'::jsonb @> '["9", ["7", "3"], ["1"]]'::jsonb;
+-- array containment string matching confusion bug
+SELECT '{ "name": "Bob", "tags": [ "enim", "qui"]}'::jsonb @> '{"tags":["qu"]}';
 
 -- array length
 SELECT jsonb_array_length('[1,2,3,{"f1":1,"f2":[5,6]},4]');
@@ -941,25 +941,25 @@ SELECT
    '{"ff":{"a":12,"b":16},"qq":123,"x":[1,2],"Y":null}'::jsonb -> 'x';
 
 -- nested containment
---@ SELECT '{"a":[1,2],"c":"b"}'::jsonb @> '{"a":[1,2]}';
---@ SELECT '{"a":[2,1],"c":"b"}'::jsonb @> '{"a":[1,2]}';
---@ SELECT '{"a":{"1":2},"c":"b"}'::jsonb @> '{"a":[1,2]}';
---@ SELECT '{"a":{"2":1},"c":"b"}'::jsonb @> '{"a":[1,2]}';
---@ SELECT '{"a":{"1":2},"c":"b"}'::jsonb @> '{"a":{"1":2}}';
---@ SELECT '{"a":{"2":1},"c":"b"}'::jsonb @> '{"a":{"1":2}}';
---@ SELECT '["a","b"]'::jsonb @> '["a","b","c","b"]';
---@ SELECT '["a","b","c","b"]'::jsonb @> '["a","b"]';
---@ SELECT '["a","b","c",[1,2]]'::jsonb @> '["a",[1,2]]';
---@ SELECT '["a","b","c",[1,2]]'::jsonb @> '["b",[1,2]]';
---@ 
---@ SELECT '{"a":[1,2],"c":"b"}'::jsonb @> '{"a":[1]}';
---@ SELECT '{"a":[1,2],"c":"b"}'::jsonb @> '{"a":[2]}';
---@ SELECT '{"a":[1,2],"c":"b"}'::jsonb @> '{"a":[3]}';
---@ 
---@ SELECT '{"a":[1,2,{"c":3,"x":4}],"c":"b"}'::jsonb @> '{"a":[{"c":3}]}';
---@ SELECT '{"a":[1,2,{"c":3,"x":4}],"c":"b"}'::jsonb @> '{"a":[{"x":4}]}';
---@ SELECT '{"a":[1,2,{"c":3,"x":4}],"c":"b"}'::jsonb @> '{"a":[{"x":4},3]}';
---@ SELECT '{"a":[1,2,{"c":3,"x":4}],"c":"b"}'::jsonb @> '{"a":[{"x":4},1]}';
+SELECT '{"a":[1,2],"c":"b"}'::jsonb @> '{"a":[1,2]}';
+SELECT '{"a":[2,1],"c":"b"}'::jsonb @> '{"a":[1,2]}';
+SELECT '{"a":{"1":2},"c":"b"}'::jsonb @> '{"a":[1,2]}';
+SELECT '{"a":{"2":1},"c":"b"}'::jsonb @> '{"a":[1,2]}';
+SELECT '{"a":{"1":2},"c":"b"}'::jsonb @> '{"a":{"1":2}}';
+SELECT '{"a":{"2":1},"c":"b"}'::jsonb @> '{"a":{"1":2}}';
+SELECT '["a","b"]'::jsonb @> '["a","b","c","b"]';
+SELECT '["a","b","c","b"]'::jsonb @> '["a","b"]';
+SELECT '["a","b","c",[1,2]]'::jsonb @> '["a",[1,2]]';
+SELECT '["a","b","c",[1,2]]'::jsonb @> '["b",[1,2]]';
+
+SELECT '{"a":[1,2],"c":"b"}'::jsonb @> '{"a":[1]}';
+SELECT '{"a":[1,2],"c":"b"}'::jsonb @> '{"a":[2]}';
+SELECT '{"a":[1,2],"c":"b"}'::jsonb @> '{"a":[3]}';
+
+SELECT '{"a":[1,2,{"c":3,"x":4}],"c":"b"}'::jsonb @> '{"a":[{"c":3}]}';
+SELECT '{"a":[1,2,{"c":3,"x":4}],"c":"b"}'::jsonb @> '{"a":[{"x":4}]}';
+SELECT '{"a":[1,2,{"c":3,"x":4}],"c":"b"}'::jsonb @> '{"a":[{"x":4},3]}';
+SELECT '{"a":[1,2,{"c":3,"x":4}],"c":"b"}'::jsonb @> '{"a":[{"x":4},1]}';
 
 -- check some corner cases for indexed nested containment (bug #13756)
 --@ create temp table nestjsonb (j jsonb);
