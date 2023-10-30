@@ -18,7 +18,6 @@ use std::ops::{Mul, Sub};
 use risingwave_pb::plan_common::JoinType;
 
 use super::{DefaultBehavior, DefaultValue, PlanVisitor};
-use crate::catalog::system_catalog::pg_catalog::PG_NAMESPACE_TABLE_NAME;
 use crate::optimizer::plan_node::generic::TopNLimit;
 use crate::optimizer::plan_node::{
     self, PlanNode, PlanTreeNode, PlanTreeNodeBinary, PlanTreeNodeUnary,
@@ -44,18 +43,35 @@ impl CardinalityVisitor {
         // We don't have UNIQUE key now. So we hack here to support some complex queries on
         // system tables.
         // TODO(card): remove this after we have UNIQUE key. https://github.com/risingwavelabs/risingwave/issues/12514
-        if let Some(scan) = input.as_logical_scan()
-            && scan.is_sys_table()
-            && scan.table_name() == PG_NAMESPACE_TABLE_NAME
         {
-            if let Some(nspname) = scan
-                .output_col_idx()
-                .iter()
-                .find(|i| scan.table_desc().columns[**i].name == "nspname") {
-                unique_keys.push([*nspname].into_iter().collect());
+            // Hack for unique key `nspname` on `pg_catalog.pg_namespace`
+            //
+            // LogicalFilter { predicate: (rw_schemas.name = ...) }
+            //  (below is expanded logical view, see src/frontend/src/catalog/system_catalog/pg_catalog/pg_namespace.rs)
+            //  └─LogicalProject { exprs: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
+            //    └─LogicalScan { table: rw_schemas, columns: [id, name, owner, acl] }
+            fn try_get_unique_key_from_pg_namespace(plan: &dyn PlanNode) -> Option<HashSet<usize>> {
+                let proj = plan.as_logical_project()?;
+                if !proj.is_identity() {
+                    return None;
+                }
+                let scan = proj.input();
+                let scan = scan.as_logical_scan()?;
+                if scan.is_sys_table() && scan.table_name() == "rw_schemas" {
+                    if let Some(name) = scan
+                        .output_col_idx()
+                        .iter()
+                        .find(|i| scan.table_desc().columns[**i].name == "name")
+                    {
+                        return Some([*name].into_iter().collect());
+                    }
+                }
+                None
+            }
+            if let Some(unique_key) = try_get_unique_key_from_pg_namespace(input) {
+                unique_keys.push(unique_key);
             }
         }
-
         if unique_keys
             .iter()
             .any(|unique_key| eq_set.is_superset(unique_key))
@@ -67,8 +83,10 @@ impl CardinalityVisitor {
     }
 }
 
-impl PlanVisitor<Cardinality> for CardinalityVisitor {
-    type DefaultBehavior = impl DefaultBehavior<Cardinality>;
+impl PlanVisitor for CardinalityVisitor {
+    type Result = Cardinality;
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     fn default_behavior() -> Self::DefaultBehavior {
         // returns unknown cardinality for default behavior, which is always correct

@@ -85,7 +85,7 @@ impl SinkFormatter for DebeziumJsonFormatter {
         &self,
         chunk: &StreamChunk,
     ) -> impl Iterator<Item = Result<(Option<Value>, Option<Value>)>> {
-        std::iter::from_generator(|| {
+        std::iter::from_coroutine(|| {
             let DebeziumJsonFormatter {
                 schema,
                 pk_indices,

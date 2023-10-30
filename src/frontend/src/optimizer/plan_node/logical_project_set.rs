@@ -19,8 +19,9 @@ use risingwave_common::types::DataType;
 
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchProjectSet, ColPrunable, ExprRewritable, LogicalProject,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchProjectSet, ColPrunable, ExprRewritable, Logical,
+    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet,
+    ToBatch, ToStream,
 };
 use crate::expr::{
     collect_input_refs, Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction,
@@ -41,7 +42,7 @@ use crate::utils::{ColIndexMapping, Condition, Substitute};
 /// column.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalProjectSet {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::ProjectSet<PlanRef>,
 }
 
@@ -427,7 +428,7 @@ mod test {
         let mut values = LogicalValues::new(vec![], Schema { fields }, ctx);
         values
             .base
-            .functional_dependency
+            .functional_dependency_mut()
             .add_functional_dependency_by_column_indices(&[1], &[2]);
         let project_set = LogicalProjectSet::new(
             values.into(),
@@ -449,8 +450,9 @@ mod test {
         );
         let fd_set: HashSet<FunctionalDependency> = project_set
             .base
-            .functional_dependency
-            .into_dependencies()
+            .functional_dependency()
+            .as_dependencies()
+            .clone()
             .into_iter()
             .collect();
         let expected_fd_set: HashSet<FunctionalDependency> =

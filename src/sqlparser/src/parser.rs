@@ -259,6 +259,7 @@ impl Parser {
                 Keyword::PREPARE => Ok(self.parse_prepare()?),
                 Keyword::COMMENT => Ok(self.parse_comment()?),
                 Keyword::FLUSH => Ok(Statement::Flush),
+                Keyword::WAIT => Ok(Statement::Wait),
                 _ => self.expected(
                     "an SQL statement",
                     Token::Word(w).with_location(token.location),
@@ -1396,6 +1397,11 @@ impl Parser {
             Token::LongArrow => Some(BinaryOperator::LongArrow),
             Token::HashArrow => Some(BinaryOperator::HashArrow),
             Token::HashLongArrow => Some(BinaryOperator::HashLongArrow),
+            Token::AtArrow => Some(BinaryOperator::Contains),
+            Token::ArrowAt => Some(BinaryOperator::Contained),
+            Token::QuestionMark => Some(BinaryOperator::Exists),
+            Token::QuestionMarkPipe => Some(BinaryOperator::ExistsAny),
+            Token::QuestionMarkAmpersand => Some(BinaryOperator::ExistsAll),
             Token::Word(w) => match w.keyword {
                 Keyword::AND => Some(BinaryOperator::And),
                 Keyword::OR => Some(BinaryOperator::Or),
@@ -1734,7 +1740,12 @@ impl Parser {
             | Token::Arrow
             | Token::LongArrow
             | Token::HashArrow
-            | Token::HashLongArrow => Ok(P::Other),
+            | Token::HashLongArrow
+            | Token::AtArrow
+            | Token::ArrowAt
+            | Token::QuestionMark
+            | Token::QuestionMarkPipe
+            | Token::QuestionMarkAmpersand => Ok(P::Other),
             Token::Word(w)
                 if w.keyword == Keyword::OPERATOR && self.peek_nth_token(1) == Token::LParen =>
             {
@@ -3253,7 +3264,12 @@ impl Parser {
                 _ => {
                     self.prev_token();
                     let type_name = self.parse_object_name()?;
-                    Ok(DataType::Custom(type_name))
+                    // JSONB is not a keyword
+                    if type_name.to_string().eq_ignore_ascii_case("jsonb") {
+                        Ok(DataType::Jsonb)
+                    } else {
+                        Ok(DataType::Custom(type_name))
+                    }
                 }
             },
             unexpected => {

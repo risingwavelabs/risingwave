@@ -17,6 +17,8 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortNode;
 
+use super::batch::prelude::*;
+use super::batch::BatchPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -26,7 +28,7 @@ use crate::optimizer::property::{Order, OrderDisplay};
 /// collation required by user or parent plan node.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSort {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     input: PlanRef,
 }
 
@@ -56,7 +58,7 @@ impl PlanTreeNodeUnary for BatchSort {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.base.order.clone())
+        Self::new(input, self.base.order().clone())
     }
 }
 impl_plan_tree_node_for_unary! {BatchSort}
@@ -70,7 +72,7 @@ impl ToDistributedBatch for BatchSort {
 
 impl ToBatchPb for BatchSort {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let column_orders = self.base.order.to_protobuf();
+        let column_orders = self.base.order().to_protobuf();
         NodeBody::Sort(SortNode { column_orders })
     }
 }

@@ -44,7 +44,7 @@ pub use order_by_expr::{OrderBy, OrderByExpr};
 mod expr_mutator;
 mod expr_rewriter;
 mod expr_visitor;
-mod function_impl;
+pub mod function_impl;
 mod session_timezone;
 mod type_inference;
 mod utils;
@@ -351,7 +351,9 @@ macro_rules! impl_has_variant {
                     pub fn [<has_ $variant:snake>](&self) -> bool {
                         struct Has {}
 
-                        impl ExprVisitor<bool> for Has {
+                        impl ExprVisitor for Has {
+
+                            type Result = bool;
 
                             fn merge(a: bool, b: bool) -> bool {
                                 a | b
@@ -422,7 +424,9 @@ impl ExprImpl {
             depth: usize,
         }
 
-        impl ExprVisitor<bool> for Has {
+        impl ExprVisitor for Has {
+            type Result = bool;
+
             fn merge(a: bool, b: bool) -> bool {
                 a | b
             }
@@ -480,7 +484,9 @@ impl ExprImpl {
             correlated_id: CorrelatedId,
         }
 
-        impl ExprVisitor<bool> for Has {
+        impl ExprVisitor for Has {
+            type Result = bool;
+
             fn merge(a: bool, b: bool) -> bool {
                 a | b
             }
@@ -600,7 +606,9 @@ impl ExprImpl {
             struct HasOthers {
                 has_others: bool,
             }
-            impl ExprVisitor<()> for HasOthers {
+            impl ExprVisitor for HasOthers {
+                type Result = ();
+
                 fn merge(_: (), _: ()) {}
 
                 fn visit_expr(&mut self, expr: &ExprImpl) {

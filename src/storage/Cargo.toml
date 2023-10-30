@@ -14,7 +14,6 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-anyhow = "1"
 arc-swap = "1"
 async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
@@ -26,7 +25,7 @@ dyn-clone = "1.0.14"
 either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
-foyer = { git = "https://github.com/mrcroxx/foyer", rev = "438eec8" }
+foyer = { git = "https://github.com/MrCroxx/foyer", rev = "2261151" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"

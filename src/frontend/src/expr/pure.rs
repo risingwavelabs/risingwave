@@ -18,7 +18,9 @@ use super::{ExprImpl, ExprVisitor};
 use crate::expr::FunctionCall;
 pub(crate) struct ImpureAnalyzer {}
 
-impl ExprVisitor<bool> for ImpureAnalyzer {
+impl ExprVisitor for ImpureAnalyzer {
+    type Result = bool;
+
     fn merge(a: bool, b: bool) -> bool {
         // the expr will be impure if any of its input is impure
         a || b
@@ -171,10 +173,19 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::ArrayPosition
             | expr_node::Type::HexToInt256
             | expr_node::Type::JsonbCat
-            | expr_node::Type::JsonbAccessInner
+            | expr_node::Type::JsonbAccess
             | expr_node::Type::JsonbAccessStr
+            | expr_node::Type::JsonbAccessMulti
+            | expr_node::Type::JsonbAccessMultiStr
             | expr_node::Type::JsonbTypeof
             | expr_node::Type::JsonbArrayLength
+            | expr_node::Type::JsonbObject
+            | expr_node::Type::JsonbPretty
+            | expr_node::Type::JsonbContains
+            | expr_node::Type::JsonbContained
+            | expr_node::Type::JsonbExists
+            | expr_node::Type::JsonbExistsAny
+            | expr_node::Type::JsonbExistsAll
             | expr_node::Type::IsJson
             | expr_node::Type::Sind
             | expr_node::Type::Cosd
@@ -198,7 +209,11 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::ArrayPositions
             | expr_node::Type::StringToArray
             | expr_node::Type::Format
-            | expr_node::Type::ArrayTransform =>
+            | expr_node::Type::PgwireSend
+            | expr_node::Type::PgwireRecv
+            | expr_node::Type::ArrayTransform
+            | expr_node::Type::Greatest
+            | expr_node::Type::Least =>
             // expression output is deterministic(same result for the same input)
             {
                 let x = func_call
@@ -215,7 +230,8 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::PgSleep
             | expr_node::Type::PgSleepFor
             | expr_node::Type::PgSleepUntil
-            | expr_node::Type::ColDescription => true,
+            | expr_node::Type::ColDescription
+            | expr_node::Type::CastRegclass => true,
         }
     }
 }

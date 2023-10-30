@@ -24,7 +24,7 @@ use aws_sdk_s3::operation::get_object::builders::GetObjectFluentBuilder;
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::list_objects_v2::ListObjectsV2Error;
 use aws_sdk_s3::operation::upload_part::UploadPartOutput;
-use aws_sdk_s3::primitives::ByteStream;
+use aws_sdk_s3::primitives::{ByteStream, ByteStreamError};
 use aws_sdk_s3::types::{
     AbortIncompleteMultipartUpload, BucketLifecycleConfiguration, CompletedMultipartUpload,
     CompletedPart, Delete, ExpirationStatus, LifecycleRule, LifecycleRuleFilter, ObjectIdentifier,
@@ -34,6 +34,7 @@ use aws_smithy_client::http_connector::{ConnectorSettings, HttpConnector};
 use aws_smithy_http::body::SdkBody;
 use aws_smithy_http::result::SdkError;
 use aws_smithy_types::retry::RetryConfig;
+use either::Either;
 use fail::fail_point;
 use futures::future::{try_join_all, BoxFuture, FutureExt};
 use futures::{stream, Stream};
@@ -354,11 +355,19 @@ impl ObjectStore for S3ObjectStore {
         )));
 
         // retry if occurs AWS EC2 HTTP timeout error.
-        let resp = tokio_retry::RetryIf::spawn(
+        let val = tokio_retry::RetryIf::spawn(
             self.config.get_retry_strategy(),
             || async {
                 match self.obj_store_request(path, range.clone()).send().await {
-                    Ok(resp) => Ok(resp),
+                    Ok(resp) => {
+                        let val = resp
+                            .body
+                            .collect()
+                            .await
+                            .map_err(either::Right)?
+                            .into_bytes();
+                        Ok(val)
+                    }
                     Err(err) => {
                         if let SdkError::DispatchFailure(e) = &err
                             && e.is_timeout()
@@ -369,15 +378,13 @@ impl ObjectStore for S3ObjectStore {
                                 .inc();
                         }
 
-                        Err(err)
+                        Err(either::Left(err))
                     }
                 }
             },
             Self::should_retry,
         )
         .await?;
-
-        let val = resp.body.collect().await?.into_bytes();
 
         if let Some(len) = range.len() && len != val.len() {
             return Err(ObjectError::internal(format!(
@@ -445,7 +452,7 @@ impl ObjectStore for S3ObjectStore {
                                 .inc();
                         }
 
-                        Err(err)
+                        Err(either::Left(err))
                     }
                 }
             },
@@ -671,7 +678,6 @@ impl S3ObjectStore {
         range: impl ObjectRangeBounds,
     ) -> GetObjectFluentBuilder {
         let req = self.client.get_object().bucket(&self.bucket).key(path);
-
         if range.is_full() {
             return req;
         }
@@ -697,7 +703,7 @@ impl S3ObjectStore {
     ///   - <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpu-abort-incomplete-mpu-lifecycle-config.html>
     /// - MinIO
     ///   - <https://github.com/minio/minio/issues/15681#issuecomment-1245126561>
-    pub async fn configure_bucket_lifecycle(&self) {
+    pub async fn configure_bucket_lifecycle(&self) -> bool {
         // Check if lifecycle is already configured to avoid overriding existing configuration.
         let bucket = self.bucket.as_str();
         let mut configured_rules = vec![];
@@ -707,8 +713,12 @@ impl S3ObjectStore {
             .bucket(bucket)
             .send()
             .await;
+        let mut is_expiration_configured = false;
         if let Ok(config) = &get_config_result {
             for rule in config.rules().unwrap_or_default() {
+                if rule.expiration().is_some() {
+                    is_expiration_configured = true;
+                }
                 if matches!(rule.status().unwrap(), ExpirationStatus::Enabled)
                     && rule.abort_incomplete_multipart_upload().is_some()
                 {
@@ -755,16 +765,33 @@ impl S3ObjectStore {
                 tracing::warn!("Failed to configure life cycle rule for S3 bucket: {:?}. It is recommended to configure it manually to avoid unnecessary storage cost.", bucket);
             }
         }
+        if is_expiration_configured {
+            tracing::info!(
+                "S3 bucket {} has already configured the expiration for the lifecycle.",
+                bucket,
+            );
+        }
+        is_expiration_configured
     }
 
     #[inline(always)]
-    fn should_retry(err: &SdkError<GetObjectError>) -> bool {
-        if let SdkError::DispatchFailure(e) = err {
-            if e.is_timeout() {
-                tracing::warn!(target: "http_timeout_retry", "{:?} occurs, trying to retry S3 get_object request.", e);
+    fn should_retry(err: &Either<SdkError<GetObjectError>, ByteStreamError>) -> bool {
+        match err {
+            Either::Left(err) => {
+                if let SdkError::DispatchFailure(e) = err {
+                    if e.is_timeout() {
+                        tracing::warn!(target: "http_timeout_retry", "{:?} occurs, trying to retry S3 get_object request.", e);
+                        return true;
+                    }
+                }
+            }
+            Either::Right(_) => {
+                // Unfortunately `ErrorKind` of `ByteStreamError` is not accessible.
+                // Always returns true and relies on req_retry_max_attempts to avoid infinite loop.
                 return true;
             }
         }
+
         false
     }
 }
@@ -901,6 +928,15 @@ impl Stream for S3ObjectIter {
         };
         self.send_future = Some(Box::pin(f));
         self.poll_next(cx)
+    }
+}
+
+impl From<Either<SdkError<GetObjectError>, ByteStreamError>> for ObjectError {
+    fn from(e: Either<SdkError<GetObjectError>, ByteStreamError>) -> Self {
+        match e {
+            Either::Left(e) => e.into(),
+            Either::Right(e) => e.into(),
+        }
     }
 }
 

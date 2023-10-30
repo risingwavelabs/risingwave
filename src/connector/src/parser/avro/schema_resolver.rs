@@ -19,7 +19,7 @@ use moka::future::Cache;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 
-use crate::parser::schema_registry::{Client, ConfluentSchema};
+use crate::schema::schema_registry::{Client, ConfluentSchema};
 
 #[derive(Debug)]
 pub struct ConfluentSchemaResolver {

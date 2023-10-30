@@ -48,12 +48,23 @@ pub enum PickerType {
     BottomLevel,
 }
 
+impl ToString for PickerType {
+    fn to_string(&self) -> String {
+        match self {
+            PickerType::Tier => String::from("Tier"),
+            PickerType::Intra => String::from("Intra"),
+            PickerType::ToBase => String::from("ToBase"),
+            PickerType::BottomLevel => String::from("BottomLevel"),
+        }
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct PickerInfo {
-    score: u64,
-    select_level: usize,
-    target_level: usize,
-    picker_type: PickerType,
+    pub score: u64,
+    pub select_level: usize,
+    pub target_level: usize,
+    pub picker_type: PickerType,
 }
 
 #[derive(Default, Debug)]
@@ -178,7 +189,11 @@ impl DynamicLevelSelectorCore {
         ctx
     }
 
-    fn get_priority_levels(&self, levels: &Levels, handlers: &[LevelHandler]) -> SelectContext {
+    pub(crate) fn get_priority_levels(
+        &self,
+        levels: &Levels,
+        handlers: &[LevelHandler],
+    ) -> SelectContext {
         let mut ctx = self.calculate_level_base_size(levels);
 
         let idle_file_count = levels
@@ -255,7 +270,7 @@ impl DynamicLevelSelectorCore {
             // Reduce the level num of l0 non-overlapping sub_level
             ctx.score_levels.push({
                 PickerInfo {
-                    score: non_overlapping_score,
+                    score: non_overlapping_score + 1,
                     select_level: 0,
                     target_level: ctx.base_level,
                     picker_type: PickerType::ToBase,

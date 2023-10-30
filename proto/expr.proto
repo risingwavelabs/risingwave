@@ -33,6 +33,8 @@ message ExprNode {
     LESS_THAN_OR_EQUAL = 11;
     GREATER_THAN = 12;
     GREATER_THAN_OR_EQUAL = 13;
+    GREATEST = 14;
+    LEAST = 15;
     // logical operators
     AND = 21;
     OR = 22;
@@ -171,6 +173,8 @@ message ExprNode {
     LEFT = 317;
     RIGHT = 318;
     FORMAT = 319;
+    PGWIRE_SEND = 320;
+    PGWIRE_RECV = 321;
 
     // Unary operators
     NEG = 401;
@@ -208,14 +212,30 @@ message ExprNode {
 
     // Jsonb functions
 
-    // jsonb -> int, jsonb -> text, jsonb #> text[] that returns jsonb
-    JSONB_ACCESS_INNER = 600;
-    // jsonb ->> int, jsonb ->> text, jsonb #>> text[] that returns text
+    // jsonb -> int, jsonb -> text that returns jsonb
+    JSONB_ACCESS = 600;
+    // jsonb ->> int, jsonb ->> text that returns text
     JSONB_ACCESS_STR = 601;
+    // jsonb #> text[] -> jsonb
+    JSONB_ACCESS_MULTI = 613;
+    // jsonb #>> text[] -> text
+    JSONB_ACCESS_MULTI_STR = 614;
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
     IS_JSON = 604;
     JSONB_CAT = 605;
+    JSONB_OBJECT = 606;
+    JSONB_PRETTY = 607;
+    // jsonb @> jsonb
+    JSONB_CONTAINS = 608;
+    // jsonb <@ jsonb
+    JSONB_CONTAINED = 609;
+    // jsonb ? text
+    JSONB_EXISTS = 610;
+    // jsonb ?| text[]
+    JSONB_EXISTS_ANY = 611;
+    // jsonb ?& text[]
+    JSONB_EXISTS_ALL = 612;
 
     // Non-pure functions below (> 1000)
     // ------------------------
@@ -229,6 +249,7 @@ message ExprNode {
 
     // Adminitration functions
     COL_DESCRIPTION = 2100;
+    CAST_REGCLASS = 2101;
   }
   Type function_type = 1;
   data.DataType return_type = 3;
@@ -345,6 +366,7 @@ message AggCall {
     MODE = 24;
     LAST_VALUE = 25;
     GROUPING = 26;
+    INTERNAL_LAST_SEEN_VALUE = 27;
   }
   Type type = 1;
   repeated InputRef args = 2;

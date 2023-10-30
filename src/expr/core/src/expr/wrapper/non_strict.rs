@@ -23,7 +23,7 @@ use crate::expr::{Expression, ValueImpl};
 use crate::ExprError;
 
 /// Report an error during evaluation.
-#[auto_impl(Arc)]
+#[auto_impl(&, Arc)]
 pub trait EvalErrorReport: Clone + Send + Sync {
     /// Perform the error reporting.
     ///
@@ -42,11 +42,21 @@ impl EvalErrorReport for ! {
     }
 }
 
+/// Log the error to report an error during evaluation.
+#[derive(Clone)]
+pub struct LogReport;
+
+impl EvalErrorReport for LogReport {
+    fn report(&self, error: ExprError) {
+        tracing::error!(%error, "failed to evaluate expression");
+    }
+}
+
 /// A wrapper of [`Expression`] that evaluates in a non-strict way. Basically...
 /// - When an error occurs during chunk-level evaluation, recompute in row-based execution and pad
 ///   with NULL for each failed row.
 /// - Report all error occurred during row-level evaluation to the [`EvalErrorReport`].
-pub struct NonStrict<E, R> {
+pub(crate) struct NonStrict<E, R> {
     inner: E,
     report: R,
 }

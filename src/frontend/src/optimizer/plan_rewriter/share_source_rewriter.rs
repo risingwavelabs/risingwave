@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 
 use crate::catalog::SourceId;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     LogicalShare, LogicalSource, PlanNodeId, PlanTreeNode, StreamShare,
 };
@@ -109,8 +110,10 @@ impl PlanRewriter for ShareSourceRewriter {
     }
 }
 
-impl PlanVisitor<()> for SourceCounter {
-    type DefaultBehavior = impl DefaultBehavior<()>;
+impl PlanVisitor for SourceCounter {
+    type Result = ();
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     fn default_behavior() -> Self::DefaultBehavior {
         DefaultValue

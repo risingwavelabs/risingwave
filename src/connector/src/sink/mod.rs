@@ -34,9 +34,9 @@ pub mod utils;
 pub mod writer;
 
 use std::collections::HashMap;
-use std::future::Future;
 
 use ::clickhouse::error::Error as ClickHouseError;
+use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_common::buffer::Bitmap;
@@ -216,13 +216,13 @@ impl From<SinkCatalog> for SinkParam {
 
 #[derive(Clone)]
 pub struct SinkMetrics {
-    pub sink_commit_duration_metrics: LabelGuardedHistogram,
-    pub connector_sink_rows_received: LabelGuardedIntCounter,
-    pub log_store_first_write_epoch: LabelGuardedIntGauge,
-    pub log_store_latest_write_epoch: LabelGuardedIntGauge,
-    pub log_store_write_rows: LabelGuardedIntCounter,
-    pub log_store_latest_read_epoch: LabelGuardedIntGauge,
-    pub log_store_read_rows: LabelGuardedIntCounter,
+    pub sink_commit_duration_metrics: LabelGuardedHistogram<3>,
+    pub connector_sink_rows_received: LabelGuardedIntCounter<2>,
+    pub log_store_first_write_epoch: LabelGuardedIntGauge<3>,
+    pub log_store_latest_write_epoch: LabelGuardedIntGauge<3>,
+    pub log_store_write_rows: LabelGuardedIntCounter<3>,
+    pub log_store_latest_read_epoch: LabelGuardedIntGauge<3>,
+    pub log_store_read_rows: LabelGuardedIntCounter<3>,
 }
 
 impl SinkMetrics {
@@ -277,11 +277,9 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     }
 }
 
-pub trait LogSinker: Send + 'static {
-    fn consume_log_and_sink(
-        self,
-        log_reader: impl LogReader,
-    ) -> impl Future<Output = Result<()>> + Send + 'static;
+#[async_trait]
+pub trait LogSinker: 'static {
+    async fn consume_log_and_sink(self, log_reader: impl LogReader) -> Result<()>;
 }
 
 #[async_trait]
@@ -383,6 +381,8 @@ pub enum SinkError {
     Coordinator(anyhow::Error),
     #[error("ClickHouse error: {0}")]
     ClickHouse(String),
+    #[error("Redis error: {0}")]
+    Redis(String),
     #[error("Nats error: {0}")]
     Nats(anyhow::Error),
     #[error("Doris http error: {0}")]
@@ -410,6 +410,12 @@ impl From<RpcError> for SinkError {
 impl From<ClickHouseError> for SinkError {
     fn from(value: ClickHouseError) -> Self {
         SinkError::ClickHouse(format!("{}", value))
+    }
+}
+
+impl From<RedisError> for SinkError {
+    fn from(value: RedisError) -> Self {
+        SinkError::Redis(format!("{}", value))
     }
 }
 

@@ -15,7 +15,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::LazyLock;
 
-use anyhow::anyhow;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -27,9 +26,10 @@ use risingwave_common::error::ErrorCode::{self, InvalidInputSyntax, ProtocolErro
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
-    name_strategy_from_str, schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig,
-    ProtobufParserConfig, SpecificParserConfig,
+    schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
+    SpecificParserConfig,
 };
+use risingwave_connector::schema::schema_registry::name_strategy_from_str;
 use risingwave_connector::source::cdc::{
     CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
@@ -37,17 +37,16 @@ use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
 use risingwave_connector::source::{
-    SourceEncode, SourceFormat, SourceStruct, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
-    KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR, PULSAR_CONNECTOR, S3_CONNECTOR,
-    S3_V2_CONNECTOR,
+    GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR,
+    PULSAR_CONNECTOR, S3_CONNECTOR, S3_V2_CONNECTOR,
 };
 use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
 };
 use risingwave_pb::plan_common::{EncodeType, FormatType};
 use risingwave_sqlparser::ast::{
-    self, get_delimiter, AstString, AvroSchema, ColumnDef, ColumnOption, CreateSourceStatement,
-    DebeziumAvroSchema, Encode, Format, ProtobufSchema, SourceSchemaV2, SourceWatermark,
+    self, get_delimiter, AstString, AvroSchema, ColumnDef, ColumnOption, ConnectorSchema,
+    CreateSourceStatement, DebeziumAvroSchema, Encode, Format, ProtobufSchema, SourceWatermark,
 };
 
 use super::RwPgResponse;
@@ -99,11 +98,7 @@ async fn extract_avro_table_schema(
     info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let parser_config = SpecificParserConfig::new(
-        SourceStruct::new(SourceFormat::Plain, SourceEncode::Avro),
-        info,
-        with_properties,
-    )?;
+    let parser_config = SpecificParserConfig::new(info, with_properties)?;
     let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
     Ok(vec_column_desc
@@ -120,11 +115,7 @@ async fn extract_upsert_avro_table_schema(
     info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
-    let parser_config = SpecificParserConfig::new(
-        SourceStruct::new(SourceFormat::Upsert, SourceEncode::Avro),
-        info,
-        with_properties,
-    )?;
+    let parser_config = SpecificParserConfig::new(info, with_properties)?;
     let conf = AvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
     let mut vec_column_catalog = vec_column_desc
@@ -164,11 +155,7 @@ async fn extract_debezium_avro_table_pk_columns(
     info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<String>> {
-    let parser_config = SpecificParserConfig::new(
-        SourceStruct::new(SourceFormat::Debezium, SourceEncode::Avro),
-        info,
-        with_properties,
-    )?;
+    let parser_config = SpecificParserConfig::new(info, with_properties)?;
     let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
     Ok(conf.extract_pks()?.drain(..).map(|c| c.name).collect())
 }
@@ -178,11 +165,7 @@ async fn extract_debezium_avro_table_schema(
     info: &StreamSourceInfo,
     with_properties: &HashMap<String, String>,
 ) -> Result<Vec<ColumnCatalog>> {
-    let parser_config = SpecificParserConfig::new(
-        SourceStruct::new(SourceFormat::Debezium, SourceEncode::Avro),
-        info,
-        with_properties,
-    )?;
+    let parser_config = SpecificParserConfig::new(info, with_properties)?;
     let conf = DebeziumAvroParserConfig::new(parser_config.encoding_config).await?;
     let vec_column_desc = conf.map_to_columns()?;
     let column_catalog = vec_column_desc
@@ -204,13 +187,11 @@ async fn extract_protobuf_table_schema(
         proto_message_name: schema.message_name.0.clone(),
         row_schema_location: schema.row_schema_location.0.clone(),
         use_schema_registry: schema.use_schema_registry,
+        format: FormatType::Plain.into(),
+        row_encode: EncodeType::Protobuf.into(),
         ..Default::default()
     };
-    let parser_config = SpecificParserConfig::new(
-        SourceStruct::new(SourceFormat::Plain, SourceEncode::Protobuf),
-        &info,
-        &with_properties,
-    )?;
+    let parser_config = SpecificParserConfig::new(&info, &with_properties)?;
     let conf = ProtobufParserConfig::new(parser_config.encoding_config).await?;
 
     let column_descs = conf.map_to_columns()?;
@@ -296,7 +277,7 @@ fn get_name_strategy_or_default(name_strategy: Option<AstString>) -> Result<Opti
 /// resolve the schema of the source from external schema file, return the relation's columns. see <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
 /// return `(columns, pk_names, source info)`
 pub(crate) async fn try_bind_columns_from_source(
-    source_schema: &SourceSchemaV2,
+    source_schema: &ConnectorSchema,
     sql_defined_pk_names: Vec<String>,
     sql_defined_columns: &[ColumnDef],
     with_properties: &HashMap<String, String>,
@@ -308,7 +289,7 @@ pub(crate) async fn try_bind_columns_from_source(
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
     let sql_defined_schema = !sql_defined_columns.is_empty();
     let is_kafka: bool = is_kafka_connector(with_properties);
-    let mut options = source_schema.gen_options().map_err(|e| anyhow!(e))?;
+    let mut options = WithOptions::try_from(source_schema.row_options())?.into_inner();
 
     let get_key_message_name = |options: &mut BTreeMap<String, String>| -> Option<String> {
         consume_string_from_options(options, KEY_MESSAGE_NAME_KEY)
@@ -648,6 +629,7 @@ pub(crate) async fn try_bind_columns_from_source(
                         field_descs: vec![],
                         type_name: "".to_string(),
                         generated_or_default_column: None,
+                        description: None,
                     },
                     is_hidden: false,
                 },
@@ -659,6 +641,7 @@ pub(crate) async fn try_bind_columns_from_source(
                         field_descs: vec![],
                         type_name: "".to_string(),
                         generated_or_default_column: None,
+                        description: None,
                     },
                     is_hidden: false,
                 },
@@ -793,6 +776,7 @@ fn check_and_add_timestamp_column(
                 field_descs: vec![],
                 type_name: "".to_string(),
                 generated_or_default_column: None,
+                description: None,
             },
 
             is_hidden: true,
@@ -810,6 +794,7 @@ fn add_upsert_default_key_column(columns: &mut Vec<ColumnCatalog>) {
             field_descs: vec![],
             type_name: "".to_string(),
             generated_or_default_column: None,
+            description: None,
         },
         is_hidden: true,
     };
@@ -918,7 +903,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
     });
 
 pub fn validate_compatibility(
-    source_schema: &SourceSchemaV2,
+    source_schema: &ConnectorSchema,
     props: &mut HashMap<String, String>,
 ) -> Result<()> {
     let connector = get_connector(props)
@@ -936,8 +921,8 @@ pub fn validate_compatibility(
     if connector != KAFKA_CONNECTOR {
         let res = match (&source_schema.format, &source_schema.row_encode) {
             (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
-                let mut options = source_schema.gen_options().map_err(|e| anyhow!(e))?;
-                let (_, use_schema_registry) = get_schema_location(&mut options)?;
+                let mut options = WithOptions::try_from(source_schema.row_options())?;
+                let (_, use_schema_registry) = get_schema_location(options.inner_mut())?;
                 use_schema_registry
             }
             (Format::Debezium, Encode::Avro) => true,

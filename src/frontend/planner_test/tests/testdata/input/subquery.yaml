@@ -291,3 +291,13 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: Only table-in-out functions can have subquery parameters.
+  sql: |
+    SELECT * FROM generate_series(1, (select 1));
+  expected_outputs:
+    - binder_error
+- name: While this one is allowed.
+  sql: |
+    SELECT generate_series(1, (select 1));
+  expected_outputs:
+    - batch_plan

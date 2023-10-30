@@ -345,7 +345,6 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 &mut cache,
                 this.cache_policy,
                 &this.calls,
-                &this.partition_key_indices,
                 &this.order_key_data_types,
                 &this.order_key_order_types,
                 &this.order_key_indices,
