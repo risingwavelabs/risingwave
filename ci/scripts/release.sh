@@ -70,7 +70,7 @@ cd ${REPO_ROOT}/java && mvn -B package -Dmaven.test.skip=true -Dno-build-rust
 if [[ -n "${BUILDKITE_TAG}" ]]; then
   echo "--- Collect all release assets"
   cd ${REPO_ROOT} && mkdir release-assets && cd release-assets
-  cp ${REPO_ROOT}/target/release/* .
+  cp -r ${REPO_ROOT}/target/release/* .
   mv ${REPO_ROOT}/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
   tar -zxvf risingwave-connector-"${BUILDKITE_TAG}".tar.gz libs
   ls -l
