@@ -41,16 +41,6 @@ impl ColIndexMapping {
         Self { target_size, map }
     }
 
-    /// Create a partial mapping which maps the subscripts range `(0..map.len())` to the
-    /// corresponding element. **This method is not recommended**, please use `with_target_size` instead, see <https://github.com/risingwavelabs/risingwave/issues/7234> for more information**
-    pub fn without_target_size(map: Vec<Option<usize>>) -> Self {
-        let target_size = match map.iter().filter_map(|x| *x).max_by_key(|x| *x) {
-            Some(target_max) => target_max + 1,
-            None => 0,
-        };
-        Self { target_size, map }
-    }
-
     pub fn into_parts(self) -> (Vec<Option<usize>>, usize) {
         (self.map, self.target_size)
     }
