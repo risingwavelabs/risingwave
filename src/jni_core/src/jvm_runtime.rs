@@ -49,8 +49,11 @@ impl JavaVmWrapper {
             libs_path
         } else {
             tracing::warn!("environment variable CONNECTOR_LIBS_PATH is not specified, so use default path `./libs` instead");
-            "./libs".into()
+            let path = std::env::current_exe()?.parent().unwrap().join("./libs");
+            path.to_str().unwrap().into()
         };
+
+        tracing::info!("libs_path = {}", libs_path);
 
         let dir = Path::new(&libs_path);
 
