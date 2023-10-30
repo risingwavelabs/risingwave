@@ -240,13 +240,17 @@ impl LogSinker for RemoteLogSinker {
         let (response_tx, mut response_rx) = unbounded_channel();
 
         let poll_response_stream = pin!(async move {
-            let result = response_err_stream_rx.response_stream.try_next().await;
-            match result {
-                Ok(Some(response)) => response_tx.send(response).map_err(|err| {
-                    SinkError::Remote(anyhow!("unable to send response: {:?}", err.0))
-                }),
-                Ok(None) => Err(SinkError::Remote(anyhow!("end of response stream"))),
-                Err(e) => Err(SinkError::Remote(e)),
+            loop {
+                let result = response_err_stream_rx.response_stream.try_next().await;
+                match result {
+                    Ok(Some(response)) => {
+                        response_tx.send(response).map_err(|err| {
+                            SinkError::Remote(anyhow!("unable to send response: {:?}", err.0))
+                        })?;
+                    }
+                    Ok(None) => return Err(SinkError::Remote(anyhow!("end of response stream"))),
+                    Err(e) => return Err(SinkError::Remote(e)),
+                }
             }
         });
 
