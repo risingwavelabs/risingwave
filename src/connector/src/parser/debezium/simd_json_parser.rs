@@ -15,7 +15,8 @@
 use std::fmt::Debug;
 
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use simd_json::{BorrowedValue, Mutable};
+use simd_json::prelude::MutableObject;
+use simd_json::BorrowedValue;
 
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::AccessImpl;
