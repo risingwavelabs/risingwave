@@ -281,10 +281,10 @@ SELECT jsonb_array_length('4');
 --@ SELECT jsonb_exists('{"a":null, "b":"qq"}', 'b');
 --@ SELECT jsonb_exists('{"a":null, "b":"qq"}', 'c');
 --@ SELECT jsonb_exists('{"a":"null", "b":"qq"}', 'a');
---@ SELECT jsonb '{"a":null, "b":"qq"}' ? 'a';
---@ SELECT jsonb '{"a":null, "b":"qq"}' ? 'b';
---@ SELECT jsonb '{"a":null, "b":"qq"}' ? 'c';
---@ SELECT jsonb '{"a":"null", "b":"qq"}' ? 'a';
+SELECT jsonb '{"a":null, "b":"qq"}' ? 'a';
+SELECT jsonb '{"a":null, "b":"qq"}' ? 'b';
+SELECT jsonb '{"a":null, "b":"qq"}' ? 'c';
+SELECT jsonb '{"a":"null", "b":"qq"}' ? 'a';
 --@ -- array exists - array elements should behave as keys
 --@ SELECT count(*) from testjsonb  WHERE j->'array' ? 'bar';
 --@ -- type sensitive array exists - should return no rows (since "exists" only
@@ -298,23 +298,23 @@ SELECT jsonb_array_length('4');
 --@ SELECT jsonb_exists_any('{"a":null, "b":"qq"}', ARRAY['c','a']);
 --@ SELECT jsonb_exists_any('{"a":null, "b":"qq"}', ARRAY['c','d']);
 --@ SELECT jsonb_exists_any('{"a":null, "b":"qq"}', '{}'::text[]);
---@ SELECT jsonb '{"a":null, "b":"qq"}' ?| ARRAY['a','b'];
---@ SELECT jsonb '{"a":null, "b":"qq"}' ?| ARRAY['b','a'];
---@ SELECT jsonb '{"a":null, "b":"qq"}' ?| ARRAY['c','a'];
---@ SELECT jsonb '{"a":null, "b":"qq"}' ?| ARRAY['c','d'];
---@ SELECT jsonb '{"a":null, "b":"qq"}' ?| '{}'::text[];
+SELECT jsonb '{"a":null, "b":"qq"}' ?| ARRAY['a','b'];
+SELECT jsonb '{"a":null, "b":"qq"}' ?| ARRAY['b','a'];
+SELECT jsonb '{"a":null, "b":"qq"}' ?| ARRAY['c','a'];
+SELECT jsonb '{"a":null, "b":"qq"}' ?| ARRAY['c','d'];
+SELECT jsonb '{"a":null, "b":"qq"}' ?| '{}'::text[];
 --@ 
 --@ SELECT jsonb_exists_all('{"a":null, "b":"qq"}', ARRAY['a','b']);
 --@ SELECT jsonb_exists_all('{"a":null, "b":"qq"}', ARRAY['b','a']);
 --@ SELECT jsonb_exists_all('{"a":null, "b":"qq"}', ARRAY['c','a']);
 --@ SELECT jsonb_exists_all('{"a":null, "b":"qq"}', ARRAY['c','d']);
 --@ SELECT jsonb_exists_all('{"a":null, "b":"qq"}', '{}'::text[]);
---@ SELECT jsonb '{"a":null, "b":"qq"}' ?& ARRAY['a','b'];
---@ SELECT jsonb '{"a":null, "b":"qq"}' ?& ARRAY['b','a'];
---@ SELECT jsonb '{"a":null, "b":"qq"}' ?& ARRAY['c','a'];
---@ SELECT jsonb '{"a":null, "b":"qq"}' ?& ARRAY['c','d'];
---@ SELECT jsonb '{"a":null, "b":"qq"}' ?& ARRAY['a','a', 'b', 'b', 'b'];
---@ SELECT jsonb '{"a":null, "b":"qq"}' ?& '{}'::text[];
+SELECT jsonb '{"a":null, "b":"qq"}' ?& ARRAY['a','b'];
+SELECT jsonb '{"a":null, "b":"qq"}' ?& ARRAY['b','a'];
+SELECT jsonb '{"a":null, "b":"qq"}' ?& ARRAY['c','a'];
+SELECT jsonb '{"a":null, "b":"qq"}' ?& ARRAY['c','d'];
+SELECT jsonb '{"a":null, "b":"qq"}' ?& ARRAY['a','a', 'b', 'b', 'b'];
+SELECT jsonb '{"a":null, "b":"qq"}' ?& '{}'::text[];
 
 -- typeof
 SELECT jsonb_typeof('{}') AS object;
