@@ -139,14 +139,9 @@ fn jsonb_remove_index(v: JsonbRef<'_>, index: i32) -> Result<JsonbVal> {
             })
         }
     };
-    // out of bounds index returns original value
-    if index < -(array.len() as i32) || index >= (array.len() as i32) {
+    let Some(idx) = normalize_array_index(array.len(), idx) else {
+        // out of bounds index returns original value
         return Ok(JsonbVal::from(v));
-    }
-    let idx = if index >= 0 {
-        index as usize
-    } else {
-        (array.len() as i32 + index) as usize
     };
     Ok(JsonbVal::from(Value::array(
         array
@@ -239,24 +234,23 @@ fn jsonb_remove_index(v: JsonbRef<'_>, index: i32) -> Result<JsonbVal> {
 /// ```
 #[function("jsonb_remove_path(jsonb, varchar[]) -> jsonb")]
 fn jsonb_remove_path(v: JsonbRef<'_>, path: ListRef<'_>) -> Result<JsonbVal> {
+    if path.is_empty() {
+        return Ok(JsonbVal::from(v));
+    }
     let jsonb: ValueRef<'_> = v.into();
     let mut builder = jsonbb::Builder::<Vec<u8>>::with_capacity(jsonb.capacity());
     jsonbb_remove_path(jsonb, path, 0, &mut builder)?;
     Ok(JsonbVal::from(builder.finish()))
 }
 
-// Recursively remove `path[i..]`` from `jsonb` and write the result to `builder`.
+// Recursively remove `path[i..]` from `jsonb` and write the result to `builder`.
+// Panics if `i` is out of bounds.
 fn jsonbb_remove_path(
     jsonb: ValueRef<'_>,
     path: ListRef<'_>,
     i: usize,
     builder: &mut jsonbb::Builder,
 ) -> Result<()> {
-    if i == path.len() {
-        // reached end of path
-        builder.add_value(jsonb);
-        return Ok(());
-    }
     match jsonb {
         ValueRef::Object(obj) => {
             let key = path
@@ -305,15 +299,10 @@ fn jsonbb_remove_path(
                 )
                 .into(),
             })?;
-            // out of bounds index returns original value
-            if idx < -(array.len() as i32) || idx >= (array.len() as i32) {
+            let Some(idx) = normalize_array_index(array.len(), idx) else {
+                // out of bounds index returns original value
                 builder.add_value(jsonb);
                 return Ok(());
-            }
-            let idx = if idx >= 0 {
-                idx as usize
-            } else {
-                (array.len() as i32 + idx) as usize
             };
             builder.begin_array();
             for (j, v) in array.iter().enumerate() {
@@ -333,5 +322,19 @@ fn jsonbb_remove_path(
             builder.add_value(jsonb);
             Ok(())
         }
+    }
+}
+
+/// Normalizes an array index to `0..len`.
+/// Negative indices count from the end. i.e. `-len..0 => 0..len`.
+/// Returns `None` if index is out of bounds.
+fn normalize_array_index(len: usize, index: i32) -> Option<usize> {
+    if index < -(len as i32) || index >= (len as i32) {
+        return None;
+    }
+    if index >= 0 {
+        Some(index as usize)
+    } else {
+        Some((len as i32 + index) as usize)
     }
 }
