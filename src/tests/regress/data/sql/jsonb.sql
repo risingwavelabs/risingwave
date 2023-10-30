@@ -1090,31 +1090,30 @@ select jsonb_pretty('{"a":["b", "c"], "d": {"e":"f"}}');
 --@ select pg_column_size('{"aa":1, "b":2}'::jsonb || '{}'::jsonb) = pg_column_size('{"aa":1, "b":2}'::jsonb);
 --@ select pg_column_size('{}'::jsonb || '{"aa":1, "b":2}'::jsonb) = pg_column_size('{"aa":1, "b":2}'::jsonb);
 
---@ select jsonb_delete('{"a":1 , "b":2, "c":3}'::jsonb, 'a');
---@ select jsonb_delete('{"a":null , "b":2, "c":3}'::jsonb, 'a');
---@ select jsonb_delete('{"a":1 , "b":2, "c":3}'::jsonb, 'b');
---@ select jsonb_delete('{"a":1 , "b":2, "c":3}'::jsonb, 'c');
---@ select jsonb_delete('{"a":1 , "b":2, "c":3}'::jsonb, 'd');
---@ select '{"a":1 , "b":2, "c":3}'::jsonb - 'a';
---@ select '{"a":null , "b":2, "c":3}'::jsonb - 'a';
---@ select '{"a":1 , "b":2, "c":3}'::jsonb - 'b';
---@ select '{"a":1 , "b":2, "c":3}'::jsonb - 'c';
---@ select '{"a":1 , "b":2, "c":3}'::jsonb - 'd';
+select jsonb_delete('{"a":1 , "b":2, "c":3}'::jsonb, 'a');
+select jsonb_delete('{"a":null , "b":2, "c":3}'::jsonb, 'a');
+select jsonb_delete('{"a":1 , "b":2, "c":3}'::jsonb, 'b');
+select jsonb_delete('{"a":1 , "b":2, "c":3}'::jsonb, 'c');
+select jsonb_delete('{"a":1 , "b":2, "c":3}'::jsonb, 'd');
+select '{"a":1 , "b":2, "c":3}'::jsonb - 'a';
+select '{"a":null , "b":2, "c":3}'::jsonb - 'a';
+select '{"a":1 , "b":2, "c":3}'::jsonb - 'b';
+select '{"a":1 , "b":2, "c":3}'::jsonb - 'c';
+select '{"a":1 , "b":2, "c":3}'::jsonb - 'd';
 --@ select pg_column_size('{"a":1 , "b":2, "c":3}'::jsonb - 'b') = pg_column_size('{"a":1, "b":2}'::jsonb);
---@ 
---@ select '["a","b","c"]'::jsonb - 3;
---@ select '["a","b","c"]'::jsonb - 2;
---@ select '["a","b","c"]'::jsonb - 1;
---@ select '["a","b","c"]'::jsonb - 0;
---@ select '["a","b","c"]'::jsonb - -1;
---@ select '["a","b","c"]'::jsonb - -2;
---@ select '["a","b","c"]'::jsonb - -3;
---@ select '["a","b","c"]'::jsonb - -4;
---@ 
---@ select '{"a":1 , "b":2, "c":3}'::jsonb - '{b}'::text[];
---@ select '{"a":1 , "b":2, "c":3}'::jsonb - '{c,b}'::text[];
---@ select '{"a":1 , "b":2, "c":3}'::jsonb - '{}'::text[];
---@ 
+
+select '["a","b","c"]'::jsonb - 3;
+select '["a","b","c"]'::jsonb - 2;
+select '["a","b","c"]'::jsonb - 1;
+select '["a","b","c"]'::jsonb - 0;
+select '["a","b","c"]'::jsonb - -1;
+select '["a","b","c"]'::jsonb - -2;
+select '["a","b","c"]'::jsonb - -3;
+select '["a","b","c"]'::jsonb - -4;
+select '{"a":1 , "b":2, "c":3}'::jsonb - '{b}'::text[];
+select '{"a":1 , "b":2, "c":3}'::jsonb - '{c,b}'::text[];
+select '{"a":1 , "b":2, "c":3}'::jsonb - '{}'::text[];
+
 --@ select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{n}', '[1,2,3]');
 --@ select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{b,-1}', '[1,2,3]');
 --@ select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{d,1,0}', '[1,2,3]');
@@ -1127,28 +1126,28 @@ select jsonb_pretty('{"a":["b", "c"], "d": {"e":"f"}}');
 --@ 
 --@ select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{b,-1}', '"test"');
 --@ select jsonb_set('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb, '{b,-1}', '{"f": "test"}');
---@ 
---@ select jsonb_delete_path('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}', '{n}');
---@ select jsonb_delete_path('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}', '{b,-1}');
---@ select jsonb_delete_path('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}', '{d,1,0}');
---@ 
---@ select '{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb #- '{n}';
---@ select '{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb #- '{b,-1}';
---@ select '{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb #- '{b,-1e}'; -- invalid array subscript
---@ select '{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb #- '{d,1,0}';
---@ 
---@ 
---@ -- empty structure and error conditions for delete and replace
---@ 
---@ select '"a"'::jsonb - 'a'; -- error
---@ select '{}'::jsonb - 'a';
---@ select '[]'::jsonb - 'a';
---@ select '"a"'::jsonb - 1; -- error
---@ select '{}'::jsonb -  1; -- error
---@ select '[]'::jsonb - 1;
---@ select '"a"'::jsonb #- '{a}'; -- error
---@ select '{}'::jsonb #- '{a}';
---@ select '[]'::jsonb #- '{a}';
+
+select jsonb_delete_path('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}', '{n}');
+select jsonb_delete_path('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}', '{b,-1}');
+select jsonb_delete_path('{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}', '{d,1,0}');
+
+select '{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb #- '{n}';
+select '{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb #- '{b,-1}';
+select '{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb #- '{b,-1e}'; -- invalid array subscript
+select '{"n":null, "a":1, "b":[1,2], "c":{"1":2}, "d":{"1":[2,3]}}'::jsonb #- '{d,1,0}';
+
+
+-- empty structure and error conditions for delete and replace
+
+select '"a"'::jsonb - 'a'; -- error
+select '{}'::jsonb - 'a';
+select '[]'::jsonb - 'a';
+select '"a"'::jsonb - 1; -- error
+select '{}'::jsonb -  1; -- error
+select '[]'::jsonb - 1;
+select '"a"'::jsonb #- '{a}'; -- error
+select '{}'::jsonb #- '{a}';
+select '[]'::jsonb #- '{a}';
 --@ select jsonb_set('"a"','{a}','"b"'); --error
 --@ select jsonb_set('{}','{a}','"b"', false);
 --@ select jsonb_set('[]','{1}','"b"', false);
