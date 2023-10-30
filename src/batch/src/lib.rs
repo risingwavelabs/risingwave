@@ -32,6 +32,7 @@
 #![feature(result_option_inspect)]
 #![feature(assert_matches)]
 #![feature(lazy_cell)]
+#![feature(array_methods)]
 
 mod error;
 pub mod exchange_source;
