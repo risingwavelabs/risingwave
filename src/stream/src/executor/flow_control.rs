@@ -51,28 +51,55 @@ impl FlowControlExecutor {
             RateLimiter::direct_with_clock(quota, &clock)
         };
         let rate_limiter = self.rate_limit.map(get_rate_limiter);
-        #[for_await]
-        for msg in self.input.execute() {
-            let msg = msg?;
-            match msg {
-                Message::Chunk(chunk) => {
-                    #[cfg(not(madsim))]
-                    {
-                        if let Some(rate_limiter) = &rate_limiter {
-                            let result = rate_limiter
-                                .until_n_ready(NonZeroU32::new(chunk.cardinality() as u32).unwrap())
-                                .await;
-                            if let Err(InsufficientCapacity(n)) = result {
-                                tracing::error!(
-                                    "Rate Limit {:?} smaller than chunk cardinality {n}",
-                                    self.rate_limit,
-                                );
+        let mut msg_stream = self.input.execute();
+        loop {
+            match rate_limiter {
+                Some(ref rate_limiter) => {
+                    #[for_await]
+                    for msg in &mut msg_stream {
+                        let msg = msg?;
+                        match msg {
+                            Message::Chunk(chunk) => {
+                                #[cfg(not(madsim))]
+                                {
+                                    let result = rate_limiter
+                                        .until_n_ready(
+                                            NonZeroU32::new(chunk.cardinality() as u32).unwrap(),
+                                        )
+                                        .await;
+                                    if let Err(InsufficientCapacity(n)) = result {
+                                        tracing::error!(
+                                            "Rate Limit {:?} smaller than chunk cardinality {n}",
+                                            self.rate_limit,
+                                        );
+                                    }
+                                }
+                                yield Message::Chunk(chunk);
                             }
+                            Message::Barrier(_) => {
+                                // Handle config change
+                                break;
+                            }
+                            _ => yield msg,
                         }
                     }
-                    yield Message::Chunk(chunk);
                 }
-                _ => yield msg,
+                None => {
+                    #[for_await]
+                    for msg in &mut msg_stream {
+                        let msg = msg?;
+                        match msg {
+                            Message::Chunk(chunk) => {
+                                yield Message::Chunk(chunk);
+                            }
+                            Message::Barrier(_) => {
+                                // Handle config change
+                                break;
+                            }
+                            _ => yield msg,
+                        }
+                    }
+                }
             }
         }
     }
