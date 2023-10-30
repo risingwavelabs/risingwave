@@ -689,22 +689,29 @@ impl EmbeddedConnectorClient {
         &self,
         class_name: &'static str,
         method_name: &'static str,
-        request_rx: JniReceiverType<REQ>,
+        mut request_rx: JniReceiverType<REQ>,
     ) -> Receiver<std::result::Result<RSP, anyhow::Error>> {
-        let (response_tx, response_rx): (JniSenderType<RSP>, _) =
+        let (mut response_tx, response_rx): (JniSenderType<RSP>, _) =
             mpsc::channel(DEFAULT_BUFFER_SIZE);
 
         let jvm = self.jvm;
         std::thread::spawn(move || {
-            let mut env = jvm.attach_current_thread().unwrap();
+            let mut env = match jvm.attach_current_thread() {
+                Ok(env) => env,
+                Err(e) => {
+                    let _ = response_tx
+                        .blocking_send(Err(anyhow!("failed to attach current thread: {:?}", e)));
+                    return;
+                }
+            };
 
             let result = env.call_static_method(
                 class_name,
                 method_name,
                 gen_jni_sig!(void f(long, long)),
                 &[
-                    JValue::from(&request_rx as *const JniReceiverType<REQ> as i64),
-                    JValue::from(&response_tx as *const JniSenderType<RSP> as i64),
+                    JValue::from(&mut request_rx as *mut JniReceiverType<REQ> as i64),
+                    JValue::from(&mut response_tx as *mut JniSenderType<RSP> as i64),
                 ],
             );
 

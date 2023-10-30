@@ -125,13 +125,11 @@ impl JavaVmWrapper {
 pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::Error> {
     let mut env = jvm
         .attach_current_thread()
-        .inspect_err(|e| tracing::error!("jvm attach thread error: {:?}", e))
-        .unwrap();
+        .inspect_err(|e| tracing::error!("jvm attach thread error: {:?}", e))?;
 
     let binding_class = env
         .find_class("com/risingwave/java/binding/Binding")
-        .inspect_err(|e| tracing::error!("jvm find class error: {:?}", e))
-        .unwrap();
+        .inspect_err(|e| tracing::error!("jvm find class error: {:?}", e))?;
     use crate::*;
     macro_rules! gen_native_method_array {
         () => {{
@@ -163,34 +161,40 @@ pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::E
 /// Load JVM memory statistics from the runtime. If JVM is not initialized or fail to initialize, return zero.
 pub fn load_jvm_memory_stats() -> (usize, usize) {
     if let Ok(jvm) = JVM.get() {
-        let mut env = jvm.attach_current_thread().unwrap();
-        let runtime_instance = env
-            .call_static_method(
+        let result: Result<(usize, usize), jni::errors::Error> = try {
+            let mut env = jvm.attach_current_thread()?;
+
+            let runtime_instance = env.call_static_method(
                 "java/lang/Runtime",
                 "getRuntime",
                 "()Ljava/lang/Runtime;",
                 &[],
-            )
-            .unwrap();
+            )?;
 
-        let runtime_instance = match runtime_instance {
-            JValueOwned::Object(o) => o,
-            _ => unreachable!(),
+            let runtime_instance = match runtime_instance {
+                JValueOwned::Object(o) => o,
+                _ => unreachable!(),
+            };
+
+            let total_memory = env
+                .call_method(runtime_instance.as_ref(), "totalMemory", "()J", &[])?
+                .j()
+                .expect("should be long");
+
+            let free_memory = env
+                .call_method(runtime_instance, "freeMemory", "()J", &[])?
+                .j()
+                .expect("should be long");
+
+            (total_memory as usize, (total_memory - free_memory) as usize)
         };
-
-        let total_memory = env
-            .call_method(runtime_instance.as_ref(), "totalMemory", "()J", &[])
-            .unwrap()
-            .j()
-            .unwrap();
-
-        let free_memory = env
-            .call_method(runtime_instance, "freeMemory", "()J", &[])
-            .unwrap()
-            .j()
-            .unwrap();
-
-        (total_memory as usize, (total_memory - free_memory) as usize)
+        match result {
+            Ok(ret) => ret,
+            Err(e) => {
+                error!("failed to collect jvm stats: {:?}", e);
+                (0, 0)
+            }
+        }
     } else {
         (0, 0)
     }

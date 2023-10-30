@@ -17,6 +17,7 @@
 #![feature(once_cell_try)]
 #![feature(type_alias_impl_trait)]
 #![feature(result_option_inspect)]
+#![feature(try_blocks)]
 
 pub mod hummock_iterator;
 pub mod jvm_runtime;
@@ -60,7 +61,6 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use crate::hummock_iterator::HummockJavaBindingIterator;
 pub use crate::jvm_runtime::register_native_method_for_jvm;
 use crate::stream_chunk_iterator::{into_iter, StreamChunkRowIterator};
-pub type GetEventStreamJniSender = Sender<GetEventStreamResponse>;
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| tokio::runtime::Runtime::new().unwrap());
 
@@ -846,6 +846,9 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetArrayValu
     })
 }
 
+pub type JniSenderType<T> = Sender<anyhow::Result<T>>;
+pub type JniReceiverType<T> = Receiver<T>;
+
 /// Send messages to the channel received by `CdcSplitReader`.
 /// If msg is null, just check whether the channel is closed.
 /// Return true if sending is successful, otherwise, return false so that caller can stop
@@ -853,7 +856,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetArrayValu
 #[no_mangle]
 extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToChannel<'a>(
     env: EnvParam<'a>,
-    channel: Pointer<'a, GetEventStreamJniSender>,
+    channel: Pointer<'a, JniSenderType<GetEventStreamResponse>>,
     msg: JByteArray<'a>,
 ) -> jboolean {
     execute_and_catch(env, move |env| {
@@ -869,7 +872,10 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToCh
         let get_event_stream_response: GetEventStreamResponse =
             Message::decode(to_guarded_slice(&msg, env)?.deref())?;
 
-        match channel.as_ref().blocking_send(get_event_stream_response) {
+        match channel
+            .as_ref()
+            .blocking_send(Ok(get_event_stream_response))
+        {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {
                 tracing::info!("send error.  {:?}", e);
@@ -878,9 +884,6 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToCh
         }
     })
 }
-
-pub type JniSenderType<T> = Sender<anyhow::Result<T>>;
-pub type JniReceiverType<T> = Receiver<T>;
 
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_recvSinkWriterRequestFromChannel<
