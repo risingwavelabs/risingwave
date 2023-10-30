@@ -69,7 +69,6 @@ cd ${REPO_ROOT}/java && mvn -B package -Dmaven.test.skip=true -Dno-build-rust
 cd ${REPO_ROOT} && mv ${REPO_ROOT}/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
 tar -zxvf risingwave-connector-"${BUILDKITE_TAG}".tar.gz libs
 
-
 if [[ -n "${BUILDKITE_TAG}" ]]; then
   echo "--- Install gh cli"
   yum install -y dnf
@@ -81,22 +80,22 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
   gh release create "${BUILDKITE_TAG}" --notes "release ${BUILDKITE_TAG}" -d -p
 
   echo "--- Release upload risingwave asset"
-  tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risingwave
+  tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz ${REPO_ROOT}/target/release/risingwave
   gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
 
   echo "--- Release upload risingwave debug info"
-  tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.dwp.tar.gz risingwave.dwp
+  tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.dwp.tar.gz ${REPO_ROOT}/target/release/risingwave.dwp
   gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.dwp.tar.gz
 
   echo "--- Release upload risectl asset"
-  tar -czvf risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risectl
+  tar -czvf risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz ${REPO_ROOT}/target/release/risectl
   gh release upload "${BUILDKITE_TAG}" risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
 
   echo "--- Release build and upload risingwave connector node jar asset"
-  gh release upload "${BUILDKITE_TAG}" risingwave-connector-"${BUILDKITE_TAG}".tar.gz
+  gh release upload "${BUILDKITE_TAG}" ${REPO_ROOT}/risingwave-connector-"${BUILDKITE_TAG}".tar.gz
 
   echo "--- Release upload risingwave-all-in-one asset"
-  tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux-all-in-one.tar.gz risingwave libs
+  tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux-all-in-one.tar.gz ${REPO_ROOT}/target/release/risingwave ${REPO_ROOT}/libs
   gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux-all-in-one.tar.gz
 fi
 
