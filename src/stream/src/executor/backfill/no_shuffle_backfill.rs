@@ -308,7 +308,7 @@ where
                                             tokio::time::sleep(std::time::Duration::from_millis(
                                                 snapshot_read_delay as u64,
                                             ))
-                                                .await;
+                                            .await;
                                         }
 
                                         // Raise the current position.
