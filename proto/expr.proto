@@ -225,13 +225,13 @@ message ExprNode {
     // jsonb @> jsonb
     JSONB_CONTAINS = 608;
     // jsonb <@ jsonb
-    JSONB_CONTAINED_BY = 609;
+    JSONB_CONTAINED = 609;
     // jsonb ? text
-    JSONB_CONTAINS_KEY = 610;
+    JSONB_EXISTS = 610;
     // jsonb ?| text[]
-    JSONB_CONTAINS_ANY_KEY = 611;
+    JSONB_EXISTS_ANY = 611;
     // jsonb ?& text[]
-    JSONB_CONTAINS_ALL_KEYS = 612;
+    JSONB_EXISTS_ALL = 612;
 
     // Non-pure functions below (> 1000)
     // ------------------------

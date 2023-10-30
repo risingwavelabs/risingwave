@@ -160,8 +160,8 @@ fn jsonbb_contains(left: ValueRef<'_>, right: ValueRef<'_>, root: bool) -> bool 
 /// ----
 /// t
 /// ```
-#[function("jsonb_contained_by(jsonb, jsonb) -> boolean")]
-fn jsonb_contained_by(left: JsonbRef<'_>, right: JsonbRef<'_>) -> bool {
+#[function("jsonb_contained(jsonb, jsonb) -> boolean")]
+fn jsonb_contained(left: JsonbRef<'_>, right: JsonbRef<'_>) -> bool {
     jsonb_contains(right, left)
 }
 
@@ -200,8 +200,8 @@ fn jsonb_contained_by(left: JsonbRef<'_>, right: JsonbRef<'_>) -> bool {
 /// ----
 /// t
 /// ```
-#[function("jsonb_contains_key(jsonb, varchar) -> boolean")]
-fn jsonb_contains_key(left: JsonbRef<'_>, key: &str) -> bool {
+#[function("jsonb_exists(jsonb, varchar) -> boolean")]
+fn jsonb_exists(left: JsonbRef<'_>, key: &str) -> bool {
     match left.into() {
         ValueRef::Object(object) => object.get(key).is_some(),
         ValueRef::Array(array) => array.iter().any(|val| val.as_str() == Some(key)),
@@ -230,8 +230,8 @@ fn jsonb_contains_key(left: JsonbRef<'_>, key: &str) -> bool {
 /// ----
 /// t
 /// ```
-#[function("jsonb_contains_any_key(jsonb, varchar[]) -> boolean")]
-fn jsonb_contains_any_key(left: JsonbRef<'_>, keys: ListRef<'_>) -> bool {
+#[function("jsonb_exists_any(jsonb, varchar[]) -> boolean")]
+fn jsonb_exists_any(left: JsonbRef<'_>, keys: ListRef<'_>) -> bool {
     let mut keys = keys.iter().flatten().map(|val| val.into_utf8());
     match left.into() {
         ValueRef::Object(object) => keys.any(|key| object.get(key).is_some()),
@@ -261,8 +261,8 @@ fn jsonb_contains_any_key(left: JsonbRef<'_>, keys: ListRef<'_>) -> bool {
 /// ----
 /// t
 /// ```
-#[function("jsonb_contains_all_keys(jsonb, varchar[]) -> boolean")]
-fn jsonb_contains_all_keys(left: JsonbRef<'_>, keys: ListRef<'_>) -> bool {
+#[function("jsonb_exists_all(jsonb, varchar[]) -> boolean")]
+fn jsonb_exists_all(left: JsonbRef<'_>, keys: ListRef<'_>) -> bool {
     let mut keys = keys.iter().flatten().map(|val| val.into_utf8());
     match left.into() {
         ValueRef::Object(object) => keys.all(|key| object.get(key).is_some()),

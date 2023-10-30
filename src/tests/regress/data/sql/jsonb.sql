@@ -211,13 +211,13 @@ select '"foo"'::jsonb ->> 'z';
 --@ SELECT '{"x":"y"}'::jsonb <> '{"x":"z"}'::jsonb;
 
 -- containment
---@ SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"b"}');
---@ SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"b", "c":null}');
---@ SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"b", "g":null}');
---@ SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"g":null}');
---@ SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"c"}');
---@ SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"b"}');
---@ SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"b", "c":"q"}');
+SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"b"}');
+SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"b", "c":null}');
+SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"b", "g":null}');
+SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"g":null}');
+SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"c"}');
+SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"b"}');
+SELECT jsonb_contains('{"a":"b", "b":1, "c":null}', '{"a":"b", "c":"q"}');
 SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"b"}';
 SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"b", "c":null}';
 SELECT '{"a":"b", "b":1, "c":null}'::jsonb @> '{"a":"b", "g":null}';
@@ -233,13 +233,13 @@ SELECT '[1,2,2]'::jsonb <@ '[1,2]'::jsonb;
 SELECT '[1,2,2]'::jsonb <@ '[1,1,2]'::jsonb;
 SELECT '[[1,2,2]]'::jsonb <@ '[[1,2]]'::jsonb;
 
---@ SELECT jsonb_contained('{"a":"b"}', '{"a":"b", "b":1, "c":null}');
---@ SELECT jsonb_contained('{"a":"b", "c":null}', '{"a":"b", "b":1, "c":null}');
---@ SELECT jsonb_contained('{"a":"b", "g":null}', '{"a":"b", "b":1, "c":null}');
---@ SELECT jsonb_contained('{"g":null}', '{"a":"b", "b":1, "c":null}');
---@ SELECT jsonb_contained('{"a":"c"}', '{"a":"b", "b":1, "c":null}');
---@ SELECT jsonb_contained('{"a":"b"}', '{"a":"b", "b":1, "c":null}');
---@ SELECT jsonb_contained('{"a":"b", "c":"q"}', '{"a":"b", "b":1, "c":null}');
+SELECT jsonb_contained('{"a":"b"}', '{"a":"b", "b":1, "c":null}');
+SELECT jsonb_contained('{"a":"b", "c":null}', '{"a":"b", "b":1, "c":null}');
+SELECT jsonb_contained('{"a":"b", "g":null}', '{"a":"b", "b":1, "c":null}');
+SELECT jsonb_contained('{"g":null}', '{"a":"b", "b":1, "c":null}');
+SELECT jsonb_contained('{"a":"c"}', '{"a":"b", "b":1, "c":null}');
+SELECT jsonb_contained('{"a":"b"}', '{"a":"b", "b":1, "c":null}');
+SELECT jsonb_contained('{"a":"b", "c":"q"}', '{"a":"b", "b":1, "c":null}');
 SELECT '{"a":"b"}'::jsonb <@ '{"a":"b", "b":1, "c":null}';
 SELECT '{"a":"b", "c":null}'::jsonb <@ '{"a":"b", "b":1, "c":null}';
 SELECT '{"a":"b", "g":null}'::jsonb <@ '{"a":"b", "b":1, "c":null}';
@@ -277,10 +277,10 @@ SELECT jsonb_array_length('4');
 --@ SELECT * FROM jsonb_each_text('{"a":{"b":"c","c":"b","1":"first"},"b":[1,2],"c":"cc","1":"first","n":null}'::jsonb) AS q;
 
 -- exists
---@ SELECT jsonb_exists('{"a":null, "b":"qq"}', 'a');
---@ SELECT jsonb_exists('{"a":null, "b":"qq"}', 'b');
---@ SELECT jsonb_exists('{"a":null, "b":"qq"}', 'c');
---@ SELECT jsonb_exists('{"a":"null", "b":"qq"}', 'a');
+SELECT jsonb_exists('{"a":null, "b":"qq"}', 'a');
+SELECT jsonb_exists('{"a":null, "b":"qq"}', 'b');
+SELECT jsonb_exists('{"a":null, "b":"qq"}', 'c');
+SELECT jsonb_exists('{"a":"null", "b":"qq"}', 'a');
 SELECT jsonb '{"a":null, "b":"qq"}' ? 'a';
 SELECT jsonb '{"a":null, "b":"qq"}' ? 'b';
 SELECT jsonb '{"a":null, "b":"qq"}' ? 'c';
@@ -292,23 +292,23 @@ SELECT jsonb '{"a":"null", "b":"qq"}' ? 'a';
 --@ SELECT count(*) from testjsonb  WHERE j->'array' ? '5'::text;
 --@ -- However, a raw scalar is *contained* within the array
 --@ SELECT count(*) from testjsonb  WHERE j->'array' @> '5'::jsonb;
---@ 
---@ SELECT jsonb_exists_any('{"a":null, "b":"qq"}', ARRAY['a','b']);
---@ SELECT jsonb_exists_any('{"a":null, "b":"qq"}', ARRAY['b','a']);
---@ SELECT jsonb_exists_any('{"a":null, "b":"qq"}', ARRAY['c','a']);
---@ SELECT jsonb_exists_any('{"a":null, "b":"qq"}', ARRAY['c','d']);
---@ SELECT jsonb_exists_any('{"a":null, "b":"qq"}', '{}'::text[]);
+
+SELECT jsonb_exists_any('{"a":null, "b":"qq"}', ARRAY['a','b']);
+SELECT jsonb_exists_any('{"a":null, "b":"qq"}', ARRAY['b','a']);
+SELECT jsonb_exists_any('{"a":null, "b":"qq"}', ARRAY['c','a']);
+SELECT jsonb_exists_any('{"a":null, "b":"qq"}', ARRAY['c','d']);
+SELECT jsonb_exists_any('{"a":null, "b":"qq"}', '{}'::text[]);
 SELECT jsonb '{"a":null, "b":"qq"}' ?| ARRAY['a','b'];
 SELECT jsonb '{"a":null, "b":"qq"}' ?| ARRAY['b','a'];
 SELECT jsonb '{"a":null, "b":"qq"}' ?| ARRAY['c','a'];
 SELECT jsonb '{"a":null, "b":"qq"}' ?| ARRAY['c','d'];
 SELECT jsonb '{"a":null, "b":"qq"}' ?| '{}'::text[];
---@ 
---@ SELECT jsonb_exists_all('{"a":null, "b":"qq"}', ARRAY['a','b']);
---@ SELECT jsonb_exists_all('{"a":null, "b":"qq"}', ARRAY['b','a']);
---@ SELECT jsonb_exists_all('{"a":null, "b":"qq"}', ARRAY['c','a']);
---@ SELECT jsonb_exists_all('{"a":null, "b":"qq"}', ARRAY['c','d']);
---@ SELECT jsonb_exists_all('{"a":null, "b":"qq"}', '{}'::text[]);
+
+SELECT jsonb_exists_all('{"a":null, "b":"qq"}', ARRAY['a','b']);
+SELECT jsonb_exists_all('{"a":null, "b":"qq"}', ARRAY['b','a']);
+SELECT jsonb_exists_all('{"a":null, "b":"qq"}', ARRAY['c','a']);
+SELECT jsonb_exists_all('{"a":null, "b":"qq"}', ARRAY['c','d']);
+SELECT jsonb_exists_all('{"a":null, "b":"qq"}', '{}'::text[]);
 SELECT jsonb '{"a":null, "b":"qq"}' ?& ARRAY['a','b'];
 SELECT jsonb '{"a":null, "b":"qq"}' ?& ARRAY['b','a'];
 SELECT jsonb '{"a":null, "b":"qq"}' ?& ARRAY['c','a'];
