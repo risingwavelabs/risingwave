@@ -268,18 +268,25 @@ pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
 }
 
 // const EPOCH_AVAILABLE_BITS: u64 = 16;
+const EPOCH_MASK: u64 = 0xFFFF;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug, PartialOrd, Ord)]
 pub struct EpochWithGap(u64);
 
 impl EpochWithGap {
     pub fn new(epoch: u64, spill_offset: u64) -> Self {
-        let epoch_with_gap = epoch + spill_offset;
-        EpochWithGap(epoch_with_gap)
+        #[cfg(not(feature = "enable_test_epoch"))]
+        {
+            let epoch_with_gap = epoch + spill_offset;
+            EpochWithGap(epoch_with_gap)
+        }
+        #[cfg(feature = "enable_test_epoch")]
+        {
+            let epoch_with_gap = epoch + spill_offset - spill_offset;
+            EpochWithGap(epoch_with_gap)
+        }
     }
 
     pub fn new_from_epoch(epoch_with_gap: u64) -> Self {
-        // debug_assert_eq!(epoch_with_gap % EPOCH_AVAILABLE_BITS, 0);
-
         EpochWithGap(epoch_with_gap)
     }
 
@@ -298,10 +305,17 @@ impl EpochWithGap {
 
     // return the pure epoch without spill offset
     pub fn pure_epoch(&self) -> HummockEpoch {
-        self.0 & !0xFFFF
+        #[cfg(not(feature = "enable_test_epoch"))]
+        {
+            self.0 & !EPOCH_MASK
+        }
+        #[cfg(feature = "enable_test_epoch")]
+        {
+            self.0
+        }
     }
 
     pub fn offset(&self) -> u64 {
-        self.0 & 0xFFFF
+        self.0 & EPOCH_MASK
     }
 }

@@ -83,6 +83,7 @@ risingwave_expr_impl = { workspace = true }
 risingwave_hummock_test = { path = "../storage/hummock_test", features = [
     "test",
 ] }
+risingwave_hummock_sdk = { workspace = true , features = ["enable_test_epoch"]}
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
 tracing-test = "0.2"
