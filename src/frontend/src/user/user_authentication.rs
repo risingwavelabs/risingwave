@@ -24,6 +24,15 @@ const MD5_ENCRYPTED_PREFIX: &str = "md5";
 const VALID_SHA256_ENCRYPTED_LEN: usize = SHA256_ENCRYPTED_PREFIX.len() + 64;
 const VALID_MD5_ENCRYPTED_LEN: usize = MD5_ENCRYPTED_PREFIX.len() + 32;
 
+/// Build AuthInfo for OAuth.
+#[inline(always)]
+pub fn build_oauth_info() -> Option<AuthInfo> {
+    Some(AuthInfo {
+        encryption_type: EncryptionType::OAuth as i32,
+        encrypted_value: Vec::new(),
+    })
+}
+
 /// Try to extract the encryption password from given password. The password is always stored
 /// encrypted in the system catalogs. The ENCRYPTED keyword has no effect, but is accepted for
 /// backwards compatibility. The method of encryption is by default SHA-256-encrypted. If the
@@ -81,6 +90,7 @@ pub fn encrypted_raw_password(info: &AuthInfo) -> String {
         EncryptionType::Plaintext => "",
         EncryptionType::Sha256 => SHA256_ENCRYPTED_PREFIX,
         EncryptionType::Md5 => MD5_ENCRYPTED_PREFIX,
+        EncryptionType::OAuth => "",
     };
     format!("{}{}", prefix, encrypted_pwd)
 }

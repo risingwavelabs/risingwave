@@ -23,7 +23,7 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::handler::HandlerArgs;
-use crate::user::user_authentication::encrypted_password;
+use crate::user::user_authentication::{build_oauth_info, encrypted_password};
 use crate::user::user_catalog::UserCatalog;
 
 fn alter_prost_user_info(
@@ -108,6 +108,10 @@ fn alter_prost_user_info(
                     user_info.auth_info = None;
                 }
                 update_fields.push(UpdateField::AuthInfo);
+            }
+            UserOption::OAuth => {
+                user_info.auth_info = build_oauth_info();
+                update_fields.push(UpdateField::AuthInfo)
             }
         }
     }

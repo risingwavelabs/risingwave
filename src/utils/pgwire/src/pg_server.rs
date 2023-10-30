@@ -116,6 +116,7 @@ pub enum UserAuthenticator {
         encrypted_password: Vec<u8>,
         salt: [u8; 4],
     },
+    OAuth,
 }
 
 impl UserAuthenticator {
@@ -126,6 +127,10 @@ impl UserAuthenticator {
             UserAuthenticator::Md5WithSalt {
                 encrypted_password, ..
             } => encrypted_password == password,
+            UserAuthenticator::OAuth => {
+                // TODO: OAuth authentication happens here.
+                true
+            }
         }
     }
 }

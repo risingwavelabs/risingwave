@@ -337,6 +337,7 @@ define_keywords!(
     NULLIF,
     NULLS,
     NUMERIC,
+    OAUTH,
     OBJECT,
     OCCURRENCES_REGEX,
     OCTET_LENGTH,

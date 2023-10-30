@@ -23,7 +23,7 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::{CatalogError, DatabaseId};
 use crate::handler::HandlerArgs;
-use crate::user::user_authentication::encrypted_password;
+use crate::user::user_authentication::{build_oauth_info, encrypted_password};
 use crate::user::user_catalog::UserCatalog;
 
 fn make_prost_user_info(
@@ -89,6 +89,7 @@ fn make_prost_user_info(
                     user_info.auth_info = encrypted_password(&user_info.name, &password.0);
                 }
             }
+            UserOption::OAuth => user_info.auth_info = build_oauth_info(),
         }
     }
 

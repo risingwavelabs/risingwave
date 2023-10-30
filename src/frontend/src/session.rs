@@ -825,6 +825,8 @@ impl SessionManager for SessionManagerImpl {
                             ),
                             salt,
                         }
+                    } else if auth_info.encryption_type == EncryptionType::OAuth as i32 {
+                        UserAuthenticator::OAuth
                     } else {
                         return Err(Box::new(Error::new(
                             ErrorKind::Unsupported,
