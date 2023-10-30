@@ -105,18 +105,8 @@ impl Source {
         // returns retention_seconds so default is used here
         let mut builder = TableCatalogBuilder::new(WithOptions::new(HashMap::default()));
 
-        let key = Field {
-            data_type: DataType::Varchar,
-            name: "partition_id".to_string(),
-            sub_fields: vec![],
-            type_name: "".to_string(),
-        };
-        let value = Field {
-            data_type: DataType::Jsonb,
-            name: "offset_info".to_string(),
-            sub_fields: vec![],
-            type_name: "".to_string(),
-        };
+        let key = Field::with_name(DataType::Varchar, "partition_id");
+        let value = Field::with_name(DataType::Jsonb, "offset_info");
 
         let ordered_col_idx = builder.add_column(&key);
         builder.add_column(&value);

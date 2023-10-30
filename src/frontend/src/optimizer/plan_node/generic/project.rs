@@ -73,25 +73,19 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
             .enumerate()
             .map(|(i, expr)| {
                 // Get field info from o2i.
-                let (name, sub_fields, type_name) = match o2i.try_map(i) {
+                let name = match o2i.try_map(i) {
                     Some(input_idx) => {
                         let field = input_schema.fields()[input_idx].clone();
-                        (field.name, field.sub_fields, field.type_name)
+                        field.name
                     }
                     None => match expr {
-                        ExprImpl::InputRef(_) | ExprImpl::Literal(_) => (
-                            format!("{:?}", ExprDisplay { expr, input_schema }),
-                            vec![],
-                            String::new(),
-                        ),
-                        _ => (
-                            format!("$expr{}", ctx.next_expr_display_id()),
-                            vec![],
-                            String::new(),
-                        ),
+                        ExprImpl::InputRef(_) | ExprImpl::Literal(_) => {
+                            format!("{:?}", ExprDisplay { expr, input_schema })
+                        }
+                        _ => format!("$expr{}", ctx.next_expr_display_id()),
                     },
                 };
-                Field::with_struct(expr.return_type(), name, sub_fields, type_name)
+                Field::with_name(expr.return_type(), name)
             })
             .collect();
         Schema { fields }

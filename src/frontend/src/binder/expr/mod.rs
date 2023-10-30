@@ -13,13 +13,12 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_sqlparser::ast::{
     Array, BinaryOperator, DataType as AstDataType, Expr, Function, JsonPredicateType, ObjectName,
-    Query, StructField, TrimWhereField, UnaryOperator,
+    Query, TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::expr::function::SYS_FUNCTION_WITHOUT_ARGS;
@@ -561,37 +560,6 @@ impl Binder {
         let lhs = self.bind_expr_inner(expr)?;
         lhs.cast_explicit(data_type).map_err(Into::into)
     }
-}
-
-/// Given a type `STRUCT<v1 int>`, this function binds the field `v1 int`.
-pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
-    let field_descs = if let AstDataType::Struct(defs) = &column_def.data_type {
-        defs.iter()
-            .map(|f| {
-                Ok(ColumnDesc {
-                    data_type: bind_data_type(&f.data_type)?,
-                    // Literals don't have `column_id`.
-                    column_id: ColumnId::new(0),
-                    name: f.name.real_value(),
-                    field_descs: vec![],
-                    type_name: "".to_string(),
-                    generated_or_default_column: None,
-                    description: None,
-                })
-            })
-            .collect::<Result<Vec<_>>>()?
-    } else {
-        vec![]
-    };
-    Ok(ColumnDesc {
-        data_type: bind_data_type(&column_def.data_type)?,
-        column_id: ColumnId::new(0),
-        name: column_def.name.real_value(),
-        field_descs,
-        type_name: "".to_string(),
-        generated_or_default_column: None,
-        description: None,
-    })
 }
 
 pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {

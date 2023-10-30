@@ -560,7 +560,6 @@ mod tests {
                         ("y", DataType::Float32),
                     ])),
                     column_id: 7.into(),
-                    fields: vec![],
                     column_type: SourceColumnType::Normal,
                     is_pk: false,
                 },

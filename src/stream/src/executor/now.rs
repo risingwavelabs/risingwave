@@ -46,12 +46,7 @@ impl<S: StateStore> NowExecutor<S> {
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> Self {
-        let schema = Schema::new(vec![Field {
-            data_type: DataType::Timestamptz,
-            name: String::from("now"),
-            sub_fields: vec![],
-            type_name: String::default(),
-        }]);
+        let schema = Schema::new(vec![Field::with_name(DataType::Timestamptz, "now")]);
 
         Self {
             barrier_receiver,

@@ -26,7 +26,6 @@ pub struct SourceColumnDesc {
     pub name: String,
     pub data_type: DataType,
     pub column_id: ColumnId,
-    pub fields: Vec<ColumnDesc>,
     pub column_type: SourceColumnType,
 
     // `is_pk` is used to indicate whether the column is part of the primary key columns.
@@ -76,7 +75,6 @@ impl SourceColumnDesc {
             name,
             data_type,
             column_id,
-            fields: vec![],
             column_type: SourceColumnType::Normal,
             is_pk: false,
         }
@@ -107,7 +105,6 @@ impl From<&ColumnDesc> for SourceColumnDesc {
             name: c.name.clone(),
             data_type: c.data_type.clone(),
             column_id: c.column_id,
-            fields: c.field_descs.clone(),
             column_type,
             is_pk: false,
         }
@@ -120,8 +117,6 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             data_type: s.data_type.clone(),
             column_id: s.column_id,
             name: s.name.clone(),
-            field_descs: s.fields.clone(),
-            type_name: "".to_string(),
             generated_or_default_column: None,
             description: None,
         }

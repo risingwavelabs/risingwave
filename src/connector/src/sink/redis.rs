@@ -294,14 +294,10 @@ mod test {
             Field {
                 data_type: DataType::Int32,
                 name: "id".to_string(),
-                sub_fields: vec![],
-                type_name: "string".to_string(),
             },
             Field {
                 data_type: DataType::Varchar,
                 name: "name".to_string(),
-                sub_fields: vec![],
-                type_name: "string".to_string(),
             },
         ]);
 
@@ -355,14 +351,10 @@ mod test {
             Field {
                 data_type: DataType::Int32,
                 name: "id".to_string(),
-                sub_fields: vec![],
-                type_name: "string".to_string(),
             },
             Field {
                 data_type: DataType::Varchar,
                 name: "name".to_string(),
-                sub_fields: vec![],
-                type_name: "string".to_string(),
             },
         ]);
 

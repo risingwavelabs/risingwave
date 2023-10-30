@@ -21,7 +21,6 @@ use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 
 use super::row_id_column_desc;
 use crate::catalog::{offset_column_desc, Field, ROW_ID_COLUMN_ID};
-use crate::error::ErrorCode;
 use crate::types::DataType;
 
 /// Column ID is the unique identifier of a column in a table. Different from table ID, column ID is
@@ -98,8 +97,6 @@ pub struct ColumnDesc {
     pub data_type: DataType,
     pub column_id: ColumnId,
     pub name: String,
-    pub field_descs: Vec<ColumnDesc>,
-    pub type_name: String,
     pub generated_or_default_column: Option<GeneratedOrDefaultColumn>,
     pub description: Option<String>,
 }
@@ -110,8 +107,6 @@ impl ColumnDesc {
             data_type,
             column_id,
             name: String::new(),
-            field_descs: vec![],
-            type_name: String::new(),
             generated_or_default_column: None,
             description: None,
         }
@@ -123,47 +118,8 @@ impl ColumnDesc {
             column_type: Some(self.data_type.to_protobuf()),
             column_id: self.column_id.get_id(),
             name: self.name.clone(),
-            field_descs: self
-                .field_descs
-                .clone()
-                .into_iter()
-                .map(|f| f.to_protobuf())
-                .collect_vec(),
-            type_name: self.type_name.clone(),
             generated_or_default_column: self.generated_or_default_column.clone(),
             description: self.description.clone(),
-        }
-    }
-
-    /// Flatten a nested column to a list of columns (including itself).
-    /// If the type is atomic, it returns simply itself.
-    /// If the type has multiple nesting levels, it traverses for the tree-like schema,
-    /// and returns every tree node.
-    pub fn flatten(&self) -> Vec<ColumnDesc> {
-        let mut descs = vec![self.clone()];
-        descs.extend(self.field_descs.iter().flat_map(|d| {
-            let mut desc = d.clone();
-            desc.name = self.name.clone() + "." + &desc.name;
-            desc.flatten()
-        }));
-        descs
-    }
-
-    /// Find `column_desc` in `field_descs` by name.
-    pub fn field(&self, name: &String) -> crate::error::Result<(ColumnDesc, i32)> {
-        if let DataType::Struct { .. } = self.data_type {
-            for (index, col) in self.field_descs.iter().enumerate() {
-                if col.name == *name {
-                    return Ok((col.clone(), index as i32));
-                }
-            }
-            Err(ErrorCode::ItemNotFound(format!("Invalid field name: {}", name)).into())
-        } else {
-            Err(ErrorCode::ItemNotFound(format!(
-                "Cannot get field from non nested column: {}",
-                self.name
-            ))
-            .into())
         }
     }
 
@@ -172,29 +128,6 @@ impl ColumnDesc {
             data_type,
             column_id: ColumnId::new(column_id),
             name: name.to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
-            generated_or_default_column: None,
-            description: None,
-        }
-    }
-
-    pub fn new_struct(
-        name: &str,
-        column_id: i32,
-        type_name: &str,
-        fields: Vec<ColumnDesc>,
-    ) -> Self {
-        let data_type = DataType::new_struct(
-            fields.iter().map(|f| f.data_type.clone()).collect_vec(),
-            fields.iter().map(|f| f.name.clone()).collect_vec(),
-        );
-        Self {
-            data_type,
-            column_id: ColumnId::new(column_id),
-            name: name.to_string(),
-            field_descs: fields,
-            type_name: type_name.to_string(),
             generated_or_default_column: None,
             description: None,
         }
@@ -205,12 +138,6 @@ impl ColumnDesc {
             data_type: field.data_type.clone(),
             column_id: ColumnId::new(id),
             name: field.name.clone(),
-            field_descs: field
-                .sub_fields
-                .iter()
-                .map(Self::from_field_without_column_id)
-                .collect_vec(),
-            type_name: field.type_name.clone(),
             description: None,
             generated_or_default_column: None,
         }
@@ -237,17 +164,10 @@ impl ColumnDesc {
 
 impl From<PbColumnDesc> for ColumnDesc {
     fn from(prost: PbColumnDesc) -> Self {
-        let field_descs: Vec<ColumnDesc> = prost
-            .field_descs
-            .into_iter()
-            .map(ColumnDesc::from)
-            .collect();
         Self {
             data_type: DataType::from(prost.column_type.as_ref().unwrap()),
             column_id: ColumnId::new(prost.column_id),
             name: prost.name,
-            type_name: prost.type_name,
-            field_descs,
             generated_or_default_column: prost.generated_or_default_column,
             description: prost.description.clone(),
         }
@@ -266,8 +186,6 @@ impl From<&ColumnDesc> for PbColumnDesc {
             column_type: c.data_type.to_protobuf().into(),
             column_id: c.column_id.into(),
             name: c.name.clone(),
-            field_descs: c.field_descs.iter().map(ColumnDesc::to_protobuf).collect(),
-            type_name: c.type_name.clone(),
             generated_or_default_column: c.generated_or_default_column.clone(),
             description: c.description.clone(),
         }
@@ -410,9 +328,10 @@ pub mod tests {
         ];
         let country = vec![
             PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 1),
-            PbColumnDesc::new_struct("country.city", 4, ".test.City", city),
+            // PbColumnDesc::new_struct("country.city", 4, ".test.City", city),
         ];
-        PbColumnDesc::new_struct("country", 5, ".test.Country", country)
+        // PbColumnDesc::new_struct("country", 5, ".test.Country", country)
+        country[0].clone()
     }
 
     pub fn build_desc() -> ColumnDesc {
@@ -422,9 +341,10 @@ pub mod tests {
         ];
         let country = vec![
             ColumnDesc::new_atomic(DataType::Varchar, "country.address", 1),
-            ColumnDesc::new_struct("country.city", 4, ".test.City", city),
+            // ColumnDesc::new_struct("country.city", 4, ".test.City", city),
         ];
-        ColumnDesc::new_struct("country", 5, ".test.Country", country)
+        // ColumnDesc::new_struct("country", 5, ".test.Country", country)
+        country[0].clone()
     }
 
     #[test]

@@ -39,37 +39,13 @@ fn avro_field_to_column_desc(
     index: &mut i32,
 ) -> anyhow::Result<ColumnDesc> {
     let data_type = avro_type_mapping(schema)?;
-    match schema {
-        Schema::Record {
-            name: schema_name,
-            fields,
-            ..
-        } => {
-            let vec_column = fields
-                .iter()
-                .map(|f| avro_field_to_column_desc(&f.name, &f.schema, index))
-                .collect::<anyhow::Result<Vec<_>>>()?;
-            *index += 1;
-            Ok(ColumnDesc {
-                column_type: Some(data_type.to_protobuf()),
-                column_id: *index,
-                name: name.to_owned(),
-                field_descs: vec_column,
-                type_name: schema_name.to_string(),
-                generated_or_default_column: None,
-                description: None,
-            })
-        }
-        _ => {
-            *index += 1;
-            Ok(ColumnDesc {
-                column_type: Some(data_type.to_protobuf()),
-                column_id: *index,
-                name: name.to_owned(),
-                ..Default::default()
-            })
-        }
-    }
+    *index += 1;
+    Ok(ColumnDesc {
+        column_type: Some(data_type.to_protobuf()),
+        column_id: *index,
+        name: name.to_owned(),
+        ..Default::default()
+    })
 }
 
 fn avro_type_mapping(schema: &Schema) -> anyhow::Result<DataType> {

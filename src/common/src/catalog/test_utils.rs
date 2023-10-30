@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::plan_common::ColumnDesc;
 
@@ -22,11 +20,6 @@ pub trait ColumnDescTestExt {
     ///
     /// **Note: Only used for tests.**
     fn new_atomic(data_type: DataType, name: &str, column_id: i32) -> Self;
-
-    /// Create a [`ColumnDesc`] with `Struct` type.
-    ///
-    /// **Note: Only used for tests.**
-    fn new_struct(name: &str, column_id: i32, type_name: &str, fields: Vec<ColumnDesc>) -> Self;
 }
 
 impl ColumnDescTestExt for ColumnDesc {
@@ -36,28 +29,6 @@ impl ColumnDescTestExt for ColumnDesc {
             column_id,
             name: name.to_string(),
             ..Default::default()
-        }
-    }
-
-    fn new_struct(name: &str, column_id: i32, type_name: &str, fields: Vec<ColumnDesc>) -> Self {
-        let field_type = fields
-            .iter()
-            .map(|f| f.column_type.as_ref().unwrap().clone())
-            .collect_vec();
-        Self {
-            column_type: Some(DataType {
-                type_name: TypeName::Struct as i32,
-                is_nullable: true,
-                field_type,
-                field_names: fields.iter().map(|f| f.name.clone()).collect_vec(),
-                ..Default::default()
-            }),
-            column_id,
-            name: name.to_string(),
-            type_name: type_name.to_string(),
-            field_descs: fields,
-            generated_or_default_column: None,
-            description: None,
         }
     }
 }

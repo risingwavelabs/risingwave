@@ -36,12 +36,7 @@ pub struct LogicalNow {
 
 impl LogicalNow {
     pub fn new(ctx: OptimizerContextRef) -> Self {
-        let schema = Schema::new(vec![Field {
-            data_type: DataType::Timestamptz,
-            name: String::from("now"),
-            sub_fields: vec![],
-            type_name: String::default(),
-        }]);
+        let schema = Schema::new(vec![Field::with_name(DataType::Timestamptz, "now")]);
         let base = PlanBase::new_logical(
             ctx,
             schema,

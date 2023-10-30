@@ -183,33 +183,13 @@ impl ProtobufParserConfig {
         parse_trace: &mut Vec<String>,
     ) -> Result<ColumnDesc> {
         let field_type = protobuf_type_mapping(field_descriptor, parse_trace)?;
-        if let Kind::Message(m) = field_descriptor.kind() {
-            let field_descs = if let DataType::List { .. } = field_type {
-                vec![]
-            } else {
-                m.fields()
-                    .map(|f| Self::pb_field_to_col_desc(&f, index, parse_trace))
-                    .collect::<Result<Vec<_>>>()?
-            };
-            *index += 1;
-            Ok(ColumnDesc {
-                column_id: *index,
-                name: field_descriptor.name().to_string(),
-                column_type: Some(field_type.to_protobuf()),
-                field_descs,
-                type_name: m.full_name().to_string(),
-                generated_or_default_column: None,
-                description: None,
-            })
-        } else {
-            *index += 1;
-            Ok(ColumnDesc {
-                column_id: *index,
-                name: field_descriptor.name().to_string(),
-                column_type: Some(field_type.to_protobuf()),
-                ..Default::default()
-            })
-        }
+        *index += 1;
+        Ok(ColumnDesc {
+            column_id: *index,
+            name: field_descriptor.name().to_string(),
+            column_type: Some(field_type.to_protobuf()),
+            ..Default::default()
+        })
     }
 }
 

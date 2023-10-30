@@ -165,36 +165,21 @@ impl LogicalSource {
             column_catalog: vec![
                 ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(
-                        &Field {
-                            name: "filename".to_string(),
-                            data_type: DataType::Varchar,
-                            sub_fields: vec![],
-                            type_name: "".to_string(),
-                        },
+                        &Field::with_name(DataType::Varchar, "filename"),
                         0,
                     ),
                     is_hidden: false,
                 },
                 ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(
-                        &Field {
-                            name: "last_edit_time".to_string(),
-                            data_type: DataType::Timestamp,
-                            sub_fields: vec![],
-                            type_name: "".to_string(),
-                        },
+                        &Field::with_name(DataType::Timestamp, "last_edit_time"),
                         1,
                     ),
                     is_hidden: false,
                 },
                 ColumnCatalog {
                     column_desc: ColumnDesc::from_field_with_column_id(
-                        &Field {
-                            name: "file_size".to_string(),
-                            data_type: DataType::Int64,
-                            sub_fields: vec![],
-                            type_name: "".to_string(),
-                        },
+                        &Field::with_name(DataType::Int64, "file_size"),
                         0,
                     ),
                     is_hidden: false,
