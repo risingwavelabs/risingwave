@@ -7378,6 +7378,7 @@ dependencies = [
  "url",
  "urlencoding",
  "workspace-hack",
+ "yup-oauth2",
 ]
 
 [[package]]

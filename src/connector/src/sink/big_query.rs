@@ -29,10 +29,14 @@ use risingwave_common::types::DataType;
 use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::serde_as;
+use url::Url;
+use yup_oauth2::ServiceAccountKey;
 
 use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
 use super::writer::LogSinkerOf;
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
+use crate::aws_auth::AwsAuthProps;
+use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::sink::writer::SinkWriterExt;
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriter, SinkWriterParam,
@@ -43,14 +47,51 @@ const BIGQUERY_INSERT_MAX_NUMS: usize = 1024;
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct BigQueryCommon {
-    #[serde(rename = "bigquery.path")]
-    pub file_path: String,
+    #[serde(rename = "bigquery.local.path")]
+    pub local_path: Option<String>,
+    #[serde(rename = "bigquery.s3.path")]
+    pub s3_path: Option<String>,
     #[serde(rename = "bigquery.project")]
     pub project: String,
     #[serde(rename = "bigquery.dataset")]
     pub dataset: String,
     #[serde(rename = "bigquery.table")]
     pub table: String,
+    #[serde(flatten)]
+    /// required keys refer to [`crate::aws_utils::AWS_DEFAULT_CONFIG`]
+    pub s3_credentials: HashMap<String, String>,
+}
+
+impl BigQueryCommon {
+    pub(crate) async fn build_client(&self) -> Result<Client> {
+        let service_account = if let Some(local_path) = &self.local_path {
+            let auth_json = std::fs::read_to_string(local_path)
+                .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
+            serde_json::from_str::<ServiceAccountKey>(&auth_json)
+                .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?
+        } else if let Some(s3_path) = &self.s3_path {
+            let url =
+                Url::parse(s3_path).map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
+            let auth_json = load_file_descriptor_from_s3(
+                &url,
+                &AwsAuthProps::from_pairs(
+                    self.s3_credentials
+                        .iter()
+                        .map(|(k, v)| (k.as_str(), v.as_str())),
+                ),
+            )
+            .await
+            .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
+            serde_json::from_slice::<ServiceAccountKey>(&auth_json)
+                .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?
+        } else {
+            return Err(SinkError::BigQuery(anyhow::anyhow!("`bigquery.local.path` and `bigquery.s3.path` set at least one, configure as needed.")));
+        };
+        let client: Client = Client::from_service_account_key(service_account, false)
+            .await
+            .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
+        Ok(client)
+    }
 }
 
 #[serde_as]
@@ -200,9 +241,7 @@ impl Sink for BigQuerySink {
             )));
         }
 
-        let client = Client::from_service_account_key_file(&self.config.common.file_path)
-            .await
-            .map_err(|e| SinkError::BigQuery(e.into()))?;
+        let client = self.config.common.build_client().await?;
         let mut rs = client
         .job()
         .query(
@@ -266,10 +305,7 @@ impl BigQuerySinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
-        let client = Client::from_service_account_key_file(&config.common.file_path)
-            .await
-            .map_err(|e| SinkError::BigQuery(e.into()))
-            .unwrap();
+        let client = config.common.build_client().await?;
         Ok(Self {
             config,
             schema: schema.clone(),

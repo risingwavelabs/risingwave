@@ -28,6 +28,7 @@ CREATE table '${project_id}'.'${dataset_id}'.'${table_id}'(
 
     1. We need to obtain the JSON file for Google Cloud service accounts, which can be configured here: https://console.cloud.google.com/iam-admin/serviceaccounts.
     2. Because BigQuery has limited support for updates and deletes, we currently only support 'append only'
+    3. Regarding file path, we can choose between S3 and local files, and the specific SQL statement is in the 'create_sink.sql'.
 
 Run the following query
 ```sql
