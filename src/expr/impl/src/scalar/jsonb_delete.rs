@@ -231,9 +231,30 @@ fn jsonb_remove_index(v: JsonbRef<'_>, index: i32) -> Result<JsonbVal> {
 /// SELECT '{"a": 1}'::jsonb #- '{}';
 /// ----
 /// {"a": 1}
+///
+/// # Edge case: Empty array
+/// query T
+/// SELECT '[]'::jsonb #- '{a}';
+/// ----
+/// []
+///
+/// # Edge case: Empty object
+/// query T
+/// SELECT '{}'::jsonb #- '{null}';
+/// ----
+/// {}
+///
+/// query error cannot delete path in scalar
+/// SELECT '1'::jsonb #- '{}';
 /// ```
 #[function("jsonb_delete_path(jsonb, varchar[]) -> jsonb")]
 fn jsonb_delete_path(v: JsonbRef<'_>, path: ListRef<'_>) -> Result<JsonbVal> {
+    if v.is_scalar() {
+        return Err(ExprError::InvalidParam {
+            name: "jsonb",
+            reason: "cannot delete path in scalar".into(),
+        });
+    }
     if path.is_empty() {
         return Ok(JsonbVal::from(v));
     }
@@ -253,6 +274,10 @@ fn jsonbb_remove_path(
 ) -> Result<()> {
     match jsonb {
         ValueRef::Object(obj) => {
+            if obj.is_empty() {
+                builder.add_value(jsonb);
+                return Ok(());
+            }
             let key = path
                 .get(i)
                 .unwrap()
@@ -282,6 +307,10 @@ fn jsonbb_remove_path(
             Ok(())
         }
         ValueRef::Array(array) => {
+            if array.is_empty() {
+                builder.add_value(jsonb);
+                return Ok(());
+            }
             let key = path
                 .get(i)
                 .unwrap()
