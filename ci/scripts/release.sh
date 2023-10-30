@@ -39,16 +39,16 @@ echo "--- Install aws cli"
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 
-#echo "--- Check risingwave release version"
-#if [[ -n "${BUILDKITE_TAG}" ]]; then
-#  CARGO_PKG_VERSION="$(toml get --toml-path Cargo.toml workspace.package.version)"
-#  if [[ "${CARGO_PKG_VERSION}" != "${BUILDKITE_TAG#*v}" ]]; then
-#    echo "CARGO_PKG_VERSION: ${CARGO_PKG_VERSION}"
-#    echo "BUILDKITE_TAG: ${BUILDKITE_TAG}"
-#    echo "CARGO_PKG_VERSION and BUILDKITE_TAG are not equal"
-#    exit 1
-#  fi
-#fi
+echo "--- Check risingwave release version"
+if [[ -n "${BUILDKITE_TAG}" ]]; then
+  CARGO_PKG_VERSION="$(toml get --toml-path Cargo.toml workspace.package.version)"
+  if [[ "${CARGO_PKG_VERSION}" != "${BUILDKITE_TAG#*v}" ]]; then
+    echo "CARGO_PKG_VERSION: ${CARGO_PKG_VERSION}"
+    echo "BUILDKITE_TAG: ${BUILDKITE_TAG}"
+    echo "CARGO_PKG_VERSION and BUILDKITE_TAG are not equal"
+    exit 1
+  fi
+fi
 
 echo "--- Build risingwave release binary"
 cargo build -p risingwave_cmd_all --features "rw-static-link" --profile release
@@ -95,9 +95,6 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
   echo "--- Release upload risectl asset"
   tar -czvf risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risectl
   gh release upload "${BUILDKITE_TAG}" risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
-
-  echo "--- Release build and upload risingwave connector node jar asset"
-  gh release upload "${BUILDKITE_TAG}" risingwave-connector-"${BUILDKITE_TAG}".tar.gz
 
   echo "--- Release upload risingwave-all-in-one asset"
   tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux-all-in-one.tar.gz risingwave libs
