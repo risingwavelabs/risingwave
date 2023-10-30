@@ -263,7 +263,7 @@ impl GlobalStreamManager {
         .in_current_span();
         tokio::spawn(fut);
 
-        try {
+        let res = try {
             while let Some(state) = receiver.recv().await {
                 match state {
                     CreatingState::Failed { reason } => {
@@ -284,7 +284,9 @@ impl GlobalStreamManager {
                                 .try_cancel_scheduled_create(table_id)
                                 .await
                             {
-                                tracing::debug!("cancelling streaming job {table_id} in buffer queue.");
+                                tracing::debug!(
+                                    "cancelling streaming job {table_id} in buffer queue."
+                                );
                                 let node_actors = table_fragments.worker_actor_ids();
                                 let cluster_info =
                                     self.cluster_manager.get_streaming_cluster_info().await;
@@ -300,7 +302,8 @@ impl GlobalStreamManager {
                                 let futures = node_actors.into_iter().map(|(node, actor_ids)| {
                                     let request_id = Uuid::new_v4().to_string();
                                     async move {
-                                        let client = self.env.stream_client_pool().get(&node).await?;
+                                        let client =
+                                            self.env.stream_client_pool().get(&node).await?;
                                         let request = DropActorsRequest {
                                             request_id,
                                             actor_ids,
@@ -318,8 +321,8 @@ impl GlobalStreamManager {
                             }
                             if !table_fragments.is_created() {
                                 tracing::debug!(
-                                "cancelling streaming job {table_id} by issue cancel command."
-                            );
+                                    "cancelling streaming job {table_id} by issue cancel command."
+                                );
                                 self.barrier_scheduler
                                     .run_command(Command::CancelStreamingJob(table_fragments))
                                     .await?;
@@ -337,10 +340,10 @@ impl GlobalStreamManager {
                     }
                 }
             }
-        }
+        };
 
         self.creating_job_info.delete_job(table_id).await;
-        Ok(())
+        res
     }
 
     async fn build_actors(
