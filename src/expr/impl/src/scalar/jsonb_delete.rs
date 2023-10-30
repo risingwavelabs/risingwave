@@ -139,7 +139,7 @@ fn jsonb_remove_index(v: JsonbRef<'_>, index: i32) -> Result<JsonbVal> {
             })
         }
     };
-    let Some(idx) = normalize_array_index(array.len(), idx) else {
+    let Some(idx) = normalize_array_index(array.len(), index) else {
         // out of bounds index returns original value
         return Ok(JsonbVal::from(v));
     };
