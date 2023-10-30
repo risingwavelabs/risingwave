@@ -134,7 +134,7 @@ impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
         let map = (0..input_len)
             .map(|source| Some(source + input_len))
             .collect_vec();
-        ColIndexMapping::with_target_size(map, self.output_len())
+        ColIndexMapping::new(map, self.output_len())
     }
 
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {

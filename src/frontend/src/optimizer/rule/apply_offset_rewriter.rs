@@ -81,6 +81,6 @@ impl ApplyCorrelatedIndicesConverter {
         for (src, dst) in col_mapping.mapping_pairs() {
             map[dst] = Some(src);
         }
-        ColIndexMapping::with_target_size(map, col_mapping.source_size())
+        ColIndexMapping::new(map, col_mapping.source_size())
     }
 }
