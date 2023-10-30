@@ -99,6 +99,11 @@ pub enum BinaryOperator {
     LongArrow,
     HashArrow,
     HashLongArrow,
+    Contains,
+    Contained,
+    Exists,
+    ExistsAny,
+    ExistsAll,
     PGQualified(Box<QualifiedOperator>),
 }
 
@@ -143,6 +148,11 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::LongArrow => "->>",
             BinaryOperator::HashArrow => "#>",
             BinaryOperator::HashLongArrow => "#>>",
+            BinaryOperator::Contains => "@>",
+            BinaryOperator::Contained => "<@",
+            BinaryOperator::Exists => "?",
+            BinaryOperator::ExistsAny => "?|",
+            BinaryOperator::ExistsAll => "?&",
             BinaryOperator::PGQualified(_) => unreachable!(),
         })
     }

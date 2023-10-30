@@ -222,6 +222,16 @@ message ExprNode {
     JSONB_CAT = 605;
     JSONB_OBJECT = 606;
     JSONB_PRETTY = 607;
+    // jsonb @> jsonb
+    JSONB_CONTAINS = 608;
+    // jsonb <@ jsonb
+    JSONB_CONTAINED = 609;
+    // jsonb ? text
+    JSONB_EXISTS = 610;
+    // jsonb ?| text[]
+    JSONB_EXISTS_ANY = 611;
+    // jsonb ?& text[]
+    JSONB_EXISTS_ALL = 612;
 
     // Non-pure functions below (> 1000)
     // ------------------------

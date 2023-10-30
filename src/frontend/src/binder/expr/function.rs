@@ -879,6 +879,11 @@ impl Binder {
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
                 ("jsonb_object", raw_call(ExprType::JsonbObject)),
                 ("jsonb_pretty", raw_call(ExprType::JsonbPretty)),
+                ("jsonb_contains", raw_call(ExprType::JsonbContains)),
+                ("jsonb_contained", raw_call(ExprType::JsonbContained)),
+                ("jsonb_exists", raw_call(ExprType::JsonbExists)),
+                ("jsonb_exists_any", raw_call(ExprType::JsonbExistsAny)),
+                ("jsonb_exists_all", raw_call(ExprType::JsonbExistsAll)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least
