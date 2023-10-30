@@ -129,6 +129,7 @@ impl UserAuthenticator {
             } => encrypted_password == password,
             UserAuthenticator::OAuth => {
                 // TODO: OAuth authentication happens here.
+                tracing::info!("OAuth authenticator gets: {}", String::from_utf8_lossy(password));
                 true
             }
         }
