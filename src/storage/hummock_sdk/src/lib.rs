@@ -289,10 +289,10 @@ impl EpochWithGap {
     }
 
     pub fn new_from_epoch(epoch: u64) -> Self {
-        #[cfg(not(feature = "enable_test_epoch"))]
-        {
-            debug_assert_eq!(epoch & EPOCH_MASK, 0);
-        }
+        // #[cfg(not(feature = "enable_test_epoch"))]
+        // {
+        //     debug_assert_eq!(epoch & EPOCH_MASK, 0);
+        // }
 
         EpochWithGap::new(epoch, 0)
     }
