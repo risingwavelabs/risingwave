@@ -212,10 +212,14 @@ message ExprNode {
 
     // Jsonb functions
 
-    // jsonb -> int, jsonb -> text, jsonb #> text[] that returns jsonb
-    JSONB_ACCESS_INNER = 600;
-    // jsonb ->> int, jsonb ->> text, jsonb #>> text[] that returns text
+    // jsonb -> int, jsonb -> text that returns jsonb
+    JSONB_ACCESS = 600;
+    // jsonb ->> int, jsonb ->> text that returns text
     JSONB_ACCESS_STR = 601;
+    // jsonb #> text[] -> jsonb
+    JSONB_ACCESS_MULTI = 613;
+    // jsonb #>> text[] -> text
+    JSONB_ACCESS_MULTI_STR = 614;
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
     IS_JSON = 604;
