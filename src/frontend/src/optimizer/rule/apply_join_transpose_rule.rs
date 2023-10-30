@@ -356,7 +356,7 @@ impl ApplyJoinTransposeRule {
             correlated_indices,
             false,
         );
-        let output_indices: Vec<_> = {
+        let (output_indices, target_size) = {
             let (apply_left_len, join_right_len) = match apply_join_type {
                 JoinType::LeftSemi | JoinType::LeftAnti => (apply_left_len, 0),
                 JoinType::RightSemi | JoinType::RightAnti => (0, join.right().schema().len()),
@@ -368,14 +368,19 @@ impl ApplyJoinTransposeRule {
                 join_left_len + apply_left_len..join_left_len + apply_left_len + join_right_len,
             );
 
-            match join.join_type() {
+            let output_indices: Vec<_> = match join.join_type() {
                 JoinType::LeftSemi | JoinType::LeftAnti => left_iter.collect(),
                 JoinType::RightSemi | JoinType::RightAnti => right_iter.collect(),
                 _ => left_iter.chain(right_iter).collect(),
-            }
+            };
+
+            let target_size = join_left_len + apply_left_len + join_right_len;
+            (output_indices, target_size)
         };
-        let mut output_indices_mapping =
-            ColIndexMapping::without_target_size(output_indices.iter().map(|x| Some(*x)).collect());
+        let mut output_indices_mapping = ColIndexMapping::new(
+            output_indices.iter().map(|x| Some(*x)).collect(),
+            target_size,
+        );
         let new_join = LogicalJoin::new(
             join.left(),
             new_join_right,
@@ -518,7 +523,7 @@ impl ApplyJoinTransposeRule {
             false,
         );
 
-        let output_indices: Vec<_> = {
+        let (output_indices, target_size) = {
             let (apply_left_len, join_right_len) = match apply_join_type {
                 JoinType::LeftSemi | JoinType::LeftAnti => (apply_left_len, 0),
                 JoinType::RightSemi | JoinType::RightAnti => (0, join.right().schema().len()),
@@ -529,11 +534,14 @@ impl ApplyJoinTransposeRule {
             let right_iter = join_left_len + apply_left_len * 2
                 ..join_left_len + apply_left_len * 2 + join_right_len;
 
-            match join.join_type() {
+            let output_indices: Vec<_> = match join.join_type() {
                 JoinType::LeftSemi | JoinType::LeftAnti => left_iter.collect(),
                 JoinType::RightSemi | JoinType::RightAnti => right_iter.collect(),
                 _ => left_iter.chain(right_iter).collect(),
-            }
+            };
+
+            let target_size = join_left_len + apply_left_len * 2 + join_right_len;
+            (output_indices, target_size)
         };
         let new_join = LogicalJoin::new(
             new_join_left,
@@ -548,8 +556,9 @@ impl ApplyJoinTransposeRule {
                 new_join.into()
             }
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                let mut output_indices_mapping = ColIndexMapping::without_target_size(
+                let mut output_indices_mapping = ColIndexMapping::new(
                     output_indices.iter().map(|x| Some(*x)).collect(),
+                    target_size,
                 );
                 // Leave other condition for predicate push down to deal with
                 LogicalFilter::create(
