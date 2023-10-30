@@ -32,8 +32,10 @@ use super::*;
 /// It is used to throttle problematic MVs that are consuming too much resources.
 pub struct FlowControlExecutor {
     input: BoxedExecutor,
-    rate_limit: Option<u32>,
+    rate_limit: RateLimitConfig,
 }
+
+type RateLimitConfig = Option<u32>;
 
 impl FlowControlExecutor {
     #[allow(clippy::too_many_arguments)]
@@ -45,36 +47,81 @@ impl FlowControlExecutor {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        let get_rate_limiter = |rate_limit: u32| {
-            let quota = Quota::per_second(NonZeroU32::new(rate_limit).unwrap());
-            let clock = MonotonicClock;
-            RateLimiter::direct_with_clock(quota, &clock)
-        };
-        let rate_limiter = self.rate_limit.map(get_rate_limiter);
-        #[for_await]
-        for msg in self.input.execute() {
-            let msg = msg?;
-            match msg {
-                Message::Chunk(chunk) => {
-                    #[cfg(not(madsim))]
-                    {
-                        if let Some(rate_limiter) = &rate_limiter {
-                            let result = rate_limiter
-                                .until_n_ready(NonZeroU32::new(chunk.cardinality() as u32).unwrap())
-                                .await;
-                            if let Err(InsufficientCapacity(n)) = result {
-                                tracing::error!(
-                                    "Rate Limit {:?} smaller than chunk cardinality {n}",
-                                    self.rate_limit,
-                                );
+        let mut rate_limit = self.rate_limit;
+        let input = self.input;
+        let mut input_stream = input.execute();
+        loop {
+            match &rate_limit {
+                None =>
+                {
+                    #[for_await]
+                    for msg in &mut input_stream {
+                        let msg = msg?;
+                        match msg {
+                            Message::Barrier(ref b) => {
+                                if let Some(new_rate_limit) = Self::get_rate_limit_config_change(b)
+                                {
+                                    rate_limit = new_rate_limit;
+                                    yield msg;
+                                    break;
+                                } else {
+                                    yield msg;
+                                }
+                            }
+                            _ => {
+                                yield msg;
                             }
                         }
                     }
-                    yield Message::Chunk(chunk);
                 }
-                _ => yield msg,
+                Some(rate_limit_value) => {
+                    let quota = Quota::per_second(NonZeroU32::new(*rate_limit_value).unwrap());
+                    let clock = MonotonicClock;
+                    let rate_limiter = RateLimiter::direct_with_clock(quota, &clock);
+                    #[for_await]
+                    for msg in &mut input_stream {
+                        let msg = msg?;
+                        match msg {
+                            Message::Chunk(ref chunk) => {
+                                #[cfg(not(madsim))]
+                                {
+                                    let result = rate_limiter
+                                        .until_n_ready(
+                                            NonZeroU32::new(chunk.cardinality() as u32).unwrap(),
+                                        )
+                                        .await;
+                                    if let Err(InsufficientCapacity(n)) = result {
+                                        tracing::error!(
+                                            "Rate Limit {:?} smaller than chunk cardinality {n}",
+                                            rate_limit_value,
+                                        );
+                                    }
+                                }
+                                yield msg;
+                            }
+                            Message::Barrier(ref b) => {
+                                if let Some(new_rate_limit) = Self::get_rate_limit_config_change(b)
+                                {
+                                    rate_limit = new_rate_limit;
+                                    yield msg;
+                                    break;
+                                } else {
+                                    yield msg;
+                                }
+                            }
+                            _ => {
+                                yield msg;
+                            }
+                        }
+                    }
+                }
             }
         }
+    }
+
+    // TODO: Handle config change for rate limit.
+    fn get_rate_limit_config_change(_barrier: &Barrier) -> Option<RateLimitConfig> {
+        None
     }
 }
 
