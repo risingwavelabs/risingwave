@@ -875,6 +875,8 @@ impl Binder {
                 ("jsonb_array_element", raw_call(ExprType::JsonbAccess)),
                 ("jsonb_object_field_text", raw_call(ExprType::JsonbAccessStr)),
                 ("jsonb_array_element_text", raw_call(ExprType::JsonbAccessStr)),
+                ("jsonb_extract_path", raw_call(ExprType::JsonbExtractPath)),
+                ("jsonb_extract_path_text", raw_call(ExprType::JsonbExtractPathText)),
                 ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
                 ("jsonb_object", raw_call(ExprType::JsonbObject)),

@@ -236,6 +236,8 @@ message ExprNode {
     JSONB_EXISTS_ANY = 611;
     // jsonb ?& text[]
     JSONB_EXISTS_ALL = 612;
+    JSONB_EXTRACT_PATH = 616;
+    JSONB_EXTRACT_PATH_TEXT = 617;
 
     // Non-pure functions below (> 1000)
     // ------------------------
