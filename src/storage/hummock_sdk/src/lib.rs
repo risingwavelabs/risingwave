@@ -267,7 +267,7 @@ pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
     checkpoint_path.trim_end_matches(|c| c != '/').to_string()
 }
 
-const EPOCH_AVAILABLE_BITS: u64 = 16;
+// const EPOCH_AVAILABLE_BITS: u64 = 16;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug, PartialOrd, Ord)]
 pub struct EpochWithGap(u64);
 
@@ -298,18 +298,10 @@ impl EpochWithGap {
 
     // return the pure epoch without spill offset
     pub fn pure_epoch(&self) -> HummockEpoch {
-        #[cfg(test)]
-        {
-            self.0
-        }
-
-        #[cfg(not(test))]
-        {
-            self.0 >> EPOCH_AVAILABLE_BITS
-        }
+        self.0 & !0xFFFF
     }
 
     pub fn offset(&self) -> u64 {
-        self.0 % EPOCH_AVAILABLE_BITS
+        self.0 & 0xFFFF
     }
 }
