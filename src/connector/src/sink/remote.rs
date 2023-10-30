@@ -153,7 +153,7 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
         }).try_collect()?;
 
         let mut env = JVM
-            .get_with_err()?
+            .get()?
             .attach_current_thread()
             .map_err(|err| SinkError::Internal(err.into()))?;
         let validate_sink_request = ValidateSinkRequest {

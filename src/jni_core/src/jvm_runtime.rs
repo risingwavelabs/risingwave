@@ -29,22 +29,28 @@ use tracing::error;
 const DEFAULT_MEMORY_PROPORTION: f64 = 0.07;
 
 pub static JVM: JavaVmWrapper = JavaVmWrapper;
+static JVM_RESULT: OnceLock<Result<JavaVM, String>> = OnceLock::new();
 
 pub struct JavaVmWrapper;
 
 impl JavaVmWrapper {
-    pub fn get(&self) -> Result<&'static JavaVM, &String> {
-        static JVM_RESULT: OnceLock<Result<JavaVM, String>> = OnceLock::new();
-        JVM_RESULT
-            .get_or_init(|| {
-                Self::inner_new().inspect_err(|e| error!("failed to init jvm: {:?}", e))
-            })
-            .as_ref()
+    pub fn for_initialized_jvm<O, F: FnOnce(&'static JavaVM) -> O>(&self, f: F) -> Option<O> {
+        JVM_RESULT.get().and_then(|result| {
+            if let Ok(jvm) = result {
+                Some(f(jvm))
+            } else {
+                None
+            }
+        })
     }
 
-    pub fn get_with_err(&self) -> anyhow::Result<&'static JavaVM> {
-        self.get()
-            .map_err(|e| anyhow!("jvm not initialized properly: {:?}", e))
+    pub fn get(&self) -> anyhow::Result<&'static JavaVM> {
+        match JVM_RESULT.get_or_init(|| {
+            Self::inner_new().inspect_err(|e| error!("failed to init jvm: {:?}", e))
+        }) {
+            Ok(jvm) => Ok(jvm),
+            Err(e) => Err(anyhow!("jvm not initialized properly: {:?}", e)),
+        }
     }
 
     fn inner_new() -> Result<JavaVM, String> {
@@ -160,7 +166,7 @@ pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::E
 
 /// Load JVM memory statistics from the runtime. If JVM is not initialized or fail to initialize, return zero.
 pub fn load_jvm_memory_stats() -> (usize, usize) {
-    if let Ok(jvm) = JVM.get() {
+    JVM.for_initialized_jvm(|jvm| {
         let result: Result<(usize, usize), jni::errors::Error> = try {
             let mut env = jvm.attach_current_thread()?;
 
@@ -195,7 +201,6 @@ pub fn load_jvm_memory_stats() -> (usize, usize) {
                 (0, 0)
             }
         }
-    } else {
-        (0, 0)
-    }
+    })
+    .unwrap_or((0, 0))
 }
