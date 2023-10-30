@@ -197,8 +197,8 @@ pub fn infer_show_variable(name: &str) -> Vec<PgFieldDescriptor> {
             ),
             PgFieldDescriptor::new(
                 "Mutable".to_string(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
+                DataType::Boolean.to_oid(),
+                DataType::Boolean.type_len(),
             ),
         ]
     } else {
