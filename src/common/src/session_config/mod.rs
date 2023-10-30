@@ -938,7 +938,7 @@ impl ConfigMap {
             VariableInfo{
                 name : BackfillSnapshotReadDelay::entry_name().to_lowercase(),
                 setting : self.backfill_snapshot_read_delay.to_string(),
-                description : String::from("Inject delay after first barrier in backfilling. Used for testing to yield control to tokio runtime")
+                description : String::from("Inject delay(ms) after first barrier in backfilling. Used for testing to yield control to tokio runtime")
             },
         ]
     }
