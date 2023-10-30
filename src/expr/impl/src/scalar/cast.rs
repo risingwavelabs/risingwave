@@ -37,14 +37,14 @@ use risingwave_pb::expr::expr_node::PbType;
 #[function("cast(varchar) -> timestamp")]
 #[function("cast(varchar) -> interval")]
 #[function("cast(varchar) -> jsonb")]
-pub fn str_parse<T>(elem: &str) -> Result<T>
+pub fn str_parse<T>(elem: &str, ctx: &Context) -> Result<T>
 where
     T: FromStr,
     <T as FromStr>::Err: std::fmt::Display,
 {
-    elem.trim()
-        .parse()
-        .map_err(|err: <T as FromStr>::Err| ExprError::Parse(err.to_string().into()))
+    elem.trim().parse().map_err(|err: <T as FromStr>::Err| {
+        ExprError::Parse(format!("{} {}", ctx.return_type, err).into())
+    })
 }
 
 // TODO: introduce `FromBinary` and support all types
@@ -521,7 +521,11 @@ mod tests {
     async fn test_unary() {
         test_unary_bool::<BoolArray, _>(|x| !x, PbType::Not).await;
         test_unary_date::<TimestampArray, _>(|x| try_cast(x).unwrap(), PbType::Cast).await;
-        test_str_to_int16::<I16Array, _>(|x| str_parse(x).unwrap()).await;
+        let ctx_str_to_int16 = Context {
+            arg_types: vec![DataType::Varchar],
+            return_type: DataType::Int16,
+        };
+        test_str_to_int16::<I16Array, _>(|x| str_parse(x, &ctx_str_to_int16).unwrap()).await;
     }
 
     #[tokio::test]

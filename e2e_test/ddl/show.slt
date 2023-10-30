@@ -33,10 +33,10 @@ table description       t3   NULL  volutpat vitae
 query TTT
 show columns from t3;
 ----
-v1 integer false
-v2 integer false
-v3 integer false
-_row_id serial true
+v1 integer false turpis vehicula
+v2 integer false Lorem ipsum dolor sit amet
+v3 integer false NULL
+_row_id serial true consectetur adipiscing elit
 
 statement ok
 create index idx1 on t3 (v1,v2);
