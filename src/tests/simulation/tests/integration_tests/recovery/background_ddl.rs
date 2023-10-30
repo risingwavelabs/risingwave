@@ -24,7 +24,6 @@ const CREATE_TABLE: &str = "CREATE TABLE t(v1 int);";
 const SEED_TABLE: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 100000);";
 const SET_BACKGROUND_DDL: &str = "SET BACKGROUND_DDL=true;";
 const SET_STREAMING_RATE_LIMIT: &str = "SET STREAMING_RATE_LIMIT=4000;";
-const SET_BACKFILL_SNAPSHOT_READ_DELAY: &str = "SET BACKFILL_SNAPSHOT_READ_DELAY=100;";
 const CREATE_MV1: &str = "CREATE MATERIALIZED VIEW mv1 as SELECT * FROM t;";
 
 async fn kill_cn_and_wait_recover(cluster: &Cluster) {
@@ -140,6 +139,7 @@ async fn test_background_ddl_cancel() -> Result<()> {
         "RUST_LOG",
         "info,risingwave_meta=debug,risingwave_stream::executor::backfill=debug",
     );
+    env::set_var("BACKFILL_SNAPSHOT_READ_DELAY", "100");
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_ansi(false)
@@ -150,7 +150,6 @@ async fn test_background_ddl_cancel() -> Result<()> {
     session.run(SEED_TABLE).await?;
     session.run(SET_BACKGROUND_DDL).await?;
     session.run(SET_STREAMING_RATE_LIMIT).await?;
-    session.run(SET_BACKFILL_SNAPSHOT_READ_DELAY).await?;
 
     for _ in 0..5 {
         session.run(CREATE_MV1).await?;
