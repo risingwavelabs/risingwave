@@ -306,6 +306,16 @@ impl<'a> JsonbRef<'a> {
         self.0.as_null().is_some()
     }
 
+    /// Returns true if this is a jsonb array.
+    pub fn is_array(&self) -> bool {
+        matches!(self.0, ValueRef::Array(_))
+    }
+
+    /// Returns true if this is a jsonb object.
+    pub fn is_object(&self) -> bool {
+        matches!(self.0, ValueRef::Object(_))
+    }
+
     /// Returns the type name of this jsonb.
     ///
     /// Possible values are: `null`, `boolean`, `number`, `string`, `array`, `object`.

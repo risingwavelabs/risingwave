@@ -92,10 +92,15 @@ pub fn jsonb_access_multi<'a>(v: JsonbRef<'a>, path: ListRef<'_>) -> Option<Json
     for key in path.iter() {
         // return null if any element is null
         let key = key?.into_utf8();
-        jsonb = match key.parse() {
-            Ok(idx) => jsonb_array_element(jsonb, idx)?,
-            Err(_) => jsonb_object_field(jsonb, key)?,
-        };
+        if jsonb.is_array() {
+            // return null if the key is not an integer
+            let idx = key.parse().ok()?;
+            jsonb = jsonb_array_element(jsonb, idx)?;
+        } else if jsonb.is_object() {
+            jsonb = jsonb_object_field(jsonb, key)?;
+        } else {
+            return None;
+        }
     }
     Some(jsonb)
 }
