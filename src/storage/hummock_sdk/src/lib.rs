@@ -286,12 +286,13 @@ impl EpochWithGap {
         }
     }
 
-    pub fn new_from_epoch(epoch_with_gap: u64) -> Self {
-        EpochWithGap(epoch_with_gap)
-    }
+    pub fn new_from_epoch(epoch: u64) -> Self {
+        #[cfg(not(feature = "enable_test_epoch"))]
+        {
+            debug_assert_eq!(epoch & EPOCH_MASK, 0);
+        }
 
-    pub fn new_for_test(epoch_with_gap: u64) -> Self {
-        EpochWithGap(epoch_with_gap)
+        EpochWithGap::new(epoch, 0)
     }
 
     pub fn new_max_epoch() -> Self {
