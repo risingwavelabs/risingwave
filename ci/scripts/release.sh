@@ -67,7 +67,7 @@ fi
 echo "--- Build connector node"
 cd ${REPO_ROOT}/java && mvn -B package -Dmaven.test.skip=true -Dno-build-rust
 cd ${REPO_ROOT} && mv ${REPO_ROOT}/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
-tar -zxvf risingwave-connector-"${BUILDKITE_TAG}".tar.gz
+tar -zxvf risingwave-connector-"${BUILDKITE_TAG}".tar.gz libs
 
 
 if [[ -n "${BUILDKITE_TAG}" ]]; then
@@ -96,8 +96,8 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
   gh release upload "${BUILDKITE_TAG}" risingwave-connector-"${BUILDKITE_TAG}".tar.gz
 
   echo "--- Release upload risingwave-all-in-one asset"
-  tar -czvf risingwave-all-in-one-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risingwave libs
-  gh release upload "${BUILDKITE_TAG}" risingwave-all-in-one-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
+  tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux-all-in-one.tar.gz risingwave libs
+  gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux-all-in-one.tar.gz
 fi
 
 
