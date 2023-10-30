@@ -921,6 +921,12 @@ impl CatalogManager {
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
     ) -> MetaResult<()> {
+        if self.table_is_created(table_id).await {
+            return Err(MetaError::invalid_parameter(format!(
+                "table is already created id={:#?}",
+                table_id
+            )));
+        }
         let table = {
             let core = &mut self.core.lock().await;
             let database_core = &mut core.database;
@@ -932,6 +938,18 @@ impl CatalogManager {
                 );
                 return Ok(());
             };
+            // `Unspecified` maps to Created state, due to backwards compatibility.
+            // `Created` states should not be cancelled.
+            if table
+                .get_stream_job_status()
+                .unwrap_or(StreamJobStatus::Created)
+                != StreamJobStatus::Creating
+            {
+                return Err(MetaError::invalid_parameter(format!(
+                    "table is not in creating state id={:#?}",
+                    table_id
+                )));
+            }
 
             tracing::trace!("cleanup tables for {}", table.id);
             let mut table_ids = vec![table.id];

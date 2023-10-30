@@ -40,7 +40,7 @@ use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::stream::{build_actor_connector_splits, SourceManagerRef, SplitAssignment};
-use crate::{MetaError, MetaResult};
+use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
 /// in some fragment, like scaling or migrating.
@@ -668,13 +668,6 @@ impl CommandContext {
             }
 
             Command::CancelStreamingJob(table_fragments) => {
-                let table_id = table_fragments.table_id().table_id;
-                if self.catalog_manager.table_is_created(table_id).await {
-                    return Err(MetaError::invalid_parameter(format!(
-                        "table is already created id={:#?}",
-                        table_id
-                    )));
-                }
                 tracing::debug!(id = ?table_fragments.table_id(), "cancelling stream job");
                 let node_actors = table_fragments.worker_actor_ids();
                 self.clean_up(node_actors).await?;
@@ -688,6 +681,7 @@ impl CommandContext {
                 // It won't clean the tables on failure,
                 // since the failure could be recoverable.
                 // As such it needs to be handled here.
+                let table_id = table_fragments.table_id().table_id;
                 let mut table_ids = table_fragments.internal_table_ids();
                 table_ids.push(table_id);
                 if let Err(e) = self.hummock_manager.unregister_table_ids(&table_ids).await {
