@@ -63,7 +63,7 @@ impl Rule for PushCalculationOfJoinRule {
                 )
                 .map(Some)
                 .collect_vec();
-            ColIndexMapping::with_target_size(map, new_internal_col_num)
+            ColIndexMapping::new(map, new_internal_col_num)
         };
         let (mut exprs, new_output_indices) =
             Self::remap_exprs_and_output_indices(exprs, output_indices, &mut col_index_mapping);
@@ -82,7 +82,7 @@ impl Rule for PushCalculationOfJoinRule {
                 .map(|i| i + left_col_num + left_exprs_non_input_ref.len())
                 .map(Some)
                 .collect_vec();
-            ColIndexMapping::with_target_size(map, new_internal_col_num)
+            ColIndexMapping::new(map, new_internal_col_num)
         };
         // replace chosen function calls.
         for (((index_of_func_call, ty), left_expr), right_expr) in indices_and_ty_of_func_calls

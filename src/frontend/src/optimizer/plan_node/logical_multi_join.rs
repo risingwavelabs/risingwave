@@ -87,7 +87,7 @@ impl LogicalMultiJoinBuilder {
     /// add a predicate above the plan, so they will be rewritten from the `output_indices` to the
     /// input indices
     pub fn add_predicate_above(&mut self, exprs: impl Iterator<Item = ExprImpl>) {
-        let mut mapping = ColIndexMapping::with_target_size(
+        let mut mapping = ColIndexMapping::new(
             self.output_indices.iter().map(|i| Some(*i)).collect(),
             self.tot_input_col_num,
         );
@@ -240,7 +240,7 @@ impl LogicalMultiJoin {
 
             i2o_maps
                 .into_iter()
-                .map(|map| ColIndexMapping::with_target_size(map, tot_col_num))
+                .map(|map| ColIndexMapping::new(map, tot_col_num))
                 .collect_vec()
         };
 

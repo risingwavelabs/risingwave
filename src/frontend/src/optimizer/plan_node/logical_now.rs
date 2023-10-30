@@ -81,10 +81,7 @@ impl ToStream for LogicalNow {
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        Ok((
-            self.clone().into(),
-            ColIndexMapping::with_target_size(vec![Some(0)], 1),
-        ))
+        Ok((self.clone().into(), ColIndexMapping::new(vec![Some(0)], 1)))
     }
 
     /// `to_stream` is equivalent to `to_stream_with_dist_required(RequiredDist::Any)`

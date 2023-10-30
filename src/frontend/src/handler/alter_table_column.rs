@@ -240,7 +240,7 @@ pub async fn handle_alter_table_column(
     };
 
     // Calculate the mapping from the original columns to the new columns.
-    let col_index_mapping = ColIndexMapping::with_target_size(
+    let col_index_mapping = ColIndexMapping::new(
         original_catalog
             .columns()
             .iter()
