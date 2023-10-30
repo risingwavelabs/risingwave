@@ -70,6 +70,7 @@ pub mod system_param;
 pub mod telemetry;
 pub mod transaction;
 
+pub mod acl;
 pub mod metrics;
 pub mod test_utils;
 pub mod types;

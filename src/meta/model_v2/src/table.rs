@@ -94,6 +94,7 @@ pub struct Model {
     pub cleaned_by_watermark: bool,
     pub job_status: JobStatus,
     pub create_type: CreateType,
+    pub description: Option<String>,
     pub version: TableVersion,
 }
 
