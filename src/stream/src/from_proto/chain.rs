@@ -173,7 +173,6 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     stream.streaming_metrics.clone(),
                     params.env.config().developer.chunk_size,
                     params.executor_id,
-                    node.snapshot_read_delay,
                 )
                 .boxed()
             }

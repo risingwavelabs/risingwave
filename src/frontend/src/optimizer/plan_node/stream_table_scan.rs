@@ -286,11 +286,6 @@ impl StreamTableScan {
             .build_backfill_state_catalog(state)
             .to_internal_table_prost();
 
-        let ctx = self.base.ctx();
-        let config = ctx.session_ctx().config();
-        let rate_limit = config.get_streaming_rate_limit();
-        let snapshot_read_delay = config.get_backfill_snapshot_read_delay();
-
         PbStreamNode {
             fields: self.schema().to_prost(),
             input: vec![
@@ -321,8 +316,12 @@ impl StreamTableScan {
                 // The table desc used by backfill executor
                 table_desc: Some(self.core.table_desc.to_protobuf()),
                 state_table: Some(catalog),
-                rate_limit,
-                snapshot_read_delay,
+                rate_limit: self
+                    .base
+                    .ctx()
+                    .session_ctx()
+                    .config()
+                    .get_streaming_rate_limit(),
                 ..Default::default()
             })),
             stream_key,

@@ -38,7 +38,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 40] = [
+const CONFIG_KEYS: [&str; 39] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -78,7 +78,6 @@ const CONFIG_KEYS: [&str; 40] = [
     "RW_STREAMING_OVER_WINDOW_CACHE_POLICY",
     "BACKGROUND_DDL",
     "SERVER_ENCODING",
-    "BACKFILL_SNAPSHOT_READ_DELAY",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -122,7 +121,6 @@ const CDC_BACKFILL: usize = 35;
 const STREAMING_OVER_WINDOW_CACHE_POLICY: usize = 36;
 const BACKGROUND_DDL: usize = 37;
 const SERVER_ENCODING: usize = 38;
-const BACKFILL_SNAPSHOT_READ_DELAY: usize = 39;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -348,7 +346,6 @@ type StreamingRateLimit = ConfigU64<STREAMING_RATE_LIMIT, 0>;
 type CdcBackfill = ConfigBool<CDC_BACKFILL, false>;
 type BackgroundDdl = ConfigBool<BACKGROUND_DDL, false>;
 type ServerEncoding = ConfigString<SERVER_ENCODING>;
-type BackfillSnapshotReadDelay = ConfigI32<BACKFILL_SNAPSHOT_READ_DELAY, 0>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {
@@ -502,9 +499,6 @@ pub struct ConfigMap {
     /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
     #[educe(Default(expression = "ConfigString::<SERVER_ENCODING>(String::from(\"UTF8\"))"))]
     server_encoding: ServerEncoding,
-
-    /// Inject delay after first barrier in backfill.
-    backfill_snapshot_read_delay: BackfillSnapshotReadDelay,
 }
 
 impl ConfigMap {
@@ -638,8 +632,6 @@ impl ConfigMap {
                 .into());
             }
             // No actual assignment because we only support UTF8.
-        } else if key.eq_ignore_ascii_case(BackfillSnapshotReadDelay::entry_name()) {
-            self.backfill_snapshot_read_delay = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -731,8 +723,6 @@ impl ConfigMap {
             Ok(self.background_ddl.to_string())
         } else if key.eq_ignore_ascii_case(ServerEncoding::entry_name()) {
             Ok(self.server_encoding.to_string())
-        } else if key.eq_ignore_ascii_case(BackfillSnapshotReadDelay::entry_name()) {
-            Ok(self.backfill_snapshot_read_delay.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -935,11 +925,6 @@ impl ConfigMap {
                 setting : self.server_encoding.to_string(),
                 description : String::from("Sets the server character set encoding.")
             },
-            VariableInfo{
-                name : BackfillSnapshotReadDelay::entry_name().to_lowercase(),
-                setting : self.backfill_snapshot_read_delay.to_string(),
-                description : String::from("Inject delay(ms) after first barrier in backfilling. Used for testing to yield control to tokio runtime")
-            },
         ]
     }
 
@@ -1085,9 +1070,5 @@ impl ConfigMap {
 
     pub fn get_server_encoding(&self) -> &str {
         &self.server_encoding
-    }
-
-    pub fn get_backfill_snapshot_read_delay(&self) -> u32 {
-        self.backfill_snapshot_read_delay.0 as u32
     }
 }
