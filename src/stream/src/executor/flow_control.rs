@@ -87,15 +87,13 @@ impl RateLimiter for SimRateLimiter {
             );
             return;
         }
-        for _ in 0..n {
-            let semaphore_ref = self.inner.clone();
-            if let Ok(permit) = semaphore_ref.acquire_owned().await {
-                tokio::spawn(async move {
-                    sleep(Duration::from_secs(1)).await;
-                    drop(permit);
-                })
-            };
-        }
+        let semaphore_ref = self.inner.clone();
+        if let Ok(permit) = semaphore_ref.acquire_many_owned(n as u32).await {
+            tokio::spawn(async move {
+                sleep(Duration::from_secs(1)).await;
+                drop(permit);
+            });
+        };
     }
 }
 
