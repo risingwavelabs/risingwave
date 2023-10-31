@@ -538,24 +538,6 @@ impl<'a> ListRef<'a> {
     }
 }
 
-impl Row for ListRef<'_> {
-    fn len(&self) -> usize {
-        self.len()
-    }
-
-    fn datum_at(&self, index: usize) -> DatumRef<'_> {
-        self.get(index).unwrap()
-    }
-
-    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        self.get(index).unwrap()
-    }
-
-    fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
-        (*self).iter()
-    }
-}
-
 impl PartialEq for ListRef<'_> {
     fn eq(&self, other: &Self) -> bool {
         iter_elems_ref!(*self, lhs, {
