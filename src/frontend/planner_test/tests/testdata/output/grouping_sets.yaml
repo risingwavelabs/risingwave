@@ -5,16 +5,16 @@
     SELECT brand, size, sum(sales) FROM items_sold GROUP BY GROUPING SETS ((brand), (size), ());
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [items_sold.brand, items_sold.size, sum(items_sold.sales)] }
-      └─BatchHashAgg { group_key: [items_sold.brand, items_sold.size, flag], aggs: [sum(items_sold.sales)] }
-        └─BatchExchange { order: [], dist: HashShard(items_sold.brand, items_sold.size, flag) }
+    └─BatchProject { exprs: [items_sold.brand_expanded, items_sold.size_expanded, sum(items_sold.sales)] }
+      └─BatchHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales)] }
+        └─BatchExchange { order: [], dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─BatchExpand { column_subsets: [[items_sold.brand], [items_sold.size], []] }
             └─BatchScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [brand, size, sum, flag(hidden)], stream_key: [brand, size, flag], pk_columns: [brand, size, flag], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [items_sold.brand, items_sold.size, sum(items_sold.sales), flag] }
-      └─StreamHashAgg { group_key: [items_sold.brand, items_sold.size, flag], aggs: [sum(items_sold.sales), count] }
-        └─StreamExchange { dist: HashShard(items_sold.brand, items_sold.size, flag) }
+    └─StreamProject { exprs: [items_sold.brand_expanded, items_sold.size_expanded, sum(items_sold.sales), flag] }
+      └─StreamHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales), count] }
+        └─StreamExchange { dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─StreamExpand { column_subsets: [[items_sold.brand], [items_sold.size], []] }
             └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], pk: [items_sold._row_id], dist: UpstreamHashShard(items_sold._row_id) }
 - name: with distinct
@@ -23,18 +23,18 @@
     SELECT brand, size, sum(distinct sales) FROM items_sold GROUP BY GROUPING SETS ((brand), (size), ());
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [items_sold.brand, items_sold.size, sum(items_sold.sales)] }
-      └─BatchHashAgg { group_key: [items_sold.brand, items_sold.size, flag], aggs: [sum(items_sold.sales)] }
-        └─BatchExchange { order: [], dist: HashShard(items_sold.brand, items_sold.size, flag) }
-          └─BatchHashAgg { group_key: [items_sold.brand, items_sold.size, items_sold.sales, flag], aggs: [] }
-            └─BatchExchange { order: [], dist: HashShard(items_sold.brand, items_sold.size, items_sold.sales, flag) }
+    └─BatchProject { exprs: [items_sold.brand_expanded, items_sold.size_expanded, sum(items_sold.sales)] }
+      └─BatchHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales)] }
+        └─BatchExchange { order: [], dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
+          └─BatchHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, items_sold.sales, flag], aggs: [] }
+            └─BatchExchange { order: [], dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, items_sold.sales, flag) }
               └─BatchExpand { column_subsets: [[items_sold.brand], [items_sold.size], []] }
                 └─BatchScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [brand, size, sum, flag(hidden)], stream_key: [brand, size, flag], pk_columns: [brand, size, flag], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [items_sold.brand, items_sold.size, sum(distinct items_sold.sales), flag] }
-      └─StreamHashAgg { group_key: [items_sold.brand, items_sold.size, flag], aggs: [sum(distinct items_sold.sales), count] }
-        └─StreamExchange { dist: HashShard(items_sold.brand, items_sold.size, flag) }
+    └─StreamProject { exprs: [items_sold.brand_expanded, items_sold.size_expanded, sum(distinct items_sold.sales), flag] }
+      └─StreamHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(distinct items_sold.sales), count] }
+        └─StreamExchange { dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─StreamExpand { column_subsets: [[items_sold.brand], [items_sold.size], []] }
             └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], pk: [items_sold._row_id], dist: UpstreamHashShard(items_sold._row_id) }
 - name: column pruning
@@ -43,17 +43,17 @@
     SELECT brand, size, sum(sales) FROM items_sold GROUP BY GROUPING SETS ((size), (brand), ());
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [items_sold.brand, items_sold.size, sum(items_sold.sales)] }
-      └─BatchHashAgg { group_key: [items_sold.size, items_sold.brand, flag], aggs: [sum(items_sold.sales)] }
-        └─BatchExchange { order: [], dist: HashShard(items_sold.size, items_sold.brand, flag) }
+    └─BatchProject { exprs: [items_sold.brand_expanded, items_sold.size_expanded, sum(items_sold.sales)] }
+      └─BatchHashAgg { group_key: [items_sold.size_expanded, items_sold.brand_expanded, flag], aggs: [sum(items_sold.sales)] }
+        └─BatchExchange { order: [], dist: HashShard(items_sold.size_expanded, items_sold.brand_expanded, flag) }
           └─BatchExpand { column_subsets: [[items_sold.size], [items_sold.brand], []] }
             └─BatchProject { exprs: [items_sold.size, items_sold.brand, items_sold.sales] }
               └─BatchScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [brand, size, sum, flag(hidden)], stream_key: [size, brand, flag], pk_columns: [size, brand, flag], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [items_sold.brand, items_sold.size, sum(items_sold.sales), flag] }
-      └─StreamHashAgg { group_key: [items_sold.size, items_sold.brand, flag], aggs: [sum(items_sold.sales), count] }
-        └─StreamExchange { dist: HashShard(items_sold.size, items_sold.brand, flag) }
+    └─StreamProject { exprs: [items_sold.brand_expanded, items_sold.size_expanded, sum(items_sold.sales), flag] }
+      └─StreamHashAgg { group_key: [items_sold.size_expanded, items_sold.brand_expanded, flag], aggs: [sum(items_sold.sales), count] }
+        └─StreamExchange { dist: HashShard(items_sold.size_expanded, items_sold.brand_expanded, flag) }
           └─StreamExpand { column_subsets: [[items_sold.size], [items_sold.brand], []] }
             └─StreamProject { exprs: [items_sold.size, items_sold.brand, items_sold.sales, items_sold._row_id] }
               └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], pk: [items_sold._row_id], dist: UpstreamHashShard(items_sold._row_id) }
@@ -63,18 +63,18 @@
     SELECT brand, size, sum(sales), grouping(brand) g1, grouping(size) g2, grouping(brand,size) g3, count(distinct sales) FROM items_sold GROUP BY GROUPING SETS ((brand), (size), ());
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [items_sold.brand, items_sold.size, sum(sum(items_sold.sales)), Case((0:Int64 = flag), 0:Int32, (1:Int64 = flag), 1:Int32, (2:Int64 = flag), 1:Int32) as $expr1, Case((0:Int64 = flag), 1:Int32, (1:Int64 = flag), 0:Int32, (2:Int64 = flag), 1:Int32) as $expr2, Case((0:Int64 = flag), 1:Int32, (1:Int64 = flag), 2:Int32, (2:Int64 = flag), 3:Int32) as $expr3, count(items_sold.sales)] }
-      └─BatchHashAgg { group_key: [items_sold.brand, items_sold.size, flag], aggs: [sum(sum(items_sold.sales)), count(items_sold.sales)] }
-        └─BatchExchange { order: [], dist: HashShard(items_sold.brand, items_sold.size, flag) }
-          └─BatchHashAgg { group_key: [items_sold.brand, items_sold.size, items_sold.sales, flag], aggs: [sum(items_sold.sales)] }
-            └─BatchExchange { order: [], dist: HashShard(items_sold.brand, items_sold.size, items_sold.sales, flag) }
+    └─BatchProject { exprs: [items_sold.brand_expanded, items_sold.size_expanded, sum(sum(items_sold.sales)), Case((0:Int64 = flag), 0:Int32, (1:Int64 = flag), 1:Int32, (2:Int64 = flag), 1:Int32) as $expr1, Case((0:Int64 = flag), 1:Int32, (1:Int64 = flag), 0:Int32, (2:Int64 = flag), 1:Int32) as $expr2, Case((0:Int64 = flag), 1:Int32, (1:Int64 = flag), 2:Int32, (2:Int64 = flag), 3:Int32) as $expr3, count(items_sold.sales)] }
+      └─BatchHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(sum(items_sold.sales)), count(items_sold.sales)] }
+        └─BatchExchange { order: [], dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
+          └─BatchHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, items_sold.sales, flag], aggs: [sum(items_sold.sales)] }
+            └─BatchExchange { order: [], dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, items_sold.sales, flag) }
               └─BatchExpand { column_subsets: [[items_sold.brand], [items_sold.size], []] }
                 └─BatchScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [brand, size, sum, g1, g2, g3, count, flag(hidden)], stream_key: [brand, size, flag], pk_columns: [brand, size, flag], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [items_sold.brand, items_sold.size, sum(items_sold.sales), Case((0:Int64 = flag), 0:Int32, (1:Int64 = flag), 1:Int32, (2:Int64 = flag), 1:Int32) as $expr1, Case((0:Int64 = flag), 1:Int32, (1:Int64 = flag), 0:Int32, (2:Int64 = flag), 1:Int32) as $expr2, Case((0:Int64 = flag), 1:Int32, (1:Int64 = flag), 2:Int32, (2:Int64 = flag), 3:Int32) as $expr3, count(distinct items_sold.sales), flag] }
-      └─StreamHashAgg { group_key: [items_sold.brand, items_sold.size, flag], aggs: [sum(items_sold.sales), count(distinct items_sold.sales), count] }
-        └─StreamExchange { dist: HashShard(items_sold.brand, items_sold.size, flag) }
+    └─StreamProject { exprs: [items_sold.brand_expanded, items_sold.size_expanded, sum(items_sold.sales), Case((0:Int64 = flag), 0:Int32, (1:Int64 = flag), 1:Int32, (2:Int64 = flag), 1:Int32) as $expr1, Case((0:Int64 = flag), 1:Int32, (1:Int64 = flag), 0:Int32, (2:Int64 = flag), 1:Int32) as $expr2, Case((0:Int64 = flag), 1:Int32, (1:Int64 = flag), 2:Int32, (2:Int64 = flag), 3:Int32) as $expr3, count(distinct items_sold.sales), flag] }
+      └─StreamHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales), count(distinct items_sold.sales), count] }
+        └─StreamExchange { dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─StreamExpand { column_subsets: [[items_sold.brand], [items_sold.size], []] }
             └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], pk: [items_sold._row_id], dist: UpstreamHashShard(items_sold._row_id) }
 - name: too many arguments for grouping error
@@ -95,16 +95,16 @@
     SELECT brand, size, sum(sales) FROM items_sold GROUP BY ROLLUP(brand, size);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [items_sold.brand, items_sold.size, sum(items_sold.sales)] }
-      └─BatchHashAgg { group_key: [items_sold.brand, items_sold.size, flag], aggs: [sum(items_sold.sales)] }
-        └─BatchExchange { order: [], dist: HashShard(items_sold.brand, items_sold.size, flag) }
+    └─BatchProject { exprs: [items_sold.brand_expanded, items_sold.size_expanded, sum(items_sold.sales)] }
+      └─BatchHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales)] }
+        └─BatchExchange { order: [], dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─BatchExpand { column_subsets: [[], [items_sold.brand], [items_sold.brand, items_sold.size]] }
             └─BatchScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [brand, size, sum, flag(hidden)], stream_key: [brand, size, flag], pk_columns: [brand, size, flag], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [items_sold.brand, items_sold.size, sum(items_sold.sales), flag] }
-      └─StreamHashAgg { group_key: [items_sold.brand, items_sold.size, flag], aggs: [sum(items_sold.sales), count] }
-        └─StreamExchange { dist: HashShard(items_sold.brand, items_sold.size, flag) }
+    └─StreamProject { exprs: [items_sold.brand_expanded, items_sold.size_expanded, sum(items_sold.sales), flag] }
+      └─StreamHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales), count] }
+        └─StreamExchange { dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─StreamExpand { column_subsets: [[], [items_sold.brand], [items_sold.brand, items_sold.size]] }
             └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], pk: [items_sold._row_id], dist: UpstreamHashShard(items_sold._row_id) }
 - name: rollup2
@@ -113,16 +113,16 @@
     SELECT brand, size, sum(sales) FROM items_sold GROUP BY ROLLUP((brand, size));
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [items_sold.brand, items_sold.size, sum(items_sold.sales)] }
-      └─BatchHashAgg { group_key: [items_sold.brand, items_sold.size, flag], aggs: [sum(items_sold.sales)] }
-        └─BatchExchange { order: [], dist: HashShard(items_sold.brand, items_sold.size, flag) }
+    └─BatchProject { exprs: [items_sold.brand_expanded, items_sold.size_expanded, sum(items_sold.sales)] }
+      └─BatchHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales)] }
+        └─BatchExchange { order: [], dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─BatchExpand { column_subsets: [[], [items_sold.brand, items_sold.size]] }
             └─BatchScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [brand, size, sum, flag(hidden)], stream_key: [brand, size, flag], pk_columns: [brand, size, flag], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [items_sold.brand, items_sold.size, sum(items_sold.sales), flag] }
-      └─StreamHashAgg { group_key: [items_sold.brand, items_sold.size, flag], aggs: [sum(items_sold.sales), count] }
-        └─StreamExchange { dist: HashShard(items_sold.brand, items_sold.size, flag) }
+    └─StreamProject { exprs: [items_sold.brand_expanded, items_sold.size_expanded, sum(items_sold.sales), flag] }
+      └─StreamHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales), count] }
+        └─StreamExchange { dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─StreamExpand { column_subsets: [[], [items_sold.brand, items_sold.size]] }
             └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], pk: [items_sold._row_id], dist: UpstreamHashShard(items_sold._row_id) }
 - name: cube1
@@ -131,16 +131,16 @@
     SELECT brand, size, sum(sales) FROM items_sold GROUP BY CUBE(brand, size);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [items_sold.brand, items_sold.size, sum(items_sold.sales)] }
-      └─BatchHashAgg { group_key: [items_sold.brand, items_sold.size, flag], aggs: [sum(items_sold.sales)] }
-        └─BatchExchange { order: [], dist: HashShard(items_sold.brand, items_sold.size, flag) }
+    └─BatchProject { exprs: [items_sold.brand_expanded, items_sold.size_expanded, sum(items_sold.sales)] }
+      └─BatchHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales)] }
+        └─BatchExchange { order: [], dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─BatchExpand { column_subsets: [[], [items_sold.brand], [items_sold.size], [items_sold.brand, items_sold.size]] }
             └─BatchScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [brand, size, sum, flag(hidden)], stream_key: [brand, size, flag], pk_columns: [brand, size, flag], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [items_sold.brand, items_sold.size, sum(items_sold.sales), flag] }
-      └─StreamHashAgg { group_key: [items_sold.brand, items_sold.size, flag], aggs: [sum(items_sold.sales), count] }
-        └─StreamExchange { dist: HashShard(items_sold.brand, items_sold.size, flag) }
+    └─StreamProject { exprs: [items_sold.brand_expanded, items_sold.size_expanded, sum(items_sold.sales), flag] }
+      └─StreamHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales), count] }
+        └─StreamExchange { dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─StreamExpand { column_subsets: [[], [items_sold.brand], [items_sold.size], [items_sold.brand, items_sold.size]] }
             └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], pk: [items_sold._row_id], dist: UpstreamHashShard(items_sold._row_id) }
 - name: cube2
@@ -149,16 +149,16 @@
     SELECT brand, size, sum(sales) FROM items_sold GROUP BY CUBE(brand, size, size);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [items_sold.brand, items_sold.size, sum(items_sold.sales)] }
-      └─BatchHashAgg { group_key: [items_sold.brand, items_sold.size, flag], aggs: [sum(items_sold.sales)] }
-        └─BatchExchange { order: [], dist: HashShard(items_sold.brand, items_sold.size, flag) }
+    └─BatchProject { exprs: [items_sold.brand_expanded, items_sold.size_expanded, sum(items_sold.sales)] }
+      └─BatchHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales)] }
+        └─BatchExchange { order: [], dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─BatchExpand { column_subsets: [[], [items_sold.brand], [items_sold.size], [items_sold.size], [items_sold.brand, items_sold.size], [items_sold.brand, items_sold.size], [items_sold.size], [items_sold.brand, items_sold.size]] }
             └─BatchScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [brand, size, sum, flag(hidden)], stream_key: [brand, size, flag], pk_columns: [brand, size, flag], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [items_sold.brand, items_sold.size, sum(items_sold.sales), flag] }
-      └─StreamHashAgg { group_key: [items_sold.brand, items_sold.size, flag], aggs: [sum(items_sold.sales), count] }
-        └─StreamExchange { dist: HashShard(items_sold.brand, items_sold.size, flag) }
+    └─StreamProject { exprs: [items_sold.brand_expanded, items_sold.size_expanded, sum(items_sold.sales), flag] }
+      └─StreamHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales), count] }
+        └─StreamExchange { dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─StreamExpand { column_subsets: [[], [items_sold.brand], [items_sold.size], [items_sold.size], [items_sold.brand, items_sold.size], [items_sold.brand, items_sold.size], [items_sold.size], [items_sold.brand, items_sold.size]] }
             └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], pk: [items_sold._row_id], dist: UpstreamHashShard(items_sold._row_id) }
 - name: cube3
@@ -167,16 +167,16 @@
     SELECT brand, size, sum(sales) FROM items_sold GROUP BY CUBE((brand, size), size);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [items_sold.brand, items_sold.size, sum(items_sold.sales)] }
-      └─BatchHashAgg { group_key: [items_sold.brand, items_sold.size, flag], aggs: [sum(items_sold.sales)] }
-        └─BatchExchange { order: [], dist: HashShard(items_sold.brand, items_sold.size, flag) }
+    └─BatchProject { exprs: [items_sold.brand_expanded, items_sold.size_expanded, sum(items_sold.sales)] }
+      └─BatchHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales)] }
+        └─BatchExchange { order: [], dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─BatchExpand { column_subsets: [[], [items_sold.brand, items_sold.size], [items_sold.size], [items_sold.brand, items_sold.size]] }
             └─BatchScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [brand, size, sum, flag(hidden)], stream_key: [brand, size, flag], pk_columns: [brand, size, flag], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [items_sold.brand, items_sold.size, sum(items_sold.sales), flag] }
-      └─StreamHashAgg { group_key: [items_sold.brand, items_sold.size, flag], aggs: [sum(items_sold.sales), count] }
-        └─StreamExchange { dist: HashShard(items_sold.brand, items_sold.size, flag) }
+    └─StreamProject { exprs: [items_sold.brand_expanded, items_sold.size_expanded, sum(items_sold.sales), flag] }
+      └─StreamHashAgg { group_key: [items_sold.brand_expanded, items_sold.size_expanded, flag], aggs: [sum(items_sold.sales), count] }
+        └─StreamExchange { dist: HashShard(items_sold.brand_expanded, items_sold.size_expanded, flag) }
           └─StreamExpand { column_subsets: [[], [items_sold.brand, items_sold.size], [items_sold.size], [items_sold.brand, items_sold.size]] }
             └─StreamTableScan { table: items_sold, columns: [items_sold.brand, items_sold.size, items_sold.sales, items_sold._row_id], pk: [items_sold._row_id], dist: UpstreamHashShard(items_sold._row_id) }
 - name: only one set in grouping sets

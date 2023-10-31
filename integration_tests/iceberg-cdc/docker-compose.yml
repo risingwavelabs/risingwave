@@ -79,6 +79,15 @@ services:
       - "./mysql_prepare.sql:/mysql_prepare.sql"
     container_name: prepare_mysql
     restart: on-failure
+  datagen:
+    build: ../datagen
+    depends_on: [mysql]
+    command:
+      - /bin/sh
+      - -c
+      - /datagen --mode clickstream --qps 1 mysql --user mysqluser --password mysqlpw --host mysql --port 3306 --db mydb
+    container_name: datagen
+    restart: on-failure
 
   rest:
     image: tabulario/iceberg-rest:0.6.0

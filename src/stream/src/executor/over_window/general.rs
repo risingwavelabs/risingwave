@@ -389,7 +389,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
             }
 
             // Update recently accessed range for later shrinking cache.
-            if !this.cache_policy.is_full() && let Some(accessed_range) = accessed_range {
+            if !this.cache_policy.is_full()
+                && let Some(accessed_range) = accessed_range
+            {
                 match vars.recently_accessed_ranges.entry(part_key) {
                     btree_map::Entry::Vacant(vacant) => {
                         vacant.insert(accessed_range);

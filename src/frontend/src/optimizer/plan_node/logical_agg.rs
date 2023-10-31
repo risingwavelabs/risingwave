@@ -1214,7 +1214,7 @@ impl ToStream for LogicalAgg {
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);
         let (map, _) = out_col_change.into_parts();
-        let out_col_change = ColIndexMapping::with_target_size(map, agg.schema().len());
+        let out_col_change = ColIndexMapping::new(map, agg.schema().len());
         Ok((agg.into(), out_col_change))
     }
 }

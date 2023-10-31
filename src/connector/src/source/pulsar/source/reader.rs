@@ -65,7 +65,7 @@ impl SplitReader for PulsarSplitReader {
 
         tracing::debug!("creating consumer for pulsar split topic {}", topic,);
 
-        if props.iceberg_loader_enabled
+        if props.iceberg_loader_enabled.unwrap_or(false)
             && matches!(split.start_offset, PulsarEnumeratorOffset::Earliest)
             && !topic.starts_with("non-persistent://")
         {

@@ -161,7 +161,9 @@ impl StreamHashJoin {
                     )
                 };
                 let mut is_valuable_inequality = do_state_cleaning;
-                if let Some(internal) = internal && !watermark_columns.contains(internal) {
+                if let Some(internal) = internal
+                    && !watermark_columns.contains(internal)
+                {
                     watermark_columns.insert(internal);
                     is_valuable_inequality = true;
                 }

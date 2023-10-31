@@ -518,8 +518,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
                 *i += left.schema().len();
             }
             map.append(&mut right_map);
-            let mut mapping =
-                ColIndexMapping::with_target_size(map, left.schema().len() + right.schema().len());
+            let mut mapping = ColIndexMapping::new(map, left.schema().len() + right.schema().len());
 
             let new_output_indices = self
                 .output_indices()
@@ -978,7 +977,10 @@ impl LogicalJoin {
         // Use primary table.
         let mut result_plan = self.to_stream_temporal_join(predicate.clone(), ctx);
         // Return directly if this temporal join can match the pk of its right table.
-        if let Ok(temporal_join) = &result_plan && temporal_join.eq_join_predicate().eq_indexes().len() == logical_scan.primary_key().len() {
+        if let Ok(temporal_join) = &result_plan
+            && temporal_join.eq_join_predicate().eq_indexes().len()
+                == logical_scan.primary_key().len()
+        {
             return result_plan;
         }
         let indexes = logical_scan.indexes();

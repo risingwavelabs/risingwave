@@ -92,11 +92,15 @@ impl ProjectSetExecutor {
                     // for each column
                     for (item, value) in results.iter_mut().zip_eq_fast(&mut row[1..]) {
                         *value = match item {
-                            Either::Left(state) => if let Some((i, value)) = state.peek() && i == row_idx {
-                                valid = true;
-                                value
-                            } else {
-                                None
+                            Either::Left(state) => {
+                                if let Some((i, value)) = state.peek()
+                                    && i == row_idx
+                                {
+                                    valid = true;
+                                    value
+                                } else {
+                                    None
+                                }
                             }
                             Either::Right(array) => array.value_at(row_idx),
                         };
@@ -110,7 +114,9 @@ impl ProjectSetExecutor {
                     }
                     // move to the next row
                     for item in &mut results {
-                        if let Either::Left(state) = item && matches!(state.peek(), Some((i, _)) if i == row_idx) {
+                        if let Either::Left(state) = item
+                            && matches!(state.peek(), Some((i, _)) if i == row_idx)
+                        {
                             state.next().await?;
                         }
                     }

@@ -1933,12 +1933,12 @@ impl<K> HashJoinExecutor<K> {
 mod tests {
     use futures::StreamExt;
     use futures_async_stream::for_await;
-    use prometheus::IntGauge;
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::error::Result;
     use risingwave_common::hash::Key32;
     use risingwave_common::memory::MemoryContext;
+    use risingwave_common::metrics::LabelGuardedIntGauge;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
@@ -2157,7 +2157,7 @@ mod tests {
             };
 
             let mem_ctx =
-                MemoryContext::new(parent_mem_ctx, IntGauge::new("memory_usage", " ").unwrap());
+                MemoryContext::new(parent_mem_ctx, LabelGuardedIntGauge::<4>::test_int_gauge());
             Box::new(HashJoinExecutor::<Key32>::new(
                 join_type,
                 output_indices,
@@ -2198,7 +2198,7 @@ mod tests {
             right_executor: BoxedExecutor,
         ) {
             let parent_mem_context =
-                MemoryContext::root(IntGauge::new("total_memory_usage", " ").unwrap());
+                MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge());
 
             {
                 let join_executor = self.create_join_executor_with_chunk_size_and_executors(

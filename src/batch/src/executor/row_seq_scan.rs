@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::ops::{Bound, RangeBounds};
+use std::ops::{Bound, Deref, RangeBounds};
 use std::sync::Arc;
 
 use futures::{pin_mut, StreamExt};
@@ -310,9 +310,12 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         let table = Arc::new(table);
 
         // Create collector.
-        let histogram = metrics
-            .as_ref()
-            .map(|metrics| metrics.create_collector_for_row_seq_scan_next_duration(vec![identity]));
+        let histogram = metrics.as_ref().map(|metrics| {
+            metrics
+                .executor_metrics()
+                .row_seq_scan_next_duration
+                .with_label_values(&metrics.executor_labels(&identity))
+        });
 
         if ordered {
             // Currently we execute range-scans concurrently so the order is not guaranteed if
@@ -329,9 +332,8 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         // Point Get
         for point_get in point_gets {
             let table = table.clone();
-            let histogram = histogram.clone();
             if let Some(row) =
-                Self::execute_point_get(table, point_get, epoch.clone(), histogram).await?
+                Self::execute_point_get(table, point_get, epoch.clone(), histogram.clone()).await?
             {
                 if let Some(chunk) = data_chunk_builder.append_one_row(row) {
                     yield chunk;
@@ -365,7 +367,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         table: Arc<StorageTable<S>>,
         scan_range: ScanRange,
         epoch: BatchQueryEpoch,
-        histogram: Option<Histogram>,
+        histogram: Option<impl Deref<Target = Histogram>>,
     ) -> Result<Option<OwnedRow>> {
         let pk_prefix = scan_range.pk_prefix;
         assert!(pk_prefix.len() == table.pk_indices().len());
@@ -389,7 +391,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         ordered: bool,
         epoch: BatchQueryEpoch,
         chunk_size: usize,
-        histogram: Option<Histogram>,
+        histogram: Option<impl Deref<Target = Histogram>>,
     ) {
         let ScanRange {
             pk_prefix,
