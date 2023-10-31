@@ -54,8 +54,8 @@ use crate::{MetaError, MetaResult};
 
 /// `CatalogController` is the controller for catalog related operations, including database, schema, table, view, etc.
 pub struct CatalogController {
-    env: MetaSrvEnv,
-    inner: RwLock<CatalogControllerInner>,
+    pub(crate) env: MetaSrvEnv,
+    pub(crate) inner: RwLock<CatalogControllerInner>,
 }
 
 #[derive(Clone, Default)]
@@ -79,8 +79,8 @@ impl CatalogController {
     }
 }
 
-struct CatalogControllerInner {
-    db: DatabaseConnection,
+pub(crate) struct CatalogControllerInner {
+    pub(crate) db: DatabaseConnection,
 }
 
 impl CatalogController {

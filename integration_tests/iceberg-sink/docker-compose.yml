@@ -96,10 +96,6 @@ services:
       timeout: 5s
       retries: 5
     container_name: mysql
-  connector-node:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: connector-node
   prepare_mysql:
     image: mysql:8.0
     depends_on:

@@ -17,6 +17,7 @@
 #![feature(once_cell_try)]
 #![feature(type_alias_impl_trait)]
 #![feature(result_option_inspect)]
+#![feature(try_blocks)]
 
 pub mod hummock_iterator;
 pub mod jvm_runtime;
@@ -60,7 +61,6 @@ use tokio::sync::mpsc::{Receiver, Sender};
 use crate::hummock_iterator::HummockJavaBindingIterator;
 pub use crate::jvm_runtime::register_native_method_for_jvm;
 use crate::stream_chunk_iterator::{into_iter, StreamChunkRowIterator};
-pub type GetEventStreamJniSender = Sender<GetEventStreamResponse>;
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| tokio::runtime::Runtime::new().unwrap());
 
@@ -846,6 +846,9 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetArrayValu
     })
 }
 
+pub type JniSenderType<T> = Sender<anyhow::Result<T>>;
+pub type JniReceiverType<T> = Receiver<T>;
+
 /// Send messages to the channel received by `CdcSplitReader`.
 /// If msg is null, just check whether the channel is closed.
 /// Return true if sending is successful, otherwise, return false so that caller can stop
@@ -853,7 +856,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetArrayValu
 #[no_mangle]
 extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToChannel<'a>(
     env: EnvParam<'a>,
-    channel: Pointer<'a, GetEventStreamJniSender>,
+    channel: Pointer<'a, JniSenderType<GetEventStreamResponse>>,
     msg: JByteArray<'a>,
 ) -> jboolean {
     execute_and_catch(env, move |env| {
@@ -869,7 +872,10 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToCh
         let get_event_stream_response: GetEventStreamResponse =
             Message::decode(to_guarded_slice(&msg, env)?.deref())?;
 
-        match channel.as_ref().blocking_send(get_event_stream_response) {
+        match channel
+            .as_ref()
+            .blocking_send(Ok(get_event_stream_response))
+        {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {
                 tracing::info!("send error.  {:?}", e);
@@ -884,7 +890,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_recvSinkWriterRe
     'a,
 >(
     env: EnvParam<'a>,
-    mut channel: Pointer<'a, Receiver<SinkWriterStreamRequest>>,
+    mut channel: Pointer<'a, JniReceiverType<SinkWriterStreamRequest>>,
 ) -> JByteArray<'a> {
     execute_and_catch(env, move |env| match channel.as_mut().blocking_recv() {
         Some(msg) => {
@@ -902,7 +908,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkWriterRe
     'a,
 >(
     env: EnvParam<'a>,
-    channel: Pointer<'a, Sender<anyhow::Result<SinkWriterStreamResponse>>>,
+    channel: Pointer<'a, JniSenderType<SinkWriterStreamResponse>>,
     msg: JByteArray<'a>,
 ) -> jboolean {
     execute_and_catch(env, move |env| {
@@ -927,7 +933,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_recvSinkCoordina
     'a,
 >(
     env: EnvParam<'a>,
-    mut channel: Pointer<'a, Receiver<SinkCoordinatorStreamRequest>>,
+    mut channel: Pointer<'a, JniReceiverType<SinkCoordinatorStreamRequest>>,
 ) -> JByteArray<'a> {
     execute_and_catch(env, move |env| match channel.as_mut().blocking_recv() {
         Some(msg) => {
@@ -945,7 +951,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkCoordina
     'a,
 >(
     env: EnvParam<'a>,
-    channel: Pointer<'a, Sender<SinkCoordinatorStreamResponse>>,
+    channel: Pointer<'a, JniSenderType<SinkCoordinatorStreamResponse>>,
     msg: JByteArray<'a>,
 ) -> jboolean {
     execute_and_catch(env, move |env| {
@@ -954,7 +960,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkCoordina
 
         match channel
             .as_ref()
-            .blocking_send(sink_coordinator_stream_response)
+            .blocking_send(Ok(sink_coordinator_stream_response))
         {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {

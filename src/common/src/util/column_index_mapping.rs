@@ -67,8 +67,10 @@ impl ColIndexMapping {
             return false;
         }
         for (src, tar) in self.map.iter().enumerate() {
-            if let Some(tar_value) = tar && src == *tar_value {
-                continue
+            if let Some(tar_value) = tar
+                && src == *tar_value
+            {
+                continue;
             } else {
                 return false;
             }
@@ -333,6 +335,7 @@ impl ColIndexMapping {
             r#type: strategy.r#type,
             dist_key_indices: map(&strategy.dist_key_indices)?,
             output_indices: map(&strategy.output_indices)?,
+            downstream_table_name: strategy.downstream_table_name.clone(),
         })
     }
 }

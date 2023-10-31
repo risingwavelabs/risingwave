@@ -217,7 +217,9 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     if watermark.col_idx == event_time_col_idx {
                         tracing::warn!("WatermarkFilterExecutor received a watermark on the event it is filtering.");
                         let watermark = watermark.val;
-                        if let Some(cur_watermark) = current_watermark.clone() && cur_watermark.default_cmp(&watermark).is_lt() {
+                        if let Some(cur_watermark) = current_watermark.clone()
+                            && cur_watermark.default_cmp(&watermark).is_lt()
+                        {
                             current_watermark = Some(watermark.clone());
                             idle_input = false;
                             yield Message::Watermark(Watermark::new(
@@ -267,7 +269,10 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                             let global_max_watermark =
                                 Self::get_global_max_watermark(&table).await?;
 
-                            current_watermark = if let Some(global_max_watermark) = global_max_watermark.clone()  &&  let Some(watermark) = current_watermark.clone(){
+                            current_watermark = if let Some(global_max_watermark) =
+                                global_max_watermark.clone()
+                                && let Some(watermark) = current_watermark.clone()
+                            {
                                 Some(cmp::max_by(
                                     watermark,
                                     global_max_watermark,

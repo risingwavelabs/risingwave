@@ -33,6 +33,7 @@ use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
 
+use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
 use super::filesystem::FsSplit;
 use super::google_pubsub::GooglePubsubMeta;
@@ -572,6 +573,7 @@ pub enum SourceMeta {
     Nexmark(NexmarkMeta),
     GooglePubsub(GooglePubsubMeta),
     Datagen(DatagenMeta),
+    DebeziumCdc(DebeziumCdcMeta),
     // For the source that doesn't have meta data.
     Empty,
 }

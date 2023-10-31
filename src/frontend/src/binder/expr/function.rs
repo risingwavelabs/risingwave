@@ -93,7 +93,9 @@ impl Binder {
         };
 
         // agg calls
-        if f.over.is_none() && let Ok(kind) = function_name.parse() {
+        if f.over.is_none()
+            && let Ok(kind) = function_name.parse()
+        {
             return self.bind_agg(f, kind);
         }
 
@@ -154,11 +156,12 @@ impl Binder {
 
         // user defined function
         // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
-        if let Ok(schema) = self.first_valid_schema() &&
-            let Some(func) = schema.get_function_by_name_args(
+        if let Ok(schema) = self.first_valid_schema()
+            && let Some(func) = schema.get_function_by_name_args(
                 &function_name,
                 &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
-        ) {
+            )
+        {
             use crate::catalog::function_catalog::FunctionKind::*;
             match &func.kind {
                 Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
@@ -360,8 +363,12 @@ impl Binder {
         // check signature and do implicit cast
         match (kind, direct_args.as_mut_slice(), args.as_mut_slice()) {
             (AggKind::PercentileCont | AggKind::PercentileDisc, [fraction], [arg]) => {
-                if fraction.cast_implicit_mut(DataType::Float64).is_ok() && let Ok(casted) = fraction.fold_const() {
-                    if let Some(ref casted) = casted && !(0.0..=1.0).contains(&casted.as_float64().0) {
+                if fraction.cast_implicit_mut(DataType::Float64).is_ok()
+                    && let Ok(casted) = fraction.fold_const()
+                {
+                    if let Some(ref casted) = casted
+                        && !(0.0..=1.0).contains(&casted.as_float64().0)
+                    {
                         return Err(ErrorCode::InvalidInputSyntax(format!(
                             "direct arg in `{}` must between 0.0 and 1.0",
                             kind
@@ -916,6 +923,7 @@ impl Binder {
                 ("jsonb_exists_all", raw_call(ExprType::JsonbExistsAll)),
                 ("jsonb_delete", raw_call(ExprType::Subtract)),
                 ("jsonb_delete_path", raw_call(ExprType::JsonbDeletePath)),
+                ("jsonb_strip_nulls", raw_call(ExprType::JsonbStripNulls)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least

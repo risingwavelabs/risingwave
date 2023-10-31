@@ -146,6 +146,14 @@ where
 
         let pk_order = self.upstream_table.pk_serializer().get_order_types();
 
+        #[cfg(madsim)]
+        let snapshot_read_delay = if let Ok(v) = std::env::var("RW_BACKFILL_SNAPSHOT_READ_DELAY")
+            && let Ok(v) = v.parse::<u64>() {
+            v
+        } else {
+            0
+        };
+
         let upstream_table_id = self.upstream_table.table_id().table_id;
 
         let mut upstream = self.upstream.execute();
@@ -295,6 +303,14 @@ where
                                         break 'backfill_loop;
                                     }
                                     Some(chunk) => {
+                                        #[cfg(madsim)]
+                                        {
+                                            tokio::time::sleep(std::time::Duration::from_millis(
+                                                snapshot_read_delay as u64,
+                                            ))
+                                            .await;
+                                        }
+
                                         // Raise the current position.
                                         // As snapshot read streams are ordered by pk, so we can
                                         // just use the last row to update `current_pos`.

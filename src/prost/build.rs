@@ -59,7 +59,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
 
     // Paths to generate `BTreeMap` for protobuf maps.
-    let btree_map_paths = [".monitor_service.StackTraceResponse"];
+    let btree_map_paths = [
+        ".monitor_service.StackTraceResponse",
+        ".plan_common.ExternalTableDesc",
+    ];
 
     // Build protobuf structs.
 
@@ -108,7 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.GeneratedColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.DefaultColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.Cardinality", "#[derive(Eq, Hash, Copy)]")
-        .type_attribute("plan_common.StorageTableDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.ExternalTableDesc", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.ColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("common.ColumnOrder", "#[derive(Eq, Hash)]")
         .type_attribute("common.OrderType", "#[derive(Eq, Hash)]")

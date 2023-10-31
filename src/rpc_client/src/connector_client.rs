@@ -17,6 +17,7 @@ use std::fmt::Debug;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use futures::TryStreamExt;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::monitor::connection::{EndpointExt, TcpConfig};
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
@@ -29,6 +30,7 @@ use risingwave_pb::connector_service::sink_writer_stream_request::{
 };
 use risingwave_pb::connector_service::sink_writer_stream_response::CommitResponse;
 use risingwave_pb::connector_service::*;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::{Channel, Endpoint};
 use tonic::Streaming;
 use tracing::error;
@@ -262,7 +264,13 @@ impl ConnectorClient {
                     format: sink_payload_format as i32,
                 })),
             },
-            |req_stream| async move { rpc_client.sink_writer_stream(req_stream).await },
+            |rx| async move {
+                rpc_client
+                    .sink_writer_stream(ReceiverStream::new(rx))
+                    .await
+                    .map(|response| response.into_inner().map_err(RpcError::from))
+                    .map_err(RpcError::from)
+            },
         )
         .await?;
 
@@ -288,7 +296,13 @@ impl ConnectorClient {
                     StartCoordinator { param: Some(param) },
                 )),
             },
-            |req_stream| async move { rpc_client.sink_coordinator_stream(req_stream).await },
+            |rx| async move {
+                rpc_client
+                    .sink_coordinator_stream(ReceiverStream::new(rx))
+                    .await
+                    .map(|response| response.into_inner().map_err(RpcError::from))
+                    .map_err(RpcError::from)
+            },
         )
         .await?;
 
