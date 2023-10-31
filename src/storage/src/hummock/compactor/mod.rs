@@ -300,7 +300,6 @@ impl Compactor {
             task_progress.clone(),
             self.task_config.is_target_l0_or_lbase,
             self.task_config.table_vnode_partition.clone(),
-            self.task_config.split_weight_by_vnode,
         );
         let compaction_statistics = compact_and_build_sst(
             &mut sst_builder,

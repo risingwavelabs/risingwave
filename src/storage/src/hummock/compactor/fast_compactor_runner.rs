@@ -330,7 +330,6 @@ impl CompactorRunner {
             Some(task_progress.clone()),
             task_config.is_target_l0_or_lbase,
             task_config.table_vnode_partition.clone(),
-            task_config.split_weight_by_vnode,
         );
         assert_eq!(task.input_ssts.len(), 2);
         let left = Box::new(ConcatSstableIterator::new(

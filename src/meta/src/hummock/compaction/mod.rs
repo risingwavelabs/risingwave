@@ -78,7 +78,6 @@ pub struct CompactionTask {
     pub compression_algorithm: String,
     pub target_file_size: u64,
     pub compaction_task_type: compact_task::TaskType,
-    pub enable_split_by_table: bool,
 }
 
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
@@ -239,7 +238,6 @@ pub fn create_compaction_task(
         input,
         target_file_size,
         compaction_task_type,
-        enable_split_by_table: false,
     }
 }
 

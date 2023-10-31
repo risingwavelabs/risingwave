@@ -93,12 +93,7 @@ where
         task_progress: Option<Arc<TaskProgress>>,
         is_target_level_l0_or_lbase: bool,
         table_partition_vnode: HashMap<u32, u32>,
-        mut split_weight_by_vnode: u32,
     ) -> Self {
-        // if !is_target_level_l0_or_lbase {
-        //     split_weight_by_vnode = 0;
-        // }
-
         Self {
             builder_factory,
             sst_outputs: Vec::new(),
@@ -108,7 +103,7 @@ where
             last_table_id: 0,
             is_target_level_l0_or_lbase,
             table_partition_vnode,
-            split_weight_by_vnode,
+            split_weight_by_vnode: 0,
             largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
             last_vnode: 0,
         }
@@ -253,20 +248,23 @@ where
     pub fn check_table_and_vnode_change(&mut self, user_key: &UserKey<&[u8]>) -> (bool, bool) {
         let mut switch_builder = false;
         let mut vnode_changed = false;
-        if (self
-            .table_partition_vnode
-            .contains_key(&user_key.table_id.table_id)
-            || self.table_partition_vnode.contains_key(&self.last_table_id))
-            && user_key.table_id.table_id != self.last_table_id
-        {
-            // table_id change
-            self.last_table_id = user_key.table_id.table_id;
-            switch_builder = true;
-            self.last_vnode = 0;
-            vnode_changed = true;
-            if self.split_weight_by_vnode > 1 {
-                self.largest_vnode_in_current_partition =
-                    VirtualNode::COUNT / (self.split_weight_by_vnode as usize) - 1;
+        if user_key.table_id.table_id != self.last_table_id {
+            let new_vnode_partition_count =
+                self.table_partition_vnode.get(&user_key.table_id.table_id);
+
+            if new_vnode_partition_count.is_some()
+                || self.table_partition_vnode.contains_key(&self.last_table_id)
+            {
+                self.split_weight_by_vnode = *new_vnode_partition_count.unwrap();
+                // table_id change
+                self.last_table_id = user_key.table_id.table_id;
+                switch_builder = true;
+                self.last_vnode = 0;
+                vnode_changed = true;
+                if self.split_weight_by_vnode > 1 {
+                    self.largest_vnode_in_current_partition =
+                        VirtualNode::COUNT / (self.split_weight_by_vnode as usize) - 1;
+                }
             }
         }
         if self.largest_vnode_in_current_partition != VirtualNode::MAX.to_index() {
@@ -597,7 +595,6 @@ mod tests {
             None,
             false,
             HashMap::default(),
-            0,
         );
         let full_key = FullKey::for_test(
             table_id,
@@ -684,7 +681,6 @@ mod tests {
             None,
             false,
             HashMap::default(),
-            0,
         );
         assert_eq!(del_iter.earliest_epoch(), HummockEpoch::MAX);
         while del_iter.is_valid() {
@@ -721,7 +717,6 @@ mod tests {
             None,
             false,
             HashMap::default(),
-            0,
         );
         builder
             .add_monotonic_delete(MonotonicDeleteEvent {

@@ -28,7 +28,6 @@ pub struct MinOverlappingPicker {
     level: usize,
     target_level: usize,
     max_select_bytes: u64,
-    split_by_table: bool,
     overlap_strategy: Arc<dyn OverlapStrategy>,
 }
 
@@ -37,14 +36,12 @@ impl MinOverlappingPicker {
         level: usize,
         target_level: usize,
         max_select_bytes: u64,
-        split_by_table: bool,
         overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> MinOverlappingPicker {
         MinOverlappingPicker {
             level,
             target_level,
             max_select_bytes,
-            split_by_table,
             overlap_strategy,
         }
     }
@@ -64,9 +61,6 @@ impl MinOverlappingPicker {
             let mut select_file_size = 0;
             for (right, table) in select_tables.iter().enumerate().skip(left) {
                 if level_handlers[self.level].is_pending_compact(&table.sst_id) {
-                    break;
-                }
-                if self.split_by_table && table.table_ids != select_tables[left].table_ids {
                     break;
                 }
                 if select_file_size > self.max_select_bytes {

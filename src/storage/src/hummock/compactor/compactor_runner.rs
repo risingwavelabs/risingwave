@@ -101,7 +101,6 @@ impl CompactorRunner {
                 task_type: task.task_type(),
                 is_target_l0_or_lbase: task.target_level == 0
                     || task.target_level == task.base_level,
-                // split_by_table: task.split_by_state_table,
                 split_weight_by_vnode: task.split_weight_by_vnode,
                 use_block_based_filter,
                 table_vnode_partition: task.table_vnode_partition.clone(),
