@@ -174,7 +174,7 @@ async fn test_background_ddl_cancel() -> Result<()> {
     assert_eq!(ids.len(), 1);
 
     // Make sure MV can be created after all these cancels
-    session.run(RESET_RATE_LIMIT).await?;
+    session.run(SET_RATE_LIMIT_2).await?;
     create_mv(&mut session).await?;
 
     kill_and_wait_recover(&cluster).await;
