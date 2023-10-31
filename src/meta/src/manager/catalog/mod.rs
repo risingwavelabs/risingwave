@@ -893,6 +893,7 @@ impl CatalogManager {
         }
         commit_meta!(self, tables)?;
 
+        tracing::debug!(id = ?table.id, "notifying frontend");
         let version = self
             .notify_frontend(
                 Operation::Add,
@@ -932,6 +933,18 @@ impl CatalogManager {
                 );
                 return Ok(());
             };
+            // `Unspecified` maps to Created state, due to backwards compatibility.
+            // `Created` states should not be cancelled.
+            if table
+                .get_stream_job_status()
+                .unwrap_or(StreamJobStatus::Created)
+                != StreamJobStatus::Creating
+            {
+                return Err(MetaError::invalid_parameter(format!(
+                    "table is not in creating state id={:#?}",
+                    table_id
+                )));
+            }
 
             tracing::trace!("cleanup tables for {}", table.id);
             let mut table_ids = vec![table.id];
@@ -2516,6 +2529,15 @@ impl CatalogManager {
             .notification_manager()
             .notify_frontend_relation_info(operation, relation_info)
             .await
+    }
+
+    pub async fn table_is_created(&self, table_id: TableId) -> bool {
+        let guard = self.core.lock().await;
+        return if let Some(table) = guard.database.tables.get(&table_id) {
+            table.get_stream_job_status() != Ok(StreamJobStatus::Creating)
+        } else {
+            false
+        };
     }
 
     pub async fn get_tables(&self, table_ids: &[TableId]) -> Vec<Table> {
