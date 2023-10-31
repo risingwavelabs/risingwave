@@ -20,12 +20,13 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    CdcTableDesc, ColumnCatalog, ColumnDesc, TableId, TableVersionId, INITIAL_SOURCE_VERSION_ID,
-    INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
+    CdcTableDesc, ColumnCatalog, ColumnDesc, TableId, TableVersionId, DEFAULT_SCHEMA_NAME,
+    INITIAL_SOURCE_VERSION_ID, INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
 };
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
+use risingwave_connector::source;
 use risingwave_connector::source::cdc::{CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY};
 use risingwave_connector::source::external::{
     CdcTableType, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
@@ -43,6 +44,7 @@ use risingwave_sqlparser::ast::{
 
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field, Clause};
+use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, CatalogError, ColumnId};
@@ -759,7 +761,7 @@ fn gen_create_table_plan_for_cdc_source(
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     mut col_id_gen: ColumnIdGenerator,
-) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
+) -> Result<(PlanRef, PbTable)> {
     let session = context.session_ctx().clone();
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
@@ -769,7 +771,19 @@ fn gen_create_table_plan_for_cdc_source(
     // cdc table cannot be append-only
     let append_only = false;
     let source_name = source_name.real_value();
-    let source = session.get_source_by_name(schema_name, &source_name)?;
+
+    let source = {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_name = schema_name
+            .clone()
+            .unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
+        let (source, _) = catalog_reader.get_source_by_name(
+            db_name,
+            SchemaPath::Name(schema_name.as_str()),
+            source_name.as_str(),
+        )?;
+        source.clone()
+    };
 
     let mut columns = bind_sql_columns(&column_defs)?;
 
@@ -843,18 +857,19 @@ fn gen_create_table_plan_for_cdc_source(
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
     table.owner = session.user_id();
-    Ok((materialize.into(), None, table))
+    Ok((materialize.into(), table))
 }
 
 fn derive_connect_properties(
     source: &SourceCatalog,
     external_table_name: String,
 ) -> Result<BTreeMap<String, String>> {
+    use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR};
     // we should remove the prefix from `full_table_name`
     let mut connect_properties = source.properties.clone();
     if let Some(connector) = source.properties.get(UPSTREAM_SOURCE_KEY) {
         let table_name = match connector.as_str() {
-            "mysql-cdc" => {
+            MYSQL_CDC_CONNECTOR => {
                 let db_name = connect_properties.get(DATABASE_NAME_KEY).ok_or_else(|| {
                     anyhow!("{} not found in source properties", DATABASE_NAME_KEY)
                 })?;
@@ -864,7 +879,7 @@ fn derive_connect_properties(
                     .strip_prefix(prefix.as_str())
                     .ok_or_else(|| anyhow!("external table name must contain database prefix"))?
             }
-            "postgres-cdc" => {
+            POSTGRES_CDC_CONNECTOR => {
                 let schema_name = connect_properties
                     .get(SCHEMA_NAME_KEY)
                     .ok_or_else(|| anyhow!("{} not found in source properties", SCHEMA_NAME_KEY))?;
@@ -923,7 +938,7 @@ pub async fn handle_create_table(
         let context = OptimizerContext::from_handler_args(handler_args);
         let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
         let col_id_gen = ColumnIdGenerator::new_initial();
-        let properties = context.with_options().inner().clone().into_iter().collect();
+        // let properties = context.with_options().inner().clone().into_iter().collect();
 
         let ((plan, source, table), job_type) = match (source_schema, cdc_table_info.as_ref()) {
             (Some(source_schema), None) => (
@@ -938,7 +953,7 @@ pub async fn handle_create_table(
                     append_only,
                 )
                 .await?,
-                TableJobType::Unspecified,
+                TableJobType::General,
             ),
             (None, None) => (
                 gen_create_table_plan(
@@ -950,11 +965,11 @@ pub async fn handle_create_table(
                     source_watermarks,
                     append_only,
                 )?,
-                TableJobType::Unspecified,
+                TableJobType::General,
             ),
 
-            (None, Some(cdc_table)) => (
-                gen_create_table_plan_for_cdc_source(
+            (None, Some(cdc_table)) => {
+                let (plan, table) = gen_create_table_plan_for_cdc_source(
                     context.into(),
                     cdc_table.source_name.clone(),
                     table_name.clone(),
@@ -962,9 +977,10 @@ pub async fn handle_create_table(
                     column_defs,
                     constraints,
                     col_id_gen,
-                )?,
-                TableJobType::SharedCdcSource,
-            ),
+                )?;
+
+                ((plan, None, table), TableJobType::SharedCdcSource)
+            }
             (Some(_), Some(_)) => return Err(ErrorCode::NotSupported(
                 "Data format and encoding format doesn't apply to table created from a CDC source"
                     .into(),
@@ -973,16 +989,10 @@ pub async fn handle_create_table(
             .into()),
         };
         let mut graph = build_graph(plan);
-        graph.parallelism = if cdc_table_info.is_some()
-            || CdcTableType::from_properties(&properties).can_backfill()
-        {
-            Some(Parallelism { parallelism: 1 })
-        } else {
-            session
-                .config()
-                .get_streaming_parallelism()
-                .map(|parallelism| Parallelism { parallelism })
-        };
+        graph.parallelism = session
+            .config()
+            .get_streaming_parallelism()
+            .map(|parallelism| Parallelism { parallelism });
         (graph, source, table, job_type)
     };
 

@@ -257,8 +257,14 @@ fn build_fragment(
             current_fragment.fragment_type_mask |= FragmentTypeFlag::BarrierRecv as u32
         }
 
-        NodeBody::Source(_) => {
+        NodeBody::Source(node) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32;
+
+            if let Some(source) = node.source_inner.as_ref() &&
+                let Some(source_info) = source.info.as_ref() && source_info.cdc_source_job {
+                tracing::debug!("mark cdc source job as singleton");
+                current_fragment.requires_singleton = true;
+            }
         }
 
         NodeBody::Dml(_) => {

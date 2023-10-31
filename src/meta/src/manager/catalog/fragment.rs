@@ -23,6 +23,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_connector::source::SplitImpl;
+use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
@@ -36,9 +37,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 
 use crate::barrier::Reschedule;
 use crate::manager::cluster::WorkerId;
-use crate::manager::{
-    commit_meta, commit_meta_with_trx, LocalNotification, MetaSrvEnv, TableJobType,
-};
+use crate::manager::{commit_meta, commit_meta_with_trx, LocalNotification, MetaSrvEnv};
 use crate::model::{
     ActorId, BTreeMapTransaction, FragmentId, MetadataModel, MigrationPlan, TableFragments,
     ValTransaction,
@@ -1168,7 +1167,7 @@ impl FragmentManager {
     }
 
     /// Get and filter the upstream `Materialize` or `Source` fragments of the specified relations.
-    pub async fn get_upstream_job_fragments(
+    pub async fn get_upstream_root_fragments(
         &self,
         upstream_table_ids: &HashSet<TableId>,
         table_job_type: Option<TableJobType>,
@@ -1186,7 +1185,8 @@ impl FragmentManager {
                         fragments.insert(table_id, fragment);
                     }
                 }
-                None | Some(TableJobType::Unspecified) => {
+                // MV on MV, and other kinds of table job
+                None | Some(TableJobType::General) | Some(TableJobType::Unspecified) => {
                     if let Some(fragment) = table_fragments.mview_fragment() {
                         fragments.insert(table_id, fragment);
                     }
@@ -1218,7 +1218,7 @@ impl FragmentManager {
                     r#type: d.r#type,
                     dist_key_indices: d.dist_key_indices.clone(),
                     output_indices: d.output_indices.clone(),
-                    downstream_table_name: None,
+                    downstream_table_name: d.downstream_table_name.clone(),
                 };
                 (fragment_id, strategy)
             })

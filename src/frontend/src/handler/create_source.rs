@@ -1210,7 +1210,7 @@ pub async fn handle_create_source(
                 Some(Rc::new(SourceCatalog::from(&source))),
                 columns.clone(),
                 row_id_index,
-                true,
+                false,
                 false,
                 context.into(),
             )?;
@@ -1219,7 +1219,11 @@ pub async fn handle_create_source(
             let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
             let mut graph = build_graph(stream_plan);
             // set parallelism to 1
-            graph.parallelism = Some(Parallelism { parallelism: 1 });
+            // graph.parallelism = Some(Parallelism { parallelism: 1 });
+            graph.parallelism = session
+                .config()
+                .get_streaming_parallelism()
+                .map(|parallelism| Parallelism { parallelism });
             graph
         };
         catalog_writer

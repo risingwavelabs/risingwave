@@ -17,25 +17,9 @@ use std::collections::HashMap;
 use risingwave_common::catalog::TableVersionId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
-use risingwave_pb::ddl_service::PbTableJobType;
+use risingwave_pb::ddl_service::TableJobType;
 
 use crate::model::FragmentId;
-
-#[derive(Default, Debug, Clone)]
-pub enum TableJobType {
-    #[default]
-    Unspecified,
-    SharedCdcSource, // table streaming job sharing a cdc source
-}
-
-impl TableJobType {
-    pub fn from_protobuf(pb: PbTableJobType) -> Self {
-        match pb {
-            PbTableJobType::Unspecified => Self::Unspecified,
-            PbTableJobType::SharedCdcSource => Self::SharedCdcSource,
-        }
-    }
-}
 
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
@@ -245,7 +229,7 @@ impl StreamingJob {
 
     pub fn table_job_type(&self) -> Option<TableJobType> {
         if let Self::Table(.., sub_type) = self {
-            Some(sub_type.clone())
+            Some(*sub_type)
         } else {
             None
         }

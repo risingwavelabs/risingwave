@@ -432,6 +432,13 @@ impl Scan {
         matches!(self.scan_table_type, ScanTableType::CdcTable)
     }
 
+    pub fn append_only(&self) -> bool {
+        if self.is_cdc_table() {
+            return false;
+        }
+        self.table_desc.append_only
+    }
+
     /// Get the descs of the output columns.
     pub fn column_descs(&self) -> Vec<ColumnDesc> {
         self.output_col_idx

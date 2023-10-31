@@ -326,6 +326,8 @@ impl Scheduler {
             })
             .collect();
 
+        tracing::debug!(?distributions, "schedule result");
+
         Ok(distributions)
     }
 }

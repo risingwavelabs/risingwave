@@ -54,6 +54,7 @@ impl StreamTableScan {
     pub fn new_with_chain_type(core: generic::Scan, chain_type: ChainType) -> Self {
         let batch_plan_id = core.ctx.next_plan_node_id();
 
+        // TODO: correctly derive the distribution for cdc backfill
         let distribution = {
             match core.distribution_key() {
                 Some(distribution_key) => {
@@ -67,10 +68,11 @@ impl StreamTableScan {
                 None => Distribution::SomeShard,
             }
         };
+
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
-            core.table_desc.append_only,
+            core.append_only(),
             false,
             core.watermark_columns(),
         );

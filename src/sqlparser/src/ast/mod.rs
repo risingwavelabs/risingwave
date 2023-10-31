@@ -1091,7 +1091,7 @@ pub enum Statement {
         append_only: bool,
         /// `AS ( query )`
         query: Option<Box<Query>>,
-
+        /// `FROM cdc_source TABLE database_name.table_name`
         cdc_table_info: Option<CdcTableInfo>,
     },
     /// CREATE INDEX

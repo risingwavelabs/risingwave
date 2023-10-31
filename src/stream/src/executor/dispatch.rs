@@ -387,7 +387,6 @@ impl DispatcherImpl {
                     output_indices,
                     hash_mapping,
                     dispatcher.dispatcher_id,
-                    dispatcher.downstream_table_name.clone(),
                 ))
             }
             CdcTablename => {
@@ -616,7 +615,6 @@ pub struct HashDataDispatcher {
     hash_mapping: ExpandedActorMapping,
     dispatcher_id: DispatcherId,
     dispatcher_id_str: String,
-    downstream_table_name: Option<String>,
 }
 
 impl Debug for HashDataDispatcher {
@@ -636,7 +634,6 @@ impl HashDataDispatcher {
         output_indices: Vec<usize>,
         hash_mapping: ExpandedActorMapping,
         dispatcher_id: DispatcherId,
-        downstream_table_name: Option<String>,
     ) -> Self {
         Self {
             outputs,
@@ -645,7 +642,6 @@ impl HashDataDispatcher {
             hash_mapping,
             dispatcher_id,
             dispatcher_id_str: dispatcher_id.to_string(),
-            downstream_table_name,
         }
     }
 }
@@ -693,28 +689,15 @@ impl Dispatcher for HashDataDispatcher {
         // Apply output indices after calculating the vnode.
         let chunk = chunk.project(&self.output_indices);
 
-        for (((vnode, &op), visible), row) in vnodes
+        for ((vnode, &op), visible) in vnodes
             .iter()
             .copied()
             .zip_eq_fast(chunk.ops())
             .zip_eq_fast(chunk.visibility().iter())
-            .zip_eq_fast(chunk.data_chunk().rows_with_holes())
         {
             // Build visibility map for every output chunk.
             for (output, vis_map) in self.outputs.iter().zip_eq_fast(vis_maps.iter_mut()) {
-                let should_emit = if let Some(row) = row && let Some(full_table_name) = self.downstream_table_name.as_ref() {
-                    let table_name_datum = row.datum_at(self.keys[0]).unwrap();
-                    tracing::trace!(target: "events::stream::dispatch::hash::cdc", "keys: {:?}, table: {}", self.keys, full_table_name);
-                    // dispatch based on downstream table name
-                    table_name_datum == ScalarRefImpl::Utf8(full_table_name)
-                } else {
-                    true
-                };
-                vis_map.append(
-                    visible
-                        && self.hash_mapping[vnode.to_index()] == output.actor_id()
-                        && should_emit,
-                );
+                vis_map.append(visible && self.hash_mapping[vnode.to_index()] == output.actor_id());
             }
 
             if !visible {
@@ -1154,7 +1137,6 @@ mod tests {
             vec![0, 1, 2],
             hash_mapping,
             0,
-            None,
         );
 
         let chunk = StreamChunk::from_pretty(
@@ -1392,7 +1374,6 @@ mod tests {
             (0..dimension).collect(),
             hash_mapping.clone(),
             0,
-            None,
         );
 
         let mut ops = Vec::new();

@@ -1864,10 +1864,9 @@ impl CatalogManager {
             .notify_frontend(
                 Operation::Add,
                 Info::RelationGroup(RelationGroup {
-                    relations: vec![Relation {
+                    relations: std::iter::once(Relation {
                         relation_info: RelationInfo::Source(source.to_owned()).into(),
-                    }]
-                    .into_iter()
+                    })
                     .chain(internal_tables.into_iter().map(|internal_table| Relation {
                         relation_info: RelationInfo::Table(internal_table).into(),
                     }))

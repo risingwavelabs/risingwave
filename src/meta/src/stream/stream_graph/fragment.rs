@@ -28,6 +28,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_pb::catalog::Table;
+use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
     Parallelism, StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
@@ -38,7 +39,7 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
 
-use crate::manager::{IdGeneratorManagerRef, StreamingJob, TableJobType};
+use crate::manager::{IdGeneratorManagerRef, StreamingJob};
 use crate::model::FragmentId;
 use crate::stream::stream_graph::id::{GlobalFragmentId, GlobalFragmentIdGen, GlobalTableIdGen};
 use crate::stream::stream_graph::schedule::Distribution;
@@ -481,7 +482,9 @@ pub struct CompleteStreamFragmentGraph {
 }
 
 pub struct FragmentGraphUpstreamContext {
-    upstream_job_fragments: HashMap<TableId, Fragment>,
+    /// Root fragment is the root of upstream stream graph, which can be a
+    /// mview fragment or source fragment for cdc source job
+    upstream_root_fragments: HashMap<TableId, Fragment>,
 }
 
 pub struct FragmentGraphDownstreamContext {
@@ -502,17 +505,17 @@ impl CompleteStreamFragmentGraph {
         }
     }
 
-    /// Create a new [`CompleteStreamFragmentGraph`] for MV on MV or MV on CDC Source, with the upstream existing
+    /// Create a new [`CompleteStreamFragmentGraph`] for MV on MV or Table on CDC Source, with the upstream existing
     /// `Materialize` or `Source` fragments.
     pub fn with_upstreams(
         graph: StreamFragmentGraph,
-        upstream_job_fragments: HashMap<TableId, Fragment>,
+        upstream_root_fragments: HashMap<TableId, Fragment>,
         table_job_type: Option<TableJobType>,
     ) -> MetaResult<Self> {
         Self::build_helper(
             graph,
             Some(FragmentGraphUpstreamContext {
-                upstream_job_fragments,
+                upstream_root_fragments,
             }),
             None,
             table_job_type,
@@ -548,7 +551,7 @@ impl CompleteStreamFragmentGraph {
         let mut existing_fragments = HashMap::new();
 
         if let Some(FragmentGraphUpstreamContext {
-            upstream_job_fragments,
+            upstream_root_fragments,
         }) = upstream_ctx
         {
             // Build the extra edges between the upstream `Materialize` and the downstream `Chain`
@@ -568,9 +571,10 @@ impl CompleteStreamFragmentGraph {
                                 }
                             });
 
-                            let source_fragment = upstream_job_fragments
-                                .get(&upstream_table_id)
-                                .context("upstream materialized view fragment not found")?;
+                            let source_fragment =
+                                upstream_root_fragments
+                                    .get(&upstream_table_id)
+                                    .context("upstream materialized view fragment not found")?;
                             let source_job_id = GlobalFragmentId::new(source_fragment.fragment_id);
                             // extract `_rw_table_name` column index
                             let rw_table_name_index = {
@@ -607,7 +611,8 @@ impl CompleteStreamFragmentGraph {
                             (source_job_id, edge)
                         }
                         _ => {
-                            let mview_fragment = upstream_job_fragments
+                            // handle other kinds of streaming graph, normally MV on MV
+                            let mview_fragment = upstream_root_fragments
                                 .get(&upstream_table_id)
                                 .context("upstream materialized view fragment not found")?;
                             let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
@@ -671,7 +676,7 @@ impl CompleteStreamFragmentGraph {
             }
 
             existing_fragments.extend(
-                upstream_job_fragments
+                upstream_root_fragments
                     .into_values()
                     .map(|f| (GlobalFragmentId::new(f.fragment_id), f)),
             );
