@@ -742,7 +742,8 @@ impl CatalogManager {
     fn assert_table_creating(tables: &BTreeMap<TableId, Table>, table: &Table) {
         if let Some(t) = tables.get(&table.id)
             && let Ok(StreamJobStatus::Creating) = t.get_stream_job_status()
-        {} else {
+        {
+        } else {
             panic!("Table must be in creating procedure: {table:#?}")
         }
     }

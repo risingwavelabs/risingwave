@@ -48,10 +48,6 @@ services:
       timeout: 5s
       retries: 5
     container_name: mysql
-  connector-node:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: connector-node
   datagen_tpch:
     image: ghcr.io/risingwavelabs/go-tpc:v0.1
     depends_on:

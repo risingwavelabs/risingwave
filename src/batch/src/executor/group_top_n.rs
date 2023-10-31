@@ -240,9 +240,9 @@ impl<K: HashKey> GroupTopNExecutor<K> {
 #[cfg(test)]
 mod tests {
     use futures::stream::StreamExt;
-    use prometheus::IntGauge;
     use risingwave_common::array::DataChunk;
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::metrics::LabelGuardedIntGauge;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
@@ -254,7 +254,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_group_top_n_executor() {
-        let parent_mem = MemoryContext::root(IntGauge::new("root_memory_usage", " ").unwrap());
+        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge());
         {
             let schema = Schema {
                 fields: vec![
@@ -290,7 +290,7 @@ mod tests {
             ];
             let mem_ctx = MemoryContext::new(
                 Some(parent_mem.clone()),
-                IntGauge::new("memory_usage", " ").unwrap(),
+                LabelGuardedIntGauge::<4>::test_int_gauge(),
             );
             let top_n_executor = (GroupTopNExecutorBuilder {
                 child: Box::new(mock_executor),

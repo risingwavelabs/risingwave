@@ -24,7 +24,9 @@ impl Rule for UnionMergeRule {
         let mut new_inputs = vec![];
         let mut has_merge = false;
         for input in top_union.inputs() {
-            if let Some(bottom_union) = input.as_logical_union() && bottom_union.all() == top_all {
+            if let Some(bottom_union) = input.as_logical_union()
+                && bottom_union.all() == top_all
+            {
                 new_inputs.extend(bottom_union.inputs());
                 has_merge = true;
             } else {

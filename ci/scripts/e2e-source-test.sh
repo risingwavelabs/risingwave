@@ -6,7 +6,6 @@ set -euo pipefail
 source ci/scripts/common.sh
 
 # prepare environment
-export CONNECTOR_RPC_ENDPOINT="localhost:50051"
 export CONNECTOR_LIBS_PATH="./connector-node/libs"
 
 while getopts 'p:' opt; do
@@ -49,36 +48,9 @@ export PGHOST=db PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test
 createdb
 psql < ./e2e_test/source/cdc/postgres_cdc.sql
 
-node_port=50051
-node_timeout=10
-
-wait_for_connector_node_start() {
-  start_time=$(date +%s)
-  while :
-  do
-      if nc -z localhost $node_port; then
-          echo "Port $node_port is listened! Connector Node is up!"
-          break
-      fi
-
-      current_time=$(date +%s)
-      elapsed_time=$((current_time - start_time))
-      if [ $elapsed_time -ge $node_timeout ]; then
-          echo "Timeout waiting for port $node_port to be listened!"
-          exit 1
-      fi
-      sleep 0.1
-  done
-  sleep 2
-}
-
-echo "--- starting risingwave cluster with connector node"
+echo "--- starting risingwave cluster"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-1cn-1fe-with-recovery
-./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-node.log 2>&1 &
-
-echo "waiting for connector node to start"
-wait_for_connector_node_start
 
 echo "--- inline cdc test"
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
@@ -96,7 +68,6 @@ sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
 
 # kill cluster and the connector node
 cargo make kill
-pkill -f connector-node
 echo "cluster killed "
 
 # insert new rows
@@ -106,10 +77,6 @@ echo "inserted new rows into mysql and postgres"
 
 # start cluster w/o clean-data
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-touch .risingwave/log/connector-node.log
-./connector-node/start-service.sh -p $node_port >> .risingwave/log/connector-node.log 2>&1 &
-echo "(recovery) waiting for connector node to start"
-wait_for_connector_node_start
 
 cargo make dev ci-1cn-1fe-with-recovery
 echo "wait for cluster recovery finish"
@@ -120,7 +87,6 @@ sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
 
 echo "--- Kill cluster"
 cargo make ci-kill
-pkill -f connector-node
 
 echo "--- e2e, ci-1cn-1fe, protobuf schema registry"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
