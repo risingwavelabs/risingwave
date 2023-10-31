@@ -126,7 +126,11 @@ impl CreatingStreamingJobInfo {
                 && let Some(shutdown_tx) = job.shutdown_tx.take()
             {
                 let (tx, rx) = oneshot::channel();
-                if shutdown_tx.send(CreatingState::Canceling { finish_tx: tx }).await.is_ok() {
+                if shutdown_tx
+                    .send(CreatingState::Canceling { finish_tx: tx })
+                    .await
+                    .is_ok()
+                {
                     receivers.insert(job_id, rx);
                 } else {
                     tracing::warn!(id=?job_id, "failed to send canceling state");

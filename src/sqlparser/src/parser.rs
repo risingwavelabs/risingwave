@@ -1397,6 +1397,7 @@ impl Parser {
             Token::LongArrow => Some(BinaryOperator::LongArrow),
             Token::HashArrow => Some(BinaryOperator::HashArrow),
             Token::HashLongArrow => Some(BinaryOperator::HashLongArrow),
+            Token::HashMinus => Some(BinaryOperator::HashMinus),
             Token::AtArrow => Some(BinaryOperator::Contains),
             Token::ArrowAt => Some(BinaryOperator::Contained),
             Token::QuestionMark => Some(BinaryOperator::Exists),
@@ -1741,6 +1742,7 @@ impl Parser {
             | Token::LongArrow
             | Token::HashArrow
             | Token::HashLongArrow
+            | Token::HashMinus
             | Token::AtArrow
             | Token::ArrowAt
             | Token::QuestionMark

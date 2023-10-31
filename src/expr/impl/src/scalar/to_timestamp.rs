@@ -108,7 +108,9 @@ fn build_dummy(_return_type: DataType, _children: Vec<BoxedExpression>) -> Resul
 )]
 pub fn to_date(s: &str, tmpl: &ChronoPattern) -> Result<Date> {
     let mut parsed = parse(s, tmpl)?;
-    if let Some(year) = &mut parsed.year && *year < 0 {
+    if let Some(year) = &mut parsed.year
+        && *year < 0
+    {
         *year += 1;
     }
     Ok(parsed.to_naive_date()?.into())

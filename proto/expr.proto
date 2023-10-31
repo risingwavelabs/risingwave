@@ -107,6 +107,7 @@ message ExprNode {
     REGEXP_REPLACE = 280;
     REGEXP_COUNT = 281;
     REGEXP_SPLIT_TO_ARRAY = 282;
+    REGEXP_EQ = 283;
     POW = 233;
     EXP = 234;
     CHR = 235;
@@ -236,6 +237,13 @@ message ExprNode {
     JSONB_EXISTS_ANY = 611;
     // jsonb ?& text[]
     JSONB_EXISTS_ALL = 612;
+    // see SUBTRACT for:
+    // jsonb - text -> jsonb
+    // jsonb - text[] -> jsonb
+    // jsonb - integer -> jsonb
+    //
+    // jsonb #- text[] -> jsonb
+    JSONB_DELETE_PATH = 615;
 
     // Non-pure functions below (> 1000)
     // ------------------------

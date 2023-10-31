@@ -386,7 +386,9 @@ impl ObjectStore for S3ObjectStore {
         )
         .await?;
 
-        if let Some(len) = range.len() && len != val.len() {
+        if let Some(len) = range.len()
+            && len != val.len()
+        {
             return Err(ObjectError::internal(format!(
                 "mismatched size: expected {}, found {} when reading {} at {:?}",
                 len,

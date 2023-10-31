@@ -41,22 +41,28 @@
     <img alt="Slack" src="https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack" />
   </a>
   <a
-    href="https://buildkite.com/risingwavelabs/main"
+    href="https://hub.docker.com/r/risingwavelabs/risingwave"
     target="_blank"
   >
-    <img alt="Build status" src="https://badge.buildkite.com/9394d2bca0f87e2e97aa78b25f765c92d4207c0b65e7f6648f.svg" />
+    <img alt="Docker" src="https://img.shields.io/docker/v/risingwavelabs/risingwave" />
   </a>
   <a
-    href="https://codecov.io/gh/risingwavelabs/risingwave"
+    href="https://twitter.com/risingwavelabs"
     target="_blank"
   >
-    <img alt="codecov" src="https://codecov.io/gh/risingwavelabs/risingwave/branch/main/graph/badge.svg?token=EB44K9K38B" />
+    <img alt="X" src="https://img.shields.io/twitter/follow/risingwavelabs" />
+  </a>
+  <a
+    href="https://www.youtube.com/@risingwave-labs"
+    target="_blank"
+  >
+    <img alt="YouTube" src="https://img.shields.io/youtube/channel/views/UCsHwdyBRxBpmkA5RRd0YNEA" />
   </a>
 </div>
 
 RisingWave is a distributed SQL streaming database that enables <b>cost-efficient</b> and <b>reliable</b> processing of streaming data.
 
-![RisingWave](https://github.com/risingwavelabs/risingwave-docs/blob/0f7e1302b22493ba3c1c48e78810750ce9a5ff42/docs/images/archi_simple.png)
+![RisingWave](https://github.com/risingwavelabs/risingwave-docs/blob/main/docs/images/new_archi_grey.png)
 
 ## Try it out in 5 minutes
 **Mac**
@@ -70,6 +76,10 @@ risingwave playground
 wget https://github.com/risingwavelabs/risingwave/releases/download/v1.3.0/risingwave-v1.3.0-x86_64-unknown-linux.tar.gz
 tar xvf risingwave-v1.3.0-x86_64-unknown-linux.tar.gz
 ./risingwave playground
+```
+**Docker**
+```
+docker run -it --pull=always -p 4566:4566 -p 5691:5691 risingwavelabs/risingwave:latest playground
 ```
 Now connect to RisingWave using `psql`:
 ```
