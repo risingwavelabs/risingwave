@@ -19,6 +19,7 @@ use anyhow::anyhow;
 use either::Either;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_connector::source::{
     BoxSourceWithStateStream, ConnectorState, SourceContext, SourceCtrlOpts, SplitMetaData,
@@ -244,16 +245,13 @@ impl<S: StateStore> SourceExecutor<S> {
             self.actor_ctx.id,
             core.source_id,
         );
-        self.metrics
-            .user_source_reader_error_count
-            .with_label_values(&[
-                "SourceReaderError",
-                &e.to_string(),
-                "SourceExecutor",
-                &self.actor_ctx.id.to_string(),
-                &core.source_id.to_string(),
-            ])
-            .inc_by(1);
+        GLOBAL_ERROR_METRICS.user_source_reader_error.report([
+            "SourceReaderError".to_owned(),
+            e.to_string(),
+            "SourceExecutor".to_owned(),
+            self.actor_ctx.id.to_string(),
+            core.source_id.to_string(),
+        ]);
         // fetch the newest offset, either it's in cache (before barrier)
         // or in state table (just after barrier)
         let target_state = if core.state_cache.is_empty() {
