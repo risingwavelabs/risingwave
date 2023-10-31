@@ -133,10 +133,9 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
 
 #[tokio::test]
 async fn test_background_ddl_cancel() -> Result<()> {
+    env::set_var("RW_BACKFILL_SNAPSHOT_READ_DELAY", "50");
     async fn create_mv(session: &mut Session) -> Result<()> {
-        env::set_var("RW_BACKFILL_SNAPSHOT_READ_DELAY", "50");
         session.run(CREATE_MV1).await?;
-        env::remove_var("RW_BACKFILL_SNAPSHOT_READ_DELAY");
         sleep(Duration::from_secs(2)).await;
         Ok(())
     }
@@ -154,14 +153,11 @@ async fn test_background_ddl_cancel() -> Result<()> {
 
     for _ in 0..5 {
         create_mv(&mut session).await?;
-        sleep(Duration::from_secs(2)).await;
-
         let ids = cancel_stream_jobs(&mut session).await?;
         assert_eq!(ids.len(), 1);
     }
 
     create_mv(&mut session).await?;
-    sleep(Duration::from_secs(2)).await;
 
     // Test cancel after kill cn
     kill_cn_and_wait_recover(&cluster).await;
@@ -172,7 +168,6 @@ async fn test_background_ddl_cancel() -> Result<()> {
     sleep(Duration::from_secs(2)).await;
 
     create_mv(&mut session).await?;
-    sleep(Duration::from_secs(2)).await;
 
     // Test cancel after kill meta
     kill_and_wait_recover(&cluster).await;
@@ -182,7 +177,6 @@ async fn test_background_ddl_cancel() -> Result<()> {
 
     // Make sure MV can be created after all these cancels
     create_mv(&mut session).await?;
-    sleep(Duration::from_secs(2)).await;
 
     kill_and_wait_recover(&cluster).await;
 
@@ -192,5 +186,6 @@ async fn test_background_ddl_cancel() -> Result<()> {
     session.run("DROP MATERIALIZED VIEW mv1").await?;
     session.run("DROP TABLE t").await?;
 
+    env::remove_var("RW_BACKFILL_SNAPSHOT_READ_DELAY");
     Ok(())
 }
