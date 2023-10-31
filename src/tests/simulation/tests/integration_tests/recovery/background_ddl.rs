@@ -119,10 +119,15 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
     // Now just wait for it to complete.
     session.run(WAIT).await?;
 
-    session
+    let t_inserts = session
+        .run("SELECT COUNT(v1) FROM t")
+        .await?;
+
+    let mv1_inserts = session
         .run("SELECT COUNT(v1) FROM mv1")
-        .await?
-        .assert_result_eq("2000");
+        .await?;
+
+    assert_eq!(t_inserts, mv1_inserts);
 
     // Make sure that if MV killed and restarted
     // it will not be dropped.
