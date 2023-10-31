@@ -147,7 +147,7 @@ where
         let pk_order = self.upstream_table.pk_serializer().get_order_types();
 
         #[cfg(madsim)]
-        let snapshot_read_delay = if let Ok(v) = std::env::var("BACKFILL_SNAPSHOT_READ_DELAY")
+        let snapshot_read_delay = if let Ok(v) = std::env::var("RW_BACKFILL_SNAPSHOT_READ_DELAY")
             && let Ok(v) = v.parse::<u64>() {
             v
         } else {
