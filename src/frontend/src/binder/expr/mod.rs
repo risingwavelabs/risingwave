@@ -642,7 +642,6 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "float4" => DataType::Float32,
                 "float8" => DataType::Float64,
                 "timestamptz" => DataType::Timestamptz,
-                "jsonb" => DataType::Jsonb,
                 "serial" => {
                     return Err(ErrorCode::NotSupported(
                         "Column type SERIAL is not supported".into(),
@@ -654,6 +653,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
             }
         }
         AstDataType::Bytea => DataType::Bytea,
+        AstDataType::Jsonb => DataType::Jsonb,
         AstDataType::Regclass
         | AstDataType::Regproc
         | AstDataType::Uuid

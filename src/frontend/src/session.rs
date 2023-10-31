@@ -87,7 +87,7 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
-use crate::utils::infer_stmt_row_desc::infer_show_object;
+use crate::utils::infer_stmt_row_desc::{infer_show_object, infer_show_variable};
 use crate::{FrontendOpts, PgResponseStream};
 
 pub(crate) mod transaction;
@@ -1102,31 +1102,7 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
         ]),
         Statement::ShowVariable { variable } => {
             let name = &variable[0].real_value().to_lowercase();
-            if name.eq_ignore_ascii_case("ALL") {
-                Ok(vec![
-                    PgFieldDescriptor::new(
-                        "Name".to_string(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Setting".to_string(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Description".to_string(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                ])
-            } else {
-                Ok(vec![PgFieldDescriptor::new(
-                    name.to_ascii_lowercase(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                )])
-            }
+            Ok(infer_show_variable(name))
         }
         Statement::Describe { name: _ } => Ok(vec![
             PgFieldDescriptor::new(

@@ -49,8 +49,8 @@ pub struct PulsarProperties {
     pub common: PulsarCommon,
 
     #[serde(rename = "iceberg.enabled")]
-    #[serde_as(as = "Option<DisplayFromStr>")]
-    pub iceberg_loader_enabled: bool,
+    #[serde_as(as = "DisplayFromStr")]
+    pub iceberg_loader_enabled: Option<bool>,
 
     #[serde(rename = "iceberg.bucket", default)]
     pub iceberg_bucket: Option<String>,

@@ -122,7 +122,7 @@ impl<PlanRef: GenericPlanRef> ProjectSet<PlanRef> {
                 map[1 + i] = Some(input.index())
             }
         }
-        ColIndexMapping::with_target_size(map, input_len)
+        ColIndexMapping::new(map, input_len)
     }
 
     /// Gets the Mapping of columnIndex from input column index to output column index,if a input
@@ -135,7 +135,7 @@ impl<PlanRef: GenericPlanRef> ProjectSet<PlanRef> {
                 map[input.index()] = Some(1 + i)
             }
         }
-        ColIndexMapping::with_target_size(map, 1 + self.select_list.len())
+        ColIndexMapping::new(map, 1 + self.select_list.len())
     }
 }
 

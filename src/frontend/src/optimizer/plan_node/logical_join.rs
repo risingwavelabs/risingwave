@@ -518,8 +518,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
                 *i += left.schema().len();
             }
             map.append(&mut right_map);
-            let mut mapping =
-                ColIndexMapping::with_target_size(map, left.schema().len() + right.schema().len());
+            let mut mapping = ColIndexMapping::new(map, left.schema().len() + right.schema().len());
 
             let new_output_indices = self
                 .output_indices()

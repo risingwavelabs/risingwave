@@ -44,6 +44,8 @@ mod format_type;
 mod int256;
 mod jsonb_access;
 mod jsonb_concat;
+mod jsonb_contains;
+mod jsonb_delete;
 mod jsonb_info;
 mod jsonb_object;
 mod length;
