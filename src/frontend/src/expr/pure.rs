@@ -176,8 +176,6 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::JsonbCat
             | expr_node::Type::JsonbAccess
             | expr_node::Type::JsonbAccessStr
-            | expr_node::Type::JsonbAccessMulti
-            | expr_node::Type::JsonbAccessMultiStr
             | expr_node::Type::JsonbExtractPath
             | expr_node::Type::JsonbExtractPathText
             | expr_node::Type::JsonbTypeof

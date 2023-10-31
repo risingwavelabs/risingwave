@@ -541,22 +541,6 @@ fn infer_type_for_special(
             ensure_arity!("greatest/least", 1 <= | inputs |);
             Ok(Some(align_types(inputs.iter_mut())?))
         }
-        ExprType::JsonbExtractPath => {
-            ensure_arity!("jsonb_extract_path", 2 <= | inputs |);
-            inputs[0].cast_implicit_mut(DataType::Jsonb)?;
-            for input in inputs.iter_mut().skip(1) {
-                input.cast_explicit_mut(DataType::Varchar)?;
-            }
-            Ok(Some(DataType::Jsonb))
-        }
-        ExprType::JsonbExtractPathText => {
-            ensure_arity!("jsonb_extract_path_text", 2 <= | inputs |);
-            inputs[0].cast_implicit_mut(DataType::Jsonb)?;
-            for input in inputs.iter_mut().skip(1) {
-                input.cast_explicit_mut(DataType::Varchar)?;
-            }
-            Ok(Some(DataType::Varchar))
-        }
         _ => Ok(None),
     }
 }
