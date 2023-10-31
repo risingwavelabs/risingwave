@@ -21,8 +21,9 @@ use bytes::Bytes;
 use parking_lot::RwLock;
 use prometheus::IntGauge;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
-use risingwave_hummock_sdk::{HummockEpoch, MAX_SPILL_TIMES};
+use risingwave_hummock_sdk::HummockEpoch;
 use tokio::sync::mpsc;
 use tracing::{warn, Instrument};
 

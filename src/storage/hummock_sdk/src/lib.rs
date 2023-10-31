@@ -26,6 +26,7 @@ mod key_cmp;
 use std::cmp::Ordering;
 
 pub use key_cmp::*;
+use risingwave_common::util::epoch::EPOCH_MASK;
 use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
@@ -55,10 +56,6 @@ pub const FIRST_VERSION_ID: HummockVersionId = 1;
 pub const SPLIT_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 1u64 << 56;
 pub const SINGLE_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 2u64 << 56;
 pub const OBJECT_SUFFIX: &str = "data";
-
-pub const EPOCH_AVAILABLE_BITS: u64 = 16;
-pub const MAX_SPILL_TIMES: u64 = 1 << EPOCH_AVAILABLE_BITS;
-pub const EPOCH_MASK: u64 = (1 << EPOCH_AVAILABLE_BITS) - 1;
 
 #[macro_export]
 /// This is wrapper for `info` log.
@@ -289,10 +286,10 @@ impl EpochWithGap {
     }
 
     pub fn new_from_epoch(epoch: u64) -> Self {
-        // #[cfg(not(feature = "enable_test_epoch"))]
-        // {
-        //     debug_assert_eq!(epoch & EPOCH_MASK, 0);
-        // }
+        #[cfg(not(feature = "enable_test_epoch"))]
+        {
+            debug_assert_eq!(epoch & EPOCH_MASK, 0);
+        }
 
         EpochWithGap::new(epoch, 0)
     }
