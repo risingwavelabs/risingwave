@@ -133,7 +133,7 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
 
 #[tokio::test]
 async fn test_background_ddl_cancel() -> Result<()> {
-    env::set_var("RW_BACKFILL_SNAPSHOT_READ_DELAY", "50");
+    env::set_var("RW_BACKFILL_SNAPSHOT_READ_DELAY", "100");
     async fn create_mv(session: &mut Session) -> Result<()> {
         session.run(CREATE_MV1).await?;
         sleep(Duration::from_secs(2)).await;
