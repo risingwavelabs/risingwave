@@ -37,14 +37,14 @@ use crate::source::MockExternalTableReader;
 pub type ConnectorResult<T> = std::result::Result<T, ConnectorError>;
 
 #[derive(Debug)]
-pub enum ExternalTableType {
+pub enum CdcTableType {
     Undefined,
     MySql,
     Postgres,
     Citus,
 }
 
-impl ExternalTableType {
+impl CdcTableType {
     pub fn from_properties(properties: &HashMap<String, String>) -> Self {
         let connector = properties
             .get("connector")
@@ -81,12 +81,14 @@ impl ExternalTableType {
 
 #[derive(Debug, Clone)]
 pub struct SchemaTableName {
+    // namespace of the table, e.g. database in mysql, schema in postgres
     pub schema_name: String,
     pub table_name: String,
 }
 
-const TABLE_NAME_KEY: &str = "table.name";
-const SCHEMA_NAME_KEY: &str = "schema.name";
+pub const TABLE_NAME_KEY: &str = "table.name";
+pub const SCHEMA_NAME_KEY: &str = "schema.name";
+pub const DATABASE_NAME_KEY: &str = "database.name";
 
 impl SchemaTableName {
     pub fn new(schema_name: String, table_name: String) -> Self {
@@ -97,15 +99,21 @@ impl SchemaTableName {
     }
 
     pub fn from_properties(properties: &HashMap<String, String>) -> Self {
-        let table_name = properties
-            .get(TABLE_NAME_KEY)
-            .map(|c| c.to_ascii_lowercase())
-            .unwrap_or_default();
+        let table_type = CdcTableType::from_properties(properties);
+        let table_name = properties.get(TABLE_NAME_KEY).cloned().unwrap_or_default();
 
-        let schema_name = properties
-            .get(SCHEMA_NAME_KEY)
-            .map(|c| c.to_ascii_lowercase())
-            .unwrap_or_default();
+        let schema_name = match table_type {
+            CdcTableType::MySql => properties
+                .get(DATABASE_NAME_KEY)
+                .cloned()
+                .unwrap_or_default(),
+            CdcTableType::Postgres | CdcTableType::Citus => {
+                properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
+            }
+            _ => {
+                unreachable!("invalid external table type: {:?}", table_type);
+            }
+        };
 
         Self {
             schema_name,
@@ -247,7 +255,8 @@ pub struct ExternalTableConfig {
 
 impl ExternalTableReader for MySqlExternalTableReader {
     fn get_normalized_table_name(&self, table_name: &SchemaTableName) -> String {
-        format!("`{}`", table_name.table_name)
+        // schema name is the database name in mysql
+        format!("`{}`.`{}`", table_name.schema_name, table_name.table_name)
     }
 
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
@@ -286,13 +295,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
 
 impl MySqlExternalTableReader {
     pub fn new(properties: HashMap<String, String>, rw_schema: Schema) -> ConnectorResult<Self> {
-        if let Some(field) = rw_schema.fields.last()
-            && field.name.as_str() != OFFSET_COLUMN_NAME
-        {
-            return Err(ConnectorError::Config(anyhow!(
-                "last column of schema must be `_rw_offset`"
-            )));
-        }
+        tracing::debug!(?rw_schema, "create mysql external table reader");
 
         let config = serde_json::from_value::<ExternalTableConfig>(
             serde_json::to_value(properties).unwrap(),

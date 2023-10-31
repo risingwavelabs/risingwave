@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::default::Default;
 use std::pin::{pin, Pin};
 use std::sync::Arc;
 
@@ -22,17 +21,20 @@ use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use maplit::hashmap;
-use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::Schema;
-use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{JsonbVal, ScalarRefImpl};
-use risingwave_common::util::epoch::EpochPair;
-use risingwave_connector::source::external::{CdcOffset, DebeziumOffset, DebeziumSourceOffset};
-use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
+use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::types::{DataType, ScalarRefImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::parser::{
+    DebeziumParser, EncodingProperties, JsonProperties, ProtocolProperties,
+    SourceStreamChunkBuilder, SpecificParserConfig,
+};
+use risingwave_connector::source::external::CdcOffset;
+use risingwave_connector::source::{SourceColumnDesc, SourceContext, SplitMetaData};
 use risingwave_storage::StateStore;
-use serde_json::Value;
 
+use crate::executor::backfill::cdc::state::{CdcBackfillStateImpl, SingleTableState};
 use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::upstream_table::snapshot::{
     SnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
@@ -48,15 +50,13 @@ use crate::executor::{
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
-pub const BACKFILL_STATE_KEY_SUFFIX: &str = "_backfill";
-
 pub struct CdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
     /// Upstream external table
     upstream_table: ExternalStorageTable,
 
-    /// Upstream changelog with the same schema with the external table.
+    /// Upstream changelog stream which may contain metadata columns, e.g. `_rw_offset`
     upstream: BoxedExecutor,
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
@@ -67,8 +67,12 @@ pub struct CdcBackfillExecutor<S: StateStore> {
 
     info: ExecutorInfo,
 
-    /// Stores the backfill done flag
+    /// State table of the Source executor
     source_state_handler: SourceStateTableHandler<S>,
+
+    shared_cdc_source: bool,
+
+    progress: Option<CreateMviewProgress>,
 
     metrics: Arc<StreamingMetrics>,
 
@@ -82,11 +86,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         upstream_table: ExternalStorageTable,
         upstream: BoxedExecutor,
         output_indices: Vec<usize>,
-        _progress: Option<CreateMviewProgress>,
+        progress: Option<CreateMviewProgress>,
         schema: Schema,
         pk_indices: PkIndices,
         metrics: Arc<StreamingMetrics>,
         source_state_handler: SourceStateTableHandler<S>,
+        shared_cdc_source: bool,
         chunk_size: usize,
     ) -> Self {
         Self {
@@ -103,6 +108,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             chunk_size,
             actor_ctx,
             source_state_handler,
+            shared_cdc_source,
+            progress,
         }
     }
 
@@ -112,10 +119,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
         let pk_order = self.upstream_table.pk_order_types().to_vec();
 
+        let shared_cdc_source = self.shared_cdc_source;
         let upstream_table_id = self.upstream_table.table_id().table_id;
         let upstream_table_reader = UpstreamTableReader::new(self.upstream_table);
 
-        let mut upstream = self.upstream.execute().peekable();
+        let mut upstream = self.upstream.execute();
 
         // Current position of the upstream_table storage primary key.
         // `None` means it starts from the beginning.
@@ -129,54 +137,56 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         // Check whether this parallelism has been assigned splits,
         // if not, we should bypass the backfill directly.
-        let mut invalid_backfill = false;
-        let mut split_id: Option<SplitId> = None;
-        let mut cdc_split: Option<SplitImpl> = None;
-        if let Some(mutation) = first_barrier.mutation.as_ref() {
-            match mutation.as_ref() {
-                Mutation::Add { splits, .. }
-                | Mutation::Update {
-                    actor_splits: splits,
-                    ..
-                } => {
-                    invalid_backfill = match splits.get(&self.actor_ctx.id) {
-                        None => true,
-                        Some(splits) => {
-                            let is_empty = splits.is_empty();
-                            if !is_empty {
-                                let split = splits.iter().exactly_one().map_err(|err| {
-                                    StreamExecutorError::from(anyhow!(
-                                        "fail to get cdc split {}",
-                                        err
-                                    ))
-                                })?;
-                                split_id = Some(split.id());
-                                cdc_split = Some(split.clone());
+        let mut state_impl = if shared_cdc_source {
+            CdcBackfillStateImpl::Undefined
+        } else if let Some(mutation) = first_barrier.mutation.as_ref() &&
+            let Mutation::Add{splits, ..} = mutation.as_ref()
+        {
+            tracing::info!(?mutation, ?shared_cdc_source, "got first barrier");
+            // We can assume for cdc table, the parallism of the fragment must be 1
+            match splits.get(&self.actor_ctx.id) {
+                None => {
+                    unreachable!("expect to receive the cdc split, please check the parallelism of the fragment")
+                },
+                Some(splits) => {
+                    if splits.is_empty() {
+                        tracing::info!(?splits, "got empty cdc split, bypass the backfill");
+                        // The first barrier message should be propagated.
+                        yield Message::Barrier(first_barrier);
+                        #[for_await]
+                        for msg in upstream {
+                            if let Some(msg) = mapping_message(msg?, &self.output_indices) {
+                                yield msg;
                             }
-                            is_empty
                         }
+                        // exit the executor
+                        return Ok(());
                     }
-                }
-                _ => {}
-            }
-        }
 
-        if invalid_backfill {
-            // The first barrier message should be propagated.
-            yield Message::Barrier(first_barrier);
-            #[for_await]
-            for msg in upstream {
-                if let Some(msg) = mapping_message(msg?, &self.output_indices) {
-                    yield msg;
+                    let split = splits.iter().exactly_one().map_err(|_err| {
+                        StreamExecutorError::from(anyhow!(
+                                "expect only one cdc split for table {}",
+                                upstream_table_id
+                            ))
+                    })?;
+                    CdcBackfillStateImpl::SingleTable(SingleTableState::new(self.source_state_handler, upstream_table_id, split.id(), split.clone()))
                 }
             }
-            // exit the executor
-            return Ok(());
         }
+        else {
+            unreachable!("backfilled cdc source init fail")
+        };
 
-        tracing::debug!("start cdc backfill: actor {:?}", self.actor_ctx.id);
+        let mut upstream = if shared_cdc_source {
+            transform_upstream(upstream, &self.info.schema)
+                .boxed()
+                .peekable()
+        } else {
+            upstream.peekable()
+        };
 
-        self.source_state_handler.init_epoch(first_barrier.epoch);
+        tracing::debug!(?upstream_table_id, ?self.actor_ctx.id, ?shared_cdc_source, "start cdc backfill");
+        state_impl.init_epoch(first_barrier.epoch);
 
         // start from the beginning
         // TODO(siyuan): restore backfill offset from state store
@@ -184,22 +194,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         current_pk_pos = backfill_offset;
 
-        let is_finished = {
-            // restore backfill done flag from state store
-            if let Some(split_id) = split_id.as_ref() {
-                let mut key = split_id.to_string();
-                key.push_str(BACKFILL_STATE_KEY_SUFFIX);
-                match self.source_state_handler.get(key.into()).await? {
-                    Some(row) => match row.datum_at(1) {
-                        Some(ScalarRefImpl::Jsonb(jsonb_ref)) => jsonb_ref.as_bool()?,
-                        _ => unreachable!("invalid backfill persistent state"),
-                    },
-                    None => false,
-                }
-            } else {
-                false
-            }
-        };
+        // restore backfill done flag from state store
+        let is_finished = state_impl.check_finished().await?;
 
         // If the snapshot is empty, we don't need to backfill.
         let is_snapshot_empty: bool = {
@@ -226,6 +222,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // Keep track of rows from the snapshot.
         #[allow(unused_variables)]
         let mut total_snapshot_processed_rows: u64 = 0;
+        let mut snapshot_read_epoch;
 
         // Read the current binlog offset as a low watermark
         let mut last_binlog_offset: Option<CdcOffset> =
@@ -338,11 +335,15 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     }
 
                                     // seal current epoch even though there is no data
-                                    Self::persist_state(
-                                        &mut self.source_state_handler,
-                                        barrier.epoch,
-                                    )
-                                    .await?;
+                                    state_impl.commit_state(barrier.epoch).await?;
+                                    snapshot_read_epoch = barrier.epoch.prev;
+                                    if let Some(progress) = self.progress.as_mut() {
+                                        progress.update(
+                                            barrier.epoch.curr,
+                                            snapshot_read_epoch,
+                                            total_snapshot_processed_rows,
+                                        );
+                                    }
 
                                     yield Message::Barrier(barrier);
                                     // Break the for loop and start a new snapshot read stream.
@@ -413,14 +414,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         ));
                                     }
 
-                                    Self::write_backfill_state(
-                                        &mut self.source_state_handler,
-                                        upstream_table_id,
-                                        &split_id,
-                                        &mut cdc_split,
-                                        last_binlog_offset.clone(),
-                                    )
-                                    .await?;
+                                    state_impl.mutate_state(last_binlog_offset.clone()).await?;
                                     break 'backfill_loop;
                                 }
                                 Some(chunk) => {
@@ -453,20 +447,35 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 initial_binlog_offset = ?last_binlog_offset,
                 "upstream snapshot is empty, mark backfill is done and persist current binlog offset");
 
-            Self::write_backfill_state(
-                &mut self.source_state_handler,
-                upstream_table_id,
-                &split_id,
-                &mut cdc_split,
-                last_binlog_offset,
-            )
-            .await?;
+            // The snapshot is empty, just set backfill to finished
+            state_impl.mutate_state(last_binlog_offset).await?;
         }
 
         tracing::info!(
             actor = self.actor_id,
             "CdcBackfill has already finished and forward messages directly to the downstream"
         );
+
+        // Wait for first barrier to come after backfill is finished.
+        // So we can update our progress + persist the status.
+        while let Some(Ok(msg)) = upstream.next().await {
+            if let Some(msg) = mapping_message(msg, &self.output_indices) {
+                // If not finished then we need to update state, otherwise no need.
+                if let Message::Barrier(barrier) = &msg {
+                    // persist the backfill state
+                    state_impl.commit_state(barrier.epoch).await?;
+
+                    // mark progress as finished
+                    if let Some(progress) = self.progress.as_mut() {
+                        progress.finish(barrier.epoch.curr, total_snapshot_processed_rows);
+                    }
+                    yield msg;
+                    // break after the state have been saved
+                    break;
+                }
+                yield msg;
+            }
+        }
 
         // After backfill progress finished
         // we can forward messages directly to the downstream,
@@ -476,87 +485,120 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             // upstream offsets will be removed from the message before forwarding to
             // downstream
             if let Some(msg) = mapping_message(msg?, &self.output_indices) {
-                // persist the backfill state if any
                 if let Message::Barrier(barrier) = &msg {
-                    Self::persist_state(&mut self.source_state_handler, barrier.epoch).await?;
+                    // commit state just to bump the epoch of state table
+                    state_impl.commit_state(barrier.epoch).await?;
                 }
                 yield msg;
             }
         }
     }
+}
 
-    /// When snapshot read stream ends, we should persist two states:
-    /// 1) a backfill finish flag to denote the backfill has done
-    /// 2) a consumed binlog offset to denote the last binlog offset
-    /// which will be committed to the state store upon next barrier.
-    async fn write_backfill_state(
-        source_state_handler: &mut SourceStateTableHandler<S>,
-        upstream_table_id: u32,
-        split_id: &Option<SplitId>,
-        cdc_split: &mut Option<SplitImpl>,
-        last_binlog_offset: Option<CdcOffset>,
-    ) -> StreamExecutorResult<()> {
-        assert!(
-            last_binlog_offset.is_some(),
-            "last binlog offset cannot be None"
-        );
+#[try_stream(ok = Message, error = StreamExecutorError)]
+pub async fn transform_upstream(upstream: BoxedMessageStream, schema: &Schema) {
+    let props = SpecificParserConfig {
+        key_encoding_config: None,
+        encoding_config: EncodingProperties::Json(JsonProperties {
+            use_schema_registry: false,
+        }),
+        protocol_config: ProtocolProperties::Debezium,
+    };
+    let mut parser = DebeziumParser::new(
+        props,
+        get_rw_columns(schema),
+        Arc::new(SourceContext::default()),
+    )
+    .await
+    .map_err(StreamExecutorError::connector_error)?;
 
-        if let Some(split_id) = split_id.as_ref() {
-            let mut key = split_id.to_string();
-            key.push_str(BACKFILL_STATE_KEY_SUFFIX);
-            source_state_handler
-                .set(key.into(), JsonbVal::from(Value::Bool(true)))
-                .await?;
-
-            if let Some(SplitImpl::MysqlCdc(split)) = cdc_split.as_mut()
-                && let Some(s) = split.mysql_split.as_mut()
-            {
-                let start_offset = last_binlog_offset.as_ref().map(|cdc_offset| {
-                    let source_offset = if let CdcOffset::MySql(o) = cdc_offset {
-                        DebeziumSourceOffset {
-                            file: Some(o.filename.clone()),
-                            pos: Some(o.position),
-                            ..Default::default()
-                        }
-                    } else {
-                        DebeziumSourceOffset::default()
-                    };
-
-                    let mut server = "RW_CDC_".to_string();
-                    server.push_str(upstream_table_id.to_string().as_str());
-                    DebeziumOffset {
-                        source_partition: hashmap! {
-                            "server".to_string() => server
-                        },
-                        source_offset,
-                        // upstream heartbeat event would not emit to the cdc backfill executor,
-                        // since we don't parse heartbeat event in the source parser.
-                        is_heartbeat: false,
-                    }
-                });
-
-                // persist the last binlog offset into split state
-                s.inner.start_offset = start_offset.map(|o| {
-                    let value = serde_json::to_value(o).unwrap();
-                    value.to_string()
-                });
-                s.inner.snapshot_done = true;
-            }
-            if let Some(split_impl) = cdc_split {
-                source_state_handler
-                    .set(split_impl.id(), split_impl.encode_to_json())
-                    .await?
-            }
+    pin_mut!(upstream);
+    #[for_await]
+    for msg in upstream {
+        let mut msg = msg?;
+        if let Message::Chunk(chunk) = &mut msg {
+            let parsed_chunk = parse_debezium_chunk(&mut parser, chunk, schema).await?;
+            let _ = std::mem::replace(chunk, parsed_chunk);
         }
-        Ok(())
+        yield msg;
+    }
+}
+
+async fn parse_debezium_chunk(
+    parser: &mut DebeziumParser,
+    chunk: &StreamChunk,
+    schema: &Schema,
+) -> StreamExecutorResult<StreamChunk> {
+    // here we transform the input chunk in (payload varchar, _rw_offset varchar, _rw_table_name varchar) schema
+    // to chunk with downstream table schema `info.schema` of MergeNode contains the schema of the
+    // table job with `_rw_offset` in the end
+    // see `gen_create_table_plan_for_cdc_source` for details
+    let column_descs = get_rw_columns(schema);
+    let mut builder = SourceStreamChunkBuilder::with_capacity(column_descs, chunk.capacity());
+
+    // The schema of input chunk (payload varchar, _rw_offset varchar, _rw_table_name varchar, _row_id)
+    // We should use the debezium parser to parse the first column,
+    // then chain the parsed row with `_rw_offset` row to get a new row.
+    let payloads = chunk.data_chunk().project(vec![0].as_slice());
+    let offset_columns = chunk.data_chunk().project(vec![1].as_slice());
+
+    // TODO: preserve the transaction semantics
+    for payload in payloads.rows() {
+        let ScalarRefImpl::Jsonb(jsonb_ref) = payload.datum_at(0).expect("payload must exist")
+        else {
+            unreachable!("payload must be jsonb");
+        };
+
+        parser
+            .parse_inner(
+                None,
+                Some(jsonb_ref.to_string().as_bytes().to_vec()),
+                builder.row_writer(),
+            )
+            .await
+            .unwrap();
     }
 
-    async fn persist_state(
-        source_state_handler: &mut SourceStateTableHandler<S>,
-        new_epoch: EpochPair,
-    ) -> StreamExecutorResult<()> {
-        source_state_handler.state_store.commit(new_epoch).await
+    let parsed_chunk = builder.finish();
+    let (data_chunk, ops) = parsed_chunk.into_parts();
+
+    // concat the rows in the parsed chunk with the _rw_offset column, we should also retain the Op column
+    let mut new_rows = Vec::with_capacity(chunk.capacity());
+    let offset_columns = offset_columns.compact();
+    for (data_row, offset_row) in data_chunk
+        .rows_with_holes()
+        .zip_eq_fast(offset_columns.rows_with_holes())
+    {
+        let combined = data_row.chain(offset_row);
+        new_rows.push(combined);
     }
+
+    let data_types = schema
+        .fields
+        .iter()
+        .map(|field| field.data_type.clone())
+        .chain(std::iter::once(DataType::Varchar)) // _rw_offset column
+        .collect_vec();
+
+    Ok(StreamChunk::from_parts(
+        ops,
+        DataChunk::from_rows(new_rows.as_slice(), data_types.as_slice()),
+    ))
+}
+
+fn get_rw_columns(schema: &Schema) -> Vec<SourceColumnDesc> {
+    schema
+        .fields
+        .iter()
+        .map(|field| {
+            let column_desc = ColumnDesc::named(
+                field.name.clone(),
+                ColumnId::placeholder(),
+                field.data_type.clone(),
+            );
+            SourceColumnDesc::from(&column_desc)
+        })
+        .collect_vec()
 }
 
 impl<S: StateStore> Executor for CdcBackfillExecutor<S> {
@@ -574,5 +616,72 @@ impl<S: StateStore> Executor for CdcBackfillExecutor<S> {
 
     fn identity(&self) -> &str {
         &self.info.identity
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use futures::{pin_mut, StreamExt};
+    use risingwave_common::array::{DataChunk, Op, StreamChunk};
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::{DataType, Datum, JsonbVal};
+    use risingwave_common::util::iter_util::ZipEqFast;
+
+    use crate::executor::backfill::cdc::cdc_backfill::transform_upstream;
+    use crate::executor::test_utils::MockSource;
+    use crate::executor::Executor;
+
+    #[tokio::test]
+    async fn test_transform_upstream_chunk() {
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Jsonb),   // debezium json payload
+            Field::unnamed(DataType::Varchar), // _rw_offset
+            Field::unnamed(DataType::Varchar), // _rw_table_name
+        ]);
+        let pk_indices = vec![1];
+        let (mut tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
+        // let payload = r#"{"before": null,"after":{"O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" },"source":{"version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null},"op":"r","ts_ms":1695277757017,"transaction":null}"#.to_string();
+        let payload = r#"{ "payload": { "before": null, "after": { "O_ORDERKEY": 5, "O_CUSTKEY": 44485, "O_ORDERSTATUS": "F", "O_TOTALPRICE": "144659.20", "O_ORDERDATE": "1994-07-30" }, "source": { "version": "1.9.7.Final", "connector": "mysql", "name": "RW_CDC_1002", "ts_ms": 1695277757000, "snapshot": "last", "db": "mydb", "sequence": null, "table": "orders_new", "server_id": 0, "gtid": null, "file": "binlog.000008", "pos": 3693, "row": 0, "thread": null, "query": null }, "op": "r", "ts_ms": 1695277757017, "transaction": null } }"#;
+
+        let datums: Vec<Datum> = vec![
+            Some(JsonbVal::from_str(payload).unwrap().into()),
+            Some("file: 1.binlog, pos: 100".to_string().into()),
+            Some("mydb.orders".to_string().into()),
+        ];
+
+        println!("datums: {:?}", datums[1]);
+
+        let mut builders = schema.create_array_builders(8);
+        for (builder, datum) in builders.iter_mut().zip_eq_fast(datums.iter()) {
+            builder.append(datum.clone());
+        }
+        let columns = builders
+            .into_iter()
+            .map(|builder| builder.finish().into())
+            .collect();
+
+        // one row chunk
+        let chunk = StreamChunk::from_parts(vec![Op::Insert], DataChunk::new(columns, 1));
+
+        tx.push_chunk(chunk);
+        let upstream = Box::new(source).execute();
+
+        // schema of the CDC table
+        let rw_schema = Schema::new(vec![
+            Field::with_name(DataType::Int64, "O_ORDERKEY"), // orderkey
+            Field::with_name(DataType::Int64, "O_CUSTKEY"),  // custkey
+            Field::with_name(DataType::Varchar, "O_ORDERSTATUS"), // orderstatus
+            Field::with_name(DataType::Decimal, "O_TOTALPRICE"), // totalprice
+            Field::with_name(DataType::Date, "O_ORDERDATE"), // orderdate
+        ]);
+
+        let parsed_stream = transform_upstream(upstream, &rw_schema);
+        pin_mut!(parsed_stream);
+        // the output chunk must contain the offset column
+        if let Some(message) = parsed_stream.next().await {
+            println!("chunk: {:#?}", message.unwrap());
+        }
     }
 }

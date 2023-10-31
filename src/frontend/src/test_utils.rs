@@ -34,7 +34,7 @@ use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
-use risingwave_pb::ddl_service::{create_connection_request, DdlProgress};
+use risingwave_pb::ddl_service::{create_connection_request, DdlProgress, PbTableJobType};
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactionGroupInfo, HummockSnapshot, HummockVersion, HummockVersionDelta,
@@ -105,6 +105,15 @@ impl LocalFrontend {
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
         self.session_ref().run_statement(sql.as_str(), vec![]).await
+    }
+
+    pub async fn run_sql_with_session(
+        &self,
+        session_ref: Arc<SessionImpl>,
+        sql: impl Into<String>,
+    ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let sql = sql.into();
+        session_ref.run_statement(sql.as_str(), vec![]).await
     }
 
     pub async fn run_user_sql(
@@ -254,6 +263,7 @@ impl CatalogWriter for MockCatalogWriter {
         source: Option<PbSource>,
         mut table: PbTable,
         graph: StreamFragmentGraph,
+        _job_type: PbTableJobType,
     ) -> Result<()> {
         if let Some(source) = source {
             let source_id = self.create_source_inner(source)?;
@@ -276,6 +286,14 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn create_source(&self, source: PbSource) -> Result<()> {
+        self.create_source_inner(source).map(|_| ())
+    }
+
+    async fn create_source_with_graph(
+        &self,
+        source: PbSource,
+        _graph: StreamFragmentGraph,
+    ) -> Result<()> {
         self.create_source_inner(source).map(|_| ())
     }
 

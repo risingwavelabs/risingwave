@@ -26,7 +26,7 @@ use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
-    DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
+    ChainType, DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
 };
 
 use super::id::GlobalFragmentIdsExt;
@@ -159,6 +159,8 @@ impl ActorBuilder {
 
             // "Leaf" node `Chain`.
             NodeBody::Chain(chain_node) => {
+                let cdc_backfill = chain_node.chain_type == ChainType::CdcBackfill as i32;
+
                 let input = stream_node.get_input();
                 assert_eq!(input.len(), 2);
 
@@ -184,7 +186,11 @@ impl ActorBuilder {
                         node_body: Some(NodeBody::Merge(MergeNode {
                             upstream_actor_id,
                             upstream_fragment_id: upstreams.fragment_id.as_global_id(),
-                            upstream_dispatcher_type: DispatcherType::NoShuffle as _,
+                            upstream_dispatcher_type: if cdc_backfill {
+                                DispatcherType::CdcTablename as _
+                            } else {
+                                DispatcherType::NoShuffle as _
+                            },
                             fields: merge_node.fields.clone(),
                         })),
                         ..merge_node.clone()
@@ -352,6 +358,7 @@ impl ActorGraphBuildStateInner {
             hash_mapping: Some(downstream_actor_mapping.to_protobuf()),
             dispatcher_id: downstream_fragment_id.as_global_id() as u64,
             downstream_actor_id: downstream_actors.as_global_ids(),
+            downstream_table_name: strategy.downstream_table_name.clone(),
         }
     }
 
@@ -371,6 +378,28 @@ impl ActorGraphBuildStateInner {
             hash_mapping: None,
             dispatcher_id: downstream_fragment_id.as_global_id() as u64,
             downstream_actor_id: downstream_actors.as_global_ids(),
+            downstream_table_name: None,
+        }
+    }
+
+    /// Create a new dispatcher for cdc event dispatch.
+    fn new_cdc_dispatcher(
+        strategy: &DispatchStrategy,
+        downstream_fragment_id: GlobalFragmentId,
+        downstream_actors: &[GlobalActorId],
+    ) -> Dispatcher {
+        // dist key is the index to `_rw_table_name` column
+        assert_eq!(strategy.dist_key_indices.len(), 1);
+        assert!(strategy.downstream_table_name.is_some());
+
+        Dispatcher {
+            r#type: strategy.r#type,
+            dist_key_indices: strategy.dist_key_indices.clone(),
+            output_indices: strategy.output_indices.clone(),
+            hash_mapping: None,
+            dispatcher_id: downstream_fragment_id.as_global_id() as u64,
+            downstream_actor_id: downstream_actors.as_global_ids(),
+            downstream_table_name: strategy.downstream_table_name.clone(),
         }
     }
 
@@ -471,7 +500,10 @@ impl ActorGraphBuildStateInner {
             }
 
             // Otherwise, make m * n links between the actors.
-            DispatcherType::Hash | DispatcherType::Broadcast | DispatcherType::Simple => {
+            DispatcherType::Hash
+            | DispatcherType::Broadcast
+            | DispatcherType::Simple
+            | DispatcherType::CdcTablename => {
                 // Add dispatchers for the upstream actors.
                 let dispatcher = if let DispatcherType::Hash = dt {
                     // Transform the `ParallelUnitMapping` from the downstream distribution to the
@@ -492,6 +524,12 @@ impl ActorGraphBuildStateInner {
                         downstream.fragment_id,
                         downstream.actor_ids,
                         actor_mapping,
+                    )
+                } else if let DispatcherType::CdcTablename = dt {
+                    Self::new_cdc_dispatcher(
+                        &edge.dispatch_strategy,
+                        downstream.fragment_id,
+                        downstream.actor_ids,
                     )
                 } else {
                     Self::new_normal_dispatcher(

@@ -71,7 +71,8 @@ pub fn jsonb_array_element(v: JsonbRef<'_>, p: i32) -> Option<JsonbRef<'_>> {
 
 /// Extracts JSON sub-object at the specified path, where path elements can be either field keys or array indexes.
 ///
-/// `jsonb #> text[] → jsonb`
+/// - `jsonb #> text[] → jsonb`
+/// - `jsonb_extract_path ( from_json jsonb, VARIADIC path_elems text[] ) → jsonb`
 ///
 /// # Examples
 ///
@@ -85,9 +86,14 @@ pub fn jsonb_array_element(v: JsonbRef<'_>, p: i32) -> Option<JsonbRef<'_>> {
 /// select '{"a": {"b": ["foo","bar"]}}'::jsonb #> '{a,b,null}'::text[];
 /// ----
 /// NULL
+///
+/// query T
+/// select jsonb_extract_path('{"a": {"b": ["foo","bar"]}}', 'a', 'b', '1');
+/// ----
+/// "bar"
 /// ```
-#[function("jsonb_access_multi(jsonb, varchar[]) -> jsonb")]
-pub fn jsonb_access_multi<'a>(v: JsonbRef<'a>, path: ListRef<'_>) -> Option<JsonbRef<'a>> {
+#[function("jsonb_extract_path(jsonb, varchar[]) -> jsonb")]
+pub fn jsonb_extract_path<'a>(v: JsonbRef<'a>, path: ListRef<'_>) -> Option<JsonbRef<'a>> {
     let mut jsonb = v;
     for key in path.iter() {
         // return null if any element is null
@@ -161,7 +167,8 @@ pub fn jsonb_array_element_str(v: JsonbRef<'_>, p: i32, writer: &mut impl Write)
 
 /// Extracts JSON sub-object at the specified path as text.
 ///
-/// `jsonb #>> text[] → text`
+/// - `jsonb #>> text[] → text`
+/// - `jsonb_extract_path_text ( from_json jsonb, VARIADIC path_elems text[] ) → text`
 ///
 /// # Examples
 ///
@@ -180,14 +187,19 @@ pub fn jsonb_array_element_str(v: JsonbRef<'_>, p: i32, writer: &mut impl Write)
 /// select '{"a": {"b": ["foo","bar"]}}'::jsonb #>> '{a,b,null}'::text[];
 /// ----
 /// NULL
+///
+/// query T
+/// select jsonb_extract_path_text('{"a": {"b": ["foo","bar"]}}', 'a', 'b', '1');
+/// ----
+/// bar
 /// ```
-#[function("jsonb_access_multi_str(jsonb, varchar[]) -> varchar")]
-pub fn jsonb_access_multi_str(
+#[function("jsonb_extract_path_text(jsonb, varchar[]) -> varchar")]
+pub fn jsonb_extract_path_text(
     v: JsonbRef<'_>,
     path: ListRef<'_>,
     writer: &mut impl Write,
 ) -> Option<()> {
-    let jsonb = jsonb_access_multi(v, path)?;
+    let jsonb = jsonb_extract_path(v, path)?;
     if jsonb.is_jsonb_null() {
         return None;
     }
