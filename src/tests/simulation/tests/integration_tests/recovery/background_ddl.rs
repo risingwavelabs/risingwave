@@ -21,10 +21,10 @@ use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
 const CREATE_TABLE: &str = "CREATE TABLE t(v1 int);";
-const SEED_TABLE: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 100000);";
+const SEED_TABLE: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 500);";
 const SET_BACKGROUND_DDL: &str = "SET BACKGROUND_DDL=true;";
-const SET_RATE_LIMIT_4096: &str = "SET STREAMING_RATE_LIMIT=4096;";
-const SET_RATE_LIMIT_2048: &str = "SET STREAMING_RATE_LIMIT=2048;";
+const SET_RATE_LIMIT_2: &str = "SET STREAMING_RATE_LIMIT=2;";
+const SET_RATE_LIMIT_1: &str = "SET STREAMING_RATE_LIMIT=1;";
 const RESET_RATE_LIMIT: &str = "SET STREAMING_RATE_LIMIT=0;";
 const CREATE_MV1: &str = "CREATE MATERIALIZED VIEW mv1 as SELECT * FROM t;";
 
@@ -74,18 +74,14 @@ async fn cancel_stream_jobs(session: &mut Session) -> Result<Vec<u32>> {
 
 #[tokio::test]
 async fn test_background_mv_barrier_recovery() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
     let mut session = cluster.start_session();
 
-    session.run("CREATE TABLE t1 (v1 int);").await?;
-    session
-        .run("INSERT INTO t1 select * from generate_series(1, 400000)")
-        .await?;
-    session.run("flush").await?;
-    session.run("SET BACKGROUND_DDL=true;").await?;
-    session
-        .run("create materialized view m1 as select * from t1;")
-        .await?;
+    session.run(CREATE_TABLE).await?;
+    session.run(SEED_TABLE).await?;
+    session.flush().await?;
+    session.run(SET_BACKGROUND_DDL).await?;
+    session.run(CREATE_MV1).await?;
 
     // If the CN is killed before first barrier pass for the MV, the MV will be dropped.
     // This is because it's table fragments will NOT be committed until first barrier pass.
@@ -145,11 +141,11 @@ async fn test_background_ddl_cancel() -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_ansi(false)
         .init();
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
     let mut session = cluster.start_session();
     session.run(CREATE_TABLE).await?;
     session.run(SEED_TABLE).await?;
-    session.run(SET_RATE_LIMIT_4096).await?;
+    session.run(SET_RATE_LIMIT_2).await?;
     session.run(SET_BACKGROUND_DDL).await?;
 
     for _ in 0..5 {
@@ -158,7 +154,7 @@ async fn test_background_ddl_cancel() -> Result<()> {
         assert_eq!(ids.len(), 1);
     }
 
-    session.run(SET_RATE_LIMIT_2048).await?;
+    session.run(SET_RATE_LIMIT_1).await?;
     create_mv(&mut session).await?;
 
     // Test cancel after kill cn
