@@ -201,7 +201,7 @@ impl SortOverWindowExecutor {
             for (call, state) in this.calls.iter().zip_eq_fast(states.iter_mut()) {
                 // TODO(rc): batch appending
                 state.append(
-                    this.row_to_state_key(&row)?,
+                    this.row_to_state_key(row)?,
                     row.project(call.args.val_indices())
                         .into_owned_row()
                         .as_inner()

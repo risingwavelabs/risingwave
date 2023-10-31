@@ -33,15 +33,9 @@ mod private {
     }
 }
 
-#[derive(EstimateSize)]
+#[derive(Default, EstimateSize)]
 pub struct RowNumber {
     prev_rank: i64,
-}
-
-impl Default for RowNumber {
-    fn default() -> Self {
-        Self { prev_rank: 0 }
-    }
 }
 
 impl RankFuncCount for RowNumber {
@@ -85,19 +79,10 @@ impl RankFuncCount for Rank {
     }
 }
 
-#[derive(Debug, EstimateSize)]
+#[derive(Default, EstimateSize)]
 pub struct DenseRank {
     prev_order_key: Option<MemcmpEncoded>,
     prev_rank: i64,
-}
-
-impl Default for DenseRank {
-    fn default() -> Self {
-        Self {
-            prev_order_key: None,
-            prev_rank: 0,
-        }
-    }
 }
 
 impl RankFuncCount for DenseRank {
