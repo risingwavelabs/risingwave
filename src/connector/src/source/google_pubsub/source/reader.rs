@@ -96,7 +96,9 @@ impl CommonSplitReader for PubsubSplitReader {
             yield chunk;
 
             // Stop if we've approached the stop_offset
-            if let Some(stop_offset) = self.stop_offset && latest_offset >= stop_offset {
+            if let Some(stop_offset) = self.stop_offset
+                && latest_offset >= stop_offset
+            {
                 return Ok(());
             }
         }

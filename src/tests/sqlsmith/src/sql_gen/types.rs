@@ -173,6 +173,7 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSi
                     && func.ret_type.is_exact()
                     // Ignored functions
                     && ![
+                        AggKind::InternalLastSeenValue, // Use internally
                         AggKind::Sum0, // Used internally
                         AggKind::BitAnd,
                         AggKind::BitOr,

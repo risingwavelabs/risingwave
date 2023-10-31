@@ -444,7 +444,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                         };
                         if key.null_bitmap().is_subset(&null_matched)
                             && let join_entry = self.right_table.lookup(&key, epoch).await?
-                            && !join_entry.is_empty() {
+                            && !join_entry.is_empty()
+                        {
                             for right_row in join_entry.cached.values() {
                                 // check join condition
                                 let ok = if let Some(ref mut cond) = self.condition {
@@ -458,7 +459,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                                 };
 
                                 if ok {
-                                    if let Some(chunk) = builder.append_row(op, left_row, right_row) {
+                                    if let Some(chunk) = builder.append_row(op, left_row, right_row)
+                                    {
                                         yield Message::Chunk(chunk);
                                     }
                                 }

@@ -57,7 +57,9 @@ impl StreamGroupTopN {
         let mut stream_key = core
             .stream_key()
             .expect("logical node should have stream key here");
-        if let Some(vnode_col_idx) = vnode_col_idx && stream_key.len() > 1 {
+        if let Some(vnode_col_idx) = vnode_col_idx
+            && stream_key.len() > 1
+        {
             // The output stream key of `GroupTopN` is a union of group key and input stream key,
             // while vnode is calculated from a subset of input stream key. So we can safely remove
             // the vnode column from output stream key. While at meanwhile we cannot leave the stream key

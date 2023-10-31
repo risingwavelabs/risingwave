@@ -28,7 +28,7 @@ create source invalid_startup_timestamp (
   properties.bootstrap.server = 'message_queue:29092'
 ) ROW FORMAT JSON;
 
-statement error db error: ERROR: QueryError: Invalid input syntax: schema definition is required for ENCODE JSON
+statement error db error: ERROR: QueryError: Protocol error: Schema definition is required, either from SQL or schema registry.
 create source invalid_schema_definition
 with (
   connector = 'kafka',

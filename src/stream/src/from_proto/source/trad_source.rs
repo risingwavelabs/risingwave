@@ -160,8 +160,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     );
 
                     let table_type = ExternalTableType::from_properties(&source.properties);
-                    if table_type.can_backfill() && let Some(table_desc) = source_info.upstream_table.clone() {
-                        let upstream_table_name = SchemaTableName::from_properties(&source.properties);
+                    if table_type.can_backfill()
+                        && let Some(table_desc) = source_info.upstream_table.clone()
+                    {
+                        let upstream_table_name =
+                            SchemaTableName::from_properties(&source.properties);
                         let table_pk_indices = table_desc
                             .pk
                             .iter()
@@ -173,7 +176,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
                             .collect_vec();
 
-                        let table_reader = table_type.create_table_reader(source.properties.clone(), schema.clone())?;
+                        let table_reader = table_type
+                            .create_table_reader(source.properties.clone(), schema.clone())?;
                         let external_table = ExternalStorageTable::new(
                             TableId::new(source.source_id),
                             upstream_table_name,
@@ -188,18 +192,19 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         let source_state_handler = SourceStateTableHandler::from_table_catalog(
                             source.state_table.as_ref().unwrap(),
                             store.clone(),
-                        ).await;
+                        )
+                        .await;
                         let cdc_backfill = CdcBackfillExecutor::new(
                             params.actor_context.clone(),
                             external_table,
                             Box::new(source_exec),
-                            (0..source.columns.len()).collect_vec(),    // eliminate the last column (_rw_offset)
+                            (0..source.columns.len()).collect_vec(), /* eliminate the last column (_rw_offset) */
                             None,
                             schema.clone(),
                             params.pk_indices,
                             params.executor_stats,
                             source_state_handler,
-                            source_ctrl_opts.chunk_size
+                            source_ctrl_opts.chunk_size,
                         );
                         cdc_backfill.boxed()
                     } else {

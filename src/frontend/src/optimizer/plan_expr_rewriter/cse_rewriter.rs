@@ -36,7 +36,9 @@ impl CseRewriter {
 
 impl ExprRewriter for CseRewriter {
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
-        if let Some(count) = self.expr_counter.counter.get(&func_call) && *count > 1 {
+        if let Some(count) = self.expr_counter.counter.get(&func_call)
+            && *count > 1
+        {
             if let Some(expr) = self.cse_mapping.get(&func_call) {
                 let expr: ExprImpl = ExprImpl::InputRef(expr.clone().into());
                 return expr;
