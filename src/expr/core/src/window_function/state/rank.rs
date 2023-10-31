@@ -102,11 +102,6 @@ impl Default for DenseRank {
 
 impl RankFuncCount for DenseRank {
     fn count(&mut self, curr_key: StateKey) -> i64 {
-        println!(
-            "[rc] DenseRank: {:?}, curr order key: {:?}",
-            self, curr_key.order_key
-        );
-
         let curr_rank = if let Some(prev_order_key) = self.prev_order_key.as_ref() && prev_order_key == &curr_key.order_key {
              // current key is in the same peer group as the previous one
             self.prev_rank
@@ -184,5 +179,170 @@ impl<RF: RankFuncCount> WindowState for RankState<RF> {
         assert!(self.curr_window().is_ready);
         let (_rank, evict_hint) = self.slide_inner();
         Ok(evict_hint)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::row::OwnedRow;
+    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::util::memcmp_encoding;
+    use risingwave_common::util::sort_util::OrderType;
+
+    use super::*;
+    use crate::aggregate::AggArgs;
+    use crate::window_function::{Frame, FrameBound, WindowFuncKind};
+
+    fn create_state_key(order: i64, pk: i64) -> StateKey {
+        StateKey {
+            order_key: memcmp_encoding::encode_value(
+                Some(ScalarImpl::from(order)),
+                OrderType::ascending(),
+            )
+            .unwrap(),
+            pk: OwnedRow::new(vec![Some(pk.into())]).into(),
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "should not slide forward when the current window is not ready")]
+    fn test_rank_state_bad_use() {
+        let call = WindowFuncCall {
+            kind: WindowFuncKind::RowNumber,
+            args: AggArgs::None,
+            return_type: DataType::Int64,
+            frame: Frame::rows(
+                FrameBound::UnboundedPreceding,
+                FrameBound::UnboundedFollowing,
+            ),
+        };
+        let mut state = RankState::<RowNumber>::new(&call);
+        assert!(state.curr_window().key.is_none());
+        assert!(!state.curr_window().is_ready);
+        _ = state.slide()
+    }
+
+    #[test]
+    fn test_row_number_state() {
+        let call = WindowFuncCall {
+            kind: WindowFuncKind::RowNumber,
+            args: AggArgs::None,
+            return_type: DataType::Int64,
+            frame: Frame::rows(
+                FrameBound::UnboundedPreceding,
+                FrameBound::UnboundedFollowing,
+            ),
+        };
+        let mut state = RankState::<RowNumber>::new(&call);
+        assert!(state.curr_window().key.is_none());
+        assert!(!state.curr_window().is_ready);
+        state.append(create_state_key(1, 100), SmallVec::new());
+        assert_eq!(state.curr_window().key.unwrap(), &create_state_key(1, 100));
+        assert!(state.curr_window().is_ready);
+        let (output, evict_hint) = state.slide().unwrap();
+        assert_eq!(output.unwrap(), 1i64.into());
+        match evict_hint {
+            StateEvictHint::CannotEvict(state_key) => {
+                assert_eq!(state_key, create_state_key(1, 100));
+            }
+            _ => unreachable!(),
+        }
+        assert!(!state.curr_window().is_ready);
+        state.append(create_state_key(2, 103), SmallVec::new());
+        state.append(create_state_key(2, 102), SmallVec::new());
+        assert_eq!(state.curr_window().key.unwrap(), &create_state_key(2, 103));
+        let (output, evict_hint) = state.slide().unwrap();
+        assert_eq!(output.unwrap(), 2i64.into());
+        match evict_hint {
+            StateEvictHint::CannotEvict(state_key) => {
+                assert_eq!(state_key, create_state_key(1, 100));
+            }
+            _ => unreachable!(),
+        }
+        assert_eq!(state.curr_window().key.unwrap(), &create_state_key(2, 102));
+        let (output, _) = state.slide().unwrap();
+        assert_eq!(output.unwrap(), 3i64.into());
+    }
+
+    #[test]
+    fn test_rank_state() {
+        let call = WindowFuncCall {
+            kind: WindowFuncKind::Rank,
+            args: AggArgs::None,
+            return_type: DataType::Int64,
+            frame: Frame::rows(
+                FrameBound::UnboundedPreceding,
+                FrameBound::UnboundedFollowing,
+            ),
+        };
+        let mut state = RankState::<Rank>::new(&call);
+        assert!(state.curr_window().key.is_none());
+        assert!(!state.curr_window().is_ready);
+        state.append(create_state_key(1, 100), SmallVec::new());
+        state.append(create_state_key(2, 103), SmallVec::new());
+        state.append(create_state_key(2, 102), SmallVec::new());
+        state.append(create_state_key(3, 106), SmallVec::new());
+        state.append(create_state_key(3, 105), SmallVec::new());
+        state.append(create_state_key(3, 104), SmallVec::new());
+        state.append(create_state_key(8, 108), SmallVec::new());
+
+        let mut outputs = vec![];
+        while state.curr_window().is_ready {
+            outputs.push(state.slide().unwrap().0)
+        }
+
+        assert_eq!(
+            outputs,
+            vec![
+                Some(1i64.into()),
+                Some(2i64.into()),
+                Some(2i64.into()),
+                Some(4i64.into()),
+                Some(4i64.into()),
+                Some(4i64.into()),
+                Some(7i64.into())
+            ]
+        );
+    }
+
+    #[test]
+    fn test_dense_rank_state() {
+        let call = WindowFuncCall {
+            kind: WindowFuncKind::DenseRank,
+            args: AggArgs::None,
+            return_type: DataType::Int64,
+            frame: Frame::rows(
+                FrameBound::UnboundedPreceding,
+                FrameBound::UnboundedFollowing,
+            ),
+        };
+        let mut state = RankState::<DenseRank>::new(&call);
+        assert!(state.curr_window().key.is_none());
+        assert!(!state.curr_window().is_ready);
+        state.append(create_state_key(1, 100), SmallVec::new());
+        state.append(create_state_key(2, 103), SmallVec::new());
+        state.append(create_state_key(2, 102), SmallVec::new());
+        state.append(create_state_key(3, 106), SmallVec::new());
+        state.append(create_state_key(3, 105), SmallVec::new());
+        state.append(create_state_key(3, 104), SmallVec::new());
+        state.append(create_state_key(8, 108), SmallVec::new());
+
+        let mut outputs = vec![];
+        while state.curr_window().is_ready {
+            outputs.push(state.slide().unwrap().0)
+        }
+
+        assert_eq!(
+            outputs,
+            vec![
+                Some(1i64.into()),
+                Some(2i64.into()),
+                Some(2i64.into()),
+                Some(3i64.into()),
+                Some(3i64.into()),
+                Some(3i64.into()),
+                Some(4i64.into())
+            ]
+        );
     }
 }
