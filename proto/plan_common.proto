@@ -83,8 +83,7 @@ message ExternalTableDesc {
   repeated common.ColumnOrder pk = 3;
   string table_name = 4;
   repeated uint32 stream_key = 5;
-  // use string as a work around until https://github.com/madsim-rs/madsim/issues/169 finished
-  string connect_properties = 6;
+  map<string, string> connect_properties = 6;
 }
 
 enum JoinType {

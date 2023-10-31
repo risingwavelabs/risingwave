@@ -548,7 +548,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
             pk: table_pk,
             columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
             stream_key: pk_column_indices,
-            value_indices: (0..columns.len()).collect_vec(), /* FIXME: maybe we can remove `_rw_offset` from TableDesc */
+            value_indices: (0..columns.len()).collect_vec(),
             connect_properties: Default::default(),
         };
 

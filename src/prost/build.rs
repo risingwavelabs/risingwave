@@ -59,7 +59,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect();
 
     // Paths to generate `BTreeMap` for protobuf maps.
-    let btree_map_paths = [".monitor_service.StackTraceResponse"];
+    let btree_map_paths = [
+        ".monitor_service.StackTraceResponse",
+        ".plan_common.ExternalTableDesc",
+    ];
 
     // Build protobuf structs.
 

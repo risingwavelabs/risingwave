@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::external::{CdcTableType, SchemaTableName};
 use risingwave_pb::plan_common::{ExternalTableDesc, StorageTableDesc};
 use risingwave_pb::stream_plan::{ChainNode, ChainType};
@@ -99,10 +99,11 @@ impl ExecutorBuilder for ChainExecutorBuilder {
             .boxed(),
             ChainType::CdcBackfill => {
                 let table_desc: &ExternalTableDesc = node.get_cdc_table_desc()?;
-                let properties = serde_json::from_str(table_desc.connect_properties.as_str())
-                    .map_err(|err| {
-                        ConnectorError::Internal(anyhow!("invalid connect properties {}", err))
-                    })?;
+                let properties: HashMap<String, String> = table_desc
+                    .connect_properties
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
                 let table_type = CdcTableType::from_properties(&properties);
                 let table_reader =
                     table_type.create_table_reader(properties.clone(), schema.clone())?;

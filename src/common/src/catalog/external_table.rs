@@ -62,8 +62,7 @@ impl CdcTableDesc {
             pk: self.pk.iter().map(|v| v.to_protobuf()).collect(),
             table_name: self.external_table_name.clone(),
             stream_key: self.stream_key.iter().map(|k| *k as _).collect(),
-            connect_properties: serde_json::to_string(&self.connect_properties)
-                .expect("failed to serialize connect_properties"),
+            connect_properties: self.connect_properties.clone(),
         }
     }
 
