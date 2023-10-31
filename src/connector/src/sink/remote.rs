@@ -268,6 +268,8 @@ impl LogSinker for RemoteLogSinker {
                         let offset = TruncateOffset::Chunk { epoch, chunk_id };
                         if let Some(prev_offset) = &prev_offset {
                             prev_offset.check_next_offset(offset)?;
+                        } else {
+                            request_tx.start_epoch(epoch).await?;
                         }
                         let cardinality = chunk.cardinality();
                         sink_metrics
@@ -284,6 +286,9 @@ impl LogSinker for RemoteLogSinker {
                         let offset = TruncateOffset::Barrier { epoch };
                         if let Some(prev_offset) = &prev_offset {
                             prev_offset.check_next_offset(offset)?;
+                        } else {
+                            // TODO: this start epoch is actually unnecessary
+                            request_tx.start_epoch(epoch).await?;
                         }
                         if is_checkpoint {
                             let start_time = Instant::now();
