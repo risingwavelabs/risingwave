@@ -169,12 +169,19 @@ impl MessageMeta<'_> {
             SourceColumnType::Offset => Datum::Some(self.offset.into()).into(),
             // Extract custom meta data per connector.
             SourceColumnType::Meta if let SourceMeta::Kafka(kafka_meta) = self.meta => {
-                assert_eq!(desc.name.as_str(), KAFKA_TIMESTAMP_COLUMN_NAME, "unexpected meta column name");
-                kafka_meta.timestamp.map(|ts| {
-                    risingwave_common::cast::i64_to_timestamptz(ts)
-                        .unwrap()
-                        .to_scalar_value()
-                }).into()
+                assert_eq!(
+                    desc.name.as_str(),
+                    KAFKA_TIMESTAMP_COLUMN_NAME,
+                    "unexpected meta column name"
+                );
+                kafka_meta
+                    .timestamp
+                    .map(|ts| {
+                        risingwave_common::cast::i64_to_timestamptz(ts)
+                            .unwrap()
+                            .to_scalar_value()
+                    })
+                    .into()
             }
 
             // For other cases, return `None`.

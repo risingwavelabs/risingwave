@@ -24,7 +24,9 @@ impl Rule for IntersectMergeRule {
         let mut new_inputs = vec![];
         let mut has_merge = false;
         for input in top_intersect.inputs() {
-            if let Some(bottom_intersect) = input.as_logical_intersect() && bottom_intersect.all() == top_all {
+            if let Some(bottom_intersect) = input.as_logical_intersect()
+                && bottom_intersect.all() == top_all
+            {
                 new_inputs.extend(bottom_intersect.inputs());
                 has_merge = true;
             } else {

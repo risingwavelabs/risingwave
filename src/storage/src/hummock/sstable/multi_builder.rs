@@ -212,9 +212,17 @@ where
                     }
                 }
             }
-            if need_seal_current && let Some(event) = builder.last_range_tombstone() && event.new_epoch != HummockEpoch::MAX {
+            if need_seal_current
+                && let Some(event) = builder.last_range_tombstone()
+                && event.new_epoch != HummockEpoch::MAX
+            {
                 last_range_tombstone_epoch = event.new_epoch;
-                if event.event_key.left_user_key.as_ref().eq(&full_key.user_key) {
+                if event
+                    .event_key
+                    .left_user_key
+                    .as_ref()
+                    .eq(&full_key.user_key)
+                {
                     // If the last range tombstone equals the new key, we can not create new file because we must keep the new key in origin file.
                     need_seal_current = false;
                 } else {
@@ -295,7 +303,10 @@ where
 
     /// Add kv pair to sstable.
     pub async fn add_monotonic_delete(&mut self, event: MonotonicDeleteEvent) -> HummockResult<()> {
-        if let Some(builder) = self.current_builder.as_mut() && builder.reach_capacity() && event.new_epoch != HummockEpoch::MAX {
+        if let Some(builder) = self.current_builder.as_mut()
+            && builder.reach_capacity()
+            && event.new_epoch != HummockEpoch::MAX
+        {
             if builder.last_range_tombstone_epoch() != HummockEpoch::MAX {
                 builder.add_monotonic_delete(MonotonicDeleteEvent {
                     event_key: event.event_key.clone(),

@@ -67,7 +67,9 @@ impl Planner {
                 exprs.iter().map(|expr| (expr.clone(), false)).collect();
             let mut uncovered_distinct_on_exprs_cnt = distinct_on_exprs.len();
             let mut order_iter = order.iter().map(|o| &select_items[o.column_index]);
-            while uncovered_distinct_on_exprs_cnt > 0 && let Some(order_expr) = order_iter.next() {
+            while uncovered_distinct_on_exprs_cnt > 0
+                && let Some(order_expr) = order_iter.next()
+            {
                 match distinct_on_exprs.get_mut(order_expr) {
                     Some(has_been_covered) => {
                         if !*has_been_covered {
@@ -179,7 +181,9 @@ impl Planner {
 
         if let BoundDistinct::Distinct = distinct {
             let fields = root.schema().fields();
-            let group_key = if let Some(field) = fields.get(0) && field.name == "projected_row_id" {
+            let group_key = if let Some(field) = fields.get(0)
+                && field.name == "projected_row_id"
+            {
                 // Do not group by projected_row_id hidden column.
                 (1..fields.len()).collect()
             } else {

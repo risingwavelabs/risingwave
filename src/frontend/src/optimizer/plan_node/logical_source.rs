@@ -571,7 +571,9 @@ impl ToStream for LogicalSource {
         }
 
         assert!(!(self.core.gen_row_id && self.core.for_table));
-        if let Some(row_id_index) = self.core.row_id_index && self.core.gen_row_id {
+        if let Some(row_id_index) = self.core.row_id_index
+            && self.core.gen_row_id
+        {
             plan = StreamRowIdGen::new(plan, row_id_index).into();
         }
         Ok(plan)
