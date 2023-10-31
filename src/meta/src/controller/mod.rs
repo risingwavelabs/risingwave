@@ -34,6 +34,8 @@ pub mod cluster;
 pub mod fragment;
 pub mod rename;
 pub mod system_param;
+#[allow(dead_code)]
+pub mod user;
 pub mod utils;
 
 // todo: refine the error transform.

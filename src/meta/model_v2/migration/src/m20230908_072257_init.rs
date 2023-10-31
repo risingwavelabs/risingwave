@@ -124,13 +124,12 @@ impl MigrationTrait for Migration {
                             .primary_key()
                             .auto_increment(),
                     )
-                    .col(ColumnDef::new(User::Name).string().not_null())
+                    .col(ColumnDef::new(User::Name).string().unique_key().not_null())
                     .col(ColumnDef::new(User::IsSuper).boolean().not_null())
                     .col(ColumnDef::new(User::CanCreateDb).boolean().not_null())
                     .col(ColumnDef::new(User::CanCreateUser).boolean().not_null())
                     .col(ColumnDef::new(User::CanLogin).boolean().not_null())
-                    .col(ColumnDef::new(User::AuthType).string())
-                    .col(ColumnDef::new(User::AuthValue).string())
+                    .col(ColumnDef::new(User::AuthInfo).json())
                     .to_owned(),
             )
             .await?;
@@ -197,6 +196,11 @@ impl MigrationTrait for Migration {
                             .primary_key()
                             .auto_increment(),
                     )
+                    .col(
+                        ColumnDef::new(UserPrivilege::DependentId)
+                            .integer()
+                            .not_null(),
+                    )
                     .col(ColumnDef::new(UserPrivilege::UserId).integer().not_null())
                     .col(ColumnDef::new(UserPrivilege::Oid).integer().not_null())
                     .col(
@@ -204,11 +208,19 @@ impl MigrationTrait for Migration {
                             .integer()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(UserPrivilege::Actions).string().not_null())
+                    .col(ColumnDef::new(UserPrivilege::Action).string().not_null())
                     .col(
                         ColumnDef::new(UserPrivilege::WithGrantOption)
                             .boolean()
                             .not_null(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_user_privilege_dependent_id")
+                            .from(UserPrivilege::Table, UserPrivilege::DependentId)
+                            .to(UserPrivilege::Table, UserPrivilege::Id)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
                     )
                     .foreign_key(
                         &mut ForeignKey::create()
@@ -651,6 +663,19 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
+        manager
+            .create_index(
+                MigrationIndex::create()
+                    .table(UserPrivilege::Table)
+                    .name("idx_user_privilege_item")
+                    .unique()
+                    .col(UserPrivilege::UserId)
+                    .col(UserPrivilege::Oid)
+                    .col(UserPrivilege::Action)
+                    .col(UserPrivilege::GrantedBy)
+                    .to_owned(),
+            )
+            .await?;
 
         // 4. initialize data.
         let insert_cluster_id = Query::insert()
@@ -799,18 +824,18 @@ enum User {
     CanCreateDb,
     CanCreateUser,
     CanLogin,
-    AuthType,
-    AuthValue,
+    AuthInfo,
 }
 
 #[derive(DeriveIden)]
 enum UserPrivilege {
     Table,
     Id,
+    DependentId,
     UserId,
     Oid,
     GrantedBy,
-    Actions,
+    Action,
     WithGrantOption,
 }
 

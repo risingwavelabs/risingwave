@@ -84,7 +84,7 @@ pub(crate) struct CatalogControllerInner {
 }
 
 impl CatalogController {
-    async fn notify_frontend(
+    pub(crate) async fn notify_frontend(
         &self,
         operation: NotificationOperation,
         info: NotificationInfo,
@@ -95,7 +95,7 @@ impl CatalogController {
             .await
     }
 
-    async fn notify_frontend_relation_info(
+    pub(crate) async fn notify_frontend_relation_info(
         &self,
         operation: NotificationOperation,
         relation_info: PbRelationInfo,
