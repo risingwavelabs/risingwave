@@ -155,7 +155,7 @@ impl ConnectorSource {
                 let to_reader_splits = splits.into_iter().map(|split| vec![split]);
 
                 try_join_all(to_reader_splits.into_iter().map(|splits| {
-                    tracing::debug!("spawning connector split reader for split {:?}", splits);
+                    tracing::debug!(?splits, ?prop, "spawning connector split reader");
                     let props = prop.clone();
                     let data_gen_columns = data_gen_columns.clone();
                     let parser_config = parser_config.clone();

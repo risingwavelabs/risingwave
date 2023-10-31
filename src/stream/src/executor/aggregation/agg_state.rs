@@ -19,6 +19,7 @@ use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::types::Datum;
 use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction};
+use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
@@ -65,6 +66,7 @@ impl AggState {
     /// Create an [`AggState`] from a given [`AggCall`].
     #[allow(clippy::too_many_arguments)]
     pub fn create(
+        version: PbAggNodeVersion,
         agg_call: &AggCall,
         agg_func: &BoxedAggregateFunction,
         storage: &AggStateStorage<impl StateStore>,
@@ -83,6 +85,7 @@ impl AggState {
             }
             AggStateStorage::MaterializedInput { mapping, .. } => {
                 Self::MaterializedInput(Box::new(MaterializedInputState::new(
+                    version,
                     agg_call,
                     pk_indices,
                     mapping,

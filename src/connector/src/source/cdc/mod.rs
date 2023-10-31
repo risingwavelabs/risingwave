@@ -42,6 +42,17 @@ pub trait CdcSourceTypeTrait: Send + Sync + Clone + 'static {
 
 for_all_classified_sources!(impl_cdc_source_type);
 
+impl<'a> From<&'a str> for CdcSourceType {
+    fn from(name: &'a str) -> Self {
+        match name {
+            MYSQL_CDC_CONNECTOR => CdcSourceType::Mysql,
+            POSTGRES_CDC_CONNECTOR => CdcSourceType::Postgres,
+            CITUS_CDC_CONNECTOR => CdcSourceType::Citus,
+            _ => CdcSourceType::Unspecified,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct CdcProperties<T: CdcSourceTypeTrait> {
     /// Properties specified in the WITH clause by user

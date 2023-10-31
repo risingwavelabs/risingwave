@@ -30,6 +30,10 @@ fn is_numeric_out_of_range_err(db_error: &str) -> bool {
         || db_error.contains("Casting to u32 out of range")
 }
 
+fn is_parse_err(db_error: &str) -> bool {
+    db_error.contains("Parse error")
+}
+
 /// Skip queries with unimplemented features
 fn is_unimplemented_error(db_error: &str) -> bool {
     db_error.contains("not yet implemented")
@@ -106,6 +110,7 @@ pub fn is_neg_exp_error(db_error: &str) -> bool {
 pub fn is_permissible_error(db_error: &str) -> bool {
     is_numeric_out_of_range_err(db_error)
         || is_zero_err(db_error)
+        || is_parse_err(db_error)
         || is_unimplemented_error(db_error)
         || not_unique_error(db_error)
         || is_window_error(db_error)

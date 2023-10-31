@@ -33,7 +33,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    ColumnDef, ColumnOption, DataType as AstDataType, Format, ObjectName, SourceSchemaV2,
+    ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Format, ObjectName,
     SourceWatermark, TableConstraint,
 };
 
@@ -43,8 +43,8 @@ use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, CatalogError, ColumnId};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
-    bind_source_watermark, check_source_schema, try_bind_columns_from_source,
-    validate_compatibility, UPSTREAM_SOURCE_KEY,
+    bind_all_columns, bind_columns_from_source, bind_source_pk, bind_source_watermark,
+    check_source_schema, validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
@@ -346,7 +346,7 @@ pub fn ensure_table_constraints_supported(table_constraints: &[TableConstraint])
     Ok(())
 }
 
-pub fn bind_pk_names(
+pub fn bind_sql_pk_names(
     columns_defs: &[ColumnDef],
     table_constraints: &[TableConstraint],
 ) -> Result<Vec<String>> {
@@ -436,7 +436,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-    source_schema: SourceSchemaV2,
+    source_schema: ConnectorSchema,
     source_watermarks: Vec<SourceWatermark>,
     mut col_id_gen: ColumnIdGenerator,
     append_only: bool,
@@ -457,13 +457,27 @@ pub(crate) async fn gen_create_table_plan_with_source(
     validate_compatibility(&source_schema, &mut properties)?;
 
     ensure_table_constraints_supported(&constraints)?;
-    let pk_names = bind_pk_names(&column_defs, &constraints)?;
 
-    let (columns_from_resolve_source, pk_names, mut source_info) =
-        try_bind_columns_from_source(&source_schema, pk_names, &column_defs, &properties).await?;
+    let sql_pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
+
+    let (columns_from_resolve_source, mut source_info) =
+        bind_columns_from_source(&source_schema, &properties).await?;
     let columns_from_sql = bind_sql_columns(&column_defs)?;
 
-    let mut columns = columns_from_resolve_source.unwrap_or(columns_from_sql);
+    let mut columns = bind_all_columns(
+        &source_schema,
+        columns_from_resolve_source,
+        columns_from_sql,
+        &column_defs,
+    )?;
+    let pk_names = bind_source_pk(
+        &source_schema,
+        &source_info,
+        &mut columns,
+        sql_pk_names,
+        &properties,
+    )
+    .await?;
 
     for c in &mut columns {
         c.column_desc.column_id = col_id_gen.generate(c.name())
@@ -605,7 +619,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
     version: Option<TableVersion>,
 ) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     ensure_table_constraints_supported(&constraints)?;
-    let pk_names = bind_pk_names(&column_defs, &constraints)?;
+    let pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
     let (mut columns, pk_column_ids, row_id_index) = bind_pk_on_relation(columns, pk_names)?;
 
     let watermark_descs = bind_source_watermark(
@@ -749,7 +763,7 @@ pub async fn handle_create_table(
     columns: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     if_not_exists: bool,
-    source_schema: Option<SourceSchemaV2>,
+    source_schema: Option<ConnectorSchema>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
     notice: Option<String>,
@@ -826,8 +840,8 @@ pub async fn handle_create_table(
 
 pub fn check_create_table_with_source(
     with_options: &WithOptions,
-    source_schema: Option<SourceSchemaV2>,
-) -> Result<Option<SourceSchemaV2>> {
+    source_schema: Option<ConnectorSchema>,
+) -> Result<Option<ConnectorSchema>> {
     if with_options.inner().contains_key(UPSTREAM_SOURCE_KEY) {
         source_schema.as_ref().ok_or_else(|| {
             ErrorCode::InvalidInputSyntax("Please specify a source schema using FORMAT".to_owned())
@@ -976,7 +990,7 @@ mod tests {
                     c.column_desc.column_id = col_id_gen.generate(c.name())
                 }
                 ensure_table_constraints_supported(&constraints)?;
-                let pk_names = bind_pk_names(&column_defs, &constraints)?;
+                let pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
                 let (_, pk_column_ids, _) = bind_pk_on_relation(columns, pk_names)?;
                 Ok(pk_column_ids)
             })();

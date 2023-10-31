@@ -357,7 +357,7 @@ impl HummockManager {
                 && !env.opts.do_not_config_object_storage_lifecycle
             {
                 let is_bucket_expiration_configured = s3.inner().configure_bucket_lifecycle().await;
-                if is_bucket_expiration_configured{
+                if is_bucket_expiration_configured {
                     return Err(ObjectError::internal("Cluster cannot start with object expiration configured for bucket because RisingWave data will be lost when object expiration kicks in.
                     Please disable object expiration and restart the cluster.")
                     .into());

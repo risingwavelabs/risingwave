@@ -912,7 +912,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 // allow since we will handle error manually.
                 #[allow(clippy::disallowed_methods)]
                 let eval_result = delta_expression
-                    .inner().eval_row(&OwnedRow::new(vec![Some(input_watermark.val)]))
+                    .inner()
+                    .eval_row(&OwnedRow::new(vec![Some(input_watermark.val)]))
                     .await;
                 match eval_result {
                     Ok(value) => input_watermark.val = value.unwrap(),
