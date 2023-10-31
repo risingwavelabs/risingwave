@@ -210,7 +210,7 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
                 map[i] = Some(input.index())
             }
         }
-        ColIndexMapping::with_target_size(map, input_len)
+        ColIndexMapping::new(map, input_len)
     }
 
     /// get the Mapping of columnIndex from input column index to output column index,if a input
@@ -224,7 +224,7 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
                 map[input.index()] = Some(i)
             }
         }
-        ColIndexMapping::with_target_size(map, exprs.len())
+        ColIndexMapping::new(map, exprs.len())
     }
 
     pub fn is_all_inputref(&self) -> bool {

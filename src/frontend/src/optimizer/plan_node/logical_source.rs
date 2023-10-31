@@ -127,7 +127,7 @@ impl LogicalSource {
                     mapping[idx] = None;
                 }
             }
-            ColIndexMapping::with_target_size(mapping, columns.len())
+            ColIndexMapping::new(mapping, columns.len())
         };
 
         let mut rewriter = IndexRewriter::new(col_mapping);

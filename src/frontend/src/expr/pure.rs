@@ -108,6 +108,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::RegexpReplace
             | expr_node::Type::RegexpCount
             | expr_node::Type::RegexpSplitToArray
+            | expr_node::Type::RegexpEq
             | expr_node::Type::Pow
             | expr_node::Type::Exp
             | expr_node::Type::Ln
@@ -183,6 +184,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::JsonbArrayLength
             | expr_node::Type::JsonbObject
             | expr_node::Type::JsonbPretty
+            | expr_node::Type::JsonbDeletePath
             | expr_node::Type::JsonbContains
             | expr_node::Type::JsonbContained
             | expr_node::Type::JsonbExists

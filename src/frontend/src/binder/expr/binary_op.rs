@@ -91,6 +91,7 @@ impl Binder {
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
             BinaryOperator::Arrow => ExprType::JsonbAccess,
             BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
+            BinaryOperator::HashMinus => ExprType::JsonbDeletePath,
             BinaryOperator::HashArrow => ExprType::JsonbAccessMulti,
             BinaryOperator::HashLongArrow => ExprType::JsonbAccessMultiStr,
             BinaryOperator::Prefix => ExprType::StartsWith,
@@ -142,13 +143,10 @@ impl Binder {
                     }
                 }
             }
-            BinaryOperator::PGRegexMatch => {
-                func_types.push(ExprType::IsNotNull);
-                ExprType::RegexpMatch
-            }
+            BinaryOperator::PGRegexMatch => ExprType::RegexpEq,
             BinaryOperator::PGRegexNotMatch => {
-                func_types.push(ExprType::IsNull);
-                ExprType::RegexpMatch
+                func_types.push(ExprType::Not);
+                ExprType::RegexpEq
             }
             _ => {
                 return Err(
