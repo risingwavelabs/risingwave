@@ -403,11 +403,15 @@ impl DdlController {
     async fn delete_vpc_endpoint(&self, connection: &Connection) -> MetaResult<()> {
         // delete AWS vpc endpoint
         if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info
-            && svc.get_provider()? == PbPrivateLinkProvider::Aws {
+            && svc.get_provider()? == PbPrivateLinkProvider::Aws
+        {
             if let Some(aws_cli) = self.aws_client.as_ref() {
                 aws_cli.delete_vpc_endpoint(&svc.endpoint_id).await?;
             } else {
-                warn!("AWS client is not initialized, skip deleting vpc endpoint {}", svc.endpoint_id);
+                warn!(
+                    "AWS client is not initialized, skip deleting vpc endpoint {}",
+                    svc.endpoint_id
+                );
             }
         }
         Ok(())

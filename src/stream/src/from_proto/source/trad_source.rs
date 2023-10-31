@@ -160,7 +160,9 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     );
 
                     let table_type = CdcTableType::from_properties(&source.properties);
-                    if table_type.can_backfill() && let Some(table_desc) = source_info.external_table.clone() {
+                    if table_type.can_backfill()
+                        && let Some(table_desc) = source_info.external_table.clone()
+                    {
                         let table_schema = Schema::new(table_desc.columns.iter().map(Into::into).collect());
                         let upstream_table_name = SchemaTableName::from_properties(&source.properties);
                         let table_pk_indices = table_desc
@@ -174,7 +176,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
                             .collect_vec();
 
-                        let table_reader = table_type.create_table_reader(source.properties.clone(), table_schema.clone())?;
+                        let table_reader = table_type
+                            .create_table_reader(source.properties.clone(), table_schema.clone())?;
                         let external_table = ExternalStorageTable::new(
                             TableId::new(source.source_id),
                             upstream_table_name,
@@ -202,7 +205,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             params.executor_stats,
                             source_state_handler,
                             false,
-                            source_ctrl_opts.chunk_size
+                            source_ctrl_opts.chunk_size,
                         );
                         cdc_backfill.boxed()
                     } else {

@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures_async_stream::try_stream;
+use futures::StreamExt;
 use risingwave_common::catalog::Schema;
 
-use crate::executor::{
-    BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndicesRef, StreamExecutorError,
-};
+use crate::executor::{BoxedMessageStream, Executor, ExecutorInfo, PkIndicesRef};
 
 #[derive(Default)]
 pub struct DummyExecutor {
@@ -34,14 +32,11 @@ impl DummyExecutor {
             },
         }
     }
-
-    #[try_stream(boxed, ok = Message, error = StreamExecutorError)]
-    async fn do_nothing() {}
 }
 
 impl Executor for DummyExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        DummyExecutor::do_nothing()
+        futures::stream::pending().boxed()
     }
 
     fn schema(&self) -> &Schema {

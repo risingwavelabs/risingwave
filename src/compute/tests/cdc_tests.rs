@@ -350,9 +350,11 @@ async fn consume_message_stream(mut stream: BoxedMessageStream) -> StreamResult<
                 println!("[mv] chunk: {:#?}", c);
             }
             Message::Barrier(b) => {
-                if let Some(m) = b.mutation && matches!(*m, Mutation::Stop(_)) {
+                if let Some(m) = b.mutation
+                    && matches!(*m, Mutation::Stop(_))
+                {
                     println!("encounter stop barrier");
-                    break
+                    break;
                 }
             }
         }

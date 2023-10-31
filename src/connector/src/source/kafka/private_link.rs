@@ -120,7 +120,9 @@ impl PrivateLinkConsumerContext {
 impl ClientContext for PrivateLinkConsumerContext {
     /// this func serves as a callback when `poll` is completed.
     fn stats(&self, statistics: Statistics) {
-        if let Some(metrics) = &self.metrics && let Some(id) = &self.identifier {
+        if let Some(metrics) = &self.metrics
+            && let Some(id) = &self.identifier
+        {
             metrics.report(id.as_str(), &statistics);
         }
     }
@@ -160,7 +162,9 @@ impl PrivateLinkProducerContext {
 
 impl ClientContext for PrivateLinkProducerContext {
     fn stats(&self, statistics: Statistics) {
-        if let Some(metrics) = &self.metrics && let Some(id) = &self.identifier {
+        if let Some(metrics) = &self.metrics
+            && let Some(id) = &self.identifier
+        {
             metrics.report(id.as_str(), &statistics);
         }
     }

@@ -886,6 +886,7 @@ impl Dispatcher for CdcTableNameDispatcher {
 
         let chunk = chunk.project(&self.output_indices);
 
+        // TODO: use a more efficient way to filter data, e.g. add a Filter node before Chain
         for (visible, row) in chunk
             .visibility()
             .iter()

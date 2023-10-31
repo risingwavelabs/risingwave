@@ -70,7 +70,9 @@ impl ProvideExpander {
                     .into_hash()
                     .ok_or_else(|| anyhow!("expect a hashmap"))?;
                 let map = map.into_iter().map(|(k, v)| {
-                    if let Some(k) = k.as_str() && k.starts_with("provide-") {
+                    if let Some(k) = k.as_str()
+                        && k.starts_with("provide-")
+                    {
                         let array = v
                             .as_vec()
                             .ok_or_else(|| anyhow!("expect an array of provide-"))?;

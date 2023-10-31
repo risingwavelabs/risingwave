@@ -100,7 +100,9 @@ pub fn handle_parse(
             Ok(PrepareStatement::PureStatement(statement))
         }
         Statement::CreateTable { query, .. } => {
-            if let Some(query) = query && have_parameter_in_query(query) {
+            if let Some(query) = query
+                && have_parameter_in_query(query)
+            {
                 Err(ErrorCode::NotImplemented(
                     "CREATE TABLE AS SELECT with parameters".to_string(),
                     None.into(),
@@ -111,7 +113,9 @@ pub fn handle_parse(
             }
         }
         Statement::CreateSink { stmt } => {
-            if let CreateSink::AsQuery(query) = &stmt.sink_from && have_parameter_in_query(query) {
+            if let CreateSink::AsQuery(query) = &stmt.sink_from
+                && have_parameter_in_query(query)
+            {
                 Err(ErrorCode::NotImplemented(
                     "CREATE SINK AS SELECT with parameters".to_string(),
                     None.into(),

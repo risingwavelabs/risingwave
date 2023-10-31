@@ -38,6 +38,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         if node.table_desc.is_none() {
+            // used in sharing cdc source backfill as a dummy batch plan node
             return Ok(Box::new(DummyExecutor::new()));
         }
 

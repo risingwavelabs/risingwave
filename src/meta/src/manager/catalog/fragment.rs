@@ -79,7 +79,9 @@ impl FragmentManagerCore {
             .filter(|tf| tf.state() != State::Initial)
             .flat_map(|table_fragments| {
                 table_fragments.fragments.values().filter_map(|fragment| {
-                    if let Some(id_filter) = id_filter.as_ref() && !id_filter.contains(&fragment.fragment_id) {
+                    if let Some(id_filter) = id_filter.as_ref()
+                        && !id_filter.contains(&fragment.fragment_id)
+                    {
                         return None;
                     }
                     let parallelism = match fragment.vnode_mapping.as_ref() {
@@ -688,7 +690,9 @@ impl FragmentManager {
             .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
 
         for status in table_fragment.actor_status.values_mut() {
-            if let Some(pu) = &status.parallel_unit && migration_plan.parallel_unit_plan.contains_key(&pu.id) {
+            if let Some(pu) = &status.parallel_unit
+                && migration_plan.parallel_unit_plan.contains_key(&pu.id)
+            {
                 status.parallel_unit = Some(migration_plan.parallel_unit_plan[&pu.id].clone());
             }
         }
@@ -718,8 +722,9 @@ impl FragmentManager {
             .values()
             .filter(|tf| {
                 for status in tf.actor_status.values() {
-                    if let Some(pu) = &status.parallel_unit &&
-                    migration_plan.parallel_unit_plan.contains_key(&pu.id) {
+                    if let Some(pu) = &status.parallel_unit
+                        && migration_plan.parallel_unit_plan.contains_key(&pu.id)
+                    {
                         return true;
                     }
                 }
