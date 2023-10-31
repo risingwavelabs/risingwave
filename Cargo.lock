@@ -8034,6 +8034,7 @@ dependencies = [
  "risingwave_e2e_extended_mode_test",
  "risingwave_expr_impl",
  "risingwave_frontend",
+ "risingwave_hummock_sdk",
  "risingwave_meta_node",
  "risingwave_pb",
  "risingwave_rpc_client",
