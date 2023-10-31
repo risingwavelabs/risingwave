@@ -195,15 +195,18 @@
     create table t(x int , arr int[]);
     select * from t, abs(x) WITH ORDINALITY;
   batch_plan: |-
-    BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-    ├─BatchExchange { order: [], dist: Single }
-    │ └─BatchHashJoin { type: Inner, predicate: t.x IS NOT DISTINCT FROM t.x, output: [t.x, t.arr] }
-    │   ├─BatchExchange { order: [], dist: HashShard(t.x) }
-    │   │ └─BatchScan { table: t, columns: [t.x, t.arr], distribution: SomeShard }
-    │   └─BatchHashAgg { group_key: [t.x], aggs: [] }
-    │     └─BatchExchange { order: [], dist: HashShard(t.x) }
-    │       └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
-    └─BatchValues { rows: [[Abs(CorrelatedInputRef { index: 0, correlated_id: 1 }), 1:Int64]] }
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t.x, t.arr, Abs(t.x) as $expr1, 1:Int64] }
+      └─BatchHashJoin { type: Inner, predicate: t.x IS NOT DISTINCT FROM t.x, output: all }
+        ├─BatchExchange { order: [], dist: HashShard(t.x) }
+        │ └─BatchScan { table: t, columns: [t.x, t.arr], distribution: SomeShard }
+        └─BatchExchange { order: [], dist: HashShard(t.x) }
+          └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+            ├─BatchExchange { order: [], dist: Single }
+            │ └─BatchHashAgg { group_key: [t.x], aggs: [] }
+            │   └─BatchExchange { order: [], dist: HashShard(t.x) }
+            │     └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+            └─BatchValues { rows: [[]] }
   stream_error: |-
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
