@@ -46,8 +46,16 @@ impl JavaVmWrapper {
         let libs_path = if let Ok(libs_path) = std::env::var("CONNECTOR_LIBS_PATH") {
             libs_path
         } else {
-            return Err("environment variable CONNECTOR_LIBS_PATH is not specified".to_string());
+            tracing::warn!("environment variable CONNECTOR_LIBS_PATH is not specified, so use default path `./libs` instead");
+            let path = std::env::current_exe()
+                .map_err(|e| format!("unable to get path of current_exe: {:?}", e))?
+                .parent()
+                .expect("not root")
+                .join("./libs");
+            path.to_str().expect("should be able to cast").into()
         };
+
+        tracing::info!("libs_path = {}", libs_path);
 
         let dir = Path::new(&libs_path);
 

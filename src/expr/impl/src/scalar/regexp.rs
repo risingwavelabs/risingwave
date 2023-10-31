@@ -135,6 +135,15 @@ impl FromStr for RegexpOptions {
 }
 
 #[function(
+    // source ~ pattern
+    "regexp_eq(varchar, varchar) -> boolean",
+    prebuild = "RegexpContext::from_pattern($1)?"
+)]
+fn regexp_eq(text: &str, regex: &RegexpContext) -> bool {
+    regex.regex.is_match(text).unwrap()
+}
+
+#[function(
     // regexp_match(source, pattern)
     "regexp_match(varchar, varchar) -> varchar[]",
     prebuild = "RegexpContext::from_pattern($1)?"

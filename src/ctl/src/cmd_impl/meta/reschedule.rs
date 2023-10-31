@@ -273,7 +273,9 @@ pub async fn unregister_workers(
             .ok()
             .or_else(|| worker_index_by_host.get(&worker).cloned());
 
-        if let Some(worker_id) = worker_id && worker_ids.contains(&worker_id) {
+        if let Some(worker_id) = worker_id
+            && worker_ids.contains(&worker_id)
+        {
             if !target_worker_ids.insert(worker_id) {
                 println!("Warn: {} and {} are the same worker", worker, worker_id);
             }

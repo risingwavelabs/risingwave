@@ -889,7 +889,9 @@ impl Condition {
         }
         // remove all constant boolean `true`
         res.retain(|expr| {
-            if let Some(v) = try_get_bool_constant(expr) && v {
+            if let Some(v) = try_get_bool_constant(expr)
+                && v
+            {
                 false
             } else {
                 true

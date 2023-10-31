@@ -242,7 +242,7 @@ impl<REQ, RSP> BidiStreamHandle<REQ, RSP> {
         let first_response = response_stream
             .next()
             .await
-            .ok_or_else(|| anyhow!("get empty response from firstrequest"))??;
+            .ok_or_else(|| anyhow!("get empty response from first request"))??;
 
         Ok((
             Self {

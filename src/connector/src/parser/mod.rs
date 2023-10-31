@@ -169,12 +169,19 @@ impl MessageMeta<'_> {
             SourceColumnType::Offset => Datum::Some(self.offset.into()).into(),
             // Extract custom meta data per connector.
             SourceColumnType::Meta if let SourceMeta::Kafka(kafka_meta) = self.meta => {
-                assert_eq!(desc.name.as_str(), KAFKA_TIMESTAMP_COLUMN_NAME, "unexpected meta column name");
-                kafka_meta.timestamp.map(|ts| {
-                    risingwave_common::cast::i64_to_timestamptz(ts)
-                        .unwrap()
-                        .to_scalar_value()
-                }).into()
+                assert_eq!(
+                    desc.name.as_str(),
+                    KAFKA_TIMESTAMP_COLUMN_NAME,
+                    "unexpected meta column name"
+                );
+                kafka_meta
+                    .timestamp
+                    .map(|ts| {
+                        risingwave_common::cast::i64_to_timestamptz(ts)
+                            .unwrap()
+                            .to_scalar_value()
+                    })
+                    .into()
             }
 
             // For other cases, return `None`.
@@ -794,7 +801,6 @@ impl SpecificParserConfig {
 pub struct AvroProperties {
     pub use_schema_registry: bool,
     pub row_schema_location: String,
-    pub upsert_primary_key: String,
     pub client_config: SchemaRegistryAuth,
     pub aws_auth_props: Option<AwsAuthProps>,
     pub topic: String,
@@ -895,7 +901,6 @@ impl SpecificParserConfig {
                         .unwrap(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
-                    upsert_primary_key: info.upsert_avro_primary_key.clone(),
                     ..Default::default()
                 };
                 if format == SourceFormat::Upsert {

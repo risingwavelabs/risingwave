@@ -82,7 +82,9 @@ pub async fn list_serving_fragment_mappings(context: &CtlContext) -> anyhow::Res
             )
             .into(),
         );
-        if let Some(w) = worker && let Some(addr) = w.host.as_ref() {
+        if let Some(w) = worker
+            && let Some(addr) = w.host.as_ref()
+        {
             row.add_cell(format!("id: {}; {}:{}", w.id, addr.host, addr.port).into());
         } else {
             row.add_cell("".into());
