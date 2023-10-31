@@ -13,19 +13,51 @@
 // limitations under the License.
 
 use async_nats::jetstream::object_store::ObjectMetadata;
-use opendal::{Operator, Lister};
+use opendal::{Operator, Lister, Metakey};
+use futures::{stream::{self, BoxStream}, StreamExt};
 
+use crate::source::FsListInner;
 pub struct OpendalSource {
     pub(crate) op: Operator,
     pub(crate) engine_type: EngineType,
 }
 
 impl OpendalSource{
-    async fn list(&self, prefix: &str) -> ObjectResult<ObjectMetadataIter> {
-        let lister = self.op.scan(prefix).await?;
-        Ok(Box::pin(OpenDalObjectIter::new(lister, self.op.clone())))
+    async fn list(&self, prefix: &str) ->  anyhow::Result<ObjectMetadataIter> {
+        let object_lister = self
+            .op
+            .lister_with(prefix)
+            .delimiter("")
+            .metakey(Metakey::ContentLength | Metakey::ContentType)
+            .await?;
+
+        let stream = stream::unfold(object_lister, |mut object_lister| async move {
+            match object_lister.next().await {
+                Some(Ok(object)) => {
+                    let key = object.path().to_string();
+                    let om = object.metadata();
+                    let last_modified = match om.last_modified() {
+                        Some(t) => t.timestamp() as f64,
+                        None => 0_f64,
+                    };
+                    let total_size = om.content_length() as usize;
+                    let metadata = ObjectListMetadata {
+                        key,
+                        last_modified,
+                        total_size,
+                    };
+                    Some((Ok(metadata), object_lister))
+                }
+                Some(Err(err)) => Some((Err(err.into()), object_lister)),
+                None => None,
+            }
+        });
+
+        Ok(stream.boxed())
     }
 }
+
+pub type ObjectMetadataIter = BoxStream<'static,  anyhow::Result<ObjectListMetadata>>;
 
 #[derive(Clone)]
 pub enum EngineType {
@@ -34,94 +66,55 @@ pub enum EngineType {
 }
 
 
-struct OpenDalSourceLister {
-    lister: Option<Lister>,
-    op: Option<Operator>,
-    #[allow(clippy::type_complexity)]
-    next_future: Option<BoxFuture<'static, (Option<Result<Entry, Error>>, Lister)>>,
-    #[allow(clippy::type_complexity)]
-    metadata_future: Option<BoxFuture<'static, (Result<ObjectMetadata, Error>, Operator)>>,
+#[derive(Debug, Clone, PartialEq)]
+pub struct ObjectListMetadata {
+    // Full path
+    pub key: String,
+    // Seconds since unix epoch.
+    pub last_modified: f64,
+    pub total_size: usize,
 }
 
-impl OpenDalSourceLister{
-    fn new(lister: Lister, op: Operator) -> Self {
-        Self {
-            lister: Some(lister),
-            op: Some(op),
-            next_future: None,
-            metadata_future: None,
+#[async_trait]
+impl FsListInner for OpendalSource {
+    async fn get_next_page<T: for<'a> From<&'a Object>>(
+        &mut self,
+    ) -> anyhow::Result<(Vec<T>, bool)> {
+        let mut has_finished = false;
+        let mut req = self
+            .client
+            .list_objects_v2()
+            .bucket(&self.bucket_name)
+            .set_prefix(self.prefix.clone());
+        if let Some(continuation_token) = self.next_continuation_token.take() {
+            req = req.continuation_token(continuation_token);
         }
+        let mut res = req
+            .send()
+            .await
+            .map_err(|e| anyhow!(DisplayErrorContext(e)))?;
+        if res.is_truncated() {
+            self.next_continuation_token = res.next_continuation_token.clone();
+        } else {
+            has_finished = true;
+            self.next_continuation_token = None;
+        }
+        let objects = res.contents.take().unwrap_or_default();
+        let matched_objs: Vec<T> = objects
+            .iter()
+            .filter(|obj| obj.key().is_some())
+            .filter(|obj| {
+                self.matcher
+                    .as_ref()
+                    .map(|m| m.matches(obj.key().unwrap()))
+                    .unwrap_or(true)
+            })
+            .map(T::from)
+            .collect_vec();
+        Ok((matched_objs, has_finished))
     }
-}
 
-impl Stream for OpenDalObjectIter {
-    type Item = ObjectResult<ObjectMetadata>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        if let Some(metadata_future) = self.metadata_future.as_mut() {
-            let (result, op) = ready!(metadata_future.poll_unpin(cx));
-            self.op = Some(op);
-            return match result {
-                Ok(m) => {
-                    self.metadata_future = None;
-                    Poll::Ready(Some(Ok(m)))
-                }
-                Err(e) => {
-                    self.metadata_future = None;
-                    Poll::Ready(Some(Err(e.into())))
-                }
-            };
-        }
-        if let Some(next_future) = self.next_future.as_mut() {
-            let (option, lister) = ready!(next_future.poll_unpin(cx));
-            self.lister = Some(lister);
-            return match option {
-                None => {
-                    self.next_future = None;
-                    Poll::Ready(None)
-                }
-                Some(result) => {
-                    self.next_future = None;
-                    match result {
-                        Ok(object) => {
-                            let op = self.op.take().expect("op should not be None");
-                            let f = async move {
-                                let key = object.path().to_string();
-                                // FIXME: How does opendal metadata cache work?
-                                // Will below line result in one IO per object?
-                                let om = match op
-                                    .metadata(
-                                        &object,
-                                        Metakey::LastModified | Metakey::ContentLength,
-                                    )
-                                    .await
-                                {
-                                    Ok(om) => om,
-                                    Err(e) => return (Err(e), op),
-                                };
-                                let last_modified = match om.last_modified() {
-                                    Some(t) => t.timestamp() as f64,
-                                    None => 0_f64,
-                                };
-                                let total_size = om.content_length() as usize;
-                                let metadata = ObjectMetadata {
-                                    key,
-                                    last_modified,
-                                    total_size,
-                                };
-                                (Ok(metadata), op)
-                            };
-                            self.metadata_future = Some(Box::pin(f));
-                            self.poll_next(cx)
-                        }
-                        Err(e) => Poll::Ready(Some(Err(e.into()))),
-                    }
-                }
-            };
-        }
-        let mut lister = self.lister.take().expect("list should not be None");
-        let f = async move { (lister.next().await, lister) };
-        self.next_future = Some(Box::pin(f));
-        self.poll_next(cx)
+    fn filter_policy(&self, _ctx: &FsFilterCtrlCtx, _page_num: usize, _item: &FsPageItem) -> bool {
+        true
     }
 }

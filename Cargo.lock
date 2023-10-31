@@ -3898,7 +3898,7 @@ dependencies = [
  "log",
  "murmur3",
  "once_cell",
- "opendal 0.40.0",
+ "opendal",
  "ordered-float 3.9.1",
  "parquet",
  "regex",
@@ -5270,40 +5270,6 @@ checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
 name = "opendal"
-version = "0.40.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddba7299bab261d3ae2f37617fb7f45b19ed872752bb4e22cf93a69d979366c5"
-dependencies = [
- "anyhow",
- "async-compat",
- "async-trait",
- "backon",
- "base64 0.21.4",
- "bytes",
- "chrono",
- "flagset",
- "futures",
- "http",
- "hyper",
- "log",
- "md-5",
- "once_cell",
- "parking_lot 0.12.1",
- "percent-encoding",
- "pin-project",
- "prometheus",
- "quick-xml 0.29.0",
- "reqsign",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "opendal"
 version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e31b48f0af6de5b3b344c1acc1e06c4581dca3e13cd5ba05269927fc2abf953a"
@@ -5325,6 +5291,7 @@ dependencies = [
  "parking_lot 0.12.1",
  "percent-encoding",
  "pin-project",
+ "prometheus",
  "quick-xml 0.30.0",
  "reqsign",
  "reqwest",
@@ -6558,16 +6525,6 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.29.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81b9228215d82c7b61490fec1de287136b5de6f5700f6e58ea9ad61a7964ca51"
-dependencies = [
- "memchr",
- "serde",
-]
-
-[[package]]
-name = "quick-xml"
 version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eff6510e86862b57b210fd8cbe8ed3f0d7d600b9c2863cd4549a2e033c66e956"
@@ -7381,7 +7338,7 @@ dependencies = [
  "mysql_common",
  "nexmark",
  "num-bigint",
- "opendal 0.39.0",
+ "opendal",
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
@@ -7884,7 +7841,7 @@ dependencies = [
  "itertools 0.11.0",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
- "opendal 0.41.0",
+ "opendal",
  "prometheus",
  "risingwave_common",
  "spin 0.9.8",
