@@ -377,23 +377,35 @@
 - id: multiple rank function calls
   sql: |
     create table t(x int);
-    select row_number() over(PARTITION BY x ORDER BY x), rank() over(ORDER BY x) from t;
+    select row_number() over(PARTITION BY x ORDER BY x), rank() over(PARTITION BY x ORDER BY x), dense_rank() over (PARTITION BY x ORDER BY x) from t;
   logical_plan: |-
-    LogicalProject { exprs: [row_number, rank] }
-    └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), rank() OVER(ORDER BY t.x ASCROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+    LogicalProject { exprs: [row_number, rank, dense_rank] }
+    └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), rank() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), dense_rank() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─LogicalProject { exprs: [t.x, t._row_id] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   optimized_logical_plan_for_stream: |-
-    LogicalProject { exprs: [row_number, rank] }
-    └─LogicalOverWindow { window_functions: [rank() OVER(ORDER BY t.x ASCROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─LogicalScan { table: t, columns: [t.x] }
-  batch_error: |-
-    Feature is not yet implemented: `rank` and `dense_rank` function calls that don't match TopN pattern are not supported yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/8965
-  stream_error: |-
-    Feature is not yet implemented: `rank` and `dense_rank` function calls that don't match TopN pattern are not supported yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/8965
+    LogicalProject { exprs: [row_number, rank, dense_rank] }
+    └─LogicalOverWindow { window_functions: [dense_rank() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─LogicalScan { table: t, columns: [t.x] }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [row_number, rank, dense_rank] }
+      └─BatchOverWindow { window_functions: [dense_rank() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─BatchOverWindow { window_functions: [rank() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+            └─BatchExchange { order: [t.x ASC, t.x ASC], dist: HashShard(t.x) }
+              └─BatchSort { order: [t.x ASC, t.x ASC] }
+                └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [row_number, rank, dense_rank, t._row_id(hidden), t.x(hidden)], stream_key: [t._row_id, t.x], pk_columns: [t._row_id, t.x], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [row_number, rank, dense_rank, t._row_id, t.x] }
+      └─StreamOverWindow { window_functions: [dense_rank() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─StreamOverWindow { window_functions: [rank() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+            └─StreamExchange { dist: HashShard(t.x) }
+              └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - id: row_number with valid over clause
   sql: |
     create table t(x int, y int);
@@ -536,12 +548,21 @@
         └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─LogicalProject { exprs: [t.x, t.y, t._row_id] }
             └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
-  batch_error: |-
-    Feature is not yet implemented: `rank` and `dense_rank` function calls that don't match TopN pattern are not supported yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/8965
-  stream_error: |-
-    Feature is not yet implemented: `rank` and `dense_rank` function calls that don't match TopN pattern are not supported yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/8965
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [t.x, t.y] }
+      └─BatchFilter { predicate: (rank <= 3:Int32) AND (rank > 1:Int32) }
+        └─BatchOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
+            └─BatchSort { order: [t.y ASC, t.x ASC] }
+              └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.x, t.y, t._row_id] }
+      └─StreamFilter { predicate: (rank <= 3:Int32) AND (rank > 1:Int32) }
+        └─StreamOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─StreamExchange { dist: HashShard(t.y) }
+            └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(x int, y int);
     select x, y from
@@ -942,9 +963,29 @@
       └─LogicalOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
         └─LogicalOverWindow { window_functions: [rank() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─LogicalScan { table: t, columns: [t.x, t.y, t.z] }
-  batch_error: |-
-    Feature is not yet implemented: `rank` and `dense_rank` function calls that don't match TopN pattern are not supported yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/8965
-  stream_error: |-
-    Feature is not yet implemented: `rank` and `dense_rank` function calls that don't match TopN pattern are not supported yet
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/8965
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
+        └─BatchSort { order: [t.y ASC, t.x ASC] }
+          └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+            └─BatchExchange { order: [t.x ASC, t.y ASC], dist: HashShard(t.x) }
+              └─BatchSort { order: [t.x ASC, t.y ASC] }
+                └─BatchOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+                  └─BatchExchange { order: [t.z ASC, t.y ASC], dist: HashShard(t.z) }
+                    └─BatchSort { order: [t.z ASC, t.y ASC] }
+                      └─BatchOverWindow { window_functions: [rank() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+                        └─BatchExchange { order: [t.x ASC, t.y ASC], dist: HashShard(t.x) }
+                          └─BatchSort { order: [t.x ASC, t.y ASC] }
+                            └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [x, y, z, t._row_id(hidden), w0, w1, w2, w3], stream_key: [t._row_id, x, z, y], pk_columns: [t._row_id, x, z, y], pk_conflict: NoCheck }
+    └─StreamOverWindow { window_functions: [rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      └─StreamExchange { dist: HashShard(t.y) }
+        └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─StreamExchange { dist: HashShard(t.x) }
+            └─StreamOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+              └─StreamExchange { dist: HashShard(t.z) }
+                └─StreamOverWindow { window_functions: [rank() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+                  └─StreamExchange { dist: HashShard(t.x) }
+                    └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
