@@ -47,8 +47,8 @@ impl FlowControlExecutor {
         tracing::warn!("FlowControlExecutor rate limiter is disabled in madsim as it will spawn system threads");
         Self {
             input,
-            rate_limit,
             actor_ctx,
+            rate_limit,
         }
     }
 
@@ -91,21 +91,19 @@ impl FlowControlExecutor {
                 }
                 Message::Barrier(barrier) => {
                     if let Some(mutation) = barrier.mutation.as_ref() {
-                        match mutation.as_ref() {
-                            Mutation::Throttle(actor_to_apply) => {
-                                if let Some(limit) = actor_to_apply.get(&self.actor_ctx.id) {
-                                    self.rate_limit = *limit;
-                                    rate_limiter = self.rate_limit.map(get_rate_limiter);
-                                    tracing::info!(
-                                        "actor {:?} rate limit changed to {:?}",
-                                        self.actor_ctx.id,
-                                        self.rate_limit
-                                    )
-                                }
+                        if let Mutation::Throttle(actor_to_apply) = mutation.as_ref() {
+                            if let Some(limit) = actor_to_apply.get(&self.actor_ctx.id) {
+                                self.rate_limit = *limit;
+                                rate_limiter = self.rate_limit.map(get_rate_limiter);
+                                tracing::info!(
+                                    "actor {:?} rate limit changed to {:?}",
+                                    self.actor_ctx.id,
+                                    self.rate_limit
+                                )
                             }
-                            _ => {}
                         }
                     }
+
                     yield Message::Barrier(barrier);
                 }
                 _ => yield msg,

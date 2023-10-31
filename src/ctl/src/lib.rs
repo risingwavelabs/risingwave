@@ -706,7 +706,7 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 .await?
         }
         Commands::Debug(DebugCommands::Dump { common }) => cmd_impl::debug::dump(common).await?,
-        Commands::Throttle(ThrottleCommands::Source(args)) => todo!(),
+        Commands::Throttle(ThrottleCommands::Source(_args)) => todo!(),
         Commands::Throttle(ThrottleCommands::Mv(args)) => {
             apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Mv, args).await?;
         }

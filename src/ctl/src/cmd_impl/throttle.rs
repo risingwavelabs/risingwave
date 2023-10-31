@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::meta::{PbThrottleTarget, ThrottleRequest};
+use risingwave_pb::meta::PbThrottleTarget;
 
 use crate::common::CtlContext;
 use crate::ThrottleCommandArgs;

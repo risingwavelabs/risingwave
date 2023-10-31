@@ -103,19 +103,14 @@ impl StreamManagerService for StreamServiceImpl {
         request: Request<ThrottleRequest>,
     ) -> Result<Response<ThrottleResponse>, Status> {
         let request = request.into_inner();
-        let actor_to_apply: HashMap<FragmentId, Vec<ActorId>>;
-        match request.kind() {
+        let actor_to_apply = match request.kind() {
             ThrottleTarget::Source => todo!(),
             ThrottleTarget::Mv => {
-                actor_to_apply = self
-                    .fragment_manager
-                    .update_mv_rate_limit_by_table_id(
-                        TableId::from(request.id),
-                        request.rate.clone(),
-                    )
-                    .await?;
+                self.fragment_manager
+                    .update_mv_rate_limit_by_table_id(TableId::from(request.id), request.rate)
+                    .await?
             }
-        }
+        };
 
         let mutation: ThrottleConfig = actor_to_apply
             .iter()
@@ -124,12 +119,12 @@ impl StreamManagerService for StreamServiceImpl {
                     *fragment_id,
                     actors
                         .iter()
-                        .map(|actor_id| (*actor_id, request.rate.clone()))
+                        .map(|actor_id| (*actor_id, request.rate))
                         .collect::<HashMap<ActorId, Option<u32>>>(),
                 )
             })
             .collect();
-        let i = self
+        let _i = self
             .barrier_scheduler
             .run_command(Command::Throttle(mutation))
             .await?;
