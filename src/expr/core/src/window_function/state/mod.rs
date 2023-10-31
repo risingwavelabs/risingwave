@@ -28,7 +28,6 @@ mod buffer;
 
 mod aggregate;
 mod rank;
-mod row_number;
 
 /// Unique and ordered identifier for a row in internal states.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, EstimateSize)]
