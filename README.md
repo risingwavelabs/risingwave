@@ -41,6 +41,12 @@
     <img alt="Slack" src="https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack" />
   </a>
   <a
+    href="https://hub.docker.com/r/risingwavelabs/risingwave"
+    target="_blank"
+  >
+    <img alt="Docker" src="https://img.shields.io/docker/v/risingwavelabs/risingwave" />
+  </a>
+  <a
     href="https://buildkite.com/risingwavelabs/main"
     target="_blank"
   >
@@ -56,7 +62,7 @@
 
 RisingWave is a distributed SQL streaming database that enables <b>cost-efficient</b> and <b>reliable</b> processing of streaming data.
 
-![RisingWave](https://github.com/risingwavelabs/risingwave-docs/blob/0f7e1302b22493ba3c1c48e78810750ce9a5ff42/docs/images/archi_simple.png)
+![RisingWave](https://github.com/risingwavelabs/risingwave-docs/blob/main/docs/images/new_archi_grey.png)
 
 ## Try it out in 5 minutes
 **Mac**
@@ -70,6 +76,10 @@ risingwave playground
 wget https://github.com/risingwavelabs/risingwave/releases/download/v1.3.0/risingwave-v1.3.0-x86_64-unknown-linux.tar.gz
 tar xvf risingwave-v1.3.0-x86_64-unknown-linux.tar.gz
 ./risingwave playground
+```
+**Docker**
+```
+docker run -it --pull=always -p 4566:4566 -p 5691:5691 risingwavelabs/risingwave:latest playground
 ```
 Now connect to RisingWave using `psql`:
 ```

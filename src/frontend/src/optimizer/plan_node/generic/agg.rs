@@ -74,7 +74,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         for (i, key) in self.group_key.indices().enumerate() {
             map[i] = Some(key);
         }
-        ColIndexMapping::with_target_size(map, self.input.schema().len())
+        ColIndexMapping::new(map, self.input.schema().len())
     }
 
     /// get the Mapping of columnIndex from input column index to out column index
@@ -83,7 +83,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         for (i, key) in self.group_key.indices().enumerate() {
             map[key] = Some(i);
         }
-        ColIndexMapping::with_target_size(map, self.output_len())
+        ColIndexMapping::new(map, self.output_len())
     }
 
     fn two_phase_agg_forced(&self) -> bool {

@@ -794,7 +794,6 @@ impl SpecificParserConfig {
 pub struct AvroProperties {
     pub use_schema_registry: bool,
     pub row_schema_location: String,
-    pub upsert_primary_key: String,
     pub client_config: SchemaRegistryAuth,
     pub aws_auth_props: Option<AwsAuthProps>,
     pub topic: String,
@@ -895,7 +894,6 @@ impl SpecificParserConfig {
                         .unwrap(),
                     use_schema_registry: info.use_schema_registry,
                     row_schema_location: info.row_schema_location.clone(),
-                    upsert_primary_key: info.upsert_avro_primary_key.clone(),
                     ..Default::default()
                 };
                 if format == SourceFormat::Upsert {
