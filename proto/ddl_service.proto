@@ -139,6 +139,10 @@ message DropViewResponse {
   uint64 version = 2;
 }
 
+// An enum to distinguish different types of the Table streaming job.
+// - GENERAL: Table streaming jobs w/ or w/o a connector
+// - SHARED_CDC_SOURCE: The table streaming job is created based on a shared CDC source job (risingwavelabs/rfcs#73).
+// And one may add other types to support Table jobs that based on other backfill-able sources (risingwavelabs/rfcs#72).
 enum TableJobType {
   UNSPECIFIED = 0;
   // table streaming jobs excepts the `SHARED_CDC_SOURCE` type

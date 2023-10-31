@@ -1211,7 +1211,7 @@ pub async fn handle_create_source(
     let catalog_writer = session.catalog_writer()?;
 
     if create_cdc_source_job {
-        // create a streaming job for the cdc source
+        // create a streaming job for the cdc source, which will mark as *singleton* in the Fragmenter
         let graph = {
             let context = OptimizerContext::from_handler_args(handler_args);
             // cdc source is an append-only source in plain json format
@@ -1227,8 +1227,6 @@ pub async fn handle_create_source(
             // generate stream graph for cdc source job
             let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
             let mut graph = build_graph(stream_plan);
-            // set parallelism to 1
-            // graph.parallelism = Some(Parallelism { parallelism: 1 });
             graph.parallelism = session
                 .config()
                 .get_streaming_parallelism()
