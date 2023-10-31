@@ -255,19 +255,7 @@ impl LogSinker for RemoteLogSinker {
         });
 
         let poll_consume_log_and_sink = pin!(async move {
-            #[derive(Debug)]
-            enum LogConsumerState {
-                /// Mark that the log consumer is not initialized yet
-                Uninitialized,
-
-                /// Mark that a new epoch has begun.
-                EpochBegun { curr_epoch: u64, next_batch_id: u64 },
-
-                /// Mark that the consumer has just received a barrier
-                BarrierReceived { prev_epoch: u64 },
-            }
-
-            let mut state = LogConsumerState::Uninitialized;
+            let mut prev_offset: Option<TruncateOffset> = None;
 
             log_reader.init().await?;
 
@@ -275,79 +263,28 @@ impl LogSinker for RemoteLogSinker {
                 let (epoch, item): (u64, LogStoreReadItem) =
                     log_reader.next_item().map_err(SinkError::Internal).await?;
 
-                if let LogStoreReadItem::UpdateVnodeBitmap(_) = &item {
-                    match &state {
-                        LogConsumerState::BarrierReceived { .. } => {}
-                        _ => unreachable!(
-                            "update vnode bitmap can be accepted only right after \
-                    barrier, but current state is {:?}",
-                            state
-                        ),
-                    }
-                }
-                // begin_epoch when not previously began
-                state = match state {
-                    LogConsumerState::Uninitialized => {
-                        request_tx.start_epoch(epoch).await?;
-                        LogConsumerState::EpochBegun {
-                            curr_epoch: epoch,
-                            next_batch_id: 0,
-                        }
-                    }
-                    LogConsumerState::EpochBegun {
-                        curr_epoch,
-                        next_batch_id,
-                    } => {
-                        assert!(
-                            epoch >= curr_epoch,
-                            "new epoch {} should not be below the current epoch {}",
-                            epoch,
-                            curr_epoch
-                        );
-                        LogConsumerState::EpochBegun {
-                            curr_epoch: epoch,
-                            next_batch_id,
-                        }
-                    }
-                    LogConsumerState::BarrierReceived { prev_epoch } => {
-                        assert!(
-                            epoch > prev_epoch,
-                            "new epoch {} should be greater than prev epoch {}",
-                            epoch,
-                            prev_epoch
-                        );
-                        request_tx.start_epoch(epoch).await?;
-                        LogConsumerState::EpochBegun {
-                            curr_epoch: epoch,
-                            next_batch_id: 0,
-                        }
-                    }
-                };
                 match item {
-                    LogStoreReadItem::StreamChunk { chunk, .. } => {
+                    LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
+                        let offset = TruncateOffset::Chunk { epoch, chunk_id };
+                        if let Some(prev_offset) = &prev_offset {
+                            prev_offset.check_next_offset(offset)?;
+                        }
                         let cardinality = chunk.cardinality();
                         sink_metrics
                             .connector_sink_rows_received
                             .inc_by(cardinality as _);
-                        let (epoch, next_batch_id) = match &mut state {
-                            LogConsumerState::EpochBegun {
-                                curr_epoch,
-                                next_batch_id,
-                            } => (*curr_epoch, next_batch_id),
-                            _ => unreachable!("epoch must have begun before handling stream chunk"),
-                        };
-
-                        let batch_id = *next_batch_id;
-                        *next_batch_id += 1;
 
                         let payload = build_chunk_payload(chunk);
-                        request_tx.write_batch(epoch, batch_id, payload).await?;
+                        request_tx
+                            .write_batch(epoch, chunk_id as u64, payload)
+                            .await?;
+                        prev_offset = Some(offset);
                     }
                     LogStoreReadItem::Barrier { is_checkpoint } => {
-                        let prev_epoch = match state {
-                            LogConsumerState::EpochBegun { curr_epoch, .. } => curr_epoch,
-                            _ => unreachable!("epoch must have begun before handling barrier"),
-                        };
+                        let offset = TruncateOffset::Barrier { epoch };
+                        if let Some(prev_offset) = &prev_offset {
+                            prev_offset.check_next_offset(offset)?;
+                        }
                         if is_checkpoint {
                             let start_time = Instant::now();
                             request_tx.barrier(epoch, true).await?;
@@ -373,7 +310,7 @@ impl LogSinker for RemoteLogSinker {
                         } else {
                             request_tx.barrier(epoch, false).await?;
                         }
-                        state = LogConsumerState::BarrierReceived { prev_epoch }
+                        prev_offset = Some(offset);
                     }
                     LogStoreReadItem::UpdateVnodeBitmap(_) => {}
                 }

@@ -156,15 +156,14 @@ public class SinkWriterStreamObserver
                 boolean isCheckpoint = sinkTask.getBarrier().getIsCheckpoint();
                 Optional<ConnectorServiceProto.SinkMetadata> metadata = sink.barrier(isCheckpoint);
                 currentEpoch = sinkTask.getBarrier().getEpoch();
+                currentBatchId = null;
                 LOG.debug("Epoch {} barrier {}", currentEpoch, isCheckpoint);
                 if (isCheckpoint) {
                     ConnectorServiceProto.SinkWriterStreamResponse.CommitResponse.Builder builder =
                             ConnectorServiceProto.SinkWriterStreamResponse.CommitResponse
                                     .newBuilder()
                                     .setEpoch(currentEpoch);
-                    if (metadata.isPresent()) {
-                        builder.setMetadata(metadata.get());
-                    }
+                    metadata.ifPresent(builder::setMetadata);
                     responseObserver.onNext(
                             ConnectorServiceProto.SinkWriterStreamResponse.newBuilder()
                                     .setCommit(builder)
