@@ -27,6 +27,7 @@ use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorSuppressor, RwError};
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::source::ConnectorSplit;
@@ -194,18 +195,15 @@ impl SourceContext {
                 suppressor.lock().max()
             );
         }
-        self.metrics
-            .user_source_error_count
-            .with_label_values(&[
-                "SourceError",
-                // TODO(jon-chuang): add the error msg truncator to truncate these
-                &err_str,
-                // Let's be a bit more specific for SourceExecutor
-                "SourceExecutor",
-                &self.source_info.fragment_id.to_string(),
-                &self.source_info.source_id.table_id.to_string(),
-            ])
-            .inc();
+        GLOBAL_ERROR_METRICS.user_source_error.report([
+            "SourceError".to_owned(),
+            // TODO(jon-chuang): add the error msg truncator to truncate these
+            err_str,
+            // Let's be a bit more specific for SourceExecutor
+            "SourceExecutor".to_owned(),
+            self.source_info.fragment_id.to_string(),
+            self.source_info.source_id.table_id.to_string(),
+        ]);
     }
 }
 
