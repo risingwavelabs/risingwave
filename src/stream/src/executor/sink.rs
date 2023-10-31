@@ -328,9 +328,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     actor_context.error_suppressor.lock().max()
                 );
             }
-            GLOBAL_ERROR_METRICS
-                .user_sink_error
-                .report([S::SINK_NAME.to_owned(), identity, err_str]);
+            GLOBAL_ERROR_METRICS.user_sink_error.report([
+                S::SINK_NAME.to_owned(),
+                identity,
+                err_str,
+            ]);
             return Err(e.into());
         }
         Err(anyhow!("end of stream").into())
