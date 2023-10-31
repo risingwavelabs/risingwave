@@ -73,8 +73,16 @@ async fn cancel_stream_jobs(session: &mut Session) -> Result<Vec<u32>> {
     Ok(ids)
 }
 
+fn init_logger() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_ansi(false)
+        .try_init();
+}
+
 #[tokio::test]
 async fn test_background_mv_barrier_recovery() -> Result<()> {
+    init_logger();
     let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
     let mut session = cluster.start_session();
 
@@ -82,6 +90,7 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
     session.run(SEED_TABLE).await?;
     session.flush().await?;
     session.run(SET_BACKGROUND_DDL).await?;
+    session.run(SET_RATE_LIMIT_2).await?;
     session.run(CREATE_MV1).await?;
 
     // If the CN is killed before first barrier pass for the MV, the MV will be dropped.
@@ -111,15 +120,15 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
     session.run(WAIT).await?;
 
     session
-        .run("SELECT COUNT(v1) FROM m1")
+        .run("SELECT COUNT(v1) FROM mv1")
         .await?
         .assert_result_eq("2000");
 
     // Make sure that if MV killed and restarted
     // it will not be dropped.
 
-    session.run("DROP MATERIALIZED VIEW m1").await?;
-    session.run("DROP TABLE t1").await?;
+    session.run("DROP MATERIALIZED VIEW mv1").await?;
+    session.run("DROP TABLE t").await?;
 
     Ok(())
 }
@@ -131,10 +140,7 @@ async fn test_background_ddl_cancel() -> Result<()> {
         sleep(Duration::from_secs(2)).await;
         Ok(())
     }
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .with_ansi(false)
-        .init();
+    init_logger();
     let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
     let mut session = cluster.start_session();
     session.run(CREATE_TABLE).await?;
