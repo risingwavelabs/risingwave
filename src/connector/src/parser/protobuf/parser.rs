@@ -423,7 +423,7 @@ pub fn from_protobuf_value(
                 let Some(ScalarImpl::Bytea(payload)) =
                     from_protobuf_value(&payload_field_desc, &payload, descriptor_pool)?
                 else {
-                    let err_msg = format!("Expected ScalarImpl::Bytea for payload");
+                    let err_msg = "Expected ScalarImpl::Bytea for payload".to_string();
                     return Err(RwError::from(ProtocolError(err_msg)));
                 };
 
