@@ -25,6 +25,7 @@ use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulabili
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
 };
+use crate::cmd_impl::throttle::apply_throttle;
 use crate::common::CtlContext;
 
 pub mod cmd_impl;
@@ -706,7 +707,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Debug(DebugCommands::Dump { common }) => cmd_impl::debug::dump(common).await?,
         Commands::Throttle(ThrottleCommands::Source(args)) => todo!(),
-        Commands::Throttle(ThrottleCommands::Mv(args)) => todo!(),
+        Commands::Throttle(ThrottleCommands::Mv(args)) => {
+            apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Mv, args).await?;
+        }
     }
     Ok(())
 }

@@ -120,7 +120,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
 
                 if is_fs_connector {
                     FsSourceExecutor::new(
-                        params.actor_context,
+                        params.actor_context.clone(),
                         schema,
                         params.pk_indices,
                         stream_source_core,
@@ -208,7 +208,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 }
             };
             let rate_limit = source.get_rate_limit().cloned().ok();
-            Ok(FlowControlExecutor::new(executor, rate_limit).boxed())
+            Ok(FlowControlExecutor::new(executor, params.actor_context, rate_limit).boxed())
         } else {
             // If there is no external stream source, then no data should be persisted. We pass a
             // `PanicStateStore` type here for indication.

@@ -32,25 +32,42 @@ use super::*;
 /// It is used to throttle problematic MVs that are consuming too much resources.
 pub struct FlowControlExecutor {
     input: BoxedExecutor,
+    actor_ctx: ActorContextRef,
     rate_limit: Option<u32>,
 }
 
 impl FlowControlExecutor {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(input: Box<dyn Executor>, rate_limit: Option<u32>) -> Self {
+    pub fn new(
+        input: Box<dyn Executor>,
+        actor_ctx: ActorContextRef,
+        rate_limit: Option<u32>,
+    ) -> Self {
         #[cfg(madsim)]
         tracing::warn!("FlowControlExecutor rate limiter is disabled in madsim as it will spawn system threads");
-        Self { input, rate_limit }
+        Self {
+            input,
+            rate_limit,
+            actor_ctx,
+        }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self) {
+    async fn execute_inner(mut self) {
         let get_rate_limiter = |rate_limit: u32| {
             let quota = Quota::per_second(NonZeroU32::new(rate_limit).unwrap());
             let clock = MonotonicClock;
             RateLimiter::direct_with_clock(quota, &clock)
         };
-        let rate_limiter = self.rate_limit.map(get_rate_limiter);
+        let mut rate_limiter = self.rate_limit.map(get_rate_limiter);
+        if self.rate_limit.is_some() {
+            tracing::info!(
+                "actor {:?} starts with rate limit {:?}",
+                self.actor_ctx.id,
+                self.rate_limit
+            );
+        }
+
         #[for_await]
         for msg in self.input.execute() {
             let msg = msg?;
@@ -71,6 +88,25 @@ impl FlowControlExecutor {
                         }
                     }
                     yield Message::Chunk(chunk);
+                }
+                Message::Barrier(barrier) => {
+                    if let Some(mutation) = barrier.mutation.as_ref() {
+                        match mutation.as_ref() {
+                            Mutation::Throttle(actor_to_apply) => {
+                                if let Some(limit) = actor_to_apply.get(&self.actor_ctx.id) {
+                                    self.rate_limit = *limit;
+                                    rate_limiter = self.rate_limit.map(get_rate_limiter);
+                                    tracing::info!(
+                                        "actor {:?} rate limit changed to {:?}",
+                                        self.actor_ctx.id,
+                                        self.rate_limit
+                                    )
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    yield Message::Barrier(barrier);
                 }
                 _ => yield msg,
             }

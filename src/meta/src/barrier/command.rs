@@ -24,10 +24,11 @@ use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
+use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, Dispatcher, Dispatchers, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
-    StopMutation, UpdateMutation,
+    StopMutation, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
 use risingwave_rpc_client::StreamClientPoolRef;
@@ -39,7 +40,9 @@ use crate::barrier::CommandChanges;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
-use crate::stream::{build_actor_connector_splits, SourceManagerRef, SplitAssignment};
+use crate::stream::{
+    build_actor_connector_splits, SourceManagerRef, SplitAssignment, ThrottleConfig,
+};
 use crate::MetaResult;
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -146,6 +149,10 @@ pub enum Command {
     /// `SourceSplitAssignment` generates Plain(Mutation::Splits) for pushing initialized splits or
     /// newly added splits.
     SourceSplitAssignment(SplitAssignment),
+
+    /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
+    /// the `rate_limit` of FlowControl Executor after Chain or Source.
+    Throttle(ThrottleConfig),
 }
 
 impl Command {
@@ -195,6 +202,7 @@ impl Command {
                 CommandChanges::Actor { to_add, to_remove }
             }
             Command::SourceSplitAssignment(_) => CommandChanges::None,
+            Command::Throttle(_) => CommandChanges::None,
         }
     }
 
@@ -312,6 +320,21 @@ impl CommandContext {
 
                 Some(Mutation::Splits(SourceChangeSplitMutation {
                     actor_splits: build_actor_connector_splits(&diff),
+                }))
+            }
+
+            Command::Throttle(config) => {
+                let mut actor_to_apply = HashMap::new();
+                for per_fragment in config.values() {
+                    actor_to_apply.extend(
+                        per_fragment
+                            .iter()
+                            .map(|(actor_id, limit)| (*actor_id, RateLimit { rate_limit: *limit })),
+                    );
+                }
+
+                Some(Mutation::Throttle(ThrottleMutation {
+                    actor_throttle: actor_to_apply,
                 }))
             }
 
@@ -656,6 +679,8 @@ impl CommandContext {
                     .apply_source_change(None, Some(split_assignment.clone()), None)
                     .await;
             }
+
+            Command::Throttle(_) => {}
 
             Command::DropStreamingJobs(table_ids) => {
                 // Tell compute nodes to drop actors.

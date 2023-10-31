@@ -16,7 +16,8 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_meta::model::ActorId;
+use risingwave_meta::model::{ActorId, FragmentId};
+use risingwave_meta::stream::ThrottleConfig;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
@@ -102,7 +103,7 @@ impl StreamManagerService for StreamServiceImpl {
         request: Request<ThrottleRequest>,
     ) -> Result<Response<ThrottleResponse>, Status> {
         let request = request.into_inner();
-        let actor_to_apply: Vec<ActorId>;
+        let actor_to_apply: HashMap<FragmentId, Vec<ActorId>>;
         match request.kind() {
             ThrottleTarget::Source => todo!(),
             ThrottleTarget::Mv => {
@@ -116,7 +117,24 @@ impl StreamManagerService for StreamServiceImpl {
             }
         }
 
-        todo!()
+        let mutation: ThrottleConfig = actor_to_apply
+            .iter()
+            .map(|(fragment_id, actors)| {
+                (
+                    *fragment_id,
+                    actors
+                        .iter()
+                        .map(|actor_id| (*actor_id, request.rate.clone()))
+                        .collect::<HashMap<ActorId, Option<u32>>>(),
+                )
+            })
+            .collect();
+        let i = self
+            .barrier_scheduler
+            .run_command(Command::Throttle(mutation))
+            .await?;
+
+        Ok(Response::new(ThrottleResponse { status: None }))
     }
 
     async fn cancel_creating_jobs(

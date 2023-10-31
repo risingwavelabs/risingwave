@@ -179,6 +179,6 @@ impl ExecutorBuilder for ChainExecutorBuilder {
             ChainType::ChainUnspecified => unreachable!(),
         };
         let rate_limit = node.get_rate_limit().cloned().ok();
-        Ok(FlowControlExecutor::new(executor, rate_limit).boxed())
+        Ok(FlowControlExecutor::new(executor, params.actor_context, rate_limit).boxed())
     }
 }

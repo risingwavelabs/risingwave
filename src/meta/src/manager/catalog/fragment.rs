@@ -775,17 +775,16 @@ impl FragmentManager {
         &self,
         table_id: TableId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<Vec<ActorId>> {
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
         let map = &mut self.core.write().await.table_fragments;
 
         let mut table_fragments = BTreeMapTransaction::new(map);
         let mut fragment = table_fragments
             .get_mut(table_id)
             .ok_or_else(|| MetaError::fragment_not_found(table_id))?;
-
-        let mut actor_to_apply = vec![];
-
+        let mut fragment_to_apply = HashMap::new();
         for fragment in fragment.fragments.values_mut() {
+            let mut actor_to_apply = Vec::new();
             for actor in &mut fragment.actors {
                 if let Some(stream_node) = actor.nodes.as_mut() {
                     if let Some(NodeBody::Chain(ref mut node)) = stream_node.node_body.as_mut() {
@@ -794,11 +793,12 @@ impl FragmentManager {
                     }
                 }
             }
+            fragment_to_apply.insert(fragment.fragment_id, actor_to_apply);
         }
 
         commit_meta!(self, table_fragments)?;
 
-        Ok(actor_to_apply)
+        Ok(fragment_to_apply)
     }
 
     pub async fn update_actor_splits_by_split_assignment(
