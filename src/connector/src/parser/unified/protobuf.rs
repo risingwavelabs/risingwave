@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use anyhow::anyhow;
-use prost_reflect::{DynamicMessage, ReflectMessage};
+use prost_reflect::{DescriptorPool, DynamicMessage, ReflectMessage};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::RwError;
 use risingwave_common::types::DataType;
@@ -24,11 +26,15 @@ use crate::parser::unified::AccessError;
 
 pub struct ProtobufAccess {
     message: DynamicMessage,
+    descriptor_pool: Arc<DescriptorPool>,
 }
 
 impl ProtobufAccess {
-    pub fn new(message: DynamicMessage) -> Self {
-        Self { message }
+    pub fn new(message: DynamicMessage, descriptor_pool: Arc<DescriptorPool>) -> Self {
+        Self {
+            message,
+            descriptor_pool,
+        }
     }
 }
 
@@ -46,6 +52,7 @@ impl Access for ProtobufAccess {
             })
             .map_err(|e| AccessError::Other(anyhow!(e)))?;
         let value = self.message.get_field(&field_desc);
-        from_protobuf_value(&field_desc, &value).map_err(|e| AccessError::Other(anyhow!(e)))
+        from_protobuf_value(&field_desc, &value, &self.descriptor_pool)
+            .map_err(|e| AccessError::Other(anyhow!(e)))
     }
 }
