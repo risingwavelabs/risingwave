@@ -624,7 +624,6 @@ pub trait HummockLevelsExt {
         delete_sst_levels: &[u32],
         delete_sst_ids_set: HashSet<u64>,
     ) -> bool;
-    fn can_partition_by_vnode(&self) -> bool;
 }
 
 impl HummockLevelsExt for Levels {
@@ -707,6 +706,8 @@ impl HummockLevelsExt for Levels {
                         sst.table_ids.len() == 1 && sst.table_ids[0] == self.member_table_ids[0]
                     })
                 {
+                    // Only change vnode_partition_count for group which has only one state-table.
+                    // Only change vnode_partition_count for level which update all sst files in this compact task.
                     l0.sub_levels[index].vnode_partition_count = new_vnode_partition_count;
                 }
                 level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
@@ -772,10 +773,6 @@ impl HummockLevelsExt for Levels {
             }
         }
         delete_sst_ids_set.is_empty()
-    }
-
-    fn can_partition_by_vnode(&self) -> bool {
-        self.vnode_partition_count > 0 && self.member_table_ids.len() == 1
     }
 }
 
