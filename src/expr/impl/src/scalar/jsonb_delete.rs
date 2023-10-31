@@ -377,7 +377,7 @@ fn normalize_array_index(len: usize, index: i32) -> Option<usize> {
 /// query T
 /// SELECT jsonb_strip_nulls('[{"f1":1, "f2":null}, 2, null, 3]');
 /// ----
-/// [{"f1":1},2,null,3]
+/// [{"f1": 1}, 2, null, 3]
 /// ```
 #[function("jsonb_strip_nulls(jsonb) -> jsonb")]
 fn jsonb_strip_nulls(v: JsonbRef<'_>) -> JsonbVal {
