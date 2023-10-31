@@ -23,7 +23,7 @@ use crate::util::sort_util::ColumnOrder;
 /// Compute node will use this information to connect to the external database and scan the table.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct CdcTableDesc {
-    /// Id of the table, to find in storage.
+    /// Id of the upstream source in sharing cdc mode
     pub table_id: TableId,
 
     /// The full name of the table in external database, e.g. `database_name.table.name` in MySQL

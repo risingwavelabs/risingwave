@@ -326,7 +326,7 @@ impl Scheduler {
             })
             .collect();
 
-        tracing::debug!(?distributions, "schedule result");
+        tracing::debug!(?distributions, "schedule fragments");
 
         Ok(distributions)
     }

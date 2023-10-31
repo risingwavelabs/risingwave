@@ -149,7 +149,20 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     unreachable!("expect to receive the cdc split, please check the parallelism of the fragment")
                 },
                 Some(splits) => {
-                    assert!(!splits.is_empty());
+                    if splits.is_empty() {
+                        tracing::info!(?splits, "got empty cdc split, bypass the backfill");
+                        // The first barrier message should be propagated.
+                        yield Message::Barrier(first_barrier);
+                        #[for_await]
+                        for msg in upstream {
+                            if let Some(msg) = mapping_message(msg?, &self.output_indices) {
+                                yield msg;
+                            }
+                        }
+                        // exit the executor
+                        return Ok(());
+                    }
+
                     let split = splits.iter().exactly_one().map_err(|_err| {
                         StreamExecutorError::from(anyhow!(
                                 "expect only one cdc split for table {}",
