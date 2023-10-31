@@ -25,7 +25,7 @@ use risingwave_pb::catalog::{
     PbView,
 };
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
-use risingwave_pb::ddl_service::create_connection_request;
+use risingwave_pb::ddl_service::{create_connection_request, PbTableJobType};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
@@ -78,6 +78,7 @@ pub trait CatalogWriter: Send + Sync {
         source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
+        job_type: PbTableJobType,
     ) -> Result<()>;
 
     async fn replace_table(
@@ -98,6 +99,12 @@ pub trait CatalogWriter: Send + Sync {
     ) -> Result<()>;
 
     async fn create_source(&self, source: PbSource) -> Result<()>;
+
+    async fn create_source_with_graph(
+        &self,
+        source: PbSource,
+        graph: StreamFragmentGraph,
+    ) -> Result<()>;
 
     async fn create_sink(&self, sink: PbSink, graph: StreamFragmentGraph) -> Result<()>;
 
@@ -225,8 +232,12 @@ impl CatalogWriter for CatalogWriterImpl {
         source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
+        job_type: PbTableJobType,
     ) -> Result<()> {
-        let (_, version) = self.meta_client.create_table(source, table, graph).await?;
+        let (_, version) = self
+            .meta_client
+            .create_table(source, table, graph, job_type)
+            .await?;
         self.wait_version(version).await
     }
 
@@ -251,6 +262,18 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn create_source(&self, source: PbSource) -> Result<()> {
         let (_id, version) = self.meta_client.create_source(source).await?;
+        self.wait_version(version).await
+    }
+
+    async fn create_source_with_graph(
+        &self,
+        source: PbSource,
+        graph: StreamFragmentGraph,
+    ) -> Result<()> {
+        let (_id, version) = self
+            .meta_client
+            .create_source_with_graph(source, graph)
+            .await?;
         self.wait_version(version).await
     }
 

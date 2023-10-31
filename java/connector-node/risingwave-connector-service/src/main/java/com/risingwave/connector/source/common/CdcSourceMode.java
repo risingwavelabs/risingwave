@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod arrangement_backfill;
-pub mod cdc;
-pub mod no_shuffle_backfill;
-pub mod upstream_table;
-pub mod utils;
+package com.risingwave.connector.source.common;
+
+public enum CdcSourceMode {
+    // The source is dedicated to a single CDC table
+    SINGLE_MODE,
+    // The source is sharing by multiple CDC tables
+    SHARING_MODE,
+}

@@ -45,14 +45,17 @@ public class DbzConnectorConfig {
 
     public static final String DB_SERVERS = "database.servers";
 
-    /* MySQL specified configs */
+    /* MySQL configs */
     public static final String MYSQL_SERVER_ID = "server.id";
 
-    /* Postgres specified configs */
+    /* Postgres configs */
     public static final String PG_SLOT_NAME = "slot.name";
     public static final String PG_PUB_NAME = "publication.name";
     public static final String PG_PUB_CREATE = "publication.create.enable";
     public static final String PG_SCHEMA_NAME = "schema.name";
+
+    /* RisingWave configs */
+    public static final String CDC_SHARING_MODE = "rw.sharing.mode.enable";
 
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
@@ -128,6 +131,7 @@ public class DbzConnectorConfig {
             }
 
             dbzProps.putAll(mysqlProps);
+
         } else if (source == SourceTypeE.POSTGRES || source == SourceTypeE.CITUS) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
 
@@ -161,9 +165,19 @@ public class DbzConnectorConfig {
             dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
         }
 
+        if (Utils.getCdcSourceMode(userProps) == CdcSourceMode.SHARING_MODE) {
+            adjustConfigForSharedCdcStream(dbzProps);
+        }
+
         this.sourceId = sourceId;
         this.sourceType = source;
         this.resolvedDbzProps = dbzProps;
+    }
+
+    private void adjustConfigForSharedCdcStream(Properties dbzProps) {
+        // disable table filtering for the shared cdc stream
+        LOG.info("Disable table filtering for the shared cdc stream");
+        dbzProps.remove("table.include.list");
     }
 
     private Properties initiateDbConfig(String fileName, StringSubstitutor substitutor) {
