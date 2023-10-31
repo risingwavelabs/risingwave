@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use opendal::{services::Gcs, layers::{LoggingLayer, RetryLayer}, Operator};
+use serde::Deserialize;
 
-use super::opendal_enumerator::{OpendalSource, EngineType};
+use super::opendal_enumerator::{OpenDALSplitEnumerator, EngineType};
 
-impl OpendalSource {
+impl OpenDALSplitEnumerator {
     /// create opendal gcs engine.
     pub fn new_gcs_source(bucket: String, root: String) -> anyhow::Result<Self> {
         // Create gcs backend builder.
@@ -42,3 +43,23 @@ impl OpendalSource {
         })
     }
 }
+
+use crate::source::filesystem::FsSplit;
+use crate::source::SourceProperties;
+
+pub const GCS_CONNECTOR: &str = "s3";
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct GCSProperties {
+    #[serde(rename = "gcs.bucket_name")]
+    pub bucket_name: String,
+}
+
+impl SourceProperties for GCSProperties {
+    type Split = FsSplit;
+    type SplitEnumerator = OpenDALSplitEnumerator;
+    type SplitReader = OpenDALSplitEnumerator;
+
+    const SOURCE_NAME: &'static str = GCS_CONNECTOR;
+}
+

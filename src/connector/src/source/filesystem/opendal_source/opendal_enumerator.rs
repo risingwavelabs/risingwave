@@ -13,16 +13,30 @@
 // limitations under the License.
 
 use async_nats::jetstream::object_store::ObjectMetadata;
+use async_trait::async_trait;
 use opendal::{Operator, Lister, Metakey};
 use futures::{stream::{self, BoxStream}, StreamExt};
 
-use crate::source::FsListInner;
-pub struct OpendalSource {
+use crate::source::{FsListInner, SplitEnumerator, SourceEnumeratorContextRef};
+pub struct OpenDALSplitEnumerator {
     pub(crate) op: Operator,
     pub(crate) engine_type: EngineType,
 }
 
-impl OpendalSource{
+#[async_trait]
+impl SplitEnumerator for OpenDALSplitEnumerator{
+    async fn new(
+        properties: Self::Properties,
+        _context: SourceEnumeratorContextRef,
+    ) -> anyhow::Result<Self> {
+        todo!()
+    }
+
+    async fn list_splits(&mut self) -> anyhow::Result<Vec<Self::Split>> {
+        todo!()
+    }
+}
+impl OpenDALSplitEnumerator{
     async fn list(&self, prefix: &str) ->  anyhow::Result<ObjectMetadataIter> {
         let object_lister = self
             .op
@@ -75,46 +89,5 @@ pub struct ObjectListMetadata {
     pub total_size: usize,
 }
 
-#[async_trait]
-impl FsListInner for OpendalSource {
-    async fn get_next_page<T: for<'a> From<&'a Object>>(
-        &mut self,
-    ) -> anyhow::Result<(Vec<T>, bool)> {
-        let mut has_finished = false;
-        let mut req = self
-            .client
-            .list_objects_v2()
-            .bucket(&self.bucket_name)
-            .set_prefix(self.prefix.clone());
-        if let Some(continuation_token) = self.next_continuation_token.take() {
-            req = req.continuation_token(continuation_token);
-        }
-        let mut res = req
-            .send()
-            .await
-            .map_err(|e| anyhow!(DisplayErrorContext(e)))?;
-        if res.is_truncated() {
-            self.next_continuation_token = res.next_continuation_token.clone();
-        } else {
-            has_finished = true;
-            self.next_continuation_token = None;
-        }
-        let objects = res.contents.take().unwrap_or_default();
-        let matched_objs: Vec<T> = objects
-            .iter()
-            .filter(|obj| obj.key().is_some())
-            .filter(|obj| {
-                self.matcher
-                    .as_ref()
-                    .map(|m| m.matches(obj.key().unwrap()))
-                    .unwrap_or(true)
-            })
-            .map(T::from)
-            .collect_vec();
-        Ok((matched_objs, has_finished))
-    }
 
-    fn filter_policy(&self, _ctx: &FsFilterCtrlCtx, _page_num: usize, _item: &FsPageItem) -> bool {
-        true
-    }
-}
+

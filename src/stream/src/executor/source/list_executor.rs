@@ -106,7 +106,42 @@ impl<S: StateStore> FsListExecutor<S> {
             .boxed())
     }
 
+    async fn build_chunked_paginate_stream_v2(
+        &self,
+        source_desc: &SourceDesc,
+    ) -> StreamExecutorResult<BoxTryStream<StreamChunk>> {
+        let stream = source_desc
+            .source
+            .get_source_list_v2()
+            .await
+            .map_err(StreamExecutorError::connector_error)?;
+
+        Ok(stream
+            .map(|item| item.map(Self::map_fs_page_to_chunk))
+            .boxed())
+    }
+
     fn map_fs_page_to_chunk(page: FsPage) -> StreamChunk {
+        let rows = page
+            .into_iter()
+            .map(|split| {
+                (
+                    Op::Insert,
+                    OwnedRow::new(vec![
+                        Some(ScalarImpl::Utf8(split.name.into_boxed_str())),
+                        Some(ScalarImpl::Timestamp(split.timestamp)),
+                        Some(ScalarImpl::Int64(split.size)),
+                    ]),
+                )
+            })
+            .collect::<Vec<_>>();
+        StreamChunk::from_rows(
+            &rows,
+            &[DataType::Varchar, DataType::Timestamp, DataType::Int64],
+        )
+    }
+
+    fn map_fs_item_to_chunk(page: FsPage) -> StreamChunk {
         let rows = page
             .into_iter()
             .map(|split| {
