@@ -35,6 +35,9 @@ pub enum ConnectorError {
     #[error("MySQL error: {0}")]
     MySql(#[from] mysql_async::Error),
 
+    #[error("Pulsar error: {0}")]
+    Pulsar(anyhow::Error),
+
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }

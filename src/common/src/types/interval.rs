@@ -1386,7 +1386,9 @@ impl Interval {
     fn parse_postgres(s: &str) -> Result<Self> {
         use DateTimeField::*;
         let mut tokens = parse_interval(s)?;
-        if tokens.len() % 2 != 0 && let Some(TimeStrToken::Num(_)) = tokens.last() {
+        if tokens.len() % 2 != 0
+            && let Some(TimeStrToken::Num(_)) = tokens.last()
+        {
             tokens.push(TimeStrToken::TimeUnit(DateTimeField::Second));
         }
         if tokens.len() % 2 != 0 {
@@ -1394,7 +1396,9 @@ impl Interval {
         }
         let mut token_iter = tokens.into_iter();
         let mut result = Interval::from_month_day_usec(0, 0, 0);
-        while let Some(num) = token_iter.next() && let Some(interval_unit) = token_iter.next() {
+        while let Some(num) = token_iter.next()
+            && let Some(interval_unit) = token_iter.next()
+        {
             match (num, interval_unit) {
                 (TimeStrToken::Num(num), TimeStrToken::TimeUnit(interval_unit)) => {
                     result = (|| match interval_unit {

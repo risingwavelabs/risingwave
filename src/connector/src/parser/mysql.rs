@@ -143,7 +143,9 @@ mod tests {
         });
         pin_mut!(row_stream);
         while let Some(row) = row_stream.next().await {
-            if let Ok(ro) = row && ro.is_some() {
+            if let Ok(ro) = row
+                && ro.is_some()
+            {
                 let owned_row = ro.unwrap();
                 let d = owned_row.datum_at(2);
                 if let Some(scalar) = d {

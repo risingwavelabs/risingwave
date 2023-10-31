@@ -17,7 +17,8 @@ use std::fmt::Debug;
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use simd_json::{BorrowedValue, Mutable};
+use simd_json::prelude::MutableObject;
+use simd_json::BorrowedValue;
 
 use crate::only_parse_payload;
 use crate::parser::unified::debezium::{DebeziumChangeEvent, MongoProjection};

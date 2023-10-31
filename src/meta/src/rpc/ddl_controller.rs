@@ -24,7 +24,7 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
 use risingwave_pb::catalog::{
-    connection, Connection, CreateType, Database, Function, Schema, Source, Table, View,
+    connection, Comment, Connection, CreateType, Database, Function, Schema, Source, Table, View,
 };
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -103,6 +103,7 @@ pub enum DdlCommand {
     AlterSourceColumn(Source),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
+    CommentOn(Comment),
 }
 
 #[derive(Clone)]
@@ -260,6 +261,7 @@ impl DdlController {
                     ctrl.drop_connection(connection_id).await
                 }
                 DdlCommand::AlterSourceColumn(source) => ctrl.alter_source_column(source).await,
+                DdlCommand::CommentOn(comment) => ctrl.comment_on(comment).await,
             }
         }
         .in_current_span();
@@ -400,11 +402,15 @@ impl DdlController {
     async fn delete_vpc_endpoint(&self, connection: &Connection) -> MetaResult<()> {
         // delete AWS vpc endpoint
         if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info
-            && svc.get_provider()? == PbPrivateLinkProvider::Aws {
+            && svc.get_provider()? == PbPrivateLinkProvider::Aws
+        {
             if let Some(aws_cli) = self.aws_client.as_ref() {
                 aws_cli.delete_vpc_endpoint(&svc.endpoint_id).await?;
             } else {
-                warn!("AWS client is not initialized, skip deleting vpc endpoint {}", svc.endpoint_id);
+                warn!(
+                    "AWS client is not initialized, skip deleting vpc endpoint {}",
+                    svc.endpoint_id
+                );
             }
         }
         Ok(())
@@ -431,6 +437,7 @@ impl DdlController {
 
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
 
+        // Persist tables
         tracing::debug!(id = stream_job.id(), "preparing stream job");
         let fragment_graph = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
@@ -1097,7 +1104,7 @@ impl DdlController {
         }
     }
 
-    pub async fn wait(&self) {
+    pub async fn wait(&self) -> MetaResult<()> {
         for _ in 0..30 * 60 {
             if self
                 .catalog_manager
@@ -1105,9 +1112,14 @@ impl DdlController {
                 .await
                 .is_empty()
             {
-                break;
+                return Ok(());
             }
             sleep(Duration::from_secs(1)).await;
         }
+        Err(MetaError::cancelled("timeout".into()))
+    }
+
+    async fn comment_on(&self, comment: Comment) -> MetaResult<NotificationVersion> {
+        self.catalog_manager.comment_on(comment).await
     }
 }

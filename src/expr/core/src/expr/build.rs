@@ -349,7 +349,9 @@ pub(crate) fn lexer(input: &str) -> Vec<Token> {
             ':' => Token::Colon,
             '$' => {
                 let mut number = String::new();
-                while let Some(c) = chars.peek() && c.is_ascii_digit() {
+                while let Some(c) = chars.peek()
+                    && c.is_ascii_digit()
+                {
                     number.push(chars.next().unwrap());
                 }
                 let index = number.parse::<usize>().expect("Invalid number");

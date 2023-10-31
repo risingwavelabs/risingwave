@@ -180,7 +180,9 @@ impl TopNHeap {
                         let mut ties_with_peek = vec![];
                         // pop all the ties with peek
                         ties_with_peek.push(self.heap.pop().unwrap());
-                        while let Some(e) = self.heap.peek() && e.encoded_row == peek.encoded_row {
+                        while let Some(e) = self.heap.peek()
+                            && e.encoded_row == peek.encoded_row
+                        {
                             ties_with_peek.push(self.heap.pop().unwrap());
                         }
                         self.heap.push(elem);

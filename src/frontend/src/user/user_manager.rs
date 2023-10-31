@@ -17,12 +17,13 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 
+use crate::user::user_catalog::UserCatalog;
 use crate::user::{UserId, UserInfoVersion};
 
 /// `UserInfoManager` is responsible for managing users.
 pub struct UserInfoManager {
     version: UserInfoVersion,
-    user_by_name: HashMap<String, UserInfo>,
+    user_by_name: HashMap<String, UserCatalog>,
     user_name_by_id: HashMap<UserId, String>,
 }
 
@@ -38,16 +39,16 @@ impl Default for UserInfoManager {
 }
 
 impl UserInfoManager {
-    pub fn get_user_mut(&mut self, id: UserId) -> Option<&mut UserInfo> {
+    pub fn get_user_mut(&mut self, id: UserId) -> Option<&mut UserCatalog> {
         let name = self.user_name_by_id.get(&id)?;
         self.user_by_name.get_mut(name)
     }
 
-    pub fn get_all_users(&self) -> Vec<UserInfo> {
+    pub fn get_all_users(&self) -> Vec<UserCatalog> {
         self.user_by_name.values().cloned().collect_vec()
     }
 
-    pub fn get_user_by_name(&self, user_name: &str) -> Option<&UserInfo> {
+    pub fn get_user_by_name(&self, user_name: &str) -> Option<&UserCatalog> {
         self.user_by_name.get(user_name)
     }
 
@@ -63,7 +64,7 @@ impl UserInfoManager {
         let id = user_info.id;
         let name = user_info.name.clone();
         self.user_by_name
-            .try_insert(name.clone(), user_info)
+            .try_insert(name.clone(), user_info.into())
             .unwrap();
         self.user_name_by_id.try_insert(id, name).unwrap();
     }
@@ -78,9 +79,11 @@ impl UserInfoManager {
         let name = user_info.name.clone();
         if let Some(old_name) = self.get_user_name_by_id(id) {
             self.user_by_name.remove(&old_name);
-            self.user_by_name.insert(name.clone(), user_info);
+            self.user_by_name.insert(name.clone(), user_info.into());
         } else {
-            self.user_by_name.insert(name.clone(), user_info).unwrap();
+            self.user_by_name
+                .insert(name.clone(), user_info.into())
+                .unwrap();
         }
         self.user_name_by_id.insert(id, name).unwrap();
     }

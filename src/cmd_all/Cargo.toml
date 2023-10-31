@@ -69,6 +69,7 @@ task_stats_alloc = { path = "../utils/task_stats_alloc" }
 [[bin]]
 name = "risingwave"
 path = "src/bin/risingwave.rs"
+test = false
 
 [lints]
 workspace = true
