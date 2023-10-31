@@ -23,7 +23,10 @@ use risingwave_common::types::{
     DataType, Date, Decimal, Int256, Interval, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
-use simd_json::{BorrowedValue, ValueAccess, ValueType};
+use simd_json::prelude::{
+    TypedValue, ValueAsContainer, ValueAsScalar, ValueObjectAccess, ValueTryAsScalar,
+};
+use simd_json::{BorrowedValue, ValueType};
 
 use super::{Access, AccessError, AccessResult};
 use crate::parser::common::json_object_get_case_insensitive;

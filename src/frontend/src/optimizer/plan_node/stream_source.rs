@@ -20,10 +20,10 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 
+use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, StreamNode};
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -31,24 +31,24 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSource {
-    pub base: PlanBase,
-    pub(crate) logical: generic::Source,
+    pub base: PlanBase<Stream>,
+    pub(crate) core: generic::Source,
 }
 
 impl StreamSource {
-    pub fn new(logical: generic::Source) -> Self {
-        let base = PlanBase::new_stream_with_logical(
-            &logical,
+    pub fn new(core: generic::Source) -> Self {
+        let base = PlanBase::new_stream_with_core(
+            &core,
             Distribution::SomeShard,
-            logical.catalog.as_ref().map_or(true, |s| s.append_only),
+            core.catalog.as_ref().map_or(true, |s| s.append_only),
             false,
-            FixedBitSet::with_capacity(logical.column_catalog.len()),
+            FixedBitSet::with_capacity(core.column_catalog.len()),
         );
-        Self { base, logical }
+        Self { base, core }
     }
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
-        self.logical.catalog.clone()
+        self.core.catalog.clone()
     }
 }
 
@@ -79,9 +79,9 @@ impl StreamNode for StreamSource {
                     .to_internal_table_prost(),
             ),
             info: Some(source_catalog.info.clone()),
-            row_id_index: self.logical.row_id_index.map(|index| index as _),
+            row_id_index: self.core.row_id_index.map(|index| index as _),
             columns: self
-                .logical
+                .core
                 .column_catalog
                 .iter()
                 .map(|c| c.to_protobuf())

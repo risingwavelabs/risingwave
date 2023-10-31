@@ -25,7 +25,7 @@
 #![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(error_generic_member_access)]
-#![cfg_attr(coverage, feature(no_coverage))]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 pub mod error;
 pub mod meta_snapshot;

@@ -97,6 +97,8 @@ rdkafka = { workspace = true, features = [
     "gssapi",
     "zstd",
 ] }
+redis = { version = "0.23.3", features = ["aio","tokio-comp","async-std-comp"] }
+regex = "1.4"
 reqwest = { version = "0.11", features = ["json"] }
 risingwave_common = { workspace = true }
 risingwave_jni_core = { workspace = true }
@@ -107,12 +109,12 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
-simd-json = "0.12.0"
+simd-json = "0.13.3"
 strum = "0.25"
 strum_macros = "0.25"
 tempfile = "3"
 thiserror = "1"
-time = "0.3.28"
+time = "0.3.30"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -138,6 +140,7 @@ workspace-hack = { path = "../workspace-hack" }
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 rand = "0.8"
 tempfile = "3"
+tracing-subscriber = "0.3"
 tracing-test = "0.2"
 
 [build-dependencies]
@@ -145,6 +148,10 @@ prost-build = "0.12"
 
 [[bench]]
 name = "parser"
+harness = false
+
+[[bench]]
+name = "nexmark_integration"
 harness = false
 
 [lints]

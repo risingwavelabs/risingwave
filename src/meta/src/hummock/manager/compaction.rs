@@ -19,6 +19,8 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::{CompactStatus as PbCompactStatus, CompactTaskAssignment};
 
+use crate::hummock::compaction::selector::level_selector::PickerInfo;
+use crate::hummock::compaction::selector::DynamicLevelSelectorCore;
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::manager::read_lock;
 use crate::hummock::HummockManager;
@@ -70,5 +72,30 @@ impl HummockManager {
                 .cloned()
                 .collect(),
         )
+    }
+
+    #[named]
+    pub async fn get_compaction_scores(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> Vec<PickerInfo> {
+        let (status, levels, config) = {
+            let compaction = read_lock!(self, compaction).await;
+            let versioning = read_lock!(self, versioning).await;
+            let config_manager = self.compaction_group_manager.read().await;
+            match (
+                compaction.compaction_statuses.get(&compaction_group_id),
+                versioning.current_version.levels.get(&compaction_group_id),
+                config_manager.try_get_compaction_group_config(compaction_group_id),
+            ) {
+                (Some(cs), Some(v), Some(cf)) => (cs.to_owned(), v.to_owned(), cf),
+                _ => {
+                    return vec![];
+                }
+            }
+        };
+        let dynamic_level_core = DynamicLevelSelectorCore::new(config.compaction_config);
+        let ctx = dynamic_level_core.get_priority_levels(&levels, &status.level_handlers);
+        ctx.score_levels
     }
 }

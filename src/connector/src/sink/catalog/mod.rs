@@ -132,6 +132,7 @@ pub enum SinkEncode {
     Json,
     Protobuf,
     Avro,
+    Template,
 }
 
 impl SinkFormatDesc {
@@ -177,6 +178,7 @@ impl SinkFormatDesc {
             SinkEncode::Json => E::Json,
             SinkEncode::Protobuf => E::Protobuf,
             SinkEncode::Avro => E::Avro,
+            SinkEncode::Template => E::Template,
         };
         let options = self
             .options
@@ -212,6 +214,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
         let encode = match value.encode() {
             E::Json => SinkEncode::Json,
             E::Protobuf => SinkEncode::Protobuf,
+            E::Template => SinkEncode::Template,
             E::Avro => SinkEncode::Avro,
             e @ (E::Unspecified | E::Native | E::Csv | E::Bytes) => {
                 return Err(SinkError::Config(anyhow!(

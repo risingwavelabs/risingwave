@@ -23,7 +23,7 @@ use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, BatchOverWindow, ColPrunable, ExprRewritable, LogicalProject,
+    gen_filter_and_pushdown, BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalProject,
     PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamEowcSort,
     StreamOverWindow, ToBatch, ToStream,
 };
@@ -341,7 +341,9 @@ impl<'a> OverWindowProjectBuilder<'a> {
     }
 }
 
-impl<'a> ExprVisitor<()> for OverWindowProjectBuilder<'a> {
+impl<'a> ExprVisitor for OverWindowProjectBuilder<'a> {
+    type Result = ();
+
     fn merge(_a: (), _b: ()) {}
 
     fn visit_window_function(&mut self, window_function: &WindowFunction) {
@@ -356,7 +358,7 @@ impl<'a> ExprVisitor<()> for OverWindowProjectBuilder<'a> {
 /// The output schema is the input schema plus the window functions.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalOverWindow {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: OverWindow<PlanRef>,
 }
 
@@ -770,6 +772,8 @@ impl ToBatch for LogicalOverWindow {
 
 impl ToStream for LogicalOverWindow {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         if self
             .window_functions()
             .iter()
@@ -832,9 +836,9 @@ impl ToStream for LogicalOverWindow {
                     .enforce_if_not_satisfies(stream_input, &Order::any())?;
             let sort = StreamEowcSort::new(sort_input, order_key_index);
 
-            let mut logical = self.core.clone();
-            logical.input = sort.into();
-            Ok(StreamEowcOverWindow::new(logical).into())
+            let mut core = self.core.clone();
+            core.input = sort.into();
+            Ok(StreamEowcOverWindow::new(core).into())
         } else {
             // General (Emit-On-Update) case
 
@@ -863,9 +867,9 @@ impl ToStream for LogicalOverWindow {
             let new_input =
                 RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
                     .enforce_if_not_satisfies(stream_input, &Order::any())?;
-            let mut logical = self.core.clone();
-            logical.input = new_input;
-            Ok(StreamOverWindow::new(logical).into())
+            let mut core = self.core.clone();
+            core.input = new_input;
+            Ok(StreamOverWindow::new(core).into())
         }
     }
 

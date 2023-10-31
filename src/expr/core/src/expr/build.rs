@@ -27,8 +27,13 @@ use super::expr_in::InExpression;
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
-use super::wrapper::{Checked, EvalErrorReport, NonStrict};
-use crate::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
+use super::wrapper::checked::Checked;
+use super::wrapper::non_strict::NonStrict;
+use super::wrapper::EvalErrorReport;
+use super::NonStrictExpression;
+use crate::expr::{
+    BoxedExpression, Expression, ExpressionBoxExt, InputRefExpression, LiteralExpression,
+};
 use crate::sig::FUNCTION_REGISTRY;
 use crate::{bail, ExprError, Result};
 
@@ -41,8 +46,10 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
 pub fn build_non_strict_from_prost(
     prost: &ExprNode,
     error_report: impl EvalErrorReport + 'static,
-) -> Result<BoxedExpression> {
-    ExprBuilder::new_non_strict(error_report).build(prost)
+) -> Result<NonStrictExpression> {
+    ExprBuilder::new_non_strict(error_report)
+        .build(prost)
+        .map(NonStrictExpression)
 }
 
 /// Build an expression from protobuf with possibly some wrappers attached to each node.
@@ -153,7 +160,7 @@ impl<E: Build + 'static> BuildBoxed for E {
         prost: &ExprNode,
         build_child: impl Fn(&ExprNode) -> Result<BoxedExpression>,
     ) -> Result<BoxedExpression> {
-        Self::build(prost, build_child).map(Expression::boxed)
+        Self::build(prost, build_child).map(ExpressionBoxExt::boxed)
     }
 }
 
@@ -217,9 +224,9 @@ pub fn build_func_non_strict(
     ret_type: DataType,
     children: Vec<BoxedExpression>,
     error_report: impl EvalErrorReport + 'static,
-) -> Result<BoxedExpression> {
+) -> Result<NonStrictExpression> {
     let expr = build_func(func, ret_type, children)?;
-    let wrapped = ExprBuilder::new_non_strict(error_report).wrap(expr);
+    let wrapped = NonStrictExpression(ExprBuilder::new_non_strict(error_report).wrap(expr));
 
     Ok(wrapped)
 }

@@ -19,8 +19,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::NowNode;
 
-use super::generic::GenericPlanRef;
-use super::stream::StreamPlanRef;
+use super::stream::prelude::*;
 use super::utils::{childless_record, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, LogicalNow, PlanBase, StreamNode};
 use crate::optimizer::plan_node::utils::column_names_pretty;
@@ -30,7 +29,7 @@ use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamNow {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
 }
 
 impl StreamNow {
@@ -59,7 +58,7 @@ impl StreamNow {
 
 impl Distill for StreamNow {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let vec = if self.base.ctx.is_explain_verbose() {
+        let vec = if self.base.ctx().is_explain_verbose() {
             vec![("output", column_names_pretty(self.schema()))]
         } else {
             vec![]

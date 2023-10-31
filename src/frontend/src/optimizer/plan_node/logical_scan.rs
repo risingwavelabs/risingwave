@@ -25,7 +25,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
     PredicatePushdown, StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
@@ -42,7 +42,7 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalScan {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Scan,
 }
 
@@ -233,7 +233,7 @@ impl LogicalScan {
         }
 
         let mut inverse_mapping = {
-            let mapping = ColIndexMapping::with_target_size(
+            let mapping = ColIndexMapping::new(
                 self.required_col_idx().iter().map(|i| Some(*i)).collect(),
                 self.table_desc().columns.len(),
             );
@@ -242,7 +242,7 @@ impl LogicalScan {
             for (src, dst) in mapping.mapping_pairs() {
                 inverse_map[dst] = Some(src);
             }
-            ColIndexMapping::with_target_size(inverse_map, mapping.source_size())
+            ColIndexMapping::new(inverse_map, mapping.source_size())
         };
 
         predicate = predicate.rewrite_expr(&mut inverse_mapping);
@@ -273,7 +273,7 @@ impl LogicalScan {
             self.output_col_idx().to_vec(),
             self.core.table_desc.clone(),
             self.indexes().to_vec(),
-            self.base.ctx.clone(),
+            self.base.ctx().clone(),
             predicate,
             self.for_system_time_as_of_proctime(),
             self.table_cardinality(),
@@ -288,7 +288,7 @@ impl LogicalScan {
             output_col_idx,
             self.core.table_desc.clone(),
             self.indexes().to_vec(),
-            self.base.ctx.clone(),
+            self.base.ctx().clone(),
             self.predicate().clone(),
             self.for_system_time_as_of_proctime(),
             self.table_cardinality(),
@@ -309,7 +309,7 @@ impl_plan_tree_node_for_leaf! {LogicalScan}
 
 impl Distill for LogicalScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let verbose = self.base.ctx.is_explain_verbose();
+        let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(5);
         vec.push(("table", Pretty::from(self.table_name().to_owned())));
         let key_is_columns =
@@ -397,7 +397,9 @@ impl PredicatePushdown for LogicalScan {
         // If the predicate contains `CorrelatedInputRef` or `now()`. We don't push down.
         // This case could come from the predicate push down before the subquery unnesting.
         struct HasCorrelated {}
-        impl ExprVisitor<bool> for HasCorrelated {
+        impl ExprVisitor for HasCorrelated {
+            type Result = bool;
+
             fn merge(a: bool, b: bool) -> bool {
                 a | b
             }
@@ -410,7 +412,7 @@ impl PredicatePushdown for LogicalScan {
             .conjunctions
             .extract_if(|expr| expr.count_nows() > 0 || HasCorrelated {}.visit_expr(expr))
             .collect();
-        let predicate = predicate.rewrite_expr(&mut ColIndexMapping::with_target_size(
+        let predicate = predicate.rewrite_expr(&mut ColIndexMapping::new(
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
             self.table_desc().columns.len(),
         ));
@@ -438,7 +440,7 @@ impl LogicalScan {
             let (scan_ranges, predicate) = self.predicate().clone().split_to_scan_ranges(
                 self.core.table_desc.clone(),
                 self.base
-                    .ctx
+                    .ctx()
                     .session_ctx()
                     .config()
                     .get_max_split_range_gap(),
@@ -549,7 +551,7 @@ impl ToStream for LogicalScan {
                 None.into(),
             )));
         }
-        match self.base.stream_key.is_none() {
+        match self.base.stream_key().is_none() {
             true => {
                 let mut col_ids = HashSet::new();
 

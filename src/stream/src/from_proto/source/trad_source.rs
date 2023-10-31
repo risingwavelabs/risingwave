@@ -207,11 +207,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     }
                 }
             };
-            if let Ok(rate_limit) = source.get_rate_limit() {
-                Ok(FlowControlExecutor::new(executor, *rate_limit).boxed())
-            } else {
-                Ok(executor)
-            }
+            let rate_limit = source.get_rate_limit().cloned().ok();
+            Ok(FlowControlExecutor::new(executor, rate_limit).boxed())
         } else {
             // If there is no external stream source, then no data should be persisted. We pass a
             // `PanicStateStore` type here for indication.

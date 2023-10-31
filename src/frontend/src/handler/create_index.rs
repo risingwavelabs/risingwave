@@ -18,12 +18,13 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::{PbIndex, PbStreamJobStatus, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
-use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_pb::user::grant_privilege::Object;
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
@@ -74,7 +75,7 @@ pub(crate) fn gen_create_index_plan(
 
     session.check_privileges(&[ObjectCheckItem::new(
         table.owner,
-        Action::Select,
+        AclMode::Select,
         Object::TableId(table.id.table_id),
     )])?;
 

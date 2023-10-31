@@ -74,13 +74,18 @@ pub struct ApplyCorrelatedIndicesConverter {}
 impl ApplyCorrelatedIndicesConverter {
     pub fn convert_to_index_mapping(correlated_indices: &[usize]) -> ColIndexMapping {
         // Inverse anyway.
-        let col_mapping = ColIndexMapping::without_target_size(
+        let target_size = match correlated_indices.iter().max_by_key(|&&x| x) {
+            Some(target_max) => target_max + 1,
+            None => 0,
+        };
+        let col_mapping = ColIndexMapping::new(
             correlated_indices.iter().copied().map(Some).collect_vec(),
+            target_size,
         );
         let mut map = vec![None; col_mapping.target_size()];
         for (src, dst) in col_mapping.mapping_pairs() {
             map[dst] = Some(src);
         }
-        ColIndexMapping::with_target_size(map, col_mapping.source_size())
+        ColIndexMapping::new(map, col_mapping.source_size())
     }
 }
