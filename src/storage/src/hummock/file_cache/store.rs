@@ -265,6 +265,7 @@ where
                 admissions,
                 reinsertions: config.reinsertions,
                 buffer_pool_size: config.buffer_pool_size,
+                flusher_buffer_size: 131072, // TODO: make it configurable
                 flushers: config.flushers,
                 flush_rate_limit: config.flush_rate_limit,
                 reclaimers: config.reclaimers,
