@@ -385,7 +385,7 @@ impl ToStream for LogicalProjectSet {
         // But the target size of `out_col_change` should be the same as the length of the new
         // schema.
         let (map, _) = out_col_change.into_parts();
-        let out_col_change = ColIndexMapping::with_target_size(map, project_set.schema().len());
+        let out_col_change = ColIndexMapping::new(map, project_set.schema().len());
         Ok((project_set.into(), out_col_change))
     }
 

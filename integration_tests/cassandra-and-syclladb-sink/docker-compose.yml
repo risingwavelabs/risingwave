@@ -41,10 +41,6 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: meta-node-0
-  connector-node:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: connector-node
   minio-0:
     extends:
       file: ../../docker/docker-compose.yml

@@ -261,7 +261,7 @@ impl LogicalScan {
         }
 
         let mut inverse_mapping = {
-            let mapping = ColIndexMapping::with_target_size(
+            let mapping = ColIndexMapping::new(
                 self.required_col_idx().iter().map(|i| Some(*i)).collect(),
                 self.table_desc().columns.len(),
             );
@@ -270,7 +270,7 @@ impl LogicalScan {
             for (src, dst) in mapping.mapping_pairs() {
                 inverse_map[dst] = Some(src);
             }
-            ColIndexMapping::with_target_size(inverse_map, mapping.source_size())
+            ColIndexMapping::new(inverse_map, mapping.source_size())
         };
 
         predicate = predicate.rewrite_expr(&mut inverse_mapping);
@@ -447,8 +447,7 @@ impl PredicatePushdown for LogicalScan {
             .conjunctions
             .extract_if(|expr| expr.count_nows() > 0 || HasCorrelated {}.visit_expr(expr))
             .collect();
-
-        let predicate = predicate.rewrite_expr(&mut ColIndexMapping::with_target_size(
+        let predicate = predicate.rewrite_expr(&mut ColIndexMapping::new(
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
             self.table_desc().columns.len(),
         ));

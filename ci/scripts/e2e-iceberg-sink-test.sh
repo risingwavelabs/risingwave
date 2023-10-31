@@ -31,9 +31,8 @@ buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
-echo "--- starting risingwave cluster with connector node"
+echo "--- starting risingwave cluster"
 mkdir -p .risingwave/log
-./connector-node/start-service.sh -p 50051 > .risingwave/log/connector-sink.log 2>&1 &
 cargo make ci-start ci-iceberg-test
 sleep 1
 
@@ -84,4 +83,3 @@ fi
 
 echo "--- Kill cluster"
 cargo make ci-kill
-pkill -f connector-node

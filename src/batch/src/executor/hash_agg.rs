@@ -308,8 +308,8 @@ mod tests {
     use std::sync::Arc;
 
     use futures_async_stream::for_await;
-    use prometheus::IntGauge;
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::metrics::LabelGuardedIntGauge;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::PbDataType;
@@ -323,7 +323,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_int32_grouped() {
-        let parent_mem = MemoryContext::root(IntGauge::new("root_memory_usage", " ").unwrap());
+        let parent_mem = MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge());
         {
             let src_exec = Box::new(MockExecutor::with_chunk(
                 DataChunk::from_pretty(
@@ -370,7 +370,7 @@ mod tests {
 
             let mem_context = MemoryContext::new(
                 Some(parent_mem.clone()),
-                IntGauge::new("memory_usage", " ").unwrap(),
+                LabelGuardedIntGauge::<4>::test_int_gauge(),
             );
             let actual_exec = HashAggExecutorBuilder::deserialize(
                 &agg_prost,

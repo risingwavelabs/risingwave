@@ -363,6 +363,12 @@ impl ColumnDef {
             options,
         }
     }
+
+    pub fn is_generated(&self) -> bool {
+        self.options
+            .iter()
+            .any(|option| matches!(option.option, ColumnOption::GeneratedColumns(_)))
+    }
 }
 
 impl fmt::Display for ColumnDef {

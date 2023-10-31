@@ -378,7 +378,7 @@ impl PlanRoot {
                         }
                         let plan =
                             LogicalProject::with_out_col_idx(plan, output_indices.into_iter());
-                        let out_col_change = ColIndexMapping::with_target_size(map, target_size);
+                        let out_col_change = ColIndexMapping::new(map, target_size);
                         (plan.into(), out_col_change)
                     }
                 };

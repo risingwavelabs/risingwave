@@ -562,7 +562,7 @@ pub type SplitId = Arc<str>;
 pub struct SourceMessage {
     pub key: Option<Vec<u8>>,
     pub payload: Option<Vec<u8>>,
-    pub offset: String,
+    pub offset: String, // TODO: use `Arc<str>`
     pub split_id: SplitId,
     pub meta: SourceMeta,
 }

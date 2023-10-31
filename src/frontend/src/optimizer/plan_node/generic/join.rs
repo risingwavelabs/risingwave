@@ -431,7 +431,7 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
         // If output_indices = [0, 0, 1], we should use it as `o2i_col_mapping` directly.
         // If we use `self.i2o_col_mapping().inverse()`, we will lose the first 0.
-        ColIndexMapping::with_target_size(
+        ColIndexMapping::new(
             self.output_indices.iter().map(|x| Some(*x)).collect(),
             self.internal_column_num(),
         )
