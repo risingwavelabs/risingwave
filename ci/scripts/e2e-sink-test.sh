@@ -53,30 +53,8 @@ psql -h db -U postgres -d test -c "CREATE TABLE t4 (v1 int PRIMARY KEY, v2 int);
 psql -h db -U postgres -d test -c "create table t5 (v1 smallint primary key, v2 int, v3 bigint, v4 float4, v5 float8, v6 decimal, v7 varchar, v8 timestamp, v9 boolean);"
 psql -h db -U postgres -d test < ./e2e_test/sink/remote/pg_create_table.sql
 
-node_port=50051
-node_timeout=10
-
-echo "--- starting risingwave cluster with connector node"
+echo "--- starting risingwave cluster"
 cargo make ci-start ci-1cn-1fe
-./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-node.log 2>&1 &
-
-echo "waiting for connector node to start"
-start_time=$(date +%s)
-while :
-do
-    if nc -z localhost $node_port; then
-        echo "Port $node_port is listened! Connector Node is up!"
-        break
-    fi
-
-    current_time=$(date +%s)
-    elapsed_time=$((current_time - start_time))
-    if [ $elapsed_time -ge $node_timeout ]; then
-        echo "Timeout waiting for port $node_port to be listened!"
-        exit 1
-    fi
-    sleep 0.1
-done
 
 echo "--- testing common sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/append_only_sink.slt'
@@ -141,7 +119,6 @@ fi
 
 echo "--- Kill cluster"
 cargo make ci-kill
-pkill -f connector-node
 
 echo "--- e2e, ci-1cn-1fe, nexmark endless"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \

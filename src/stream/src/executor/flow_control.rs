@@ -39,7 +39,7 @@ impl FlowControlExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(input: Box<dyn Executor>, rate_limit: Option<u32>) -> Self {
         #[cfg(madsim)]
-        println!("FlowControlExecutor rate limiter is disabled in madsim as it will spawn system threads");
+        tracing::warn!("FlowControlExecutor rate limiter is disabled in madsim as it will spawn system threads");
         Self { input, rate_limit }
     }
 

@@ -139,6 +139,7 @@ workspace-hack = { path = "../workspace-hack" }
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 rand = "0.8"
 tempfile = "3"
+tracing-subscriber = "0.3"
 tracing-test = "0.2"
 
 [build-dependencies]
@@ -146,6 +147,10 @@ prost-build = "0.12"
 
 [[bench]]
 name = "parser"
+harness = false
+
+[[bench]]
+name = "nexmark_integration"
 harness = false
 
 [lints]

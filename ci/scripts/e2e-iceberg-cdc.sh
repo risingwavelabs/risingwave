@@ -6,7 +6,6 @@ set -euo pipefail
 source ci/scripts/common.sh
 
 # prepare environment
-export CONNECTOR_RPC_ENDPOINT="localhost:50051"
 export CONNECTOR_LIBS_PATH="./connector-node/libs"
 
 while getopts 'p:' opt; do
@@ -34,36 +33,10 @@ tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- e2e, ci-1cn-1fe, iceberg cdc"
 
-node_port=50051
-node_timeout=10
-
-wait_for_connector_node_start() {
-  start_time=$(date +%s)
-  while :
-  do
-      if nc -z localhost $node_port; then
-          echo "Port $node_port is listened! Connector Node is up!"
-          break
-      fi
-
-      current_time=$(date +%s)
-      elapsed_time=$((current_time - start_time))
-      if [ $elapsed_time -ge $node_timeout ]; then
-          echo "Timeout waiting for port $node_port to be listened!"
-          exit 1
-      fi
-      sleep 0.1
-  done
-  sleep 2
-}
-
-echo "--- starting risingwave cluster with connector node"
+echo "--- starting risingwave cluster"
 
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cargo make ci-start ci-1cn-1fe-with-recovery
-./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-node.log 2>&1 &
-echo "waiting for connector node to start"
-wait_for_connector_node_start
 
 # prepare minio iceberg sink
 echo "--- preparing iceberg"

@@ -195,7 +195,7 @@ mod test {
         // Test parsing into standalone-level opts.
         let raw_opts = "
 --compute-opts=--listen-addr 127.0.0.1:8000 --total-memory-bytes 34359738368 --parallelism 10
---meta-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001
+--meta-opts=--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001 --etcd-password 1234
 --frontend-opts=--config-path=src/config/original.toml
 --prometheus-listener-addr=127.0.0.1:1234
 --config-path=src/config/test.toml
@@ -203,7 +203,7 @@ mod test {
         let actual = StandaloneOpts::parse_from(raw_opts.lines());
         let opts = StandaloneOpts {
             compute_opts: Some("--listen-addr 127.0.0.1:8000 --total-memory-bytes 34359738368 --parallelism 10".into()),
-            meta_opts: Some("--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001".into()),
+            meta_opts: Some("--advertise-addr 127.0.0.1:9999 --data-directory \"some path with spaces\" --listen-addr 127.0.0.1:8001 --etcd-password 1234".into()),
             frontend_opts: Some("--config-path=src/config/original.toml".into()),
             compactor_opts: None,
             prometheus_listener_addr: Some("127.0.0.1:1234".into()),
@@ -228,7 +228,7 @@ mod test {
                             etcd_endpoints: "",
                             etcd_auth: false,
                             etcd_username: "",
-                            etcd_password: "",
+                            etcd_password: [REDACTED alloc::string::String],
                             sql_endpoint: None,
                             dashboard_ui_path: None,
                             prometheus_endpoint: None,

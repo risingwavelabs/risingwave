@@ -53,10 +53,10 @@ table description t3        NULL  NULL
 query TTT
 show columns from t3;
 ----
-v1 integer false
-v2 integer false
-v3 integer false
-_row_id serial true
+v1 integer false NULL
+v2 integer false NULL
+v3 integer false NULL
+_row_id serial true NULL
 
 statement ok
 drop table t3;

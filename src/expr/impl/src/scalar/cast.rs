@@ -37,14 +37,22 @@ use risingwave_pb::expr::expr_node::PbType;
 #[function("cast(varchar) -> timestamp")]
 #[function("cast(varchar) -> interval")]
 #[function("cast(varchar) -> jsonb")]
-pub fn str_parse<T>(elem: &str) -> Result<T>
+pub fn str_parse<T>(elem: &str, ctx: &Context) -> Result<T>
 where
     T: FromStr,
     <T as FromStr>::Err: std::fmt::Display,
 {
-    elem.trim()
-        .parse()
-        .map_err(|err: <T as FromStr>::Err| ExprError::Parse(err.to_string().into()))
+    elem.trim().parse().map_err(|err: <T as FromStr>::Err| {
+        ExprError::Parse(format!("{} {}", ctx.return_type, err).into())
+    })
+}
+
+// TODO: introduce `FromBinary` and support all types
+#[function("pgwire_recv(bytea) -> int8")]
+pub fn pgwire_recv(elem: &[u8]) -> Result<i64> {
+    let fixed_length =
+        <[u8; 8]>::try_from(elem).map_err(|e| ExprError::Parse(e.to_string().into()))?;
+    Ok(i64::from_be_bytes(fixed_length))
 }
 
 #[function("cast(int2) -> int256")]
@@ -154,6 +162,12 @@ pub fn int_to_bool(input: i32) -> bool {
 #[function("cast(anyarray) -> varchar")]
 pub fn general_to_text(elem: impl ToText, mut writer: &mut impl Write) {
     elem.write(&mut writer).unwrap();
+}
+
+// TODO: use `ToBinary` and support all types
+#[function("pgwire_send(int8) -> bytea")]
+fn pgwire_send(elem: i64) -> Box<[u8]> {
+    elem.to_be_bytes().into()
 }
 
 #[function("cast(boolean) -> varchar")]
@@ -507,7 +521,11 @@ mod tests {
     async fn test_unary() {
         test_unary_bool::<BoolArray, _>(|x| !x, PbType::Not).await;
         test_unary_date::<TimestampArray, _>(|x| try_cast(x).unwrap(), PbType::Cast).await;
-        test_str_to_int16::<I16Array, _>(|x| str_parse(x).unwrap()).await;
+        let ctx_str_to_int16 = Context {
+            arg_types: vec![DataType::Varchar],
+            return_type: DataType::Int16,
+        };
+        test_str_to_int16::<I16Array, _>(|x| str_parse(x, &ctx_str_to_int16).unwrap()).await;
     }
 
     #[tokio::test]

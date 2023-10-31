@@ -28,8 +28,14 @@ pub fn substr_start(s: &str, start: i32, writer: &mut impl Write) -> Result<()> 
     Ok(())
 }
 
-#[function("substr(varchar, int4, int4) -> varchar")]
-pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut impl Write) -> Result<()> {
+#[function("substr(bytea, int4) -> bytea")]
+pub fn substr_start_bytea(s: &[u8], start: i32) -> Box<[u8]> {
+    let skip = start.saturating_sub(1).max(0) as usize;
+
+    s.iter().copied().skip(skip).collect()
+}
+
+fn convert_args(start: i32, count: i32) -> Result<(usize, usize)> {
     if count < 0 {
         return Err(ExprError::InvalidParam {
             name: "length",
@@ -44,12 +50,28 @@ pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut impl Write
         count.saturating_add(start.saturating_sub(1)).max(0) as usize
     };
 
+    // The returned args may still go out of bounds.
+    // So `skip` and `take` on iterator is safer than `[skip..(skip+take)]`
+    Ok((skip, take))
+}
+
+#[function("substr(varchar, int4, int4) -> varchar")]
+pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut impl Write) -> Result<()> {
+    let (skip, take) = convert_args(start, count)?;
+
     let substr = s.chars().skip(skip).take(take);
     for char in substr {
         writer.write_char(char).unwrap();
     }
 
     Ok(())
+}
+
+#[function("substr(bytea, int4, int4) -> bytea")]
+pub fn substr_start_for_bytea(s: &[u8], start: i32, count: i32) -> Result<Box<[u8]>> {
+    let (skip, take) = convert_args(start, count)?;
+
+    Ok(s.iter().copied().skip(skip).take(take).collect())
 }
 
 #[cfg(test)]
