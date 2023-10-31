@@ -17,7 +17,6 @@ use std::time::Duration;
 use anyhow::Result;
 use itertools::Itertools;
 use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts, Session};
-use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
 const CREATE_TABLE: &str = "CREATE TABLE t(v1 int);";
@@ -119,13 +118,9 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
     // Now just wait for it to complete.
     session.run(WAIT).await?;
 
-    let t_inserts = session
-        .run("SELECT COUNT(v1) FROM t")
-        .await?;
+    let t_inserts = session.run("SELECT COUNT(v1) FROM t").await?;
 
-    let mv1_inserts = session
-        .run("SELECT COUNT(v1) FROM mv1")
-        .await?;
+    let mv1_inserts = session.run("SELECT COUNT(v1) FROM mv1").await?;
 
     assert_eq!(t_inserts, mv1_inserts);
 

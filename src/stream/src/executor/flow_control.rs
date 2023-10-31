@@ -59,9 +59,7 @@ impl FlowControlExecutor {
                         continue;
                     };
                     if let Some(rate_limiter) = &rate_limiter {
-                        let result = rate_limiter
-                            .until_n_ready(n)
-                            .await;
+                        let result = rate_limiter.until_n_ready(n).await;
                         if let Err(InsufficientCapacity(n)) = result {
                             tracing::error!(
                                 "Rate Limit {:?} smaller than chunk cardinality {n}",
