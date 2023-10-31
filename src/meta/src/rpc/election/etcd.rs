@@ -94,7 +94,9 @@ impl ElectionClient for EtcdElectionClient {
         let (mut keeper, mut resp_stream) = self.client.keep_alive(lease_id).await?;
         let _resp = keeper.keep_alive().await?;
         let resp = resp_stream.message().await?;
-        if let Some(resp) = resp && resp.ttl() <= 0 {
+        if let Some(resp) = resp
+            && resp.ttl() <= 0
+        {
             tracing::info!("lease {} expired or revoked, re-granting", lease_id);
             if restored_leader {
                 tracing::info!("restored leader lease {} lost", lease_id);

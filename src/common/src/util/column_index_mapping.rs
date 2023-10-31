@@ -67,8 +67,10 @@ impl ColIndexMapping {
             return false;
         }
         for (src, tar) in self.map.iter().enumerate() {
-            if let Some(tar_value) = tar && src == *tar_value {
-                continue
+            if let Some(tar_value) = tar
+                && src == *tar_value
+            {
+                continue;
             } else {
                 return false;
             }

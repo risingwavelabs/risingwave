@@ -149,7 +149,9 @@ async fn test_stream_query(
     setup_sql: &str,
 ) -> Result<()> {
     let mut rng;
-    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
+    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH")
+        && x == "true"
+    {
         rng = SmallRng::from_entropy();
     } else {
         rng = SmallRng::seed_from_u64(seed);
@@ -205,7 +207,9 @@ fn test_batch_query(
     setup_sql: &str,
 ) -> Result<()> {
     let mut rng;
-    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
+    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH")
+        && x == "true"
+    {
         rng = SmallRng::from_entropy();
     } else {
         rng = SmallRng::seed_from_u64(seed);
@@ -248,7 +252,9 @@ async fn setup_sqlsmith_with_seed_inner(seed: u64) -> Result<SqlsmithEnv> {
     let session = frontend.session_ref();
 
     let mut rng;
-    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH") && x == "true" {
+    if let Ok(x) = env::var("RW_RANDOM_SEED_SQLSMITH")
+        && x == "true"
+    {
         rng = SmallRng::from_entropy();
     } else {
         rng = SmallRng::seed_from_u64(seed);
@@ -266,7 +272,9 @@ async fn setup_sqlsmith_with_seed_inner(seed: u64) -> Result<SqlsmithEnv> {
 /// Otherwise no error: skip status: false.
 fn validate_result<T>(result: Result<T>) -> Result<bool> {
     if let Err(e) = result {
-        if let Some(s) = e.message() && is_permissible_error(s) {
+        if let Some(s) = e.message()
+            && is_permissible_error(s)
+        {
             return Ok(true);
         } else {
             return Err(e);
