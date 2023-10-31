@@ -56,7 +56,9 @@ impl Expression for CoalesceExpression {
         }
         let mut builder = self.return_type.create_array_builder(len);
         for (i, sel) in selection.iter().enumerate() {
-            if init_vis.is_set(i) && let Some(child_idx) = sel {
+            if init_vis.is_set(i)
+                && let Some(child_idx) = sel
+            {
                 builder.append(children_array[*child_idx].value_at(i));
             } else {
                 builder.append_null()

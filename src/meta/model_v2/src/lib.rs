@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
 use sea_orm::{DeriveActiveEnum, EnumIter, FromJsonQueryResult};
@@ -62,6 +62,10 @@ pub type FunctionId = ObjectId;
 pub type ConnectionId = ObjectId;
 pub type UserId = u32;
 
+pub type FragmentId = u32;
+
+pub type ActorId = u32;
+
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
 pub enum JobStatus {
@@ -104,10 +108,24 @@ macro_rules! derive_from_json_struct {
         #[derive(Clone, Debug, PartialEq, FromJsonQueryResult, Serialize, Deserialize, Default)]
         pub struct $struct_name(pub $field_type);
         impl Eq for $struct_name {}
+
+        impl $struct_name {
+            pub fn into_inner(self) -> $field_type {
+                self.0
+            }
+
+            pub fn inner_ref(&self) -> &$field_type {
+                &self.0
+            }
+        }
     };
 }
 
 derive_from_json_struct!(I32Array, Vec<i32>);
+derive_from_json_struct!(U32Array, Vec<u32>);
+
+derive_from_json_struct!(ActorUpstreamActors, BTreeMap<FragmentId, Vec<ActorId>>);
+
 derive_from_json_struct!(DataType, risingwave_pb::data::DataType);
 derive_from_json_struct!(DataTypeArray, Vec<risingwave_pb::data::DataType>);
 derive_from_json_struct!(FieldArray, Vec<risingwave_pb::plan_common::Field>);
@@ -131,4 +149,19 @@ derive_from_json_struct!(TableVersion, risingwave_pb::catalog::table::PbTableVer
 derive_from_json_struct!(
     PrivateLinkService,
     risingwave_pb::catalog::connection::PbPrivateLinkService
+);
+
+derive_from_json_struct!(StreamNode, risingwave_pb::stream_plan::PbStreamNode);
+derive_from_json_struct!(Dispatchers, Vec<risingwave_pb::stream_plan::Dispatcher>);
+
+derive_from_json_struct!(ConnectorSplits, risingwave_pb::source::ConnectorSplits);
+derive_from_json_struct!(
+    ActorStatus,
+    risingwave_pb::meta::table_fragments::PbActorStatus
+);
+derive_from_json_struct!(VnodeBitmap, risingwave_pb::common::Buffer);
+
+derive_from_json_struct!(
+    FragmentVnodeMapping,
+    risingwave_pb::common::ParallelUnitMapping
 );

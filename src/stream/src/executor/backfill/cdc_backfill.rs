@@ -509,35 +509,31 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 .await?;
 
             if let Some(SplitImpl::MysqlCdc(split)) = cdc_split.as_mut()
-                && let Some(s) = split.mysql_split.as_mut() {
-                let start_offset =
-                    last_binlog_offset.as_ref().map(|cdc_offset| {
-                        let source_offset =
-                            if let CdcOffset::MySql(o) = cdc_offset
-                            {
-                                DebeziumSourceOffset {
-                                    file: Some(o.filename.clone()),
-                                    pos: Some(o.position),
-                                    ..Default::default()
-                                }
-                            } else {
-                                DebeziumSourceOffset::default()
-                            };
-
-                        let mut server = "RW_CDC_".to_string();
-                        server.push_str(
-                            upstream_table_id.to_string().as_str(),
-                        );
-                        DebeziumOffset {
-                            source_partition: hashmap! {
-                                "server".to_string() => server
-                            },
-                            source_offset,
-                            // upstream heartbeat event would not emit to the cdc backfill executor,
-                            // since we don't parse heartbeat event in the source parser.
-                            is_heartbeat: false,
+                && let Some(s) = split.mysql_split.as_mut()
+            {
+                let start_offset = last_binlog_offset.as_ref().map(|cdc_offset| {
+                    let source_offset = if let CdcOffset::MySql(o) = cdc_offset {
+                        DebeziumSourceOffset {
+                            file: Some(o.filename.clone()),
+                            pos: Some(o.position),
+                            ..Default::default()
                         }
-                    });
+                    } else {
+                        DebeziumSourceOffset::default()
+                    };
+
+                    let mut server = "RW_CDC_".to_string();
+                    server.push_str(upstream_table_id.to_string().as_str());
+                    DebeziumOffset {
+                        source_partition: hashmap! {
+                            "server".to_string() => server
+                        },
+                        source_offset,
+                        // upstream heartbeat event would not emit to the cdc backfill executor,
+                        // since we don't parse heartbeat event in the source parser.
+                        is_heartbeat: false,
+                    }
+                });
 
                 // persist the last binlog offset into split state
                 s.inner.start_offset = start_offset.map(|o| {
