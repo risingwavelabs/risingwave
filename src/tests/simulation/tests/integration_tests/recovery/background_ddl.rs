@@ -141,7 +141,6 @@ async fn test_background_ddl_cancel() -> Result<()> {
         sleep(Duration::from_secs(2)).await;
         Ok(())
     }
-    use std::env;
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .with_ansi(false)
@@ -190,6 +189,5 @@ async fn test_background_ddl_cancel() -> Result<()> {
     session.run("DROP MATERIALIZED VIEW mv1").await?;
     session.run("DROP TABLE t").await?;
 
-    env::remove_var("RW_BACKFILL_SNAPSHOT_READ_DELAY");
     Ok(())
 }
