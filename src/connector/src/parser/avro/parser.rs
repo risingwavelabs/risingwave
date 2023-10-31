@@ -108,7 +108,6 @@ pub struct AvroParserConfig {
     pub schema: Arc<Schema>,
     pub key_schema: Option<Arc<Schema>>,
     pub schema_resolver: Option<Arc<ConfluentSchemaResolver>>,
-    pub upsert_primary_key_column_name: Option<String>,
 }
 
 impl AvroParserConfig {
@@ -120,12 +119,7 @@ impl AvroParserConfig {
         if avro_config.use_schema_registry {
             let client = Client::new(url, &avro_config.client_config)?;
             let resolver = ConfluentSchemaResolver::new(client);
-            let upsert_primary_key_column_name =
-                if enable_upsert && !avro_config.upsert_primary_key.is_empty() {
-                    Some(avro_config.upsert_primary_key.clone())
-                } else {
-                    None
-                };
+
             let subject_key = if enable_upsert {
                 Some(get_subject_by_strategy(
                     &avro_config.name_strategy,
@@ -157,7 +151,6 @@ impl AvroParserConfig {
                     None
                 },
                 schema_resolver: Some(Arc::new(resolver)),
-                upsert_primary_key_column_name,
             })
         } else {
             if enable_upsert {
@@ -184,7 +177,6 @@ impl AvroParserConfig {
                 schema: Arc::new(schema),
                 key_schema: None,
                 schema_resolver: None,
-                upsert_primary_key_column_name: None,
             })
         }
     }

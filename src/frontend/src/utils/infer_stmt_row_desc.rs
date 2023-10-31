@@ -35,6 +35,11 @@ pub fn infer_show_object(objects: &ShowObject) -> Vec<PgFieldDescriptor> {
                 DataType::Varchar.to_oid(),
                 DataType::Varchar.type_len(),
             ),
+            PgFieldDescriptor::new(
+                "Description".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
         ],
         ShowObject::Connection { .. } => vec![
             PgFieldDescriptor::new(
@@ -161,5 +166,51 @@ pub fn infer_show_object(objects: &ShowObject) -> Vec<PgFieldDescriptor> {
             DataType::Varchar.to_oid(),
             DataType::Varchar.type_len(),
         )],
+    }
+}
+
+pub fn infer_show_variable(name: &str) -> Vec<PgFieldDescriptor> {
+    if name.eq_ignore_ascii_case("ALL") {
+        vec![
+            PgFieldDescriptor::new(
+                "Name".to_string(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Setting".to_string(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Description".to_string(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+        ]
+    } else if name.eq_ignore_ascii_case("PARAMETERS") {
+        vec![
+            PgFieldDescriptor::new(
+                "Name".to_string(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Value".to_string(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Mutable".to_string(),
+                DataType::Boolean.to_oid(),
+                DataType::Boolean.type_len(),
+            ),
+        ]
+    } else {
+        vec![PgFieldDescriptor::new(
+            name.to_ascii_lowercase(),
+            DataType::Varchar.to_oid(),
+            DataType::Varchar.type_len(),
+        )]
     }
 }

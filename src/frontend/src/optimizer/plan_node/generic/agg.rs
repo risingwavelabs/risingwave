@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fmt;
+use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
 use itertools::{Either, Itertools};
@@ -74,7 +74,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         for (i, key) in self.group_key.indices().enumerate() {
             map[i] = Some(key);
         }
-        ColIndexMapping::with_target_size(map, self.input.schema().len())
+        ColIndexMapping::new(map, self.input.schema().len())
     }
 
     /// get the Mapping of columnIndex from input column index to out column index
@@ -83,7 +83,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         for (i, key) in self.group_key.indices().enumerate() {
             map[key] = Some(i);
         }
-        ColIndexMapping::with_target_size(map, self.output_len())
+        ColIndexMapping::new(map, self.output_len())
     }
 
     fn two_phase_agg_forced(&self) -> bool {
@@ -265,7 +265,7 @@ pub struct MaterializedInputState {
 impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     pub fn infer_tables(
         &self,
-        me: &impl stream::StreamPlanRef,
+        me: impl stream::StreamPlanRef,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> (
@@ -274,9 +274,9 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         HashMap<usize, TableCatalog>,
     ) {
         (
-            self.infer_intermediate_state_table(me, vnode_col_idx, window_col_idx),
-            self.infer_stream_agg_state(me, vnode_col_idx, window_col_idx),
-            self.infer_distinct_dedup_tables(me, vnode_col_idx, window_col_idx),
+            self.infer_intermediate_state_table(&me, vnode_col_idx, window_col_idx),
+            self.infer_stream_agg_state(&me, vnode_col_idx, window_col_idx),
+            self.infer_distinct_dedup_tables(&me, vnode_col_idx, window_col_idx),
         )
     }
 
@@ -338,7 +338,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     /// Infer `AggCallState`s for streaming agg.
     pub fn infer_stream_agg_state(
         &self,
-        me: &impl stream::StreamPlanRef,
+        me: impl stream::StreamPlanRef,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> Vec<AggCallState> {
@@ -348,6 +348,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
 
         let gen_materialized_input_state = |sort_keys: Vec<(OrderType, usize)>,
+                                            extra_keys: Vec<usize>,
                                             include_keys: Vec<usize>|
          -> MaterializedInputState {
             let (mut table_builder, mut included_upstream_indices, mut column_mapping) =
@@ -375,7 +376,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             for (order_type, idx) in sort_keys {
                 add_column(idx, Some(order_type), true, &mut table_builder);
             }
-            for &idx in &in_pks {
+            for idx in extra_keys {
                 add_column(idx, Some(OrderType::ascending()), true, &mut table_builder);
             }
             for idx in include_keys {
@@ -458,6 +459,17 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                             _ => unreachable!(),
                         }
                     };
+
+                    // columns to ensure each row unique
+                    let extra_keys = if agg_call.distinct {
+                        // if distinct, use distinct keys as extra keys
+                        let distinct_key = agg_call.inputs[0].index;
+                        vec![distinct_key]
+                    } else {
+                        // if not distinct, use primary keys as extra keys
+                        in_pks.clone()
+                    };
+
                     // other columns that should be contained in state table
                     let include_keys = match agg_call.agg_kind {
                         AggKind::FirstValue
@@ -470,7 +482,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         }
                         _ => vec![],
                     };
-                    let state = gen_materialized_input_state(sort_keys, include_keys);
+
+                    let state = gen_materialized_input_state(sort_keys, extra_keys, include_keys);
                     AggCallState::MaterializedInput(Box::new(state))
                 }
                 agg_kinds::rewritten!() => {
@@ -487,7 +500,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     /// group key | state for AGG1 | state for AGG2 | ...
     pub fn infer_intermediate_state_table(
         &self,
-        me: &impl GenericPlanRef,
+        me: impl GenericPlanRef,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> TableCatalog {
@@ -550,7 +563,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     /// group key | distinct key | count for AGG1(distinct x) | count for AGG2(distinct x) | ...
     pub fn infer_distinct_dedup_tables(
         &self,
-        me: &impl GenericPlanRef,
+        me: impl GenericPlanRef,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> HashMap<usize, TableCatalog> {

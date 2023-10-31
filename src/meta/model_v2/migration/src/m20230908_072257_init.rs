@@ -472,6 +472,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Table::JobStatus).string().not_null())
                     .col(ColumnDef::new(Table::CreateType).string().not_null())
+                    .col(ColumnDef::new(Table::Description).string())
                     .col(ColumnDef::new(Table::Version).json().not_null())
                     .foreign_key(
                         &mut ForeignKey::create()
@@ -887,6 +888,7 @@ enum Table {
     CleanedByWatermark,
     JobStatus,
     CreateType,
+    Description,
     Version,
 }
 

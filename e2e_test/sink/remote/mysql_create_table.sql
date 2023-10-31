@@ -47,5 +47,9 @@ CREATE TABLE t_types (
    interval_column VARCHAR(100),
    jsonb_column JSON,
    array_column LONGTEXT,
-   array_column2 LONGTEXT
+   array_column2 LONGTEXT,
+   array_column3 LONGTEXT,
+   array_column4 LONGTEXT,
+   array_column5 LONGTEXT,
+   array_column6 LONGTEXT
 );

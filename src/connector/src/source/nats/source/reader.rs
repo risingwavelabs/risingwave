@@ -77,7 +77,11 @@ impl SplitReader for NatsSplitReader {
 
         let consumer = properties
             .common
-            .build_consumer(split_id.to_string(), start_position.clone())
+            .build_consumer(
+                properties.stream.clone(),
+                split_id.to_string(),
+                start_position.clone(),
+            )
             .await?;
         Ok(Self {
             consumer,
