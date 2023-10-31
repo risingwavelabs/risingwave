@@ -31,6 +31,7 @@ ctor = "0.2"
 downcast-rs = "1.2"
 easy-ext = "1"
 either = "1"
+enum-as-inner = "0.6"
 futures-async-stream = { workspace = true }
 futures-util = "0.3"
 itertools = "0.11"

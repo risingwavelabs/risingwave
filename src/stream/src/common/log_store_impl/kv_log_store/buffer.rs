@@ -250,7 +250,9 @@ impl LogStoreBufferSender {
     pub(crate) fn pop_truncation(&self, curr_epoch: u64) -> Option<ReaderTruncationOffsetType> {
         let mut inner = self.buffer.inner();
         let mut ret = None;
-        while let Some((epoch, _)) = inner.truncation_list.front() && *epoch < curr_epoch {
+        while let Some((epoch, _)) = inner.truncation_list.front()
+            && *epoch < curr_epoch
+        {
             ret = inner.truncation_list.pop_front();
         }
         ret
@@ -380,7 +382,9 @@ impl LogStoreBufferReceiver {
             }
         }
         if let Some((epoch, seq_id)) = latest_offset {
-            if let Some((prev_epoch, ref mut prev_seq_id)) = inner.truncation_list.back_mut() && *prev_epoch == epoch {
+            if let Some((prev_epoch, ref mut prev_seq_id)) = inner.truncation_list.back_mut()
+                && *prev_epoch == epoch
+            {
                 *prev_seq_id = seq_id;
             } else {
                 inner.truncation_list.push_back((epoch, seq_id));

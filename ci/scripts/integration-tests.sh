@@ -41,13 +41,11 @@ cd integration_tests/scripts
 
 echo "--- case: ${case}, format: ${format}"
 
-if [ -z "${RW_IMAGE_VERSION-}" ]; then
-  export RW_IMAGE_VERSION=latest
-fi
 if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
-  export RW_IMAGE_VERSION="nightly-$(date '+%Y%m%d')"
+  # Use ghcr nightly image for scheduled build. If not specified, we use dockerhub's 'risingwavelabs/risingwave'.
+  export RW_IMAGE="ghcr.io/risingwavelabs/risingwave:nightly-$(date '+%Y%m%d')"
+  echo Docker image: $RW_IMAGE
 fi
-echo Docker image version: $RW_IMAGE_VERSION
 
 echo "--- rewrite docker compose for protobuf"
 if [ "${format}" == "protobuf" ]; then

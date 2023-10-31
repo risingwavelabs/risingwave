@@ -111,12 +111,16 @@ impl FunctionCall {
         target: DataType,
         allows: CastContext,
     ) -> Result<(), CastError> {
-        if let ExprImpl::Parameter(expr) = child && !expr.has_infer() {
+        if let ExprImpl::Parameter(expr) = child
+            && !expr.has_infer()
+        {
             // Always Ok below. Safe to mutate `expr` (from `child`).
             expr.cast_infer_type(target);
             return Ok(());
         }
-        if let ExprImpl::FunctionCall(func) = child && func.func_type == ExprType::Row {
+        if let ExprImpl::FunctionCall(func) = child
+            && func.func_type == ExprType::Row
+        {
             // Row function will have empty fields in Datatype::Struct at this point. Therefore,
             // we will need to take some special care to generate the cast types. For normal struct
             // types, they will be handled in `cast_ok`.
