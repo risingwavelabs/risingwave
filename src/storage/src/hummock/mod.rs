@@ -77,7 +77,15 @@ pub async fn get_from_sstable_info(
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
     // contain `TablePrefix` and `VnodePrefix`.
     if let Some(hash) = dist_key_hash
-        && !hit_sstable_bloom_filter(sstable.value(), &(Bound::Included(full_key.user_key), Bound::Included(full_key.user_key)), hash, local_stats)
+        && !hit_sstable_bloom_filter(
+            sstable.value(),
+            &(
+                Bound::Included(full_key.user_key),
+                Bound::Included(full_key.user_key),
+            ),
+            hash,
+            local_stats,
+        )
     {
         if !read_options.ignore_range_tombstone {
             let delete_epoch = get_min_delete_range_epoch_from_sstable(

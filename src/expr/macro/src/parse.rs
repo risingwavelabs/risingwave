@@ -314,7 +314,9 @@ fn strip_iterator(ty: &syn::Type) -> Option<&syn::Type> {
         return None;
     };
     for arg in &angle_bracketed.args {
-        if let syn::GenericArgument::AssocType(b) = arg && b.ident == "Item" {
+        if let syn::GenericArgument::AssocType(b) = arg
+            && b.ident == "Item"
+        {
             return Some(&b.ty);
         }
     }

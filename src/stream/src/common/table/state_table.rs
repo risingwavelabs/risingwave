@@ -852,14 +852,14 @@ where
                     match op {
                         Op::Insert | Op::UpdateInsert => {
                             if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                    self.watermark_cache.insert(pk);
-                                }
+                                self.watermark_cache.insert(pk);
+                            }
                             self.insert_inner(TableKey(key_bytes), value);
                         }
                         Op::Delete | Op::UpdateDelete => {
                             if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                    self.watermark_cache.delete(pk);
-                                }
+                                self.watermark_cache.delete(pk);
+                            }
                             self.delete_inner(TableKey(key_bytes), value);
                         }
                     }
@@ -870,14 +870,14 @@ where
                 match op {
                     Op::Insert | Op::UpdateInsert => {
                         if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                self.watermark_cache.insert(pk);
-                            }
+                            self.watermark_cache.insert(pk);
+                        }
                         self.insert_inner(TableKey(key_bytes), value);
                     }
                     Op::Delete | Op::UpdateDelete => {
                         if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                self.watermark_cache.delete(pk);
-                            }
+                            self.watermark_cache.delete(pk);
+                        }
                         self.delete_inner(TableKey(key_bytes), value);
                     }
                 }
@@ -1026,11 +1026,21 @@ where
         });
 
         // Compute Delete Ranges
-        if should_clean_watermark && let Some(watermark_suffix) = watermark_suffix && let Some(first_byte) = watermark_suffix.first() {
+        if should_clean_watermark
+            && let Some(watermark_suffix) = watermark_suffix
+            && let Some(first_byte) = watermark_suffix.first()
+        {
             trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
                 self.vnodes.iter_vnodes().collect_vec()
             }, "delete range");
-            if prefix_serializer.as_ref().unwrap().get_order_types().first().unwrap().is_ascending() {
+            if prefix_serializer
+                .as_ref()
+                .unwrap()
+                .get_order_types()
+                .first()
+                .unwrap()
+                .is_ascending()
+            {
                 // We either serialize null into `0u8`, data into `(1u8 || scalar)`, or serialize null
                 // into `1u8`, data into `(0u8 || scalar)`. We do not want to delete null
                 // here, so `range_begin_suffix` cannot be `vec![]` when null is represented as `0u8`.

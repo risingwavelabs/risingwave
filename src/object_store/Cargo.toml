@@ -24,7 +24,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
 hyper-tls = "0.5.0"
 itertools = "0.11"
-opendal = "0.39"
+opendal = "0.41"
 prometheus = { version = "0.13", features = ["process"] }
 risingwave_common = { workspace = true }
 spin = "0.9"

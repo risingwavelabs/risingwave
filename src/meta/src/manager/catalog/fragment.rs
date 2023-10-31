@@ -23,6 +23,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_connector::source::SplitImpl;
+use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
@@ -78,7 +79,9 @@ impl FragmentManagerCore {
             .filter(|tf| tf.state() != State::Initial)
             .flat_map(|table_fragments| {
                 table_fragments.fragments.values().filter_map(|fragment| {
-                    if let Some(id_filter) = id_filter.as_ref() && !id_filter.contains(&fragment.fragment_id) {
+                    if let Some(id_filter) = id_filter.as_ref()
+                        && !id_filter.contains(&fragment.fragment_id)
+                    {
                         return None;
                     }
                     let parallelism = match fragment.vnode_mapping.as_ref() {
@@ -687,7 +690,9 @@ impl FragmentManager {
             .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
 
         for status in table_fragment.actor_status.values_mut() {
-            if let Some(pu) = &status.parallel_unit && migration_plan.parallel_unit_plan.contains_key(&pu.id) {
+            if let Some(pu) = &status.parallel_unit
+                && migration_plan.parallel_unit_plan.contains_key(&pu.id)
+            {
                 status.parallel_unit = Some(migration_plan.parallel_unit_plan[&pu.id].clone());
             }
         }
@@ -717,8 +722,9 @@ impl FragmentManager {
             .values()
             .filter(|tf| {
                 for status in tf.actor_status.values() {
-                    if let Some(pu) = &status.parallel_unit &&
-                    migration_plan.parallel_unit_plan.contains_key(&pu.id) {
+                    if let Some(pu) = &status.parallel_unit
+                        && migration_plan.parallel_unit_plan.contains_key(&pu.id)
+                    {
                         return true;
                     }
                 }
@@ -1165,10 +1171,11 @@ impl FragmentManager {
             .mview_actor_ids())
     }
 
-    /// Get and filter the upstream `Materialize` fragments of the specified relations.
-    pub async fn get_upstream_mview_fragments(
+    /// Get and filter the upstream `Materialize` or `Source` fragments of the specified relations.
+    pub async fn get_upstream_root_fragments(
         &self,
         upstream_table_ids: &HashSet<TableId>,
+        table_job_type: Option<TableJobType>,
     ) -> MetaResult<HashMap<TableId, Fragment>> {
         let map = &self.core.read().await.table_fragments;
         let mut fragments = HashMap::new();
@@ -1177,8 +1184,18 @@ impl FragmentManager {
             let table_fragments = map
                 .get(&table_id)
                 .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
-            if let Some(fragment) = table_fragments.mview_fragment() {
-                fragments.insert(table_id, fragment);
+            match table_job_type.as_ref() {
+                Some(TableJobType::SharedCdcSource) => {
+                    if let Some(fragment) = table_fragments.source_fragment() {
+                        fragments.insert(table_id, fragment);
+                    }
+                }
+                // MV on MV, and other kinds of table job
+                None | Some(TableJobType::General) | Some(TableJobType::Unspecified) => {
+                    if let Some(fragment) = table_fragments.mview_fragment() {
+                        fragments.insert(table_id, fragment);
+                    }
+                }
             }
         }
 
@@ -1206,6 +1223,7 @@ impl FragmentManager {
                     r#type: d.r#type,
                     dist_key_indices: d.dist_key_indices.clone(),
                     output_indices: d.output_indices.clone(),
+                    downstream_table_name: d.downstream_table_name.clone(),
                 };
                 (fragment_id, strategy)
             })

@@ -55,12 +55,16 @@ message StreamSourceInfo {
   string proto_message_name = 4;
   int32 csv_delimiter = 5;
   bool csv_has_header = 6;
-  string upsert_avro_primary_key = 7;
+  reserved 7;
+  reserved "upsert_avro_primary_key"; // deprecated
   plan_common.FormatType format = 8;
   plan_common.EncodeType row_encode = 9;
   SchemaRegistryNameStrategy name_strategy = 10;
   optional string key_message_name = 11;
-  plan_common.StorageTableDesc upstream_table = 12;
+  plan_common.ExternalTableDesc external_table = 12;
+  // Whether the stream source is a cdc source streaming job.
+  // We need this field to differentiate the cdc source job until we fully implement risingwavelabs/rfcs#72.
+  bool cdc_source_job = 13;
 }
 
 message Source {

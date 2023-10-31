@@ -586,7 +586,9 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
             .pop()
             .expect("have check non-empty");
         self.row_streams.push(stream.into_future());
-        while let Some((stream_epoch, _)) = self.not_started_streams.last() && *stream_epoch == epoch {
+        while let Some((stream_epoch, _)) = self.not_started_streams.last()
+            && *stream_epoch == epoch
+        {
             let (_, stream) = self.not_started_streams.pop().expect("should not be empty");
             self.row_streams.push(stream.into_future());
         }

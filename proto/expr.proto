@@ -107,6 +107,7 @@ message ExprNode {
     REGEXP_REPLACE = 280;
     REGEXP_COUNT = 281;
     REGEXP_SPLIT_TO_ARRAY = 282;
+    REGEXP_EQ = 283;
     POW = 233;
     EXP = 234;
     CHR = 235;
@@ -212,14 +213,38 @@ message ExprNode {
 
     // Jsonb functions
 
-    // jsonb -> int, jsonb -> text, jsonb #> text[] that returns jsonb
-    JSONB_ACCESS_INNER = 600;
-    // jsonb ->> int, jsonb ->> text, jsonb #>> text[] that returns text
+    // jsonb -> int, jsonb -> text that returns jsonb
+    JSONB_ACCESS = 600;
+    // jsonb ->> int, jsonb ->> text that returns text
     JSONB_ACCESS_STR = 601;
+    // jsonb #> text[] -> jsonb
+    JSONB_EXTRACT_PATH = 613;
+    // jsonb #>> text[] -> text
+    JSONB_EXTRACT_PATH_TEXT = 614;
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
     IS_JSON = 604;
     JSONB_CAT = 605;
+    JSONB_OBJECT = 606;
+    JSONB_PRETTY = 607;
+    // jsonb @> jsonb
+    JSONB_CONTAINS = 608;
+    // jsonb <@ jsonb
+    JSONB_CONTAINED = 609;
+    // jsonb ? text
+    JSONB_EXISTS = 610;
+    // jsonb ?| text[]
+    JSONB_EXISTS_ANY = 611;
+    // jsonb ?& text[]
+    JSONB_EXISTS_ALL = 612;
+    // see SUBTRACT for:
+    // jsonb - text -> jsonb
+    // jsonb - text[] -> jsonb
+    // jsonb - integer -> jsonb
+    //
+    // jsonb #- text[] -> jsonb
+    JSONB_DELETE_PATH = 615;
+    JSONB_STRIP_NULLS = 616;
 
     // Non-pure functions below (> 1000)
     // ------------------------

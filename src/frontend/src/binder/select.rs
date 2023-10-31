@@ -227,21 +227,50 @@ impl Binder {
         self.context.clause = Some(Clause::GroupBy);
 
         // Only support one grouping item in group by clause
-        let group_by = if select.group_by.len() == 1 && let Expr::GroupingSets(grouping_sets) = &select.group_by[0] {
-            GroupBy::GroupingSets(self.bind_grouping_items_expr_in_select(grouping_sets.clone(), &out_name_to_index, &select_items)?)
-        } else if select.group_by.len() == 1 && let Expr::Rollup(rollup) = &select.group_by[0] {
-            GroupBy::Rollup(self.bind_grouping_items_expr_in_select(rollup.clone(), &out_name_to_index, &select_items)?)
-        } else if select.group_by.len() == 1 && let Expr::Cube(cube) = &select.group_by[0] {
-            GroupBy::Cube(self.bind_grouping_items_expr_in_select(cube.clone(), &out_name_to_index, &select_items)?)
+        let group_by = if select.group_by.len() == 1
+            && let Expr::GroupingSets(grouping_sets) = &select.group_by[0]
+        {
+            GroupBy::GroupingSets(self.bind_grouping_items_expr_in_select(
+                grouping_sets.clone(),
+                &out_name_to_index,
+                &select_items,
+            )?)
+        } else if select.group_by.len() == 1
+            && let Expr::Rollup(rollup) = &select.group_by[0]
+        {
+            GroupBy::Rollup(self.bind_grouping_items_expr_in_select(
+                rollup.clone(),
+                &out_name_to_index,
+                &select_items,
+            )?)
+        } else if select.group_by.len() == 1
+            && let Expr::Cube(cube) = &select.group_by[0]
+        {
+            GroupBy::Cube(self.bind_grouping_items_expr_in_select(
+                cube.clone(),
+                &out_name_to_index,
+                &select_items,
+            )?)
         } else {
-            if select.group_by.iter().any(|expr| matches!(expr, Expr::GroupingSets(_)) || matches!(expr, Expr::Rollup(_)) || matches!(expr, Expr::Cube(_))) {
-                return Err(ErrorCode::BindError("Only support one grouping item in group by clause".to_string()).into());
+            if select.group_by.iter().any(|expr| {
+                matches!(expr, Expr::GroupingSets(_))
+                    || matches!(expr, Expr::Rollup(_))
+                    || matches!(expr, Expr::Cube(_))
+            }) {
+                return Err(ErrorCode::BindError(
+                    "Only support one grouping item in group by clause".to_string(),
+                )
+                .into());
             }
-            GroupBy::GroupKey(select
-                .group_by
-                .into_iter()
-                .map(|expr| self.bind_group_by_expr_in_select(expr, &out_name_to_index, &select_items))
-                .try_collect()?)
+            GroupBy::GroupKey(
+                select
+                    .group_by
+                    .into_iter()
+                    .map(|expr| {
+                        self.bind_group_by_expr_in_select(expr, &out_name_to_index, &select_items)
+                    })
+                    .try_collect()?,
+            )
         };
         self.context.clause = None;
 
@@ -795,7 +824,9 @@ impl Binder {
                 let mut bound_exprs = vec![];
                 for expr in exprs {
                     let expr_impl = match expr {
-                        Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.real_value()) => {
+                        Expr::Identifier(name)
+                            if let Some(index) = name_to_index.get(&name.real_value()) =>
+                        {
                             match *index {
                                 usize::MAX => {
                                     return Err(ErrorCode::BindError(format!(
@@ -809,24 +840,21 @@ impl Binder {
                                 }
                             }
                         }
-                        Expr::Value(Value::Number(number)) => {
-                            match number.parse::<usize>() {
-                                Ok(index) if 1 <= index && index <= select_items.len() => {
-                                    let idx_from_0 = index - 1;
-                                    InputRef::new(idx_from_0, select_items[idx_from_0].return_type()).into()
-                                }
-                                _ => {
-                                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                                        "Invalid ordinal number in DISTINCT ON: {}",
-                                        number
-                                    ))
-                                    .into())
-                                }
+                        Expr::Value(Value::Number(number)) => match number.parse::<usize>() {
+                            Ok(index) if 1 <= index && index <= select_items.len() => {
+                                let idx_from_0 = index - 1;
+                                InputRef::new(idx_from_0, select_items[idx_from_0].return_type())
+                                    .into()
                             }
-                        }
-                        expr => {
-                            self.bind_expr(expr)?
-                        }
+                            _ => {
+                                return Err(ErrorCode::InvalidInputSyntax(format!(
+                                    "Invalid ordinal number in DISTINCT ON: {}",
+                                    number
+                                ))
+                                .into())
+                            }
+                        },
+                        expr => self.bind_expr(expr)?,
                     };
                     bound_exprs.push(expr_impl);
                 }
@@ -905,6 +933,7 @@ fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
         AstDataType::Regproc => "regproc".to_string(),
         AstDataType::Text => "text".to_string(),
         AstDataType::Bytea => "bytea".to_string(),
+        AstDataType::Jsonb => "jsonb".to_string(),
         AstDataType::Array(ty) => return data_type_to_alias(ty),
         AstDataType::Custom(ty) => format!("{}", ty),
         AstDataType::Struct(_) => {
