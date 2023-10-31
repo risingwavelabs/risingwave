@@ -12,14 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod backup_manager;
-pub use backup_manager::*;
-mod error;
-mod meta_snapshot_builder;
-mod meta_snapshot_builder_v2;
-mod metrics;
-mod restore;
-mod restore_impl;
-mod utils;
+use risingwave_backup::error::BackupResult;
+use risingwave_backup::meta_snapshot::{MetaSnapshot, Metadata};
+use risingwave_backup::MetaSnapshotId;
 
-pub use restore::*;
+pub mod v1;
+pub mod v2;
+
+/// `Loader` gets, validates and amends `MetaSnapshot`.
+#[async_trait::async_trait]
+pub trait Loader<S: Metadata> {
+    async fn load(&self, id: MetaSnapshotId) -> BackupResult<MetaSnapshot<S>>;
+}
+
+/// `Writer` writes `MetaSnapshot` to meta store.
+#[async_trait::async_trait]
+pub trait Writer<S: Metadata> {
+    async fn write(&self, s: MetaSnapshot<S>) -> BackupResult<()>;
+}
