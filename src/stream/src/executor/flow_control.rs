@@ -93,8 +93,8 @@ impl RateLimiter for SimRateLimiter {
                 tokio::spawn(async move {
                     sleep(Duration::from_secs(1)).await;
                     drop(permit);
-                }
-            });
+                })
+            };
         }
     }
 }
