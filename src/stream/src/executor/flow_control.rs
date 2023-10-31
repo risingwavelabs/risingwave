@@ -14,88 +14,12 @@
 
 use std::fmt::{Debug, Formatter};
 use std::num::NonZeroU32;
-use std::time::Duration;
 
 use governor::clock::MonotonicClock;
-use governor::state::{InMemoryState, NotKeyed};
-use governor::{InsufficientCapacity, Quota, RateLimiter as GovernorRateLimiter};
+use governor::{InsufficientCapacity, Quota, RateLimiter};
 use risingwave_common::catalog::Schema;
-use tokio::sync::Semaphore;
-use tokio::time::sleep;
 
 use super::*;
-
-#[cfg(not(madsim))]
-type RateLimiterImpl = DefaultRateLimiter;
-#[cfg(madsim)]
-type RateLimiterImpl = SimRateLimiter;
-
-/// Rate limiter. We can abstract this out when there's more use-cases for it.
-/// Otherwise for now we can keep it local to `flow_control`.
-trait RateLimiter {
-    fn new(rate_limit: u32) -> Self;
-    async fn until_n_ready(&self, n: usize);
-}
-
-struct DefaultRateLimiter {
-    inner: GovernorRateLimiter<NotKeyed, InMemoryState, MonotonicClock>,
-    rate_limit: u32,
-}
-
-impl RateLimiter for DefaultRateLimiter {
-    fn new(rate_limit: u32) -> Self {
-        let quota = Quota::per_second(NonZeroU32::new(rate_limit).unwrap());
-        let clock = MonotonicClock;
-        DefaultRateLimiter {
-            inner: GovernorRateLimiter::direct_with_clock(quota, &clock),
-            rate_limit,
-        }
-    }
-
-    async fn until_n_ready(&self, n: usize) {
-        let result = self
-            .inner
-            .until_n_ready(NonZeroU32::new(n as u32).unwrap())
-            .await;
-        if let Err(InsufficientCapacity(n)) = result {
-            tracing::error!(
-                "Rate Limit {:?} smaller than chunk cardinality {n}",
-                self.rate_limit,
-            );
-        }
-    }
-}
-
-struct SimRateLimiter {
-    inner: Arc<Semaphore>,
-    rate_limit: u32,
-}
-
-impl RateLimiter for SimRateLimiter {
-    fn new(rate_limit: u32) -> Self {
-        Self {
-            inner: Arc::new(Semaphore::new(rate_limit as usize)),
-            rate_limit,
-        }
-    }
-
-    async fn until_n_ready(&self, n: usize) {
-        if n > self.rate_limit as usize {
-            tracing::error!(
-                "Rate Limit {:?} smaller than chunk cardinality {n}",
-                self.rate_limit,
-            );
-            return;
-        }
-        let semaphore_ref = self.inner.clone();
-        if let Ok(permit) = semaphore_ref.acquire_many_owned(n as u32).await {
-            tokio::spawn(async move {
-                sleep(Duration::from_secs(1)).await;
-                drop(permit);
-            });
-        };
-    }
-}
 
 /// Flow Control Executor is used to control the rate of the input executor.
 ///
@@ -114,21 +38,32 @@ pub struct FlowControlExecutor {
 impl FlowControlExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(input: Box<dyn Executor>, rate_limit: Option<u32>) -> Self {
-        #[cfg(madsim)]
-        tracing::warn!("FlowControlExecutor rate limiter is disabled in madsim as it will spawn system threads");
         Self { input, rate_limit }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        let rate_limiter = self.rate_limit.map(RateLimiterImpl::new);
+        let get_rate_limiter = |rate_limit: u32| {
+            let quota = Quota::per_second(NonZeroU32::new(rate_limit).unwrap());
+            let clock = MonotonicClock;
+            RateLimiter::direct_with_clock(quota, &clock)
+        };
+        let rate_limiter = self.rate_limit.map(get_rate_limiter);
         #[for_await]
         for msg in self.input.execute() {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
                     if let Some(rate_limiter) = &rate_limiter {
-                        rate_limiter.until_n_ready(chunk.cardinality()).await;
+                        let result = rate_limiter
+                            .until_n_ready(NonZeroU32::new(chunk.cardinality() as u32).unwrap())
+                            .await;
+                        if let Err(InsufficientCapacity(n)) = result {
+                            tracing::error!(
+                                "Rate Limit {:?} smaller than chunk cardinality {n}",
+                                self.rate_limit,
+                            );
+                        }
                     }
                     yield Message::Chunk(chunk);
                 }
