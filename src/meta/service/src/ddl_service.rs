@@ -204,8 +204,8 @@ impl DdlService for DdlServiceImpl {
                     });
                 }
 
+                // The id of stream job has been set above
                 let stream_job = StreamingJob::Source(source);
-
                 let version = self
                     .ddl_controller
                     .run_command(DdlCommand::CreateStreamingJob(

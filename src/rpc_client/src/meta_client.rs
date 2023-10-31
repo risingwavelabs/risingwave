@@ -1730,7 +1730,6 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
-            // ,{ ddl_client, create_source_with_graph, CreateSourceRequest, CreateSourceResponse }
             ,{ ddl_client, create_sink, CreateSinkRequest, CreateSinkResponse }
             ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }

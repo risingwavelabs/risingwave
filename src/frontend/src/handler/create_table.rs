@@ -951,7 +951,6 @@ pub async fn handle_create_table(
         let context = OptimizerContext::from_handler_args(handler_args);
         let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
         let col_id_gen = ColumnIdGenerator::new_initial();
-        // let properties = context.with_options().inner().clone().into_iter().collect();
 
         let ((plan, source, table), job_type) = match (source_schema, cdc_table_info.as_ref()) {
             (Some(source_schema), None) => (
