@@ -23,6 +23,7 @@ use tokio::time::sleep;
 const CREATE_TABLE: &str = "CREATE TABLE t(v1 int);";
 const SEED_TABLE: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 100000);";
 const SET_BACKGROUND_DDL: &str = "SET BACKGROUND_DDL=true;";
+const SET_RATE_LIMIT: &str = "SET STREAMING_RATE_LIMIT=5000;";
 const CREATE_MV1: &str = "CREATE MATERIALIZED VIEW mv1 as SELECT * FROM t;";
 
 async fn kill_cn_and_wait_recover(cluster: &Cluster) {
@@ -133,13 +134,11 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
 
 #[tokio::test]
 async fn test_background_ddl_cancel() -> Result<()> {
-    env::set_var("RW_BACKFILL_SNAPSHOT_READ_DELAY", "100");
     async fn create_mv(session: &mut Session) -> Result<()> {
         session.run(CREATE_MV1).await?;
         sleep(Duration::from_secs(2)).await;
         Ok(())
     }
-    // FIXME: See if we can use rate limit instead.
     use std::env;
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -149,6 +148,7 @@ async fn test_background_ddl_cancel() -> Result<()> {
     let mut session = cluster.start_session();
     session.run(CREATE_TABLE).await?;
     session.run(SEED_TABLE).await?;
+    session.run(SET_RATE_LIMIT).await?;
     session.run(SET_BACKGROUND_DDL).await?;
 
     for _ in 0..5 {
@@ -174,6 +174,9 @@ async fn test_background_ddl_cancel() -> Result<()> {
 
     let ids = cancel_stream_jobs(&mut session).await?;
     assert_eq!(ids.len(), 1);
+
+    session.run(SEED_TABLE).await?;
+    session.flush().await?;
 
     // Make sure MV can be created after all these cancels
     create_mv(&mut session).await?;
