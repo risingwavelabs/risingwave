@@ -153,7 +153,7 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
         }).try_collect()?;
 
         let mut env = JVM
-            .get()?
+            .get_or_init()?
             .attach_current_thread()
             .map_err(|err| SinkError::Internal(err.into()))?;
         let validate_sink_request = ValidateSinkRequest {
@@ -613,7 +613,7 @@ struct EmbeddedConnectorClient {
 
 impl EmbeddedConnectorClient {
     fn new() -> Result<Self> {
-        let jvm = JVM.get().map_err(|e| anyhow!("cannot get jvm: {:?}", e))?;
+        let jvm = JVM.get_or_init()?;
         Ok(EmbeddedConnectorClient { jvm })
     }
 

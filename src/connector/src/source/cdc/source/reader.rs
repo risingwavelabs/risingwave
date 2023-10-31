@@ -124,7 +124,7 @@ impl<T: CdcSourceTypeTrait> CommonSplitReader for CdcSplitReader<T> {
         let (mut tx, mut rx) = mpsc::channel(DEFAULT_CHANNEL_SIZE);
 
         let jvm = JVM
-            .get()
+            .get_or_init()
             .map_err(|e| anyhow!("jvm not initialized properly: {:?}", e))?;
 
         let get_event_stream_request = GetEventStreamRequest {

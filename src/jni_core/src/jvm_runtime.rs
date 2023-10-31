@@ -19,7 +19,6 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use anyhow::anyhow;
-use jni::objects::JValueOwned;
 use jni::strings::JNIString;
 use jni::{InitArgsBuilder, JNIVersion, JavaVM, NativeMethod};
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
@@ -34,17 +33,7 @@ static JVM_RESULT: OnceLock<Result<JavaVM, String>> = OnceLock::new();
 pub struct JavaVmWrapper;
 
 impl JavaVmWrapper {
-    pub fn for_initialized_jvm<O, F: FnOnce(&'static JavaVM) -> O>(&self, f: F) -> Option<O> {
-        JVM_RESULT.get().and_then(|result| {
-            if let Ok(jvm) = result {
-                Some(f(jvm))
-            } else {
-                None
-            }
-        })
-    }
-
-    pub fn get(&self) -> anyhow::Result<&'static JavaVM> {
+    pub fn get_or_init(&self) -> anyhow::Result<&'static JavaVM> {
         match JVM_RESULT.get_or_init(|| {
             Self::inner_new().inspect_err(|e| error!("failed to init jvm: {:?}", e))
         }) {
@@ -166,41 +155,41 @@ pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::E
 
 /// Load JVM memory statistics from the runtime. If JVM is not initialized or fail to initialize, return zero.
 pub fn load_jvm_memory_stats() -> (usize, usize) {
-    JVM.for_initialized_jvm(|jvm| {
-        let result: Result<(usize, usize), jni::errors::Error> = try {
-            let mut env = jvm.attach_current_thread()?;
+    match JVM_RESULT.get() {
+        Some(Ok(jvm)) => {
+            let result: Result<(usize, usize), jni::errors::Error> = try {
+                let mut env = jvm.attach_current_thread()?;
 
-            let runtime_instance = env.call_static_method(
-                "java/lang/Runtime",
-                "getRuntime",
-                "()Ljava/lang/Runtime;",
-                &[],
-            )?;
+                let runtime_instance = env
+                    .call_static_method(
+                        "java/lang/Runtime",
+                        "getRuntime",
+                        "()Ljava/lang/Runtime;",
+                        &[],
+                    )?
+                    .l()
+                    .expect("should be object");
 
-            let runtime_instance = match runtime_instance {
-                JValueOwned::Object(o) => o,
-                _ => unreachable!(),
+                let total_memory = env
+                    .call_method(runtime_instance.as_ref(), "totalMemory", "()J", &[])?
+                    .j()
+                    .expect("should be long");
+
+                let free_memory = env
+                    .call_method(runtime_instance, "freeMemory", "()J", &[])?
+                    .j()
+                    .expect("should be long");
+
+                (total_memory as usize, (total_memory - free_memory) as usize)
             };
-
-            let total_memory = env
-                .call_method(runtime_instance.as_ref(), "totalMemory", "()J", &[])?
-                .j()
-                .expect("should be long");
-
-            let free_memory = env
-                .call_method(runtime_instance, "freeMemory", "()J", &[])?
-                .j()
-                .expect("should be long");
-
-            (total_memory as usize, (total_memory - free_memory) as usize)
-        };
-        match result {
-            Ok(ret) => ret,
-            Err(e) => {
-                error!("failed to collect jvm stats: {:?}", e);
-                (0, 0)
+            match result {
+                Ok(ret) => ret,
+                Err(e) => {
+                    error!("failed to collect jvm stats: {:?}", e);
+                    (0, 0)
+                }
             }
         }
-    })
-    .unwrap_or((0, 0))
+        _ => (0, 0),
+    }
 }
