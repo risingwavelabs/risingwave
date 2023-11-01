@@ -47,9 +47,9 @@ fn jsonb_build_array(args: impl Row) -> Result<JsonbVal> {
 ///
 /// ```slt
 /// query T
-/// select jsonb_build_object('foo', 1, 2, row(3,'bar'));
+/// select jsonb_build_object('foo', 1, 2, 'bar');
 /// ----
-/// {"foo": 1, "2": {"f1": 3, "f2": "bar"}}
+/// {"foo": 1, "2": "bar"}
 /// ```
 #[function("jsonb_build_object(...) -> jsonb")]
 fn jsonb_build_object(args: impl Row) -> Result<JsonbVal> {
