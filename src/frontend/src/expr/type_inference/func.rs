@@ -541,6 +541,7 @@ fn infer_type_for_special(
             ensure_arity!("greatest/least", 1 <= | inputs |);
             Ok(Some(align_types(inputs.iter_mut())?))
         }
+        ExprType::JsonbBuildArray | ExprType::JsonbBuildObject => Ok(Some(DataType::Jsonb)),
         _ => Ok(None),
     }
 }
