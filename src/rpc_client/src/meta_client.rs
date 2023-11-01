@@ -789,8 +789,8 @@ impl MetaClient {
         kind: PbThrottleTarget,
         id: u32,
         rate: Option<u32>,
-    ) -> Result<ThrottleResponse> {
-        let request = ThrottleRequest {
+    ) -> Result<ApplyThrottleResponse> {
+        let request = ApplyThrottleRequest {
             kind: kind as i32,
             id,
             rate,
@@ -1735,7 +1735,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, pause, PauseRequest, PauseResponse }
             ,{ stream_client, resume, ResumeRequest, ResumeResponse }
-             ,{ stream_client, apply_throttle, ThrottleRequest, ThrottleResponse }
+             ,{ stream_client, apply_throttle, ApplyThrottleRequest, ApplyThrottleResponse }
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }

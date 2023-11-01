@@ -101,11 +101,11 @@ impl StreamManagerService for StreamServiceImpl {
     #[cfg_attr(coverage, coverage(off))]
     async fn apply_throttle(
         &self,
-        request: Request<ThrottleRequest>,
-    ) -> Result<Response<ThrottleResponse>, Status> {
+        request: Request<ApplyThrottleRequest>,
+    ) -> Result<Response<ApplyThrottleResponse>, Status> {
         let request = request.into_inner();
         let actor_to_apply = match request.kind() {
-            ThrottleTarget::Source => {
+            ThrottleTarget::SourceUnspecified => {
                 self.fragment_manager
                     .update_source_rate_limit_by_source_id(request.id as SourceId, request.rate)
                     .await?
@@ -134,7 +134,7 @@ impl StreamManagerService for StreamServiceImpl {
             .run_command(Command::Throttle(mutation))
             .await?;
 
-        Ok(Response::new(ThrottleResponse { status: None }))
+        Ok(Response::new(ApplyThrottleResponse { status: None }))
     }
 
     async fn cancel_creating_jobs(
