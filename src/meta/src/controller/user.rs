@@ -18,7 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{DEFAULT_SUPER_USER, DEFAULT_SUPER_USER_FOR_PG};
 use risingwave_meta_model_v2::prelude::{Object, User, UserPrivilege};
 use risingwave_meta_model_v2::user_privilege::Action;
-use risingwave_meta_model_v2::{object, user, user_privilege, AuthInfo, UserId};
+use risingwave_meta_model_v2::{object, user, user_privilege, AuthInfo, PrivilegeId, UserId};
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
@@ -212,7 +212,7 @@ impl CatalogController {
                     .and(user_privilege::Column::Oid.eq(*privilege.oid.as_ref()))
                     .and(user_privilege::Column::Action.eq(privilege.action.as_ref().clone()))
                     .and(user_privilege::Column::WithGrantOption.eq(true));
-                let privilege_id: Option<i32> = UserPrivilege::find()
+                let privilege_id: Option<PrivilegeId> = UserPrivilege::find()
                     .select_only()
                     .column(user_privilege::Column::Id)
                     .filter(filter)

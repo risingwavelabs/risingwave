@@ -15,7 +15,7 @@
 use risingwave_pb::user::grant_privilege::PbAction;
 use sea_orm::entity::prelude::*;
 
-use crate::{ObjectId, UserId};
+use crate::{ObjectId, PrivilegeId, UserId};
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
@@ -69,8 +69,8 @@ impl From<Action> for PbAction {
 #[sea_orm(table_name = "user_privilege")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: i32,
-    pub dependent_id: Option<i32>,
+    pub id: PrivilegeId,
+    pub dependent_id: Option<PrivilegeId>,
     pub user_id: UserId,
     pub oid: ObjectId,
     pub granted_by: UserId,

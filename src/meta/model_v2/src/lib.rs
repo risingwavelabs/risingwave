@@ -61,6 +61,7 @@ pub type ViewId = ObjectId;
 pub type FunctionId = ObjectId;
 pub type ConnectionId = ObjectId;
 pub type UserId = u32;
+pub type PrivilegeId = u32;
 
 pub type FragmentId = u32;
 

@@ -18,7 +18,7 @@ use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     connection, function, index, object, object_dependency, schema, sink, source, table, user,
-    user_privilege, view, DataTypeArray, DatabaseId, ObjectId, SchemaId, UserId,
+    user_privilege, view, DataTypeArray, DatabaseId, ObjectId, PrivilegeId, SchemaId, UserId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
@@ -397,7 +397,7 @@ where
 ///  r#"WITH RECURSIVE "granted_privilege_ids" ("id", "user_id") AS (SELECT "id", "user_id" FROM "user_privilege" WHERE "user_privilege"."id" IN (1, 2, 3) UNION ALL SELECT "user_privilege"."id", "user_privilege"."user_id" FROM "user_privilege" INNER JOIN "granted_privilege_ids" ON "granted_privilege_ids"."id" = "dependent_id") SELECT "id", "user_id" FROM "granted_privilege_ids""#
 /// );
 /// ```
-pub fn construct_privilege_dependency_query(ids: Vec<i32>) -> WithQuery {
+pub fn construct_privilege_dependency_query(ids: Vec<PrivilegeId>) -> WithQuery {
     let cte_alias = Alias::new("granted_privilege_ids");
     let cte_return_privilege_alias = Alias::new("id");
     let cte_return_user_alias = Alias::new("user_id");
@@ -446,12 +446,12 @@ pub fn construct_privilege_dependency_query(ids: Vec<i32>) -> WithQuery {
 #[derive(Clone, DerivePartialModel, FromQueryResult)]
 #[sea_orm(entity = "UserPrivilege")]
 pub struct PartialUserPrivilege {
-    pub id: i32,
+    pub id: PrivilegeId,
     pub user_id: UserId,
 }
 
 pub async fn get_referring_privileges_cascade<C>(
-    ids: Vec<i32>,
+    ids: Vec<PrivilegeId>,
     db: &C,
 ) -> MetaResult<Vec<PartialUserPrivilege>>
 where
@@ -471,7 +471,7 @@ where
 }
 
 /// `ensure_privileges_not_referred` ensures that the privileges are not granted to any other users.
-pub async fn ensure_privileges_not_referred<C>(ids: Vec<i32>, db: &C) -> MetaResult<()>
+pub async fn ensure_privileges_not_referred<C>(ids: Vec<PrivilegeId>, db: &C) -> MetaResult<()>
 where
     C: ConnectionTrait,
 {
