@@ -382,21 +382,12 @@ impl LogicalOverWindow {
         let rewritten_selected_items = over_window_builder.rewrite_selected_items(select_exprs)?;
 
         for window_func in &window_functions {
-            if window_func.kind.is_rank() {
-                if window_func.order_by.sort_exprs.is_empty() {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "window rank function without order by: {:?}",
-                        window_func
-                    ))
-                    .into());
-                }
-                if window_func.kind == WindowFuncKind::DenseRank {
-                    return Err(ErrorCode::NotImplemented(
-                        format!("window rank function: {}", window_func.kind),
-                        4847.into(),
-                    )
-                    .into());
-                }
+            if window_func.kind.is_rank() && window_func.order_by.sort_exprs.is_empty() {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "window rank function without order by: {:?}",
+                    window_func
+                ))
+                .into());
             }
         }
 
@@ -709,19 +700,6 @@ impl PredicatePushdown for LogicalOverWindow {
 
 impl ToBatch for LogicalOverWindow {
     fn to_batch(&self) -> Result<PlanRef> {
-        if self
-            .window_functions()
-            .iter()
-            .any(|x| matches!(x.kind, WindowFuncKind::Rank | WindowFuncKind::DenseRank))
-        {
-            return Err(ErrorCode::NotImplemented(
-                "`rank` and `dense_rank` function calls that don't match TopN pattern are not supported yet"
-                    .to_string(),
-                8965.into(),
-            )
-            .into());
-        }
-
         if !self.core.funcs_have_same_partition_and_order() {
             return Err(ErrorCode::InvalidInputSyntax(
                 "All window functions must have the same PARTITION BY and ORDER BY".to_string(),
@@ -756,19 +734,6 @@ impl ToBatch for LogicalOverWindow {
 impl ToStream for LogicalOverWindow {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         use super::stream::prelude::*;
-
-        if self
-            .window_functions()
-            .iter()
-            .any(|x| matches!(x.kind, WindowFuncKind::Rank | WindowFuncKind::DenseRank))
-        {
-            return Err(ErrorCode::NotImplemented(
-                "`rank` and `dense_rank` function calls that don't match TopN pattern are not supported yet"
-                    .to_string(),
-                8965.into(),
-            )
-            .into());
-        }
 
         let stream_input = self.core.input.to_stream(ctx)?;
 
