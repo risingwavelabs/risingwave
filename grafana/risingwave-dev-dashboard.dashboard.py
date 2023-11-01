@@ -908,20 +908,6 @@ def section_streaming_actors(outer_panels):
         outer_panels.row_collapsed(
             "Streaming Actors",
             [
-                panels.timeseries_actor_rowsps(
-                    "Executor Throughput",
-                    "When enabled, this metric shows the input throughput of each executor.",
-                    [
-                        panels.target(
-                            f"sum(rate({metric('stream_executor_row_count')}[$__rate_interval])) by (executor_identity, fragment_id)",
-                            "{{executor_identity}} fragment {{fragment_id}}",
-                        ),
-                        panels.target_hidden(
-                            f"rate({metric('stream_executor_row_count')}[$__rate_interval])",
-                            "{{executor_identity}} actor {{actor_id}}",
-                        ),
-                    ],
-                ),
                 panels.timeseries_percentage(
                     "Actor Output Blocking Time Ratio (Backpressure)",
                     "We first record the total blocking duration(ns) of output buffer of each actor. It shows how "
@@ -931,45 +917,6 @@ def section_streaming_actors(outer_panels):
                         panels.target(
                             f"avg(rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, downstream_fragment_id) / 1000000000",
                             "fragment {{fragment_id}}->{{downstream_fragment_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "Actor Memory Usage (TaskLocalAlloc)",
-                    "The actor-level memory usage statistics reported by TaskLocalAlloc. (Disabled by default)",
-                    [
-                        panels.target(
-                            f"sum({metric('actor_memory_usage')}) by (fragment_id)",
-                            "fragment {{fragment_id}}",
-                        ),
-                        panels.target_hidden(
-                            f"{metric('actor_memory_usage')}",
-                            "actor {{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "Executor Memory Usage",
-                    "The operator-level memory usage statistics collected by each LRU cache",
-                    [
-                        panels.target(
-                            f"sum({metric('stream_memory_usage')}) by (table_id, desc)",
-                            "table {{table_id}} desc: {{desc}}",
-                        ),
-                        panels.target_hidden(
-                            f"{metric('stream_memory_usage')}",
-                            "table {{table_id}} actor {{actor_id}} desc: {{desc}}",
-                        ),
-                    ],
-                ),
-
-                panels.timeseries_bytes(
-                    "Materialized View Memory Usage",
-                    "Memory usage aggregated by materialized views",
-                    [
-                        panels.target(
-                            f"sum({metric('stream_memory_usage')} * on(table_id, actor_id) group_left(materialized_view_id) table_info) by (materialized_view_id)",
-                            "mview {{materialized_view_id}}",
                         ),
                     ],
                 ),
@@ -1008,6 +955,30 @@ def section_streaming_actors(outer_panels):
                         panels.target_hidden(
                             f"rate({metric('stream_actor_out_record_cnt')}[$__rate_interval])",
                             "actor {{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Executor Cache Memory Usage",
+                    "The operator-level memory usage statistics collected by each LRU cache",
+                    [
+                        panels.target(
+                            f"sum({metric('stream_memory_usage')}) by (table_id, desc)",
+                            "table {{table_id}} desc: {{desc}}",
+                        ),
+                        panels.target_hidden(
+                            f"{metric('stream_memory_usage')}",
+                            "table {{table_id}} actor {{actor_id}} desc: {{desc}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Executor Cache Memory Usage of Materialized Views",
+                    "Memory usage aggregated by materialized views",
+                    [
+                        panels.target(
+                            f"sum({metric('stream_memory_usage')} * on(table_id, actor_id) group_left(materialized_view_id) table_info) by (materialized_view_id)",
+                            "materialized view {{materialized_view_id}}",
                         ),
                     ],
                 ),
@@ -1301,6 +1272,34 @@ def section_streaming_actors(outer_panels):
                                       "over window cached count | table {{table_id}} fragment {{fragment_id}}"),
                         panels.target_hidden(f"{metric('stream_over_window_cached_entry_count')}",
                                       "over window cached count | table {{table_id}} actor {{actor_id}}"),
+                    ],
+                ),
+                panels.timeseries_actor_rowsps(
+                    "Executor Throughput",
+                    "When enabled, this metric shows the input throughput of each executor.",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('stream_executor_row_count')}[$__rate_interval])) by (executor_identity, fragment_id)",
+                            "{{executor_identity}} fragment {{fragment_id}}",
+                        ),
+                        panels.target_hidden(
+                            f"rate({metric('stream_executor_row_count')}[$__rate_interval])",
+                            "{{executor_identity}} actor {{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Actor Memory Usage (TaskLocalAlloc)",
+                    "The actor-level memory usage statistics reported by TaskLocalAlloc. (Disabled by default)",
+                    [
+                        panels.target(
+                            f"sum({metric('actor_memory_usage')}) by (fragment_id)",
+                            "fragment {{fragment_id}}",
+                        ),
+                        panels.target_hidden(
+                            f"{metric('actor_memory_usage')}",
+                            "actor {{actor_id}}",
+                        ),
                     ],
                 ),
             ],
