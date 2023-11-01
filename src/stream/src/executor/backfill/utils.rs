@@ -45,6 +45,9 @@ use crate::executor::{
     Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
 };
 
+/// `vnode`, `is_finished`, `row_count`, all occupy 1 column each.
+pub const METADATA_STATE_LEN: usize = 3;
+
 #[derive(Clone, Debug)]
 pub struct BackfillState {
     /// Used to track backfill progress.
@@ -356,9 +359,15 @@ pub(crate) fn build_temporary_state_with_vnode(
     is_finished: bool,
     current_pos: &OwnedRow,
 ) {
-    row_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
-    row_state[current_pos.len() + 1] = Some(is_finished.into());
+    // vnode
     row_state[0] = Some(vnode.to_scalar().into());
+    // pk
+    row_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
+    // is_finished
+    row_state[current_pos.len() + 1] = Some(is_finished.into());
+    // row_count
+    // FIXME(kwannoel): Currently arrangement backfill will not persist row_count.
+    row_state[current_pos.len() + 2] = Some(0.into());
 }
 
 /// We want to avoid allocating a row for every vnode.

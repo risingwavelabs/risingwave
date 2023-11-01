@@ -36,6 +36,7 @@ use crate::executor::backfill::utils::{
     compute_bounds, construct_initial_finished_state, get_progress_per_vnode, iter_chunks,
     mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, owned_row_iter,
     persist_state_per_vnode, update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
+    METADATA_STATE_LEN,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -114,7 +115,7 @@ where
         // The primary key columns, in the output columns of the upstream_table scan.
         // Table scan scans a subset of the columns of the upstream table.
         let pk_indices = self.upstream_table.pk_indices().to_vec(); // We have full table.
-        let state_len = pk_indices.len() + 2; // +1 for backfill_finished, +1 for vnode key.
+        let state_len = pk_indices.len() + METADATA_STATE_LEN;
         let pk_order = self.upstream_table.pk_serde().get_order_types().to_vec();
         let upstream_table_id = self.upstream_table.table_id();
         let mut upstream_table = self.upstream_table;
