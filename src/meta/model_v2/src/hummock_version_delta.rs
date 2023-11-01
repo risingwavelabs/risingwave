@@ -39,11 +39,9 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
-#[derive(Clone, Debug, PartialEq, Eq, FromJsonQueryResult, Serialize, Deserialize, Default)]
-pub struct SstableObjectIds(pub Vec<HummockSstableObjectId>);
+crate::derive_from_json_struct!(SstableObjectIds, Vec<HummockSstableObjectId>);
 
-#[derive(Clone, Debug, PartialEq, Eq, FromJsonQueryResult, Serialize, Deserialize, Default)]
-pub struct GroupDeltas(pub HashMap<CompactionGroupId, Vec<PbGroupDelta>>);
+crate::derive_from_json_struct!(GroupDeltas, HashMap<CompactionGroupId, Vec<PbGroupDelta>>);
 
 impl From<Model> for HummockVersionDelta {
     fn from(value: Model) -> Self {

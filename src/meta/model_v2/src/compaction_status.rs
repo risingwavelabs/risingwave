@@ -32,5 +32,4 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
-#[derive(Clone, Debug, PartialEq, Eq, FromJsonQueryResult, Serialize, Deserialize, Default)]
-pub struct LevelHandlers(pub Vec<PbLevelHandler>);
+crate::derive_from_json_struct!(LevelHandlers, Vec<PbLevelHandler>);

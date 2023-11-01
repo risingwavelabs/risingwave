@@ -126,6 +126,8 @@ macro_rules! derive_from_json_struct {
     };
 }
 
+pub(crate) use derive_from_json_struct;
+
 derive_from_json_struct!(I32Array, Vec<i32>);
 derive_from_json_struct!(U32Array, Vec<u32>);
 

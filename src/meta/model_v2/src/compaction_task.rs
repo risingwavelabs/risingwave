@@ -33,8 +33,7 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
-#[derive(Clone, Debug, PartialEq, Eq, FromJsonQueryResult, Serialize, Deserialize, Default)]
-pub struct CompactionTask(pub PbCompactTask);
+crate::derive_from_json_struct!(CompactionTask, PbCompactTask);
 
 impl From<Model> for CompactTaskAssignment {
     fn from(value: Model) -> Self {
