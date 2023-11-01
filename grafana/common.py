@@ -129,6 +129,12 @@ class Panels:
                       datasource=self.datasource,
                       hide=hide)
 
+    def target_hidden(self, expr, legendFormat):
+        return Target(expr=expr,
+                      legendFormat=legendFormat,
+                      datasource=self.datasource,
+                      hide=True)
+
     def table_target(self, expr, hide=False):
         return Target(expr=expr,
                       datasource=self.datasource,
