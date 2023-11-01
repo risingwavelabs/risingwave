@@ -23,7 +23,7 @@ use prometheus::{
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
     RelabeledCounterVec, RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
-    RelabeledHistogramVec,
+    RelabeledHistogramVec, RelabeledMetricVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
@@ -38,8 +38,8 @@ use tracing::warn;
 /// job or an executor should be collected by views like `StateStats` and `JobStats`.
 #[derive(Debug, Clone)]
 pub struct HummockStateStoreMetrics {
-    pub bloom_filter_true_negative_counts: RelabeledCounterVec,
-    pub bloom_filter_check_counts: RelabeledCounterVec,
+    pub bloom_filter_true_negative_counts: RelabeledGuardedIntCounterVec<2>,
+    pub bloom_filter_check_counts: RelabeledGuardedIntCounterVec<2>,
     pub iter_merge_sstable_counts: RelabeledHistogramVec,
     pub sst_store_block_request_counts: RelabeledGuardedIntCounterVec<2>,
     pub iter_scan_key_counts: RelabeledGuardedIntCounterVec<2>,
@@ -95,27 +95,27 @@ impl HummockStateStoreMetrics {
         // 1ms - 100s
         let state_store_read_time_buckets = exponential_buckets(0.001, 10.0, 5).unwrap();
 
-        let bloom_filter_true_negative_counts = register_int_counter_vec_with_registry!(
+        let bloom_filter_true_negative_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_bloom_filter_true_negative_counts",
             "Total number of sstables that have been considered true negative by bloom filters",
             &["table_id", "type"],
             registry
         )
         .unwrap();
-        let bloom_filter_true_negative_counts = RelabeledCounterVec::with_metric_level(
+        let bloom_filter_true_negative_counts = RelabeledMetricVec::with_metric_level(
             MetricLevel::Debug,
             bloom_filter_true_negative_counts,
             metric_level,
         );
 
-        let bloom_filter_check_counts = register_int_counter_vec_with_registry!(
+        let bloom_filter_check_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_bloom_filter_check_counts",
             "Total number of read request to check bloom filters",
             &["table_id", "type"],
             registry
         )
         .unwrap();
-        let bloom_filter_check_counts = RelabeledCounterVec::with_metric_level(
+        let bloom_filter_check_counts = RelabeledMetricVec::with_metric_level(
             MetricLevel::Debug,
             bloom_filter_check_counts,
             metric_level,

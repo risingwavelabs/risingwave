@@ -2,8 +2,8 @@
 telemetry_enabled = false
 metrics_level = "Disabled"
 
-#[streaming.developer]
-#stream_chunk_size = 1
+[streaming.developer]
+stream_chunk_size = 1
 
 [system]
 barrier_interval_ms = 1000

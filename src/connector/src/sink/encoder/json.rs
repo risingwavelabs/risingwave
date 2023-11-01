@@ -81,6 +81,20 @@ impl JsonEncoder {
             ..self
         }
     }
+
+    pub fn new_with_big_query(
+        schema: Schema,
+        col_indices: Option<Vec<usize>>,
+        timestamp_handling_mode: TimestampHandlingMode,
+    ) -> Self {
+        Self {
+            schema,
+            col_indices,
+            timestamp_handling_mode,
+            custom_json_type: CustomJsonType::Bigquery,
+            kafka_connect: None,
+        }
+    }
 }
 
 impl RowEncoder for JsonEncoder {
@@ -193,7 +207,7 @@ fn datum_to_json_object(
                 }
                 json!(v_string)
             }
-            CustomJsonType::None => {
+            CustomJsonType::None | CustomJsonType::Bigquery => {
                 json!(v.to_text())
             }
         },
@@ -217,7 +231,7 @@ fn datum_to_json_object(
         }
         (DataType::Date, ScalarRefImpl::Date(v)) => match custom_json_type {
             CustomJsonType::None => json!(v.0.num_days_from_ce()),
-            CustomJsonType::Doris(_) => {
+            CustomJsonType::Bigquery | CustomJsonType::Doris(_) => {
                 let a = v.0.format("%Y-%m-%d").to_string();
                 json!(a)
             }
@@ -274,7 +288,7 @@ fn datum_to_json_object(
                         ArrayError::internal(format!("Json to string err{:?}", err))
                     })?)
                 }
-                CustomJsonType::None => {
+                CustomJsonType::None | CustomJsonType::Bigquery => {
                     let mut map = Map::with_capacity(st.len());
                     for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
                         st.iter()

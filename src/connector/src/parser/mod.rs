@@ -25,7 +25,7 @@ use futures_async_stream::try_stream;
 pub use json_parser::*;
 pub use protobuf::*;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
-use risingwave_common::catalog::KAFKA_TIMESTAMP_COLUMN_NAME;
+use risingwave_common::catalog::{KAFKA_TIMESTAMP_COLUMN_NAME, TABLE_NAME_COLUMN_NAME};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{Datum, Scalar};
@@ -172,7 +172,7 @@ impl MessageMeta<'_> {
                 assert_eq!(
                     desc.name.as_str(),
                     KAFKA_TIMESTAMP_COLUMN_NAME,
-                    "unexpected meta column name"
+                    "unexpected kafka meta column name"
                 );
                 kafka_meta
                     .timestamp
@@ -182,6 +182,10 @@ impl MessageMeta<'_> {
                             .to_scalar_value()
                     })
                     .into()
+            },
+            SourceColumnType::Meta if let SourceMeta::DebeziumCdc(cdc_meta) = self.meta => {
+                assert_eq!(desc.name.as_str(), TABLE_NAME_COLUMN_NAME, "unexpected cdc meta column name");
+                Datum::Some(cdc_meta.full_table_name.as_str().into()).into()
             }
 
             // For other cases, return `None`.

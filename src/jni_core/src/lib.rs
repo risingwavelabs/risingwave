@@ -30,6 +30,7 @@ use std::ops::{Deref, DerefMut};
 use std::slice::from_raw_parts;
 use std::sync::{LazyLock, OnceLock};
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use cfg_or_panic::cfg_or_panic;
 use jni::objects::{
@@ -919,6 +920,28 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkWriterRe
             .as_ref()
             .blocking_send(Ok(sink_writer_stream_response))
         {
+            Ok(_) => Ok(JNI_TRUE),
+            Err(e) => {
+                tracing::info!("send error.  {:?}", e);
+                Ok(JNI_FALSE)
+            }
+        }
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_sendSinkWriterErrorToChannel<'a>(
+    env: EnvParam<'a>,
+    channel: Pointer<'a, Sender<anyhow::Result<SinkWriterStreamResponse>>>,
+    msg: JString<'a>,
+) -> jboolean {
+    execute_and_catch(env, move |env| {
+        let err_msg: String = env
+            .get_string(&msg)
+            .expect("sink error message should be a java string")
+            .into();
+
+        match channel.as_ref().blocking_send(Err(anyhow!(err_msg))) {
             Ok(_) => Ok(JNI_TRUE),
             Err(e) => {
                 tracing::info!("send error.  {:?}", e);
