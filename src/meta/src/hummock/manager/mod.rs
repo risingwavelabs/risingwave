@@ -979,6 +979,15 @@ impl HummockManager {
                 group_config.compaction_config.compaction_filter_mask;
             table_to_vnode_partition
                 .retain(|table_id, _| compact_task.existing_table_ids.contains(table_id));
+
+            if group_config.compaction_config.split_weight_by_vnode > 0 {
+                // TODO: unify to table_to_vnode_partition directly
+                table_to_vnode_partition.insert(
+                    member_table_ids[0],
+                    group_config.compaction_config.split_weight_by_vnode,
+                );
+            }
+
             compact_task.table_vnode_partition = table_to_vnode_partition;
 
             let mut compact_task_assignment =
@@ -2181,7 +2190,9 @@ impl HummockManager {
                 ));
                 split_group_trigger_interval
                     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                split_group_trigger_interval.reset();
+
+                // TEST
+                // split_group_trigger_interval.reset(); 
 
                 let split_group_trigger = IntervalStream::new(split_group_trigger_interval)
                     .map(|_| HummockTimerEvent::GroupSplit);
@@ -2510,6 +2521,7 @@ impl HummockManager {
                 .or_insert(HashMap::default());
 
             if group.table_statistic.len() == 1 {
+                // no need to handle the dedication compaciton group
                 continue;
             }
 
@@ -2535,10 +2547,13 @@ impl HummockManager {
                         table_vnode_partition_mapping.insert(*table_id, 8_u32);
                     } else if state_table_size > self.env.opts.cut_table_size_limit {
                         table_vnode_partition_mapping.insert(*table_id, 4_u32);
+                    } else {
+                        table_vnode_partition_mapping.remove(table_id);
                     }
                 }
 
                 if !created_tables.contains(table_id) {
+                    // do not split the creating table
                     continue;
                 }
 
@@ -2591,6 +2606,11 @@ impl HummockManager {
                 }
             }
         }
+
+        tracing::info!(
+            "group_to_table_vnode_partition {:?}",
+            group_to_table_vnode_partition
+        );
 
         *self.group_to_table_vnode_partition.write() = group_to_table_vnode_partition;
     }

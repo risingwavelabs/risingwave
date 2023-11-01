@@ -232,13 +232,21 @@ async fn compact_shared_buffer(
     let use_block_based_filter = BlockedXor16FilterBuilder::is_kv_count_too_large(total_key_count);
 
     let agg = builder.build_for_compaction();
+    let table_vnode_partition = if existing_table_ids.len() == 1 {
+        let table_id = existing_table_ids.iter().next().unwrap();
+        vec![(*table_id, split_weight_by_vnode as u32)]
+            .into_iter()
+            .collect()
+    } else {
+        HashMap::default()
+    };
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
             split_index,
             key_range,
             context.clone(),
             sub_compaction_sstable_size as usize,
-            split_weight_by_vnode as u32,
+            table_vnode_partition.clone(),
             use_block_based_filter,
             Box::new(sstable_object_id_manager.clone()),
         );
@@ -457,7 +465,7 @@ impl SharedBufferCompactRunner {
         key_range: KeyRange,
         context: CompactorContext,
         sub_compaction_sstable_size: usize,
-        split_weight_by_vnode: u32,
+        table_vnode_partition: HashMap<u32, u32>,
         use_block_based_filter: bool,
         object_id_getter: Box<dyn GetObjectId>,
     ) -> Self {
@@ -474,8 +482,7 @@ impl SharedBufferCompactRunner {
                 stats_target_table_ids: None,
                 task_type: compact_task::TaskType::SharedBuffer,
                 is_target_l0_or_lbase: true,
-                table_vnode_partition: HashMap::default(),
-                split_weight_by_vnode,
+                table_vnode_partition,
                 use_block_based_filter,
             },
             object_id_getter,

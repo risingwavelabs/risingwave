@@ -119,8 +119,6 @@ pub struct TaskConfig {
     pub stats_target_table_ids: Option<HashSet<u32>>,
     pub task_type: compact_task::TaskType,
     pub is_target_l0_or_lbase: bool,
-    // pub split_by_table: bool,
-    pub split_weight_by_vnode: u32,
     pub use_block_based_filter: bool,
 
     pub table_vnode_partition: HashMap<u32, u32>,
