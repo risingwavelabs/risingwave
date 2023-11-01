@@ -799,6 +799,12 @@ impl FragmentManager {
                 }
             }
         }
+        if table_id_to_apply.is_empty() {
+            return Err(MetaError::from(anyhow!(
+                "source_id {:?} not found in all fragments",
+                source_id
+            )));
+        }
 
         let mut table_fragments = BTreeMapTransaction::new(map);
         let mut to_apply_fragment = HashMap::new();
@@ -822,6 +828,12 @@ impl FragmentManager {
         }
 
         commit_meta!(self, table_fragments)?;
+        tracing::info!(
+            "update source actor rate limit to: {:?}, actors {:?}",
+            rate_limit,
+            to_apply_fragment
+        );
+
         Ok(to_apply_fragment)
     }
 
@@ -853,6 +865,11 @@ impl FragmentManager {
         }
 
         commit_meta!(self, table_fragments)?;
+        tracing::info!(
+            "update mv actor rate limit to: {:?}, actors {:?}",
+            rate_limit,
+            fragment_to_apply
+        );
 
         Ok(fragment_to_apply)
     }
