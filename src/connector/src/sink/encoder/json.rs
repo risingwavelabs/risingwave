@@ -91,6 +91,7 @@ impl JsonEncoder {
             schema,
             col_indices,
             timestamp_handling_mode,
+            timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
             custom_json_type: CustomJsonType::Bigquery,
             kafka_connect: None,
         }
