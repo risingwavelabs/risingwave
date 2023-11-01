@@ -16,6 +16,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HopWindowNode;
 
+use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
@@ -29,7 +30,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// input rows
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchHopWindow {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::HopWindow<PlanRef>,
     window_start_exprs: Vec<ExprImpl>,
     window_end_exprs: Vec<ExprImpl>,

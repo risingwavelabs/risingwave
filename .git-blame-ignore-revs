@@ -36,3 +36,6 @@ f2a3fd021059e680b35b24c63cff5f8dbe9f9d5f
 
 # chore(rustfmt): format let-chains and let-else #9409
 d70dba827c303373f3220c9733f7c7443e5c2d37
+
+# chore: cargo +nightly fmt (#13162) (format let-chains)
+c583e2c6c054764249acf484438c7bf7197765f4

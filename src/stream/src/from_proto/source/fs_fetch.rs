@@ -112,9 +112,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         )
         .boxed();
 
-        if let Ok(rate_limit) = source.get_rate_limit() {
-            return Ok(FlowControlExecutor::new(executor, *rate_limit).boxed());
-        }
-        Ok(executor)
+        let rate_limit = source.get_rate_limit().cloned().ok();
+        Ok(FlowControlExecutor::new(executor, rate_limit).boxed())
     }
 }

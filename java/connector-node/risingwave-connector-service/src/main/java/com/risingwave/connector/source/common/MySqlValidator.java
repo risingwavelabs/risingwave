@@ -104,7 +104,10 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
     @Override
     public void validateTable() {
         try {
-            validateTableSchema();
+            // validate table schema only when not running in cdc streaming mode
+            if (Utils.getCdcSourceMode(userProps) == CdcSourceMode.SINGLE_MODE) {
+                validateTableSchema();
+            }
         } catch (SQLException e) {
             throw ValidatorUtils.internalError(e.getMessage());
         }

@@ -89,9 +89,17 @@ impl Binder {
             BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
             BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
-            BinaryOperator::Arrow => ExprType::JsonbAccessInner,
+            BinaryOperator::Arrow => ExprType::JsonbAccess,
             BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
+            BinaryOperator::HashMinus => ExprType::JsonbDeletePath,
+            BinaryOperator::HashArrow => ExprType::JsonbExtractPath,
+            BinaryOperator::HashLongArrow => ExprType::JsonbExtractPathText,
             BinaryOperator::Prefix => ExprType::StartsWith,
+            BinaryOperator::Contains => ExprType::JsonbContains,
+            BinaryOperator::Contained => ExprType::JsonbContained,
+            BinaryOperator::Exists => ExprType::JsonbExists,
+            BinaryOperator::ExistsAny => ExprType::JsonbExistsAny,
+            BinaryOperator::ExistsAll => ExprType::JsonbExistsAll,
             BinaryOperator::Concat => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
@@ -135,13 +143,10 @@ impl Binder {
                     }
                 }
             }
-            BinaryOperator::PGRegexMatch => {
-                func_types.push(ExprType::IsNotNull);
-                ExprType::RegexpMatch
-            }
+            BinaryOperator::PGRegexMatch => ExprType::RegexpEq,
             BinaryOperator::PGRegexNotMatch => {
-                func_types.push(ExprType::IsNull);
-                ExprType::RegexpMatch
+                func_types.push(ExprType::Not);
+                ExprType::RegexpEq
             }
             _ => {
                 return Err(

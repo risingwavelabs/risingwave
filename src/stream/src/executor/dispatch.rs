@@ -25,6 +25,8 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
+use risingwave_common::row::Row;
+use risingwave_common::types::ScalarRefImpl;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::PbDispatcher;
@@ -345,6 +347,7 @@ pub enum DispatcherImpl {
     Broadcast(BroadcastDispatcher),
     Simple(SimpleDispatcher),
     RoundRobin(RoundRobinDataDispatcher),
+    CdcTableName(CdcTableNameDispatcher),
 }
 
 impl DispatcherImpl {
@@ -386,6 +389,29 @@ impl DispatcherImpl {
                     dispatcher.dispatcher_id,
                 ))
             }
+            CdcTablename => {
+                assert!(!outputs.is_empty());
+                assert!(dispatcher.downstream_table_name.is_some());
+                let dist_key_indices: Vec<usize> = dispatcher
+                    .dist_key_indices
+                    .iter()
+                    .map(|i| *i as usize)
+                    .collect_vec();
+
+                assert_eq!(
+                    dist_key_indices.len(),
+                    1,
+                    "expect only one table name column index"
+                );
+                DispatcherImpl::CdcTableName(CdcTableNameDispatcher::new(
+                    outputs,
+                    dist_key_indices[0],
+                    output_indices,
+                    dispatcher.dispatcher_id,
+                    dispatcher.downstream_table_name.clone(),
+                ))
+            }
+
             Broadcast => DispatcherImpl::Broadcast(BroadcastDispatcher::new(
                 outputs,
                 output_indices,
@@ -466,7 +492,8 @@ macro_rules! for_all_dispatcher_variants {
             { Hash },
             { Broadcast },
             { Simple },
-            { RoundRobin }
+            { RoundRobin },
+            { CdcTableName }
         }
     };
 }
@@ -802,6 +829,127 @@ impl Dispatcher for BroadcastDispatcher {
     fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
         self.outputs
             .extract_if(|actor_id, _| actor_ids.contains(actor_id))
+            .count();
+    }
+
+    fn dispatcher_id(&self) -> DispatcherId {
+        self.dispatcher_id
+    }
+
+    fn dispatcher_id_str(&self) -> &str {
+        &self.dispatcher_id_str
+    }
+
+    fn is_empty(&self) -> bool {
+        self.outputs.is_empty()
+    }
+}
+
+/// Dispatch stream chunk based on table name from upstream DB
+#[derive(Debug)]
+pub struct CdcTableNameDispatcher {
+    outputs: Vec<BoxedOutput>,
+    // column index to the `_rw_table_name` column
+    table_name_col_index: usize,
+    output_indices: Vec<usize>,
+    dispatcher_id: DispatcherId,
+    dispatcher_id_str: String,
+    downstream_table_name: Option<String>,
+}
+
+impl CdcTableNameDispatcher {
+    pub fn new(
+        outputs: Vec<BoxedOutput>,
+        table_name_col_index: usize,
+        output_indices: Vec<usize>,
+        dispatcher_id: DispatcherId,
+        downstream_table_name: Option<String>,
+    ) -> Self {
+        Self {
+            outputs,
+            table_name_col_index,
+            output_indices,
+            dispatcher_id,
+            dispatcher_id_str: dispatcher_id.to_string(),
+            downstream_table_name,
+        }
+    }
+}
+
+impl Dispatcher for CdcTableNameDispatcher {
+    async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
+        let num_outputs = self.outputs.len();
+
+        let mut vis_maps = repeat_with(|| BitmapBuilder::with_capacity(chunk.capacity()))
+            .take(num_outputs)
+            .collect_vec();
+
+        let chunk = chunk.project(&self.output_indices);
+
+        // TODO: use a more efficient way to filter data, e.g. add a Filter node before Chain
+        for (visible, row) in chunk
+            .visibility()
+            .iter()
+            .zip_eq_fast(chunk.data_chunk().rows_with_holes())
+        {
+            // Build visibility map for every output chunk.
+            for vis_map in &mut vis_maps {
+                let should_emit = if let Some(row) = row && let Some(full_table_name) = self.downstream_table_name.as_ref() {
+                    let table_name_datum = row.datum_at(self.table_name_col_index).unwrap();
+                    tracing::trace!(target: "events::stream::dispatch::hash::cdc", "keys: {:?}, table: {}", self.table_name_col_index, full_table_name);
+                    // dispatch based on downstream table name
+                    table_name_datum == ScalarRefImpl::Utf8(full_table_name)
+                } else {
+                    true
+                };
+                vis_map.append(visible && should_emit);
+            }
+        }
+
+        for (vis_map, output) in vis_maps.into_iter().zip_eq_fast(self.outputs.iter_mut()) {
+            let vis_map = vis_map.finish();
+            let new_stream_chunk =
+                StreamChunk::with_visibility(chunk.ops(), chunk.columns().into(), vis_map);
+            if new_stream_chunk.cardinality() > 0 {
+                event!(
+                    tracing::Level::TRACE,
+                    msg = "chunk",
+                    downstream = output.actor_id(),
+                    "send = \n{:#?}",
+                    new_stream_chunk
+                );
+                output.send(Message::Chunk(new_stream_chunk)).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn dispatch_barrier(&mut self, barrier: Barrier) -> StreamResult<()> {
+        // always broadcast barrier
+        for output in &mut self.outputs {
+            output.send(Message::Barrier(barrier.clone())).await?;
+        }
+        Ok(())
+    }
+
+    async fn dispatch_watermark(&mut self, watermark: Watermark) -> StreamResult<()> {
+        if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
+            // always broadcast watermark
+            for output in &mut self.outputs {
+                output.send(Message::Watermark(watermark.clone())).await?;
+            }
+        }
+        Ok(())
+    }
+
+    fn add_outputs(&mut self, outputs: impl IntoIterator<Item = BoxedOutput>) {
+        self.outputs.extend(outputs);
+    }
+
+    fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
+        self.outputs
+            .extract_if(|output| actor_ids.contains(&output.actor_id()))
             .count();
     }
 

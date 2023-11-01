@@ -344,7 +344,10 @@ impl StageRunner {
             // the task.
             // We schedule the task to the worker node that owns the data partition.
             let parallel_unit_ids = vnode_bitmaps.keys().cloned().collect_vec();
-            let workers = self.worker_node_manager.manager.get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+            let workers = self
+                .worker_node_manager
+                .manager
+                .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
             for (i, (parallel_unit_id, worker)) in parallel_unit_ids
                 .into_iter()
                 .zip_eq_fast(workers.into_iter())

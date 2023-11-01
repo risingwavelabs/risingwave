@@ -16,8 +16,7 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
-use super::generic::{GenericPlanRef, PhysicalPlanRef};
-use super::stream::StreamPlanRef;
+use super::stream::prelude::*;
 use super::utils::{childless_record, plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
@@ -27,7 +26,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// without changing its content.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamExchange {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     input: PlanRef,
     no_shuffle: bool,
 }
@@ -116,6 +115,7 @@ impl StreamNode for StreamExchange {
                     r#type: DispatcherType::NoShuffle as i32,
                     dist_key_indices: vec![],
                     output_indices: (0..self.schema().len() as u32).collect(),
+                    downstream_table_name: None,
                 })
             } else {
                 Some(DispatchStrategy {
@@ -132,6 +132,7 @@ impl StreamNode for StreamExchange {
                         _ => vec![],
                     },
                     output_indices: (0..self.schema().len() as u32).collect(),
+                    downstream_table_name: None,
                 })
             },
         })

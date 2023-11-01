@@ -21,6 +21,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbInequalityPair};
 
 use super::generic::{GenericPlanRef, Join};
+use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
 use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{
@@ -38,7 +39,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// get output rows.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHashJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::Join<PlanRef>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
@@ -160,7 +161,9 @@ impl StreamHashJoin {
                     )
                 };
                 let mut is_valuable_inequality = do_state_cleaning;
-                if let Some(internal) = internal && !watermark_columns.contains(internal) {
+                if let Some(internal) = internal
+                    && !watermark_columns.contains(internal)
+                {
                     watermark_columns.insert(internal);
                     is_valuable_inequality = true;
                 }
