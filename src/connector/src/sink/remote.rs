@@ -57,7 +57,7 @@ use tracing::warn;
 
 use super::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::coordinate::CoordinatedSinkWriter;
-use crate::sink::encoder::TimestampHandlingMode;
+use crate::sink::encoder::{TimestampHandlingMode, TimestamptzHandlingMode};
 use crate::sink::log_store::{LogReader, LogStoreReadItem, TruncateOffset};
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{
@@ -412,7 +412,12 @@ impl<SM, R: RemoteSinkTrait> RemoteSinkWriterInner<SM, R> {
             batch_id: 0,
             stream_handle,
             payload_format: connector_params.sink_payload_format,
-            json_encoder: JsonEncoder::new(schema, None, TimestampHandlingMode::String),
+            json_encoder: JsonEncoder::new(
+                schema,
+                None,
+                TimestampHandlingMode::String,
+                TimestamptzHandlingMode::UtcWithoutSuffix,
+            ),
             sink_metrics,
             _phantom: PhantomData,
         })
@@ -451,7 +456,12 @@ impl<SM, R: RemoteSinkTrait> RemoteSinkWriterInner<SM, R> {
             properties,
             epoch: None,
             batch_id: 0,
-            json_encoder: JsonEncoder::new(schema, None, TimestampHandlingMode::String),
+            json_encoder: JsonEncoder::new(
+                schema,
+                None,
+                TimestampHandlingMode::String,
+                TimestamptzHandlingMode::UtcWithoutSuffix,
+            ),
             stream_handle,
             payload_format: SinkPayloadFormat::Json,
             sink_metrics: SinkMetrics::for_test(),
