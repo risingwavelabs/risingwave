@@ -70,7 +70,7 @@ impl From<Action> for PbAction {
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
-    pub dependent_id: i32,
+    pub dependent_id: Option<i32>,
     pub user_id: UserId,
     pub oid: ObjectId,
     pub granted_by: UserId,

@@ -851,8 +851,6 @@ impl CatalogController {
 #[cfg(test)]
 #[cfg(not(madsim))]
 mod tests {
-    use risingwave_common::catalog::DEFAULT_SUPER_USER_ID;
-
     use super::*;
 
     const TEST_DATABASE_ID: DatabaseId = 1;
@@ -864,7 +862,7 @@ mod tests {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
         let db = PbDatabase {
             name: "test".to_string(),
-            owner: DEFAULT_SUPER_USER_ID,
+            owner: TEST_OWNER_ID,
             ..Default::default()
         };
         mgr.create_database(db).await?;

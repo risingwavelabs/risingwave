@@ -196,11 +196,7 @@ impl MigrationTrait for Migration {
                             .primary_key()
                             .auto_increment(),
                     )
-                    .col(
-                        ColumnDef::new(UserPrivilege::DependentId)
-                            .integer()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(UserPrivilege::DependentId).integer())
                     .col(ColumnDef::new(UserPrivilege::UserId).integer().not_null())
                     .col(ColumnDef::new(UserPrivilege::Oid).integer().not_null())
                     .col(

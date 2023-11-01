@@ -14,7 +14,8 @@
 
 use risingwave_pb::user::PbUserInfo;
 use sea_orm::entity::prelude::*;
-use sea_orm::ActiveValue;
+use sea_orm::ActiveValue::Set;
+use sea_orm::NotSet;
 
 use crate::{AuthInfo, UserId};
 
@@ -48,14 +49,15 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl From<PbUserInfo> for ActiveModel {
     fn from(user: PbUserInfo) -> Self {
+        let user_id = if user.id == 0 { NotSet } else { Set(user.id) };
         Self {
-            user_id: ActiveValue::Set(user.id),
-            name: ActiveValue::Set(user.name),
-            is_super: ActiveValue::Set(user.is_super),
-            can_create_db: ActiveValue::Set(user.can_create_db),
-            can_create_user: ActiveValue::Set(user.can_create_user),
-            can_login: ActiveValue::Set(user.can_login),
-            auth_info: ActiveValue::Set(user.auth_info.map(AuthInfo)),
+            user_id,
+            name: Set(user.name),
+            is_super: Set(user.is_super),
+            can_create_db: Set(user.can_create_db),
+            can_create_user: Set(user.can_create_user),
+            can_login: Set(user.can_login),
+            auth_info: Set(user.auth_info.map(AuthInfo)),
         }
     }
 }

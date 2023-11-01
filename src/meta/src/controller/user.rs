@@ -34,6 +34,7 @@ use crate::controller::catalog::CatalogController;
 use crate::controller::utils::{
     check_user_name_duplicate, ensure_privileges_not_referred, ensure_user_id,
     extract_grant_obj_id, get_referring_privileges_cascade, get_user_privilege,
+    PartialUserPrivilege,
 };
 use crate::manager::NotificationVersion;
 use crate::{MetaError, MetaResult};
@@ -43,8 +44,7 @@ impl CatalogController {
         let inner = self.inner.write().await;
         check_user_name_duplicate(&user.name, &inner.db).await?;
 
-        let mut user: user::ActiveModel = user.into();
-        user.user_id = ActiveValue::NotSet;
+        let user: user::ActiveModel = user.into();
         let user = user.insert(&inner.db).await?;
         let version = self
             .notify_frontend(
@@ -103,6 +103,17 @@ impl CatalogController {
             .one(&inner.db)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("user", id))?;
+        Ok(user)
+    }
+
+    #[cfg(test)]
+    pub async fn get_user_by_name(&self, name: &str) -> MetaResult<user::Model> {
+        let inner = self.inner.read().await;
+        let user = User::find()
+            .filter(user::Column::Name.eq(name))
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("user {name} not found"))?;
         Ok(user)
     }
 
@@ -165,13 +176,13 @@ impl CatalogController {
 
     pub async fn grant_privilege(
         &self,
-        user_ids: &[UserId],
+        user_ids: Vec<UserId>,
         new_grant_privileges: &[PbGrantPrivilege],
         grantor: UserId,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        for user_id in user_ids {
+        for user_id in &user_ids {
             ensure_user_id(*user_id, &txn).await?;
         }
 
@@ -196,13 +207,11 @@ impl CatalogController {
             .ok_or_else(|| MetaError::catalog_id_not_found("user", grantor))?;
         if !user.is_super {
             for privilege in &mut privileges {
-                let mut filter = user_privilege::Column::UserId
+                let filter = user_privilege::Column::UserId
                     .eq(grantor)
                     .and(user_privilege::Column::Oid.eq(*privilege.oid.as_ref()))
-                    .and(user_privilege::Column::Action.eq(privilege.action.as_ref().clone()));
-                if *privilege.with_grant_option.as_ref() {
-                    filter = filter.and(user_privilege::Column::WithGrantOption.eq(true));
-                }
+                    .and(user_privilege::Column::Action.eq(privilege.action.as_ref().clone()))
+                    .and(user_privilege::Column::WithGrantOption.eq(true));
                 let privilege_id: Option<i32> = UserPrivilege::find()
                     .select_only()
                     .column(user_privilege::Column::Id)
@@ -216,7 +225,7 @@ impl CatalogController {
                         grantor, privilege.action,
                     )));
                 };
-                privilege.dependent_id = ActiveValue::Set(privilege_id);
+                privilege.dependent_id = ActiveValue::Set(Some(privilege_id));
             }
         }
 
@@ -248,17 +257,16 @@ impl CatalogController {
 
         let mut user_infos = vec![];
         for user_id in user_ids {
-            let user = User::find_by_id(*user_id)
+            let user = User::find_by_id(user_id)
                 .one(&txn)
                 .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("user", *user_id))?;
+                .ok_or_else(|| MetaError::catalog_id_not_found("user", user_id))?;
             let mut user_info: PbUserInfo = user.into();
             user_info.grant_privileges = get_user_privilege(user_info.id, &txn).await?;
             user_infos.push(user_info);
         }
         txn.commit().await?;
 
-        // todo: change to only notify privilege change.
         let mut version = 0;
         for info in user_infos {
             version = self
@@ -272,7 +280,7 @@ impl CatalogController {
         &self,
         user_ids: Vec<UserId>,
         revoke_grant_privileges: &[PbGrantPrivilege],
-        granted_by: UserId,
+        granted_by: Option<UserId>,
         revoke_by: UserId,
         revoke_grant_option: bool,
         cascade: bool,
@@ -288,6 +296,22 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("user", revoke_by))?;
 
+        let granted_by = granted_by.unwrap_or(revoke_by);
+        // check whether user can revoke the privilege.
+        if !revoke_user.is_super && granted_by != revoke_by {
+            let granted_user_name: String = User::find_by_id(granted_by)
+                .select_only()
+                .column(user::Column::Name)
+                .into_tuple()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("user", granted_by))?;
+            return Err(MetaError::permission_denied(format!(
+                "user {} is not super, can't revoke privileges for {}",
+                revoke_user.name, granted_user_name
+            )));
+        }
+
         let mut revoke_items = HashMap::new();
         for privilege in revoke_grant_privileges {
             let obj = extract_grant_obj_id(privilege.get_object()?);
@@ -300,13 +324,6 @@ impl CatalogController {
         }
 
         let filter = if !revoke_user.is_super {
-            // todo: do not request meta if granted by is not specified and revoke user is not super.
-            if granted_by != revoke_by {
-                return Err(MetaError::permission_denied(format!(
-                    "user {} is not super, can't revoke privileges for {}",
-                    revoke_user.name, granted_by,
-                )));
-            };
             // ensure user have grant options.
             for (obj, actions) in &revoke_items {
                 let owned_actions: HashSet<Action> = UserPrivilege::find()
@@ -337,39 +354,44 @@ impl CatalogController {
         } else {
             user_privilege::Column::UserId.is_in(user_ids.clone())
         };
-        let mut root_privilege_ids: Vec<i32> = vec![];
+        let mut root_user_privileges: Vec<PartialUserPrivilege> = vec![];
         for (obj, actions) in &revoke_items {
             let filter = filter
                 .clone()
                 .and(user_privilege::Column::Oid.eq(*obj))
                 .and(user_privilege::Column::Action.is_in(actions.clone()));
-            root_privilege_ids.extend(
+            root_user_privileges.extend(
                 UserPrivilege::find()
                     .select_only()
-                    .column(user_privilege::Column::Id)
+                    .columns([user_privilege::Column::Id, user_privilege::Column::UserId])
                     .filter(filter)
-                    .into_tuple::<i32>()
+                    .into_partial_model()
                     .all(&txn)
                     .await?,
             );
         }
+        if root_user_privileges.is_empty() {
+            return Err(MetaError::invalid_parameter(
+                "no privilege to revoke".to_string(),
+            ));
+        }
 
         // check if the user granted any privileges to other users.
-        let all_privilege_ids = if !cascade {
+        let root_privilege_ids = root_user_privileges.iter().map(|ur| ur.id).collect_vec();
+        let (all_privilege_ids, to_update_user_ids): (_, HashSet<UserId>) = if !cascade {
             ensure_privileges_not_referred(root_privilege_ids.clone(), &txn).await?;
-            root_privilege_ids.clone()
+            (
+                root_privilege_ids.clone(),
+                root_user_privileges.iter().map(|ur| ur.user_id).collect(),
+            )
         } else {
-            get_referring_privileges_cascade(root_privilege_ids.clone(), &txn).await?
+            let all_user_privileges =
+                get_referring_privileges_cascade(root_privilege_ids.clone(), &txn).await?;
+            (
+                all_user_privileges.iter().map(|ur| ur.id).collect_vec(),
+                all_user_privileges.iter().map(|ur| ur.user_id).collect(),
+            )
         };
-
-        // todo: return them in cte.
-        let to_update_users = UserPrivilege::find()
-            .select_only()
-            .column(user_privilege::Column::UserId)
-            .filter(user_privilege::Column::Id.is_in(all_privilege_ids.clone()))
-            .into_tuple::<UserId>()
-            .all(&txn)
-            .await?;
 
         if revoke_grant_option {
             UserPrivilege::update_many()
@@ -393,7 +415,7 @@ impl CatalogController {
         }
 
         let mut user_infos = vec![];
-        for user_id in to_update_users {
+        for user_id in to_update_user_ids {
             let user = User::find_by_id(user_id)
                 .one(&txn)
                 .await?
@@ -404,7 +426,6 @@ impl CatalogController {
         }
         txn.commit().await?;
 
-        // todo: change to only notify privilege change.
         let mut version = 0;
         for info in user_infos {
             version = self
@@ -412,5 +433,217 @@ impl CatalogController {
                 .await;
         }
         Ok(version)
+    }
+}
+
+#[cfg(test)]
+#[cfg(not(madsim))]
+mod tests {
+    use risingwave_meta_model_v2::DatabaseId;
+    use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
+
+    use super::*;
+    use crate::manager::MetaSrvEnv;
+
+    const TEST_DATABASE_ID: DatabaseId = 1;
+    const TEST_ROOT_USER_ID: UserId = 1;
+
+    fn make_test_user(name: &str) -> PbUserInfo {
+        PbUserInfo {
+            name: name.to_string(),
+            ..Default::default()
+        }
+    }
+
+    fn make_privilege(
+        object: PbObject,
+        actions: &[PbAction],
+        with_grant_option: bool,
+    ) -> PbGrantPrivilege {
+        PbGrantPrivilege {
+            object: Some(object),
+            action_with_opts: actions
+                .iter()
+                .map(|&action| PbActionWithGrantOption {
+                    action: action as _,
+                    with_grant_option,
+                    ..Default::default()
+                })
+                .collect(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_user_and_privilege() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        mgr.create_user(make_test_user("test_user_1")).await?;
+        mgr.create_user(make_test_user("test_user_2")).await?;
+        let user_1 = mgr.get_user_by_name("test_user_1").await?;
+        let user_2 = mgr.get_user_by_name("test_user_2").await?;
+
+        let conn_with_option = make_privilege(
+            PbObject::DatabaseId(TEST_DATABASE_ID),
+            &[PbAction::Connect],
+            true,
+        );
+        let create_without_option = make_privilege(
+            PbObject::DatabaseId(TEST_DATABASE_ID),
+            &[PbAction::Create],
+            false,
+        );
+        // ROOT grant CONN with grant option to user_1.
+        mgr.grant_privilege(
+            vec![user_1.user_id],
+            &[conn_with_option.clone()],
+            TEST_ROOT_USER_ID,
+        )
+        .await?;
+        // ROOT grant CREATE without grant option to user_1.
+        mgr.grant_privilege(
+            vec![user_1.user_id],
+            &[create_without_option.clone()],
+            TEST_ROOT_USER_ID,
+        )
+        .await?;
+        // user_1 grant CONN with grant option to user_2.
+        mgr.grant_privilege(
+            vec![user_2.user_id],
+            &[conn_with_option.clone()],
+            user_1.user_id,
+        )
+        .await?;
+        // user_1 grant CREATE without grant option to user_2.
+        assert!(
+            mgr.grant_privilege(
+                vec![user_2.user_id],
+                &[create_without_option.clone()],
+                user_1.user_id
+            )
+            .await
+            .is_err(),
+            "user_1 don't have grant option"
+        );
+
+        assert!(
+            mgr.drop_user(user_1.user_id).await.is_err(),
+            "user_1 can't be dropped"
+        );
+
+        let privilege_1 = get_user_privilege(user_1.user_id, &mgr.inner.read().await.db).await?;
+        assert_eq!(privilege_1.len(), 2);
+        assert!(privilege_1.iter().all(|gp| gp.object
+            == Some(PbObject::DatabaseId(TEST_DATABASE_ID))
+            && gp.action_with_opts[0].granted_by == TEST_ROOT_USER_ID));
+
+        let privilege_2 = get_user_privilege(user_2.user_id, &mgr.inner.read().await.db).await?;
+        assert_eq!(privilege_2.len(), 1);
+        assert!(privilege_2.iter().all(|gp| gp.object
+            == Some(PbObject::DatabaseId(TEST_DATABASE_ID))
+            && gp.action_with_opts[0].granted_by == user_1.user_id
+            && gp.action_with_opts[0].with_grant_option));
+
+        // revoke privilege for others by non-super user.
+        assert!(
+            mgr.revoke_privilege(
+                vec![user_1.user_id],
+                &[conn_with_option.clone()],
+                Some(TEST_ROOT_USER_ID),
+                user_2.user_id,
+                false,
+                false
+            )
+            .await
+            .is_err(),
+            "user_2 can't revoke for user_1"
+        );
+
+        // revoke privilege without grant option.
+        assert!(
+            mgr.revoke_privilege(
+                vec![user_2.user_id],
+                &[create_without_option.clone()],
+                None,
+                user_1.user_id,
+                false,
+                false
+            )
+            .await
+            .is_err(),
+            "user_2 don't have grant option for CREATE"
+        );
+
+        // revoke referred privilege in restrict mode.
+        assert!(
+            mgr.revoke_privilege(
+                vec![user_1.user_id],
+                &[conn_with_option.clone()],
+                None,
+                TEST_ROOT_USER_ID,
+                false,
+                false
+            )
+            .await
+            .is_err(),
+            "permission deny in restrict mode, CONN granted to user_2"
+        );
+
+        // revoke non-referred privilege in restrict mode.
+        mgr.revoke_privilege(
+            vec![user_1.user_id],
+            &[create_without_option.clone()],
+            None,
+            TEST_ROOT_USER_ID,
+            false,
+            false,
+        )
+        .await?;
+
+        let privilege_1 = get_user_privilege(user_1.user_id, &mgr.inner.read().await.db).await?;
+        assert_eq!(privilege_1.len(), 1);
+        assert!(privilege_1.iter().all(|gp| gp.object
+            == Some(PbObject::DatabaseId(TEST_DATABASE_ID))
+            && gp.action_with_opts[0].action == PbAction::Connect as i32));
+
+        // revoke grant option for referred privilege in cascade mode.
+        mgr.revoke_privilege(
+            vec![user_1.user_id],
+            &[conn_with_option.clone()],
+            None,
+            TEST_ROOT_USER_ID,
+            true,
+            true,
+        )
+        .await?;
+        let privilege_1 = get_user_privilege(user_1.user_id, &mgr.inner.read().await.db).await?;
+        assert_eq!(privilege_1.len(), 1);
+        assert!(privilege_1.iter().all(|gp| gp.object
+            == Some(PbObject::DatabaseId(TEST_DATABASE_ID))
+            && gp.action_with_opts[0].action == PbAction::Connect as i32
+            && !gp.action_with_opts[0].with_grant_option));
+        let privilege_2 = get_user_privilege(user_2.user_id, &mgr.inner.read().await.db).await?;
+        assert_eq!(privilege_2.len(), 1);
+        assert!(privilege_2.iter().all(|gp| gp.object
+            == Some(PbObject::DatabaseId(TEST_DATABASE_ID))
+            && gp.action_with_opts[0].action == PbAction::Connect as i32
+            && !gp.action_with_opts[0].with_grant_option));
+
+        // revoke referred privilege in cascade mode.
+        mgr.revoke_privilege(
+            vec![user_1.user_id],
+            &[conn_with_option.clone()],
+            None,
+            TEST_ROOT_USER_ID,
+            false,
+            true,
+        )
+        .await?;
+        let privilege_1 = get_user_privilege(user_1.user_id, &mgr.inner.read().await.db).await?;
+        assert!(privilege_1.is_empty());
+        let privilege_2 = get_user_privilege(user_2.user_id, &mgr.inner.read().await.db).await?;
+        assert!(privilege_2.is_empty());
+
+        mgr.drop_user(user_1.user_id).await?;
+        mgr.drop_user(user_2.user_id).await?;
+        Ok(())
     }
 }

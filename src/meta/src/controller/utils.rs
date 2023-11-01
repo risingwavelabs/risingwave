@@ -386,45 +386,52 @@ where
 ///
 /// assert_eq!(
 ///    query.to_string(MysqlQueryBuilder),
-///   r#"WITH RECURSIVE `granted_privilege_ids` (`privilege_id`) AS (SELECT `id` FROM `user_privilege` WHERE `user_privilege`.`id` IN (1, 2, 3) UNION ALL (SELECT `user_privilege`.`id` FROM `user_privilege` INNER JOIN `granted_privilege_ids` ON `granted_privilege_ids`.`privilege_id` = `dependent_id`)) SELECT `privilege_id` FROM `granted_privilege_ids`"#
+///   r#"WITH RECURSIVE `granted_privilege_ids` (`id`, `user_id`) AS (SELECT `id`, `user_id` FROM `user_privilege` WHERE `user_privilege`.`id` IN (1, 2, 3) UNION ALL (SELECT `user_privilege`.`id`, `user_privilege`.`user_id` FROM `user_privilege` INNER JOIN `granted_privilege_ids` ON `granted_privilege_ids`.`id` = `dependent_id`)) SELECT `id`, `user_id` FROM `granted_privilege_ids`"#
 /// );
 /// assert_eq!(
 ///   query.to_string(PostgresQueryBuilder),
-///  r#"WITH RECURSIVE "granted_privilege_ids" ("privilege_id") AS (SELECT "id" FROM "user_privilege" WHERE "user_privilege"."id" IN (1, 2, 3) UNION ALL (SELECT "user_privilege"."id" FROM "user_privilege" INNER JOIN "granted_privilege_ids" ON "granted_privilege_ids"."privilege_id" = "dependent_id")) SELECT "privilege_id" FROM "granted_privilege_ids""#
+///  r#"WITH RECURSIVE "granted_privilege_ids" ("id", "user_id") AS (SELECT "id", "user_id" FROM "user_privilege" WHERE "user_privilege"."id" IN (1, 2, 3) UNION ALL (SELECT "user_privilege"."id", "user_privilege"."user_id" FROM "user_privilege" INNER JOIN "granted_privilege_ids" ON "granted_privilege_ids"."id" = "dependent_id")) SELECT "id", "user_id" FROM "granted_privilege_ids""#
 /// );
 /// assert_eq!(
 ///  query.to_string(SqliteQueryBuilder),
-/// r#"WITH RECURSIVE "granted_privilege_ids" ("privilege_id") AS (SELECT "id" FROM "user_privilege" WHERE "user_privilege"."id" IN (1, 2, 3) UNION ALL SELECT "user_privilege"."id" FROM "user_privilege" INNER JOIN "granted_privilege_ids" ON "granted_privilege_ids"."privilege_id" = "dependent_id") SELECT "privilege_id" FROM "granted_privilege_ids""#
+///  r#"WITH RECURSIVE "granted_privilege_ids" ("id", "user_id") AS (SELECT "id", "user_id" FROM "user_privilege" WHERE "user_privilege"."id" IN (1, 2, 3) UNION ALL SELECT "user_privilege"."id", "user_privilege"."user_id" FROM "user_privilege" INNER JOIN "granted_privilege_ids" ON "granted_privilege_ids"."id" = "dependent_id") SELECT "id", "user_id" FROM "granted_privilege_ids""#
 /// );
 /// ```
 pub fn construct_privilege_dependency_query(ids: Vec<i32>) -> WithQuery {
     let cte_alias = Alias::new("granted_privilege_ids");
-    let cte_return_alias = Alias::new("privilege_id");
+    let cte_return_privilege_alias = Alias::new("id");
+    let cte_return_user_alias = Alias::new("user_id");
 
     let mut base_query = SelectStatement::new()
-        .column(user_privilege::Column::Id)
+        .columns([user_privilege::Column::Id, user_privilege::Column::UserId])
         .from(UserPrivilege)
         .and_where(user_privilege::Column::Id.is_in(ids))
         .to_owned();
 
     let cte_referencing = Query::select()
-        .column((UserPrivilege, user_privilege::Column::Id))
+        .columns([
+            (UserPrivilege, user_privilege::Column::Id),
+            (UserPrivilege, user_privilege::Column::UserId),
+        ])
         .from(UserPrivilege)
         .inner_join(
             cte_alias.clone(),
-            Expr::col((cte_alias.clone(), cte_return_alias.clone()))
+            Expr::col((cte_alias.clone(), cte_return_privilege_alias.clone()))
                 .equals(user_privilege::Column::DependentId),
         )
         .to_owned();
 
     let common_table_expr = CommonTableExpression::new()
         .query(base_query.union(UnionType::All, cte_referencing).to_owned())
-        .column(cte_return_alias.clone())
+        .columns([
+            cte_return_privilege_alias.clone(),
+            cte_return_user_alias.clone(),
+        ])
         .table_name(cte_alias.clone())
         .to_owned();
 
     SelectStatement::new()
-        .column(cte_return_alias)
+        .columns([cte_return_privilege_alias, cte_return_user_alias])
         .from(cte_alias.clone())
         .to_owned()
         .with(
@@ -436,25 +443,31 @@ pub fn construct_privilege_dependency_query(ids: Vec<i32>) -> WithQuery {
         .to_owned()
 }
 
-pub async fn get_referring_privileges_cascade<C>(ids: Vec<i32>, db: &C) -> MetaResult<Vec<i32>>
+#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[sea_orm(entity = "UserPrivilege")]
+pub struct PartialUserPrivilege {
+    pub id: i32,
+    pub user_id: UserId,
+}
+
+pub async fn get_referring_privileges_cascade<C>(
+    ids: Vec<i32>,
+    db: &C,
+) -> MetaResult<Vec<PartialUserPrivilege>>
 where
     C: ConnectionTrait,
 {
     let query = construct_privilege_dependency_query(ids);
     let (sql, values) = query.build_any(&*db.get_database_backend().get_query_builder());
-    let res = db
-        .query_all(Statement::from_sql_and_values(
-            db.get_database_backend(),
-            sql,
-            values,
-        ))
-        .await?;
-    let ids = res
-        .into_iter()
-        .map(|row| row.try_get_by::<i32, usize>(0).unwrap())
-        .collect();
+    let privileges = PartialUserPrivilege::find_by_statement(Statement::from_sql_and_values(
+        db.get_database_backend(),
+        sql,
+        values,
+    ))
+    .all(db)
+    .await?;
 
-    Ok(ids)
+    Ok(privileges)
 }
 
 /// `ensure_privileges_not_referred` ensures that the privileges are not granted to any other users.
@@ -468,7 +481,7 @@ where
         .await?;
     if count != 0 {
         return Err(MetaError::permission_denied(format!(
-            "privileges used by {} other objects.",
+            "privileges granted to {} other ones.",
             count
         )));
     }
