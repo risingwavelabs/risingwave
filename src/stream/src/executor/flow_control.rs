@@ -54,10 +54,12 @@ impl FlowControlExecutor {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
+                    let Some(n) = NonZeroU32::new(chunk.cardinality() as u32) else {
+                        // Handle case where chunk is empty
+                        continue;
+                    };
                     if let Some(rate_limiter) = &rate_limiter {
-                        let result = rate_limiter
-                            .until_n_ready(NonZeroU32::new(chunk.cardinality() as u32).unwrap())
-                            .await;
+                        let result = rate_limiter.until_n_ready(n).await;
                         if let Err(InsufficientCapacity(n)) = result {
                             tracing::error!(
                                 "Rate Limit {:?} smaller than chunk cardinality {n}",
