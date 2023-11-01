@@ -97,16 +97,16 @@ restart_cn() {
 test_snapshot_and_upstream_read() {
   echo "--- e2e, ci-backfill, test_snapshot_and_upstream_read"
   cargo make ci-start ci-backfill
-  run_sql_file "$PARENT_PATH"/sql/backfill/create_base_table.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_base_table.sql
 
   # Provide snapshot
-  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert.sql
 
   # Provide updates ...
-  run_sql_file "$PARENT_PATH"/sql/backfill/insert.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert.sql &
 
   # ... and concurrently create mv.
-  run_sql_file "$PARENT_PATH"/sql/backfill/create_mv.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_mv.sql &
 
   wait
 
