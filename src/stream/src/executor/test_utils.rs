@@ -70,6 +70,10 @@ impl MessageSender {
         self.0.send(Message::Barrier(barrier)).unwrap();
     }
 
+    pub fn send_barrier(&self, barrier: Barrier) {
+        self.0.send(Message::Barrier(barrier)).unwrap();
+    }
+
     #[allow(dead_code)]
     pub fn push_barrier_with_prev_epoch_for_test(
         &mut self,

@@ -668,6 +668,7 @@ impl CommandContext {
             }
 
             Command::CancelStreamingJob(table_fragments) => {
+                tracing::debug!(id = ?table_fragments.table_id(), "cancelling stream job");
                 let node_actors = table_fragments.worker_actor_ids();
                 self.clean_up(node_actors).await?;
 

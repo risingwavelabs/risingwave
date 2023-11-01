@@ -12,25 +12,51 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use sea_orm::entity::prelude::*;
 
-use crate::I32Array;
+use crate::{FragmentId, FragmentVnodeMapping, StreamNode, TableId, U32Array};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "fragment")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub fragment_id: i32,
-    pub table_id: i32,
-    pub fragment_type_mask: i32,
-    pub distribution_type: String,
-    pub stream_node: Json,
-    pub vnode_mapping: Option<Json>,
-    pub state_table_ids: Option<I32Array>,
-    pub upstream_fragment_id: Option<I32Array>,
-    pub dispatcher_type: Option<String>,
-    pub dist_key_indices: Option<I32Array>,
-    pub output_indices: Option<I32Array>,
+    pub fragment_id: FragmentId,
+    pub table_id: TableId,
+    pub fragment_type_mask: u32,
+    pub distribution_type: DistributionType,
+    pub stream_node: StreamNode,
+    pub vnode_mapping: Option<FragmentVnodeMapping>,
+    pub state_table_ids: U32Array,
+    pub upstream_fragment_id: U32Array,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "String(None)")]
+pub enum DistributionType {
+    #[sea_orm(string_value = "SINGLE")]
+    Single,
+    #[sea_orm(string_value = "HASH")]
+    Hash,
+}
+
+impl From<DistributionType> for PbFragmentDistributionType {
+    fn from(val: DistributionType) -> Self {
+        match val {
+            DistributionType::Single => PbFragmentDistributionType::Single,
+            DistributionType::Hash => PbFragmentDistributionType::Hash,
+        }
+    }
+}
+
+impl From<PbFragmentDistributionType> for DistributionType {
+    fn from(val: PbFragmentDistributionType) -> Self {
+        match val {
+            PbFragmentDistributionType::Unspecified => unreachable!(),
+            PbFragmentDistributionType::Single => DistributionType::Single,
+            PbFragmentDistributionType::Hash => DistributionType::Hash,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

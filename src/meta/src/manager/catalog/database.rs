@@ -345,6 +345,17 @@ impl DatabaseManager {
             .copied()
             .chain(self.sinks.keys().copied())
             .chain(self.indexes.keys().copied())
+            .chain(self.sources.keys().copied())
+            .chain(
+                // filter cdc source jobs
+                self.sources
+                    .iter()
+                    .filter(|(_, source)| {
+                        source.info.as_ref().is_some_and(|info| info.cdc_source_job)
+                    })
+                    .map(|(id, _)| id)
+                    .copied(),
+            )
     }
 
     pub fn check_database_duplicated(&self, database_key: &DatabaseKey) -> MetaResult<()> {

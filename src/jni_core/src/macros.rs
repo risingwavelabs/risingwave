@@ -18,20 +18,20 @@ macro_rules! gen_class_name {
         stringify! {$last}
     };
     ($first:ident . $($rest:ident).+) => {
-        concat! {stringify! {$first}, "/", gen_class_name! {$($rest).+} }
+        concat! {stringify! {$first}, "/", $crate::gen_class_name! {$($rest).+} }
     }
 }
 
 #[macro_export]
 macro_rules! gen_jni_sig_inner {
     ($(public)? static native $($rest:tt)*) => {
-        gen_jni_sig_inner! { $($rest)* }
+        $crate::gen_jni_sig_inner! { $($rest)* }
     };
     ($($ret:ident).+  $($func_name:ident)? ($($args:tt)*)) => {
-        concat! {"(", gen_jni_sig_inner!{$($args)*}, ")", gen_jni_sig_inner! {$($ret).+} }
+        concat! {"(", $crate::gen_jni_sig_inner!{$($args)*}, ")", $crate::gen_jni_sig_inner! {$($ret).+} }
     };
     ($($ret:ident).+ []  $($func_name:ident)? ($($args:tt)*)) => {
-        concat! {"(", gen_jni_sig_inner!{$($args)*}, ")", gen_jni_sig_inner! {$($ret).+ []} }
+        concat! {"(", $crate::gen_jni_sig_inner!{$($args)*}, ")", $crate::gen_jni_sig_inner! {$($ret).+ []} }
     };
     (boolean) => {
         "Z"
@@ -61,25 +61,25 @@ macro_rules! gen_jni_sig_inner {
         "V"
     };
     (String) => {
-        gen_jni_sig_inner! { java.lang.String }
+        $crate::gen_jni_sig_inner! { java.lang.String }
     };
     (Object) => {
-        gen_jni_sig_inner! { java.lang.Object }
+        $crate::gen_jni_sig_inner! { java.lang.Object }
     };
     (Class) => {
-        gen_jni_sig_inner! { java.lang.Class }
+        $crate::gen_jni_sig_inner! { java.lang.Class }
     };
     ($($class_part:ident).+) => {
-        concat! {"L", gen_class_name! {$($class_part).+}, ";"}
+        concat! {"L", $crate::gen_class_name! {$($class_part).+}, ";"}
     };
     ($($class_part:ident).+ $(.)? [] $($param_name:ident)? $(,$($rest:tt)*)?) => {
-        concat! { "[", gen_jni_sig_inner! {$($class_part).+}, gen_jni_sig_inner! {$($($rest)*)?}}
+        concat! { "[", $crate::gen_jni_sig_inner! {$($class_part).+}, $crate::gen_jni_sig_inner! {$($($rest)*)?}}
     };
     (Class $(< ? >)? $($param_name:ident)? $(,$($rest:tt)*)?) => {
-        concat! { gen_jni_sig_inner! { Class }, gen_jni_sig_inner! {$($($rest)*)?}}
+        concat! { $crate::gen_jni_sig_inner! { Class }, $crate::gen_jni_sig_inner! {$($($rest)*)?}}
     };
     ($($class_part:ident).+ $($param_name:ident)? $(,$($rest:tt)*)?) => {
-        concat! { gen_jni_sig_inner! {$($class_part).+}, gen_jni_sig_inner! {$($($rest)*)?}}
+        concat! { $crate::gen_jni_sig_inner! {$($class_part).+}, $crate::gen_jni_sig_inner! {$($($rest)*)?}}
     };
     () => {
         ""
@@ -93,7 +93,7 @@ macro_rules! gen_jni_sig_inner {
 macro_rules! gen_jni_sig {
     ($($input:tt)*) => {{
         // this macro only provide with a expression context
-        gen_jni_sig_inner! {$($input)*}
+        $crate::gen_jni_sig_inner! {$($input)*}
     }}
 }
 
@@ -158,6 +158,8 @@ macro_rules! for_all_plain_native_methods {
                 public static native byte[] recvSinkWriterRequestFromChannel(long channelPtr);
 
                 public static native boolean sendSinkWriterResponseToChannel(long channelPtr, byte[] msg);
+
+                public static native boolean sendSinkWriterErrorToChannel(long channelPtr, String msg);
 
                 public static native byte[] recvSinkCoordinatorRequestFromChannel(long channelPtr);
 

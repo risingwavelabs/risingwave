@@ -304,6 +304,15 @@ impl TableFragments {
             .cloned()
     }
 
+    pub fn source_fragment(&self) -> Option<Fragment> {
+        self.fragments
+            .values()
+            .find(|fragment| {
+                (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0
+            })
+            .cloned()
+    }
+
     /// Returns actors that contains Chain node.
     pub fn chain_actor_ids(&self) -> HashSet<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
