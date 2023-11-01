@@ -453,6 +453,7 @@ pub(crate) mod tests {
     use crate::catalog::root_catalog::Catalog;
     use crate::catalog::table_catalog::TableType;
     use crate::expr::InputRef;
+    use crate::optimizer::plan_node::generic::ScanTableType;
     use crate::optimizer::plan_node::{
         generic, BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalScan, ToBatch,
     };
@@ -566,6 +567,7 @@ pub(crate) mod tests {
         };
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
+            ScanTableType::default(),
             Rc::new(TableDesc {
                 table_id,
                 stream_key: vec![],

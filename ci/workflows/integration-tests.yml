@@ -29,7 +29,8 @@ steps:
           - "postgres-cdc"
           - "mysql-sink"
           - "postgres-sink"
-          - "iceberg-sink"
+          - "iceberg-cdc"
+          # - "iceberg-sink"
           - "debezium-mysql"
         format:
           - "json"
@@ -75,8 +76,12 @@ steps:
             testcase: "postgres-sink"
             format: "protobuf"
           skip: true
+        # - with:
+        #    testcase: "iceberg-sink"
+        #    format: "protobuf"
+        #  skip: true
         - with:
-            testcase: "iceberg-sink"
+            testcase: "iceberg-cdc"
             format: "protobuf"
           skip: true
         - with:

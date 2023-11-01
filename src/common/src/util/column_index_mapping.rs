@@ -32,19 +32,9 @@ pub struct ColIndexMapping {
 }
 
 impl ColIndexMapping {
-    /// Create a partial mapping which maps the subscripts range `(0..map.len())` to the
-    /// corresponding element. **This method is not recommended**, please use `with_target_size` instead, see <https://github.com/risingwavelabs/risingwave/issues/7234> for more information**
-    pub fn without_target_size(map: Vec<Option<usize>>) -> Self {
-        let target_size = match map.iter().filter_map(|x| *x).max_by_key(|x| *x) {
-            Some(target_max) => target_max + 1,
-            None => 0,
-        };
-        Self { target_size, map }
-    }
-
     /// Create a partial mapping which maps from the subscripts range `(0..map.len())` to
     /// `(0..target_size)`. Each subscript is mapped to the corresponding element.
-    pub fn with_target_size(map: Vec<Option<usize>>, target_size: usize) -> Self {
+    pub fn new(map: Vec<Option<usize>>, target_size: usize) -> Self {
         if let Some(target_max) = map.iter().filter_map(|x| *x).max_by_key(|x| *x) {
             assert!(target_max < target_size)
         };
@@ -69,7 +59,7 @@ impl ColIndexMapping {
 
     pub fn identity(size: usize) -> Self {
         let map = (0..size).map(Some).collect();
-        Self::without_target_size(map)
+        Self::new(map, size)
     }
 
     pub fn is_identity(&self) -> bool {
@@ -77,8 +67,10 @@ impl ColIndexMapping {
             return false;
         }
         for (src, tar) in self.map.iter().enumerate() {
-            if let Some(tar_value) = tar && src == *tar_value {
-                continue
+            if let Some(tar_value) = tar
+                && src == *tar_value
+            {
+                continue;
             } else {
                 return false;
             }
@@ -90,12 +82,12 @@ impl ColIndexMapping {
         let map = (0..source_size)
             .map(|i| if i < target_size { Some(i) } else { None })
             .collect();
-        Self::with_target_size(map, target_size)
+        Self::new(map, target_size)
     }
 
     pub fn empty(source_size: usize, target_size: usize) -> Self {
         let map = vec![None; source_size];
-        Self::with_target_size(map, target_size)
+        Self::new(map, target_size)
     }
 
     /// Create a partial mapping which maps range `(0..source_num)` to range
@@ -134,7 +126,7 @@ impl ColIndexMapping {
             })
             .collect_vec();
         let target_size = usize::try_from(source_num as isize + offset).unwrap();
-        Self::with_target_size(map, target_size)
+        Self::new(map, target_size)
     }
 
     /// Maps the smallest index to 0, the next smallest to 1, and so on.
@@ -159,7 +151,7 @@ impl ColIndexMapping {
         for (tar, &src) in cols.iter().enumerate() {
             map[src] = Some(tar);
         }
-        Self::without_target_size(map)
+        Self::new(map, cols.len())
     }
 
     // TODO(yuchao): isn't this the same as `with_remaining_columns`?
@@ -170,7 +162,7 @@ impl ColIndexMapping {
                 map[src] = Some(tar);
             }
         }
-        Self::without_target_size(map)
+        Self::new(map, cols.len())
     }
 
     /// Remove the given columns, and maps the remaining columns to a consecutive range starting
@@ -205,7 +197,7 @@ impl ColIndexMapping {
         for target in &mut map {
             *target = target.and_then(|index| following.try_map(index));
         }
-        Self::with_target_size(map, following.target_size())
+        Self::new(map, following.target_size())
     }
 
     pub fn clone_with_offset(&self, offset: usize) -> Self {
@@ -213,7 +205,7 @@ impl ColIndexMapping {
         for target in &mut map {
             *target = target.and_then(|index| index.checked_add(offset));
         }
-        Self::with_target_size(map, self.target_size() + offset)
+        Self::new(map, self.target_size() + offset)
     }
 
     /// Union two mapping, the result mapping `target_size` and source size will be the max size
@@ -236,7 +228,7 @@ impl ColIndexMapping {
             assert_eq!(map[src], None);
             map[src] = Some(dst);
         }
-        Self::with_target_size(map, target_size)
+        Self::new(map, target_size)
     }
 
     /// Inverse the mapping. If a target corresponds to more than one source, return `None`.
@@ -249,7 +241,7 @@ impl ColIndexMapping {
             }
             map[dst] = Some(src);
         }
-        Some(Self::with_target_size(map, self.source_size()))
+        Some(Self::new(map, self.source_size()))
     }
 
     /// return iter of (src, dst) order by src
@@ -343,6 +335,7 @@ impl ColIndexMapping {
             r#type: strategy.r#type,
             dist_key_indices: map(&strategy.dist_key_indices)?,
             output_indices: map(&strategy.output_indices)?,
+            downstream_table_name: strategy.downstream_table_name.clone(),
         })
     }
 }

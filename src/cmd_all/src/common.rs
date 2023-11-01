@@ -22,8 +22,8 @@ pub enum RisingWaveService {
     Compute(Vec<OsString>),
     Meta(Vec<OsString>),
     Frontend(Vec<OsString>),
+    #[allow(dead_code)]
     Compactor(Vec<OsString>),
-    ConnectorNode(Vec<OsString>),
 }
 
 impl RisingWaveService {
@@ -33,10 +33,7 @@ impl RisingWaveService {
             RisingWaveService::Compute(args0)
             | RisingWaveService::Meta(args0)
             | RisingWaveService::Frontend(args0)
-            | RisingWaveService::Compactor(args0)
-            | RisingWaveService::ConnectorNode(args0) => {
-                args0.extend(args.iter().map(|s| s.into()))
-            }
+            | RisingWaveService::Compactor(args0) => args0.extend(args.iter().map(|s| s.into())),
         }
     }
 }

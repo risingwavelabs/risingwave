@@ -26,7 +26,6 @@ use risingwave_common::config::{
     load_config, AsyncStackTraceOption, MetricLevel, StorageMemoryConfig,
     MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE,
 };
-use risingwave_common::heap_profiling::HeapProfiler;
 use risingwave_common::monitor::connection::{RouterExt, TcpConfig};
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
@@ -34,6 +33,7 @@ use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::pretty_bytes::convert;
 use risingwave_common::{GIT_SHA, RW_VERSION};
+use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::tracing::TracingExtractLayer;

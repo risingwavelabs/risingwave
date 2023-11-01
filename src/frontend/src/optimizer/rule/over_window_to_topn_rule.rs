@@ -18,6 +18,7 @@ use risingwave_expr::window_function::WindowFuncKind;
 
 use super::Rule;
 use crate::expr::{collect_input_refs, ExprImpl, ExprType};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalTopN, PlanTreeNodeUnary};
 use crate::optimizer::property::Order;
 use crate::planner::LIMIT_ALL_COUNT;
@@ -160,7 +161,9 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
             assert_eq!(input_ref.index, window_func_pos);
             let v = v.cast_implicit(DataType::Int64).ok()?.fold_const().ok()??;
             let v = *v.as_int64();
-            if let Some(eq) = eq && eq != v {
+            if let Some(eq) = eq
+                && eq != v
+            {
                 tracing::warn!(
                     "Failed to optimize rank predicate with conflicting equal conditions."
                 );

@@ -17,13 +17,15 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, INITIAL_TABLE_VERSION_ID};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use super::stream::prelude::*;
+use super::stream::StreamPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDml {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     input: PlanRef,
     column_descs: Vec<ColumnDesc>,
 }

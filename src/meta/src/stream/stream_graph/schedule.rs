@@ -110,6 +110,8 @@ crepe::crepe! {
 
     // The downstream fragment of a `Simple` edge must be singleton.
     SingletonReq(y) <- Edge(_, y, Simple);
+    // The downstream fragment of a `CdcTablename` edge must be singleton.
+    SingletonReq(y) <- Edge(_, y, CdcTablename);
 
     // Multiple requirements conflict.
     Failed(x) <- Requirement(x, d1), Requirement(x, d2), (d1 != d2);
@@ -325,6 +327,8 @@ impl Scheduler {
                 (id, distribution)
             })
             .collect();
+
+        tracing::debug!(?distributions, "schedule fragments");
 
         Ok(distributions)
     }

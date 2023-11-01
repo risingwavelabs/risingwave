@@ -237,7 +237,9 @@ impl InMemObjectStore {
             .map(|(_, obj)| obj)
             .ok_or_else(|| Error::not_found(format!("no object at path '{}'", path)))?;
 
-        if let Some(end) = range.end() && end > obj.len() {
+        if let Some(end) = range.end()
+            && end > obj.len()
+        {
             return Err(Error::other("bad block offset and size").into());
         }
 

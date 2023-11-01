@@ -21,6 +21,8 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::WatermarkDesc;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use super::stream::prelude::*;
+use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{ExprDisplay, ExprImpl};
@@ -29,7 +31,7 @@ use crate::{TableCatalog, WithOptions};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamWatermarkFilter {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     input: PlanRef,
     watermark_descs: Vec<WatermarkDesc>,
 }
@@ -53,7 +55,11 @@ impl StreamWatermarkFilter {
         Self::with_base(base, input, watermark_descs)
     }
 
-    fn with_base(base: PlanBase, input: PlanRef, watermark_descs: Vec<WatermarkDesc>) -> Self {
+    fn with_base(
+        base: PlanBase<Stream>,
+        input: PlanRef,
+        watermark_descs: Vec<WatermarkDesc>,
+    ) -> Self {
         Self {
             base,
             input,
@@ -85,7 +91,7 @@ impl Distill for StreamWatermarkFilter {
             })
             .collect();
         let display_output_watermarks =
-            watermark_pretty(&self.base.watermark_columns, input_schema).unwrap();
+            watermark_pretty(self.base.watermark_columns(), input_schema).unwrap();
         let fields = vec![
             ("watermark_descs", Pretty::Array(display_watermark_descs)),
             ("output_watermarks", display_output_watermarks),

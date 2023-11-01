@@ -469,7 +469,9 @@ where
                     "backfill_finished_wait_for_barrier"
                 );
                 // If not finished then we need to update state, otherwise no need.
-                if let Message::Barrier(barrier) = &msg && !is_completely_finished {
+                if let Message::Barrier(barrier) = &msg
+                    && !is_completely_finished
+                {
                     // If snapshot was empty, we do not need to backfill,
                     // but we still need to persist the finished state.
                     // We currently persist it on the second barrier here rather than first.
@@ -487,7 +489,7 @@ where
                               p.clone(),
                         };
                         backfill_state.update_progress(vnode, BackfillProgressPerVnode::Completed(finished_state.clone()));
-                     }
+                    }
 
                     persist_state_per_vnode(
                         barrier.epoch,
@@ -496,9 +498,11 @@ where
                         &backfill_state,
                         &mut committed_progress,
                         &mut temporary_state,
-                    ).await?;
+                    )
+                    .await?;
 
-                    self.progress.finish(barrier.epoch.curr, total_snapshot_processed_rows);
+                    self.progress
+                        .finish(barrier.epoch.curr, total_snapshot_processed_rows);
                     yield msg;
                     break;
                 } else {

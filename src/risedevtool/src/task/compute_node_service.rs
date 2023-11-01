@@ -34,7 +34,9 @@ impl ComputeNodeService {
     fn compute_node(&self) -> Result<Command> {
         let prefix_bin = env::var("PREFIX_BIN")?;
 
-        if let Ok(x) = env::var("ENABLE_ALL_IN_ONE") && x == "true" {
+        if let Ok(x) = env::var("ENABLE_ALL_IN_ONE")
+            && x == "true"
+        {
             Ok(Command::new(
                 Path::new(&prefix_bin)
                     .join("risingwave")
@@ -100,6 +102,14 @@ impl Task for ComputeNodeService {
             let conf = "prof:true,lg_prof_interval:34,lg_prof_sample:19,prof_prefix:compute-node";
             cmd.env("_RJEM_MALLOC_CONF", conf); // prefixed for macos
             cmd.env("MALLOC_CONF", conf); // unprefixed for linux
+        }
+
+        if crate::util::is_env_set("ENABLE_BUILD_RW_CONNECTOR") {
+            let prefix_bin = env::var("PREFIX_BIN")?;
+            cmd.env(
+                "CONNECTOR_LIBS_PATH",
+                Path::new(&prefix_bin).join("connector-node/libs/"),
+            );
         }
 
         cmd.arg("--config-path")

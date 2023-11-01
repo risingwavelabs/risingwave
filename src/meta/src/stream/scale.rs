@@ -97,7 +97,7 @@ pub struct RescheduleOptions {
     pub resolve_no_shuffle_upstream: bool,
 }
 
-pub(crate) struct RescheduleContext {
+pub struct RescheduleContext {
     /// Index used to map `ParallelUnitId` to `WorkerId`
     parallel_unit_id_to_worker_id: BTreeMap<ParallelUnitId, WorkerId>,
     /// Meta information for all Actors
@@ -171,7 +171,7 @@ impl RescheduleContext {
 /// assert to fail and should be skipped from the upper level.
 ///
 /// The return value is the bitmap distribution after scaling, which covers all virtual node indexes
-pub(crate) fn rebalance_actor_vnode(
+pub fn rebalance_actor_vnode(
     actors: &[StreamActor],
     actors_to_remove: &BTreeSet<ActorId>,
     actors_to_create: &BTreeSet<ActorId>,
@@ -1462,7 +1462,10 @@ impl GlobalStreamManager {
 
             match upstream_dispatch_type {
                 DispatcherType::Unspecified => unreachable!(),
-                DispatcherType::Hash | DispatcherType::Broadcast | DispatcherType::Simple => {
+                DispatcherType::Hash
+                | DispatcherType::Broadcast
+                | DispatcherType::Simple
+                | DispatcherType::CdcTablename => {
                     let upstream_fragment = &ctx.fragment_map.get(upstream_fragment_id).unwrap();
                     let mut upstream_actor_ids = upstream_fragment
                         .actors
@@ -1544,7 +1547,10 @@ impl GlobalStreamManager {
                 fragment_actors_to_create.get(&downstream_fragment_id);
 
             match dispatcher.r#type() {
-                d @ (DispatcherType::Hash | DispatcherType::Simple | DispatcherType::Broadcast) => {
+                d @ (DispatcherType::Hash
+                | DispatcherType::Simple
+                | DispatcherType::Broadcast
+                | DispatcherType::CdcTablename) => {
                     if let Some(downstream_actors_to_remove) = downstream_fragment_actors_to_remove
                     {
                         dispatcher

@@ -30,6 +30,8 @@ pub use rewrite_index::*;
 mod index_set;
 pub use index_set::*;
 pub(crate) mod group_by;
+pub mod infer_stmt_row_desc;
+
 pub use group_by::*;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};

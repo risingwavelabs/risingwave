@@ -129,7 +129,7 @@ pub async fn compaction_test_main(
 }
 
 pub async fn start_meta_node(listen_addr: String, state_store: String, config_path: String) {
-    let meta_opts = risingwave_meta::MetaNodeOpts::parse_from([
+    let meta_opts = risingwave_meta_node::MetaNodeOpts::parse_from([
         "meta-node",
         "--listen-addr",
         &listen_addr,
@@ -154,7 +154,7 @@ pub async fn start_meta_node(listen_addr: String, state_store: String, config_pa
         "enable_compaction_deterministic should be set"
     );
 
-    risingwave_meta::start(meta_opts).await
+    risingwave_meta_node::start(meta_opts).await
 }
 
 async fn start_compactor_node(

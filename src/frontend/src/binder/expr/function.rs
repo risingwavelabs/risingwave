@@ -93,7 +93,9 @@ impl Binder {
         };
 
         // agg calls
-        if f.over.is_none() && let Ok(kind) = function_name.parse() {
+        if f.over.is_none()
+            && let Ok(kind) = function_name.parse()
+        {
             return self.bind_agg(f, kind);
         }
 
@@ -154,11 +156,12 @@ impl Binder {
 
         // user defined function
         // TODO: resolve schema name https://github.com/risingwavelabs/risingwave/issues/12422
-        if let Ok(schema) = self.first_valid_schema() &&
-            let Some(func) = schema.get_function_by_name_args(
+        if let Ok(schema) = self.first_valid_schema()
+            && let Some(func) = schema.get_function_by_name_args(
                 &function_name,
                 &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
-        ) {
+            )
+        {
             use crate::catalog::function_catalog::FunctionKind::*;
             match &func.kind {
                 Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
@@ -360,8 +363,12 @@ impl Binder {
         // check signature and do implicit cast
         match (kind, direct_args.as_mut_slice(), args.as_mut_slice()) {
             (AggKind::PercentileCont | AggKind::PercentileDisc, [fraction], [arg]) => {
-                if fraction.cast_implicit_mut(DataType::Float64).is_ok() && let Ok(casted) = fraction.fold_const() {
-                    if let Some(ref casted) = casted && !(0.0..=1.0).contains(&casted.as_float64().0) {
+                if fraction.cast_implicit_mut(DataType::Float64).is_ok()
+                    && let Ok(casted) = fraction.fold_const()
+                {
+                    if let Some(ref casted) = casted
+                        && !(0.0..=1.0).contains(&casted.as_float64().0)
+                    {
                         return Err(ErrorCode::InvalidInputSyntax(format!(
                             "direct arg in `{}` must between 0.0 and 1.0",
                             kind
@@ -802,6 +809,19 @@ impl Binder {
                 ("sha512", raw_call(ExprType::Sha512)),
                 ("left", raw_call(ExprType::Left)),
                 ("right", raw_call(ExprType::Right)),
+                ("int8send", raw_call(ExprType::PgwireSend)),
+                ("int8recv", guard_by_len(1, raw(|_binder, mut inputs| {
+                    // Similar to `cast` from string, return type is set explicitly rather than inferred.
+                    let hint = if !inputs[0].is_untyped() && inputs[0].return_type() == DataType::Varchar {
+                        " Consider `decode` or cast."
+                    } else {
+                        ""
+                    };
+                    inputs[0].cast_implicit_mut(DataType::Bytea).map_err(|e| {
+                        ErrorCode::BindError(format!("{e} in `recv`.{hint}"))
+                    })?;
+                    Ok(FunctionCall::new_unchecked(ExprType::PgwireRecv, inputs, DataType::Int64).into())
+                }))),
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),
@@ -858,14 +878,57 @@ impl Binder {
                 // int256
                 ("hex_to_int256", raw_call(ExprType::HexToInt256)),
                 // jsonb
-                ("jsonb_object_field", raw_call(ExprType::JsonbAccessInner)),
-                ("jsonb_array_element", raw_call(ExprType::JsonbAccessInner)),
+                ("jsonb_object_field", raw_call(ExprType::JsonbAccess)),
+                ("jsonb_array_element", raw_call(ExprType::JsonbAccess)),
                 ("jsonb_object_field_text", raw_call(ExprType::JsonbAccessStr)),
                 ("jsonb_array_element_text", raw_call(ExprType::JsonbAccessStr)),
+                ("jsonb_extract_path", raw(|_binder, mut inputs| {
+                    // rewrite: jsonb_extract_path(jsonb, s1, s2...)
+                    // to:      jsonb_extract_path(jsonb, array[s1, s2...])
+                    if inputs.len() < 2 {
+                        return Err(ErrorCode::ExprError("unexpected arguments number".into()).into());
+                    }
+                    inputs[0].cast_implicit_mut(DataType::Jsonb)?;
+                    let mut variadic_inputs = inputs.split_off(1);
+                    for input in &mut variadic_inputs {
+                        input.cast_implicit_mut(DataType::Varchar)?;
+                    }
+                    let array = FunctionCall::new_unchecked(ExprType::Array, variadic_inputs, DataType::List(Box::new(DataType::Varchar)));
+                    inputs.push(array.into());
+                    Ok(FunctionCall::new_unchecked(ExprType::JsonbExtractPath, inputs, DataType::Jsonb).into())
+                })),
+                ("jsonb_extract_path_text", raw(|_binder, mut inputs| {
+                    // rewrite: jsonb_extract_path_text(jsonb, s1, s2...)
+                    // to:      jsonb_extract_path_text(jsonb, array[s1, s2...])
+                    if inputs.len() < 2 {
+                        return Err(ErrorCode::ExprError("unexpected arguments number".into()).into());
+                    }
+                    inputs[0].cast_implicit_mut(DataType::Jsonb)?;
+                    let mut variadic_inputs = inputs.split_off(1);
+                    for input in &mut variadic_inputs {
+                        input.cast_implicit_mut(DataType::Varchar)?;
+                    }
+                    let array = FunctionCall::new_unchecked(ExprType::Array, variadic_inputs, DataType::List(Box::new(DataType::Varchar)));
+                    inputs.push(array.into());
+                    Ok(FunctionCall::new_unchecked(ExprType::JsonbExtractPathText, inputs, DataType::Varchar).into())
+                })),
                 ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
+                ("jsonb_object", raw_call(ExprType::JsonbObject)),
+                ("jsonb_pretty", raw_call(ExprType::JsonbPretty)),
+                ("jsonb_contains", raw_call(ExprType::JsonbContains)),
+                ("jsonb_contained", raw_call(ExprType::JsonbContained)),
+                ("jsonb_exists", raw_call(ExprType::JsonbExists)),
+                ("jsonb_exists_any", raw_call(ExprType::JsonbExistsAny)),
+                ("jsonb_exists_all", raw_call(ExprType::JsonbExistsAll)),
+                ("jsonb_delete", raw_call(ExprType::Subtract)),
+                ("jsonb_delete_path", raw_call(ExprType::JsonbDeletePath)),
+                ("jsonb_strip_nulls", raw_call(ExprType::JsonbStripNulls)),
                 // Functions that return a constant value
                 ("pi", pi()),
+                // greatest and least
+                ("greatest", raw_call(ExprType::Greatest)),
+                ("least", raw_call(ExprType::Least)),
                 // System information operations.
                 (
                     "pg_typeof",

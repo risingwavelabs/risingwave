@@ -19,12 +19,13 @@ use std::sync::Arc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::{PbIndex, PbStreamJobStatus, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
-use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_pb::user::grant_privilege::Object;
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
@@ -35,6 +36,7 @@ use crate::catalog::CatalogError;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
@@ -76,7 +78,7 @@ pub(crate) fn gen_create_index_plan(
 
     session.check_privileges(&[ObjectCheckItem::new(
         table.owner,
-        Action::Select,
+        AclMode::Select,
         Object::TableId(table.id.table_id),
     )])?;
 
@@ -328,6 +330,7 @@ fn assemble_materialize(
     let logical_scan = LogicalScan::create(
         table_name,
         table_desc.clone(),
+        ScanTableType::default(),
         Some(table_catalog),
         // Index table has no indexes.
         vec![],

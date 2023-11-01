@@ -40,7 +40,8 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
-    Connection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
+    Connection, PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
+    PbView, Table,
 };
 use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
@@ -50,6 +51,7 @@ use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
+use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Register;
@@ -245,7 +247,8 @@ impl MetaClient {
                 })
                 .await?;
             if let Some(status) = &add_worker_resp.status
-                && status.code() == risingwave_pb::common::status::Code::UnknownWorker {
+                && status.code() == risingwave_pb::common::status::Code::UnknownWorker
+            {
                 tracing::error!("invalid worker: {}", status.message);
                 std::process::exit(1);
             }
@@ -359,6 +362,21 @@ impl MetaClient {
     pub async fn create_source(&self, source: PbSource) -> Result<(u32, CatalogVersion)> {
         let request = CreateSourceRequest {
             source: Some(source),
+            fragment_graph: None,
+        };
+
+        let resp = self.inner.create_source(request).await?;
+        Ok((resp.source_id, resp.version))
+    }
+
+    pub async fn create_source_with_graph(
+        &self,
+        source: PbSource,
+        graph: StreamFragmentGraph,
+    ) -> Result<(u32, CatalogVersion)> {
+        let request = CreateSourceRequest {
+            source: Some(source),
+            fragment_graph: Some(graph),
         };
 
         let resp = self.inner.create_source(request).await?;
@@ -395,15 +413,25 @@ impl MetaClient {
         source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
+        job_type: PbTableJobType,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateTableRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
             source,
+            job_type: job_type as _,
         };
         let resp = self.inner.create_table(request).await?;
         // TODO: handle error in `resp.status` here
         Ok((resp.table_id.into(), resp.version))
+    }
+
+    pub async fn comment_on(&self, comment: PbComment) -> Result<CatalogVersion> {
+        let request = CommentOnRequest {
+            comment: Some(comment),
+        };
+        let resp = self.inner.comment_on(request).await?;
+        Ok(resp.version)
     }
 
     pub async fn alter_relation_name(
@@ -695,6 +723,12 @@ impl MetaClient {
         let request = FlushRequest { checkpoint };
         let resp = self.inner.flush(request).await?;
         Ok(resp.snapshot.unwrap())
+    }
+
+    pub async fn wait(&self) -> Result<()> {
+        let request = WaitRequest {};
+        self.inner.wait(request).await?;
+        Ok(())
     }
 
     pub async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>> {
@@ -1043,6 +1077,23 @@ impl MetaClient {
             resp.task_assignment,
             resp.task_progress,
         ))
+    }
+
+    pub async fn get_compaction_score(
+        &self,
+        compaction_group_id: CompactionGroupId,
+    ) -> Result<Vec<PickerInfo>> {
+        let req = GetCompactionScoreRequest {
+            compaction_group_id,
+        };
+        let resp = self.inner.get_compaction_score(req).await?;
+        Ok(resp.scores)
+    }
+
+    pub async fn risectl_rebuild_table_stats(&self) -> Result<()> {
+        let req = RiseCtlRebuildTableStatsRequest {};
+        let _resp = self.inner.rise_ctl_rebuild_table_stats(req).await?;
+        Ok(())
     }
 
     pub async fn list_branched_object(&self) -> Result<Vec<BranchedObject>> {
@@ -1700,7 +1751,9 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
             ,{ ddl_client, list_connections, ListConnectionsRequest, ListConnectionsResponse }
             ,{ ddl_client, drop_connection, DropConnectionRequest, DropConnectionResponse }
+            ,{ ddl_client, comment_on, CommentOnRequest, CommentOnResponse }
             ,{ ddl_client, get_tables, GetTablesRequest, GetTablesResponse }
+            ,{ ddl_client, wait, WaitRequest, WaitResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
@@ -1728,6 +1781,8 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
             ,{ hummock_client, split_compaction_group, SplitCompactionGroupRequest, SplitCompactionGroupResponse }
             ,{ hummock_client, rise_ctl_list_compaction_status, RiseCtlListCompactionStatusRequest, RiseCtlListCompactionStatusResponse }
+            ,{ hummock_client, get_compaction_score, GetCompactionScoreRequest, GetCompactionScoreResponse }
+            ,{ hummock_client, rise_ctl_rebuild_table_stats, RiseCtlRebuildTableStatsRequest, RiseCtlRebuildTableStatsResponse }
             ,{ hummock_client, subscribe_compaction_event, impl tonic::IntoStreamingRequest<Message = SubscribeCompactionEventRequest>, Streaming<SubscribeCompactionEventResponse> }
             ,{ hummock_client, list_branched_object, ListBranchedObjectRequest, ListBranchedObjectResponse }
             ,{ hummock_client, list_active_write_limit, ListActiveWriteLimitRequest, ListActiveWriteLimitResponse }

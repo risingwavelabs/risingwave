@@ -73,6 +73,15 @@ impl Topic {
             partition_index: Some(partition),
         })
     }
+
+    pub fn topic_str_without_partition(&self) -> Result<String> {
+        if self.topic.contains(PARTITIONED_TOPIC_SUFFIX) {
+            let parts: Vec<&str> = self.topic.split(PARTITIONED_TOPIC_SUFFIX).collect();
+            Ok(parts[0].to_string())
+        } else {
+            Ok(self.topic.clone())
+        }
+    }
 }
 
 /// `get_partition_index` returns the partition index of the topic.

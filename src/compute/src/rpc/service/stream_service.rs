@@ -45,7 +45,7 @@ impl StreamServiceImpl {
 
 #[async_trait::async_trait]
 impl StreamService for StreamServiceImpl {
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn update_actors(
         &self,
         request: Request<UpdateActorsRequest>,
@@ -61,7 +61,7 @@ impl StreamService for StreamServiceImpl {
         }
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn build_actors(
         &self,
         request: Request<BuildActorsRequest>,
@@ -85,7 +85,7 @@ impl StreamService for StreamServiceImpl {
         }
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn broadcast_actor_info_table(
         &self,
         request: Request<BroadcastActorInfoTableRequest>,
@@ -104,7 +104,7 @@ impl StreamService for StreamServiceImpl {
         }
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn drop_actors(
         &self,
         request: Request<DropActorsRequest>,
@@ -118,7 +118,7 @@ impl StreamService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn force_stop_actors(
         &self,
         request: Request<ForceStopActorsRequest>,
@@ -132,7 +132,7 @@ impl StreamService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn inject_barrier(
         &self,
         request: Request<InjectBarrierRequest>,
@@ -173,7 +173,7 @@ impl StreamService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn barrier_complete(
         &self,
         request: Request<BarrierCompleteRequest>,
@@ -243,7 +243,7 @@ impl StreamService for StreamServiceImpl {
         }))
     }
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn wait_epoch_commit(
         &self,
         request: Request<WaitEpochCommitRequest>,

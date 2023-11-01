@@ -393,7 +393,7 @@ impl ScheduledBarriers {
     }
 
     /// Make the `checkpoint` of the next barrier must be true
-    pub(crate) fn force_checkpoint_in_next_barrier(&self) {
+    pub fn force_checkpoint_in_next_barrier(&self) {
         self.inner.force_checkpoint.store(true, Ordering::Relaxed)
     }
 

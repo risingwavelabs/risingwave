@@ -114,7 +114,9 @@ where
             other => return other,
         };
 
-        if let Some(key_as_column_name) = &self.key_as_column_name && name == key_as_column_name {
+        if let Some(key_as_column_name) = &self.key_as_column_name
+            && name == key_as_column_name
+        {
             return self.access(&["key"], Some(type_expected));
         }
 

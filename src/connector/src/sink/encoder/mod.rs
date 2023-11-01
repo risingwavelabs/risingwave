@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
@@ -22,8 +23,9 @@ use crate::sink::Result;
 mod avro;
 mod json;
 mod proto;
+pub mod template;
 
-pub use avro::AvroEncoder;
+pub use avro::{AvroEncoder, AvroHeader};
 pub use json::JsonEncoder;
 pub use proto::ProtoEncoder;
 
@@ -89,7 +91,12 @@ pub enum TimestampHandlingMode {
 
 #[derive(Clone)]
 pub enum CustomJsonType {
+    // Doris's json need date is string.
+    // The internal order of the struct should follow the insertion order.
+    // The decimal needs verification and calibration.
     Doris(HashMap<String, (u8, u8)>),
+    // Bigquery's json need date is string.
+    Bigquery,
     None,
 }
 
@@ -131,3 +138,10 @@ impl From<FieldEncodeError> for super::SinkError {
         Self::Encode(value.to_string())
     }
 }
+
+#[derive(Clone)]
+pub struct KafkaConnectParams {
+    pub schema_name: String,
+}
+
+type KafkaConnectParamsRef = Arc<KafkaConnectParams>;

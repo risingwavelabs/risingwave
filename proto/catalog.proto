@@ -55,12 +55,16 @@ message StreamSourceInfo {
   string proto_message_name = 4;
   int32 csv_delimiter = 5;
   bool csv_has_header = 6;
-  string upsert_avro_primary_key = 7;
+  reserved 7;
+  reserved "upsert_avro_primary_key"; // deprecated
   plan_common.FormatType format = 8;
   plan_common.EncodeType row_encode = 9;
   SchemaRegistryNameStrategy name_strategy = 10;
   optional string key_message_name = 11;
-  plan_common.StorageTableDesc upstream_table = 12;
+  plan_common.ExternalTableDesc external_table = 12;
+  // Whether the stream source is a cdc source streaming job.
+  // We need this field to differentiate the cdc source job until we fully implement risingwavelabs/rfcs#72.
+  bool cdc_source_job = 13;
 }
 
 message Source {
@@ -280,10 +284,13 @@ message Table {
 
   CreateType create_type = 32;
 
-  // This field is introduced in v1.2.0.
+  // This field is used to store the description set by the `comment on` clause.
+  optional string description = 33;
+
+  // This field is introduced in v1.3.0.
   // It is only used if the state table is replicated.
   // If replicated, only columns with index in `output_indices` will be read.
-  repeated int32 output_indices = 33;
+  repeated int32 output_indices = 34;
 
   // Per-table catalog version, used by schema change. `None` for internal tables and tests.
   // Not to be confused with the global catalog version for notification service.
@@ -321,4 +328,12 @@ message Database {
   uint32 id = 1;
   string name = 2;
   uint32 owner = 3;
+}
+
+message Comment {
+  uint32 table_id = 1;
+  uint32 schema_id = 2;
+  uint32 database_id = 3;
+  optional uint32 column_index = 4;
+  optional string description = 5;
 }

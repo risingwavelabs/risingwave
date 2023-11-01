@@ -153,6 +153,7 @@ async fn compaction_test(
         cleaned_by_watermark: false,
         stream_job_status: PbStreamJobStatus::Created.into(),
         create_type: PbCreateType::Foreground.into(),
+        description: None,
         output_indices: vec![],
     };
     let mut delete_range_table = delete_key_table.clone();

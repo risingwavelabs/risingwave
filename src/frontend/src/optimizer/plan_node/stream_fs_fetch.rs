@@ -20,9 +20,9 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbStreamFsFetch, StreamFsFetchNode};
 
+use super::stream::prelude::*;
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary};
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::{childless_record, Distill};
 use crate::optimizer::plan_node::{generic, ExprRewritable, StreamNode};
 use crate::optimizer::property::Distribution;
@@ -30,9 +30,9 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamFsFetch {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     input: PlanRef,
-    logical: generic::Source,
+    core: generic::Source,
 }
 
 impl PlanTreeNodeUnary for StreamFsFetch {
@@ -41,14 +41,14 @@ impl PlanTreeNodeUnary for StreamFsFetch {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.logical.clone())
+        Self::new(input, self.core.clone())
     }
 }
 impl_plan_tree_node_for_unary! { StreamFsFetch }
 
 impl StreamFsFetch {
     pub fn new(input: PlanRef, source: generic::Source) -> Self {
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &source,
             Distribution::SomeShard,
             source.catalog.as_ref().map_or(true, |s| s.append_only),
@@ -59,12 +59,12 @@ impl StreamFsFetch {
         Self {
             base,
             input,
-            logical: source,
+            core: source,
         }
     }
 
     fn get_columns(&self) -> Vec<&str> {
-        self.logical
+        self.core
             .column_catalog
             .iter()
             .map(|column| column.name())
@@ -72,7 +72,7 @@ impl StreamFsFetch {
     }
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
-        self.logical.catalog.clone()
+        self.core.catalog.clone()
     }
 }
 
@@ -103,9 +103,9 @@ impl StreamNode for StreamFsFetch {
                     .to_internal_table_prost(),
             ),
             info: Some(source_catalog.info.clone()),
-            row_id_index: self.logical.row_id_index.map(|index| index as _),
+            row_id_index: self.core.row_id_index.map(|index| index as _),
             columns: self
-                .logical
+                .core
                 .column_catalog
                 .iter()
                 .map(|c| c.to_protobuf())

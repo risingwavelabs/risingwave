@@ -27,6 +27,7 @@ use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuth
 use pgwire::types::{Format, FormatIterator};
 use rand::RngCore;
 use risingwave_batch::task::{ShutdownSender, ShutdownToken};
+use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 #[cfg(test)]
 use risingwave_common::catalog::{
@@ -49,9 +50,9 @@ use risingwave_connector::source::monitor::{SourceMetrics, GLOBAL_SOURCE_METRICS
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::user::auth_info::EncryptionType;
-use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_pb::user::grant_privilege::Object;
 use risingwave_rpc_client::{ComputeClientPool, ComputeClientPoolRef, MetaClient};
-use risingwave_sqlparser::ast::{ObjectName, ShowObject, Statement};
+use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use thiserror::Error;
 use tokio::runtime::Builder;
@@ -86,6 +87,7 @@ use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
 use crate::user::UserId;
+use crate::utils::infer_stmt_row_desc::{infer_show_object, infer_show_variable};
 use crate::{FrontendOpts, PgResponseStream};
 
 pub(crate) mod transaction;
@@ -632,7 +634,7 @@ impl SessionImpl {
         if schema.name() != DEFAULT_SCHEMA_NAME {
             self.check_privileges(&[ObjectCheckItem::new(
                 schema.owner(),
-                Action::Create,
+                AclMode::Create,
                 Object::SchemaId(schema.id()),
             )])?;
         }
@@ -799,13 +801,8 @@ impl SessionManager for SessionManagerImpl {
                     format!("User {} is not allowed to login", user_name),
                 )));
             }
-            let has_privilege = user.grant_privileges.iter().any(|privilege| {
-                privilege.object == Some(Object::DatabaseId(database_id))
-                    && privilege
-                        .action_with_opts
-                        .iter()
-                        .any(|ao| ao.action == Action::Connect as i32)
-            });
+            let has_privilege =
+                user.check_privilege(&Object::DatabaseId(database_id), AclMode::Connect);
             if !user.is_super && !has_privilege {
                 return Err(Box::new(Error::new(
                     ErrorKind::PermissionDenied,
@@ -1090,25 +1087,7 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
         Statement::ShowObjects {
             object: show_object,
             ..
-        } => match show_object {
-            ShowObject::Columns { table: _ } => Ok(vec![
-                PgFieldDescriptor::new(
-                    "Name".to_owned(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                ),
-                PgFieldDescriptor::new(
-                    "Type".to_owned(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                ),
-            ]),
-            _ => Ok(vec![PgFieldDescriptor::new(
-                "Name".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            )]),
-        },
+        } => Ok(infer_show_object(&show_object)),
         Statement::ShowCreateObject { .. } => Ok(vec![
             PgFieldDescriptor::new(
                 "Name".to_owned(),
@@ -1123,31 +1102,7 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
         ]),
         Statement::ShowVariable { variable } => {
             let name = &variable[0].real_value().to_lowercase();
-            if name.eq_ignore_ascii_case("ALL") {
-                Ok(vec![
-                    PgFieldDescriptor::new(
-                        "Name".to_string(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Setting".to_string(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Description".to_string(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                ])
-            } else {
-                Ok(vec![PgFieldDescriptor::new(
-                    name.to_ascii_lowercase(),
-                    DataType::Varchar.to_oid(),
-                    DataType::Varchar.type_len(),
-                )])
-            }
+            Ok(infer_show_variable(name))
         }
         Statement::Describe { name: _ } => Ok(vec![
             PgFieldDescriptor::new(
@@ -1157,6 +1112,16 @@ fn infer(bound: Option<BoundStatement>, stmt: Statement) -> Result<Vec<PgFieldDe
             ),
             PgFieldDescriptor::new(
                 "Type".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Is Hidden".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Description".to_owned(),
                 DataType::Varchar.to_oid(),
                 DataType::Varchar.type_len(),
             ),
