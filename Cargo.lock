@@ -11193,7 +11193,6 @@ dependencies = [
  "clap_builder",
  "combine",
  "crossbeam-epoch",
- "crossbeam-queue",
  "crossbeam-utils",
  "deranged",
  "digest",

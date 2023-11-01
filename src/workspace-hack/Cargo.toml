@@ -35,7 +35,6 @@ clap = { version = "4", features = ["cargo", "derive", "env"] }
 clap_builder = { version = "4", default-features = false, features = ["cargo", "color", "env", "help", "std", "suggestions", "usage"] }
 combine = { version = "4", features = ["tokio"] }
 crossbeam-epoch = { version = "0.9" }
-crossbeam-queue = { version = "0.3" }
 crossbeam-utils = { version = "0.8" }
 deranged = { version = "0.3", default-features = false, features = ["powerfmt", "serde", "std"] }
 digest = { version = "0.10", features = ["mac", "oid", "std"] }
