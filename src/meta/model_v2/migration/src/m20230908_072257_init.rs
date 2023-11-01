@@ -238,6 +238,7 @@ impl MigrationTrait for Migration {
                             .name("FK_user_privilege_oid")
                             .from(UserPrivilege::Table, UserPrivilege::Oid)
                             .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
                             .to_owned(),
                     )
                     .to_owned(),

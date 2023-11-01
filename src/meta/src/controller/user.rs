@@ -25,8 +25,9 @@ use risingwave_pb::meta::subscribe_response::{
 use risingwave_pb::user::update_user_request::PbUpdateField;
 use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
 use sea_orm::sea_query::{OnConflict, SimpleExpr, Value};
+use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
+    ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, PaginatorTrait,
     QueryFilter, QuerySelect, TransactionTrait,
 };
 
@@ -40,16 +41,40 @@ use crate::manager::NotificationVersion;
 use crate::{MetaError, MetaResult};
 
 impl CatalogController {
-    async fn create_user(&self, user: PbUserInfo) -> MetaResult<NotificationVersion> {
+    async fn create_user(&self, pb_user: PbUserInfo) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
-        check_user_name_duplicate(&user.name, &inner.db).await?;
+        let txn = inner.db.begin().await?;
+        check_user_name_duplicate(&pb_user.name, &txn).await?;
 
-        let user: user::ActiveModel = user.into();
-        let user = user.insert(&inner.db).await?;
+        let grant_privileges = pb_user.grant_privileges.clone();
+        let user: user::ActiveModel = pb_user.into();
+        let user = user.insert(&txn).await?;
+
+        if !grant_privileges.is_empty() {
+            let mut privileges = vec![];
+            for gp in &grant_privileges {
+                let id = extract_grant_obj_id(gp.get_object()?);
+                for action_with_opt in &gp.action_with_opts {
+                    privileges.push(user_privilege::ActiveModel {
+                        user_id: Set(user.user_id),
+                        oid: Set(id),
+                        granted_by: Set(action_with_opt.granted_by),
+                        action: Set(action_with_opt.get_action()?.into()),
+                        with_grant_option: Set(action_with_opt.with_grant_option),
+                        ..Default::default()
+                    });
+                }
+            }
+            UserPrivilege::insert_many(privileges).exec(&txn).await?;
+        }
+        txn.commit().await?;
+
+        let mut user_info: PbUserInfo = user.into();
+        user_info.grant_privileges = grant_privileges;
         let version = self
             .notify_frontend(
                 NotificationOperation::Add,
-                NotificationInfo::User(user.into()),
+                NotificationInfo::User(user_info),
             )
             .await;
 
@@ -191,10 +216,10 @@ impl CatalogController {
             let id = extract_grant_obj_id(gp.get_object()?);
             for action_with_opt in &gp.action_with_opts {
                 privileges.push(user_privilege::ActiveModel {
-                    oid: ActiveValue::Set(id),
-                    granted_by: ActiveValue::Set(grantor),
-                    action: ActiveValue::Set(action_with_opt.get_action()?.into()),
-                    with_grant_option: ActiveValue::Set(action_with_opt.with_grant_option),
+                    oid: Set(id),
+                    granted_by: Set(grantor),
+                    action: Set(action_with_opt.get_action()?.into()),
+                    with_grant_option: Set(action_with_opt.with_grant_option),
                     ..Default::default()
                 });
             }
@@ -225,7 +250,7 @@ impl CatalogController {
                         grantor, privilege.action,
                     )));
                 };
-                privilege.dependent_id = ActiveValue::Set(Some(privilege_id));
+                privilege.dependent_id = Set(Some(privilege_id));
             }
         }
 
@@ -233,7 +258,7 @@ impl CatalogController {
         let user_privileges = user_ids.iter().flat_map(|user_id| {
             privileges.iter().map(|p| {
                 let mut p = p.clone();
-                p.user_id = ActiveValue::Set(*user_id);
+                p.user_id = Set(*user_id);
                 p
             })
         });
