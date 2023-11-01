@@ -16,8 +16,8 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_backup::error::{BackupError, BackupResult};
-use risingwave_backup::meta_snapshot::MetaSnapshot;
-use risingwave_backup::storage::MetaSnapshotStorageRef;
+use risingwave_backup::meta_snapshot_v1::MetaSnapshotV1;
+use risingwave_backup::storage::{MetaSnapshotStorage, MetaSnapshotStorageRef};
 use risingwave_common::config::MetaBackend;
 use risingwave_hummock_sdk::version_checkpoint_path;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
@@ -137,7 +137,7 @@ async fn restore_cluster_id<S: MetaStore>(
 
 async fn restore_default_cf<S: MetaStore>(
     meta_store: &S,
-    snapshot: &MetaSnapshot,
+    snapshot: &MetaSnapshotV1,
 ) -> BackupResult<()> {
     if !meta_store.list_cf(DEFAULT_COLUMN_FAMILY).await?.is_empty() {
         return Err(BackupError::NonemptyMetaStorage);
@@ -150,7 +150,10 @@ async fn restore_default_cf<S: MetaStore>(
     Ok(())
 }
 
-async fn restore_metadata<S: MetaStore>(meta_store: S, snapshot: MetaSnapshot) -> BackupResult<()> {
+async fn restore_metadata<S: MetaStore>(
+    meta_store: S,
+    snapshot: MetaSnapshotV1,
+) -> BackupResult<()> {
     restore_default_cf(&meta_store, &snapshot).await?;
     restore_metadata_model(&meta_store, &[snapshot.metadata.version_stats]).await?;
     restore_metadata_model(
@@ -216,7 +219,7 @@ async fn restore_impl(
             target_id
         )));
     }
-    let mut target_snapshot = backup_store.get(target_id).await?;
+    let mut target_snapshot: MetaSnapshotV1 = backup_store.get(target_id).await?;
     tracing::info!(
         "snapshot {} before rewrite:\n{}",
         target_id,
@@ -236,7 +239,7 @@ async fn restore_impl(
     // - Value is memcomparable.
     // - Keys of newest_snapshot is a superset of that of target_snapshot.
     if newest_id > target_id {
-        let newest_snapshot = backup_store.get(newest_id).await?;
+        let newest_snapshot: MetaSnapshotV1 = backup_store.get(newest_id).await?;
         for (k, v) in &target_snapshot.metadata.default_cf {
             let newest_v = newest_snapshot
                 .metadata
@@ -287,7 +290,8 @@ mod tests {
     use std::collections::HashMap;
 
     use itertools::Itertools;
-    use risingwave_backup::meta_snapshot::{ClusterMetadata, MetaSnapshot};
+    use risingwave_backup::meta_snapshot_v1::{ClusterMetadata, MetaSnapshotV1};
+    use risingwave_backup::storage::MetaSnapshotStorage;
     use risingwave_common::config::{MetaBackend, SystemConfig};
     use risingwave_pb::hummock::{HummockVersion, HummockVersionStats};
     use risingwave_pb::meta::SystemParams;
@@ -299,6 +303,8 @@ mod tests {
     use crate::manager::model::SystemParamsModel;
     use crate::model::MetadataModel;
     use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY};
+
+    type MetaSnapshot = MetaSnapshotV1;
 
     fn get_restore_opts() -> RestoreOpts {
         RestoreOpts {

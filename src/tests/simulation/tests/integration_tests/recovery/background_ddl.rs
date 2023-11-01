@@ -21,9 +21,13 @@ use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
 const CREATE_TABLE: &str = "CREATE TABLE t(v1 int);";
-const SEED_TABLE: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 100000);";
+const SEED_TABLE: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 500);";
 const SET_BACKGROUND_DDL: &str = "SET BACKGROUND_DDL=true;";
+const SET_RATE_LIMIT_2: &str = "SET STREAMING_RATE_LIMIT=2;";
+const SET_RATE_LIMIT_1: &str = "SET STREAMING_RATE_LIMIT=1;";
+const RESET_RATE_LIMIT: &str = "SET STREAMING_RATE_LIMIT=0;";
 const CREATE_MV1: &str = "CREATE MATERIALIZED VIEW mv1 as SELECT * FROM t;";
+const WAIT: &str = "WAIT;";
 
 async fn kill_cn_and_wait_recover(cluster: &Cluster) {
     // Kill it again
@@ -67,6 +71,13 @@ async fn cancel_stream_jobs(session: &mut Session) -> Result<Vec<u32>> {
         .map(|s| s.parse::<u32>().unwrap())
         .collect_vec();
     Ok(ids)
+}
+
+fn init_logger() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_ansi(false)
+        .try_init();
 }
 
 #[tokio::test]
@@ -133,22 +144,17 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
 
 #[tokio::test]
 async fn test_background_ddl_cancel() -> Result<()> {
-    env::set_var("RW_BACKFILL_SNAPSHOT_READ_DELAY", "100");
     async fn create_mv(session: &mut Session) -> Result<()> {
         session.run(CREATE_MV1).await?;
         sleep(Duration::from_secs(2)).await;
         Ok(())
     }
-    // FIXME: See if we can use rate limit instead.
-    use std::env;
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .with_ansi(false)
-        .init();
-    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    init_logger();
+    let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
     let mut session = cluster.start_session();
     session.run(CREATE_TABLE).await?;
     session.run(SEED_TABLE).await?;
+    session.run(SET_RATE_LIMIT_2).await?;
     session.run(SET_BACKGROUND_DDL).await?;
 
     for _ in 0..5 {
@@ -157,6 +163,7 @@ async fn test_background_ddl_cancel() -> Result<()> {
         assert_eq!(ids.len(), 1);
     }
 
+    session.run(SET_RATE_LIMIT_1).await?;
     create_mv(&mut session).await?;
 
     // Test cancel after kill cn
@@ -176,16 +183,14 @@ async fn test_background_ddl_cancel() -> Result<()> {
     assert_eq!(ids.len(), 1);
 
     // Make sure MV can be created after all these cancels
+    session.run(RESET_RATE_LIMIT).await?;
     create_mv(&mut session).await?;
 
-    kill_and_wait_recover(&cluster).await;
-
     // Wait for job to finish
-    session.run("WAIT;").await?;
+    session.run(WAIT).await?;
 
     session.run("DROP MATERIALIZED VIEW mv1").await?;
     session.run("DROP TABLE t").await?;
 
-    env::remove_var("RW_BACKFILL_SNAPSHOT_READ_DELAY");
     Ok(())
 }
