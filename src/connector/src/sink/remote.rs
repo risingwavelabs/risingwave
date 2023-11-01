@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::any::Any;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::Deref;
@@ -23,7 +23,7 @@ use std::time::Instant;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::future::select;
-use futures::{StreamExt, TryFutureExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt};
 use itertools::Itertools;
 use jni::objects::{JByteArray, JValue, JValueOwned};
 use jni::JavaVM;
@@ -31,7 +31,7 @@ use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::error::anyhow_error;
 use risingwave_common::types::DataType;
-use risingwave_common::util::await_future_with_monitor_error_stream;
+use risingwave_common::util::{await_future_with_monitor_error_stream, drop_either_future};
 use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_jni_core::{gen_class_name, gen_jni_sig, JniReceiverType, JniSenderType};
 use risingwave_pb::connector_service::sink_coordinator_stream_request::StartCoordinator;
@@ -56,7 +56,7 @@ use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender};
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::sink::coordinate::CoordinatedSinkWriter;
-use crate::sink::log_store::{LogReader, LogStoreReadItem, TruncateOffset};
+use crate::sink::log_store::{ChunkId, LogReader, LogStoreReadItem, TruncateOffset};
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{
     DummySinkCommitCoordinator, LogSinker, Result, Sink, SinkCommitCoordinator, SinkError,
@@ -67,18 +67,19 @@ use crate::ConnectorParams;
 macro_rules! def_remote_sink {
     () => {
         def_remote_sink! {
-            { ElasticSearch, ElasticSearchSink, "elasticsearch" },
-            { Cassandra, CassandraSink, "cassandra" },
-            { Jdbc, JdbcSink, "jdbc" },
-            { DeltaLake, DeltaLakeSink, "deltalake" }
+            { ElasticSearch, ElasticSearchSink, "elasticsearch", false },
+            { Cassandra, CassandraSink, "cassandra", false },
+            { Jdbc, JdbcSink, "jdbc", true },
+            { DeltaLake, DeltaLakeSink, "deltalake", false }
         }
     };
-    ($({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr }),*) => {
+    ($({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr, $is_async_truncate:expr }),*) => {
         $(
             #[derive(Debug)]
             pub struct $variant_name;
             impl RemoteSinkTrait for $variant_name {
                 const SINK_NAME: &'static str = $sink_name;
+                const IS_ASYNC_TRUNCATE: bool = $is_async_truncate;
             }
             pub type $sink_type_name = RemoteSink<$variant_name>;
         )*
@@ -89,6 +90,7 @@ def_remote_sink!();
 
 pub trait RemoteSinkTrait: Send + Sync + 'static {
     const SINK_NAME: &'static str;
+    const IS_ASYNC_TRUNCATE: bool;
 }
 
 #[derive(Debug)]
@@ -115,7 +117,7 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
     const SINK_NAME: &'static str = R::SINK_NAME;
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        RemoteLogSinker::new(self.param.clone(), writer_param).await
+        RemoteLogSinker::new(self.param.clone(), writer_param, R::IS_ASYNC_TRUNCATE).await
     }
 
     async fn validate(&self) -> Result<()> {
@@ -204,10 +206,15 @@ pub struct RemoteLogSinker {
     request_sender: BidiStreamSender<SinkWriterStreamRequest>,
     response_stream: BidiStreamReceiver<SinkWriterStreamResponse>,
     sink_metrics: SinkMetrics,
+    is_async_truncate: bool,
 }
 
 impl RemoteLogSinker {
-    async fn new(sink_param: SinkParam, writer_param: SinkWriterParam) -> Result<Self> {
+    async fn new(
+        sink_param: SinkParam,
+        writer_param: SinkWriterParam,
+        is_async_truncate: bool,
+    ) -> Result<Self> {
         let SinkWriterStreamHandle {
             request_sender,
             response_stream,
@@ -220,6 +227,7 @@ impl RemoteLogSinker {
             request_sender,
             response_stream,
             sink_metrics,
+            is_async_truncate,
         })
     }
 }
@@ -241,6 +249,7 @@ impl LogSinker for RemoteLogSinker {
     async fn consume_log_and_sink(self, mut log_reader: impl LogReader) -> Result<()> {
         let mut request_tx = self.request_sender;
         let mut response_err_stream_rx = self.response_stream;
+        let is_async_truncate = self.is_async_truncate;
         let sink_metrics = self.sink_metrics;
 
         let (response_tx, mut response_rx) = unbounded_channel();
@@ -262,68 +271,166 @@ impl LogSinker for RemoteLogSinker {
 
         let poll_consume_log_and_sink = pin!(async move {
             let mut prev_offset: Option<TruncateOffset> = None;
+            let mut sent_chunk_id_queue: VecDeque<(u64, ChunkId)> = VecDeque::new();
 
             log_reader.init().await?;
 
+            async fn truncate_matched_chunk_id(
+                queue: &mut VecDeque<(u64, ChunkId)>,
+                (epoch, batch_id): (u64, u64),
+                log_reader: &mut impl LogReader,
+            ) -> Result<()> {
+                let (prev_epoch, prev_batch_id) = queue.pop_front().ok_or_else(|| {
+                    anyhow!("batch {} {} is not buffered for response", epoch, batch_id)
+                })?;
+                if prev_epoch != epoch || prev_batch_id != batch_id as ChunkId {
+                    return Err(SinkError::Remote(anyhow!(
+                        "epoch and batch_id not match the first buffered one"
+                    )));
+                }
+                log_reader
+                    .truncate(TruncateOffset::Chunk {
+                        epoch,
+                        chunk_id: prev_batch_id,
+                    })
+                    .await?;
+                Ok(())
+            }
+
             loop {
-                let (epoch, item): (u64, LogStoreReadItem) =
-                    log_reader.next_item().map_err(SinkError::Internal).await?;
-
-                match item {
-                    LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
-                        let offset = TruncateOffset::Chunk { epoch, chunk_id };
-                        if let Some(prev_offset) = &prev_offset {
-                            prev_offset.check_next_offset(offset)?;
-                        } else {
-                            request_tx.start_epoch(epoch).await?;
-                        }
-                        let cardinality = chunk.cardinality();
-                        sink_metrics
-                            .connector_sink_rows_received
-                            .inc_by(cardinality as _);
-
-                        let payload = build_chunk_payload(chunk);
-                        request_tx
-                            .write_batch(epoch, chunk_id as u64, payload)
-                            .await?;
-                        prev_offset = Some(offset);
-                    }
-                    LogStoreReadItem::Barrier { is_checkpoint } => {
-                        let offset = TruncateOffset::Barrier { epoch };
-                        if let Some(prev_offset) = &prev_offset {
-                            prev_offset.check_next_offset(offset)?;
-                        } else {
-                            // TODO: this start epoch is actually unnecessary
-                            request_tx.start_epoch(epoch).await?;
-                        }
-                        if is_checkpoint {
-                            let start_time = Instant::now();
-                            request_tx.barrier(epoch, true).await?;
-                            match response_rx.recv().await.ok_or_else(|| {
-                                SinkError::Remote(anyhow!("end of response stream"))
-                            })? {
-                                SinkWriterStreamResponse {
-                                    response: Some(sink_writer_stream_response::Response::Commit(_)),
-                                } => {}
-                                response => {
+                let either_result: futures::future::Either<
+                    Option<SinkWriterStreamResponse>,
+                    anyhow::Result<(u64, LogStoreReadItem)>,
+                > = drop_either_future(
+                    select(pin!(response_rx.recv()), pin!(log_reader.next_item())).await,
+                );
+                match either_result {
+                    futures::future::Either::Left(opt) => {
+                        let response = opt.ok_or_else(|| anyhow!("end of response stream"))?;
+                        match response {
+                            SinkWriterStreamResponse {
+                                response:
+                                    Some(sink_writer_stream_response::Response::Batch(
+                                        sink_writer_stream_response::BatchWrittenResponse {
+                                            epoch,
+                                            batch_id,
+                                        },
+                                    )),
+                            } => {
+                                if !is_async_truncate {
                                     return Err(SinkError::Remote(anyhow!(
-                                        "expected commit response, but get {:?}",
-                                        response
+                                        "batch written response only for async truncate"
                                     )));
                                 }
-                            };
-                            sink_metrics
-                                .sink_commit_duration_metrics
-                                .observe(start_time.elapsed().as_millis() as f64);
-                            log_reader
-                                .truncate(TruncateOffset::Barrier { epoch })
+                                truncate_matched_chunk_id(
+                                    &mut sent_chunk_id_queue,
+                                    (epoch, batch_id),
+                                    &mut log_reader,
+                                )
                                 .await?;
-                        } else {
-                            request_tx.barrier(epoch, false).await?;
+                            }
+                            response => {
+                                return Err(SinkError::Remote(anyhow!(
+                                    "expected batch written response, but get {:?}",
+                                    response
+                                )));
+                            }
                         }
-                        prev_offset = Some(offset);
                     }
-                    LogStoreReadItem::UpdateVnodeBitmap(_) => {}
+                    futures::future::Either::Right(result) => {
+                        let (epoch, item): (u64, LogStoreReadItem) = result?;
+                        match item {
+                            LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
+                                let offset = TruncateOffset::Chunk { epoch, chunk_id };
+                                if let Some(prev_offset) = &prev_offset {
+                                    prev_offset.check_next_offset(offset)?;
+                                } else {
+                                    request_tx.start_epoch(epoch).await?;
+                                }
+                                let cardinality = chunk.cardinality();
+                                sink_metrics
+                                    .connector_sink_rows_received
+                                    .inc_by(cardinality as _);
+
+                                let payload = build_chunk_payload(chunk);
+                                request_tx
+                                    .write_batch(epoch, chunk_id as u64, payload)
+                                    .await?;
+                                prev_offset = Some(offset);
+                                if is_async_truncate {
+                                    sent_chunk_id_queue.push_back((epoch, chunk_id));
+                                }
+                            }
+                            LogStoreReadItem::Barrier { is_checkpoint } => {
+                                let offset = TruncateOffset::Barrier { epoch };
+                                if let Some(prev_offset) = &prev_offset {
+                                    prev_offset.check_next_offset(offset)?;
+                                } else {
+                                    // TODO: this start epoch is actually unnecessary
+                                    request_tx.start_epoch(epoch).await?;
+                                }
+                                if is_checkpoint {
+                                    let start_time = Instant::now();
+                                    request_tx.barrier(epoch, true).await?;
+                                    // waiting for previous response
+                                    loop {
+                                        match response_rx.recv().await.ok_or_else(|| {
+                                            SinkError::Remote(anyhow!("end of response stream"))
+                                        })? {
+                                            SinkWriterStreamResponse {
+                                                response:
+                                                    Some(sink_writer_stream_response::Response::Commit(
+                                                        _,
+                                                    )),
+                                            } => {
+                                                if is_async_truncate && !sent_chunk_id_queue.is_empty() {
+                                                    return Err(SinkError::Remote(anyhow!("get commit response with chunk not acked: {:?}", sent_chunk_id_queue)));
+                                                }
+                                                break;
+                                            }
+                                            SinkWriterStreamResponse {
+                                                response:
+                                                    Some(sink_writer_stream_response::Response::Batch(
+                                                        sink_writer_stream_response::BatchWrittenResponse {
+                                                            epoch,
+                                                            batch_id,
+                                                        },
+                                                    )),
+                                            } => {
+                                                if !is_async_truncate {
+                                                    return Err(SinkError::Remote(anyhow!(
+                                                        "batch written response only for async truncate"
+                                                    )));
+                                                }
+                                                truncate_matched_chunk_id(
+                                                    &mut sent_chunk_id_queue,
+                                                    (epoch, batch_id),
+                                                    &mut log_reader,
+                                                )
+                                                .await?;
+                                            }
+                                            response => {
+                                                return Err(SinkError::Remote(anyhow!(
+                                                    "expected commit or batch written response, but get {:?}",
+                                                    response
+                                                )));
+                                            }
+                                        };
+                                    }
+                                    sink_metrics
+                                        .sink_commit_duration_metrics
+                                        .observe(start_time.elapsed().as_millis() as f64);
+                                    log_reader
+                                        .truncate(TruncateOffset::Barrier { epoch })
+                                        .await?;
+                                } else {
+                                    request_tx.barrier(epoch, false).await?;
+                                }
+                                prev_offset = Some(offset);
+                            }
+                            LogStoreReadItem::UpdateVnodeBitmap(_) => {}
+                        }
+                    }
                 }
             }
         });

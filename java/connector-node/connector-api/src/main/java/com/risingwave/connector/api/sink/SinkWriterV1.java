@@ -43,11 +43,12 @@ public interface SinkWriterV1 {
         public void beginEpoch(long epoch) {}
 
         @Override
-        public void write(Iterator<SinkRow> rows) {
+        public boolean write(Iterator<SinkRow> rows) {
             if (!hasBegun) {
                 hasBegun = true;
             }
             this.inner.write(rows);
+            return false;
         }
 
         @Override

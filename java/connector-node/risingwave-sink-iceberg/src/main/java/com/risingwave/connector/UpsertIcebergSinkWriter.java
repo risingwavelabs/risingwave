@@ -140,7 +140,7 @@ public class UpsertIcebergSinkWriter extends IcebergSinkWriterBase {
     }
 
     @Override
-    public void write(Iterator<SinkRow> rows) {
+    public boolean write(Iterator<SinkRow> rows) {
         while (rows.hasNext()) {
             SinkRow row = rows.next();
             if (row.size() != tableSchema.getColumnNames().length) {
@@ -190,6 +190,7 @@ public class UpsertIcebergSinkWriter extends IcebergSinkWriterBase {
                             .asRuntimeException();
             }
         }
+        return false;
     }
 
     @Override

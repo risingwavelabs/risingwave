@@ -88,9 +88,15 @@ message SinkWriterStreamResponse {
     SinkMetadata metadata = 2;
   }
 
+  message BatchWrittenResponse {
+    uint64 epoch = 1;
+    uint64 batch_id = 2;
+  }
+
   oneof response {
     StartResponse start = 1;
     CommitResponse commit = 2;
+    BatchWrittenResponse batch = 3;
   }
 }
 

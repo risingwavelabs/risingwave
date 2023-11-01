@@ -23,7 +23,7 @@ import java.util.Optional;
 public interface SinkWriter {
     void beginEpoch(long epoch);
 
-    void write(Iterator<SinkRow> rows);
+    boolean write(Iterator<SinkRow> rows);
 
     Optional<ConnectorServiceProto.SinkMetadata> barrier(boolean isCheckpoint);
 
