@@ -43,8 +43,6 @@ impl FlowControlExecutor {
         actor_ctx: ActorContextRef,
         rate_limit: Option<u32>,
     ) -> Self {
-        #[cfg(madsim)]
-        tracing::warn!("FlowControlExecutor rate limiter is disabled in madsim as it will spawn system threads");
         Self {
             input,
             actor_ctx,
@@ -73,18 +71,15 @@ impl FlowControlExecutor {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    #[cfg(not(madsim))]
-                    {
-                        if let Some(rate_limiter) = &rate_limiter {
-                            let result = rate_limiter
-                                .until_n_ready(NonZeroU32::new(chunk.cardinality() as u32).unwrap())
-                                .await;
-                            if let Err(InsufficientCapacity(n)) = result {
-                                tracing::error!(
-                                    "Rate Limit {:?} smaller than chunk cardinality {n}",
-                                    self.rate_limit,
-                                );
-                            }
+                    if let Some(rate_limiter) = &rate_limiter {
+                        let result = rate_limiter
+                            .until_n_ready(NonZeroU32::new(chunk.cardinality() as u32).unwrap())
+                            .await;
+                        if let Err(InsufficientCapacity(n)) = result {
+                            tracing::error!(
+                                "Rate Limit {:?} smaller than chunk cardinality {n}",
+                                self.rate_limit,
+                            );
                         }
                     }
                     yield Message::Chunk(chunk);

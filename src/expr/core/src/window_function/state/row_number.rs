@@ -36,6 +36,19 @@ impl RowNumberState {
             curr_row_number: 1,
         }
     }
+
+    fn slide_inner(&mut self) -> StateEvictHint {
+        self.curr_row_number += 1;
+        self.buffer
+            .pop_front()
+            .expect("should not slide forward when the current window is not ready");
+        // can't evict any state key in EOWC mode, because we can't recover from previous output now
+        StateEvictHint::CannotEvict(
+            self.first_key
+                .clone()
+                .expect("should have appended some rows"),
+        )
+    }
 }
 
 impl WindowState for RowNumberState {
@@ -54,25 +67,18 @@ impl WindowState for RowNumberState {
         }
     }
 
-    fn curr_output(&self) -> Result<Datum> {
-        if self.curr_window().is_ready {
-            Ok(Some(self.curr_row_number.into()))
+    fn slide(&mut self) -> Result<(Datum, StateEvictHint)> {
+        let output = if self.curr_window().is_ready {
+            Some(self.curr_row_number.into())
         } else {
-            Ok(None)
-        }
+            None
+        };
+        let evict_hint = self.slide_inner();
+        Ok((output, evict_hint))
     }
 
-    fn slide_forward(&mut self) -> StateEvictHint {
-        self.curr_row_number += 1;
-        self.buffer
-            .pop_front()
-            .expect("should not slide forward when the current window is not ready");
-        // can't evict any state key in EOWC mode, because we can't recover from previous output now
-        StateEvictHint::CannotEvict(
-            self.first_key
-                .clone()
-                .expect("should have appended some rows"),
-        )
+    fn slide_no_output(&mut self) -> Result<StateEvictHint> {
+        Ok(self.slide_inner())
     }
 }
 
@@ -93,6 +99,24 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "should not slide forward when the current window is not ready")]
+    fn test_row_number_state_bad_use() {
+        let call = WindowFuncCall {
+            kind: WindowFuncKind::RowNumber,
+            args: AggArgs::None,
+            return_type: DataType::Int64,
+            frame: Frame::rows(
+                FrameBound::UnboundedPreceding,
+                FrameBound::UnboundedFollowing,
+            ),
+        };
+        let mut state = RowNumberState::new(&call);
+        assert!(state.curr_window().key.is_none());
+        assert!(!state.curr_window().is_ready);
+        _ = state.slide()
+    }
+
+    #[test]
     fn test_row_number_state() {
         let call = WindowFuncCall {
             kind: WindowFuncKind::RowNumber,
@@ -106,24 +130,23 @@ mod tests {
         let mut state = RowNumberState::new(&call);
         assert!(state.curr_window().key.is_none());
         assert!(!state.curr_window().is_ready);
-        assert!(state.curr_output().unwrap().is_none());
         state.append(create_state_key(100), SmallVec::new());
         assert_eq!(state.curr_window().key.unwrap(), &create_state_key(100));
         assert!(state.curr_window().is_ready);
-        assert_eq!(state.curr_output().unwrap().unwrap(), 1i64.into());
-        state.append(create_state_key(103), SmallVec::new());
-        state.append(create_state_key(102), SmallVec::new());
-        assert_eq!(state.curr_window().key.unwrap(), &create_state_key(100));
-        let evict_hint = state.slide_forward();
+        let (output, evict_hint) = state.slide().unwrap();
+        assert_eq!(output.unwrap(), 1i64.into());
         match evict_hint {
             StateEvictHint::CannotEvict(state_key) => {
                 assert_eq!(state_key, create_state_key(100));
             }
             _ => unreachable!(),
         }
+        assert!(!state.curr_window().is_ready);
+        state.append(create_state_key(103), SmallVec::new());
+        state.append(create_state_key(102), SmallVec::new());
         assert_eq!(state.curr_window().key.unwrap(), &create_state_key(103));
-        assert_eq!(state.curr_output().unwrap().unwrap(), 2i64.into());
-        let evict_hint = state.slide_forward();
+        let (output, evict_hint) = state.slide().unwrap();
+        assert_eq!(output.unwrap(), 2i64.into());
         match evict_hint {
             StateEvictHint::CannotEvict(state_key) => {
                 assert_eq!(state_key, create_state_key(100));
@@ -131,6 +154,7 @@ mod tests {
             _ => unreachable!(),
         }
         assert_eq!(state.curr_window().key.unwrap(), &create_state_key(102));
-        assert_eq!(state.curr_output().unwrap().unwrap(), 3i64.into());
+        let (output, _) = state.slide().unwrap();
+        assert_eq!(output.unwrap(), 3i64.into());
     }
 }

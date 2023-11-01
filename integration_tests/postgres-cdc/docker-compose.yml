@@ -51,10 +51,6 @@ services:
     command: [ "postgres", "-c", "wal_level=logical" ]
     restart: always
     container_name: postgres
-  connector-node:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: connector-node
   postgres_prepare:
     image: postgres
     depends_on:

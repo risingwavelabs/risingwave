@@ -378,7 +378,7 @@ impl PlanRoot {
                         }
                         let plan =
                             LogicalProject::with_out_col_idx(plan, output_indices.into_iter());
-                        let out_col_change = ColIndexMapping::with_target_size(map, target_size);
+                        let out_col_change = ColIndexMapping::new(map, target_size);
                         (plan.into(), out_col_change)
                     }
                 };
@@ -618,7 +618,7 @@ fn exist_and_no_exchange_before(plan: &PlanRef, is_candidate: fn(&PlanRef) -> bo
 fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> bool {
     fn is_user_table(plan: &PlanRef) -> bool {
         plan.as_batch_seq_scan()
-            .map(|node| !node.core().is_sys_table)
+            .map(|node| !node.core().is_sys_table())
             .unwrap_or(false)
     }
 
@@ -651,7 +651,7 @@ fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> boo
 fn require_additional_exchange_on_root_in_local_mode(plan: PlanRef) -> bool {
     fn is_user_table(plan: &PlanRef) -> bool {
         plan.as_batch_seq_scan()
-            .map(|node| !node.core().is_sys_table)
+            .map(|node| !node.core().is_sys_table())
             .unwrap_or(false)
     }
 

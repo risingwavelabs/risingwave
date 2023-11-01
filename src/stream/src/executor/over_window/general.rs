@@ -389,7 +389,9 @@ impl<S: StateStore> OverWindowExecutor<S> {
             }
 
             // Update recently accessed range for later shrinking cache.
-            if !this.cache_policy.is_full() && let Some(accessed_range) = accessed_range {
+            if !this.cache_policy.is_full()
+                && let Some(accessed_range) = accessed_range
+            {
                 match vars.recently_accessed_ranges.entry(part_key) {
                     btree_map::Entry::Vacant(vacant) => {
                         vacant.insert(accessed_range);
@@ -510,7 +512,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             // Slide to the first affected key. We can safely compare to `Some(first_curr_key)` here
             // because it must exist in the states, by the definition of affected range.
             while states.curr_key() != Some(first_curr_key.as_normal_expect()) {
-                states.just_slide_forward();
+                states.just_slide()?;
             }
             let mut curr_key_cursor = part_with_delta.find(first_curr_key).unwrap();
             assert_eq!(
@@ -523,7 +525,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 let (key, row) = curr_key_cursor
                     .key_value()
                     .expect("cursor must be valid until `last_curr_key`");
-                let output = states.curr_output()?;
+                let output = states.slide_no_evict_hint()?;
                 let new_row = OwnedRow::new(
                     row.as_inner()
                         .iter()
@@ -552,7 +554,6 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     }
                 }
 
-                states.just_slide_forward();
                 curr_key_cursor.move_next();
 
                 key != last_curr_key

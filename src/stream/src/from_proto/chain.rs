@@ -12,19 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::plan_common::StorageTableDesc;
+use risingwave_connector::source::external::{CdcTableType, SchemaTableName};
+use risingwave_pb::plan_common::{ExternalTableDesc, StorageTableDesc};
 use risingwave_pb::stream_plan::{ChainNode, ChainType};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
+use crate::executor::external::ExternalStorageTable;
 use crate::executor::{
-    BackfillExecutor, ChainExecutor, FlowControlExecutor, RearrangedChainExecutor,
+    BackfillExecutor, CdcBackfillExecutor, ChainExecutor, FlowControlExecutor,
+    RearrangedChainExecutor, SourceStateTableHandler,
 };
 
 pub struct ChainExecutorBuilder;
@@ -39,7 +44,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         state_store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let [mview, snapshot]: [_; 2] = params.input.try_into().unwrap();
+        let [upstream, snapshot]: [_; 2] = params.input.try_into().unwrap();
         // For reporting the progress.
         let progress = stream
             .context
@@ -58,6 +63,11 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     .map(|i| snapshot.schema().fields()[*i].clone())
                     .collect_vec(),
             )
+        } else if matches!(node.chain_type(), ChainType::CdcBackfill) {
+            let table_desc: &ExternalTableDesc = node.get_cdc_table_desc()?;
+            let schema = Schema::new(table_desc.columns.iter().map(Into::into).collect());
+            assert_eq!(output_indices, (0..schema.len()).collect_vec());
+            schema
         } else {
             // For `Chain`s other than `Backfill`, there should be no extra mapping required. We can
             // directly output the columns received from the upstream or snapshot.
@@ -71,7 +81,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 let upstream_only = matches!(node.chain_type(), ChainType::UpstreamOnly);
                 ChainExecutor::new(
                     snapshot,
-                    mview,
+                    upstream,
                     progress,
                     schema,
                     params.pk_indices,
@@ -79,12 +89,71 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 )
                 .boxed()
             }
-            ChainType::Rearrange => {
-                RearrangedChainExecutor::new(snapshot, mview, progress, schema, params.pk_indices)
-                    .boxed()
+            ChainType::Rearrange => RearrangedChainExecutor::new(
+                snapshot,
+                upstream,
+                progress,
+                schema,
+                params.pk_indices,
+            )
+            .boxed(),
+            ChainType::CdcBackfill => {
+                let table_desc: &ExternalTableDesc = node.get_cdc_table_desc()?;
+                let properties: HashMap<String, String> = table_desc
+                    .connect_properties
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                let table_type = CdcTableType::from_properties(&properties);
+                let table_reader =
+                    table_type.create_table_reader(properties.clone(), schema.clone())?;
+
+                let order_types = table_desc
+                    .pk
+                    .iter()
+                    .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
+                    .collect_vec();
+
+                let pk_indices = table_desc
+                    .pk
+                    .iter()
+                    .map(|k| k.column_index as usize)
+                    .collect_vec();
+
+                let schema_table_name = SchemaTableName::from_properties(&properties);
+                let external_table = ExternalStorageTable::new(
+                    TableId::new(table_desc.table_id),
+                    schema_table_name,
+                    table_reader,
+                    schema.clone(),
+                    order_types,
+                    pk_indices.clone(),
+                    (0..table_desc.columns.len()).collect_vec(),
+                );
+
+                let source_state_handler = SourceStateTableHandler::from_table_catalog(
+                    node.get_state_table().as_ref().unwrap(),
+                    state_store.clone(),
+                )
+                .await;
+                CdcBackfillExecutor::new(
+                    params.actor_context.clone(),
+                    external_table,
+                    upstream,
+                    (0..table_desc.columns.len()).collect_vec(), /* eliminate the last column (_rw_offset) */
+                    Some(progress),
+                    schema.clone(),
+                    pk_indices,
+                    params.executor_stats,
+                    source_state_handler,
+                    true,
+                    params.env.config().developer.chunk_size,
+                ).boxed()
             }
             ChainType::Backfill => {
-                let table_desc: &StorageTableDesc = node.get_table_desc()?;
+                let table_desc: &StorageTableDesc = node
+                    .get_table_desc()
+                    .map_err(|err| anyhow!("chain: table_desc not found! {:?}", err))?;
                 let table_id = TableId {
                     table_id: table_desc.table_id,
                 };
@@ -164,7 +233,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
 
                 BackfillExecutor::new(
                     upstream_table,
-                    mview,
+                    upstream,
                     state_table,
                     output_indices,
                     progress,
