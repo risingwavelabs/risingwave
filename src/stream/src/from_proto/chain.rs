@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
@@ -28,16 +27,10 @@ use risingwave_storage::table::Distribution;
 
 use super::*;
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
-use crate::executor::{
-    ArrangementBackfillExecutor, BackfillExecutor, ChainExecutor, FlowControlExecutor,
-    RearrangedChainExecutor,
-=======
-use crate::common::table::state_table::StateTable;
 use crate::executor::external::ExternalStorageTable;
 use crate::executor::{
-    BackfillExecutor, CdcBackfillExecutor, ChainExecutor, FlowControlExecutor,
-    RearrangedChainExecutor, SourceStateTableHandler,
->>>>>>> origin/main
+    ArrangementBackfillExecutor, BackfillExecutor, CdcBackfillExecutor, ChainExecutor,
+    FlowControlExecutor, RearrangedChainExecutor, SourceStateTableHandler,
 };
 
 pub struct ChainExecutorBuilder;
@@ -255,7 +248,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
 
                     BackfillExecutor::new(
                         upstream_table,
-                        mview,
+                        upstream,
                         state_table,
                         output_indices,
                         progress,
@@ -281,7 +274,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                                 .await;
                             ArrangementBackfillExecutor::<_, $SD>::new(
                                 upstream_table,
-                                mview,
+                                upstream,
                                 state_table.unwrap(),
                                 output_indices,
                                 progress,

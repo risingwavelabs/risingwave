@@ -281,6 +281,7 @@ impl Scan {
             output_col_idx,
             table_desc,
             Rc::new(CdcTableDesc::default()),
+            table_catalog,
             indexes,
             ctx,
             predicate,
@@ -302,6 +303,7 @@ impl Scan {
             output_col_idx,
             Rc::new(TableDesc::default()),
             cdc_table_desc,
+            None,
             vec![],
             ctx,
             Condition::true_cond(),
@@ -317,6 +319,7 @@ impl Scan {
         output_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
         cdc_table_desc: Rc<CdcTableDesc>,
+        table_catalog: Option<Arc<TableCatalog>>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table

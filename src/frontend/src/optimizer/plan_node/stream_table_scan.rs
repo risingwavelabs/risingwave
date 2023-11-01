@@ -121,7 +121,7 @@ impl StreamTableScan {
 
     // TODO: Add note to reviewer about safety, because of `generic::Scan` limitation.
     fn get_upstream_state_table(&self) -> Option<TableCatalog> {
-        self.logical.table_catalog.as_ref().map(|c| (**c).clone())
+        self.core.table_catalog.as_ref().map(|c| (**c).clone())
     }
 
     /// Build catalog for backfill state
@@ -253,13 +253,13 @@ impl StreamTableScan {
         // The required columns from the table (both scan and upstream).
         let upstream_column_ids = match self.chain_type {
             // For backfill, we additionally need the primary key columns.
-            ChainType::Backfill => self.core.output_and_pk_column_ids(),
+            ChainType::Backfill | ChainType::CdcBackfill => self.core.output_and_pk_column_ids(),
             // For arrangement backfill, we need all columns.
             // This is for replication.
             // Only inside the arrangement backfill executor we will
             // filter out the columns that are not in the output.
             ChainType::ArrangementBackfill => self
-                .logical
+                .core
                 .table_desc
                 .columns
                 .iter()
@@ -301,18 +301,6 @@ impl StreamTableScan {
             snapshot_schema.clone()
         };
 
-        let output_indices = self
-            .core
-            .output_column_ids()
-            .iter()
-            .map(|i| {
-                upstream_column_ids
-                    .iter()
-                    .position(|&x| x == i.get_id())
-                    .unwrap() as u32
-            })
-            .collect_vec();
-
         let batch_plan_node = BatchPlanNode {
             table_desc: if cdc_upstream {
                 None
@@ -326,8 +314,6 @@ impl StreamTableScan {
             .build_backfill_state_catalog(state)
             .to_internal_table_prost();
 
-        let table_desc = Some(self.logical.table_desc.to_protobuf());
-
         // For arrangement backfill we need to maintain 2 sets of output_indices.
         // 1. output_indices for the updates.
         // 2. output_indices for the records from the arrangement table.
@@ -336,14 +322,14 @@ impl StreamTableScan {
         let upstream_table_catalog = self
             .get_upstream_state_table()
             .unwrap()
-            .with_output_column_ids(&self.logical.output_column_ids());
+            .with_output_column_ids(&self.core.output_column_ids());
         let output_indices = match self.chain_type {
             ChainType::ArrangementBackfill => self
-                .logical
+                .core
                 .output_column_ids()
                 .iter()
                 .map(|i| {
-                    self.logical
+                    self.core
                         .table_desc
                         .columns
                         .iter()
@@ -353,7 +339,7 @@ impl StreamTableScan {
                 })
                 .collect_vec(),
             _ => self
-                .logical
+                .core
                 .output_column_ids()
                 .iter()
                 .map(|i| {

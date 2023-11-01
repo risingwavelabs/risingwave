@@ -451,7 +451,7 @@ pub(crate) mod tests {
 
     use crate::catalog::catalog_service::CatalogReader;
     use crate::catalog::root_catalog::Catalog;
-    use crate::catalog::table_catalog::TableType;
+    use crate::catalog::table_catalog::{CreateType, TableType};
     use crate::expr::InputRef;
     use crate::optimizer::plan_node::generic::ScanTableType;
     use crate::optimizer::plan_node::{
@@ -563,6 +563,8 @@ pub(crate) mod tests {
             cleaned_by_watermark: false,
             created_at_epoch: None,
             initialized_at_epoch: None,
+            create_type: CreateType::Foreground,
+            description: None,
             output_indices: vec![],
         };
         let batch_plan_node: PlanRef = LogicalScan::create(

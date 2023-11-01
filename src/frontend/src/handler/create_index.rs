@@ -329,8 +329,8 @@ fn assemble_materialize(
 
     let logical_scan = LogicalScan::create(
         table_name,
-        table_desc.clone(),
         ScanTableType::default(),
+        table_desc.clone(),
         Some(table_catalog),
         // Index table has no indexes.
         vec![],

@@ -91,6 +91,7 @@ impl LogicalScan {
     /// Create a [`LogicalScan`] node. Used by planner.
     pub fn create(
         table_name: String, // explain-only
+        scan_table_type: ScanTableType,
         table_desc: Rc<TableDesc>,
         table_catalog: Option<Arc<TableCatalog>>,
         indexes: Vec<Rc<IndexCatalog>>,
@@ -100,7 +101,7 @@ impl LogicalScan {
     ) -> Self {
         generic::Scan::new(
             table_name,
-            false,
+            scan_table_type,
             (0..table_desc.columns.len()).collect(),
             table_desc,
             table_catalog,

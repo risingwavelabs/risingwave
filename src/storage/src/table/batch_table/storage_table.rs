@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
 use std::default::Default;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::{Index, RangeBounds};

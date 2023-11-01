@@ -105,7 +105,6 @@ mod utils;
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
 pub use backfill::arrangement_backfill::*;
-pub use backfill::cdc_backfill::*;
 pub use backfill::cdc::cdc_backfill::CdcBackfillExecutor;
 pub use backfill::no_shuffle_backfill::*;
 pub use backfill::upstream_table::*;
