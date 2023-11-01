@@ -31,6 +31,7 @@ use crate::MetaStoreBackend;
 pub enum MetaStoreBackendImpl {
     Etcd(EtcdMetaStore),
     Mem(MemStore),
+    #[expect(dead_code, reason = "WIP")]
     Sql(SqlMetaStore),
 }
 
@@ -40,7 +41,7 @@ macro_rules! dispatch_meta_store {
         match $impl {
             MetaStoreBackendImpl::Etcd($store) => $body,
             MetaStoreBackendImpl::Mem($store) => $body,
-            MetaStoreBackendImpl::Sql($store) => panic!("not supported"),
+            MetaStoreBackendImpl::Sql(_) => panic!("not supported"),
         }
     }};
 }
