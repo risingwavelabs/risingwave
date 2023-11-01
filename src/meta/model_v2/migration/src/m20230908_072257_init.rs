@@ -334,9 +334,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Fragment::VnodeMapping).json())
                     .col(ColumnDef::new(Fragment::StateTableIds).json())
                     .col(ColumnDef::new(Fragment::UpstreamFragmentId).json())
-                    .col(ColumnDef::new(Fragment::DispatcherType).string())
-                    .col(ColumnDef::new(Fragment::DistKeyIndices).json())
-                    .col(ColumnDef::new(Fragment::OutputIndices).json())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_fragment_table_id")
@@ -359,11 +356,11 @@ impl MigrationTrait for Migration {
                             .auto_increment(),
                     )
                     .col(ColumnDef::new(Actor::FragmentId).integer().not_null())
-                    .col(ColumnDef::new(Actor::Status).string())
+                    .col(ColumnDef::new(Actor::Status).string().not_null())
                     .col(ColumnDef::new(Actor::Splits).json())
                     .col(ColumnDef::new(Actor::ParallelUnitId).integer().not_null())
                     .col(ColumnDef::new(Actor::UpstreamActorIds).json())
-                    .col(ColumnDef::new(Actor::Dispatchers).json())
+                    .col(ColumnDef::new(Actor::Dispatchers).json().not_null())
                     .col(ColumnDef::new(Actor::VnodeBitmap).string())
                     .foreign_key(
                         &mut ForeignKey::create()
@@ -842,9 +839,6 @@ enum Fragment {
     VnodeMapping,
     StateTableIds,
     UpstreamFragmentId,
-    DispatcherType,
-    DistKeyIndices,
-    OutputIndices,
 }
 
 #[derive(DeriveIden)]

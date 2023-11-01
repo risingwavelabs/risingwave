@@ -367,3 +367,47 @@ fn normalize_array_index(len: usize, index: i32) -> Option<usize> {
         Some((len as i32 + index) as usize)
     }
 }
+
+/// Recursively removes all object fields that have null values from the given JSON value.
+/// Null values that are not object fields are untouched.
+///
+/// Examples:
+///
+/// ```slt
+/// query T
+/// SELECT jsonb_strip_nulls('[{"f1":1, "f2":null}, 2, null, 3]');
+/// ----
+/// [{"f1": 1}, 2, null, 3]
+/// ```
+#[function("jsonb_strip_nulls(jsonb) -> jsonb")]
+fn jsonb_strip_nulls(v: JsonbRef<'_>) -> JsonbVal {
+    let jsonb: ValueRef<'_> = v.into();
+    let mut builder = jsonbb::Builder::<Vec<u8>>::with_capacity(jsonb.capacity());
+    jsonbb_strip_nulls(jsonb, &mut builder);
+    JsonbVal::from(builder.finish())
+}
+
+/// Recursively removes all object fields that have null values from the given JSON value.
+fn jsonbb_strip_nulls(jsonb: ValueRef<'_>, builder: &mut jsonbb::Builder) {
+    match jsonb {
+        ValueRef::Object(obj) => {
+            builder.begin_object();
+            for (k, v) in obj.iter() {
+                if let ValueRef::Null = v {
+                    continue;
+                }
+                builder.add_string(k);
+                jsonbb_strip_nulls(v, builder);
+            }
+            builder.end_object();
+        }
+        ValueRef::Array(array) => {
+            builder.begin_array();
+            for v in array.iter() {
+                jsonbb_strip_nulls(v, builder);
+            }
+            builder.end_array();
+        }
+        _ => builder.add_value(jsonb),
+    }
+}

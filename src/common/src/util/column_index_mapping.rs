@@ -335,6 +335,7 @@ impl ColIndexMapping {
             r#type: strategy.r#type,
             dist_key_indices: map(&strategy.dist_key_indices)?,
             output_indices: map(&strategy.output_indices)?,
+            downstream_table_name: strategy.downstream_table_name.clone(),
         })
     }
 }
