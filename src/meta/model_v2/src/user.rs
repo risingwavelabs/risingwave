@@ -62,16 +62,16 @@ impl From<PbUserInfo> for ActiveModel {
     }
 }
 
-impl Into<PbUserInfo> for Model {
-    fn into(self) -> PbUserInfo {
+impl From<Model> for PbUserInfo {
+    fn from(val: Model) -> Self {
         PbUserInfo {
-            id: self.user_id,
-            name: self.name,
-            is_super: self.is_super,
-            can_create_db: self.can_create_db,
-            can_create_user: self.can_create_user,
-            can_login: self.can_login,
-            auth_info: self.auth_info.map(|x| x.0),
+            id: val.user_id,
+            name: val.name,
+            is_super: val.is_super,
+            can_create_db: val.can_create_db,
+            can_create_user: val.can_create_user,
+            can_login: val.can_login,
+            auth_info: val.auth_info.map(|x| x.into_inner()),
             grant_privileges: vec![], // fill in later
         }
     }

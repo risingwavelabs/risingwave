@@ -34,9 +34,10 @@ use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
 use risingwave_pb::meta::{PbRelation, PbRelationGroup};
+use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, DatabaseConnection, DatabaseTransaction,
-    EntityTrait, QueryFilter, QuerySelect, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
+    QueryFilter, QuerySelect, TransactionTrait,
 };
 use tokio::sync::RwLock;
 
@@ -121,10 +122,10 @@ impl CatalogController {
     ) -> MetaResult<object::Model> {
         let active_db = object::ActiveModel {
             oid: Default::default(),
-            obj_type: ActiveValue::Set(obj_type),
-            owner_id: ActiveValue::Set(owner_id),
-            schema_id: ActiveValue::Set(schema_id),
-            database_id: ActiveValue::Set(database_id),
+            obj_type: Set(obj_type),
+            owner_id: Set(owner_id),
+            schema_id: Set(schema_id),
+            database_id: Set(database_id),
             initialized_at: Default::default(),
             created_at: Default::default(),
         };
@@ -139,7 +140,7 @@ impl CatalogController {
 
         let db_obj = Self::create_object(&txn, ObjectType::Database, owner_id, None, None).await?;
         let mut db: database::ActiveModel = db.into();
-        db.database_id = ActiveValue::Set(db_obj.oid);
+        db.database_id = Set(db_obj.oid);
         let db = db.insert(&txn).await?;
 
         let mut schemas = vec![];
@@ -148,8 +149,8 @@ impl CatalogController {
                 Self::create_object(&txn, ObjectType::Schema, owner_id, Some(db_obj.oid), None)
                     .await?;
             let schema = schema::ActiveModel {
-                schema_id: ActiveValue::Set(schema_obj.oid),
-                name: ActiveValue::Set(schema_name.into()),
+                schema_id: Set(schema_obj.oid),
+                name: Set(schema_name.into()),
             };
             let schema = schema.insert(&txn).await?;
             schemas.push(ObjectModel(schema, schema_obj).into());
@@ -256,7 +257,7 @@ impl CatalogController {
         )
         .await?;
         let mut schema: schema::ActiveModel = schema.into();
-        schema.schema_id = ActiveValue::Set(schema_obj.oid);
+        schema.schema_id = Set(schema_obj.oid);
         let schema = schema.insert(&txn).await?;
         txn.commit().await?;
 
@@ -284,7 +285,7 @@ impl CatalogController {
         }
 
         let res = Object::delete(object::ActiveModel {
-            oid: ActiveValue::Set(schema_id),
+            oid: Set(schema_id),
             ..Default::default()
         })
         .exec(&inner.db)
@@ -473,8 +474,8 @@ impl CatalogController {
         // todo: shall we need to check existence of them Or let database handle it by FOREIGN KEY constraint.
         for obj_id in &pb_view.dependent_relations {
             object_dependency::ActiveModel {
-                oid: ActiveValue::Set(*obj_id),
-                used_by: ActiveValue::Set(view_obj.oid),
+                oid: Set(*obj_id),
+                used_by: Set(view_obj.oid),
                 ..Default::default()
             }
             .insert(&txn)
@@ -523,16 +524,16 @@ impl CatalogController {
             })?;
             column_desc.description = comment.description;
             table::ActiveModel {
-                table_id: ActiveValue::Set(comment.table_id),
-                columns: ActiveValue::Set(columns),
+                table_id: Set(comment.table_id),
+                columns: Set(columns),
                 ..Default::default()
             }
             .update(&txn)
             .await?
         } else {
             table::ActiveModel {
-                table_id: ActiveValue::Set(comment.table_id),
-                description: ActiveValue::Set(comment.description),
+                table_id: Set(comment.table_id),
+                description: Set(comment.description),
                 ..Default::default()
             }
             .update(&txn)
@@ -746,9 +747,9 @@ impl CatalogController {
                 relation.name = object_name.into();
                 relation.definition = alter_relation_rename(&relation.definition, object_name);
                 let active_model = $table::ActiveModel {
-                    $identity: ActiveValue::Set(relation.$identity),
-                    name: ActiveValue::Set(object_name.into()),
-                    definition: ActiveValue::Set(relation.definition.clone()),
+                    $identity: Set(relation.$identity),
+                    name: Set(object_name.into()),
+                    definition: Set(relation.definition.clone()),
                     ..Default::default()
                 };
                 active_model.update(&txn).await?;
@@ -777,8 +778,8 @@ impl CatalogController {
 
                 // the name of index and its associated table is the same.
                 let active_model = index::ActiveModel {
-                    index_id: ActiveValue::Set(index.index_id),
-                    name: ActiveValue::Set(object_name.into()),
+                    index_id: Set(index.index_id),
+                    name: Set(object_name.into()),
                     ..Default::default()
                 };
                 active_model.update(&txn).await?;
@@ -803,8 +804,8 @@ impl CatalogController {
                 relation.definition =
                     alter_relation_rename_refs(&relation.definition, &old_name, object_name);
                 let active_model = $table::ActiveModel {
-                    $identity: ActiveValue::Set(relation.$identity),
-                    definition: ActiveValue::Set(relation.definition.clone()),
+                    $identity: Set(relation.$identity),
+                    definition: Set(relation.definition.clone()),
                     ..Default::default()
                 };
                 active_model.update(&txn).await?;
