@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_meta::model::{ActorId, FragmentId};
+use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::ThrottleConfig;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_table_fragments_response::{
