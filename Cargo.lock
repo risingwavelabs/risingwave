@@ -8414,6 +8414,7 @@ dependencies = [
  "madsim-tonic",
  "static_assertions",
  "thiserror",
+ "thiserror-ext",
 ]
 
 [[package]]
@@ -9954,6 +9955,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d6d7a740b8a666a7e828dd00da9c0dc290dff53154ea77ac109281de90589b7"
 dependencies = [
  "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-ext"
+version = "0.1.0"
+source = "git+https://github.com/risingwavelabs/thiserror-ext.git?rev=ba5d40#ba5d4012025da323e893d6d14af9502f0107272a"
+dependencies = [
+ "thiserror",
+ "thiserror-ext-derive",
+]
+
+[[package]]
+name = "thiserror-ext-derive"
+version = "0.1.0"
+source = "git+https://github.com/risingwavelabs/thiserror-ext.git?rev=ba5d40#ba5d4012025da323e893d6d14af9502f0107272a"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.37",
 ]
 
 [[package]]
