@@ -78,7 +78,7 @@ impl BatchSeqScan {
     fn clone_with_dist(&self) -> Self {
         Self::new_inner(
             self.core.clone(),
-            if self.core.is_sys_table {
+            if self.core.is_sys_table() {
                 Distribution::Single
             } else {
                 match self.core.distribution_key() {
@@ -221,7 +221,7 @@ impl ToBatchPb for BatchSeqScan {
             .map(PbColumnDesc::from)
             .collect();
 
-        if self.core.is_sys_table {
+        if self.core.is_sys_table() {
             NodeBody::SysRowSeqScan(SysRowSeqScanNode {
                 table_id: self.core.table_desc.table_id.table_id,
                 column_descs,
@@ -250,7 +250,7 @@ impl ToBatchPb for BatchSeqScan {
 
 impl ToLocalBatch for BatchSeqScan {
     fn to_local(&self) -> Result<PlanRef> {
-        let dist = if self.core.is_sys_table {
+        let dist = if self.core.is_sys_table() {
             Distribution::Single
         } else if let Some(distribution_key) = self.core.distribution_key()
             && !distribution_key.is_empty()
