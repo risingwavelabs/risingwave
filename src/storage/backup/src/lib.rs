@@ -29,6 +29,8 @@
 
 pub mod error;
 pub mod meta_snapshot;
+pub mod meta_snapshot_v1;
+pub mod meta_snapshot_v2;
 pub mod storage;
 
 use std::collections::HashSet;

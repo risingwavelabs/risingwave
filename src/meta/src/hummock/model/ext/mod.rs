@@ -12,13 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod backup_manager;
-pub use backup_manager::*;
-mod error;
-mod meta_snapshot_builder;
-mod meta_snapshot_builder_v2;
-mod metrics;
-mod restore;
-mod utils;
+mod hummock;
 
-pub use restore::*;
+pub use hummock::*;
