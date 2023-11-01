@@ -1,4 +1,4 @@
- // Copyright 2023 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use opendal::{services::Gcs, layers::{LoggingLayer, RetryLayer}, Operator};
+use opendal::layers::{LoggingLayer, RetryLayer};
+use opendal::services::Gcs;
+use opendal::Operator;
 use serde::Deserialize;
 
-use super::opendal_enumerator::{OpenDALSplitEnumerator, EngineType};
+use super::opendal_enumerator::{EngineType, OpenDALSplitEnumerator};
 
 impl OpenDALSplitEnumerator {
     /// create opendal gcs engine.
-    pub fn new_gcs_source(bucket: String, root: String) -> anyhow::Result<Self> {
+    pub fn new_gcs_source(bucket: String) -> anyhow::Result<Self> {
         // Create gcs backend builder.
         let mut builder = Gcs::default();
 
         builder.bucket(&bucket);
-
-        builder.root(&root);
-
 
         // if credential env is set, use it. Otherwise, ADC will be used.
         let cred = std::env::var("GOOGLE_APPLICATION_CREDENTIALS");
@@ -62,4 +61,3 @@ impl SourceProperties for GCSProperties {
 
     const SOURCE_NAME: &'static str = GCS_CONNECTOR;
 }
-

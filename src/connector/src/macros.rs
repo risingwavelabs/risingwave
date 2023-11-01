@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 #[macro_export]
 macro_rules! for_all_classified_sources {
     ($macro:path $(,$extra_args:tt)*) => {
@@ -33,7 +32,7 @@ macro_rules! for_all_classified_sources {
                 { GooglePubsub, $crate::source::google_pubsub::PubsubProperties, $crate::source::google_pubsub::PubsubSplit },
                 { Nats, $crate::source::nats::NatsProperties, $crate::source::nats::split::NatsSplit },
                 { S3, $crate::source::filesystem::S3Properties, $crate::source::filesystem::FsSplit },
-                { OpenDAL, $crate::source::filesystem::GCSProperties, $crate::source::filesystem::FsSplit },
+                { GCS, $crate::source::filesystem::GCSProperties, $crate::source::filesystem::FsSplit },
                 { Test, $crate::source::test_source::TestSourceProperties, $crate::source::test_source::TestSourceSplit}
             }
             $(

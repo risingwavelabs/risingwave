@@ -13,7 +13,5 @@
 // limitations under the License.
 
 pub mod gcs_source;
-
+pub use gcs_source::*;
 pub mod opendal_enumerator;
-
-
