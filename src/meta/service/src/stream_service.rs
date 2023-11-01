@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_meta::model::ActorId;
 use risingwave_meta::stream::ThrottleConfig;
+use risingwave_meta_model_v2::SourceId;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
@@ -104,7 +105,11 @@ impl StreamManagerService for StreamServiceImpl {
     ) -> Result<Response<ThrottleResponse>, Status> {
         let request = request.into_inner();
         let actor_to_apply = match request.kind() {
-            ThrottleTarget::Source => todo!(),
+            ThrottleTarget::Source => {
+                self.fragment_manager
+                    .update_source_rate_limit_by_source_id(request.id as SourceId, request.rate)
+                    .await?
+            }
             ThrottleTarget::Mv => {
                 self.fragment_manager
                     .update_mv_rate_limit_by_table_id(TableId::from(request.id), request.rate)

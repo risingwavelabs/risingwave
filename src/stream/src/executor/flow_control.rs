@@ -94,7 +94,7 @@ impl FlowControlExecutor {
                                     "actor {:?} rate limit changed to {:?}",
                                     self.actor_ctx.id,
                                     self.rate_limit
-                                )
+                                );
                             }
                         }
                     }
