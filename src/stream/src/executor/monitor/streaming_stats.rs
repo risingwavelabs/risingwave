@@ -42,8 +42,6 @@ pub struct StreamingMetrics {
 
     // Streaming actor metrics from tokio (disabled by default)
     pub actor_execution_time: GenericGaugeVec<AtomicF64>,
-    pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
-    pub actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
     pub actor_scheduled_duration: GenericGaugeVec<AtomicF64>,
     pub actor_scheduled_cnt: GenericGaugeVec<AtomicI64>,
     pub actor_fast_poll_duration: GenericGaugeVec<AtomicF64>,
@@ -71,6 +69,10 @@ pub struct StreamingMetrics {
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
+
+    // Backpressure
+    pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
+    pub actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
 
     // Streaming Join
     pub join_lookup_miss_count: LabelGuardedIntCounterVec<5>,

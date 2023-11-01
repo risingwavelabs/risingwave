@@ -971,36 +971,6 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency(
-                    "Actor Barrier Latency",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_barrier_time')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_latency(
-                    "Actor Processing Time",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_processing_time')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_latency(
-                    "Actor Execution Time",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_actor_actor_execution_time')}[$__rate_interval]) > 0",
-                            "{{actor_id}}",
-                        ),
-                    ],
-                ),
                 panels.timeseries_row(
                     "Actor Input Row",
                     "",
@@ -1021,25 +991,6 @@ def section_streaming_actors(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_actor_ops(
-                    "Join Executor Cache",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])",
-                            "cache miss - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}} ",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_join_lookup_total_count')}[$__rate_interval])",
-                            "total lookups {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
-                            "cache miss when insert {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
-                        ),
-                    ],
-                ),
-
                 panels.timeseries_actor_ops(
                     "Temporal Join Executor Cache",
                     "",
@@ -1184,54 +1135,6 @@ def section_streaming_actors(outer_panels):
                     ],
                 ),
                 panels.timeseries_actor_ops(
-                    "Aggregation Executor Cache Statistics For Each Key/State",
-                    "Lookup miss count counts the number of aggregation key's cache miss per second."
-                    "Lookup total count counts the number of rows processed per second."
-                    "By diving these two metrics, one can derive the cache miss rate per second.",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])",
-                            "stream agg cache miss - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])",
-                            "stream agg total lookups - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])",
-                            "distinct agg cache miss - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])",
-                            "distinct agg total lookups - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_group_top_n_cache_miss_count')}[$__rate_interval])",
-                            "group top n cache miss - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_group_top_n_total_query_cache_count')}[$__rate_interval])",
-                            "group top n total lookups - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])",
-                            "group top n appendonly cache miss - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_group_top_n_appendonly_total_query_cache_count')}[$__rate_interval])",
-                            "group top n appendonly total lookups - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_lookup_cache_miss_count')}[$__rate_interval])",
-                            "lookup executor cache miss - table {{table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_lookup_total_query_cache_count')}[$__rate_interval])",
-                            "lookup executor total lookups - table {{table_id}} actor {{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_actor_ops(
                     "Aggregation Executor Cache Statistics For Each StreamChunk",
                     "",
                     [
@@ -1318,6 +1221,16 @@ def section_streaming_actors_tokio(outer_panels):
         outer_panels.row_collapsed(
             "Streaming Actors (Tokio)",
             [
+                panels.timeseries_actor_latency(
+                    "Actor Execution Time",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_actor_actor_execution_time')}[$__rate_interval]) > 0",
+                            "{{actor_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_actor_latency_small(
                     "Tokio: Actor Fast Poll Time",
                     "",
