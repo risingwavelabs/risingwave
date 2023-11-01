@@ -22,10 +22,11 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use prometheus::core::{
     Atomic, AtomicF64, AtomicI64, AtomicU64, Collector, Desc, GenericCounter, GenericCounterVec,
-    GenericGauge, GenericGaugeVec, MetricVec, MetricVecBuilder,
+    GenericGauge, GenericGaugeVec, GenericLocalCounter, MetricVec, MetricVecBuilder,
 };
+use prometheus::local::{LocalHistogram, LocalIntCounter};
 use prometheus::proto::MetricFamily;
-use prometheus::{Histogram, HistogramVec};
+use prometheus::{Gauge, Histogram, HistogramVec, IntCounter, IntGauge};
 use tracing::warn;
 
 pub fn __extract_counter_builder<P: Atomic>(
@@ -119,11 +120,13 @@ pub type LabelGuardedIntGaugeVec<const N: usize> =
 pub type LabelGuardedGaugeVec<const N: usize> =
     LabelGuardedMetricVec<VecBuilderOfGauge<AtomicF64>, N>;
 
-pub type LabelGuardedHistogram<const N: usize> = LabelGuardedMetric<VecBuilderOfHistogram, N>;
-pub type LabelGuardedIntCounter<const N: usize> =
-    LabelGuardedMetric<VecBuilderOfCounter<AtomicU64>, N>;
-pub type LabelGuardedIntGauge<const N: usize> = LabelGuardedMetric<VecBuilderOfGauge<AtomicI64>, N>;
-pub type LabelGuardedGauge<const N: usize> = LabelGuardedMetric<VecBuilderOfGauge<AtomicF64>, N>;
+pub type LabelGuardedHistogram<const N: usize> = LabelGuardedMetric<Histogram, N>;
+pub type LabelGuardedIntCounter<const N: usize> = LabelGuardedMetric<IntCounter, N>;
+pub type LabelGuardedIntGauge<const N: usize> = LabelGuardedMetric<IntGauge, N>;
+pub type LabelGuardedGauge<const N: usize> = LabelGuardedMetric<Gauge, N>;
+
+pub type LabelGuardedLocalHistogram<const N: usize> = LabelGuardedMetric<LocalHistogram, N>;
+pub type LabelGuardedLocalIntCounter<const N: usize> = LabelGuardedMetric<LocalIntCounter, N>;
 
 fn gen_test_label<const N: usize>() -> [&'static str; N] {
     const TEST_LABELS: [&str; 5] = ["test1", "test2", "test3", "test4", "test5"];
@@ -138,6 +141,22 @@ fn gen_test_label<const N: usize>() -> [&'static str; N] {
 struct LabelGuardedMetricsInfo<const N: usize> {
     labeled_metrics_count: HashMap<[String; N], usize>,
     uncollected_removed_labels: HashSet<[String; N]>,
+}
+
+impl<const N: usize> LabelGuardedMetricsInfo<N> {
+    fn register_new_label(mutex: &Arc<Mutex<Self>>, labels: &[&str; N]) -> LabelGuard<N> {
+        let mut guard = mutex.lock();
+        let label_string = labels.map(|str| str.to_string());
+        guard.uncollected_removed_labels.remove(&label_string);
+        *guard
+            .labeled_metrics_count
+            .entry(label_string.clone())
+            .or_insert(0) += 1;
+        LabelGuard {
+            labels: label_string,
+            info: mutex.clone(),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -189,22 +208,16 @@ impl<T: MetricVecBuilder, const N: usize> LabelGuardedMetricVec<T, N> {
         }
     }
 
-    pub fn with_label_values(&self, labels: &[&str; N]) -> LabelGuardedMetric<T, N> {
-        let mut guard = self.info.lock();
-        let label_string = labels.map(|str| str.to_string());
-        guard.uncollected_removed_labels.remove(&label_string);
-        *guard.labeled_metrics_count.entry(label_string).or_insert(0) += 1;
+    pub fn with_label_values(&self, labels: &[&str; N]) -> LabelGuardedMetric<T::M, N> {
+        let guard = LabelGuardedMetricsInfo::register_new_label(&self.info, labels);
         let inner = self.inner.with_label_values(labels);
         LabelGuardedMetric {
-            inner: Arc::new(LabelGuardedMetricInner {
-                inner,
-                labels: labels.map(|str| str.to_string()),
-                info: self.info.clone(),
-            }),
+            inner,
+            _guard: Arc::new(guard),
         }
     }
 
-    pub fn with_test_label(&self) -> LabelGuardedMetric<T, N> {
+    pub fn with_test_label(&self) -> LabelGuardedMetric<T::M, N> {
         let labels: [&'static str; N] = gen_test_label::<N>();
         self.with_label_values(&labels)
     }
@@ -258,13 +271,12 @@ impl<const N: usize> LabelGuardedHistogramVec<N> {
 }
 
 #[derive(Clone)]
-struct LabelGuardedMetricInner<T: MetricVecBuilder, const N: usize> {
-    inner: T::M,
+struct LabelGuard<const N: usize> {
     labels: [String; N],
     info: Arc<Mutex<LabelGuardedMetricsInfo<N>>>,
 }
 
-impl<T: MetricVecBuilder, const N: usize> Drop for LabelGuardedMetricInner<T, N> {
+impl<const N: usize> Drop for LabelGuard<N> {
     fn drop(&mut self) {
         let mut guard = self.info.lock();
         let count = guard.labeled_metrics_count.get_mut(&self.labels).expect(
@@ -282,8 +294,9 @@ impl<T: MetricVecBuilder, const N: usize> Drop for LabelGuardedMetricInner<T, N>
 }
 
 #[derive(Clone)]
-pub struct LabelGuardedMetric<T: MetricVecBuilder, const N: usize> {
-    inner: Arc<LabelGuardedMetricInner<T, N>>,
+pub struct LabelGuardedMetric<T, const N: usize> {
+    inner: T,
+    _guard: Arc<LabelGuard<N>>,
 }
 
 impl<T: MetricVecBuilder, const N: usize> Debug for LabelGuardedMetric<T, N> {
@@ -292,11 +305,11 @@ impl<T: MetricVecBuilder, const N: usize> Debug for LabelGuardedMetric<T, N> {
     }
 }
 
-impl<T: MetricVecBuilder, const N: usize> Deref for LabelGuardedMetric<T, N> {
-    type Target = T::M;
+impl<T, const N: usize> Deref for LabelGuardedMetric<T, N> {
+    type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &self.inner.inner
+        &self.inner
     }
 }
 
@@ -321,6 +334,36 @@ impl<const N: usize> LabelGuardedIntGauge<N> {
 impl<const N: usize> LabelGuardedGauge<N> {
     pub fn test_gauge() -> Self {
         LabelGuardedGaugeVec::<N>::test_gauge_vec().with_test_label()
+    }
+}
+
+pub trait MetricWithLocal {
+    type Local;
+    fn local(&self) -> Self::Local;
+}
+
+impl MetricWithLocal for Histogram {
+    type Local = LocalHistogram;
+
+    fn local(&self) -> Self::Local {
+        self.local()
+    }
+}
+
+impl<P: Atomic> MetricWithLocal for GenericCounter<P> {
+    type Local = GenericLocalCounter<P>;
+
+    fn local(&self) -> Self::Local {
+        self.local()
+    }
+}
+
+impl<T: MetricWithLocal, const N: usize> LabelGuardedMetric<T, N> {
+    pub fn local(&self) -> LabelGuardedMetric<T::Local, N> {
+        LabelGuardedMetric {
+            inner: self.inner.local(),
+            _guard: self._guard.clone(),
+        }
     }
 }
 
