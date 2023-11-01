@@ -1,3 +1,9 @@
+#############################################################################################
+#                                     !!! IMPORTANT !!!                                     #
+# If you want to bump CI Docker image, please update BUILD_ENV_VERSION in build-ci-image.sh #
+# and corresponding rw-build-env version in docker-compose.yml.                             #
+#############################################################################################
+
 FROM ubuntu:22.04 AS risingwave-build-env
 
 ENV LANG en_US.utf8
