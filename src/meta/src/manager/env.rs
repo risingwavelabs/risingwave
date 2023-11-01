@@ -154,6 +154,8 @@ pub struct MetaOpts {
     pub split_group_size_limit: u64,
     /// The size limit to move a state-table to other group.
     pub min_table_split_size: u64,
+    /// The size limit to split a state-table to independent sstable.
+    pub cut_table_size_limit: u64,
 
     /// Whether config object storage bucket lifecycle to purge stale data.
     pub do_not_config_object_storage_lifecycle: bool,
@@ -200,6 +202,7 @@ impl MetaOpts {
             periodic_split_compact_group_interval_sec: 60,
             split_group_size_limit: 5 * 1024 * 1024 * 1024,
             min_table_split_size: 2 * 1024 * 1024 * 1024,
+            cut_table_size_limit: 1024 * 1024 * 1024,
             table_write_throughput_threshold: 128 * 1024 * 1024,
             min_table_split_write_throughput: 64 * 1024 * 1024,
             do_not_config_object_storage_lifecycle: true,

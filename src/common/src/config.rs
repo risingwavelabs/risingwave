@@ -255,6 +255,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::move_table_size_limit")]
     pub move_table_size_limit: u64,
 
+    #[serde(default = "default::meta::cut_table_size_limit")]
+    pub cut_table_size_limit: u64,
+
     #[serde(default = "default::meta::split_group_size_limit")]
     pub split_group_size_limit: u64,
 
@@ -941,6 +944,10 @@ pub mod default {
 
         pub fn move_table_size_limit() -> u64 {
             10 * 1024 * 1024 * 1024 // 10GB
+        }
+
+        pub fn cut_table_size_limit() -> u64 {
+            1024 * 1024 * 1024 // 1GB
         }
 
         pub fn split_group_size_limit() -> u64 {
