@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod big_query;
 pub mod blackhole;
 pub mod boxed;
 pub mod catalog;
@@ -78,6 +79,7 @@ macro_rules! for_all_sinks {
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { Doris, $crate::sink::doris::DorisSink },
+                { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { Test, $crate::sink::test_sink::TestSink }
             }
             $(,$arg)*
@@ -393,6 +395,8 @@ pub enum SinkError {
     Pulsar(anyhow::Error),
     #[error("Internal error: {0}")]
     Internal(anyhow::Error),
+    #[error("BigQuery error: {0}")]
+    BigQuery(anyhow::Error),
 }
 
 impl From<icelake::Error> for SinkError {
