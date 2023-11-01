@@ -63,6 +63,12 @@ fn jsonb_build_object(args: impl Row) -> Result<JsonbVal> {
     builder.begin_object();
     for (i, [key, value]) in args.iter().array_chunks().enumerate() {
         match key {
+            Some(ScalarRefImpl::List(_) | ScalarRefImpl::Struct(_) | ScalarRefImpl::Jsonb(_)) => {
+                return Err(ExprError::InvalidParam {
+                    name: "args",
+                    reason: "key value must be scalar, not array, composite, or json".into(),
+                })
+            }
             Some(s) => builder.display(ToTextDisplay(s)),
             None => {
                 return Err(ExprError::InvalidParam {
