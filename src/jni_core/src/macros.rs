@@ -13,42 +13,6 @@
 // limitations under the License.
 
 // Utils
-/// A macro the same as `concat!`, except that, for `concat!` if we call with `concat!({"hello"},
-/// "world")`, it will report error that `{"hello"}` is not literal, though actually it is. However,
-/// sometimes the bracket around the string literal is unavoidable if the literal is to be generated
-/// by a macro, while without a bracket macro expansion will fail with a `invalid in expression
-/// context` error.
-///
-/// This macro can be removed when the `concat!` supports input of literal embrace with bracket.
-///
-/// The returned value will only be a `&'static str` rather than a string literal and cannot be
-/// called with `concat!`.
-///
-/// ```
-/// #![feature(lazy_cell)]
-/// assert_eq!(
-///     "hello, world",
-///     risingwave_jni_core::runtime_concat!({ "hello," }, " world")
-/// )
-/// ```
-#[macro_export]
-macro_rules! runtime_concat {
-    ($($s:expr),*) => {{
-        static RESULT_STR: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
-            let mut ret = String::new();
-            $(
-                {
-                    let s: &'static str = $s;
-                    ret.push_str(s);
-                }
-            )*
-            ret
-        });
-        let ret: &'static str = RESULT_STR.as_str();
-        ret
-    }};
-}
-
 /// A macro that splits the input by comma and calls the callback `$macro` with the split result.
 /// The each part of the split result is within a bracket, and the callback `$macro` can have its
 /// first parameter as `{$({$($args:tt)+})*}` to match the split result.
@@ -289,35 +253,6 @@ macro_rules! gen_jni_type_sig {
     };
 }
 
-/// Generate the jni signature of a function parameter list. Parameter name is optional.
-/// ```
-/// use risingwave_jni_core::gen_jni_args_list_sig;
-/// assert_eq!("IS[B", gen_jni_args_list_sig!(int first, short, byte[] third))
-/// ```
-#[macro_export]
-macro_rules! gen_jni_args_list_sig {
-    ({$({$($args:tt)+})*}) => {
-        concat! {
-            $(
-                $crate::gen_jni_type_sig! {
-                    $($args)+
-                }
-            ),*
-        }
-    };
-    ({$($args:tt)*}) => {
-        $crate::split_by_comma! {
-            {$($args)*},
-            $crate::gen_jni_args_list_sig
-        }
-    };
-    ($($args:tt)*) => {{
-        $crate::gen_jni_args_list_sig! {
-            {$($args)*}
-        }
-    }}
-}
-
 /// Generate the jni signature of a given function
 /// ```
 /// #![feature(lazy_cell)]
@@ -357,23 +292,24 @@ macro_rules! gen_jni_args_list_sig {
 /// ```
 #[macro_export]
 macro_rules! gen_jni_sig {
-    ({$($ret:tt)*}, {$($args:tt)*}) => {{
-        // Use `runtime_concat` instead of `concat` because, in macro call,
-        // it requires a `{}` around it to provide an expression context, but
-        // const literal surrounded by `{}` cannot be call with `macro`.
-        $crate::runtime_concat! {
-            "(", {$crate::gen_jni_args_list_sig!{{$($args)*}}}, ")",
+    // handle the result of `split_by_comma`
+    ({$({$($args:tt)+})*}, {return {$($ret:tt)*}}) => {{
+        concat! {
+            "(", $($crate::gen_jni_type_sig!{ $($args)+ },)* ")",
             $crate::gen_jni_type_sig! {$($ret)+}
+        }
+    }};
+    ({$($ret:tt)*}, {$($args:tt)*}) => {{
+        $crate::split_by_comma! {
+            {$($args)*},
+            $crate::gen_jni_sig,
+            {return {$($ret)*}}
         }
     }};
     // handle the result of `split_extract_plain_native_methods`
     ({{$func_name:ident, {$($ret:tt)*}, {$($args:tt)*}}}) => {{
-        // Use `runtime_concat` instead of `concat` because, in macro call,
-        // it requires a `{}` around it to provide an expression context, but
-        // const literal surrounded by `{}` cannot be call with `macro`.
-        $crate::runtime_concat! {
-            "(", {$crate::gen_jni_args_list_sig!{{$($args)*}}}, ")",
-            $crate::gen_jni_type_sig! {$($ret)+}
+        $crate::gen_jni_sig! {
+            {$($ret)*}, {$($args)*}
         }
     }};
     ($($input:tt)*) => {{
@@ -454,7 +390,7 @@ macro_rules! for_all_plain_native_methods {
     };
 }
 
-/// Given the plain text of a list a native methods, split the method by semicolon (;), extract
+/// Given the plain text of a list native methods, split the methods by semicolon (;), extract
 /// the return type, argument list and name of the methods and pass the result to the callback
 /// `$macro` with the extracted result as the first parameter. The result can be matched with
 /// pattern `{$({$func_name:ident, {$($ret:tt)*}, {$($args:tt)*}})*}`
@@ -474,9 +410,13 @@ macro_rules! for_all_plain_native_methods {
 ///     }}
 /// }
 /// assert_eq!([
-///     ("f", "int", "(int param1, boolean param2)")
+///     ("f", "int", "(int param1, boolean param2)"),
+///     ("f2", "boolean []", "()"),
+///     ("f3", "java.lang.String", "(byte [] param)")
 /// ], call_split_extract_plain_native_methods!(
 ///     int f(int param1, boolean param2);
+///     boolean[] f2();
+///     java.lang.String f3(byte[] param);
 /// ))
 /// ```
 #[macro_export]
