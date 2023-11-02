@@ -422,9 +422,12 @@ impl ToText for StructRef<'_> {
                 } else {
                     write!(f, ",")?;
                 }
-                raw_text.clear();
-                x.write(&mut raw_text)?;
-                quote(&raw_text, f)?;
+                // print nothing for null
+                if x.is_some() {
+                    raw_text.clear();
+                    x.write(&mut raw_text)?;
+                    quote_if_need(&raw_text, f)?;
+                }
             }
             write!(f, ")")
         })
@@ -439,7 +442,7 @@ impl ToText for StructRef<'_> {
 }
 
 /// Double quote a string if it contains any special characters.
-fn quote(input: &str, writer: &mut impl Write) -> std::fmt::Result {
+fn quote_if_need(input: &str, writer: &mut impl Write) -> std::fmt::Result {
     if !input.is_empty() // non-empty
         && input.trim() == input // no leading or trailing whitespace
         && !input.contains(['(', ')', ',', '"', '\\'])
@@ -772,7 +775,7 @@ mod tests {
         #[track_caller]
         fn test(input: &str, quoted: &str) {
             let mut actual = String::new();
-            quote(input, &mut actual).unwrap();
+            quote_if_need(input, &mut actual).unwrap();
             assert_eq!(quoted, actual);
             assert_eq!(unquote(quoted), input);
         }
