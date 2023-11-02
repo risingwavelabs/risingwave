@@ -41,6 +41,8 @@ public class JniSinkWriterResponseObserver
 
     @Override
     public void onError(Throwable throwable) {
+        this.success =
+                Binding.sendSinkWriterErrorToChannel(this.responseTxPtr, throwable.getMessage());
         this.success = false;
         LOG.error("JniSinkWriterHandler onError: ", throwable);
     }

@@ -116,6 +116,10 @@ impl Epoch {
     }
 }
 
+pub const EPOCH_AVAILABLE_BITS: u64 = 16;
+pub const MAX_SPILL_TIMES: u64 = 1 << EPOCH_AVAILABLE_BITS;
+pub const EPOCH_MASK: u64 = (1 << EPOCH_AVAILABLE_BITS) - 1;
+pub const MAX_EPOCH: u64 = u64::MAX & !EPOCH_MASK;
 impl From<u64> for Epoch {
     fn from(epoch: u64) -> Self {
         Self(epoch)
