@@ -14,19 +14,15 @@
 
 use std::fmt::Debug;
 
-use anyhow::anyhow;
-use jsonbb::{Builder, Value};
+use jsonbb::Builder;
 use risingwave_common::types::{
     DataType, Date, Decimal, Int256Ref, Interval, JsonbRef, JsonbVal, ListRef, ScalarRefImpl,
     Serial, StructRef, Time, Timestamp, Timestamptz, ToText, F32, F64,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::{BoxedExpression, Context};
-use risingwave_expr::{build_function, function, ExprError, Result};
+use risingwave_expr::expr::Context;
+use risingwave_expr::{function, ExprError, Result};
 
-use super::timestamptz::time_zone_err;
-
-// TODO(Kexiang): We can unify all the to_jsonb functions if we include ctx and time zone for all types. Should we?
 #[function("to_jsonb(boolean) -> jsonb")]
 #[function("to_jsonb(*int) -> jsonb")]
 #[function("to_jsonb(decimal) -> jsonb")]
@@ -36,6 +32,7 @@ use super::timestamptz::time_zone_err;
 #[function("to_jsonb(time) -> jsonb")]
 #[function("to_jsonb(date) -> jsonb")]
 #[function("to_jsonb(timestamp) -> jsonb")]
+#[function("to_jsonb(timestamptz) -> jsonb")]
 #[function("to_jsonb(interval) -> jsonb")]
 #[function("to_jsonb(varchar) -> jsonb")]
 #[function("to_jsonb(jsonb) -> jsonb")]
@@ -51,86 +48,32 @@ pub fn to_jsonb(input: Option<impl ToJsonb>) -> Result<JsonbVal> {
     }
 }
 
-// Only to register this signature to function signature map.
-#[build_function("to_jsonb(timestamptz) -> jsonb")]
-#[build_function("to_jsonb(struct) -> jsonb")]
-#[build_function("to_jsonb(anyarray) -> jsonb")]
-fn build_timestamptz_to_jsonb(
-    _return_type: DataType,
-    _children: Vec<BoxedExpression>,
-) -> Result<BoxedExpression> {
-    Err(ExprError::UnsupportedFunction(
-        "to_jsonb of timestamptz/struct/anyarray should have been rewritten to include timezone"
-            .into(),
-    ))
-}
-
-#[function("to_jsonb(timestamptz, varchar) -> jsonb")]
-pub fn timestamptz_to_jsonb(input: Option<Timestamptz>, zone: Option<&str>) -> Result<JsonbVal> {
+#[function("to_jsonb(struct) -> jsonb")]
+pub fn struct_to_jsonb(input: Option<StructRef<'_>>, ctx: &Context) -> Result<JsonbVal> {
     match input {
-        Some(inner) => zone
-            .ok_or_else(|| {
-                ExprError::Internal(anyhow!(
-                    "to_char(timestamptz, varchar) have a null zone_str"
-                ))
-            })
-            .and_then(|zone_str| {
-                let value = timestamptz_to_value(inner, zone_str)?;
-                Ok(value.into())
-            }),
+        Some(inner) => {
+            let mut builder = Builder::default();
+            add_struct_to_builder(inner, &ctx.arg_types[0], &mut builder)?;
+            Ok(builder.finish().into())
+        }
         None => Ok(JsonbVal::null()),
     }
 }
 
-#[function("to_jsonb(struct, varchar) -> jsonb")]
-pub fn struct_to_jsonb(
-    input: Option<StructRef<'_>>,
-    zone: Option<&str>,
-    ctx: &Context,
-) -> Result<JsonbVal> {
+#[function("to_jsonb(anyarray) -> jsonb")]
+pub fn list_to_jsonb(input: Option<ListRef<'_>>, ctx: &Context) -> Result<JsonbVal> {
     match input {
-        Some(inner) => zone
-            .ok_or_else(|| {
-                ExprError::Internal(anyhow!("to_char(struct, varchar) have a null zone_str"))
-            })
-            .and_then(|zone_str| {
-                let mut builder = Builder::default();
-                add_struct_to_builder(inner, zone_str, &ctx.arg_types[0], &mut builder)?;
-                Ok(builder.finish().into())
-            }),
+        Some(inner) => {
+            let mut builder = Builder::default();
+            add_anyarrary_to_builder(inner, &ctx.arg_types[0], &mut builder)?;
+            Ok(builder.finish().into())
+        }
         None => Ok(JsonbVal::null()),
     }
-}
-
-#[function("to_jsonb(anyarray, varchar) -> jsonb")]
-pub fn list_to_jsonb(
-    input: Option<ListRef<'_>>,
-    zone: Option<&str>,
-    ctx: &Context,
-) -> Result<JsonbVal> {
-    match input {
-        Some(inner) => zone
-            .ok_or_else(|| {
-                ExprError::Internal(anyhow!("to_char(anyarray, varchar) have a null zone_str"))
-            })
-            .and_then(|zone_str| {
-                let mut builder = Builder::default();
-                add_anyarrary_to_builder(inner, zone_str, &ctx.arg_types[0], &mut builder)?;
-                Ok(builder.finish().into())
-            }),
-        None => Ok(JsonbVal::null()),
-    }
-}
-
-fn timestamptz_to_value(input: Timestamptz, zone: &str) -> Result<Value> {
-    let time_zone = Timestamptz::lookup_time_zone(zone).map_err(time_zone_err)?;
-    let instant_local = input.to_datetime_in_zone(time_zone);
-    Ok(instant_local.to_rfc3339().as_str().into())
 }
 
 fn add_anyarrary_to_builder(
     input: ListRef<'_>,
-    zone: &str,
     data_type: &DataType,
     builder: &mut Builder,
 ) -> Result<()> {
@@ -138,7 +81,7 @@ fn add_anyarrary_to_builder(
     builder.begin_array();
     input
         .iter()
-        .map(|x| add_scalar_to_builder(x, zone, data_type_in_list, builder))
+        .map(|x| add_scalar_to_builder(x, data_type_in_list, builder))
         .try_collect()?;
     builder.end_array();
     Ok(())
@@ -146,7 +89,6 @@ fn add_anyarrary_to_builder(
 
 fn add_struct_to_builder(
     input: StructRef<'_>,
-    zone: &str,
     data_type: &DataType,
     builder: &mut Builder,
 ) -> Result<()> {
@@ -162,7 +104,7 @@ fn add_struct_to_builder(
             } else {
                 builder.add_string(names[idx]);
             };
-            add_scalar_to_builder(scalar, zone, data_type, builder)?;
+            add_scalar_to_builder(scalar, data_type, builder)?;
             Ok::<(), ExprError>(())
         })
         .try_collect()?;
@@ -172,7 +114,6 @@ fn add_struct_to_builder(
 
 fn add_scalar_to_builder(
     input: Option<ScalarRefImpl<'_>>,
-    zone: &str,
     data_type: &DataType,
     builder: &mut Builder,
 ) -> Result<()> {
@@ -194,11 +135,9 @@ fn add_scalar_to_builder(
             ScalarRefImpl::Jsonb(v) => v.add_to(builder)?,
             ScalarRefImpl::Serial(v) => v.add_to(builder)?,
             ScalarRefImpl::Bytea(v) => v.add_to(builder)?,
-            ScalarRefImpl::Timestamptz(v) => {
-                builder.add_value(timestamptz_to_value(v, zone)?.as_ref())
-            }
-            ScalarRefImpl::Struct(v) => add_struct_to_builder(v, zone, data_type, builder)?,
-            ScalarRefImpl::List(v) => add_anyarrary_to_builder(v, zone, data_type, builder)?,
+            ScalarRefImpl::Timestamptz(v) => v.add_to(builder)?,
+            ScalarRefImpl::Struct(v) => add_struct_to_builder(v, data_type, builder)?,
+            ScalarRefImpl::List(v) => add_anyarrary_to_builder(v, data_type, builder)?,
         },
         None => builder.add_null(),
     };
@@ -329,6 +268,14 @@ impl ToJsonb for Interval {
 impl ToJsonb for Timestamp {
     fn add_to(self, builder: &mut Builder) -> Result<()> {
         builder.display(format!("{}T{}", self.0.date(), self.0.time()));
+        Ok(())
+    }
+}
+
+impl ToJsonb for Timestamptz {
+    fn add_to(self, builder: &mut Builder) -> Result<()> {
+        let instant_local = self.to_datetime_utc();
+        builder.display(instant_local.to_rfc3339().as_str());
         Ok(())
     }
 }

@@ -242,22 +242,6 @@ impl SessionTimezone {
                 new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
                 Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
             }
-            // `to_jsonb(input_timestamptz)`
-            // => `to_jsonb(input_timestamptz, zone_string)`
-            ExprType::ToJsonb => {
-                // array or struct type may implicitly contain timestamptz.
-                if !(inputs.len() == 1
-                    && matches!(
-                        inputs[0].return_type(),
-                        DataType::Timestamptz | DataType::List(_) | DataType::Struct(_)
-                    ))
-                {
-                    return None;
-                }
-                let mut new_inputs = inputs.clone();
-                new_inputs.push(ExprImpl::literal_varchar(self.timezone()));
-                Some(FunctionCall::new(func_type, new_inputs).unwrap().into())
-            }
             _ => None,
         }
     }

@@ -120,7 +120,7 @@ set timezone to 'Europe/London';
 query T
 SELECT to_jsonb('2014-05-28 12:22:35.614298'::timestamptz);
 ----
-"2014-05-28T12:22:35.614298+01:00"
+"2014-05-28T11:22:35.614298+00:00"
 
 statement ok
 SET timezone = 'EST5EDT';
@@ -128,7 +128,7 @@ SET timezone = 'EST5EDT';
 query T
 SELECT to_jsonb('2014-05-28 12:22:35.614298'::timestamptz);
 ----
-"2014-05-28T12:22:35.614298-04:00"
+"2014-05-28T16:22:35.614298+00:00"
 
 statement ok
 set timezone to 'UTC';
