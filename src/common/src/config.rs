@@ -634,9 +634,6 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::file_capacity_mb")]
     pub file_capacity_mb: usize,
 
-    #[serde(default)]
-    pub buffer_pool_size_mb: Option<usize>,
-
     #[serde(default = "default::file_cache::device_align")]
     pub device_align: usize,
 
@@ -661,14 +658,8 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::insert_rate_limit_mb")]
     pub insert_rate_limit_mb: usize,
 
-    #[serde(default = "default::file_cache::flush_rate_limit_mb")]
-    pub flush_rate_limit_mb: usize,
-
     #[serde(default = "default::file_cache::reclaim_rate_limit_mb")]
     pub reclaim_rate_limit_mb: usize,
-
-    #[serde(default = "default::file_cache::allocation_bits")]
-    pub allocation_bits: usize,
 
     #[serde(default = "default::file_cache::ring_buffer_capacity_mb")]
     pub ring_buffer_capacity_mb: usize,
@@ -676,8 +667,8 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::catalog_bits")]
     pub catalog_bits: usize,
 
-    #[serde(default = "default::file_cache::allocation_timeout_ms")]
-    pub allocation_timeout_ms: usize,
+    #[serde(default = "default::file_cache::compression")]
+    pub compression: String,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -1133,10 +1124,6 @@ pub mod default {
             64
         }
 
-        pub fn buffer_pool_size_mb() -> usize {
-            1024
-        }
-
         pub fn device_align() -> usize {
             4096
         }
@@ -1169,15 +1156,7 @@ pub mod default {
             0
         }
 
-        pub fn flush_rate_limit_mb() -> usize {
-            0
-        }
-
         pub fn reclaim_rate_limit_mb() -> usize {
-            0
-        }
-
-        pub fn allocation_bits() -> usize {
             0
         }
 
@@ -1189,8 +1168,8 @@ pub mod default {
             6
         }
 
-        pub fn allocation_timeout_ms() -> usize {
-            10
+        pub fn compression() -> String {
+            "none".to_string()
         }
     }
 
