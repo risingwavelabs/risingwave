@@ -169,6 +169,7 @@ message GetEventStreamRequest {
 message GetEventStreamResponse {
   uint64 source_id = 1;
   repeated CdcMessage events = 2;
+  bool handshake = 3;
 }
 
 message ValidateSourceRequest {

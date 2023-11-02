@@ -98,12 +98,19 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
     }
 
     /** Start to run the cdc engine */
-    public void start() {
+    public void start() throws InterruptedException {
         if (isRunning()) {
             LOG.info("engine#{} already started", engine.getId());
             return;
         }
 
+        // put a handshake message to notify the Source executor
+        engine.getOutputChannel()
+                .put(
+                        ConnectorServiceProto.GetEventStreamResponse.newBuilder()
+                                .setSourceId(engine.getId())
+                                .setHandshake(true)
+                                .build());
         executor.execute(engine);
         running.set(true);
         LOG.info("engine#{} started", engine.getId());
