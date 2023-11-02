@@ -69,6 +69,9 @@ impl SplitReader for KafkaSplitReader {
         config.set("auto.offset.reset", "smallest");
         config.set("isolation.level", KAFKA_ISOLATION_LEVEL);
         config.set("bootstrap.servers", bootstrap_servers);
+        if let Some(v) = &properties.consumer_group {
+            config.set("group.id", v);
+        }
 
         properties.common.set_security_properties(&mut config);
         properties.set_client(&mut config);
