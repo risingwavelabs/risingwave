@@ -9960,7 +9960,7 @@ dependencies = [
 [[package]]
 name = "thiserror-ext"
 version = "0.1.0"
-source = "git+https://github.com/risingwavelabs/thiserror-ext.git?rev=ba5d40#ba5d4012025da323e893d6d14af9502f0107272a"
+source = "git+https://github.com/risingwavelabs/thiserror-ext.git?rev=5ed5fe#5ed5fe9320acd5e7dac338919400f2b21341e360"
 dependencies = [
  "thiserror",
  "thiserror-ext-derive",
@@ -9969,7 +9969,7 @@ dependencies = [
 [[package]]
 name = "thiserror-ext-derive"
 version = "0.1.0"
-source = "git+https://github.com/risingwavelabs/thiserror-ext.git?rev=ba5d40#ba5d4012025da323e893d6d14af9502f0107272a"
+source = "git+https://github.com/risingwavelabs/thiserror-ext.git?rev=5ed5fe#5ed5fe9320acd5e7dac338919400f2b21341e360"
 dependencies = [
  "proc-macro2",
  "quote",

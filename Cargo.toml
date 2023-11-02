@@ -120,7 +120,7 @@ arrow-buffer = "48"
 arrow-flight = "48"
 arrow-select = "48"
 arrow-ord = "48"
-thiserror-ext = { git = "https://github.com/risingwavelabs/thiserror-ext.git", rev = "ba5d40" }
+thiserror-ext = { git = "https://github.com/risingwavelabs/thiserror-ext.git", rev = "5ed5fe" }
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
   "profiling",

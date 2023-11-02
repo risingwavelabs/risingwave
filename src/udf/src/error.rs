@@ -13,12 +13,14 @@
 // limitations under the License.
 
 use arrow_flight::error::FlightError;
+use thiserror::Error;
+use thiserror_ext::{Box, Construct};
 
 /// A specialized `Result` type for UDF operations.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// The error type for UDF operations.
-#[derive(thiserror::Error, Debug, thiserror_ext::Box, thiserror_ext::Construct)]
+#[derive(Error, Debug, Box, Construct)]
 #[thiserror_ext(type = Error)]
 pub enum ErrorInner {
     #[error("failed to connect to UDF service: {0}")]
