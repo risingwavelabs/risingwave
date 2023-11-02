@@ -12,22 +12,54 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_nats::jetstream::object_store::ObjectMetadata;
 use async_trait::async_trait;
+use chrono::NaiveDateTime;
 use futures::stream::{self, BoxStream};
 use futures::StreamExt;
 use opendal::{Lister, Metakey, Operator};
 use risingwave_common::types::Timestamp;
 
-use crate::source::filesystem::FsPageItem;
+use super::{GCSProperties, OpenDALProperties};
+use crate::source::filesystem::{FsPageItem, GcsSplit};
 use crate::source::{FsListInner, SourceEnumeratorContextRef, SplitEnumerator};
-pub struct OpenDALSplitEnumerator {
+pub struct OpenDALConnector {
     pub(crate) op: Operator,
     pub(crate) engine_type: EngineType,
 }
 
-impl OpenDALSplitEnumerator {
-    pub async fn list(&self, prefix: &str) -> anyhow::Result<FsPageItem> {
+#[derive(Clone)]
+pub enum EngineType {
+    Gcs,
+    S3,
+}
+
+#[async_trait]
+impl SplitEnumerator for OpenDALConnector {
+    type Properties = GCSProperties;
+    type Split = GcsSplit;
+
+    async fn new(
+        properties: Self::Properties,
+        _context: SourceEnumeratorContextRef,
+    ) -> anyhow::Result<OpenDALConnector> {
+        // match properties {
+        //     OpenDALProperties::GCSProperties(gcs_properties) => {
+        //         OpenDALConnector::new_gcs_source(gcs_properties)
+        //     }
+        //     OpenDALProperties::S3Properties(s3_properties) => {
+        //         OpenDALConnector::new_s3_source(s3_properties)
+        //     }
+        // }
+        OpenDALConnector::new_gcs_source(properties)
+    }
+
+    async fn list_splits(&mut self) -> anyhow::Result<Vec<GcsSplit>> {
+        todo!()
+    }
+}
+
+impl OpenDALConnector {
+    pub async fn list(&self, prefix: &str) -> anyhow::Result<ObjectMetadataIter> {
         let object_lister = self
             .op
             .lister_with(prefix)
@@ -42,8 +74,11 @@ impl OpenDALSplitEnumerator {
                     let om = object.metadata();
 
                     let t = match om.last_modified() {
-                        Some(t) => t.timestamp() as f64,
-                        None => 0_f64,
+                        Some(t) => t.naive_utc(),
+                        None => {
+                            let timestamp = 0;
+                            NaiveDateTime::from_timestamp(timestamp, 0)
+                        }
                     };
                     let timestamp = Timestamp::new(t);
                     let size = om.content_length() as i64;
@@ -61,9 +96,44 @@ impl OpenDALSplitEnumerator {
 
         Ok(stream.boxed())
     }
-}
 
-#[derive(Clone)]
-pub enum EngineType {
-    Gcs,
+    // #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
+    // async fn into_chunk_stream(self) {
+    //     for split in self.splits {
+    //         let actor_id = self.source_ctx.source_info.actor_id.to_string();
+    //         let source_id = self.source_ctx.source_info.source_id.to_string();
+    //         let source_ctx = self.source_ctx.clone();
+
+    //         let split_id = split.id();
+
+    //         let data_stream = Self::stream_read_object(
+    //             self.s3_client.clone(),
+    //             self.bucket_name.clone(),
+    //             split,
+    //             self.source_ctx.clone(),
+    //         );
+
+    //         let parser =
+    //             ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx).await?;
+    //         let msg_stream = if matches!(
+    //             parser,
+    //             ByteStreamSourceParserImpl::Json(_) | ByteStreamSourceParserImpl::Csv(_)
+    //         ) {
+    //             parser.into_stream(nd_streaming::split_stream(data_stream))
+    //         } else {
+    //             parser.into_stream(data_stream)
+    //         };
+    //         #[for_await]
+    //         for msg in msg_stream {
+    //             let msg = msg?;
+    //             self.source_ctx
+    //                 .metrics
+    //                 .partition_input_count
+    //                 .with_label_values(&[&actor_id, &source_id, &split_id])
+    //                 .inc_by(msg.chunk.cardinality() as u64);
+    //             yield msg;
+    //         }
+    //     }
+    // }
 }
+pub type ObjectMetadataIter = BoxStream<'static, anyhow::Result<FsPageItem>>;

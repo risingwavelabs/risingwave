@@ -15,36 +15,44 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use opendal::layers::{LoggingLayer, RetryLayer};
-use opendal::services::Gcs;
+use opendal::services::S3;
 use opendal::Operator;
 use serde::Deserialize;
 
 use super::opendal_enumerator::{EngineType, OpenDALConnector};
-use super::GCSProperties;
 use crate::parser::ParserConfig;
-use crate::source::filesystem::GcsSplit;
+use crate::source::filesystem::{GcsSplit, S3Properties};
 use crate::source::{Column, SourceContextRef, SplitReader};
 
 impl OpenDALConnector {
     /// create opendal gcs engine.
-    pub fn new_gcs_source(gcs_properties: GCSProperties) -> anyhow::Result<Self> {
+    pub fn new_s3_source(s3_properties: S3Properties) -> anyhow::Result<Self> {
         // Create gcs backend builder.
-        let mut builder = Gcs::default();
+        let mut builder = S3::default();
 
-        builder.bucket(&gcs_properties.bucket_name);
+        builder.bucket(&s3_properties.bucket_name);
 
-        // if credential env is set, use it. Otherwise, ADC will be used.
-        let cred = std::env::var("GOOGLE_APPLICATION_CREDENTIALS");
-        if let Ok(cred) = cred {
-            builder.credential(&cred);
+        builder.region(&s3_properties.region_name);
+
+        if let Some(endpoint_url) = s3_properties.endpoint_url {
+            builder.endpoint(&endpoint_url);
         }
+
+        if let Some(access) = s3_properties.access {
+            builder.access_key_id(&access);
+        }
+
+        if let Some(secret) = s3_properties.secret {
+            builder.secret_access_key(&secret);
+        }
+
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
             .finish();
         Ok(Self {
             op,
-            engine_type: EngineType::Gcs,
+            engine_type: EngineType::S3,
         })
     }
 }

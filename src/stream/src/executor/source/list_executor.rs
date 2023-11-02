@@ -22,7 +22,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::Schema;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
-use risingwave_connector::source::filesystem::FsPage;
+use risingwave_connector::source::filesystem::{FsPage, FsPageItem};
 use risingwave_connector::source::{BoxTryStream, SourceCtrlOpts};
 use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
@@ -95,70 +95,39 @@ impl<S: StateStore> FsListExecutor<S> {
         &self,
         source_desc: &SourceDesc,
     ) -> StreamExecutorResult<BoxTryStream<StreamChunk>> {
-        let stream = source_desc
+        let stream: std::pin::Pin<
+            Box<dyn Stream<Item = Result<FsPageItem, risingwave_common::error::RwError>> + Send>,
+        > = source_desc
             .source
-            .get_source_list()
+            .get_opendal_source_list()
             .await
             .map_err(StreamExecutorError::connector_error)?;
+        let chunked_stream = stream
+            .chunks(1024) // Group FsPageItems into chunks of size 1024
+            .map(|chunk| {
+                let rows = chunk
+                    .into_iter()
+                    .map(|item| {
+                        // Implement the conversion of FsPageItem to row here
+                        let page_item = item.unwrap();
+                        (
+                            Op::Insert,
+                            OwnedRow::new(vec![
+                                Some(ScalarImpl::Utf8(page_item.name.into_boxed_str())),
+                                Some(ScalarImpl::Timestamp(page_item.timestamp)),
+                                Some(ScalarImpl::Int64(page_item.size)),
+                            ]),
+                        )
+                    })
+                    .collect::<Vec<_>>();
 
-        Ok(stream
-            .map(|item| item.map(Self::map_fs_page_to_chunk))
-            .boxed())
-    }
+                Ok(StreamChunk::from_rows(
+                    &rows,
+                    &[DataType::Varchar, DataType::Timestamp, DataType::Int64],
+                ))
+            });
 
-    async fn build_chunked_paginate_stream_v2(
-        &self,
-        source_desc: &SourceDesc,
-    ) -> StreamExecutorResult<BoxTryStream<StreamChunk>> {
-        let stream = source_desc
-            .source
-            .get_source_list_v2()
-            .await
-            .map_err(StreamExecutorError::connector_error)?;
-
-        Ok(stream
-            .map(|item| item.map(Self::map_fs_page_to_chunk))
-            .boxed())
-    }
-
-    fn map_fs_page_to_chunk(page: FsPage) -> StreamChunk {
-        let rows = page
-            .into_iter()
-            .map(|split| {
-                (
-                    Op::Insert,
-                    OwnedRow::new(vec![
-                        Some(ScalarImpl::Utf8(split.name.into_boxed_str())),
-                        Some(ScalarImpl::Timestamp(split.timestamp)),
-                        Some(ScalarImpl::Int64(split.size)),
-                    ]),
-                )
-            })
-            .collect::<Vec<_>>();
-        StreamChunk::from_rows(
-            &rows,
-            &[DataType::Varchar, DataType::Timestamp, DataType::Int64],
-        )
-    }
-
-    fn map_fs_item_to_chunk(page: FsPage) -> StreamChunk {
-        let rows = page
-            .into_iter()
-            .map(|split| {
-                (
-                    Op::Insert,
-                    OwnedRow::new(vec![
-                        Some(ScalarImpl::Utf8(split.name.into_boxed_str())),
-                        Some(ScalarImpl::Timestamp(split.timestamp)),
-                        Some(ScalarImpl::Int64(split.size)),
-                    ]),
-                )
-            })
-            .collect::<Vec<_>>();
-        StreamChunk::from_rows(
-            &rows,
-            &[DataType::Varchar, DataType::Timestamp, DataType::Int64],
-        )
+        Ok(chunked_stream.boxed())
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]

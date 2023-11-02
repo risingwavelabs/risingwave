@@ -26,9 +26,7 @@ use risingwave_common::error::{internal_error, Result, RwError};
 use risingwave_common::util::select_all;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
-use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::{
-    OpenDALSplitEnumerator, OpendalSource,
-};
+use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpenDALConnector;
 use risingwave_connector::source::filesystem::{FsPage, FsPageItem, S3SplitEnumerator};
 use risingwave_connector::source::{
     create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties,
@@ -91,34 +89,23 @@ impl ConnectorSource {
             .collect::<Result<Vec<SourceColumnDesc>>>()
     }
 
-    pub async fn get_source_list(&self) -> Result<BoxTryStream<FsPage>> {
+    pub async fn get_opendal_source_list(&self) -> Result<BoxTryStream<FsPageItem>> {
         let config = self.config.clone();
-        let lister = match config {
-            ConnectorProperties::S3(prop) => {
-                S3SplitEnumerator::new(*prop, Arc::new(SourceEnumeratorContext::default())).await?
-            }
-            other => return Err(internal_error(format!("Unsupported source: {:?}", other))),
-        };
 
-        Ok(build_fs_list_stream(
-            FsListCtrlContext {
-                interval: Duration::from_secs(60),
-                last_tick: None,
-                filter_ctx: FsFilterCtrlCtx,
-            },
-            lister,
-        ))
-    }
-
-    pub async fn get_source_list_v2(&self) -> Result<BoxTryStream<FsPageItem>> {
-        let config = self.config.clone();
         match config {
-            ConnectorProperties::OpenDAL(prop) => {
-                let lister = OpenDALSplitEnumerator::new(
-                    *prop,
-                    Arc::new(SourceEnumeratorContext::default()),
-                )
-                .await?;
+            ConnectorProperties::GCS(prop) => {
+                let lister = OpenDALConnector::new_gcs_source(*prop)?;
+                return Ok(build_opendal_fs_list_stream(
+                    FsListCtrlContext {
+                        interval: Duration::from_secs(60),
+                        last_tick: None,
+                        filter_ctx: FsFilterCtrlCtx,
+                    },
+                    lister,
+                ));
+            }
+            ConnectorProperties::S3(prop) => {
+                let lister = OpenDALConnector::new_s3_source(*prop)?;
                 return Ok(build_opendal_fs_list_stream(
                     FsListCtrlContext {
                         interval: Duration::from_secs(60),
@@ -206,48 +193,21 @@ impl ConnectorSource {
     }
 }
 
-#[try_stream(boxed, ok = FsPage, error = RwError)]
-async fn build_fs_list_stream(
-    mut ctrl_ctx: FsListCtrlContext,
-    mut list_op: impl FsListInner + Send + 'static,
-) {
+#[try_stream(boxed, ok = FsPageItem, error = RwError)]
+async fn build_opendal_fs_list_stream(ctrl_ctx: FsListCtrlContext, lister: OpenDALConnector) {
     let mut interval = time::interval(ctrl_ctx.interval);
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-    // controlling whether request for next page
-    fn page_ctrl_logic(_ctx: &FsListCtrlContext, has_finished: bool, _page_num: usize) -> bool {
-        !has_finished
-    }
-
+    let mut object_metadata_iter = lister.list("123").await?;
     loop {
-        let mut page_num = 0;
-        ctrl_ctx.last_tick = Some(time::Instant::now());
-        'inner: loop {
-            let (fs_page, has_finished) = list_op.get_next_page::<FsPageItem>().await?;
-            let matched_items = fs_page
-                .into_iter()
-                .filter(|item| list_op.filter_policy(&ctrl_ctx.filter_ctx, page_num, item))
-                .collect_vec();
-            yield matched_items;
-            page_num += 1;
-            if !page_ctrl_logic(&ctrl_ctx, has_finished, page_num) {
-                break 'inner;
+        match object_metadata_iter.next().await {
+            Some(list_res) => {
+                yield list_res.unwrap();
+            }
+            None => {
+                break;
             }
         }
         interval.tick().await;
     }
-}
-
-#[try_stream(boxed, ok = FsPageItem, error = RwError)]
-async fn build_opendal_fs_list_stream(
-    mut ctrl_ctx: FsListCtrlContext,
-    mut lister: OpenDALSplitEnumerator,
-) {
-    let mut interval = time::interval(ctrl_ctx.interval);
-    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-    let res = lister.list("123").await?;
-
-    interval.tick().await;
-    yield res;
 }

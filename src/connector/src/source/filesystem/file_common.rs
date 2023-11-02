@@ -67,6 +67,55 @@ impl FsSplit {
     }
 }
 
+///  [`GcsSplit`] Describes a file or a split of a file. A file is a generic concept,
+/// and can be a local file, a distributed file system, or am object in S3 bucket.
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct GcsSplit {
+    pub name: String,
+    pub offset: usize,
+    pub size: usize,
+}
+
+impl From<&Object> for GcsSplit {
+    fn from(value: &Object) -> Self {
+        Self {
+            name: value.key().unwrap().to_owned(),
+            offset: 0,
+            size: value.size() as usize,
+        }
+    }
+}
+
+impl SplitMetaData for GcsSplit {
+    fn id(&self) -> SplitId {
+        self.name.as_str().into()
+    }
+
+    fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
+        serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
+    }
+
+    fn encode_to_json(&self) -> JsonbVal {
+        serde_json::to_value(self.clone()).unwrap().into()
+    }
+
+    fn update_with_offset(&mut self, start_offset: String) -> anyhow::Result<()> {
+        let offset = start_offset.parse().unwrap();
+        self.offset = offset;
+        Ok(())
+    }
+}
+
+impl GcsSplit {
+    pub fn new(name: String, start: usize, size: usize) -> Self {
+        Self {
+            name,
+            offset: start,
+            size,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct FsPageItem {
     pub name: String,
