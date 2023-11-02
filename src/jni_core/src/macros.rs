@@ -12,6 +12,208 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// Utils
+/// A macro the same as `concat!`, except that, for `concat!` if we call with `concat!({"hello"},
+/// "world")`, it will report error that `{"hello"}` is not literal, though actually it is. However,
+/// sometimes the bracket around the string literal is unavoidable if the literal is to be generated
+/// by a macro, while without a bracket macro expansion will fail with a `invalid in expression
+/// context` error.
+///
+/// This macro can be removed when the `concat!` supports input of literal embrace with bracket.
+///
+/// The returned value will only be a `&'static str` rather than a string literal and cannot be
+/// called with `concat!`.
+///
+/// ```
+/// #![feature(lazy_cell)]
+/// assert_eq!(
+///     "hello, world",
+///     risingwave_jni_core::runtime_concat!({ "hello," }, " world")
+/// )
+/// ```
+#[macro_export]
+macro_rules! runtime_concat {
+    ($($s:expr),*) => {{
+        static RESULT_STR: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+            let mut ret = String::new();
+            $(
+                {
+                    let s: &'static str = $s;
+                    ret.push_str(s);
+                }
+            )*
+            ret
+        });
+        let ret: &'static str = RESULT_STR.as_str();
+        ret
+    }};
+}
+
+/// A macro that splits the input by comma and calls the callback `$macro` with the split result.
+/// The each part of the split result is within a bracket, and the callback `$macro` can have its
+/// first parameter as `{$({$($args:tt)+})*}` to match the split result.
+///
+/// ```
+/// macro_rules! call_split_by_comma {
+///     ({$({$($args:tt)+})*}) => {
+///         [$(
+///            stringify! {$($args)+}
+///         ),*]
+///     };
+///     ($($input:tt)*) => {{
+///         risingwave_jni_core::split_by_comma! {
+///             {$($input)*},
+///             call_split_by_comma
+///         }
+///     }};
+/// }
+///
+/// let expected_result = [
+///     "hello",
+///     "my friend",
+/// ];
+///
+/// assert_eq!(expected_result, {call_split_by_comma!(hello, my friend)});
+/// ```
+#[macro_export]
+macro_rules! split_by_comma {
+    // Entry of macro. Put input as the first parameter and initialize empty
+    // second and third parameter.
+    (
+        {$($input:tt)*},
+        $macro:path $(,$args:tt)*
+    ) => {
+        $crate::split_by_comma! {
+            {$($input)*},
+            {}, // previous splits
+            {}, // current split
+            $macro $(,$args)*
+        }
+    };
+    // When the first token is comma, move the tokens of current split to the
+    // list of previous splits with a bracket wrapped, and then clear the current
+    // split.
+    (
+        {
+            ,
+            $($rest:tt)*
+        },
+        {
+            $(
+                {$($prev_split:tt)*}
+            )*
+        },
+        {
+            $($current_split:tt)*
+        },
+        $macro:path $(,$args:tt)*
+    ) => {
+        $crate::split_by_comma! {
+            {
+                $($rest)*
+            },
+            {
+                $(
+                    {$($prev_split)*}
+                )*
+                {
+                    $($current_split)*
+                }
+            },
+            {},
+            $macro $(,$args)*
+        }
+    };
+    // Do the same as the previous match when we just reach the end of input,
+    // with the content of last split not added to the list of previous split yet.
+    (
+        {},
+        {
+            $(
+                {$($prev_split:tt)*}
+            )*
+        },
+        {
+            $($current_split:tt)+
+        },
+        $macro:path $(,$args:tt)*
+    ) => {
+        $crate::split_by_comma! {
+            {},
+            {
+                $(
+                    {$($prev_split)*}
+                )*
+                {
+                    $($current_split)+
+                }
+            },
+            {},
+            $macro $(,$args)*
+        }
+    };
+    // For a token that is not comma, add to the list of current staging split.
+    (
+        {
+            $first:tt
+            $($rest:tt)*
+        },
+        {
+            $(
+                {$($prev_split:tt)*}
+            )*
+        },
+        {
+            $($current_split:tt)*
+        },
+        $macro:path $(,$args:tt)*
+    ) => {
+        $crate::split_by_comma! {
+            {
+                $($rest)*
+            },
+            {
+                $(
+                    {$($prev_split)*}
+                )*
+            },
+            {
+                $($current_split)* $first
+            },
+            $macro $(,$args)*
+        }
+    };
+    // When all split result are added to the list, call the callback `$macro` with the result.
+    (
+        {},
+        {
+            $(
+                {$($prev_split:tt)*}
+            )*
+        },
+        {},
+        $macro:path $(,$args:tt)*
+    ) => {
+        $macro! {
+            {
+                $(
+                    {$($prev_split)*}
+                )*
+            }
+            $(,$args)*
+        }
+    };
+}
+// End of utils part
+
+/// Generate the dot separated java class name to the slash separated name.
+///
+/// ```
+/// assert_eq!(
+///     "java/lang/String",
+///     risingwave_jni_core::gen_class_name!(java.lang.String)
+/// )
+/// ```
 #[macro_export]
 macro_rules! gen_class_name {
     ($last:ident) => {
@@ -22,78 +224,160 @@ macro_rules! gen_class_name {
     }
 }
 
+/// Generate the type signature of a single type
+/// ```
+/// use risingwave_jni_core::gen_jni_type_sig;
+/// assert_eq!("Z", gen_jni_type_sig!(boolean));
+/// assert_eq!("B", gen_jni_type_sig!(byte));
+/// assert_eq!("C", gen_jni_type_sig!(char));
+/// assert_eq!("S", gen_jni_type_sig!(short));
+/// assert_eq!("I", gen_jni_type_sig!(int));
+/// assert_eq!("J", gen_jni_type_sig!(long));
+/// assert_eq!("F", gen_jni_type_sig!(float));
+/// assert_eq!("D", gen_jni_type_sig!(double));
+/// assert_eq!("V", gen_jni_type_sig!(void));
+/// assert_eq!("Ljava/lang/Class;", gen_jni_type_sig!(Class<?>));
+/// assert_eq!("Ljava/lang/String;", gen_jni_type_sig!(String));
+/// assert_eq!("[B", gen_jni_type_sig!(byte[]));
+/// ```
 #[macro_export]
-macro_rules! gen_jni_sig_inner {
-    ($(public)? static native $($rest:tt)*) => {
-        $crate::gen_jni_sig_inner! { $($rest)* }
-    };
-    ($($ret:ident).+  $($func_name:ident)? ($($args:tt)*)) => {
-        concat! {"(", $crate::gen_jni_sig_inner!{$($args)*}, ")", $crate::gen_jni_sig_inner! {$($ret).+} }
-    };
-    ($($ret:ident).+ []  $($func_name:ident)? ($($args:tt)*)) => {
-        concat! {"(", $crate::gen_jni_sig_inner!{$($args)*}, ")", $crate::gen_jni_sig_inner! {$($ret).+ []} }
-    };
-    (boolean) => {
+macro_rules! gen_jni_type_sig {
+    (boolean $($param_name:ident)?) => {
         "Z"
     };
-    (byte) => {
+    (byte $($param_name:ident)?) => {
         "B"
     };
-    (char) => {
+    (char $($param_name:ident)?) => {
         "C"
     };
-    (short) => {
+    (short $($param_name:ident)?) => {
         "S"
     };
-    (int) => {
+    (int $($param_name:ident)?) => {
         "I"
     };
-    (long) => {
+    (long $($param_name:ident)?) => {
         "J"
     };
-    (float) => {
+    (float $($param_name:ident)?) => {
         "F"
     };
-    (double) => {
+    (double $($param_name:ident)?) => {
         "D"
     };
     (void) => {
         "V"
     };
-    (String) => {
-        $crate::gen_jni_sig_inner! { java.lang.String }
+    (String $($param_name:ident)?) => {
+        $crate::gen_jni_type_sig! { java.lang.String }
     };
-    (Object) => {
-        $crate::gen_jni_sig_inner! { java.lang.Object }
+    (Object $($param_name:ident)?) => {
+        $crate::gen_jni_type_sig! { java.lang.Object }
     };
-    (Class) => {
-        $crate::gen_jni_sig_inner! { java.lang.Class }
+    (Class $(< ? >)? $($param_name:ident)?) => {
+        $crate::gen_jni_type_sig! { java.lang.Class }
     };
-    ($($class_part:ident).+) => {
+    ($($class_part:ident).+ $($param_name:ident)?) => {
         concat! {"L", $crate::gen_class_name! {$($class_part).+}, ";"}
     };
-    ($($class_part:ident).+ $(.)? [] $($param_name:ident)? $(,$($rest:tt)*)?) => {
-        concat! { "[", $crate::gen_jni_sig_inner! {$($class_part).+}, $crate::gen_jni_sig_inner! {$($($rest)*)?}}
-    };
-    (Class $(< ? >)? $($param_name:ident)? $(,$($rest:tt)*)?) => {
-        concat! { $crate::gen_jni_sig_inner! { Class }, $crate::gen_jni_sig_inner! {$($($rest)*)?}}
-    };
-    ($($class_part:ident).+ $($param_name:ident)? $(,$($rest:tt)*)?) => {
-        concat! { $crate::gen_jni_sig_inner! {$($class_part).+}, $crate::gen_jni_sig_inner! {$($($rest)*)?}}
-    };
-    () => {
-        ""
+    ($($class_part:ident).+ [] $($param_name:ident)?) => {
+        concat! { "[", $crate::gen_jni_type_sig! {$($class_part).+}}
     };
     ($($invalid:tt)*) => {
-        compile_error!(concat!("unsupported type {{", stringify!($($invalid)*), "}}"))
+        compile_error!(concat!("unsupported type `", stringify!($($invalid)*), "`"))
     };
 }
 
+/// Generate the jni signature of a function parameter list. Parameter name is optional.
+/// ```
+/// use risingwave_jni_core::gen_jni_args_list_sig;
+/// assert_eq!("IS[B", gen_jni_args_list_sig!(int first, short, byte[] third))
+/// ```
+#[macro_export]
+macro_rules! gen_jni_args_list_sig {
+    ({$({$($args:tt)+})*}) => {
+        concat! {
+            $(
+                $crate::gen_jni_type_sig! {
+                    $($args)+
+                }
+            ),*
+        }
+    };
+    ({$($args:tt)*}) => {
+        $crate::split_by_comma! {
+            {$($args)*},
+            $crate::gen_jni_args_list_sig
+        }
+    };
+    ($($args:tt)*) => {{
+        $crate::gen_jni_args_list_sig! {
+            {$($args)*}
+        }
+    }}
+}
+
+/// Generate the jni signature of a given function
+/// ```
+/// #![feature(lazy_cell)]
+/// use risingwave_jni_core::gen_jni_sig;
+/// assert_eq!(gen_jni_sig!(boolean f(int, short, byte[])), "(IS[B)Z");
+/// assert_eq!(
+///     gen_jni_sig!(boolean f(int, short, byte[], java.lang.String)),
+///     "(IS[BLjava/lang/String;)Z"
+/// );
+/// assert_eq!(
+///     gen_jni_sig!(boolean f(int, java.lang.String)),
+///     "(ILjava/lang/String;)Z"
+/// );
+/// assert_eq!(gen_jni_sig!(public static native int vnodeCount()), "()I");
+/// assert_eq!(
+///     gen_jni_sig!(long hummockIteratorNew(byte[] readPlan)),
+///     "([B)J"
+/// );
+/// assert_eq!(gen_jni_sig!(long hummockIteratorNext(long pointer)), "(J)J");
+/// assert_eq!(
+///     gen_jni_sig!(void hummockIteratorClose(long pointer)),
+///     "(J)V"
+/// );
+/// assert_eq!(gen_jni_sig!(byte[] rowGetKey(long pointer)), "(J)[B");
+/// assert_eq!(
+///     gen_jni_sig!(java.sql.Timestamp rowGetTimestampValue(long pointer, int index)),
+///     "(JI)Ljava/sql/Timestamp;"
+/// );
+/// assert_eq!(
+///     gen_jni_sig!(String rowGetStringValue(long pointer, int index)),
+///     "(JI)Ljava/lang/String;"
+/// );
+/// assert_eq!(
+///     gen_jni_sig!(static native Object rowGetArrayValue(long pointer, int index, Class clazz)),
+///     "(JILjava/lang/Class;)Ljava/lang/Object;"
+/// );
+/// ```
 #[macro_export]
 macro_rules! gen_jni_sig {
+    ({$($ret:tt)*}, {$($args:tt)*}) => {{
+        // Use `runtime_concat` instead of `concat` because, in macro call,
+        // it requires a `{}` around it to provide an expression context, but
+        // const literal surrounded by `{}` cannot be call with `macro`.
+        $crate::runtime_concat! {
+            "(", {$crate::gen_jni_args_list_sig!{{$($args)*}}}, ")",
+            $crate::gen_jni_type_sig! {$($ret)+}
+        }
+    }};
+    // handle the result of `split_extract_plain_native_methods`
+    ({{$func_name:ident, {$($ret:tt)*}, {$($args:tt)*}}}) => {{
+        // Use `runtime_concat` instead of `concat` because, in macro call,
+        // it requires a `{}` around it to provide an expression context, but
+        // const literal surrounded by `{}` cannot be call with `macro`.
+        $crate::runtime_concat! {
+            "(", {$crate::gen_jni_args_list_sig!{{$($args)*}}}, ")",
+            $crate::gen_jni_type_sig! {$($ret)+}
+        }
+    }};
     ($($input:tt)*) => {{
-        // this macro only provide with a expression context
-        $crate::gen_jni_sig_inner! {$($input)*}
+        $crate::split_extract_plain_native_methods! {{$($input)*;}, $crate::gen_jni_sig}
     }}
 }
 
@@ -170,40 +454,39 @@ macro_rules! for_all_plain_native_methods {
     };
 }
 
+/// Given the plain text of a list a native methods, split the method by semicolon (;), extract
+/// the return type, argument list and name of the methods and pass the result to the callback
+/// `$macro` with the extracted result as the first parameter. The result can be matched with
+/// pattern `{$({$func_name:ident, {$($ret:tt)*}, {$($args:tt)*}})*}`
+///
+/// ```
+/// macro_rules! call_split_extract_plain_native_methods {
+///     ({$({$func_name:ident, {$($ret:tt)*}, {$($args:tt)*}})*}) => {
+///         [$(
+///             (stringify! {$func_name}, stringify!{$($ret)*}, stringify!{($($args)*)})
+///         ),*]
+///     };
+///     ($($input:tt)*) => {{
+///         risingwave_jni_core::split_extract_plain_native_methods! {
+///             {$($input)*},
+///             call_split_extract_plain_native_methods
+///         }
+///     }}
+/// }
+/// assert_eq!([
+///     ("f", "int", "(int param1, boolean param2)")
+/// ], call_split_extract_plain_native_methods!(
+///     int f(int param1, boolean param2);
+/// ))
+/// ```
 #[macro_export]
-macro_rules! for_single_native_method {
-    (
-        {$($ret:tt).+ $func_name:ident ($($args:tt)*)},
-        $macro:path
-        $(,$extra_args:tt)*
-    ) => {
-        $macro! {
-            $func_name,
-            {$($ret).+},
-            {$($args)*}
-        }
-    };
-    (
-        {$($ret:tt).+ [] $func_name:ident ($($args:tt)*)},
-        $macro:path
-        $(,$extra_args:tt)*
-    ) => {
-        $macro! {
-            $func_name,
-            {$($ret).+ []},
-            {$($args)*}
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! for_all_native_methods {
+macro_rules! split_extract_plain_native_methods {
     (
         {$($input:tt)*},
         $macro:path
         $(,$extra_args:tt)*
     ) => {{
-        $crate::for_all_native_methods! {
+        $crate::split_extract_plain_native_methods! {
             {$($input)*},
             {},
             $macro
@@ -212,7 +495,28 @@ macro_rules! for_all_native_methods {
     }};
     (
         {
-            $(public)? static native $($ret:tt).+ $func_name:ident($($args:tt)*); $($rest:tt)*
+            $(public)? static native $($first:tt)*
+        },
+        {
+            $($second:tt)*
+        },
+        $macro:path
+        $(,$extra_args:tt)*
+    ) => {
+        $crate::split_extract_plain_native_methods! {
+            {
+                $($first)*
+            },
+            {
+                $($second)*
+            },
+            $macro
+            $(,$extra_args)*
+        }
+    };
+    (
+        {
+            $($ret:tt).+ $func_name:ident($($args:tt)*); $($rest:tt)*
         },
         {
             $({$prev_func_name:ident, {$($prev_ret:tt)*}, {$($prev_args:tt)*}})*
@@ -220,7 +524,7 @@ macro_rules! for_all_native_methods {
         $macro:path
         $(,$extra_args:tt)*
     ) => {
-        $crate::for_all_native_methods! {
+        $crate::split_extract_plain_native_methods! {
             {$($rest)*},
             {
                 $({$prev_func_name, {$($prev_ret)*}, {$($prev_args)*}})*
@@ -232,7 +536,7 @@ macro_rules! for_all_native_methods {
     };
     (
         {
-            $(public)? static native $($ret:tt).+ [] $func_name:ident($($args:tt)*); $($rest:tt)*
+            $($ret:tt).+ [] $func_name:ident($($args:tt)*); $($rest:tt)*
         },
         {
             $({$prev_func_name:ident, {$($prev_ret:tt)*}, {$($prev_args:tt)*}})*
@@ -240,7 +544,7 @@ macro_rules! for_all_native_methods {
         $macro:path
         $(,$extra_args:tt)*
     ) => {
-        $crate::for_all_native_methods! {
+        $crate::split_extract_plain_native_methods! {
             {$($rest)*},
             {
                 $({$prev_func_name, {$($prev_ret)*}, {$($prev_args)*}})*
@@ -260,11 +564,20 @@ macro_rules! for_all_native_methods {
     ) => {
         $macro! {
             {
-                $({$func_name, {$($ret)*}, {$($args)*}}),*
+                $({$func_name, {$($ret)*}, {$($args)*}})*
             }
             $(,$extra_args)*
         }
     };
+    ($($invalid:tt)*) => {
+        compile_error!(concat!("unable to split extract `", stringify!($($invalid)*), "`"))
+    };
+}
+
+/// Pass the information of all native methods to the callback `$macro`. The input can be matched
+/// with pattern `{$({$func_name:ident, {$($ret:tt)*}, {$($args:tt)*}})*}`
+#[macro_export]
+macro_rules! for_all_native_methods {
     ($macro:path $(,$args:tt)*) => {{
         $crate::for_all_plain_native_methods! {
             $crate::for_all_native_methods,
@@ -272,46 +585,35 @@ macro_rules! for_all_native_methods {
             $(,$args)*
         }
     }};
+    (
+        {
+            $({$func_name:ident, {$($ret:tt)*}, {$($args:tt)*}})*
+        },
+        $macro:path
+        $(,$extra_args:tt)*
+    ) => {{
+        $macro! {
+            {$({$func_name, {$($ret)*}, {$($args)*}})*}
+            $(,$extra_args)*
+        }
+    }};
+    (
+        {$($input:tt)*},
+        $macro:path
+        $(,$extra_args:tt)*
+    ) => {{
+        $crate::split_extract_plain_native_methods! {
+            {$($input)*},
+            $crate::for_all_native_methods,
+            $macro
+            $(,$extra_args)*
+        }
+    }};
 }
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn test_gen_jni_sig() {
-        assert_eq!(gen_jni_sig!(int), "I");
-        assert_eq!(gen_jni_sig!(boolean f(int, short, byte[])), "(IS[B)Z");
-        assert_eq!(
-            gen_jni_sig!(boolean f(int, short, byte[], java.lang.String)),
-            "(IS[BLjava/lang/String;)Z"
-        );
-        assert_eq!(
-            gen_jni_sig!(boolean f(int, java.lang.String)),
-            "(ILjava/lang/String;)Z"
-        );
-        assert_eq!(gen_jni_sig!(public static native int vnodeCount()), "()I");
-        assert_eq!(
-            gen_jni_sig!(long hummockIteratorNew(byte[] readPlan)),
-            "([B)J"
-        );
-        assert_eq!(gen_jni_sig!(long hummockIteratorNext(long pointer)), "(J)J");
-        assert_eq!(
-            gen_jni_sig!(void hummockIteratorClose(long pointer)),
-            "(J)V"
-        );
-        assert_eq!(gen_jni_sig!(byte[] rowGetKey(long pointer)), "(J)[B");
-        assert_eq!(
-            gen_jni_sig!(java.sql.Timestamp rowGetTimestampValue(long pointer, int index)),
-            "(JI)Ljava/sql/Timestamp;"
-        );
-        assert_eq!(
-            gen_jni_sig!(String rowGetStringValue(long pointer, int index)),
-            "(JI)Ljava/lang/String;"
-        );
-        assert_eq!(
-            gen_jni_sig!(static native Object rowGetArrayValue(long pointer, int index, Class clazz)),
-            "(JILjava/lang/Class;)Ljava/lang/Object;"
-        );
-    }
+    use std::fmt::Formatter;
 
     #[test]
     fn test_for_all_gen() {
@@ -331,10 +633,10 @@ mod tests {
                     gen_array
                 }
             }};
-            ({$({ $func_name:ident, {$($ret:tt)+}, {$($args:tt)*} }),*}) => {{
+            ({$({ $func_name:ident, {$($ret:tt)+}, {$($args:tt)*} })*}) => {{
                 [
                     $(
-                        (stringify! {$func_name}, gen_jni_sig! { $($ret)+ ($($args)*)}),
+                        (stringify! {$func_name}, gen_jni_sig! { {$($ret)+}, {$($args)*}}),
                     )*
                 ]
             }};
@@ -351,5 +653,77 @@ mod tests {
 
         let sig = gen_array!(all);
         assert!(!sig.is_empty());
+    }
+
+    #[test]
+    fn test_all_native_methods() {
+        // This test shows the signature of all native methods
+        let expected = expect_test::expect![[r#"
+            [
+                vnodeCount                               ()I,
+                iteratorNewHummock                       ([B)J,
+                iteratorNext                             (J)Z,
+                iteratorClose                            (J)V,
+                iteratorNewFromStreamChunkPayload        ([B)J,
+                iteratorNewFromStreamChunkPretty         (Ljava/lang/String;)J,
+                iteratorGetKey                           (J)[B,
+                iteratorGetOp                            (J)I,
+                iteratorIsNull                           (JI)Z,
+                iteratorGetInt16Value                    (JI)S,
+                iteratorGetInt32Value                    (JI)I,
+                iteratorGetInt64Value                    (JI)J,
+                iteratorGetFloatValue                    (JI)F,
+                iteratorGetDoubleValue                   (JI)D,
+                iteratorGetBooleanValue                  (JI)Z,
+                iteratorGetStringValue                   (JI)Ljava/lang/String;,
+                iteratorGetTimestampValue                (JI)Ljava/sql/Timestamp;,
+                iteratorGetDecimalValue                  (JI)Ljava/math/BigDecimal;,
+                iteratorGetTimeValue                     (JI)Ljava/sql/Time;,
+                iteratorGetDateValue                     (JI)Ljava/sql/Date;,
+                iteratorGetIntervalValue                 (JI)Ljava/lang/String;,
+                iteratorGetJsonbValue                    (JI)Ljava/lang/String;,
+                iteratorGetByteaValue                    (JI)[B,
+                iteratorGetArrayValue                    (JILjava/lang/Class;)Ljava/lang/Object;,
+                sendCdcSourceMsgToChannel                (J[B)Z,
+                recvSinkWriterRequestFromChannel         (J)[B,
+                sendSinkWriterResponseToChannel          (J[B)Z,
+                sendSinkWriterErrorToChannel             (JLjava/lang/String;)Z,
+                recvSinkCoordinatorRequestFromChannel    (J)[B,
+                sendSinkCoordinatorResponseToChannel     (J[B)Z,
+            ]
+        "#]];
+
+        struct MethodInfo {
+            name: &'static str,
+            sig: &'static str,
+        }
+
+        impl std::fmt::Debug for MethodInfo {
+            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{:40} {}", self.name, self.sig)
+            }
+        }
+
+        macro_rules! gen_all_native_method_info {
+            () => {{
+                $crate::for_all_native_methods! {
+                    gen_all_native_method_info
+                }
+            }};
+            ({$({$func_name:ident, {$($ret:tt)*}, {$($args:tt)*}})*}) => {
+                [$(
+                    (
+                        MethodInfo {
+                            name: stringify! {$func_name},
+                            sig: $crate::gen_jni_sig! {
+                                {$($ret)*}, {$($args)*}
+                            },
+                        }
+                    )
+                ),*]
+            }
+        }
+        let info = gen_all_native_method_info!();
+        expected.assert_debug_eq(&info);
     }
 }
