@@ -129,6 +129,10 @@ impl ExprCorrelatedIdFinder {
     pub fn contains(&self, correlated_id: &CorrelatedId) -> bool {
         self.correlated_id_set.contains(correlated_id)
     }
+
+    pub fn has_correlated_input_ref(&self) -> bool {
+        !self.correlated_id_set.is_empty()
+    }
 }
 
 impl ExprVisitor for ExprCorrelatedIdFinder {
