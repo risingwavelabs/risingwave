@@ -35,12 +35,25 @@ use crate::controller::catalog::CatalogController;
 use crate::controller::utils::{
     check_user_name_duplicate, ensure_privileges_not_referred, ensure_user_id,
     extract_grant_obj_id, get_referring_privileges_cascade, get_user_privilege,
-    PartialUserPrivilege,
+    list_user_info_by_ids, PartialUserPrivilege,
 };
 use crate::manager::NotificationVersion;
 use crate::{MetaError, MetaResult};
 
 impl CatalogController {
+    pub(crate) async fn notify_users_update(
+        &self,
+        user_infos: Vec<PbUserInfo>,
+    ) -> NotificationVersion {
+        let mut version = 0;
+        for info in user_infos {
+            version = self
+                .notify_frontend(NotificationOperation::Update, NotificationInfo::User(info))
+                .await;
+        }
+        version
+    }
+
     async fn create_user(&self, pb_user: PbUserInfo) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -282,25 +295,10 @@ impl CatalogController {
                 .exec(&txn)
                 .await?;
         }
-
-        let mut user_infos = vec![];
-        for user_id in user_ids {
-            let user = User::find_by_id(user_id)
-                .one(&txn)
-                .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("user", user_id))?;
-            let mut user_info: PbUserInfo = user.into();
-            user_info.grant_privileges = get_user_privilege(user_info.id, &txn).await?;
-            user_infos.push(user_info);
-        }
+        let user_infos = list_user_info_by_ids(user_ids, &txn).await?;
         txn.commit().await?;
 
-        let mut version = 0;
-        for info in user_infos {
-            version = self
-                .notify_frontend(NotificationOperation::Update, NotificationInfo::User(info))
-                .await;
-        }
+        let version = self.notify_users_update(user_infos).await;
         Ok(version)
     }
 
@@ -406,18 +404,24 @@ impl CatalogController {
 
         // check if the user granted any privileges to other users.
         let root_privilege_ids = root_user_privileges.iter().map(|ur| ur.id).collect_vec();
-        let (all_privilege_ids, to_update_user_ids): (_, HashSet<UserId>) = if !cascade {
+        let (all_privilege_ids, to_update_user_ids) = if !cascade {
             ensure_privileges_not_referred(root_privilege_ids.clone(), &txn).await?;
             (
                 root_privilege_ids.clone(),
-                root_user_privileges.iter().map(|ur| ur.user_id).collect(),
+                root_user_privileges
+                    .iter()
+                    .map(|ur| ur.user_id)
+                    .collect_vec(),
             )
         } else {
             let all_user_privileges =
                 get_referring_privileges_cascade(root_privilege_ids.clone(), &txn).await?;
             (
                 all_user_privileges.iter().map(|ur| ur.id).collect_vec(),
-                all_user_privileges.iter().map(|ur| ur.user_id).collect(),
+                all_user_privileges
+                    .iter()
+                    .map(|ur| ur.user_id)
+                    .collect_vec(),
             )
         };
 
@@ -442,24 +446,10 @@ impl CatalogController {
                 .await?;
         }
 
-        let mut user_infos = vec![];
-        for user_id in to_update_user_ids {
-            let user = User::find_by_id(user_id)
-                .one(&txn)
-                .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found("user", user_id))?;
-            let mut user_info: PbUserInfo = user.into();
-            user_info.grant_privileges = get_user_privilege(user_info.id, &txn).await?;
-            user_infos.push(user_info);
-        }
+        let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
         txn.commit().await?;
 
-        let mut version = 0;
-        for info in user_infos {
-            version = self
-                .notify_frontend(NotificationOperation::Update, NotificationInfo::User(info))
-                .await;
-        }
+        let version = self.notify_users_update(user_infos).await;
         Ok(version)
     }
 }

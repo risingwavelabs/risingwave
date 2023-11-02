@@ -22,8 +22,8 @@ use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
     connection, database, function, index, object, object_dependency, schema, sink, source, table,
-    view, ColumnCatalogArray, ConnectionId, DatabaseId, FunctionId, ObjectId, PrivateLinkService,
-    SchemaId, SourceId, TableId, UserId,
+    user_privilege, view, ColumnCatalogArray, ConnectionId, DatabaseId, FunctionId, ObjectId,
+    PrivateLinkService, SchemaId, SourceId, TableId, UserId,
 };
 use risingwave_pb::catalog::{
     PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
@@ -33,11 +33,11 @@ use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
-use risingwave_pb::meta::{PbRelation, PbRelationGroup};
+use risingwave_pb::meta::{PbRelation, PbRelationGroup, PbTableFragments};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
-    QueryFilter, QuerySelect, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait, JoinType,
+    QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
 };
 use tokio::sync::RwLock;
 
@@ -46,10 +46,10 @@ use crate::controller::utils::{
     check_connection_name_duplicate, check_function_signature_duplicate,
     check_relation_name_duplicate, check_schema_name_duplicate, ensure_object_id,
     ensure_object_not_refer, ensure_schema_empty, ensure_user_id, get_referring_objects,
-    get_referring_objects_cascade, PartialObject,
+    get_referring_objects_cascade, list_user_info_by_ids, PartialObject,
 };
 use crate::controller::ObjectModel;
-use crate::manager::{MetaSrvEnv, NotificationVersion};
+use crate::manager::{MetaSrvEnv, NotificationVersion, StreamingJob};
 use crate::rpc::ddl_controller::DropMode;
 use crate::{MetaError, MetaResult};
 
@@ -213,14 +213,26 @@ impl CatalogController {
             .map(|conn| conn.info)
             .collect_vec();
 
+        let user_ids: Vec<UserId> = UserPrivilege::find()
+            .select_only()
+            .distinct()
+            .column(user_privilege::Column::UserId)
+            .join(JoinType::InnerJoin, user_privilege::Relation::Object.def())
+            .filter(object::Column::DatabaseId.eq(Some(database_id)))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
         // The schema and objects in the database will be delete cascade.
         let res = Object::delete_by_id(database_id).exec(&txn).await?;
         if res.rows_affected == 0 {
             return Err(MetaError::catalog_id_not_found("database", database_id));
         }
 
+        let user_infos = list_user_info_by_ids(user_ids, &txn).await?;
         txn.commit().await?;
 
+        self.notify_users_update(user_infos).await;
         let version = self
             .notify_frontend(
                 NotificationOperation::Delete,
@@ -276,25 +288,38 @@ impl CatalogController {
         drop_mode: DropMode,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
         let schema_obj = Object::find_by_id(schema_id)
-            .one(&inner.db)
+            .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("schema", schema_id))?;
         if drop_mode == DropMode::Restrict {
-            ensure_schema_empty(schema_id, &inner.db).await?;
+            ensure_schema_empty(schema_id, &txn).await?;
         }
+
+        let user_ids: Vec<UserId> = UserPrivilege::find()
+            .select_only()
+            .distinct()
+            .column(user_privilege::Column::UserId)
+            .join(JoinType::InnerJoin, user_privilege::Relation::Object.def())
+            .filter(object::Column::SchemaId.eq(Some(schema_id)))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        let user_infos = list_user_info_by_ids(user_ids, &txn).await?;
 
         let res = Object::delete(object::ActiveModel {
             oid: Set(schema_id),
             ..Default::default()
         })
-        .exec(&inner.db)
+        .exec(&txn)
         .await?;
         if res.rows_affected == 0 {
             return Err(MetaError::catalog_id_not_found("schema", schema_id));
         }
+        txn.commit().await?;
 
-        // todo: update user privileges accordingly.
+        self.notify_users_update(user_infos).await;
         let version = self
             .notify_frontend(
                 NotificationOperation::Delete,
@@ -303,6 +328,52 @@ impl CatalogController {
                     database_id: schema_obj.database_id.unwrap(),
                     ..Default::default()
                 }),
+            )
+            .await;
+        Ok(version)
+    }
+
+    pub async fn create_stream_job(
+        &self,
+        _stream_job: &StreamingJob,
+        _table_fragments: &PbTableFragments,
+        _internal_tables: Vec<PbTable>,
+    ) -> MetaResult<()> {
+        todo!()
+    }
+
+    pub async fn create_source(&self, mut pb_source: PbSource) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let owner_id = pb_source.owner;
+        let txn = inner.db.begin().await?;
+        ensure_user_id(owner_id, &txn).await?;
+        ensure_object_id(ObjectType::Database, pb_source.database_id, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_source.schema_id, &txn).await?;
+        check_relation_name_duplicate(
+            &pb_source.name,
+            pb_source.database_id,
+            pb_source.schema_id,
+            &txn,
+        )
+        .await?;
+
+        let source_obj = Self::create_object(
+            &txn,
+            ObjectType::Source,
+            owner_id,
+            Some(pb_source.database_id),
+            Some(pb_source.schema_id),
+        )
+        .await?;
+        pb_source.id = source_obj.oid;
+        let source: source::ActiveModel = pb_source.clone().into();
+        source.insert(&txn).await?;
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend_relation_info(
+                NotificationOperation::Add,
+                PbRelationInfo::Source(pb_source),
             )
             .await;
         Ok(version)
@@ -354,6 +425,7 @@ impl CatalogController {
         if res.rows_affected == 0 {
             return Err(MetaError::catalog_id_not_found("function", function_id));
         }
+        // todo: notify user info change.
 
         let version = self
             .notify_frontend(
@@ -433,6 +505,7 @@ impl CatalogController {
         if res.rows_affected == 0 {
             return Err(MetaError::catalog_id_not_found("connection", connection_id));
         }
+        // todo: notify user info change.
 
         let version = self
             .notify_frontend(
@@ -647,6 +720,7 @@ impl CatalogController {
                 object_id,
             ));
         }
+        // todo: notify user info change.
 
         // notify about them.
         let relations = to_drop_objects
