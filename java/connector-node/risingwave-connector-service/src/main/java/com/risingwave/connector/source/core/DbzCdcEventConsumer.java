@@ -50,11 +50,14 @@ public class DbzCdcEventConsumer
         this.outputChannel = store;
         this.heartbeatTopicPrefix = heartbeatTopicPrefix;
 
-        var jsonConverter = new JsonConverter();
+        // The default JSON converter will output the schema field in the JSON which is unnecessary
+        // to source parser, we use a customized JSON converter to avoid outputing the `schema`
+        // field.
+        var jsonConverter = new DbzJsonConverter();
         final HashMap<String, Object> configs = new HashMap<>(2);
         // only serialize the value part
         configs.put(ConverterConfig.TYPE_CONFIG, ConverterType.VALUE.getName());
-        // include record schema
+        // include record schema to output JSON in { "schema": { ... }, "payload": { ... } } format
         configs.put(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, true);
         jsonConverter.configure(configs);
         this.converter = jsonConverter;
