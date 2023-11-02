@@ -88,4 +88,19 @@ impl StreamNode for StreamValues {
     }
 }
 
-impl ExprRewritable for StreamValues {}
+impl ExprRewritable for StreamValues {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn crate::expr::ExprRewriter) -> crate::PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_values()
+                .unwrap()
+                .clone(),
+        )
+        .into()
+    }
+}
