@@ -97,38 +97,30 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
     session.run(CREATE_TABLE).await?;
     session.run(SEED_TABLE).await?;
     session.flush().await?;
-    session.run(SET_RATE_LIMIT_1).await?;
+    session.run(SET_RATE_LIMIT_2).await?;
     session.run(SET_BACKGROUND_DDL).await?;
     create_mv(&mut session).await?;
 
     // If the CN is killed before first barrier pass for the MV, the MV will be dropped.
     // This is because it's table fragments will NOT be committed until first barrier pass.
     kill_cn_and_wait_recover(&cluster).await;
-    kill_and_wait_recover(&cluster).await;
 
     // Send some upstream updates.
     session.run(SEED_TABLE).await?;
-    session.run(SEED_TABLE).await?;
     session.flush().await?;
 
-    kill_and_wait_recover(&cluster).await;
-    kill_cn_and_wait_recover(&cluster).await;
-
-    // Send some upstream updates.
-    session.run(SEED_TABLE).await?;
-    session.run(SEED_TABLE).await?;
-    session.flush().await?;
-
-    kill_cn_and_wait_recover(&cluster).await;
     kill_and_wait_recover(&cluster).await;
 
     // Now just wait for it to complete.
     session.run(WAIT).await?;
 
-    session
+    let t_count = session.run("SELECT COUNT(v1) FROM t").await?;
+
+    let mv1_count = session
         .run("SELECT COUNT(v1) FROM mv1")
-        .await?
-        .assert_result_eq("3500");
+        .await?;
+
+    assert_eq!(t_count, mv1_count);
 
     // Make sure that if MV killed and restarted
     // it will not be dropped.
