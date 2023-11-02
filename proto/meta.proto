@@ -239,8 +239,9 @@ message ListActorStatesResponse {
 }
 
 enum ThrottleTarget {
-  SOURCE_UNSPECIFIED = 0;
-  MV = 1;
+  THROTTLE_TARGET_UNSPECIFIED = 0;
+  SOURCE = 1;
+  MV = 2;
 }
 
 message ApplyThrottleRequest {

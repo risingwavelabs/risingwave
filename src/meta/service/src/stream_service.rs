@@ -105,7 +105,7 @@ impl StreamManagerService for StreamServiceImpl {
     ) -> Result<Response<ApplyThrottleResponse>, Status> {
         let request = request.into_inner();
         let actor_to_apply = match request.kind() {
-            ThrottleTarget::SourceUnspecified => {
+            ThrottleTarget::Source => {
                 self.fragment_manager
                     .update_source_rate_limit_by_source_id(request.id as SourceId, request.rate)
                     .await?
@@ -114,6 +114,9 @@ impl StreamManagerService for StreamServiceImpl {
                 self.fragment_manager
                     .update_mv_rate_limit_by_table_id(TableId::from(request.id), request.rate)
                     .await?
+            }
+            ThrottleTarget::Unspecified => {
+                return Err(Status::invalid_argument("unspecified throttle target"))
             }
         };
 
