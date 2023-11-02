@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use core::fmt;
+use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::fmt::Debug;
+use std::fmt::{Debug, Write};
 use std::hash::Hash;
 use std::sync::Arc;
 
@@ -28,8 +29,7 @@ use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::types::{
-    hash_datum, quote, DataType, Datum, DatumRef, DefaultOrd, Scalar, StructType, ToDatumRef,
-    ToText,
+    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, StructType, ToDatumRef, ToText,
 };
 use crate::util::iter_util::ZipEqFast;
 use crate::util::memcmp_encoding;
@@ -438,6 +438,57 @@ impl ToText for StructRef<'_> {
     }
 }
 
+/// Double quote a string if it contains any special characters.
+fn quote(input: &str, writer: &mut impl Write) -> std::fmt::Result {
+    if !input.is_empty() // non-empty
+        && input.trim() == input // no leading or trailing whitespace
+        && !input.contains(['(', ')', ',', '"', '\\'])
+    {
+        return writer.write_str(input);
+    }
+
+    writer.write_char('"')?;
+
+    for ch in input.chars() {
+        match ch {
+            '"' => writer.write_str("\"\"")?,
+            '\\' => writer.write_str("\\\\")?,
+            _ => writer.write_char(ch)?,
+        }
+    }
+
+    writer.write_char('"')
+}
+
+/// Remove double quotes from a string.
+/// This is the reverse of [`quote`].
+fn unquote(input: &str) -> Cow<'_, str> {
+    if !(input.starts_with('"') && input.ends_with('"')) {
+        return Cow::Borrowed(input);
+    }
+
+    let mut output = String::with_capacity(input.len() - 2);
+    let mut chars = input[1..input.len() - 1].chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' => {
+                if chars.peek() == Some(&'"') {
+                    chars.next();
+                    output.push('"');
+                }
+            }
+            '\\' => {
+                if let Some(next_char) = chars.next() {
+                    output.push(next_char);
+                }
+            }
+            _ => output.push(ch),
+        }
+    }
+    output.into()
+}
+
 #[cfg(test)]
 mod tests {
     use more_asserts::assert_gt;
@@ -714,5 +765,24 @@ mod tests {
             };
             assert_eq!(lhs_serialized.cmp(&rhs_serialized), order);
         }
+    }
+
+    #[test]
+    fn test_quote() {
+        #[track_caller]
+        fn test(input: &str, quoted: &str) {
+            let mut actual = String::new();
+            quote(input, &mut actual).unwrap();
+            assert_eq!(quoted, actual);
+            assert_eq!(unquote(quoted), input);
+        }
+        test("abc", "abc");
+        test("", r#""""#);
+        test(" x ", r#"" x ""#);
+        test(r#"a"bc"#, r#""a""bc""#);
+        test(r#"a\bc"#, r#""a\\bc""#);
+        test("{1}", "{1}");
+        test("{1,2}", r#""{1,2}""#);
+        test(r#"{"f": 1}"#, r#""{""f"": 1}""#);
     }
 }

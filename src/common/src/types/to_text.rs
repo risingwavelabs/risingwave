@@ -219,59 +219,8 @@ impl ToText for DatumRef<'_> {
     }
 }
 
-/// Double quote a string if it contains any special characters.
-pub fn quote(input: &str, writer: &mut impl Write) -> std::fmt::Result {
-    if !input.is_empty() // non-empty
-        && input.trim() == input // no leading or trailing whitespace
-        && !input.contains(&['(', ')', ',', '"', '\\'][..])
-    {
-        return writer.write_str(input);
-    }
-
-    writer.write_char('"')?;
-
-    for ch in input.chars() {
-        match ch {
-            '"' => writer.write_str("\"\"")?,
-            '\\' => writer.write_str("\\\\")?,
-            _ => writer.write_char(ch)?,
-        }
-    }
-
-    writer.write_char('"')
-}
-
-/// Remove double quotes from a string.
-/// This is the reverse of [`quote`].
-pub fn unquote(input: &str, writer: &mut impl Write) -> std::fmt::Result {
-    if !(input.starts_with('"') && input.ends_with('"')) {
-        return writer.write_str(input);
-    }
-
-    let mut chars = input.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        match ch {
-            '"' => {
-                if chars.peek() == Some(&'"') {
-                    chars.next();
-                    writer.write_char('"')?;
-                }
-            }
-            '\\' => {
-                if let Some(next_char) = chars.next() {
-                    writer.write_char(next_char)?;
-                }
-            }
-            _ => writer.write_char(ch)?,
-        }
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::types::ordered_float::OrderedFloat;
     use crate::types::ToText;
 
@@ -285,26 +234,5 @@ mod tests {
         // f32 -> text.
         let ret: OrderedFloat<f32> = OrderedFloat::<f32>::from(1.234567);
         assert_eq!("1.234567".to_string(), ret.to_text());
-    }
-
-    #[test]
-    fn test_quote() {
-        fn test(input: &str, quoted: &str) {
-            let mut actual = String::new();
-            quote(input, &mut actual).unwrap();
-            assert_eq!(quoted, actual);
-
-            let mut actual = String::new();
-            unquote(quoted, &mut actual).unwrap();
-            assert_eq!(input, actual);
-        }
-        test("abc", "abc");
-        test("", r#""""#);
-        test(" x ", r#"" x ""#);
-        test(r#"a"bc"#, r#""a""bc""#);
-        test(r#"a\bc"#, r#""a\\bc""#);
-        test("{1}", "{1}");
-        test("{1,2}", r#""{1,2}""#);
-        test(r#"{"f": 1}"#, r#""{""f"": 1}""#);
     }
 }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt;
 use std::fmt::Debug;
@@ -31,7 +32,8 @@ use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarRefImpl, ToDatumRef, ToText,
+    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, ScalarRefImpl,
+    ToDatumRef, ToText,
 };
 use crate::util::memcmp_encoding;
 use crate::util::value_encoding::estimate_serialize_datum_size;
@@ -624,6 +626,85 @@ impl<'a> From<&'a ListValue> for ListRef<'a> {
     }
 }
 
+impl ListValue {
+    /// Construct an array from literal string.
+    pub fn from_str(input: &str, data_type: &DataType) -> Result<Self, String> {
+        let elem_type = data_type.as_list();
+        let trimmed = input.trim();
+        if !trimmed.starts_with('{') {
+            return Err(r#"Array value must start with "{""#.into());
+        }
+        if !trimmed.ends_with('}') {
+            return Err(eoi());
+        }
+        let trimmed = &trimmed[1..trimmed.len() - 1];
+
+        fn eoi() -> String {
+            "Unexpected end of input.".into()
+        }
+
+        let mut elems = Vec::new();
+        let mut depth = 0;
+        let mut start = 0;
+        let mut chars = trimmed.chars().enumerate();
+        while let Some((i, c)) = chars.next() {
+            match c {
+                '{' => depth += 1,
+                '}' => depth -= 1,
+                '"' => loop {
+                    match chars.next().ok_or_else(eoi)?.1 {
+                        '\\' => {
+                            chars.next().ok_or_else(eoi)?;
+                        }
+                        '"' => break,
+                        _ => {}
+                    }
+                },
+                ',' if depth == 0 => {
+                    elems.push(match trimmed[start..i].trim() {
+                        "" => return Err("Unexpected \"}\" character.".into()),
+                        s if s.eq_ignore_ascii_case("null") => None,
+                        s => Some(ScalarImpl::from_literal(&unquote(s), elem_type)?),
+                    });
+                    start = i + 1;
+                }
+                _ => {}
+            }
+        }
+        if depth != 0 {
+            return Err(eoi());
+        }
+        match trimmed[start..].trim() {
+            "" => {
+                if !elems.is_empty() {
+                    return Err("Unexpected \"}\" character.".into());
+                }
+            }
+            s if s.eq_ignore_ascii_case("null") => elems.push(None),
+            s => elems.push(Some(ScalarImpl::from_literal(&unquote(s), elem_type)?)),
+        }
+        Ok(ListValue::new(elems))
+    }
+}
+
+/// Remove double quotes from a string.
+fn unquote(input: &str) -> Cow<'_, str> {
+    if !(input.starts_with('"') && input.ends_with('"')) {
+        return Cow::Borrowed(input);
+    }
+
+    let mut output = String::with_capacity(input.len() - 2);
+    let mut chars = input[1..input.len() - 1].chars().peekable();
+
+    while let Some(mut ch) = chars.next() {
+        if ch == '\\' {
+            ch = chars.next().unwrap();
+        }
+        output.push(ch);
+    }
+    output.into()
+}
+
 #[cfg(test)]
 mod tests {
     use more_asserts::{assert_gt, assert_lt};
@@ -1034,5 +1115,50 @@ mod tests {
         // Get 2nd value from ListRef
         let scalar = list_ref.get(1).unwrap();
         assert_eq!(scalar, Some(types::ScalarRefImpl::Int32(5)));
+    }
+
+    #[test]
+    fn test_from_to_literal() {
+        #[track_caller]
+        fn test(typestr: &str, input: &str, output: Option<&str>) {
+            let datatype: DataType = typestr.parse().unwrap();
+            let list = ListValue::from_str(input, &datatype).unwrap();
+            let actual = list.as_scalar_ref().to_text();
+            let output = output.unwrap_or(input);
+            assert_eq!(actual, output);
+        }
+
+        #[track_caller]
+        fn test_err(typestr: &str, input: &str, err: &str) {
+            let datatype: DataType = typestr.parse().unwrap();
+            let actual_err = ListValue::from_str(input, &datatype).unwrap_err();
+            assert_eq!(actual_err, err);
+        }
+
+        test("varchar[]", "{}", None);
+        test("varchar[]", "{1 2}", Some(r#"{"1 2"}"#));
+        test("int[]", "{1,2,3}", None);
+        test("varchar[]", r#"{"1,2"}"#, None);
+        test("varchar[]", r#"{1, ""}"#, Some(r#"{1,""}"#));
+        test("varchar[]", r#"{"\""}"#, None);
+        test(
+            "varchar[]",
+            r#"{"null", "NULL", null, NuLL}"#,
+            Some(r#"{"null","NULL",NULL,NULL}"#),
+        );
+        test(
+            "varchar[][]",
+            "{{1, 2, 3}, {4, 5, 6}}",
+            Some("{{1,2,3},{4,5,6}}"),
+        );
+        test(
+            "varchar[][][]",
+            "{{{1, 2, 3}}, {{4, 5, 6}}}",
+            Some("{{{1,2,3}},{{4,5,6}}}"),
+        );
+        test_err("varchar[]", "()", r#"Array value must start with "{""#);
+        test_err("varchar[]", "{1,", r#"Unexpected end of input."#);
+        test_err("varchar[]", "{1,}", r#"Unexpected "}" character."#);
+        test_err("varchar[]", "{1,,3}", r#"Unexpected "}" character."#);
     }
 }

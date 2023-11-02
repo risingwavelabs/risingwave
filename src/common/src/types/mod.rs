@@ -80,7 +80,7 @@ pub use self::struct_type::StructType;
 pub use self::successor::Successor;
 pub use self::timestamptz::*;
 pub use self::to_binary::ToBinary;
-pub use self::to_text::{quote, unquote, ToText};
+pub use self::to_text::ToText;
 
 /// A 32-bit floating point type with total order.
 pub type F32 = ordered_float::OrderedFloat<f32>;
@@ -997,11 +997,10 @@ impl ScalarImpl {
             DataType::Timestamptz => Timestamptz::from_str(s).map_err(|e| e.to_string())?.into(),
             DataType::Time => Time::from_str(s).map_err(|e| e.to_string())?.into(),
             DataType::Interval => Interval::from_str(s).map_err(|e| e.to_string())?.into(),
-            // Not processing list or struct literal right now. Leave it for later phase (normal backend
-            // evaluation).
-            DataType::List { .. } => return Err("not supported".into()),
+            DataType::List { .. } => ListValue::from_str(s, t)?.into(),
+            // Not processing struct literal right now. Leave it for later phase (normal backend evaluation).
             DataType::Struct(_) => return Err("not supported".into()),
-            DataType::Jsonb => return Err("not supported".into()),
+            DataType::Jsonb => JsonbVal::from_str(s).map_err(|e| e.to_string())?.into(),
             DataType::Bytea => str_to_bytea(s)?.into(),
         })
     }
