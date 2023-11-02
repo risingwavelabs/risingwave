@@ -3,8 +3,7 @@ control substitution on
 
 system ok
 psql -c "
-    DROP DATABASE IF EXISTS testdb1; CREATE DATABASE testdb1;
-    USE testdb1;
+    DROP TABLE IF EXISTS tt1;
     CREATE TABLE tt1 (v1 int primary key, v2 timestamp);
     INSERT INTO tt1 VALUES (1, '2023-10-23 10:00:00');"
 
@@ -15,10 +14,10 @@ create table tt1 (v1 int,
 ) with (
   connector = 'postgres-cdc',
   hostname = '${PGHOST:localhost}',
-  port = '${PGPORT:5432}',
+  port = '${PGPORT:8432}',
   username = '${PGUSER:$USER}',
-  password = '${PGPASSWORD:postgres}',
-  database.name = 'testdb1',
+  password = '${PGPASSWORD:123456}',
+  database.name = '${PGDATABASE:mydb}',
   schema.name = 'public',
   table.name = 'tt1',
   slot.name = 'tt1_slot',
@@ -34,16 +33,16 @@ create table tt1 (v1 int,
 ) with (
   connector = 'postgres-cdc',
   hostname = '${PGHOST:localhost}',
-  port = '${PGPORT:5432}',
+  port = '${PGPORT:8432}',
   username = '${PGUSER:$USER}',
-  password = '${PGPASSWORD:postgres}',
-  database.name = 'testdb1',
+  password = '${PGPASSWORD:123456}',
+  database.name = '${PGDATABASE:mydb}',
   schema.name = 'public',
   table.name = 'tt1',
   slot.name = 'tt1_slot',
 );
 
-sleep 1s
+sleep 3s
 
 query IT
 SELECT * FROM tt1;
