@@ -1,0 +1,63 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# collate in select
+
+query T
+select 'a' collate "C";
+----
+a
+
+query B
+select 'a' < 'b' collate "C";
+----
+t
+
+query B
+select 'b' < 'a' collate "POSIX";
+----
+f
+
+query T
+select (varchar 't') collate "C";
+----
+t
+
+query T
+select 'a' collate "c";
+----
+a
+
+query T
+select 'a' collate "c";
+----
+a
+
+query T
+select 'a' collate "posix";
+----
+a
+
+query T
+select 'a' collate "pOsIx";
+----
+a
+
+query BT
+select 'a' < 'b', 'a' collate "C";
+----
+t a
+
+query B
+select 'a' < ('b' collate "C");
+----
+t
+
+query B
+select ('a' < 'b') collate "C";
+----
+t
+
+# parser issue
+statement error
+select varchar 't' collate "C";
