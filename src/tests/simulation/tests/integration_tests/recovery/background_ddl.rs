@@ -95,7 +95,9 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
     kill_cn_and_wait_recover(&cluster).await;
 
     // Send some upstream updates.
-    session.run(SEED_TABLE_500).await?;
+    session
+        .run("INSERT INTO t SELECT generate_series FROM generate_series(501, 1000);")
+        .await?;
     session.flush().await?;
 
     kill_and_wait_recover(&cluster).await;
@@ -106,6 +108,11 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
     let t_count = session.run("SELECT COUNT(v1) FROM t").await?;
 
     let mv1_count = session.run("SELECT COUNT(v1) FROM mv1").await?;
+
+    let missing_rows = session
+        .run("SELECT v1 FROM t WHERE v1 NOT IN (SELECT v1 FROM mv1)")
+        .await?;
+    tracing::debug!(missing_rows);
 
     assert_eq!(t_count, mv1_count);
 
