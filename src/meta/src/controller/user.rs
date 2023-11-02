@@ -94,21 +94,24 @@ impl CatalogController {
             check_user_name_duplicate(&update_user.name, &inner.db).await?;
         }
 
-        let mut user = User::find_by_id(update_user.id)
+        let user = User::find_by_id(update_user.id)
             .one(&inner.db)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("user", update_user.id))?;
+        let mut user = user.into_active_model();
         update_fields.iter().for_each(|&field| match field {
             PbUpdateField::Unspecified => unreachable!(),
-            PbUpdateField::Super => user.is_super = update_user.is_super,
-            PbUpdateField::Login => user.can_login = update_user.can_login,
-            PbUpdateField::CreateDb => user.can_create_db = update_user.can_create_db,
-            PbUpdateField::CreateUser => user.can_create_user = update_user.can_create_user,
-            PbUpdateField::AuthInfo => user.auth_info = update_user.auth_info.clone().map(AuthInfo),
-            PbUpdateField::Rename => user.name = update_user.name.clone(),
+            PbUpdateField::Super => user.is_super = Set(update_user.is_super),
+            PbUpdateField::Login => user.can_login = Set(update_user.can_login),
+            PbUpdateField::CreateDb => user.can_create_db = Set(update_user.can_create_db),
+            PbUpdateField::CreateUser => user.can_create_user = Set(update_user.can_create_user),
+            PbUpdateField::AuthInfo => {
+                user.auth_info = Set(update_user.auth_info.clone().map(AuthInfo))
+            }
+            PbUpdateField::Rename => user.name = Set(update_user.name.clone()),
         });
 
-        let user = user.into_active_model().update(&inner.db).await?;
+        let user = user.update(&inner.db).await?;
         let mut user_info: PbUserInfo = user.into();
         user_info.grant_privileges = get_user_privilege(user_info.id, &inner.db).await?;
         let version = self
@@ -505,6 +508,24 @@ mod tests {
         mgr.create_user(make_test_user("test_user_2")).await?;
         let user_1 = mgr.get_user_by_name("test_user_1").await?;
         let user_2 = mgr.get_user_by_name("test_user_2").await?;
+
+        assert!(
+            mgr.create_user(make_test_user("test_user_1"))
+                .await
+                .is_err(),
+            "user_1 already exists"
+        );
+        mgr.update_user(
+            PbUserInfo {
+                id: user_1.user_id,
+                name: "test_user_1_new".to_string(),
+                ..Default::default()
+            },
+            &[PbUpdateField::Rename],
+        )
+        .await?;
+        let user_1 = mgr.get_user(user_1.user_id).await?;
+        assert_eq!(user_1.name, "test_user_1_new".to_string());
 
         let conn_with_option = make_privilege(
             PbObject::DatabaseId(TEST_DATABASE_ID),
