@@ -55,6 +55,7 @@ impl FlowControlExecutor {
             match msg {
                 Message::Chunk(chunk) => {
                     let Some(n) = NonZeroU32::new(chunk.cardinality() as u32) else {
+                        tracing::trace!(?chunk, "empty chunk");
                         // Handle case where chunk is empty
                         continue;
                     };
