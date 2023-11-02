@@ -132,6 +132,7 @@ tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 url = "2"
 urlencoding = "2"
+with_options = { path = "../utils/with_options" }
 yup-oauth2 = "8.3"
 
 [target.'cfg(not(madsim))'.dependencies]
@@ -146,6 +147,7 @@ tracing-test = "0.2"
 
 [build-dependencies]
 prost-build = "0.12"
+with_options_build = { path = "../utils/with_options_build" }
 
 [[bench]]
 name = "parser"

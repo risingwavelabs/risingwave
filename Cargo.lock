@@ -7553,6 +7553,8 @@ dependencies = [
  "tracing-test",
  "url",
  "urlencoding",
+ "with_options",
+ "with_options_build",
  "workspace-hack",
  "yup-oauth2",
 ]
@@ -11189,6 +11191,32 @@ checksum = "524e57b2c537c0f9b1e69f1965311ec12182b4122e45035b1508cd24d2adadb1"
 dependencies = [
  "cfg-if",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "with_options"
+version = "1.3.0-alpha"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_yaml",
+ "syn 2.0.37",
+ "walkdir",
+ "workspace-hack",
+]
+
+[[package]]
+name = "with_options_build"
+version = "1.3.0-alpha"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_yaml",
+ "syn 2.0.37",
+ "walkdir",
+ "workspace-hack",
 ]
 
 [[package]]

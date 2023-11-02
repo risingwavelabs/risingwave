@@ -13,10 +13,9 @@
 // limitations under the License.
 
 fn main() {
+    with_options_build::update_with_options_yaml();
+
     let proto_dir = "./src/test_data/proto_recursive";
-
-    println!("cargo:rerun-if-changed={}", proto_dir);
-
     let proto_files = ["recursive"];
     let protos: Vec<String> = proto_files
         .iter()

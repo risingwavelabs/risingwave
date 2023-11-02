@@ -32,6 +32,7 @@ use serde_with::{serde_as, DisplayFromStr};
 use tempfile::NamedTempFile;
 use time::OffsetDateTime;
 use url::Url;
+use with_options::WithOptions;
 
 use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::load_file_descriptor_from_s3;
@@ -51,8 +52,9 @@ pub struct AwsPrivateLinkItem {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, WithOptions)]
 pub struct KafkaCommon {
+    #[with_option(required)]
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
 
@@ -60,6 +62,7 @@ pub struct KafkaCommon {
     #[serde_as(as = "Option<JsonString>")]
     pub broker_rewrite_map: Option<HashMap<String, String>>,
 
+    #[with_option(required)]
     #[serde(rename = "topic", alias = "kafka.topic")]
     pub topic: String,
 
@@ -137,7 +140,7 @@ const fn default_kafka_sync_call_timeout() -> Duration {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, WithOptions)]
 pub struct RdKafkaPropertiesCommon {
     /// Maximum Kafka protocol request message size. Due to differing framing overhead between
     /// protocol versions the producer is unable to reliably enforce a strict max message limit at
@@ -251,11 +254,13 @@ impl KafkaCommon {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PulsarCommon {
+    #[with_option(required)]
     #[serde(rename = "topic", alias = "pulsar.topic")]
     pub topic: String,
 
+    #[with_option(required)]
     #[serde(rename = "service.url", alias = "pulsar.service.url")]
     pub service_url: String,
 
@@ -266,7 +271,7 @@ pub struct PulsarCommon {
     pub oauth: Option<PulsarOauthCommon>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PulsarOauthCommon {
     #[serde(rename = "oauth.issuer.url")]
     pub issuer_url: String,
@@ -351,31 +356,42 @@ impl PulsarCommon {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct KinesisCommon {
+    #[with_option(required)]
     #[serde(rename = "stream", alias = "kinesis.stream.name")]
     pub stream_name: String,
+
+    #[with_option(required)]
     #[serde(rename = "aws.region", alias = "kinesis.stream.region")]
     pub stream_region: String,
+
     #[serde(rename = "endpoint", alias = "kinesis.endpoint")]
     pub endpoint: Option<String>,
+
+    #[with_option(required)]
     #[serde(
         rename = "aws.credentials.access_key_id",
         alias = "kinesis.credentials.access"
     )]
     pub credentials_access_key: Option<String>,
+
+    #[with_option(required)]
     #[serde(
         rename = "aws.credentials.secret_access_key",
         alias = "kinesis.credentials.secret"
     )]
     pub credentials_secret_access_key: Option<String>,
+
     #[serde(
         rename = "aws.credentials.session_token",
         alias = "kinesis.credentials.session_token"
     )]
     pub session_token: Option<String>,
+
     #[serde(rename = "aws.credentials.role.arn", alias = "kinesis.assumerole.arn")]
     pub assume_role_arn: Option<String>,
+
     #[serde(
         rename = "aws.credentials.role.external_id",
         alias = "kinesis.assumerole.external_id"
@@ -413,14 +429,20 @@ pub struct UpsertMessage<'a> {
 }
 
 #[serde_as]
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct NatsCommon {
+    #[with_option(required)]
     #[serde(rename = "server_url")]
     pub server_url: String,
+
+    #[with_option(required)]
     #[serde(rename = "subject")]
     pub subject: String,
+
+    #[with_option(required)]
     #[serde(rename = "connect_mode")]
     pub connect_mode: Option<String>,
+
     #[serde(rename = "username")]
     pub user: Option<String>,
     #[serde(rename = "password")]

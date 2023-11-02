@@ -22,6 +22,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::serde_as;
+use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
 use super::encoder::template::TemplateEncoder;
@@ -38,8 +39,10 @@ use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriterParam};
 pub const REDIS_SINK: &str = "redis";
 pub const KEY_FORMAT: &str = "key_format";
 pub const VALUE_FORMAT: &str = "value_format";
-#[derive(Deserialize, Serialize, Debug, Clone)]
+
+#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct RedisCommon {
+    #[with_option(required)]
     #[serde(rename = "redis.url")]
     pub url: String,
 }
@@ -51,7 +54,7 @@ impl RedisCommon {
     }
 }
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct RedisConfig {
     #[serde(flatten)]
     pub common: RedisCommon,
