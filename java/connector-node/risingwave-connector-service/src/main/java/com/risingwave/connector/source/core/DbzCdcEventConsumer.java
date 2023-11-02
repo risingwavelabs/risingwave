@@ -51,7 +51,7 @@ public class DbzCdcEventConsumer
         this.heartbeatTopicPrefix = heartbeatTopicPrefix;
 
         // The default JSON converter will output the schema field in the JSON which is unnecessary
-        // to source parser, we use a customized JSON converter to avoid outputing the `schema`
+        // to source parser, we use a customized JSON converter to avoid outputting the `schema`
         // field.
         var jsonConverter = new DbzJsonConverter();
         final HashMap<String, Object> configs = new HashMap<>(2);

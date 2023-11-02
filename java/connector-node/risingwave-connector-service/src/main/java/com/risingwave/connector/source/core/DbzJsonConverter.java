@@ -19,7 +19,7 @@ import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.json.JsonConverter;
 
 /**
- * Customize the JSON converter to avoid outputing the `schema` field but retian `payload` field in
+ * Customize the JSON converter to avoid outputting the `schema` field but retian `payload` field in
  * the JSON output. e.g.
  *
  * <pre>
