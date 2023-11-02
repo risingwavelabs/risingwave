@@ -364,7 +364,7 @@ impl TableFragments {
 
     /// Resolve dependent table
     fn resolve_dependent_table(stream_node: &StreamNode, table_ids: &mut HashMap<TableId, usize>) {
-        if let Some(NodeBody::Chain(chain)) = stream_node.node_body.as_ref() {
+        if let Some(NodeBody::StreamScan(chain)) = stream_node.node_body.as_ref() {
             table_ids
                 .entry(TableId::new(chain.table_id))
                 .or_default()

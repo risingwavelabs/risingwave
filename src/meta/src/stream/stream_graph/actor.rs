@@ -26,7 +26,8 @@ use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
-    ChainType, DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
+    DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
+    StreamScanType,
 };
 
 use super::id::GlobalFragmentIdsExt;
@@ -158,8 +159,9 @@ impl ActorBuilder {
             }
 
             // "Leaf" node `Chain`.
-            NodeBody::Chain(chain_node) => {
-                let cdc_backfill = chain_node.chain_type == ChainType::CdcBackfill as i32;
+            NodeBody::StreamScan(chain_node) => {
+                let cdc_backfill =
+                    chain_node.stream_scan_type == StreamScanType::CdcBackfill as i32;
 
                 let input = stream_node.get_input();
                 assert_eq!(input.len(), 2);

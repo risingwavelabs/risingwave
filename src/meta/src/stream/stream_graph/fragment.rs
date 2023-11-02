@@ -170,7 +170,7 @@ impl BuildingFragment {
         let mut table_columns = HashMap::new();
 
         stream_graph_visitor::visit_fragment(fragment, |node_body| {
-            if let NodeBody::Chain(chain_node) = node_body {
+            if let NodeBody::StreamScan(chain_node) = node_body {
                 let table_id = chain_node.table_id.into();
                 let column_ids = chain_node.upstream_column_ids.clone();
                 table_columns
@@ -563,7 +563,7 @@ impl CompleteStreamFragmentGraph {
                             // extract the upstream full_table_name from the source fragment
                             let mut full_table_name = None;
                             visit_fragment(&mut fragment.inner, |node_body| {
-                                if let NodeBody::Chain(chain_node) = node_body {
+                                if let NodeBody::StreamScan(chain_node) = node_body {
                                     full_table_name = chain_node
                                         .cdc_table_desc
                                         .as_ref()

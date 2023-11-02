@@ -19,7 +19,7 @@ use itertools::{EitherOrBoth, Itertools};
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
-use risingwave_pb::stream_plan::ChainType;
+use risingwave_pb::stream_plan::StreamScanType;
 
 use super::generic::{
     push_down_into_join, push_down_join_condition, GenericPlanNode, GenericPlanRef,
@@ -1163,7 +1163,7 @@ impl LogicalJoin {
             .collect_vec();
         // Use UpstreamOnly chain type
         let new_stream_table_scan =
-            StreamTableScan::new_with_chain_type(new_scan, ChainType::UpstreamOnly);
+            StreamTableScan::new_with_stream_scan_type(new_scan, StreamScanType::UpstreamOnly);
         let right = RequiredDist::no_shuffle(new_stream_table_scan.into());
 
         // Construct a new logical join, because we have change its RHS.

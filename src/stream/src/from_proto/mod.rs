@@ -140,7 +140,7 @@ pub async fn create_executor(
         NodeBody::HashAgg => HashAggExecutorBuilder,
         NodeBody::HashJoin => HashJoinExecutorBuilder,
         NodeBody::HopWindow => HopWindowExecutorBuilder,
-        NodeBody::Chain => ChainExecutorBuilder,
+        NodeBody::StreamScan => ChainExecutorBuilder,
         NodeBody::BatchPlan => BatchQueryExecutorBuilder,
         NodeBody::Merge => MergeExecutorBuilder,
         NodeBody::Materialize => MaterializeExecutorBuilder,
