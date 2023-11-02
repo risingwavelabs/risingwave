@@ -399,17 +399,21 @@ impl ReplayWorker {
                     );
                 }
             }
-            Operation::Flush(delete_range) => {
+            Operation::Flush(delete_range) | Operation::TryFlush(delete_range) => {
                 assert_ne!(storage_type, StorageType::Global);
                 let local_storage = local_storages.get_mut(&storage_type).unwrap();
                 let res = res_rx.recv().await.expect("recv result failed");
                 if let OperationResult::Flush(expected) = res {
                     let actual = local_storage.flush(delete_range).await;
                     assert_eq!(TraceResult::from(actual), expected, "flush wrong");
+                } else if let OperationResult::TryFlush(expected) = res {
+                    let actual = local_storage.flush(delete_range).await;
+                    assert_eq!(TraceResult::from(actual), expected, "try flush wrong");
                 } else {
                     panic!("wrong flush result, expect flush result, but got {:?}", res);
                 }
             }
+
             Operation::Finish => unreachable!(),
             Operation::Result(_) => unreachable!(),
         }

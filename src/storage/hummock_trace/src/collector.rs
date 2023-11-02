@@ -317,7 +317,7 @@ impl TraceSpan {
     }
 
     pub fn new_try_flush_span(storage_type: StorageType) -> MayTraceSpan {
-        Self::new_global_op(Operation::Flush(vec![]), storage_type)
+        Self::new_global_op(Operation::TryFlush(vec![]), storage_type)
     }
 
     pub fn new_meta_message_span(resp: SubscribeResponse) -> MayTraceSpan {

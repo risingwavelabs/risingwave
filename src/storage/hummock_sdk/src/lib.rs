@@ -275,6 +275,7 @@ impl EpochWithGap {
     pub fn new(epoch: u64, spill_offset: u64) -> Self {
         #[cfg(not(feature = "enable_test_epoch"))]
         {
+            debug_assert_eq!(epoch & EPOCH_MASK, 0);
             let epoch_with_gap = epoch + spill_offset;
             EpochWithGap(epoch_with_gap)
         }
@@ -286,11 +287,6 @@ impl EpochWithGap {
     }
 
     pub fn new_from_epoch(epoch: u64) -> Self {
-        #[cfg(not(feature = "enable_test_epoch"))]
-        {
-            debug_assert_eq!(epoch & EPOCH_MASK, 0);
-        }
-
         EpochWithGap::new(epoch, 0)
     }
 
@@ -301,6 +297,11 @@ impl EpochWithGap {
     // return the epoch_with_gap(epoch + spill_offset)
     pub(crate) fn as_u64(&self) -> HummockEpoch {
         self.0
+    }
+
+    // return the epoch_with_gap(epoch + spill_offset)
+    pub(crate) fn from_u64(epoch_with_gap: u64) -> Self {
+        EpochWithGap(epoch_with_gap)
     }
 
     // return the pure epoch without spill offset

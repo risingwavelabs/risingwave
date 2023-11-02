@@ -696,7 +696,7 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::decode(&slice[..epoch_pos]),
-            epoch_with_gap: EpochWithGap::new(u64::MAX - epoch, 0),
+            epoch_with_gap: EpochWithGap::from_u64(u64::MAX - epoch),
         }
     }
 

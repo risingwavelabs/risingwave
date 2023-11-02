@@ -15,6 +15,7 @@
 use std::ops::Bound::*;
 
 use bytes::Bytes;
+use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 
@@ -183,7 +184,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             Included(begin_key) => {
                 let full_key = FullKey {
                     user_key: begin_key.clone(),
-                    epoch_with_gap: EpochWithGap::new_from_epoch(self.read_epoch),
+                    epoch_with_gap: EpochWithGap::new(self.read_epoch, MAX_SPILL_TIMES),
                 };
                 self.iterator.seek(full_key.to_ref()).await?;
                 if !self.iterator.is_valid() {
@@ -235,7 +236,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
         let full_key = FullKey {
             user_key,
-            epoch_with_gap: EpochWithGap::new_from_epoch(self.read_epoch),
+            epoch_with_gap: EpochWithGap::new(self.read_epoch, MAX_SPILL_TIMES),
         };
         self.iterator.seek(full_key).await?;
         if !self.iterator.is_valid() {
