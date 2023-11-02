@@ -42,8 +42,6 @@ pub struct StreamingMetrics {
 
     // Streaming actor metrics from tokio (disabled by default)
     pub actor_execution_time: GenericGaugeVec<AtomicF64>,
-    pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
-    pub actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
     pub actor_scheduled_duration: GenericGaugeVec<AtomicF64>,
     pub actor_scheduled_cnt: GenericGaugeVec<AtomicI64>,
     pub actor_fast_poll_duration: GenericGaugeVec<AtomicF64>,
@@ -71,6 +69,10 @@ pub struct StreamingMetrics {
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
+
+    // Backpressure
+    pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
+    pub actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
 
     // Streaming Join
     pub join_lookup_miss_count: LabelGuardedIntCounterVec<5>,
@@ -903,8 +905,6 @@ impl StreamingMetrics {
             level,
             executor_row_count,
             actor_execution_time,
-            actor_output_buffer_blocking_duration_ns,
-            actor_input_buffer_blocking_duration_ns,
             actor_scheduled_duration,
             actor_scheduled_cnt,
             actor_fast_poll_duration,
@@ -924,6 +924,8 @@ impl StreamingMetrics {
             sink_input_row_count,
             mview_input_row_count,
             exchange_frag_recv_size,
+            actor_output_buffer_blocking_duration_ns,
+            actor_input_buffer_blocking_duration_ns,
             join_lookup_miss_count,
             join_lookup_total_count,
             join_insert_cache_miss_count,
