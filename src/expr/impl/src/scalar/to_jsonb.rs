@@ -204,7 +204,7 @@ impl ToJsonb for F64 {
         } else if self.0.is_nan() {
             "NaN".add_to(builder)?;
         } else {
-            builder.add_f64(self.0 as f64);
+            builder.add_f64(self.0);
         }
         Ok(())
     }
@@ -267,7 +267,7 @@ impl ToJsonb for Interval {
 
 impl ToJsonb for Timestamp {
     fn add_to(self, builder: &mut Builder) -> Result<()> {
-        builder.display(format!("{}T{}", self.0.date(), self.0.time()));
+        builder.display(format_args!("{}T{}", self.0.date(), self.0.time()));
         Ok(())
     }
 }

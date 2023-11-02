@@ -45,13 +45,6 @@
     target="_blank"
   >
     <img alt="Docker" src="https://img.shields.io/docker/v/risingwavelabs/risingwave" />
-  </a>
-  <a
-    href="https://buildkite.com/risingwavelabs/main"
-    target="_blank"
-  >
-    <img alt="Build status" src="https://badge.buildkite.com/9394d2bca0f87e2e97aa78b25f765c92d4207c0b65e7f6648f.svg" />
-  </a>
   <a
     href="https://twitter.com/risingwavelabs"
     target="_blank"
