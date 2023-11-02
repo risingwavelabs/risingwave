@@ -1743,6 +1743,34 @@ impl CatalogManager {
         Ok(version)
     }
 
+    pub async fn alter_table_owner(
+        &self,
+        table_id: SchemaId,
+        owner_id: UserId,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_table_id(table_id)?;
+
+        let mut table = database_core.tables.get(&table_id).unwrap().clone();
+        table.owner = owner_id;
+        // CREATE TABLE (...) WITH (...) OWNER xxx
+        // TODO: table.definition = `alter_owner_if...`
+
+        let version = self
+            .notify_frontend(
+                Operation::Update,
+                Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: RelationInfo::Table(table).into(),
+                    }],
+                }),
+            )
+            .await;
+
+        Ok(version)
+    }
+
     pub async fn alter_index_name(
         &self,
         index_id: IndexId,

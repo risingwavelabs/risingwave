@@ -621,6 +621,21 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    async fn alter_table_owner(
+        &self,
+        request: Request<AlterTableOwnerRequest>,
+    ) -> Result<Response<AlterTableOwnerResponse>, Status> {
+        let AlterTableOwnerRequest { table_id, owner_id } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterTableOwner(table_id, owner_id))
+            .await?;
+        Ok(Response::new(AlterTableOwnerResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn get_ddl_progress(
         &self,
         _request: Request<GetDdlProgressRequest>,

@@ -37,6 +37,7 @@ mod alter_relation_rename;
 mod alter_source_column;
 mod alter_system;
 mod alter_table_column;
+mod alter_table_owner;
 pub mod alter_user;
 pub mod cancel_job;
 mod comment;
@@ -473,6 +474,10 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::ChangeOwner { new_owner_name },
+        } => alter_table_owner::handle_alter_table_owner(handler_args, name, new_owner_name).await,
         Statement::AlterIndex {
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },

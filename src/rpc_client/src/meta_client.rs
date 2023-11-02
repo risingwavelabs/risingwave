@@ -439,6 +439,12 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn alter_table_owner(&self, table_id: u32, owner_id: u32) -> Result<CatalogVersion> {
+        let request = AlterTableOwnerRequest { table_id, owner_id };
+        let resp = self.inner.alter_table_owner(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn replace_table(
         &self,
         source: Option<PbSource>,
@@ -1710,6 +1716,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_relation_name, AlterRelationNameRequest, AlterRelationNameResponse }
+            ,{ ddl_client, alter_table_owner, AlterTableOwnerRequest, AlterTableOwnerResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }

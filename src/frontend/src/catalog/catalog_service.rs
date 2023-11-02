@@ -148,6 +148,8 @@ pub trait CatalogWriter: Send + Sync {
     async fn alter_sink_name(&self, sink_id: u32, sink_name: &str) -> Result<()>;
 
     async fn alter_source_name(&self, source_id: u32, source_name: &str) -> Result<()>;
+
+    async fn alter_table_owner(&self, table_id: u32, owner_id: u32) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -387,6 +389,14 @@ impl CatalogWriter for CatalogWriterImpl {
         let version = self
             .meta_client
             .alter_relation_name(Relation::SourceId(source_id), source_name)
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_table_owner(&self, table_id: u32, owner_id: u32) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_table_owner(table_id, owner_id)
             .await?;
         self.wait_version(version).await
     }

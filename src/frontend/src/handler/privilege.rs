@@ -196,7 +196,7 @@ impl SessionImpl {
             && !self.is_super_user()
         {
             return Err(PermissionDenied(
-                "Only the relation owner, the schema owner, and superuser can drop a relation."
+                "Only the relation owner, the schema owner, and superuser can drop or alter a relation."
                     .to_string(),
             )
             .into());

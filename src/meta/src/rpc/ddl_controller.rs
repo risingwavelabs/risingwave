@@ -38,7 +38,7 @@ use crate::barrier::BarrierManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
     IdCategory, IndexId, LocalNotification, MetaSrvEnv, NotificationVersion, RelationIdEnum,
-    SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, ViewId,
+    SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, UserId, ViewId,
     IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{StreamEnvironment, TableFragments};
@@ -101,6 +101,7 @@ pub enum DdlCommand {
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterRelationName(Relation, String),
     AlterSourceColumn(Source),
+    AlterTableOwner(SchemaId, UserId),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
     CommentOn(Comment),
@@ -253,6 +254,9 @@ impl DdlController {
                 }
                 DdlCommand::AlterRelationName(relation, name) => {
                     ctrl.alter_relation_name(relation, &name).await
+                }
+                DdlCommand::AlterTableOwner(table_id, owner_id) => {
+                    ctrl.alter_table_owner(table_id, owner_id).await
                 }
                 DdlCommand::CreateConnection(connection) => {
                     ctrl.create_connection(connection).await
@@ -1102,6 +1106,16 @@ impl DdlController {
                     .await
             }
         }
+    }
+
+    async fn alter_table_owner(
+        &self,
+        table_id: SchemaId,
+        owner_id: UserId,
+    ) -> MetaResult<NotificationVersion> {
+        self.catalog_manager
+            .alter_table_owner(table_id, owner_id)
+            .await
     }
 
     pub async fn wait(&self) -> MetaResult<()> {

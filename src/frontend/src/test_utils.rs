@@ -478,6 +478,26 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn alter_table_owner(&self, table_id: u32, owner_id: u32) -> Result<()> {
+        let mut pb_table = None;
+        'outer: for database in self.catalog.read().iter_databases() {
+            for schema in database.iter_schemas() {
+                if let Some(table) = schema.get_table_by_id(&TableId::from(table_id)) {
+                    pb_table = Some(table.to_prost(schema.id(), database.id()));
+                    break 'outer;
+                }
+            }
+        }
+
+        if let Some(mut table) = pb_table {
+            table.owner = owner_id;
+            self.catalog.write().update_table(&table);
+            Ok(())
+        } else {
+            Err(ErrorCode::ItemNotFound(format!("table with id({})", table_id)).into())
+        }
+    }
+
     async fn alter_view_name(&self, _view_id: u32, _view_name: &str) -> Result<()> {
         unreachable!()
     }
