@@ -34,7 +34,7 @@ public class JniSinkWriterResponseObserver
 
     @Override
     public void onNext(ConnectorServiceProto.SinkWriterStreamResponse response) {
-        if (Binding.sendSinkWriterResponseToChannel(this.responseTxPtr, response.toByteArray())) {
+        if (!Binding.sendSinkWriterResponseToChannel(this.responseTxPtr, response.toByteArray())) {
             throw Status.INTERNAL.withDescription("unable to send response").asRuntimeException();
         }
     }
