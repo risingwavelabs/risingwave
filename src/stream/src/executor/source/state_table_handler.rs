@@ -37,8 +37,9 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
+use crate::executor::backfill::cdc::BACKFILL_STATE_KEY_SUFFIX;
 use crate::executor::error::StreamExecutorError;
-use crate::executor::{StreamExecutorResult, BACKFILL_STATE_KEY_SUFFIX};
+use crate::executor::StreamExecutorResult;
 
 const COMPLETE_SPLIT_PREFIX: &str = "SsGLdzRDqBuKzMf9bDap";
 

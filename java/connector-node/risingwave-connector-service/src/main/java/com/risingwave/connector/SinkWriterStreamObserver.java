@@ -188,7 +188,7 @@ public class SinkWriterStreamObserver
             } else {
                 throw INVALID_ARGUMENT.withDescription("invalid sink task").asRuntimeException();
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             LOG.error("sink writer error: ", e);
             cleanup();
             responseObserver.onError(e);

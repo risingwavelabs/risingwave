@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::any::Any;
 use std::collections::{HashMap, VecDeque};
-use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::pin::pin;
@@ -31,7 +29,7 @@ use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::error::anyhow_error;
 use risingwave_common::types::DataType;
-use risingwave_common::util::{await_future_with_monitor_error_stream, drop_either_future};
+use risingwave_common::util::drop_either_future;
 use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_jni_core::{gen_class_name, gen_jni_sig, JniReceiverType, JniSenderType};
 use risingwave_pb::connector_service::sink_coordinator_stream_request::StartCoordinator;
@@ -53,6 +51,7 @@ use risingwave_rpc_client::{
 };
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender};
+use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::sink::coordinate::CoordinatedSinkWriter;
@@ -125,7 +124,6 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
     }
 }
 
-#[expect(clippy::unused_async)]
 async fn validate_remote_sink(param: &SinkParam) -> Result<()> {
     // FIXME: support struct and array in stream sink
     param.columns.iter().map(|col| {
@@ -158,48 +156,53 @@ async fn validate_remote_sink(param: &SinkParam) -> Result<()> {
         }
     }).try_collect()?;
 
-    // TODO: use spawn_blocking to avoid blocking the tokio worker thread
-    let mut env = JVM
-        .get_or_init()?
-        .attach_current_thread()
-        .map_err(|err| SinkError::Internal(err.into()))?;
-    let validate_sink_request = ValidateSinkRequest {
-        sink_param: Some(param.to_proto()),
-    };
-    let validate_sink_request_bytes = env
-        .byte_array_from_slice(&Message::encode_to_vec(&validate_sink_request))
-        .map_err(|err| SinkError::Internal(err.into()))?;
+    let jvm = JVM.get_or_init()?;
+    let sink_param = param.to_proto();
 
-    let response = env
-        .call_static_method(
-            "com/risingwave/connector/JniSinkValidationHandler",
-            "validate",
-            "([B)[B",
-            &[JValue::Object(&validate_sink_request_bytes)],
+    spawn_blocking(move || {
+        let mut env = jvm
+            .attach_current_thread()
+            .map_err(|err| SinkError::Internal(err.into()))?;
+        let validate_sink_request = ValidateSinkRequest {
+            sink_param: Some(sink_param),
+        };
+        let validate_sink_request_bytes = env
+            .byte_array_from_slice(&Message::encode_to_vec(&validate_sink_request))
+            .map_err(|err| SinkError::Internal(err.into()))?;
+
+        let response = env
+            .call_static_method(
+                "com/risingwave/connector/JniSinkValidationHandler",
+                "validate",
+                "([B)[B",
+                &[JValue::Object(&validate_sink_request_bytes)],
+            )
+            .map_err(|err| SinkError::Internal(err.into()))?;
+
+        let validate_sink_response_bytes = match response {
+            JValueOwned::Object(o) => unsafe { JByteArray::from_raw(o.into_raw()) },
+            _ => unreachable!(),
+        };
+
+        let validate_sink_response: ValidateSinkResponse = Message::decode(
+            risingwave_jni_core::to_guarded_slice(&validate_sink_response_bytes, &mut env)
+                .map_err(|err| SinkError::Internal(err.into()))?
+                .deref(),
         )
         .map_err(|err| SinkError::Internal(err.into()))?;
 
-    let validate_sink_response_bytes = match response {
-        JValueOwned::Object(o) => unsafe { JByteArray::from_raw(o.into_raw()) },
-        _ => unreachable!(),
-    };
-
-    let validate_sink_response: ValidateSinkResponse = Message::decode(
-        risingwave_jni_core::to_guarded_slice(&validate_sink_response_bytes, &mut env)
-            .map_err(|err| SinkError::Internal(err.into()))?
-            .deref(),
-    )
-    .map_err(|err| SinkError::Internal(err.into()))?;
-
-    validate_sink_response.error.map_or_else(
-        || Ok(()), // If there is no error message, return Ok here.
-        |err| {
-            Err(SinkError::Remote(anyhow!(format!(
-                "sink cannot pass validation: {}",
-                err.error_message
-            ))))
-        },
-    )
+        validate_sink_response.error.map_or_else(
+            || Ok(()), // If there is no error message, return Ok here.
+            |err| {
+                Err(SinkError::Remote(anyhow!(format!(
+                    "sink cannot pass validation: {}",
+                    err.error_message
+                ))))
+            },
+        )
+    })
+    .await
+    .map_err(|e| anyhow!("unable to validate: {:?}", e))?
 }
 
 pub struct RemoteLogSinker {
@@ -229,18 +232,6 @@ impl RemoteLogSinker {
             sink_metrics,
             is_async_truncate,
         })
-    }
-}
-
-/// Await the given future while monitoring on error of the receiver stream.
-async fn await_future_with_monitor_receiver_err<O, F: Future<Output = Result<O>>>(
-    receiver: &mut BidiStreamReceiver<impl Any>,
-    future: F,
-) -> Result<O> {
-    match await_future_with_monitor_error_stream(&mut receiver.stream, future).await {
-        Ok(result) => Ok(result?),
-        Err(None) => Err(SinkError::Remote(anyhow!("end of remote receiver stream"))),
-        Err(Some(err)) => Err(SinkError::Remote(err.into())),
     }
 }
 
@@ -339,6 +330,15 @@ impl LogSinker for RemoteLogSinker {
                     }
                     futures::future::Either::Right(result) => {
                         let (epoch, item): (u64, LogStoreReadItem) = result?;
+
+                        match &prev_offset {
+                            Some(TruncateOffset::Barrier { .. }) | None => {
+                                // TODO: this start epoch is actually unnecessary
+                                request_tx.start_epoch(epoch).await?;
+                            }
+                            _ => {}
+                        }
+
                         match item {
                             LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
                                 let offset = TruncateOffset::Chunk { epoch, chunk_id };

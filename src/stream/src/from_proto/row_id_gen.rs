@@ -34,6 +34,7 @@ impl ExecutorBuilder for RowIdGenExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
+        tracing::debug!("row id gen executor: {:?}", params.vnode_bitmap);
         let vnodes = params
             .vnode_bitmap
             .expect("vnodes not set for row id gen executor");
