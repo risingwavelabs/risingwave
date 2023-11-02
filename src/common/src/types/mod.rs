@@ -80,7 +80,7 @@ pub use self::struct_type::StructType;
 pub use self::successor::Successor;
 pub use self::timestamptz::*;
 pub use self::to_binary::ToBinary;
-pub use self::to_text::ToText;
+pub use self::to_text::{quote, unquote, ToText};
 
 /// A 32-bit floating point type with total order.
 pub type F32 = ordered_float::OrderedFloat<f32>;

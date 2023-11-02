@@ -28,7 +28,8 @@ use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, StructType, ToDatumRef, ToText,
+    hash_datum, quote, DataType, Datum, DatumRef, DefaultOrd, Scalar, StructType, ToDatumRef,
+    ToText,
 };
 use crate::util::iter_util::ZipEqFast;
 use crate::util::memcmp_encoding;
@@ -411,6 +412,7 @@ impl Debug for StructRef<'_> {
 
 impl ToText for StructRef<'_> {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
+        let mut raw_text = String::new();
         iter_fields_ref!(*self, it, {
             write!(f, "(")?;
             let mut is_first = true;
@@ -420,7 +422,9 @@ impl ToText for StructRef<'_> {
                 } else {
                     write!(f, ",")?;
                 }
-                ToText::write(&x, f)?;
+                raw_text.clear();
+                x.write(&mut raw_text)?;
+                quote(&raw_text, f)?;
             }
             write!(f, ")")
         })
