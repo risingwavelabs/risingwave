@@ -17,7 +17,8 @@ use std::fmt::Debug;
 use anyhow::anyhow;
 use jsonbb::{Builder, Value};
 use risingwave_common::types::{
-    DataType, JsonbVal, ListRef, ScalarRefImpl, StructRef, Timestamptz, ToText,
+    DataType, Date, Decimal, Int256Ref, Interval, JsonbRef, JsonbVal, ListRef, ScalarRefImpl,
+    Serial, StructRef, Time, Timestamp, Timestamptz, ToText, F32, F64,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{BoxedExpression, Context};
@@ -38,18 +39,15 @@ use super::timestamptz::time_zone_err;
 #[function("to_jsonb(interval) -> jsonb")]
 #[function("to_jsonb(varchar) -> jsonb")]
 #[function("to_jsonb(jsonb) -> jsonb")]
-pub fn to_jsonb(input: Option<impl Into<JsonbVal>>) -> JsonbVal {
-    match input {
-        Some(inner) => inner.into(),
-        None => JsonbVal::null(),
-    }
-}
-
 #[function("to_jsonb(bytea) -> jsonb")]
-pub fn bytea_to_jsonb(input: Option<&[u8]>) -> JsonbVal {
+pub fn to_jsonb(input: Option<impl ToJsonb>) -> Result<JsonbVal> {
     match input {
-        Some(inner) => bytea_to_value(inner).into(),
-        None => JsonbVal::null(),
+        Some(inner) => {
+            let mut builder = Builder::default();
+            inner.add_to(&mut builder)?;
+            Ok(builder.finish().into())
+        }
+        None => Ok(JsonbVal::null()),
     }
 }
 
@@ -124,10 +122,6 @@ pub fn list_to_jsonb(
     }
 }
 
-fn bytea_to_value(input: &[u8]) -> Value {
-    input.to_text().as_str().into()
-}
-
 fn timestamptz_to_value(input: Timestamptz, zone: &str) -> Result<Value> {
     let time_zone = Timestamptz::lookup_time_zone(zone).map_err(time_zone_err)?;
     let instant_local = input.to_datetime_in_zone(time_zone);
@@ -184,22 +178,22 @@ fn add_scalar_to_builder(
 ) -> Result<()> {
     match input {
         Some(input) => match input {
-            ScalarRefImpl::Int16(v) => builder.add_value(Value::from(v).as_ref()),
-            ScalarRefImpl::Int32(v) => builder.add_value(Value::from(v).as_ref()),
-            ScalarRefImpl::Int64(v) => builder.add_value(Value::from(v).as_ref()),
-            ScalarRefImpl::Int256(v) => builder.add_value(Value::from(v).as_ref()),
-            ScalarRefImpl::Float32(v) => builder.add_value(Value::from(v).as_ref()),
-            ScalarRefImpl::Float64(v) => builder.add_value(Value::from(v).as_ref()),
-            ScalarRefImpl::Utf8(v) => builder.add_value(Value::from(v).as_ref()),
-            ScalarRefImpl::Bool(v) => builder.add_value(Value::from(v).as_ref()),
-            ScalarRefImpl::Decimal(v) => builder.add_value(Value::from(v).as_ref()),
-            ScalarRefImpl::Interval(v) => builder.add_value(Value::from(v).as_ref()),
-            ScalarRefImpl::Date(v) => builder.add_value(Value::from(v).as_ref()),
-            ScalarRefImpl::Time(v) => builder.add_value(Value::from(v).as_ref()),
-            ScalarRefImpl::Timestamp(v) => builder.add_value(Value::from(v).as_ref()),
-            ScalarRefImpl::Jsonb(v) => builder.add_value(Value::from(v).as_ref()),
-            ScalarRefImpl::Serial(v) => builder.add_value(Value::from(v).as_ref()),
-            ScalarRefImpl::Bytea(v) => builder.add_value(bytea_to_value(v).as_ref()),
+            ScalarRefImpl::Int16(v) => v.add_to(builder)?,
+            ScalarRefImpl::Int32(v) => v.add_to(builder)?,
+            ScalarRefImpl::Int64(v) => v.add_to(builder)?,
+            ScalarRefImpl::Int256(v) => v.add_to(builder)?,
+            ScalarRefImpl::Float32(v) => v.add_to(builder)?,
+            ScalarRefImpl::Float64(v) => v.add_to(builder)?,
+            ScalarRefImpl::Utf8(v) => v.add_to(builder)?,
+            ScalarRefImpl::Bool(v) => v.add_to(builder)?,
+            ScalarRefImpl::Decimal(v) => v.add_to(builder)?,
+            ScalarRefImpl::Interval(v) => v.add_to(builder)?,
+            ScalarRefImpl::Date(v) => v.add_to(builder)?,
+            ScalarRefImpl::Time(v) => v.add_to(builder)?,
+            ScalarRefImpl::Timestamp(v) => v.add_to(builder)?,
+            ScalarRefImpl::Jsonb(v) => v.add_to(builder)?,
+            ScalarRefImpl::Serial(v) => v.add_to(builder)?,
+            ScalarRefImpl::Bytea(v) => v.add_to(builder)?,
             ScalarRefImpl::Timestamptz(v) => {
                 builder.add_value(timestamptz_to_value(v, zone)?.as_ref())
             }
@@ -209,4 +203,146 @@ fn add_scalar_to_builder(
         None => builder.add_null(),
     };
     Ok(())
+}
+
+/// Values that can be converted to JSONB.
+pub trait ToJsonb {
+    fn add_to(self, builder: &mut Builder) -> Result<()>;
+}
+
+impl ToJsonb for bool {
+    fn add_to(self, builder: &mut Builder) -> Result<()> {
+        builder.add_bool(self);
+        Ok(())
+    }
+}
+
+impl ToJsonb for i16 {
+    fn add_to(self, builder: &mut Builder) -> Result<()> {
+        builder.add_i64(self as _);
+        Ok(())
+    }
+}
+
+impl ToJsonb for i32 {
+    fn add_to(self, builder: &mut Builder) -> Result<()> {
+        builder.add_i64(self as _);
+        Ok(())
+    }
+}
+
+impl ToJsonb for i64 {
+    fn add_to(self, builder: &mut Builder) -> Result<()> {
+        let res: F64 = self
+            .try_into()
+            .map_err(|_| ExprError::CastOutOfRange("IEEE 754 double"))?;
+        res.add_to(builder)?;
+        Ok(())
+    }
+}
+
+impl ToJsonb for F32 {
+    fn add_to(self, builder: &mut Builder) -> Result<()> {
+        if self.0 == f32::INFINITY {
+            "Infinity".add_to(builder)?;
+        } else if self.0 == f32::NEG_INFINITY {
+            "-Infinity".add_to(builder)?;
+        } else if self.0.is_nan() {
+            "NaN".add_to(builder)?;
+        } else {
+            builder.add_f64(self.0 as f64);
+        }
+        Ok(())
+    }
+}
+
+impl ToJsonb for F64 {
+    fn add_to(self, builder: &mut Builder) -> Result<()> {
+        if self.0 == f64::INFINITY {
+            "Infinity".add_to(builder)?;
+        } else if self.0 == f64::NEG_INFINITY {
+            "-Infinity".add_to(builder)?;
+        } else if self.0.is_nan() {
+            "NaN".add_to(builder)?;
+        } else {
+            builder.add_f64(self.0 as f64);
+        }
+        Ok(())
+    }
+}
+
+impl ToJsonb for Decimal {
+    fn add_to(self, builder: &mut Builder) -> Result<()> {
+        let res: F64 = self
+            .try_into()
+            .map_err(|_| ExprError::CastOutOfRange("IEEE 754 double"))?;
+        res.add_to(builder)?;
+        Ok(())
+    }
+}
+
+impl ToJsonb for Int256Ref<'_> {
+    fn add_to(self, builder: &mut Builder) -> Result<()> {
+        let res: F64 = self
+            .try_into()
+            .map_err(|_| ExprError::CastOutOfRange("IEEE 754 double"))?;
+        res.add_to(builder)?;
+        Ok(())
+    }
+}
+
+impl ToJsonb for &str {
+    fn add_to(self, builder: &mut Builder) -> Result<()> {
+        builder.add_string(self);
+        Ok(())
+    }
+}
+
+impl ToJsonb for &[u8] {
+    fn add_to(self, builder: &mut Builder) -> Result<()> {
+        builder.add_string(self.to_text().as_str());
+        Ok(())
+    }
+}
+
+impl ToJsonb for Date {
+    fn add_to(self, builder: &mut Builder) -> Result<()> {
+        builder.add_string(self.to_text().as_str());
+        Ok(())
+    }
+}
+
+impl ToJsonb for Time {
+    fn add_to(self, builder: &mut Builder) -> Result<()> {
+        builder.add_string(self.to_text().as_str());
+        Ok(())
+    }
+}
+
+impl ToJsonb for Interval {
+    fn add_to(self, builder: &mut Builder) -> Result<()> {
+        builder.add_string(self.to_text().as_str());
+        Ok(())
+    }
+}
+
+impl ToJsonb for Timestamp {
+    fn add_to(self, builder: &mut Builder) -> Result<()> {
+        builder.display(format!("{}T{}", self.0.date(), self.0.time()));
+        Ok(())
+    }
+}
+
+impl ToJsonb for Serial {
+    fn add_to(self, builder: &mut Builder) -> Result<()> {
+        builder.add_string(self.to_text().as_str());
+        Ok(())
+    }
+}
+
+impl ToJsonb for JsonbRef<'_> {
+    fn add_to(self, builder: &mut Builder) -> Result<()> {
+        builder.add_value(self.into());
+        Ok(())
+    }
 }
