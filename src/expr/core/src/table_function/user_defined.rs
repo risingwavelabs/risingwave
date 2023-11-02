@@ -140,7 +140,7 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
                     "",
                     DataType::from(t)
                         .try_into()
-                        .map_err(risingwave_udf::Error::Unsupported)?,
+                        .map_err(risingwave_udf::Error::unsupported)?,
                     true,
                 ))
             })

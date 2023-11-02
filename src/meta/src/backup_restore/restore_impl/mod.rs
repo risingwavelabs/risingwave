@@ -12,10 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(error_generic_member_access)]
+use risingwave_backup::error::BackupResult;
+use risingwave_backup::meta_snapshot::{MetaSnapshot, Metadata};
+use risingwave_backup::MetaSnapshotId;
 
-mod error;
-mod external;
+pub mod v1;
+pub mod v2;
 
-pub use error::{Error, Result};
-pub use external::ArrowFlightUdfClient;
+/// `Loader` gets, validates and amends `MetaSnapshot`.
+#[async_trait::async_trait]
+pub trait Loader<S: Metadata> {
+    async fn load(&self, id: MetaSnapshotId) -> BackupResult<MetaSnapshot<S>>;
+}
+
+/// `Writer` writes `MetaSnapshot` to meta store.
+#[async_trait::async_trait]
+pub trait Writer<S: Metadata> {
+    async fn write(&self, s: MetaSnapshot<S>) -> BackupResult<()>;
+}

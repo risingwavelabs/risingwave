@@ -56,7 +56,7 @@
   batch_plan: 'BatchValues { rows: [[ARRAY[]:List(Timestamptz)]] }'
   stream_plan: |-
     StreamMaterialize { columns: [array, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-    └─StreamValues { rows: [[Array, 0:Int64]] }
+    └─StreamValues { rows: [[ARRAY[]:List(Timestamptz), 0:Int64]] }
 - sql: |
     select ARRAY[]::STRUCT<f1 INT>[];
   logical_plan: |-
@@ -65,7 +65,7 @@
   batch_plan: 'BatchValues { rows: [[ARRAY[]:List(Struct(StructType { field_names: ["f1"], field_types: [Int32] }))]] }'
   stream_plan: |-
     StreamMaterialize { columns: [array, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-    └─StreamValues { rows: [[Array, 0:Int64]] }
+    └─StreamValues { rows: [[ARRAY[]:List(Struct(StructType { field_names: ["f1"], field_types: [Int32] })), 0:Int64]] }
 - sql: |
     select array_cat(array[66], array[123]);
   logical_plan: |-
