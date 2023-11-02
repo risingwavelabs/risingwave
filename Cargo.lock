@@ -3452,9 +3452,9 @@ dependencies = [
 
 [[package]]
 name = "gcp-bigquery-client"
-version = "0.17.1"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "576b349942a1b96327b1b2e50d271d3d54dc9669eb38271c830916168e753820"
+checksum = "b0ce6fcbdaca0a4521a734f2bc7f2f6bd872fe40576e24f8bd0b05732c19a74f"
 dependencies = [
  "async-stream",
  "async-trait",
