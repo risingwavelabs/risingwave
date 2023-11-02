@@ -224,6 +224,7 @@ pub async fn handle(
             source_schema,
             source_watermarks,
             append_only,
+            cdc_table_info,
         } => {
             if or_replace {
                 return Err(ErrorCode::NotImplemented(
@@ -267,6 +268,7 @@ pub async fn handle(
                 source_watermarks,
                 append_only,
                 notice,
+                cdc_table_info,
             )
             .await
         }

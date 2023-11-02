@@ -83,6 +83,8 @@ public class Binding {
 
     public static native boolean sendSinkWriterResponseToChannel(long channelPtr, byte[] msg);
 
+    public static native boolean sendSinkWriterErrorToChannel(long channelPtr, String msg);
+
     public static native byte[] recvSinkCoordinatorRequestFromChannel(long channelPtr);
 
     public static native boolean sendSinkCoordinatorResponseToChannel(long channelPtr, byte[] msg);

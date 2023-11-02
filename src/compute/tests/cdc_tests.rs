@@ -15,6 +15,8 @@
 #![feature(let_chains)]
 #![feature(coroutines)]
 
+use std::collections::{HashMap, HashSet};
+use std::marker::PhantomData;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
@@ -28,10 +30,11 @@ use risingwave_common::array::{
 };
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_connector::source::cdc::{CdcSplitBase, DebeziumCdcSplit, MySqlCdcSplit};
 use risingwave_connector::source::external::{
     DebeziumOffset, DebeziumSourceOffset, ExternalTableReaderImpl, MySqlOffset, SchemaTableName,
 };
-use risingwave_connector::source::MockExternalTableReader;
+use risingwave_connector::source::{MockExternalTableReader, SplitImpl};
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -199,8 +202,9 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     )
     .await;
 
+    let actor_id = 0x1a;
     let cdc_backfill = CdcBackfillExecutor::new(
-        ActorContext::create(0x1a),
+        ActorContext::create(actor_id),
         external_table,
         Box::new(mock_offset_executor),
         vec![0, 1, 2],
@@ -209,6 +213,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         vec![0],
         Arc::new(StreamingMetrics::unused()),
         source_state_handler,
+        false,
         4, // 4 rows in a snapshot chunk
     );
 
@@ -247,14 +252,36 @@ async fn test_cdc_backfill() -> StreamResult<()> {
 
     // The first barrier
     let curr_epoch = 11;
-    tx.push_barrier(curr_epoch, false);
+    let mut splits = HashMap::new();
+    splits.insert(
+        actor_id,
+        vec![SplitImpl::MysqlCdc(DebeziumCdcSplit {
+            mysql_split: Some(MySqlCdcSplit {
+                inner: CdcSplitBase {
+                    split_id: 0,
+                    start_offset: None,
+                    snapshot_done: false,
+                },
+            }),
+            pg_split: None,
+            _phantom: PhantomData,
+        })],
+    );
+    let init_barrier = Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add {
+        adds: HashMap::new(),
+        added_actors: HashSet::new(),
+        splits,
+        pause: false,
+    });
+
+    tx.send_barrier(init_barrier);
 
     // assert barrier is forwarded to mview
     assert!(matches!(
         materialize.next().await.unwrap()?,
         Message::Barrier(Barrier {
             epoch,
-            mutation: None,
+            mutation: Some(_),
             ..
         }) if epoch.curr == curr_epoch
     ));

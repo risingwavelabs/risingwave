@@ -38,8 +38,6 @@ pub struct FlowControlExecutor {
 impl FlowControlExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(input: Box<dyn Executor>, rate_limit: Option<u32>) -> Self {
-        #[cfg(madsim)]
-        tracing::warn!("FlowControlExecutor rate limiter is disabled in madsim as it will spawn system threads");
         Self { input, rate_limit }
     }
 
@@ -56,18 +54,17 @@ impl FlowControlExecutor {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    #[cfg(not(madsim))]
-                    {
-                        if let Some(rate_limiter) = &rate_limiter {
-                            let result = rate_limiter
-                                .until_n_ready(NonZeroU32::new(chunk.cardinality() as u32).unwrap())
-                                .await;
-                            if let Err(InsufficientCapacity(n)) = result {
-                                tracing::error!(
-                                    "Rate Limit {:?} smaller than chunk cardinality {n}",
-                                    self.rate_limit,
-                                );
-                            }
+                    let Some(n) = NonZeroU32::new(chunk.cardinality() as u32) else {
+                        // Handle case where chunk is empty
+                        continue;
+                    };
+                    if let Some(rate_limiter) = &rate_limiter {
+                        let result = rate_limiter.until_n_ready(n).await;
+                        if let Err(InsufficientCapacity(n)) = result {
+                            tracing::error!(
+                                "Rate Limit {:?} smaller than chunk cardinality {n}",
+                                self.rate_limit,
+                            );
                         }
                     }
                     yield Message::Chunk(chunk);

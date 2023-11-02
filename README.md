@@ -47,16 +47,16 @@
     <img alt="Docker" src="https://img.shields.io/docker/v/risingwavelabs/risingwave" />
   </a>
   <a
-    href="https://buildkite.com/risingwavelabs/main"
+    href="https://twitter.com/risingwavelabs"
     target="_blank"
   >
-    <img alt="Build status" src="https://badge.buildkite.com/9394d2bca0f87e2e97aa78b25f765c92d4207c0b65e7f6648f.svg" />
+    <img alt="X" src="https://img.shields.io/twitter/follow/risingwavelabs" />
   </a>
   <a
-    href="https://codecov.io/gh/risingwavelabs/risingwave"
+    href="https://www.youtube.com/@risingwave-labs"
     target="_blank"
   >
-    <img alt="codecov" src="https://codecov.io/gh/risingwavelabs/risingwave/branch/main/graph/badge.svg?token=EB44K9K38B" />
+    <img alt="YouTube" src="https://img.shields.io/youtube/channel/views/UCsHwdyBRxBpmkA5RRd0YNEA" />
   </a>
 </div>
 

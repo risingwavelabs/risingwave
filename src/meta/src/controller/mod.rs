@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![expect(dead_code, reason = "WIP")]
+
 use anyhow::anyhow;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model_v2::{
@@ -28,11 +30,12 @@ use sea_orm::{DatabaseConnection, ModelTrait};
 
 use crate::MetaError;
 
-#[allow(dead_code)]
 pub mod catalog;
 pub mod cluster;
+pub mod fragment;
 pub mod rename;
 pub mod system_param;
+pub mod user;
 pub mod utils;
 
 // todo: refine the error transform.
