@@ -94,7 +94,7 @@ impl ArrowFlightUdfClient {
         let head = output_stream
             .next()
             .await
-            .ok_or_else(|| Error::no_returned())??;
+            .ok_or_else(Error::no_returned)??;
         let mut remaining = vec![];
         while let Some(batch) = output_stream.next().await {
             remaining.push(batch?);
