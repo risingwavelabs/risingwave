@@ -5,6 +5,9 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
+export LOGDIR=.risingwave/log
+mkdir -p $LOGDIR
+
 echo "--- Download artifacts"
 buildkite-agent artifact download simulation-it-test.tar.zst .
 
@@ -19,4 +22,4 @@ seq $TEST_NUM | parallel MADSIM_TEST_SEED={} NEXTEST_PROFILE=ci-sim \
  --no-fail-fast \
  --cargo-metadata target/nextest/cargo-metadata.json \
  --binaries-metadata target/nextest/binaries-metadata.json \
- "$@"
+ "$@" 2>$LOGDIR/deterministic-it-test-{}.log && rm $LOGDIR/deterministic-it-test-{}.log
