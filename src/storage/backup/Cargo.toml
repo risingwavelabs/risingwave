@@ -16,12 +16,14 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
+bincode = "1.3"
 bytes = { version = "1", features = ["serde"] }
 itertools = "0.11"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 prost = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
+risingwave_meta_model_v2 = { workspace = true }
 risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 serde = { version = "1", features = ["derive"] }

@@ -17,7 +17,7 @@ use std::future::Future;
 
 use anyhow::anyhow;
 use risingwave_backup::error::{BackupError, BackupResult};
-use risingwave_backup::meta_snapshot::{ClusterMetadata, MetaSnapshot};
+use risingwave_backup::meta_snapshot_v1::{ClusterMetadata, MetaSnapshotV1};
 use risingwave_backup::MetaSnapshotId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_pb::catalog::{
@@ -33,15 +33,15 @@ use crate::storage::{MetaStore, Snapshot, DEFAULT_COLUMN_FAMILY};
 
 const VERSION: u32 = 1;
 
-pub struct MetaSnapshotBuilder<S> {
-    snapshot: MetaSnapshot,
+pub struct MetaSnapshotV1Builder<S> {
+    snapshot: MetaSnapshotV1,
     meta_store: S,
 }
 
-impl<S: MetaStore> MetaSnapshotBuilder<S> {
+impl<S: MetaStore> MetaSnapshotV1Builder<S> {
     pub fn new(meta_store: S) -> Self {
         Self {
-            snapshot: MetaSnapshot::default(),
+            snapshot: MetaSnapshotV1::default(),
             meta_store,
         }
     }
@@ -146,7 +146,7 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
         Ok(())
     }
 
-    pub fn finish(self) -> BackupResult<MetaSnapshot> {
+    pub fn finish(self) -> BackupResult<MetaSnapshotV1> {
         // Any sanity check goes here.
         Ok(self.snapshot)
     }
@@ -168,15 +168,18 @@ mod tests {
     use assert_matches::assert_matches;
     use itertools::Itertools;
     use risingwave_backup::error::BackupError;
-    use risingwave_backup::meta_snapshot::MetaSnapshot;
+    use risingwave_backup::meta_snapshot_v1::MetaSnapshotV1;
     use risingwave_common::error::ToErrorStr;
     use risingwave_common::system_param::system_params_for_test;
     use risingwave_pb::hummock::{HummockVersion, HummockVersionStats};
 
-    use crate::backup_restore::meta_snapshot_builder::MetaSnapshotBuilder;
+    use crate::backup_restore::meta_snapshot_builder;
     use crate::manager::model::SystemParamsModel;
     use crate::model::{ClusterId, MetadataModel};
     use crate::storage::{MemStore, MetaStore, DEFAULT_COLUMN_FAMILY};
+
+    type MetaSnapshot = MetaSnapshotV1;
+    type MetaSnapshotBuilder<S> = meta_snapshot_builder::MetaSnapshotV1Builder<S>;
 
     #[tokio::test]
     async fn test_snapshot_builder() {
@@ -244,7 +247,7 @@ mod tests {
             .await
             .unwrap();
         let snapshot = builder.finish().unwrap();
-        let encoded = snapshot.encode();
+        let encoded = snapshot.encode().unwrap();
         let decoded = MetaSnapshot::decode(&encoded).unwrap();
         assert_eq!(snapshot, decoded);
         assert_eq!(snapshot.id, 1);

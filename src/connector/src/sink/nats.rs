@@ -24,6 +24,7 @@ use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 
+use super::encoder::TimestamptzHandlingMode;
 use super::utils::chunk_to_json;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::common::NatsCommon;
@@ -138,7 +139,12 @@ impl NatsSinkWriter {
             config: config.clone(),
             context,
             schema: schema.clone(),
-            json_encoder: JsonEncoder::new(schema, None, TimestampHandlingMode::Milli),
+            json_encoder: JsonEncoder::new(
+                schema,
+                None,
+                TimestampHandlingMode::Milli,
+                TimestamptzHandlingMode::UtcWithoutSuffix,
+            ),
         })
     }
 

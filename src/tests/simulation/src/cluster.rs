@@ -151,10 +151,10 @@ impl Configuration {
 
         Configuration {
             config_path: ConfigPath::Temp(config_path.into()),
-            frontend_nodes: 1,
-            compute_nodes: 1,
+            frontend_nodes: 2,
+            compute_nodes: 3,
             meta_nodes: 3,
-            compactor_nodes: 1,
+            compactor_nodes: 2,
             compute_node_cores: 2,
             etcd_timeout_rate: 0.0,
             etcd_data_path: None,
