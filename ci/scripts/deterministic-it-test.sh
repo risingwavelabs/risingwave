@@ -16,10 +16,12 @@ tar -xvf simulation-it-test.tar.zst
 mkdir target/sim
 mv target/ci-sim target/sim
 
+TEST_PATTERN="$@"
+
 echo "--- Run integration tests in deterministic simulation mode"
 seq $TEST_NUM | parallel MADSIM_TEST_SEED={} NEXTEST_PROFILE=ci-sim \
- cargo nextest run \
+ 'cargo nextest run \
  --no-fail-fast \
  --cargo-metadata target/nextest/cargo-metadata.json \
  --binaries-metadata target/nextest/binaries-metadata.json \
- "$@" 2>$LOGDIR/deterministic-it-test-{}.log && rm $LOGDIR/deterministic-it-test-{}.log
+ "$TEST_PATTERN" 2>$LOGDIR/deterministic-it-test-{}.log && rm $LOGDIR/deterministic-it-test-{}.log'
