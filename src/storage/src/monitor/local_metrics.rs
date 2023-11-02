@@ -19,9 +19,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use prometheus::core::GenericLocalCounter;
-use prometheus::local::LocalHistogram;
+use prometheus::local::{LocalHistogram, LocalIntCounter};
 use risingwave_common::catalog::TableId;
+use risingwave_common::metrics::LabelGuardedLocalIntCounter;
 
 use super::HummockStateStoreMetrics;
 use crate::monitor::CompactorMetrics;
@@ -213,16 +213,16 @@ impl Drop for StoreLocalStatistic {
 }
 
 struct LocalStoreMetrics {
-    cache_data_block_total: GenericLocalCounter<prometheus::core::AtomicU64>,
-    cache_data_block_miss: GenericLocalCounter<prometheus::core::AtomicU64>,
-    cache_meta_block_total: GenericLocalCounter<prometheus::core::AtomicU64>,
-    cache_meta_block_miss: GenericLocalCounter<prometheus::core::AtomicU64>,
+    cache_data_block_total: LabelGuardedLocalIntCounter<2>,
+    cache_data_block_miss: LabelGuardedLocalIntCounter<2>,
+    cache_meta_block_total: LabelGuardedLocalIntCounter<2>,
+    cache_meta_block_miss: LabelGuardedLocalIntCounter<2>,
     remote_io_time: LocalHistogram,
-    processed_key_count: GenericLocalCounter<prometheus::core::AtomicU64>,
-    skip_multi_version_key_count: GenericLocalCounter<prometheus::core::AtomicU64>,
-    skip_delete_key_count: GenericLocalCounter<prometheus::core::AtomicU64>,
-    total_key_count: GenericLocalCounter<prometheus::core::AtomicU64>,
-    get_shared_buffer_hit_counts: GenericLocalCounter<prometheus::core::AtomicU64>,
+    processed_key_count: LabelGuardedLocalIntCounter<2>,
+    skip_multi_version_key_count: LabelGuardedLocalIntCounter<2>,
+    skip_delete_key_count: LabelGuardedLocalIntCounter<2>,
+    total_key_count: LabelGuardedLocalIntCounter<2>,
+    get_shared_buffer_hit_counts: LocalIntCounter,
     staging_imm_iter_count: LocalHistogram,
     staging_sst_iter_count: LocalHistogram,
     overlapping_iter_count: LocalHistogram,
@@ -457,7 +457,7 @@ add_local_metrics_count!(
 macro_rules! define_bloom_filter_metrics {
     ($($x:ident),*) => (
         struct BloomFilterLocalMetrics {
-            $($x: GenericLocalCounter<prometheus::core::AtomicU64>,)*
+            $($x: LabelGuardedLocalIntCounter<2>,)*
         }
 
         impl BloomFilterLocalMetrics {

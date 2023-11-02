@@ -293,12 +293,22 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         const LARGE_KEY_LEN: usize = MAX_KEY_LEN >> 1;
 
         let table_key_len = full_key.user_key.table_key.as_ref().len();
-        if table_key_len >= LARGE_KEY_LEN {
+        let table_value_len = match &value {
+            HummockValue::Put(t) => t.len(),
+            HummockValue::Delete => 0,
+        };
+        let large_value_len = self.options.max_sst_size as usize / 10;
+        let large_key_value_len = self.options.max_sst_size as usize / 2;
+        if table_key_len >= LARGE_KEY_LEN
+            || table_value_len > large_value_len
+            || table_key_len + table_value_len > large_key_value_len
+        {
             let table_id = full_key.user_key.table_id.table_id();
             tracing::warn!(
-                "A large key (table_id={}, len={}, epoch={}) is added to block",
+                "A large key/value (table_id={}, key len={}, value len={}, epoch={}) is added to block",
                 table_id,
                 table_key_len,
+                table_value_len,
                 full_key.epoch
             );
         }

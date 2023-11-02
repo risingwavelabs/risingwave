@@ -84,5 +84,5 @@
   sql: |
     with t(v, arr) as (select 1, array[2, 3]) select v < all(arr), v < some(arr) from t;
   batch_plan: |-
-    BatchProject { exprs: [All((1:Int32 < $expr10060)) as $expr1, Some((1:Int32 < $expr10060)) as $expr2] }
+    BatchProject { exprs: [All((1:Int32 < $expr10063)) as $expr1, Some((1:Int32 < $expr10063)) as $expr2] }
     └─BatchValues { rows: [[1:Int32, ARRAY[2, 3]:List(Int32)]] }
