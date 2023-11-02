@@ -193,6 +193,7 @@ impl Binder {
                 count,
             } => self.bind_overlay(*expr, *new_substring, *start, count),
             Expr::Parameter { index } => self.bind_parameter(index),
+            Expr::Collate { expr, collation } => self.bind_collate(*expr, collation),
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported expression {:?}", expr),
                 112.into(),
@@ -560,6 +561,18 @@ impl Binder {
         }
         let lhs = self.bind_expr_inner(expr)?;
         lhs.cast_explicit(data_type).map_err(Into::into)
+    }
+
+    pub fn bind_collate(&mut self, expr: Expr, collation: ObjectName) -> Result<ExprImpl> {
+        if !["C", "POSIX"].contains(&collation.real_value().to_uppercase().as_str()) {
+            return Err(ErrorCode::NotSupported(
+                "Collate collation other than `C` or `POSIX` is not supported".into(),
+                "Please remove collate or change collation to `C` or `POSIX`".into(),
+            )
+            .into());
+        }
+
+        self.bind_expr_inner(expr)
     }
 }
 
