@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::any::Any;
 use std::collections::HashMap;
-use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::pin::pin;
@@ -31,7 +29,6 @@ use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::error::anyhow_error;
 use risingwave_common::types::DataType;
-use risingwave_common::util::await_future_with_monitor_error_stream;
 use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_jni_core::{gen_class_name, gen_jni_sig, JniReceiverType, JniSenderType};
 use risingwave_pb::connector_service::sink_coordinator_stream_request::StartCoordinator;
@@ -224,18 +221,6 @@ impl RemoteLogSinker {
     }
 }
 
-/// Await the given future while monitoring on error of the receiver stream.
-async fn await_future_with_monitor_receiver_err<O, F: Future<Output = Result<O>>>(
-    receiver: &mut BidiStreamReceiver<impl Any>,
-    future: F,
-) -> Result<O> {
-    match await_future_with_monitor_error_stream(&mut receiver.stream, future).await {
-        Ok(result) => Ok(result?),
-        Err(None) => Err(SinkError::Remote(anyhow!("end of remote receiver stream"))),
-        Err(Some(err)) => Err(SinkError::Remote(err.into())),
-    }
-}
-
 #[async_trait]
 impl LogSinker for RemoteLogSinker {
     async fn consume_log_and_sink(self, mut log_reader: impl LogReader) -> Result<()> {
@@ -269,13 +254,19 @@ impl LogSinker for RemoteLogSinker {
                 let (epoch, item): (u64, LogStoreReadItem) =
                     log_reader.next_item().map_err(SinkError::Internal).await?;
 
+                match &prev_offset {
+                    Some(TruncateOffset::Barrier { .. }) | None => {
+                        // TODO: this start epoch is actually unnecessary
+                        request_tx.start_epoch(epoch).await?;
+                    }
+                    _ => {}
+                }
+
                 match item {
                     LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
                         let offset = TruncateOffset::Chunk { epoch, chunk_id };
                         if let Some(prev_offset) = &prev_offset {
                             prev_offset.check_next_offset(offset)?;
-                        } else {
-                            request_tx.start_epoch(epoch).await?;
                         }
                         let cardinality = chunk.cardinality();
                         sink_metrics
@@ -292,9 +283,6 @@ impl LogSinker for RemoteLogSinker {
                         let offset = TruncateOffset::Barrier { epoch };
                         if let Some(prev_offset) = &prev_offset {
                             prev_offset.check_next_offset(offset)?;
-                        } else {
-                            // TODO: this start epoch is actually unnecessary
-                            request_tx.start_epoch(epoch).await?;
                         }
                         if is_checkpoint {
                             let start_time = Instant::now();
