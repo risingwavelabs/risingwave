@@ -27,7 +27,7 @@ use crate::{ExprError, Result};
 mod buffer;
 
 mod aggregate;
-mod row_number;
+mod rank;
 
 /// Unique and ordered identifier for a row in internal states.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, EstimateSize)]
@@ -113,7 +113,9 @@ pub fn create_window_state(call: &WindowFuncCall) -> Result<Box<dyn WindowState 
 
     use WindowFuncKind::*;
     Ok(match call.kind {
-        RowNumber => Box::new(row_number::RowNumberState::new(call)),
+        RowNumber => Box::new(rank::RankState::<rank::RowNumber>::new(call)),
+        Rank => Box::new(rank::RankState::<rank::Rank>::new(call)),
+        DenseRank => Box::new(rank::RankState::<rank::DenseRank>::new(call)),
         Aggregate(_) => Box::new(aggregate::AggregateState::new(call)?),
         kind => {
             return Err(ExprError::UnsupportedFunction(format!(

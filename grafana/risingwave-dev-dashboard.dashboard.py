@@ -983,25 +983,6 @@ def section_streaming_actors(outer_panels):
                     ],
                 ),
                 panels.timeseries_actor_ops(
-                    "Join Executor Cache",
-                    "",
-                    [
-                        panels.target(
-                            f"rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])",
-                            "cache miss - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}} ",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_join_lookup_total_count')}[$__rate_interval])",
-                            "total lookups {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
-                            "cache miss when insert {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} actor {{actor_id}}",
-                        ),
-                    ],
-                ),
-
-                panels.timeseries_actor_ops(
                     "Temporal Join Executor Cache",
                     "",
                     [
@@ -1523,6 +1504,10 @@ def section_streaming_errors(outer_panels):
                             f"sum({metric('user_compute_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
                             "{{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
                         ),
+                        panels.target(
+                            f"sum({metric('user_compute_error')}) by (error_type, error_msg, fragment_id, executor_name)",
+                            "{{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
+                        ),
                     ],
                 ),
                 panels.timeseries_count(
@@ -1531,6 +1516,10 @@ def section_streaming_errors(outer_panels):
                     [
                         panels.target(
                             f"sum({metric('user_source_error_count')}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
+                            "{{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
+                        ),
+                        panels.target(
+                            f"sum({metric('user_source_error')}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
                             "{{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
                         ),
                     ],
@@ -1542,6 +1531,20 @@ def section_streaming_errors(outer_panels):
                         panels.target(
                             f"sum({metric('user_source_reader_error_count')}) by (error_type, error_msg, actor_id, source_id, executor_name)",
                             "{{error_type}}: {{error_msg}} ({{executor_name}}: actor_id={{actor_id}}, source_id={{source_id}})",
+                        ),
+                        panels.target(
+                            f"sum({metric('user_source_reader_error')}) by (error_type, error_msg, actor_id, source_id, executor_name)",
+                            "{{error_type}}: {{error_msg}} ({{executor_name}}: actor_id={{actor_id}}, source_id={{source_id}})",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Sink by Connector",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('user_sink_error')}) by (connector_name, executor_id, error_msg)",
+                            "{{connector_name}}: {{error_msg}} ({{executor_id}})",
                         ),
                     ],
                 ),

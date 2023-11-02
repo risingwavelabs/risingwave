@@ -22,6 +22,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::array::{merge_chunk_row, Op, StreamChunk, StreamChunkCompactor};
 use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::log_store::{
@@ -124,7 +125,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 .monitored(self.sink_writer_param.sink_metrics.clone()),
             self.sink_param.sink_id,
             self.sink_param.sink_type,
-            self.actor_context,
+            self.actor_context.clone(),
             stream_key_sink_pk_mismatch,
         );
 
@@ -134,6 +135,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 self.log_reader,
                 self.input_columns,
                 self.sink_writer_param,
+                self.actor_context,
             );
             select(consume_log_stream.into_stream(), write_log_stream).boxed()
         })
@@ -290,8 +292,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         log_reader: R,
         columns: Vec<ColumnCatalog>,
         sink_writer_param: SinkWriterParam,
+        actor_context: ActorContextRef,
     ) -> StreamExecutorResult<Message> {
         let metrics = sink_writer_param.sink_metrics.clone();
+        let identity = format!("SinkExecutor {:X?}", sink_writer_param.executor_id);
         let log_sinker = sink.new_log_sinker(sink_writer_param).await?;
 
         let visible_columns = columns
@@ -312,7 +316,25 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             })
             .monitored(metrics);
 
-        log_sinker.consume_log_and_sink(log_reader).await?;
+        if let Err(e) = log_sinker.consume_log_and_sink(log_reader).await {
+            let mut err_str = e.to_string();
+            if actor_context
+                .error_suppressor
+                .lock()
+                .suppress_error(&err_str)
+            {
+                err_str = format!(
+                    "error msg suppressed (due to per-actor error limit: {})",
+                    actor_context.error_suppressor.lock().max()
+                );
+            }
+            GLOBAL_ERROR_METRICS.user_sink_error.report([
+                S::SINK_NAME.to_owned(),
+                identity,
+                err_str,
+            ]);
+            return Err(e.into());
+        }
         Err(anyhow!("end of stream").into())
     }
 }

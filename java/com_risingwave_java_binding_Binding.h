@@ -17,211 +17,187 @@ JNIEXPORT jint JNICALL Java_com_risingwave_java_binding_Binding_vnodeCount
 
 /*
  * Class:     com_risingwave_java_binding_Binding
- * Method:    hummockIteratorNew
+ * Method:    iteratorNewHummock
  * Signature: ([B)J
  */
-JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_hummockIteratorNew
+JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_iteratorNewHummock
   (JNIEnv *, jclass, jbyteArray);
 
 /*
  * Class:     com_risingwave_java_binding_Binding
- * Method:    hummockIteratorNext
- * Signature: (J)J
+ * Method:    iteratorNext
+ * Signature: (J)Z
  */
-JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_hummockIteratorNext
+JNIEXPORT jboolean JNICALL Java_com_risingwave_java_binding_Binding_iteratorNext
   (JNIEnv *, jclass, jlong);
 
 /*
  * Class:     com_risingwave_java_binding_Binding
- * Method:    hummockIteratorClose
+ * Method:    iteratorClose
  * Signature: (J)V
  */
-JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_hummockIteratorClose
+JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_iteratorClose
   (JNIEnv *, jclass, jlong);
 
 /*
  * Class:     com_risingwave_java_binding_Binding
- * Method:    rowGetKey
- * Signature: (J)[B
- */
-JNIEXPORT jbyteArray JNICALL Java_com_risingwave_java_binding_Binding_rowGetKey
-  (JNIEnv *, jclass, jlong);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    rowGetOp
- * Signature: (J)I
- */
-JNIEXPORT jint JNICALL Java_com_risingwave_java_binding_Binding_rowGetOp
-  (JNIEnv *, jclass, jlong);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    rowIsNull
- * Signature: (JI)Z
- */
-JNIEXPORT jboolean JNICALL Java_com_risingwave_java_binding_Binding_rowIsNull
-  (JNIEnv *, jclass, jlong, jint);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    rowGetInt16Value
- * Signature: (JI)S
- */
-JNIEXPORT jshort JNICALL Java_com_risingwave_java_binding_Binding_rowGetInt16Value
-  (JNIEnv *, jclass, jlong, jint);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    rowGetInt32Value
- * Signature: (JI)I
- */
-JNIEXPORT jint JNICALL Java_com_risingwave_java_binding_Binding_rowGetInt32Value
-  (JNIEnv *, jclass, jlong, jint);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    rowGetInt64Value
- * Signature: (JI)J
- */
-JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_rowGetInt64Value
-  (JNIEnv *, jclass, jlong, jint);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    rowGetFloatValue
- * Signature: (JI)F
- */
-JNIEXPORT jfloat JNICALL Java_com_risingwave_java_binding_Binding_rowGetFloatValue
-  (JNIEnv *, jclass, jlong, jint);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    rowGetDoubleValue
- * Signature: (JI)D
- */
-JNIEXPORT jdouble JNICALL Java_com_risingwave_java_binding_Binding_rowGetDoubleValue
-  (JNIEnv *, jclass, jlong, jint);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    rowGetBooleanValue
- * Signature: (JI)Z
- */
-JNIEXPORT jboolean JNICALL Java_com_risingwave_java_binding_Binding_rowGetBooleanValue
-  (JNIEnv *, jclass, jlong, jint);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    rowGetStringValue
- * Signature: (JI)Ljava/lang/String;
- */
-JNIEXPORT jstring JNICALL Java_com_risingwave_java_binding_Binding_rowGetStringValue
-  (JNIEnv *, jclass, jlong, jint);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    rowGetTimestampValue
- * Signature: (JI)Ljava/sql/Timestamp;
- */
-JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_rowGetTimestampValue
-  (JNIEnv *, jclass, jlong, jint);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    rowGetDecimalValue
- * Signature: (JI)Ljava/math/BigDecimal;
- */
-JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_rowGetDecimalValue
-  (JNIEnv *, jclass, jlong, jint);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    rowGetTimeValue
- * Signature: (JI)Ljava/sql/Time;
- */
-JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_rowGetTimeValue
-  (JNIEnv *, jclass, jlong, jint);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    rowGetDateValue
- * Signature: (JI)Ljava/sql/Date;
- */
-JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_rowGetDateValue
-  (JNIEnv *, jclass, jlong, jint);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    rowGetIntervalValue
- * Signature: (JI)Ljava/lang/String;
- */
-JNIEXPORT jstring JNICALL Java_com_risingwave_java_binding_Binding_rowGetIntervalValue
-  (JNIEnv *, jclass, jlong, jint);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    rowGetJsonbValue
- * Signature: (JI)Ljava/lang/String;
- */
-JNIEXPORT jstring JNICALL Java_com_risingwave_java_binding_Binding_rowGetJsonbValue
-  (JNIEnv *, jclass, jlong, jint);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    rowGetByteaValue
- * Signature: (JI)[B
- */
-JNIEXPORT jbyteArray JNICALL Java_com_risingwave_java_binding_Binding_rowGetByteaValue
-  (JNIEnv *, jclass, jlong, jint);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    rowGetArrayValue
- * Signature: (JILjava/lang/Class;)Ljava/lang/Object;
- */
-JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_rowGetArrayValue
-  (JNIEnv *, jclass, jlong, jint, jclass);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    rowClose
- * Signature: (J)V
- */
-JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_rowClose
-  (JNIEnv *, jclass, jlong);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    streamChunkIteratorNew
+ * Method:    iteratorNewFromStreamChunkPayload
  * Signature: ([B)J
  */
-JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_streamChunkIteratorNew
+JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_iteratorNewFromStreamChunkPayload
   (JNIEnv *, jclass, jbyteArray);
 
 /*
  * Class:     com_risingwave_java_binding_Binding
- * Method:    streamChunkIteratorNext
- * Signature: (J)J
- */
-JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_streamChunkIteratorNext
-  (JNIEnv *, jclass, jlong);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    streamChunkIteratorClose
- * Signature: (J)V
- */
-JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_streamChunkIteratorClose
-  (JNIEnv *, jclass, jlong);
-
-/*
- * Class:     com_risingwave_java_binding_Binding
- * Method:    streamChunkIteratorFromPretty
+ * Method:    iteratorNewFromStreamChunkPretty
  * Signature: (Ljava/lang/String;)J
  */
-JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_streamChunkIteratorFromPretty
+JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_iteratorNewFromStreamChunkPretty
   (JNIEnv *, jclass, jstring);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorGetKey
+ * Signature: (J)[B
+ */
+JNIEXPORT jbyteArray JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetKey
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorGetOp
+ * Signature: (J)I
+ */
+JNIEXPORT jint JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetOp
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorIsNull
+ * Signature: (JI)Z
+ */
+JNIEXPORT jboolean JNICALL Java_com_risingwave_java_binding_Binding_iteratorIsNull
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorGetInt16Value
+ * Signature: (JI)S
+ */
+JNIEXPORT jshort JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetInt16Value
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorGetInt32Value
+ * Signature: (JI)I
+ */
+JNIEXPORT jint JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetInt32Value
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorGetInt64Value
+ * Signature: (JI)J
+ */
+JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetInt64Value
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorGetFloatValue
+ * Signature: (JI)F
+ */
+JNIEXPORT jfloat JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetFloatValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorGetDoubleValue
+ * Signature: (JI)D
+ */
+JNIEXPORT jdouble JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetDoubleValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorGetBooleanValue
+ * Signature: (JI)Z
+ */
+JNIEXPORT jboolean JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetBooleanValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorGetStringValue
+ * Signature: (JI)Ljava/lang/String;
+ */
+JNIEXPORT jstring JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetStringValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorGetTimestampValue
+ * Signature: (JI)Ljava/sql/Timestamp;
+ */
+JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetTimestampValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorGetDecimalValue
+ * Signature: (JI)Ljava/math/BigDecimal;
+ */
+JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetDecimalValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorGetTimeValue
+ * Signature: (JI)Ljava/sql/Time;
+ */
+JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetTimeValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorGetDateValue
+ * Signature: (JI)Ljava/sql/Date;
+ */
+JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetDateValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorGetIntervalValue
+ * Signature: (JI)Ljava/lang/String;
+ */
+JNIEXPORT jstring JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetIntervalValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorGetJsonbValue
+ * Signature: (JI)Ljava/lang/String;
+ */
+JNIEXPORT jstring JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetJsonbValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorGetByteaValue
+ * Signature: (JI)[B
+ */
+JNIEXPORT jbyteArray JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetByteaValue
+  (JNIEnv *, jclass, jlong, jint);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    iteratorGetArrayValue
+ * Signature: (JILjava/lang/Class;)Ljava/lang/Object;
+ */
+JNIEXPORT jobject JNICALL Java_com_risingwave_java_binding_Binding_iteratorGetArrayValue
+  (JNIEnv *, jclass, jlong, jint, jclass);
 
 /*
  * Class:     com_risingwave_java_binding_Binding
@@ -246,6 +222,14 @@ JNIEXPORT jbyteArray JNICALL Java_com_risingwave_java_binding_Binding_recvSinkWr
  */
 JNIEXPORT jboolean JNICALL Java_com_risingwave_java_binding_Binding_sendSinkWriterResponseToChannel
   (JNIEnv *, jclass, jlong, jbyteArray);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    sendSinkWriterErrorToChannel
+ * Signature: (JLjava/lang/String;)Z
+ */
+JNIEXPORT jboolean JNICALL Java_com_risingwave_java_binding_Binding_sendSinkWriterErrorToChannel
+  (JNIEnv *, jclass, jlong, jstring);
 
 /*
  * Class:     com_risingwave_java_binding_Binding

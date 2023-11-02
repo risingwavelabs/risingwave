@@ -564,7 +564,7 @@ mod test {
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
+    use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode, TimestamptzHandlingMode};
     use crate::sink::formatter::AppendOnlyFormatter;
 
     #[test]
@@ -729,7 +729,12 @@ mod test {
             SinkFormatterImpl::AppendOnlyJson(AppendOnlyFormatter::new(
                 // We do not specify primary key for this schema
                 None,
-                JsonEncoder::new(schema, None, TimestampHandlingMode::Milli),
+                JsonEncoder::new(
+                    schema,
+                    None,
+                    TimestampHandlingMode::Milli,
+                    TimestamptzHandlingMode::UtcString,
+                ),
             )),
         )
         .await
