@@ -18,6 +18,7 @@ use risingwave_pb::batch_plan::expand_node::Subset;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExpandNode;
 
+use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable};
 use crate::optimizer::plan_node::{
@@ -28,7 +29,7 @@ use crate::optimizer::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchExpand {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::Expand<PlanRef>,
 }
 

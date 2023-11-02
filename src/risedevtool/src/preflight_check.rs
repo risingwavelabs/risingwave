@@ -26,7 +26,10 @@ fn preflight_check_proxy() -> Result<()> {
         || env::var("all_proxy").is_ok()
         || env::var("ALL_PROXY").is_ok()
     {
-        if let Ok(x) = env::var("no_proxy") && x.contains("127.0.0.1") && x.contains("::1") {
+        if let Ok(x) = env::var("no_proxy")
+            && x.contains("127.0.0.1")
+            && x.contains("::1")
+        {
             println!(
                 "[{}] {} - You are using proxies for all RisingWave components. Please make sure that `no_proxy` is set for all worker nodes within the cluster.",
                 style("risedev-preflight-check").bold(),

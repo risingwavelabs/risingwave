@@ -312,6 +312,7 @@ impl Sink for KafkaSink {
             self.pk_indices.clone(),
             self.db_name.clone(),
             self.sink_from_name.clone(),
+            &self.config.common.topic,
         )
         .await?;
         let max_delivery_buffer_size = (self
@@ -343,6 +344,7 @@ impl Sink for KafkaSink {
             self.pk_indices.clone(),
             self.db_name.clone(),
             self.sink_from_name.clone(),
+            &self.config.common.topic,
         )
         .await?;
 
@@ -562,7 +564,7 @@ mod test {
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode};
+    use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode, TimestamptzHandlingMode};
     use crate::sink::formatter::AppendOnlyFormatter;
 
     #[test]
@@ -727,7 +729,12 @@ mod test {
             SinkFormatterImpl::AppendOnlyJson(AppendOnlyFormatter::new(
                 // We do not specify primary key for this schema
                 None,
-                JsonEncoder::new(schema, None, TimestampHandlingMode::Milli),
+                JsonEncoder::new(
+                    schema,
+                    None,
+                    TimestampHandlingMode::Milli,
+                    TimestamptzHandlingMode::UtcString,
+                ),
             )),
         )
         .await

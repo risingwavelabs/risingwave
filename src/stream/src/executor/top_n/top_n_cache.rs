@@ -232,7 +232,9 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
                 return;
             }
             // For direct insert, we need to check if the key is smaller than the largest key
-            if let Some(high_last) = self.high.last_key_value() && cache_key <= *high_last.0 {
+            if let Some(high_last) = self.high.last_key_value()
+                && cache_key <= *high_last.0
+            {
                 debug_assert!(cache_key != *high_last.0, "cache_key should be unique");
                 self.high.insert(cache_key, row);
             }
@@ -260,15 +262,16 @@ impl TopNCacheTrait for TopNCache<false> {
             self.low.insert(cache_key, (&row).into());
             return;
         }
-        let elem_to_compare_with_middle =
-            if let Some(low_last) = self.low.last_entry() && cache_key <= *low_last.key() {
-                // Take the last element of `cache.low` and insert input row to it.
-                let low_last = low_last.remove_entry();
-                self.low.insert(cache_key, (&row).into());
-                low_last
-            } else {
-                (cache_key, (&row).into())
-            };
+        let elem_to_compare_with_middle = if let Some(low_last) = self.low.last_entry()
+            && cache_key <= *low_last.key()
+        {
+            // Take the last element of `cache.low` and insert input row to it.
+            let low_last = low_last.remove_entry();
+            self.low.insert(cache_key, (&row).into());
+            low_last
+        } else {
+            (cache_key, (&row).into())
+        };
 
         if !self.is_middle_cache_full() {
             self.middle.insert(
@@ -586,15 +589,16 @@ impl AppendOnlyTopNCacheTrait for TopNCache<false> {
             return Ok(());
         }
 
-        let elem_to_insert_into_middle =
-            if let Some(low_last) = self.low.last_entry() && &cache_key <= low_last.key() {
-                // Take the last element of `cache.low` and insert input row to it.
-                let low_last = low_last.remove_entry();
-                self.low.insert(cache_key, row_ref.into());
-                low_last
-            } else {
-                (cache_key, row_ref.into())
-            };
+        let elem_to_insert_into_middle = if let Some(low_last) = self.low.last_entry()
+            && &cache_key <= low_last.key()
+        {
+            // Take the last element of `cache.low` and insert input row to it.
+            let low_last = low_last.remove_entry();
+            self.low.insert(cache_key, row_ref.into());
+            low_last
+        } else {
+            (cache_key, row_ref.into())
+        };
 
         if !self.is_middle_cache_full() {
             self.middle.insert(

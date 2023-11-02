@@ -27,8 +27,8 @@ use risingwave_connector::sink::{
 };
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    CreateSink, CreateSinkStatement, EmitMode, Encode, Format, ObjectName, Query, Select,
-    SelectItem, SetExpr, SinkSchema, TableFactor, TableWithJoins,
+    ConnectorSchema, CreateSink, CreateSinkStatement, EmitMode, Encode, Format, ObjectName, Query,
+    Select, SelectItem, SetExpr, TableFactor, TableWithJoins,
 };
 
 use super::create_mv::get_column_names;
@@ -226,10 +226,11 @@ pub async fn handle_create_sink(
 }
 
 /// Transforms the (format, encode, options) from sqlparser AST into an internal struct `SinkFormatDesc`.
-/// This is an analogy to (part of) [`crate::handler::create_source::try_bind_columns_from_source`]
+/// This is an analogy to (part of) [`crate::handler::create_source::bind_columns_from_source`]
 /// which transforms sqlparser AST `SourceSchemaV2` into `StreamSourceInfo`.
-fn bind_sink_format_desc(value: SinkSchema) -> Result<SinkFormatDesc> {
+fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
     use risingwave_connector::sink::catalog::{SinkEncode, SinkFormat};
+    use risingwave_connector::sink::encoder::TimestamptzHandlingMode;
     use risingwave_sqlparser::ast::{Encode as E, Format as F};
 
     let format = match value.format {
@@ -249,7 +250,11 @@ fn bind_sink_format_desc(value: SinkSchema) -> Result<SinkFormatDesc> {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into())
         }
     };
-    let options = WithOptions::try_from(value.row_options.as_slice())?.into_inner();
+    let mut options = WithOptions::try_from(value.row_options.as_slice())?.into_inner();
+
+    options
+        .entry(TimestamptzHandlingMode::OPTION_KEY.to_owned())
+        .or_insert(TimestamptzHandlingMode::FRONTEND_DEFAULT.to_owned());
 
     Ok(SinkFormatDesc {
         format,
@@ -269,7 +274,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
         convert_args!(hashmap!(
                 KafkaSink::SINK_NAME => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf],
-                    Format::Upsert => vec![Encode::Json],
+                    Format::Upsert => vec![Encode::Json, Encode::Avro],
                     Format::Debezium => vec![Encode::Json],
                 ),
                 KinesisSink::SINK_NAME => hashmap!(
@@ -288,7 +293,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 ),
         ))
     });
-pub fn validate_compatibility(connector: &str, format_desc: &SinkSchema) -> Result<()> {
+pub fn validate_compatibility(connector: &str, format_desc: &ConnectorSchema) -> Result<()> {
     let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS
         .get(connector)
         .ok_or_else(|| {

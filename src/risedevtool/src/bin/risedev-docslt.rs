@@ -53,11 +53,12 @@ fn extract_slt(filepath: &Path) -> Vec<SltBlock> {
             if !(line.starts_with("///") || line.starts_with("//!")) {
                 panic!("expect /// or //! at {}:{}", filepath.display(), i + 1);
             }
-            line = line[3..].trim();
-            if line == "```" {
+            line = &line[3..];
+            if line.trim() == "```" {
                 break;
             }
-            content += line;
+            // strip one leading space
+            content += line.strip_prefix(' ').unwrap_or(line);
             content += "\n";
         }
         blocks.push(SltBlock {

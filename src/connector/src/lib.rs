@@ -30,6 +30,7 @@
 #![feature(iter_from_coroutine)]
 #![feature(if_let_guard)]
 #![feature(iterator_try_collect)]
+#![feature(try_blocks)]
 
 use std::time::Duration;
 

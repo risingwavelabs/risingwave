@@ -12,8 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![expect(dead_code, reason = "WIP")]
+
 use anyhow::anyhow;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_meta_model_v2::{
+    connection, database, index, object, schema, sink, source, table, view,
+};
 use risingwave_pb::catalog::connection::PbInfo as PbConnectionInfo;
 use risingwave_pb::catalog::source::PbOptionalAssociatedTableId;
 use risingwave_pb::catalog::table::{PbOptionalAssociatedSourceId, PbTableType};
@@ -21,16 +26,16 @@ use risingwave_pb::catalog::{
     PbConnection, PbCreateType, PbDatabase, PbHandleConflictBehavior, PbIndex, PbSchema, PbSink,
     PbSinkType, PbSource, PbStreamJobStatus, PbTable, PbView,
 };
-use sea_orm::{ActiveValue, DatabaseConnection, ModelTrait};
+use sea_orm::{DatabaseConnection, ModelTrait};
 
-use crate::model_v2::{connection, database, index, object, schema, sink, source, table, view};
 use crate::MetaError;
 
-#[allow(dead_code)]
 pub mod catalog;
 pub mod cluster;
+pub mod fragment;
 pub mod rename;
 pub mod system_param;
+pub mod user;
 pub mod utils;
 
 // todo: refine the error transform.
@@ -56,7 +61,7 @@ impl SqlMetaStore {
     #[cfg(any(test, feature = "test"))]
     #[cfg(not(madsim))]
     pub async fn for_test() -> Self {
-        use model_migration::{Migrator, MigratorTrait};
+        use risingwave_meta_model_migration::{Migrator, MigratorTrait};
         let conn = sea_orm::Database::connect("sqlite::memory:").await.unwrap();
         Migrator::up(&conn, None).await.unwrap();
         Self { conn }
@@ -71,24 +76,6 @@ impl From<ObjectModel<database::Model>> for PbDatabase {
             id: value.0.database_id,
             name: value.0.name,
             owner: value.1.owner_id,
-        }
-    }
-}
-
-impl From<PbDatabase> for database::ActiveModel {
-    fn from(db: PbDatabase) -> Self {
-        Self {
-            database_id: ActiveValue::Set(db.id),
-            name: ActiveValue::Set(db.name),
-        }
-    }
-}
-
-impl From<PbSchema> for schema::ActiveModel {
-    fn from(schema: PbSchema) -> Self {
-        Self {
-            schema_id: ActiveValue::Set(schema.id),
-            name: ActiveValue::Set(schema.name),
         }
     }
 }
@@ -147,6 +134,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
                 .0
                 .optional_associated_source_id
                 .map(PbOptionalAssociatedSourceId::AssociatedSourceId),
+            description: None,
         }
     }
 }

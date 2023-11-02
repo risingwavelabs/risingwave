@@ -38,6 +38,7 @@ easy-ext = "1"
 educe = "0.4"
 either = "1"
 enum-as-inner = "0.6"
+enumflags2 = { version = "0.7.8" }
 ethnum = { version = "1", features = ["serde"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 fs-err = "2"
@@ -112,7 +113,7 @@ tower-layer = "0.3.2"
 tower-service = "0.3.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.15", default-features = false }
+procfs = { version = "0.16", default-features = false }
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]

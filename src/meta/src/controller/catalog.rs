@@ -14,20 +14,30 @@
 
 use std::iter;
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DEFAULT_SCHEMA_NAME, SYSTEM_SCHEMAS};
+use risingwave_meta_model_v2::object::ObjectType;
+use risingwave_meta_model_v2::prelude::*;
+use risingwave_meta_model_v2::{
+    connection, database, function, index, object, object_dependency, schema, sink, source, table,
+    view, ColumnCatalogArray, ConnectionId, DatabaseId, FunctionId, ObjectId, PrivateLinkService,
+    SchemaId, SourceId, TableId, UserId,
+};
 use risingwave_pb::catalog::{
-    PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+    PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
+    PbView,
 };
 use risingwave_pb::meta::relation::PbRelationInfo;
 use risingwave_pb::meta::subscribe_response::{
     Info as NotificationInfo, Operation as NotificationOperation,
 };
 use risingwave_pb::meta::{PbRelation, PbRelationGroup};
+use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, DatabaseConnection, DatabaseTransaction,
-    EntityTrait, QueryFilter, QuerySelect, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
+    QueryFilter, QuerySelect, TransactionTrait,
 };
 use tokio::sync::RwLock;
 
@@ -40,20 +50,13 @@ use crate::controller::utils::{
 };
 use crate::controller::ObjectModel;
 use crate::manager::{MetaSrvEnv, NotificationVersion};
-use crate::model_v2::object::ObjectType;
-use crate::model_v2::prelude::*;
-use crate::model_v2::{
-    connection, database, function, index, object, object_dependency, schema, sink, source, table,
-    view, ConnectionId, DatabaseId, FunctionId, ObjectId, PrivateLinkService, SchemaId, SourceId,
-    TableId, UserId,
-};
 use crate::rpc::ddl_controller::DropMode;
 use crate::{MetaError, MetaResult};
 
 /// `CatalogController` is the controller for catalog related operations, including database, schema, table, view, etc.
 pub struct CatalogController {
-    env: MetaSrvEnv,
-    inner: RwLock<CatalogControllerInner>,
+    pub(crate) env: MetaSrvEnv,
+    pub(crate) inner: RwLock<CatalogControllerInner>,
 }
 
 #[derive(Clone, Default)]
@@ -77,12 +80,12 @@ impl CatalogController {
     }
 }
 
-struct CatalogControllerInner {
-    db: DatabaseConnection,
+pub(crate) struct CatalogControllerInner {
+    pub(crate) db: DatabaseConnection,
 }
 
 impl CatalogController {
-    async fn notify_frontend(
+    pub(crate) async fn notify_frontend(
         &self,
         operation: NotificationOperation,
         info: NotificationInfo,
@@ -93,7 +96,7 @@ impl CatalogController {
             .await
     }
 
-    async fn notify_frontend_relation_info(
+    pub(crate) async fn notify_frontend_relation_info(
         &self,
         operation: NotificationOperation,
         relation_info: PbRelationInfo,
@@ -119,10 +122,10 @@ impl CatalogController {
     ) -> MetaResult<object::Model> {
         let active_db = object::ActiveModel {
             oid: Default::default(),
-            obj_type: ActiveValue::Set(obj_type),
-            owner_id: ActiveValue::Set(owner_id),
-            schema_id: ActiveValue::Set(schema_id),
-            database_id: ActiveValue::Set(database_id),
+            obj_type: Set(obj_type),
+            owner_id: Set(owner_id),
+            schema_id: Set(schema_id),
+            database_id: Set(database_id),
             initialized_at: Default::default(),
             created_at: Default::default(),
         };
@@ -137,7 +140,7 @@ impl CatalogController {
 
         let db_obj = Self::create_object(&txn, ObjectType::Database, owner_id, None, None).await?;
         let mut db: database::ActiveModel = db.into();
-        db.database_id = ActiveValue::Set(db_obj.oid);
+        db.database_id = Set(db_obj.oid);
         let db = db.insert(&txn).await?;
 
         let mut schemas = vec![];
@@ -146,8 +149,8 @@ impl CatalogController {
                 Self::create_object(&txn, ObjectType::Schema, owner_id, Some(db_obj.oid), None)
                     .await?;
             let schema = schema::ActiveModel {
-                schema_id: ActiveValue::Set(schema_obj.oid),
-                name: ActiveValue::Set(schema_name.into()),
+                schema_id: Set(schema_obj.oid),
+                name: Set(schema_name.into()),
             };
             let schema = schema.insert(&txn).await?;
             schemas.push(ObjectModel(schema, schema_obj).into());
@@ -254,7 +257,7 @@ impl CatalogController {
         )
         .await?;
         let mut schema: schema::ActiveModel = schema.into();
-        schema.schema_id = ActiveValue::Set(schema_obj.oid);
+        schema.schema_id = Set(schema_obj.oid);
         let schema = schema.insert(&txn).await?;
         txn.commit().await?;
 
@@ -282,7 +285,7 @@ impl CatalogController {
         }
 
         let res = Object::delete(object::ActiveModel {
-            oid: ActiveValue::Set(schema_id),
+            oid: Set(schema_id),
             ..Default::default()
         })
         .exec(&inner.db)
@@ -471,8 +474,8 @@ impl CatalogController {
         // todo: shall we need to check existence of them Or let database handle it by FOREIGN KEY constraint.
         for obj_id in &pb_view.dependent_relations {
             object_dependency::ActiveModel {
-                oid: ActiveValue::Set(*obj_id),
-                used_by: ActiveValue::Set(view_obj.oid),
+                oid: Set(*obj_id),
+                used_by: Set(view_obj.oid),
                 ..Default::default()
             }
             .insert(&txn)
@@ -487,6 +490,64 @@ impl CatalogController {
                 PbRelationInfo::View(pb_view),
             )
             .await;
+        Ok(version)
+    }
+
+    pub async fn comment_on(&self, comment: PbComment) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+        ensure_object_id(ObjectType::Database, comment.database_id, &txn).await?;
+        ensure_object_id(ObjectType::Schema, comment.schema_id, &txn).await?;
+        let table_obj = Object::find_by_id(comment.table_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("table", comment.table_id))?;
+
+        let table = if let Some(col_idx) = comment.column_index {
+            let mut columns: ColumnCatalogArray = Table::find_by_id(comment.table_id)
+                .select_only()
+                .column(table::Column::Columns)
+                .into_tuple()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", comment.table_id))?;
+            let column = columns
+                .0
+                .get_mut(col_idx as usize)
+                .ok_or_else(|| MetaError::catalog_id_not_found("column", col_idx))?;
+            let column_desc = column.column_desc.as_mut().ok_or_else(|| {
+                anyhow!(
+                    "column desc at index {} for table id {} not found",
+                    col_idx,
+                    comment.table_id
+                )
+            })?;
+            column_desc.description = comment.description;
+            table::ActiveModel {
+                table_id: Set(comment.table_id),
+                columns: Set(columns),
+                ..Default::default()
+            }
+            .update(&txn)
+            .await?
+        } else {
+            table::ActiveModel {
+                table_id: Set(comment.table_id),
+                description: Set(comment.description),
+                ..Default::default()
+            }
+            .update(&txn)
+            .await?
+        };
+        txn.commit().await?;
+
+        let version = self
+            .notify_frontend_relation_info(
+                NotificationOperation::Update,
+                PbRelationInfo::Table(ObjectModel(table, table_obj).into()),
+            )
+            .await;
+
         Ok(version)
     }
 
@@ -686,9 +747,9 @@ impl CatalogController {
                 relation.name = object_name.into();
                 relation.definition = alter_relation_rename(&relation.definition, object_name);
                 let active_model = $table::ActiveModel {
-                    $identity: ActiveValue::Set(relation.$identity),
-                    name: ActiveValue::Set(object_name.into()),
-                    definition: ActiveValue::Set(relation.definition.clone()),
+                    $identity: Set(relation.$identity),
+                    name: Set(object_name.into()),
+                    definition: Set(relation.definition.clone()),
                     ..Default::default()
                 };
                 active_model.update(&txn).await?;
@@ -717,8 +778,8 @@ impl CatalogController {
 
                 // the name of index and its associated table is the same.
                 let active_model = index::ActiveModel {
-                    index_id: ActiveValue::Set(index.index_id),
-                    name: ActiveValue::Set(object_name.into()),
+                    index_id: Set(index.index_id),
+                    name: Set(object_name.into()),
                     ..Default::default()
                 };
                 active_model.update(&txn).await?;
@@ -743,8 +804,8 @@ impl CatalogController {
                 relation.definition =
                     alter_relation_rename_refs(&relation.definition, &old_name, object_name);
                 let active_model = $table::ActiveModel {
-                    $identity: ActiveValue::Set(relation.$identity),
-                    definition: ActiveValue::Set(relation.definition.clone()),
+                    $identity: Set(relation.$identity),
+                    definition: Set(relation.definition.clone()),
                     ..Default::default()
                 };
                 active_model.update(&txn).await?;
@@ -791,8 +852,6 @@ impl CatalogController {
 #[cfg(test)]
 #[cfg(not(madsim))]
 mod tests {
-    use risingwave_common::catalog::DEFAULT_SUPER_USER_ID;
-
     use super::*;
 
     const TEST_DATABASE_ID: DatabaseId = 1;
@@ -804,7 +863,7 @@ mod tests {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
         let db = PbDatabase {
             name: "test".to_string(),
-            owner: DEFAULT_SUPER_USER_ID,
+            owner: TEST_OWNER_ID,
             ..Default::default()
         };
         mgr.create_database(db).await?;

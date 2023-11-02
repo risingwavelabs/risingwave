@@ -62,6 +62,8 @@ pub enum DataType {
     Text,
     /// Bytea
     Bytea,
+    /// JSONB
+    Jsonb,
     /// Custom type such as enums
     Custom(ObjectName),
     /// Arrays
@@ -102,6 +104,7 @@ impl fmt::Display for DataType {
             DataType::Regproc => write!(f, "REGPROC"),
             DataType::Text => write!(f, "TEXT"),
             DataType::Bytea => write!(f, "BYTEA"),
+            DataType::Jsonb => write!(f, "JSONB"),
             DataType::Array(ty) => write!(f, "{}[]", ty),
             DataType::Custom(ty) => write!(f, "{}", ty),
             DataType::Struct(defs) => {

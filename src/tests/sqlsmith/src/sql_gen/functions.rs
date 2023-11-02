@@ -129,6 +129,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             input_string,
             Expr::Value(Value::SingleQuotedString(encoding.to_string())),
         ];
+        let encoded_string = Expr::Function(make_simple_func("encode", &args));
+        let args = vec![
+            encoded_string,
+            Expr::Value(Value::SingleQuotedString(encoding.to_string())),
+        ];
         Expr::Function(make_simple_func("decode", &args))
     }
 

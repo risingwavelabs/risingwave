@@ -70,6 +70,10 @@ impl MessageSender {
         self.0.send(Message::Barrier(barrier)).unwrap();
     }
 
+    pub fn send_barrier(&self, barrier: Barrier) {
+        self.0.send(Message::Barrier(barrier)).unwrap();
+    }
+
     #[allow(dead_code)]
     pub fn push_barrier_with_prev_epoch_for_test(
         &mut self,
@@ -280,6 +284,7 @@ pub mod agg_executor {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::aggregate::{AggCall, AggKind};
+    use risingwave_pb::stream_plan::PbAggNodeVersion;
     use risingwave_storage::StateStore;
 
     use crate::common::table::state_table::StateTable;
@@ -444,6 +449,8 @@ pub mod agg_executor {
         .await;
 
         HashAggExecutor::<SerializedKey, S>::new(AggExecutorArgs {
+            version: PbAggNodeVersion::Max,
+
             input,
             actor_ctx: ActorContext::create(123),
             pk_indices,
@@ -507,6 +514,8 @@ pub mod agg_executor {
         .await;
 
         SimpleAggExecutor::new(AggExecutorArgs {
+            version: PbAggNodeVersion::Max,
+
             input,
             actor_ctx,
             pk_indices,

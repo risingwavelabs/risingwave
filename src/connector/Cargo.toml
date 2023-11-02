@@ -49,6 +49,7 @@ easy-ext = "1"
 enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
+gcp-bigquery-client = "0.18.0"
 glob = "0.3"
 google-cloud-pubsub = "0.20"
 http = "0.2"
@@ -82,7 +83,7 @@ prost = { version = "0.12", features = ["no-recursion-limit"] }
 prost-reflect = "0.12"
 prost-types = "0.12"
 protobuf-native = "0.2.1"
-pulsar = { version = "6.0", default-features = false, features = [
+pulsar = { version = "6.1", default-features = false, features = [
     "tokio-runtime",
     "telemetry",
     "auth-oauth2",
@@ -108,7 +109,7 @@ serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
 serde_with = { version = "3", features = ["json"] }
-simd-json = "0.12.0"
+simd-json = "0.13.3"
 strum = "0.25"
 strum_macros = "0.25"
 tempfile = "3"
@@ -131,6 +132,7 @@ tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 url = "2"
 urlencoding = "2"
+yup-oauth2 = "8.3"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
@@ -139,6 +141,7 @@ workspace-hack = { path = "../workspace-hack" }
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 rand = "0.8"
 tempfile = "3"
+tracing-subscriber = "0.3"
 tracing-test = "0.2"
 
 [build-dependencies]
@@ -146,6 +149,10 @@ prost-build = "0.12"
 
 [[bench]]
 name = "parser"
+harness = false
+
+[[bench]]
+name = "nexmark_integration"
 harness = false
 
 [lints]

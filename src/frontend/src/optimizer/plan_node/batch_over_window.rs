@@ -17,6 +17,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortOverWindowNode;
 
+use super::batch::prelude::*;
 use super::batch::BatchPlanRef;
 use super::generic::PlanWindowFunction;
 use super::utils::impl_distill_by_unit;
@@ -28,7 +29,7 @@ use crate::optimizer::property::{Order, RequiredDist};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchOverWindow {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::OverWindow<PlanRef>,
 }
 
@@ -96,19 +97,29 @@ impl ToLocalBatch for BatchOverWindow {
 
 impl ToBatchPb for BatchOverWindow {
     fn to_batch_prost_body(&self) -> NodeBody {
+        let calls = self
+            .core
+            .window_functions()
+            .iter()
+            .map(PlanWindowFunction::to_protobuf)
+            .collect();
+        let partition_by = self
+            .core
+            .partition_key_indices()
+            .into_iter()
+            .map(|idx| idx as _)
+            .collect();
+        let order_by = self
+            .core
+            .order_key()
+            .iter()
+            .map(ColumnOrder::to_protobuf)
+            .collect();
+
         NodeBody::SortOverWindow(SortOverWindowNode {
-            calls: self
-                .core
-                .window_functions()
-                .iter()
-                .map(PlanWindowFunction::to_protobuf)
-                .collect(),
-            partition_by: self
-                .core
-                .partition_key_indices()
-                .into_iter()
-                .map(|idx| idx as _)
-                .collect(),
+            calls,
+            partition_by,
+            order_by,
         })
     }
 }

@@ -187,6 +187,7 @@ pub fn col_descs_to_rows(columns: Vec<ColumnCatalog>) -> Vec<Row> {
                         Some(c.name.into()),
                         Some(type_name.into()),
                         Some(col.is_hidden.to_string().into()),
+                        c.description.map(Into::into),
                     ])
                 })
                 .collect_vec()
@@ -251,6 +252,14 @@ pub fn is_kafka_connector(with_properties: &HashMap<String, String>) -> bool {
     };
 
     connector == KAFKA_CONNECTOR
+}
+
+#[inline(always)]
+pub fn is_cdc_connector(with_properties: &HashMap<String, String>) -> bool {
+    let Some(connector) = get_connector(with_properties) else {
+        return false;
+    };
+    connector.contains("-cdc")
 }
 
 #[inline(always)]
