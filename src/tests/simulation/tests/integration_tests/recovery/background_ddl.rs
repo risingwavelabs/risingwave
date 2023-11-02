@@ -17,7 +17,6 @@ use std::time::Duration;
 use anyhow::Result;
 use itertools::Itertools;
 use risingwave_simulation::cluster::{Cluster, Configuration, KillOpts, Session};
-use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
 const CREATE_TABLE: &str = "CREATE TABLE t(v1 int);";
@@ -117,9 +116,7 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
 
     let t_count = session.run("SELECT COUNT(v1) FROM t").await?;
 
-    let mv1_count = session
-        .run("SELECT COUNT(v1) FROM mv1")
-        .await?;
+    let mv1_count = session.run("SELECT COUNT(v1) FROM mv1").await?;
 
     assert_eq!(t_count, mv1_count);
 
@@ -201,7 +198,9 @@ async fn test_foreground_ddl_no_recovery() -> Result<()> {
     sleep(Duration::from_secs(2)).await;
 
     // Kill CN should stop the job
-    cluster.kill_nodes(["compute-1", "compute-2", "compute-3"], 0).await;
+    cluster
+        .kill_nodes(["compute-1", "compute-2", "compute-3"], 0)
+        .await;
     sleep(Duration::from_secs(10)).await;
 
     // Create MV should succeed, since the previous foreground job should be cancelled.
@@ -209,6 +208,70 @@ async fn test_foreground_ddl_no_recovery() -> Result<()> {
     create_mv(&mut session).await?;
 
     session.run(DROP_MV1).await?;
+    session.run(DROP_TABLE).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_foreground_index_cancel() -> Result<()> {
+    init_logger();
+    let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
+    let mut session = cluster.start_session();
+    session.run(CREATE_TABLE).await?;
+    session.run(SEED_TABLE_100).await?;
+    session.flush().await?;
+
+    let mut session2 = cluster.start_session();
+    tokio::spawn(async move {
+        session2.run(SET_RATE_LIMIT_2).await.unwrap();
+        let result = session2.run("CREATE INDEX i ON t (v1);").await;
+        assert!(result.is_err());
+    });
+
+    // Wait for job to start
+    sleep(Duration::from_secs(2)).await;
+
+    // Kill CN should stop the job
+    cancel_stream_jobs(&mut session).await?;
+
+    // Create MV should succeed, since the previous foreground job should be cancelled.
+    session.run(SET_RATE_LIMIT_2).await?;
+    session.run("CREATE INDEX i ON t (v1);").await?;
+
+    session.run("DROP INDEX i;").await?;
+    session.run(DROP_TABLE).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_foreground_sink_cancel() -> Result<()> {
+    init_logger();
+    let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
+    let mut session = cluster.start_session();
+    session.run(CREATE_TABLE).await?;
+    session.run(SEED_TABLE_100).await?;
+    session.flush().await?;
+
+    let mut session2 = cluster.start_session();
+    tokio::spawn(async move {
+        session2.run(SET_RATE_LIMIT_2).await.unwrap();
+        let result = session2.run("CREATE SINK s ON t (v1);").await;
+        assert!(result.is_err());
+    });
+
+    // Wait for job to start
+    sleep(Duration::from_secs(2)).await;
+
+    // Kill CN should stop the job
+    cancel_stream_jobs(&mut session).await?;
+
+    // Create MV should succeed, since the previous foreground job should be cancelled.
+    session.run(SET_RATE_LIMIT_2).await?;
+    session.run("CREATE SINK s ON t (v1);").await?;
+
+    session.run("DROP SINK s;").await?;
     session.run(DROP_TABLE).await?;
 
     Ok(())
