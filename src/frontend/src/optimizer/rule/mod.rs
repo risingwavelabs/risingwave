@@ -150,6 +150,8 @@ mod apply_hop_window_transpose_rule;
 pub use apply_hop_window_transpose_rule::*;
 mod agg_call_merge_rule;
 pub use agg_call_merge_rule::*;
+mod values_extract_project_rule;
+pub use values_extract_project_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -215,6 +217,7 @@ macro_rules! for_all_rules {
             , { AggGroupBySimplifyRule }
             , { ApplyHopWindowTransposeRule }
             , { AggCallMergeRule }
+            , { ValuesExtractProjectRule }
         }
     };
 }

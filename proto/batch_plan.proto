@@ -280,6 +280,7 @@ message UnionNode {}
 message SortOverWindowNode {
   repeated expr.WindowFunction calls = 1;
   repeated uint32 partition_by = 2;
+  repeated common.ColumnOrder order_by = 3;
 }
 
 message PlanNode {
