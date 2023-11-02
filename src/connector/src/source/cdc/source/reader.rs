@@ -142,9 +142,15 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
 
         if let Some(res) = rx.recv().await {
             let resp: GetEventStreamResponse = res?;
-            assert!(resp.handshake);
+            let inited = match resp.control {
+                Some(info) => info.handshake_ok,
+                None => false,
+            };
+            if !inited {
+                return Err(anyhow!("failed to start cdc connector"));
+            }
         }
-        tracing::info!(?source_id, "cdc split reader thread started");
+        tracing::info!(?source_id, "cdc connector started");
 
         match T::source_type() {
             CdcSourceType::Mysql | CdcSourceType::Postgres => Ok(Self {
