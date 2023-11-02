@@ -48,3 +48,6 @@ query IT
 SELECT * FROM tt1;
 ----
 1 2023-10-23 10:00:00+00:00
+
+statement ok
+drop table tt1;
