@@ -61,6 +61,8 @@ pub type ViewId = ObjectId;
 pub type FunctionId = ObjectId;
 pub type ConnectionId = ObjectId;
 pub type UserId = u32;
+pub type PrivilegeId = u32;
+
 pub type HummockVersionId = u64;
 pub type Epoch = u64;
 pub type CompactionGroupId = u64;
@@ -157,6 +159,7 @@ derive_from_json_struct!(
     PrivateLinkService,
     risingwave_pb::catalog::connection::PbPrivateLinkService
 );
+derive_from_json_struct!(AuthInfo, risingwave_pb::user::PbAuthInfo);
 
 derive_from_json_struct!(StreamNode, risingwave_pb::stream_plan::PbStreamNode);
 derive_from_json_struct!(Dispatchers, Vec<risingwave_pb::stream_plan::Dispatcher>);
