@@ -22,7 +22,8 @@ use tokio::time::sleep;
 
 const CREATE_TABLE: &str = "CREATE TABLE t(v1 int);";
 const DROP_TABLE: &str = "DROP TABLE t;";
-const SEED_TABLE: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 500);";
+const SEED_TABLE_500: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 500);";
+const SEED_TABLE_100: &str = "INSERT INTO t SELECT generate_series FROM generate_series(1, 100);";
 const SET_BACKGROUND_DDL: &str = "SET BACKGROUND_DDL=true;";
 const SET_RATE_LIMIT_2: &str = "SET STREAMING_RATE_LIMIT=2;";
 const SET_RATE_LIMIT_1: &str = "SET STREAMING_RATE_LIMIT=1;";
@@ -95,7 +96,7 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
     let mut session = cluster.start_session();
 
     session.run(CREATE_TABLE).await?;
-    session.run(SEED_TABLE).await?;
+    session.run(SEED_TABLE_500).await?;
     session.flush().await?;
     session.run(SET_RATE_LIMIT_2).await?;
     session.run(SET_BACKGROUND_DDL).await?;
@@ -106,7 +107,7 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
     kill_cn_and_wait_recover(&cluster).await;
 
     // Send some upstream updates.
-    session.run(SEED_TABLE).await?;
+    session.run(SEED_TABLE_500).await?;
     session.flush().await?;
 
     kill_and_wait_recover(&cluster).await;
@@ -136,7 +137,7 @@ async fn test_background_ddl_cancel() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
     let mut session = cluster.start_session();
     session.run(CREATE_TABLE).await?;
-    session.run(SEED_TABLE).await?;
+    session.run(SEED_TABLE_500).await?;
     session.flush().await?;
     session.run(SET_RATE_LIMIT_2).await?;
     session.run(SET_BACKGROUND_DDL).await?;
@@ -175,6 +176,40 @@ async fn test_background_ddl_cancel() -> Result<()> {
 
     session.run("DROP MATERIALIZED VIEW mv1").await?;
     session.run("DROP TABLE t").await?;
+
+    Ok(())
+}
+
+// When cluster stop, foreground ddl job must be cancelled.
+#[tokio::test]
+async fn test_foreground_ddl_no_recovery() -> Result<()> {
+    init_logger();
+    let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
+    let mut session = cluster.start_session();
+    session.run(CREATE_TABLE).await?;
+    session.run(SEED_TABLE_100).await?;
+    session.flush().await?;
+
+    let mut session2 = cluster.start_session();
+    tokio::spawn(async move {
+        session2.run(SET_RATE_LIMIT_2).await.unwrap();
+        let result = create_mv(&mut session2).await;
+        assert!(result.is_err());
+    });
+
+    // Wait for job to start
+    sleep(Duration::from_secs(2)).await;
+
+    // Kill CN should stop the job
+    cluster.kill_nodes(["compute-1", "compute-2", "compute-3"], 0).await;
+    sleep(Duration::from_secs(10)).await;
+
+    // Create MV should succeed, since the previous foreground job should be cancelled.
+    session.run(SET_RATE_LIMIT_2).await?;
+    create_mv(&mut session).await?;
+
+    session.run(DROP_MV1).await?;
+    session.run(DROP_TABLE).await?;
 
     Ok(())
 }
