@@ -960,7 +960,6 @@ impl BlockStream {
     }
 }
 
-#[cfg(test)]
 mod tests {
     use std::ops::Range;
     use std::sync::Arc;

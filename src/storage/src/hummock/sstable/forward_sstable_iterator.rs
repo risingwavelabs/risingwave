@@ -363,9 +363,10 @@ mod tests {
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
-        create_small_table_cache, default_builder_opt_for_test, gen_default_test_sstable,
-        gen_test_sstable, test_key_of, test_value_of, TEST_KEYS_COUNT,
+        default_builder_opt_for_test, gen_default_test_sstable, gen_test_sstable, test_key_of,
+        test_value_of, TEST_KEYS_COUNT,
     };
+    use crate::hummock::CachePolicy;
 
     async fn inner_test_forward_iterator(sstable_store: SstableStoreRef, handle: TableHolder) {
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
@@ -399,11 +400,9 @@ mod tests {
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
-        assert!(sstable.meta.block_metas.len() > 10);
+        assert!(sstable.value().meta.block_metas.len() > 10);
 
-        let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable), CachePriority::High);
-        inner_test_forward_iterator(sstable_store.clone(), handle).await;
+        inner_test_forward_iterator(sstable_store.clone(), sstable).await;
     }
 
     #[tokio::test]
@@ -414,12 +413,9 @@ mod tests {
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
-        assert!(sstable.meta.block_metas.len() > 10);
-        let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable), CachePriority::High);
-
+        assert!(sstable.value().meta.block_metas.len() > 10);
         let mut sstable_iter = SstableIterator::create(
-            handle,
+            sstable,
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
         );
@@ -514,12 +510,8 @@ mod tests {
         )
         .await;
 
-        let mut stats = StoreLocalStatistic::default();
         let mut sstable_iter = SstableIterator::create(
-            sstable_store
-                .sstable(&table.get_sstable_info(), &mut stats)
-                .await
-                .unwrap(),
+            table,
             sstable_store,
             Arc::new(SstableIteratorReadOptions {
                 cache_policy: CachePolicy::Fill(CachePriority::High),

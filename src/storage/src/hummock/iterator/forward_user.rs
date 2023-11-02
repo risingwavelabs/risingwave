@@ -305,8 +305,6 @@ mod tests {
     use std::ops::Bound::*;
     use std::sync::Arc;
 
-    use risingwave_common::cache::CachePriority;
-
     use super::*;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
@@ -320,9 +318,8 @@ mod tests {
         SstableIterator, SstableIteratorReadOptions, SstableIteratorType,
     };
     use crate::hummock::sstable_store::SstableStoreRef;
-    use crate::hummock::test_utils::create_small_table_cache;
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{Sstable, SstableDeleteRangeIterator};
+    use crate::hummock::{SstableDeleteRangeIterator, TableHolder};
 
     #[tokio::test]
     async fn test_basic() {
@@ -352,41 +349,10 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let cache = create_small_table_cache();
         let iters = vec![
-            SstableIterator::create(
-                cache.insert(
-                    table0.id,
-                    table0.id,
-                    1,
-                    Box::new(table0),
-                    CachePriority::High,
-                ),
-                sstable_store.clone(),
-                read_options.clone(),
-            ),
-            SstableIterator::create(
-                cache.insert(
-                    table1.id,
-                    table1.id,
-                    1,
-                    Box::new(table1),
-                    CachePriority::High,
-                ),
-                sstable_store.clone(),
-                read_options.clone(),
-            ),
-            SstableIterator::create(
-                cache.insert(
-                    table2.id,
-                    table2.id,
-                    1,
-                    Box::new(table2),
-                    CachePriority::High,
-                ),
-                sstable_store,
-                read_options.clone(),
-            ),
+            SstableIterator::create(table0, sstable_store.clone(), read_options.clone()),
+            SstableIterator::create(table1, sstable_store.clone(), read_options.clone()),
+            SstableIterator::create(table2, sstable_store, read_options.clone()),
         ];
 
         let mi = UnorderedMergeIteratorInner::new(iters);
@@ -437,41 +403,10 @@ mod tests {
         )
         .await;
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let cache = create_small_table_cache();
         let iters = vec![
-            SstableIterator::create(
-                cache.insert(
-                    table0.id,
-                    table0.id,
-                    1,
-                    Box::new(table0),
-                    CachePriority::High,
-                ),
-                sstable_store.clone(),
-                read_options.clone(),
-            ),
-            SstableIterator::create(
-                cache.insert(
-                    table1.id,
-                    table1.id,
-                    1,
-                    Box::new(table1),
-                    CachePriority::High,
-                ),
-                sstable_store.clone(),
-                read_options.clone(),
-            ),
-            SstableIterator::create(
-                cache.insert(
-                    table2.id,
-                    table2.id,
-                    1,
-                    Box::new(table2),
-                    CachePriority::High,
-                ),
-                sstable_store,
-                read_options,
-            ),
+            SstableIterator::create(table0, sstable_store.clone(), read_options.clone()),
+            SstableIterator::create(table1, sstable_store.clone(), read_options.clone()),
+            SstableIterator::create(table2, sstable_store, read_options),
         ];
 
         let mi = UnorderedMergeIteratorInner::new(iters);
@@ -532,30 +467,9 @@ mod tests {
             gen_iterator_test_sstable_from_kv_pair(1, kv_pairs, sstable_store.clone()).await;
 
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let cache = create_small_table_cache();
         let iters = vec![
-            SstableIterator::create(
-                cache.insert(
-                    table0.id,
-                    table0.id,
-                    1,
-                    Box::new(table0),
-                    CachePriority::High,
-                ),
-                sstable_store.clone(),
-                read_options.clone(),
-            ),
-            SstableIterator::create(
-                cache.insert(
-                    table1.id,
-                    table1.id,
-                    1,
-                    Box::new(table1),
-                    CachePriority::High,
-                ),
-                sstable_store.clone(),
-                read_options,
-            ),
+            SstableIterator::create(table0, sstable_store.clone(), read_options.clone()),
+            SstableIterator::create(table1, sstable_store.clone(), read_options),
         ];
 
         let mi = UnorderedMergeIteratorInner::new(iters);
@@ -576,7 +490,7 @@ mod tests {
     async fn generate_test_data(
         sstable_store: SstableStoreRef,
         range_tombstones: Vec<(usize, usize, u64)>,
-    ) -> Sstable {
+    ) -> TableHolder {
         let kv_pairs = vec![
             (0, 200, HummockValue::delete()),
             (0, 100, HummockValue::put(iterator_test_value_of(0))),
@@ -593,13 +507,17 @@ mod tests {
             (7, 100, HummockValue::put(iterator_test_value_of(7))),
             (8, 100, HummockValue::put(iterator_test_value_of(8))),
         ];
-        gen_iterator_test_sstable_with_range_tombstones(
+        let sst_info = gen_iterator_test_sstable_with_range_tombstones(
             0,
             kv_pairs,
             range_tombstones,
-            sstable_store,
+            sstable_store.clone(),
         )
-        .await
+        .await;
+        sstable_store
+            .sstable(&sst_info, &mut StoreLocalStatistic::default())
+            .await
+            .unwrap()
     }
 
     // left..=end
@@ -608,13 +526,8 @@ mod tests {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
         let table = generate_test_data(sstable_store.clone(), vec![]).await;
-        let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let iters = vec![SstableIterator::create(
-            cache.insert(table.id, table.id, 1, Box::new(table), CachePriority::High),
-            sstable_store,
-            read_options,
-        )];
+        let iters = vec![SstableIterator::create(table, sstable_store, read_options)];
         let mi = UnorderedMergeIteratorInner::new(iters);
 
         let begin_key = Included(iterator_test_bytes_user_key_of(2));
@@ -691,13 +604,8 @@ mod tests {
         ];
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
-        let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let iters = vec![SstableIterator::create(
-            cache.insert(table.id, table.id, 1, Box::new(table), CachePriority::High),
-            sstable_store,
-            read_options,
-        )];
+        let iters = vec![SstableIterator::create(table, sstable_store, read_options)];
         let mi = UnorderedMergeIteratorInner::new(iters);
 
         let begin_key = Included(iterator_test_bytes_user_key_of(2));
@@ -759,13 +667,8 @@ mod tests {
         // key=[idx, epoch], value
 
         let table = generate_test_data(sstable_store.clone(), vec![]).await;
-        let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let iters = vec![SstableIterator::create(
-            cache.insert(table.id, table.id, 1, Box::new(table), CachePriority::High),
-            sstable_store,
-            read_options,
-        )];
+        let iters = vec![SstableIterator::create(table, sstable_store, read_options)];
         let mi = UnorderedMergeIteratorInner::new(iters);
         let end_key = Included(iterator_test_bytes_user_key_of(7));
 
@@ -828,13 +731,8 @@ mod tests {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
         let table = generate_test_data(sstable_store.clone(), vec![]).await;
-        let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let iters = vec![SstableIterator::create(
-            cache.insert(table.id, table.id, 1, Box::new(table), CachePriority::High),
-            sstable_store,
-            read_options,
-        )];
+        let iters = vec![SstableIterator::create(table, sstable_store, read_options)];
         let mi = UnorderedMergeIteratorInner::new(iters);
         let begin_key = Included(iterator_test_bytes_user_key_of(2));
 
@@ -908,15 +806,8 @@ mod tests {
             1,
         )
         .await;
-        let cache = create_small_table_cache();
         let iters = vec![SstableIterator::create(
-            cache.insert(
-                table0.id,
-                table0.id,
-                1,
-                Box::new(table0),
-                CachePriority::High,
-            ),
+            table0,
             sstable_store.clone(),
             read_options.clone(),
         )];
@@ -950,20 +841,16 @@ mod tests {
             vec![(0, 2, 300), (1, 4, 150), (3, 6, 50), (5, 8, 150)],
         )
         .await;
-        let cache = create_small_table_cache();
         let read_options = SstableIteratorReadOptions::default();
-        let table_id = table.id;
         let iters = vec![SstableIterator::create(
-            cache.insert(table.id, table.id, 1, Box::new(table), CachePriority::High),
+            table.clone(),
             sstable_store.clone(),
             Arc::new(read_options),
         )];
         let mi = UnorderedMergeIteratorInner::new(iters);
 
         let mut del_iter = ForwardMergeRangeIterator::new(150);
-        del_iter.add_sst_iter(SstableDeleteRangeIterator::new(
-            cache.lookup(table_id, &table_id).unwrap(),
-        ));
+        del_iter.add_sst_iter(SstableDeleteRangeIterator::new(table.clone()));
         let mut ui: UserIterator<_> =
             UserIterator::new(mi, (Unbounded, Unbounded), 150, 0, None, del_iter);
 
@@ -986,14 +873,12 @@ mod tests {
 
         let read_options = SstableIteratorReadOptions::default();
         let iters = vec![SstableIterator::create(
-            cache.lookup(table_id, &table_id).unwrap(),
+            table.clone(),
             sstable_store,
             Arc::new(read_options),
         )];
         let mut del_iter = ForwardMergeRangeIterator::new(300);
-        del_iter.add_sst_iter(SstableDeleteRangeIterator::new(
-            cache.lookup(table_id, &table_id).unwrap(),
-        ));
+        del_iter.add_sst_iter(SstableDeleteRangeIterator::new(table.clone()));
         let mi = UnorderedMergeIteratorInner::new(iters);
         let mut ui: UserIterator<_> =
             UserIterator::new(mi, (Unbounded, Unbounded), 300, 0, None, del_iter);

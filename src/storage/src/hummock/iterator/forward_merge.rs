@@ -20,11 +20,10 @@ mod test {
     use std::task::Poll;
 
     use futures::{pin_mut, FutureExt};
-    use risingwave_common::cache::CachePriority;
     use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
 
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_iterator_test_sstable_base,
+        default_builder_opt_for_test, gen_iterator_test_sstable_info,
         gen_merge_iterator_interleave_test_sstable_iters, iterator_test_key_of,
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
@@ -35,7 +34,7 @@ mod test {
     use crate::hummock::sstable::{
         SstableIterator, SstableIteratorReadOptions, SstableIteratorType,
     };
-    use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
+    use crate::hummock::test_utils::gen_test_sstable;
     use crate::hummock::value::HummockValue;
     use crate::hummock::HummockResult;
     use crate::monitor::StoreLocalStatistic;
@@ -145,41 +144,36 @@ mod test {
     async fn test_merge_invalidate_reset() {
         let sstable_store = mock_sstable_store();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let table0 = Box::new(
-            gen_iterator_test_sstable_base(
-                0,
-                default_builder_opt_for_test(),
-                |x| x,
-                sstable_store.clone(),
-                TEST_KEYS_COUNT,
-            )
-            .await,
-        );
-        let table1 = Box::new(
-            gen_iterator_test_sstable_base(
-                1,
-                default_builder_opt_for_test(),
-                |x| TEST_KEYS_COUNT + x,
-                sstable_store.clone(),
-                TEST_KEYS_COUNT,
-            )
-            .await,
-        );
+        let table0 = gen_iterator_test_sstable_info(
+            0,
+            default_builder_opt_for_test(),
+            |x| x,
+            sstable_store.clone(),
+            TEST_KEYS_COUNT,
+        )
+        .await;
+        let table1 = gen_iterator_test_sstable_info(
+            1,
+            default_builder_opt_for_test(),
+            |x| TEST_KEYS_COUNT + x,
+            sstable_store.clone(),
+            TEST_KEYS_COUNT,
+        )
+        .await;
 
-        let cache = create_small_table_cache();
-
+        let mut stats = StoreLocalStatistic::default();
         let mut unordered_iter: HummockIteratorUnion<
             Forward,
             UnorderedMergeIteratorInner<SstableIterator>,
             OrderedMergeIteratorInner<SstableIterator>,
         > = HummockIteratorUnion::First(UnorderedMergeIteratorInner::new(vec![
             SstableIterator::create(
-                cache.insert(table0.id, table0.id, 1, table0, CachePriority::High),
+                sstable_store.sstable(&table0, &mut stats).await.unwrap(),
                 sstable_store.clone(),
                 read_options.clone(),
             ),
             SstableIterator::create(
-                cache.insert(table1.id, table1.id, 1, table1, CachePriority::High),
+                sstable_store.sstable(&table1, &mut stats).await.unwrap(),
                 sstable_store.clone(),
                 read_options.clone(),
             ),
@@ -190,12 +184,12 @@ mod test {
             OrderedMergeIteratorInner<SstableIterator>,
         > = HummockIteratorUnion::Second(OrderedMergeIteratorInner::new(vec![
             SstableIterator::create(
-                cache.lookup(0, &0).unwrap(),
+                sstable_store.sstable(&table0, &mut stats).await.unwrap(),
                 sstable_store.clone(),
                 read_options.clone(),
             ),
             SstableIterator::create(
-                cache.lookup(1, &1).unwrap(),
+                sstable_store.sstable(&table1, &mut stats).await.unwrap(),
                 sstable_store.clone(),
                 read_options.clone(),
             ),
@@ -228,83 +222,57 @@ mod test {
         let sstable_store = mock_sstable_store();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
 
-        let non_overlapped_sstable = Box::new(
-            gen_test_sstable(
-                default_builder_opt_for_test(),
-                0,
-                (0..TEST_KEYS_COUNT).filter(|x| x % 3 == 0).map(|x| {
-                    (
-                        iterator_test_key_of(x),
-                        HummockValue::put(format!("non_overlapped_{}", x).as_bytes().to_vec()),
-                    )
-                }),
-                sstable_store.clone(),
-            )
-            .await,
-        );
+        let non_overlapped_sstable = gen_test_sstable(
+            default_builder_opt_for_test(),
+            0,
+            (0..TEST_KEYS_COUNT).filter(|x| x % 3 == 0).map(|x| {
+                (
+                    iterator_test_key_of(x),
+                    HummockValue::put(format!("non_overlapped_{}", x).as_bytes().to_vec()),
+                )
+            }),
+            sstable_store.clone(),
+        )
+        .await;
 
-        let overlapped_old_sstable = Box::new(
-            gen_test_sstable(
-                default_builder_opt_for_test(),
-                1,
-                (0..TEST_KEYS_COUNT).filter(|x| x % 3 != 0).map(|x| {
-                    (
-                        iterator_test_key_of(x),
-                        HummockValue::put(format!("overlapped_old_{}", x).as_bytes().to_vec()),
-                    )
-                }),
-                sstable_store.clone(),
-            )
-            .await,
-        );
+        let overlapped_old_sstable = gen_test_sstable(
+            default_builder_opt_for_test(),
+            1,
+            (0..TEST_KEYS_COUNT).filter(|x| x % 3 != 0).map(|x| {
+                (
+                    iterator_test_key_of(x),
+                    HummockValue::put(format!("overlapped_old_{}", x).as_bytes().to_vec()),
+                )
+            }),
+            sstable_store.clone(),
+        )
+        .await;
 
-        let overlapped_new_sstable = Box::new(
-            gen_test_sstable(
-                default_builder_opt_for_test(),
-                2,
-                (0..TEST_KEYS_COUNT).filter(|x| x % 3 == 1).map(|x| {
-                    (
-                        iterator_test_key_of(x),
-                        HummockValue::put(format!("overlapped_new_{}", x).as_bytes().to_vec()),
-                    )
-                }),
-                sstable_store.clone(),
-            )
-            .await,
-        );
-        let cache = create_small_table_cache();
-
+        let overlapped_new_sstable = gen_test_sstable(
+            default_builder_opt_for_test(),
+            2,
+            (0..TEST_KEYS_COUNT).filter(|x| x % 3 == 1).map(|x| {
+                (
+                    iterator_test_key_of(x),
+                    HummockValue::put(format!("overlapped_new_{}", x).as_bytes().to_vec()),
+                )
+            }),
+            sstable_store.clone(),
+        )
+        .await;
         let mut iter = OrderedMergeIteratorInner::new(vec![
             SstableIterator::create(
-                cache.insert(
-                    non_overlapped_sstable.id,
-                    non_overlapped_sstable.id,
-                    1,
-                    non_overlapped_sstable,
-                    CachePriority::High,
-                ),
+                non_overlapped_sstable,
                 sstable_store.clone(),
                 read_options.clone(),
             ),
             SstableIterator::create(
-                cache.insert(
-                    overlapped_new_sstable.id,
-                    overlapped_new_sstable.id,
-                    1,
-                    overlapped_new_sstable,
-                    CachePriority::High,
-                ),
+                overlapped_new_sstable,
                 sstable_store.clone(),
                 read_options.clone(),
             ),
             SstableIterator::create(
-                cache.insert(
-                    overlapped_old_sstable.id,
-                    overlapped_old_sstable.id,
-                    1,
-                    overlapped_old_sstable,
-                    CachePriority::High,
-                ),
+                overlapped_old_sstable,
                 sstable_store.clone(),
                 read_options.clone(),
             ),

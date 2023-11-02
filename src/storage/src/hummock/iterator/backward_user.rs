@@ -296,7 +296,6 @@ mod tests {
 
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
-    use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::key::prev_key;
 
@@ -309,10 +308,9 @@ mod tests {
         mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::UnorderedMergeIteratorInner;
-    use crate::hummock::sstable::Sstable;
-    use crate::hummock::test_utils::{create_small_table_cache, gen_test_sstable};
+    use crate::hummock::test_utils::gen_test_sstable;
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{BackwardSstableIterator, SstableStoreRef};
+    use crate::hummock::{BackwardSstableIterator, SstableStoreRef, TableHolder};
 
     #[tokio::test]
     async fn test_backward_user_basic() {
@@ -341,33 +339,11 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let cache = create_small_table_cache();
-        let handle0 = cache.insert(
-            table0.id,
-            table0.id,
-            1,
-            Box::new(table0),
-            CachePriority::High,
-        );
-        let handle1 = cache.insert(
-            table1.id,
-            table1.id,
-            1,
-            Box::new(table1),
-            CachePriority::High,
-        );
-        let handle2 = cache.insert(
-            table2.id,
-            table2.id,
-            1,
-            Box::new(table2),
-            CachePriority::High,
-        );
 
         let backward_iters = vec![
-            BackwardSstableIterator::new(handle1, sstable_store.clone()),
-            BackwardSstableIterator::new(handle2, sstable_store.clone()),
-            BackwardSstableIterator::new(handle0, sstable_store),
+            BackwardSstableIterator::new(table1, sstable_store.clone()),
+            BackwardSstableIterator::new(table2, sstable_store.clone()),
+            BackwardSstableIterator::new(table0, sstable_store),
         ];
 
         let mi = UnorderedMergeIteratorInner::new(backward_iters);
@@ -415,32 +391,10 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let cache = create_small_table_cache();
-        let handle0 = cache.insert(
-            table0.id,
-            table0.id,
-            1,
-            Box::new(table0),
-            CachePriority::High,
-        );
-        let handle1 = cache.insert(
-            table1.id,
-            table1.id,
-            1,
-            Box::new(table1),
-            CachePriority::High,
-        );
-        let handle2 = cache.insert(
-            table2.id,
-            table2.id,
-            1,
-            Box::new(table2),
-            CachePriority::High,
-        );
         let backward_iters = vec![
-            BackwardSstableIterator::new(handle0, sstable_store.clone()),
-            BackwardSstableIterator::new(handle1, sstable_store.clone()),
-            BackwardSstableIterator::new(handle2, sstable_store),
+            BackwardSstableIterator::new(table0, sstable_store.clone()),
+            BackwardSstableIterator::new(table1, sstable_store.clone()),
+            BackwardSstableIterator::new(table2, sstable_store),
         ];
 
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
@@ -498,28 +452,9 @@ mod tests {
         ];
         let table1 =
             gen_iterator_test_sstable_from_kv_pair(1, kv_pairs, sstable_store.clone()).await;
-        let cache = create_small_table_cache();
         let backward_iters = vec![
-            BackwardSstableIterator::new(
-                cache.insert(
-                    table0.id,
-                    table0.id,
-                    1,
-                    Box::new(table0),
-                    CachePriority::High,
-                ),
-                sstable_store.clone(),
-            ),
-            BackwardSstableIterator::new(
-                cache.insert(
-                    table1.id,
-                    table1.id,
-                    1,
-                    Box::new(table1),
-                    CachePriority::High,
-                ),
-                sstable_store,
-            ),
+            BackwardSstableIterator::new(table0, sstable_store.clone()),
+            BackwardSstableIterator::new(table1, sstable_store),
         ];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
         let mut bui = BackwardUserIterator::for_test(bmi, (Unbounded, Unbounded));
@@ -563,15 +498,7 @@ mod tests {
         ];
         let sstable =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
-        let cache = create_small_table_cache();
-        let handle = cache.insert(
-            sstable.id,
-            sstable.id,
-            1,
-            Box::new(sstable),
-            CachePriority::High,
-        );
-        let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
+        let backward_iters = vec![BackwardSstableIterator::new(sstable, sstable_store)];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
 
         let begin_key = Included(iterator_test_bytes_user_key_of(2));
@@ -648,15 +575,7 @@ mod tests {
         ];
         let sstable =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
-        let cache = create_small_table_cache();
-        let handle = cache.insert(
-            sstable.id,
-            sstable.id,
-            1,
-            Box::new(sstable),
-            CachePriority::High,
-        );
-        let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
+        let backward_iters = vec![BackwardSstableIterator::new(sstable, sstable_store)];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
 
         let begin_key = Excluded(iterator_test_bytes_user_key_of(2));
@@ -734,17 +653,7 @@ mod tests {
         ];
         let sstable =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
-        let cache = create_small_table_cache();
-        let backward_iters = vec![BackwardSstableIterator::new(
-            cache.insert(
-                sstable.id,
-                sstable.id,
-                1,
-                Box::new(sstable),
-                CachePriority::High,
-            ),
-            sstable_store,
-        )];
+        let backward_iters = vec![BackwardSstableIterator::new(sstable, sstable_store)];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
         let end_key = Included(iterator_test_bytes_user_key_of(7));
 
@@ -818,17 +727,8 @@ mod tests {
             (7, 100, HummockValue::put(iterator_test_value_of(7))),
             (8, 100, HummockValue::put(iterator_test_value_of(8))),
         ];
-        let sstable =
+        let handle =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
-        let cache = create_small_table_cache();
-        let handle = cache.insert(
-            sstable.id,
-            sstable.id,
-            1,
-            Box::new(sstable),
-            CachePriority::High,
-        );
-
         let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
         let begin_key = Included(iterator_test_bytes_user_key_of(2));
@@ -906,7 +806,7 @@ mod tests {
 
     #[allow(clippy::mutable_key_type)]
     async fn chaos_test_case(
-        sstable: Sstable,
+        handle: TableHolder,
         start_bound: Bound<UserKey<Bytes>>,
         end_bound: Bound<UserKey<Bytes>>,
         truth: &ChaosTestTruth,
@@ -924,14 +824,7 @@ mod tests {
             Unbounded => key_from_num(999999999999).into_bytes(),
             _ => unimplemented!(),
         };
-        let cache = create_small_table_cache();
-        let handle = cache.insert(
-            sstable.id,
-            sstable.id,
-            1,
-            Box::new(sstable),
-            CachePriority::High,
-        );
+
         let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
         let mut bui = BackwardUserIterator::for_test(bmi, (start_bound, end_bound));
@@ -973,7 +866,7 @@ mod tests {
     type ChaosTestTruth =
         BTreeMap<UserKey<Bytes>, BTreeMap<Reverse<HummockEpoch>, HummockValue<Bytes>>>;
 
-    async fn generate_chaos_test_data() -> (usize, Sstable, ChaosTestTruth, SstableStoreRef) {
+    async fn generate_chaos_test_data() -> (usize, TableHolder, ChaosTestTruth, SstableStoreRef) {
         // We first generate the key value pairs.
         let mut rng = thread_rng();
         #[allow(clippy::mutable_key_type)]
@@ -1171,16 +1064,7 @@ mod tests {
         )
         .await;
 
-        let cache = create_small_table_cache();
-        let handle0 = cache.insert(
-            table0.id,
-            table0.id,
-            1,
-            Box::new(table0),
-            CachePriority::High,
-        );
-
-        let backward_iters = vec![BackwardSstableIterator::new(handle0, sstable_store)];
+        let backward_iters = vec![BackwardSstableIterator::new(table0, sstable_store)];
 
         let min_epoch = (TEST_KEYS_COUNT / 5) as u64;
         let mi = UnorderedMergeIteratorInner::new(backward_iters);
