@@ -48,13 +48,13 @@ pub enum JoinRowSetOccupiedError<'a, K: Ord, V> {
     Vec(VecOccupiedError<'a, K, V>),
 }
 
-impl<K: Ord + Debug, V: Debug> JoinRowSet<K, V> {
+impl<K: Ord, V> JoinRowSet<K, V> {
     pub fn try_insert(
         &mut self,
         key: K,
         value: V,
     ) -> Result<&'_ mut V, JoinRowSetOccupiedError<'_, K, V>> {
-        if let Self::Vec(inner) = self && inner.len() >= MAX_VEC_SIZE{
+        if let Self::Vec(inner) = self && inner.len() >= MAX_VEC_SIZE {
             let btree = BTreeMap::from_iter(inner.drain(..));
             mem::swap(self, &mut Self::BTree(btree));
         }
@@ -71,6 +71,11 @@ impl<K: Ord + Debug, V: Debug> JoinRowSet<K, V> {
                         new_value: value,
                     }))
                 } else {
+                    if inner.capacity() == 0 {
+                        // `Vec` will give capacity 4 when `1 < mem::size_of::<T> <= 1024`
+                        // We only give one for memory optimization
+                        inner.reserve_exact(1);
+                    }
                     inner.push((key, value));
                     Ok(&mut inner.last_mut().unwrap().1)
                 }
@@ -104,7 +109,7 @@ impl<K: Ord + Debug, V: Debug> JoinRowSet<K, V> {
     #[auto_enum(Iterator)]
     pub fn values_mut(&mut self) -> impl Iterator<Item = &'_ mut V> {
         match self {
-            Self::BTree(inner) => inner.iter_mut().map(|(_, v)| v),
+            Self::BTree(inner) => inner.values_mut(),
             Self::Vec(inner) => inner.iter_mut().map(|(_, v)| v),
         }
     }
