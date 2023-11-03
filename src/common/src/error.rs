@@ -77,6 +77,13 @@ impl Display for TrackingIssue {
 pub enum ErrorCode {
     #[error("internal error: {0}")]
     InternalError(String),
+    // TODO: unify with the above
+    #[error(transparent)]
+    InternalErrorAnyhow(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("connector error: {0}")]
     ConnectorError(
         #[source]
@@ -248,7 +255,7 @@ impl From<std::net::AddrParseError> for RwError {
 
 impl From<anyhow::Error> for RwError {
     fn from(e: anyhow::Error) -> Self {
-        ErrorCode::InternalError(e.to_error_str()).into()
+        ErrorCode::InternalErrorAnyhow(e).into()
     }
 }
 
@@ -362,13 +369,6 @@ impl<T> ToErrorStr for std::sync::mpsc::SendError<T> {
 impl<T> ToErrorStr for tokio::sync::mpsc::error::SendError<T> {
     fn to_error_str(self) -> String {
         self.to_string()
-    }
-}
-
-impl ToErrorStr for anyhow::Error {
-    fn to_error_str(self) -> String {
-        // Note: use alternate Display to print the source chain.
-        format!("{:#}", self)
     }
 }
 
