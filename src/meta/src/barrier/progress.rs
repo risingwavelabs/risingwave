@@ -159,8 +159,11 @@ impl TrackingJob {
         }
     }
 
+    /// Returns whether the `TrackingJob` requires a checkpoint to complete.
     pub(crate) fn is_checkpoint(&self) -> bool {
         match self {
+            // Recovered tracking job is always a streaming job,
+            // It requires a checkpoint to complete.
             TrackingJob::Recovered(_) => true,
             TrackingJob::New(command) => {
                 command.context.kind.is_initial() || command.context.kind.is_checkpoint()
