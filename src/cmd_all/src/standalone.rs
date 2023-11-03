@@ -227,7 +227,9 @@ mod test {
                             listen_addr: "127.0.0.1:8001",
                             advertise_addr: "127.0.0.1:9999",
                             dashboard_host: None,
-                            prometheus_host: None,
+                            prometheus_host: Some(
+                                "127.0.0.1:1234",
+                            ),
                             etcd_endpoints: "",
                             etcd_auth: false,
                             etcd_username: "",
