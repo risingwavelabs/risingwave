@@ -106,18 +106,17 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
     session.run(WAIT).await?;
 
     let t_count = session.run("SELECT COUNT(v1) FROM t").await?;
-
     let mv1_count = session.run("SELECT COUNT(v1) FROM mv1").await?;
-
-    let missing_rows = session
-        .run("SELECT v1 FROM t WHERE v1 NOT IN (SELECT v1 FROM mv1)")
-        .await?;
-    tracing::debug!(missing_rows);
-    let missing_rows_with_row_id = session
-        .run("SELECT _row_id, v1 FROM t WHERE v1 NOT IN (SELECT v1 FROM mv1)")
-        .await?;
-    tracing::debug!(missing_rows_with_row_id);
-
+    if t_count != mv1_count {
+        let missing_rows = session
+            .run("SELECT v1 FROM t WHERE v1 NOT IN (SELECT v1 FROM mv1)")
+            .await?;
+        tracing::debug!(missing_rows);
+        let missing_rows_with_row_id = session
+            .run("SELECT _row_id, v1 FROM t WHERE v1 NOT IN (SELECT v1 FROM mv1)")
+            .await?;
+        tracing::debug!(missing_rows_with_row_id);
+    }
     assert_eq!(t_count, mv1_count);
 
     // Make sure that if MV killed and restarted
