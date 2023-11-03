@@ -52,16 +52,12 @@ pub struct BigQueryCommon {
     pub local_path: Option<String>,
     #[serde(rename = "bigquery.s3.path")]
     pub s3_path: Option<String>,
-
     #[serde(rename = "bigquery.project")]
     pub project: String,
-
     #[serde(rename = "bigquery.dataset")]
     pub dataset: String,
-
     #[serde(rename = "bigquery.table")]
     pub table: String,
-
     #[serde(flatten)]
     /// required keys refer to [`crate::aws_utils::AWS_DEFAULT_CONFIG`]
     pub s3_credentials: HashMap<String, String>,

@@ -356,34 +356,27 @@ impl PulsarCommon {
 pub struct KinesisCommon {
     #[serde(rename = "stream", alias = "kinesis.stream.name")]
     pub stream_name: String,
-
     #[serde(rename = "aws.region", alias = "kinesis.stream.region")]
     pub stream_region: String,
-
     #[serde(rename = "endpoint", alias = "kinesis.endpoint")]
     pub endpoint: Option<String>,
-
     #[serde(
         rename = "aws.credentials.access_key_id",
         alias = "kinesis.credentials.access"
     )]
     pub credentials_access_key: Option<String>,
-
     #[serde(
         rename = "aws.credentials.secret_access_key",
         alias = "kinesis.credentials.secret"
     )]
     pub credentials_secret_access_key: Option<String>,
-
     #[serde(
         rename = "aws.credentials.session_token",
         alias = "kinesis.credentials.session_token"
     )]
     pub session_token: Option<String>,
-
     #[serde(rename = "aws.credentials.role.arn", alias = "kinesis.assumerole.arn")]
     pub assume_role_arn: Option<String>,
-
     #[serde(
         rename = "aws.credentials.role.external_id",
         alias = "kinesis.assumerole.external_id"

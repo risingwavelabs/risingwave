@@ -154,7 +154,7 @@ pub struct ClickHouseConfig {
     #[serde(flatten)]
     pub common: ClickHouseCommon,
 
-    pub r#type: String,
+    pub r#type: String, // accept "append-only" or "upsert"
 }
 
 #[derive(Clone, Debug)]
