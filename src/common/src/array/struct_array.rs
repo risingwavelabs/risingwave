@@ -464,8 +464,9 @@ fn quote_if_need(input: &str, writer: &mut impl Write) -> std::fmt::Result {
 }
 
 /// Remove double quotes from a string.
-/// This is the reverse of [`quote`].
-fn unquote(input: &str) -> Cow<'_, str> {
+/// This is the reverse of [`quote_if_need`].
+#[allow(dead_code)]
+fn unquote_if_need(input: &str) -> Cow<'_, str> {
     if !(input.starts_with('"') && input.ends_with('"')) {
         return Cow::Borrowed(input);
     }
@@ -777,7 +778,7 @@ mod tests {
             let mut actual = String::new();
             quote_if_need(input, &mut actual).unwrap();
             assert_eq!(quoted, actual);
-            assert_eq!(unquote(quoted), input);
+            assert_eq!(unquote_if_need(quoted), input);
         }
         test("abc", "abc");
         test("", r#""""#);
