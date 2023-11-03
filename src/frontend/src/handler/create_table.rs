@@ -170,11 +170,15 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
             .clone()
             .ok_or_else(|| ErrorCode::InvalidInputSyntax("data type is not specified".into()))?;
         if let Some(collation) = collation {
-            return Err(ErrorCode::NotImplemented(
-                format!("collation \"{}\"", collation),
-                None.into(),
-            )
-            .into());
+            // PostgreSQL will limit the datatypes that collate can work on.
+            // But we don't support real collation, we simply ignore it here.
+            if !["C", "POSIX"].contains(&collation.real_value().to_uppercase().as_str()) {
+                return Err(ErrorCode::NotImplemented(
+                    "Collate collation other than `C` or `POSIX` is not implemented".into(),
+                    None.into(),
+                )
+                .into());
+            }
         }
 
         check_valid_column_name(&name.real_value())?;
