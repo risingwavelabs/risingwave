@@ -14,8 +14,12 @@
 
 use jsonbb::Builder;
 use risingwave_common::row::Row;
-use risingwave_common::types::{DatumRef, JsonbVal, ScalarRefImpl, ToText};
+use risingwave_common::types::{JsonbVal, ScalarRefImpl};
+use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_expr::expr::Context;
 use risingwave_expr::{function, ExprError, Result};
+
+use super::{ToJsonb, ToTextDisplay};
 
 /// Builds a possibly-heterogeneously-typed JSON array out of a variadic argument list.
 /// Each argument is converted as per `to_jsonb`.
@@ -29,11 +33,11 @@ use risingwave_expr::{function, ExprError, Result};
 /// [1, 2, "foo", 4, 5]
 /// ```
 #[function("jsonb_build_array(...) -> jsonb")]
-fn jsonb_build_array(args: impl Row) -> Result<JsonbVal> {
+fn jsonb_build_array(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
     let mut builder = Builder::<Vec<u8>>::new();
     builder.begin_array();
-    for value in args.iter() {
-        builder.add_datum(value)?;
+    for (value, ty) in args.iter().zip_eq_debug(&ctx.arg_types) {
+        value.add_to(ty, &mut builder)?;
     }
     builder.end_array();
     Ok(builder.finish().into())
@@ -52,7 +56,7 @@ fn jsonb_build_array(args: impl Row) -> Result<JsonbVal> {
 /// {"foo": 1, "2": "bar"}
 /// ```
 #[function("jsonb_build_object(...) -> jsonb")]
-fn jsonb_build_object(args: impl Row) -> Result<JsonbVal> {
+fn jsonb_build_object(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
     if args.len() % 2 == 1 {
         return Err(ExprError::InvalidParam {
             name: "args",
@@ -61,7 +65,12 @@ fn jsonb_build_object(args: impl Row) -> Result<JsonbVal> {
     }
     let mut builder = Builder::<Vec<u8>>::new();
     builder.begin_object();
-    for (i, [key, value]) in args.iter().array_chunks().enumerate() {
+    for (i, [(key, _), (value, value_type)]) in args
+        .iter()
+        .zip_eq_debug(&ctx.arg_types)
+        .array_chunks()
+        .enumerate()
+    {
         match key {
             Some(ScalarRefImpl::List(_) | ScalarRefImpl::Struct(_) | ScalarRefImpl::Jsonb(_)) => {
                 return Err(ExprError::InvalidParam {
@@ -77,65 +86,8 @@ fn jsonb_build_object(args: impl Row) -> Result<JsonbVal> {
                 })
             }
         }
-        builder.add_datum(value)?;
+        value.add_to(value_type, &mut builder)?;
     }
     builder.end_object();
     Ok(builder.finish().into())
-}
-
-trait BuilderExt {
-    fn add_datum(&mut self, value: DatumRef<'_>) -> Result<()>;
-}
-
-impl BuilderExt for Builder {
-    fn add_datum(&mut self, value: DatumRef<'_>) -> Result<()> {
-        use ScalarRefImpl::*;
-        match value {
-            None => self.add_null(),
-            Some(Bool(x)) => self.add_bool(x),
-            Some(Int16(x)) => self.add_i64(x as i64),
-            Some(Int32(x)) => self.add_i64(x as i64),
-            Some(Int64(x)) => self.add_i64(x),
-            Some(Serial(x)) => self.add_i64(x.into_inner()),
-            Some(Float32(x)) => self.add_f64(x.0 as f64),
-            Some(Float64(x)) => self.add_f64(x.0),
-            Some(Date(x)) => self.display(ToTextDisplay(x)),
-            Some(Time(x)) => self.display(ToTextDisplay(x)),
-            Some(Timestamp(x)) => self.display(ToTextDisplay(x)),
-            Some(Timestamptz(x)) => self.display(ToTextDisplay(x)),
-            Some(Interval(x)) => self.display(ToTextDisplay(x)),
-            Some(Bytea(x)) => self.display(ToTextDisplay(x)),
-            Some(Utf8(x)) => self.add_string(x),
-            Some(Jsonb(x)) => self.add_value(x.into()),
-            Some(List(array)) => {
-                self.begin_array();
-                for v in array.iter() {
-                    self.add_datum(v)?;
-                }
-                self.end_array();
-            }
-            // FIXME: support these types after `to_jsonb`
-            // https://github.com/risingwavelabs/risingwave/issues/12834
-            Some(Int256(_)) | Some(Decimal(_)) | Some(Struct(_)) => {
-                return Err(ExprError::InvalidParam {
-                    name: "value",
-                    reason: format!(
-                        "to jsonb is not supported yet for: {}",
-                        ToTextDisplay(value)
-                    )
-                    .into(),
-                })
-            }
-        }
-        Ok(())
-    }
-}
-
-/// A wrapper type to implement `Display` for `ToText`.
-struct ToTextDisplay<T>(T);
-
-impl<T: ToText> std::fmt::Display for ToTextDisplay<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.write(f)
-    }
 }
