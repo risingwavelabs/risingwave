@@ -36,7 +36,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{Explain, TableCatalog};
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
-/// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
+/// to stream scan + merge node (for upstream materialize) + batch table scan when converting to `MView`
 /// creation request.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTableScan {
@@ -371,10 +371,7 @@ impl StreamTableScan {
             node_body: Some(node_body),
             stream_key,
             operator_id: self.base.id().0 as u64,
-            identity: {
-                let s = self.distill_to_string();
-                s.replace("StreamTableScan", "Chain")
-            },
+            identity: self.distill_to_string(),
             append_only: self.append_only(),
         }
     }

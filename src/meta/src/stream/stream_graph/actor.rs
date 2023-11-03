@@ -159,9 +159,9 @@ impl ActorBuilder {
             }
 
             // "Leaf" node `Chain`.
-            NodeBody::StreamScan(chain_node) => {
+            NodeBody::StreamScan(stream_scan) => {
                 let cdc_backfill =
-                    chain_node.stream_scan_type == StreamScanType::CdcBackfill as i32;
+                    stream_scan.stream_scan_type == StreamScanType::CdcBackfill as i32;
 
                 let input = stream_node.get_input();
                 assert_eq!(input.len(), 2);
@@ -173,7 +173,7 @@ impl ActorBuilder {
 
                 // Index the upstreams by the an external edge ID.
                 let upstreams = &self.upstreams[&EdgeId::UpstreamExternal {
-                    upstream_table_id: chain_node.table_id.into(),
+                    upstream_table_id: stream_scan.table_id.into(),
                     downstream_fragment_id: self.fragment_id,
                 }];
 
