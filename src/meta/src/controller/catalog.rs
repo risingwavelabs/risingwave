@@ -213,12 +213,17 @@ impl CatalogController {
             .map(|conn| conn.info)
             .collect_vec();
 
-        let user_ids: Vec<UserId> = UserPrivilege::find()
+        // Find affect users with privileges on the database and the objects in the database.
+        let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
             .select_only()
             .distinct()
             .column(user_privilege::Column::UserId)
             .join(JoinType::InnerJoin, user_privilege::Relation::Object.def())
-            .filter(object::Column::DatabaseId.eq(Some(database_id)))
+            .filter(
+                object::Column::DatabaseId
+                    .eq(database_id)
+                    .or(user_privilege::Column::Oid.eq(database_id)),
+            )
             .into_tuple()
             .all(&txn)
             .await?;
@@ -228,8 +233,8 @@ impl CatalogController {
         if res.rows_affected == 0 {
             return Err(MetaError::catalog_id_not_found("database", database_id));
         }
+        let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
 
-        let user_infos = list_user_info_by_ids(user_ids, &txn).await?;
         txn.commit().await?;
 
         self.notify_users_update(user_infos).await;
@@ -297,16 +302,20 @@ impl CatalogController {
             ensure_schema_empty(schema_id, &txn).await?;
         }
 
-        let user_ids: Vec<UserId> = UserPrivilege::find()
+        // Find affect users with privileges on the schema and the objects in the schema.
+        let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
             .select_only()
             .distinct()
             .column(user_privilege::Column::UserId)
             .join(JoinType::InnerJoin, user_privilege::Relation::Object.def())
-            .filter(object::Column::SchemaId.eq(Some(schema_id)))
+            .filter(
+                object::Column::SchemaId
+                    .eq(schema_id)
+                    .or(user_privilege::Column::Oid.eq(schema_id)),
+            )
             .into_tuple()
             .all(&txn)
             .await?;
-        let user_infos = list_user_info_by_ids(user_ids, &txn).await?;
 
         let res = Object::delete(object::ActiveModel {
             oid: Set(schema_id),
@@ -317,6 +326,8 @@ impl CatalogController {
         if res.rows_affected == 0 {
             return Err(MetaError::catalog_id_not_found("schema", schema_id));
         }
+        let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
+
         txn.commit().await?;
 
         self.notify_users_update(user_infos).await;
@@ -415,18 +426,32 @@ impl CatalogController {
 
     pub async fn drop_function(&self, function_id: FunctionId) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
         let function_obj = Object::find_by_id(function_id)
-            .one(&inner.db)
+            .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("function", function_id))?;
-        ensure_object_not_refer(ObjectType::Function, function_id, &inner.db).await?;
+        ensure_object_not_refer(ObjectType::Function, function_id, &txn).await?;
 
-        let res = Object::delete_by_id(function_id).exec(&inner.db).await?;
+        // Find affect users with privileges on the function.
+        let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
+            .select_only()
+            .distinct()
+            .column(user_privilege::Column::UserId)
+            .filter(user_privilege::Column::Oid.eq(function_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let res = Object::delete_by_id(function_id).exec(&txn).await?;
         if res.rows_affected == 0 {
             return Err(MetaError::catalog_id_not_found("function", function_id));
         }
-        // todo: notify user info change.
+        let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
 
+        txn.commit().await?;
+
+        self.notify_users_update(user_infos).await;
         let version = self
             .notify_frontend(
                 NotificationOperation::Delete,
@@ -495,18 +520,32 @@ impl CatalogController {
         connection_id: ConnectionId,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
         let connection_obj = Object::find_by_id(connection_id)
-            .one(&inner.db)
+            .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("connection", connection_id))?;
-        ensure_object_not_refer(ObjectType::Connection, connection_id, &inner.db).await?;
+        ensure_object_not_refer(ObjectType::Connection, connection_id, &txn).await?;
 
-        let res = Object::delete_by_id(connection_id).exec(&inner.db).await?;
+        // Find affect users with privileges on the connection.
+        let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
+            .select_only()
+            .distinct()
+            .column(user_privilege::Column::UserId)
+            .filter(user_privilege::Column::Oid.eq(connection_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let res = Object::delete_by_id(connection_id).exec(&txn).await?;
         if res.rows_affected == 0 {
             return Err(MetaError::catalog_id_not_found("connection", connection_id));
         }
-        // todo: notify user info change.
+        let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
 
+        txn.commit().await?;
+
+        self.notify_users_update(user_infos).await;
         let version = self
             .notify_frontend(
                 NotificationOperation::Delete,
@@ -709,6 +748,16 @@ impl CatalogController {
             .await?;
         to_drop_objects.extend(to_drop_internal_table_objs);
 
+        // Find affect users with privileges on all this objects.
+        let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
+            .select_only()
+            .distinct()
+            .column(user_privilege::Column::UserId)
+            .filter(user_privilege::Column::Oid.is_in(to_drop_objects.iter().map(|obj| obj.oid)))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
         // delete all in to_drop_objects.
         let res = Object::delete_many()
             .filter(object::Column::Oid.is_in(to_drop_objects.iter().map(|obj| obj.oid)))
@@ -720,9 +769,12 @@ impl CatalogController {
                 object_id,
             ));
         }
-        // todo: notify user info change.
+        let user_infos = list_user_info_by_ids(to_update_user_ids, &txn).await?;
+
+        txn.commit().await?;
 
         // notify about them.
+        self.notify_users_update(user_infos).await;
         let relations = to_drop_objects
             .into_iter()
             .map(|obj| match obj.obj_type {
@@ -968,6 +1020,10 @@ mod tests {
         let view = View::find().one(&mgr.inner.read().await.db).await?.unwrap();
         mgr.drop_relation(ObjectType::View, view.view_id, DropMode::Cascade)
             .await?;
+        assert!(View::find_by_id(view.view_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .is_none());
 
         Ok(())
     }

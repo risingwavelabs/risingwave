@@ -373,23 +373,6 @@ where
     Ok(())
 }
 
-/// `list_referring_user_by_objs` lists all users that are granted privileges in target objects.
-pub async fn list_referring_user_by_objs<C>(
-    obj_ids: Vec<ObjectId>,
-    db: &C,
-) -> MetaResult<Vec<UserId>>
-where
-    C: ConnectionTrait,
-{
-    let users = UserPrivilege::find()
-        .filter(user_privilege::Column::Oid.is_in(obj_ids))
-        .into_tuple()
-        .all(db)
-        .await?;
-
-    Ok(users)
-}
-
 /// `list_user_info_by_ids` lists all users' info by their ids.
 pub async fn list_user_info_by_ids<C>(user_ids: Vec<UserId>, db: &C) -> MetaResult<Vec<PbUserInfo>>
 where
