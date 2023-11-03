@@ -222,10 +222,7 @@ impl ToJsonb for Decimal {
 
 impl ToJsonb for Int256Ref<'_> {
     fn add_to(self, builder: &mut Builder) -> Result<()> {
-        let res: F64 = self
-            .try_into()
-            .map_err(|_| ExprError::CastOutOfRange("IEEE 754 double"))?;
-        res.add_to(builder)?;
+        builder.add_string(self.to_text().as_str());
         Ok(())
     }
 }
