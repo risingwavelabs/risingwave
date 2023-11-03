@@ -136,3 +136,29 @@ select * from t where Row(1,v1*2) > Row(1,2);
 
 statement ok
 drop table t;
+
+# row to text
+query TTTT
+select Row('a'), Row(''), Row('"'), Row(' a ');
+----
+(a) ("") ("""") (" a ")
+
+query TTT
+select Row('{}'), Row('[]'), Row('()'), Row(',');
+----
+({}) ([]) ("()") (",")
+
+query TTT
+select Row(NULL), Row(NULL, NULL), Row('null');
+----
+() (,) (null)
+
+query TTT
+select Row(Array[] :: varchar[]), Row(Array[1] :: varchar[]), Row(Array[1,2] :: varchar[]);
+----
+({}) ({1}) ("{1,2}")
+
+query T
+select Row(Array['"'] :: varchar[]);
+----
+("{""\\""""}")
