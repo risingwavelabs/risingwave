@@ -5950,7 +5950,6 @@ dependencies = [
  "risingwave_common",
  "risingwave_sqlparser",
  "thiserror",
- "thiserror-ext",
  "tokio-openssl",
  "tokio-postgres",
  "tracing",

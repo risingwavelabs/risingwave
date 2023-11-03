@@ -628,13 +628,12 @@ impl<'a> BeMessage<'a> {
             }
 
             BeMessage::ErrorResponse(error) => {
-                use thiserror_ext::AsReport;
                 // For all the errors set Severity to Error and error code to
                 // 'internal error'.
 
                 // 'E' signalizes ErrorResponse messages
                 buf.put_u8(b'E');
-                let msg = format!("{:#}", error.as_ref().as_report());
+                let msg = error.to_string();
                 write_err_or_notice(buf, &ErrorOrNoticeMessage::internal_error(&msg))?;
             }
 
