@@ -111,7 +111,7 @@ impl ManagedBarrierState {
                 .unwrap_or_default()
                 .into_iter()
                 .map(|(actor, state)| CreateMviewProgress {
-                    chain_actor_id: actor,
+                    backfill_actor_id: actor,
                     done: matches!(state, BackfillState::Done(_)),
                     consumed_epoch: match state {
                         BackfillState::ConsumingUpstream(consumed_epoch, _) => consumed_epoch,

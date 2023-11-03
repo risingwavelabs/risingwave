@@ -313,8 +313,8 @@ impl TableFragments {
             .cloned()
     }
 
-    /// Returns actors that contains Chain node.
-    pub fn chain_actor_ids(&self) -> HashSet<ActorId> {
+    /// Returns actors that contains backfill executors.
+    pub fn backfill_actor_ids(&self) -> HashSet<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
             (fragment_type_mask & FragmentTypeFlag::StreamScan as u32) != 0
         })
@@ -364,9 +364,9 @@ impl TableFragments {
 
     /// Resolve dependent table
     fn resolve_dependent_table(stream_node: &StreamNode, table_ids: &mut HashMap<TableId, usize>) {
-        if let Some(NodeBody::StreamScan(chain)) = stream_node.node_body.as_ref() {
+        if let Some(NodeBody::StreamScan(stream_scan)) = stream_node.node_body.as_ref() {
             table_ids
-                .entry(TableId::new(chain.table_id))
+                .entry(TableId::new(stream_scan.table_id))
                 .or_default()
                 .add_assign(1);
         }

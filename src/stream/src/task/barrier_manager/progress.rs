@@ -48,7 +48,7 @@ impl LocalBarrierManager {
     }
 }
 
-/// The progress held by the chain executors to report to the local barrier manager.
+/// The progress held by the backfill executors to report to the local barrier manager.
 ///
 /// Progress can be computed by
 /// `total_rows_consumed` / `total_rows_upstream`.
@@ -82,7 +82,7 @@ pub struct CreateMviewProgress {
     barrier_manager: Arc<parking_lot::Mutex<LocalBarrierManager>>,
 
     /// The id of the actor containing the backfill executors.
-    chain_actor_id: ActorId,
+    backfill_actor_id: ActorId,
 
     state: Option<BackfillState>,
 }
@@ -90,11 +90,11 @@ pub struct CreateMviewProgress {
 impl CreateMviewProgress {
     pub fn new(
         barrier_manager: Arc<parking_lot::Mutex<LocalBarrierManager>>,
-        chain_actor_id: ActorId,
+        backfill_actor_id: ActorId,
     ) -> Self {
         Self {
             barrier_manager,
-            chain_actor_id,
+            backfill_actor_id,
             state: None,
         }
     }
@@ -105,14 +105,14 @@ impl CreateMviewProgress {
     }
 
     pub fn actor_id(&self) -> u32 {
-        self.chain_actor_id
+        self.backfill_actor_id
     }
 
     fn update_inner(&mut self, current_epoch: u64, state: BackfillState) {
         self.state = Some(state);
         self.barrier_manager.lock().update_create_mview_progress(
             current_epoch,
-            self.chain_actor_id,
+            self.backfill_actor_id,
             state,
         );
     }
@@ -157,15 +157,18 @@ impl CreateMviewProgress {
 }
 
 impl SharedContext {
-    /// Create a struct for reporting the progress of creating mview. The chain executors should
+    /// Create a struct for reporting the progress of creating mview. The backfill executors should
     /// report the progress of barrier rearranging continuously using this. The updated progress
     /// will be collected by the local barrier manager and reported to the meta service in this
     /// epoch.
     ///
-    /// When all chain executors of the creating mview finish, the creation progress will be done at
+    /// When all backfill executors of the creating mview finish, the creation progress will be done at
     /// frontend and the mview will be exposed to the user.
-    pub fn register_create_mview_progress(&self, chain_actor_id: ActorId) -> CreateMviewProgress {
-        trace!("register create mview progress: {}", chain_actor_id);
-        CreateMviewProgress::new(self.barrier_manager.clone(), chain_actor_id)
+    pub fn register_create_mview_progress(
+        &self,
+        backfill_actor_id: ActorId,
+    ) -> CreateMviewProgress {
+        trace!("register create mview progress: {}", backfill_actor_id);
+        CreateMviewProgress::new(self.barrier_manager.clone(), backfill_actor_id)
     }
 }

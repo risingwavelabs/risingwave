@@ -572,7 +572,7 @@ impl CommandContext {
     /// returns an empty set.
     pub fn actors_to_cancel(&self) -> HashSet<ActorId> {
         match &self.command {
-            Command::CancelStreamingJob(table_fragments) => table_fragments.chain_actor_ids(),
+            Command::CancelStreamingJob(table_fragments) => table_fragments.backfill_actor_ids(),
             _ => Default::default(),
         }
     }
