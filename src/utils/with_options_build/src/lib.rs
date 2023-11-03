@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::{env, fs};
 
 use serde::Serialize;
-use syn::{parse_file, Attribute, Field, Item, Lit, Meta, MetaNameValue, NestedMeta, Type};
+use syn::{parse_file, Attribute, Field, Item, ItemFn, Lit, Meta, MetaNameValue, NestedMeta, Type};
 
 pub fn connector_crate_path() -> Option<PathBuf> {
     let mut current_dir = env::current_dir().ok()?;
@@ -35,6 +35,7 @@ pub fn connector_crate_path() -> Option<PathBuf> {
 
 pub fn update_with_options_yaml() -> String {
     let mut structs = vec![];
+    let mut functions = BTreeMap::<String, FunctionInfo>::new();
 
     // Recursively list all the .rs files
     for entry in walkdir::WalkDir::new(connector_crate_path().unwrap().join("src")) {
@@ -51,6 +52,9 @@ pub fn update_with_options_yaml() -> String {
                     if has_with_options_attribute(&struct_item.attrs) {
                         structs.push(struct_item);
                     }
+                } else if let Item::Fn(func_item) = item {
+                    let (func_name, func_body) = extract_function_body(func_item);
+                    functions.insert(func_name, func_body);
                 }
             }
         }
@@ -79,7 +83,13 @@ pub fn update_with_options_yaml() -> String {
                 let alias = serde_props.alias;
                 let rename = serde_props.rename;
                 let default_func = serde_props.default_func;
-                if default_func.is_some() {
+
+                // Replace the function name with the function body.
+                let mut default = default_func.clone();
+                if let Some(default_func) = default_func {
+                    if let Some(fn_info) = functions.get(&default_func) {
+                        default = Some(fn_info.body.clone());
+                    }
                     // If the field has a default value, it must be optional.
                     required = false;
                 }
@@ -90,10 +100,10 @@ pub fn update_with_options_yaml() -> String {
                 struct_info.fields.push(FieldInfo {
                     name,
                     field_type,
-                    required,
                     comments,
+                    required,
+                    default,
                     alias,
-                    default: default_func,
                 });
             }
         }
@@ -102,9 +112,6 @@ pub fn update_with_options_yaml() -> String {
 
     // Flatten the nested options.
     let struct_infos = flatten_nested_options(struct_infos);
-    for key in struct_infos.keys() {
-        println!("Struct {}", key);
-    }
 
     // Generate the output
     serde_yaml::to_string(&struct_infos).unwrap()
@@ -142,16 +149,19 @@ struct StructInfo {
     fields: Vec<FieldInfo>,
 }
 
+#[derive(Debug)]
+struct FunctionInfo {
+    body: String,
+}
+
 fn has_with_options_attribute(attrs: &[Attribute]) -> bool {
     attrs.iter().any(|attr| {
-        if let Ok(meta) = attr.parse_meta() {
-            if let Meta::List(meta_list) = meta {
-                return meta_list.path.is_ident("derive")
-                    && meta_list.nested.iter().any(|nested| match nested {
-                        syn::NestedMeta::Meta(Meta::Path(path)) => path.is_ident("WithOptions"),
-                        _ => false,
-                    });
-            }
+        if let Ok(Meta::List(meta_list)) = attr.parse_meta() {
+            return meta_list.path.is_ident("derive")
+                && meta_list.nested.iter().any(|nested| match nested {
+                    syn::NestedMeta::Meta(Meta::Path(path)) => path.is_ident("WithOptions"),
+                    _ => false,
+                });
         }
         false
     })
@@ -161,12 +171,10 @@ fn extract_comments(attrs: &[Attribute]) -> String {
     attrs
         .iter()
         .filter_map(|attr| {
-            if let Ok(meta) = attr.parse_meta() {
-                if let Meta::NameValue(mnv) = meta {
-                    if mnv.path.is_ident("doc") {
-                        if let syn::Lit::Str(lit_str) = mnv.lit {
-                            return Some(lit_str.value());
-                        }
+            if let Ok(Meta::NameValue(mnv)) = attr.parse_meta() {
+                if mnv.path.is_ident("doc") {
+                    if let syn::Lit::Str(lit_str) = mnv.lit {
+                        return Some(lit_str.value());
                     }
                 }
             }
@@ -273,4 +281,20 @@ fn extract_type_name(ty: &Type) -> String {
         }
     }
     panic!("Failed to extract type name: {}", quote::quote!(#ty));
+}
+
+/// Extract the return expression from the body of a single-expression function,
+/// like `123` from `fn default_func() { 123 }`
+/// or `u64::MAX` from `fn default_func() -> u64 { u64::MAX }`
+fn extract_function_body(func: ItemFn) -> (String, FunctionInfo) {
+    // The function body is a Block, which contains a vector of Stmts (statements)
+    let body = func.block;
+    let body = quote::quote!(#body)
+        .to_string()
+        .trim_start_matches('{')
+        .trim_end_matches('}')
+        .trim()
+        .to_string();
+
+    (func.sig.ident.to_string(), FunctionInfo { body })
 }

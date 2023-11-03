@@ -118,7 +118,7 @@ KafkaConfig:
   - name: properties.sync.call.timeout
     field_type: Duration
     required: false
-    default: default_kafka_sync_call_timeout
+    default: 'Duration :: from_secs (5)'
   - name: properties.security.protocol
     field_type: Option < String >
     comments: Security protocol used for RisingWave to communicate with Kafka brokers. Could be  PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
@@ -193,11 +193,11 @@ KafkaConfig:
   - name: properties.retry.max
     field_type: u32
     required: false
-    default: _default_max_retries
+    default: '3'
   - name: properties.retry.interval
     field_type: Duration
     required: false
-    default: _default_retry_backoff
+    default: 'Duration :: from_millis (100)'
   - name: primary_key
     field_type: Option < String >
     comments: We have parsed the primary key for an upsert kafka sink into a `usize` vector representing  the indices of the pk columns in the frontend, so we simply store the primary key here  as a string.
@@ -246,12 +246,12 @@ KafkaConfig:
     field_type: usize
     comments: Produce message timeout.  This value is used to limits the time a produced message waits for  successful delivery (including retries).
     required: false
-    default: _default_message_timeout_ms
+    default: '5000'
   - name: properties.max.in.flight.requests.per.connection
     field_type: usize
     comments: The maximum number of unacknowledged requests the client will send on a single connection before blocking.
     required: false
-    default: _default_max_in_flight_requests_per_connection
+    default: '5'
 KafkaProperties:
   fields:
   - name: bytes.per.second
@@ -294,7 +294,7 @@ KafkaProperties:
   - name: properties.sync.call.timeout
     field_type: Duration
     required: false
-    default: default_kafka_sync_call_timeout
+    default: 'Duration :: from_secs (5)'
   - name: properties.security.protocol
     field_type: Option < String >
     comments: Security protocol used for RisingWave to communicate with Kafka brokers. Could be  PLAINTEXT, SSL, SASL_PLAINTEXT or SASL_SSL.
@@ -558,11 +558,11 @@ NexmarkPropertiesInner:
     field_type: u64
     comments: The total event count of Bid + Auction + Person
     required: false
-    default: default_event_num
+    default: 'u64 :: MAX'
   - name: nexmark.table.type
     field_type: Option < EventType >
     required: false
-    default: none
+    default: None
   - name: nexmark.max.chunk.size
     field_type: u64
     required: false
@@ -580,107 +580,107 @@ NexmarkPropertiesInner:
   - name: nexmark.active.people
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.in.flight.auctions
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.out.of.order.group.size
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.avg.person.byte.size
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.avg.auction.byte.size
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.avg.bid.byte.size
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.hot.seller.ratio
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.hot.auction.ratio
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.hot.bidder.ratio
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.hot.channel.ratio
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.first.event.id
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.first.event.number
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.num.categories
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.auction.id.lead
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.hot.seller.ratio.2
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.hot.auction.ratio.2
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.hot.bidder.ratio.2
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.person.proportion
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.auction.proportion
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.bid.proportion
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.first.auction.id
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.first.person.id
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.first.category.id
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.person.id.lead
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.sine.approx.steps
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.base.time
     field_type: Option < u64 >
     required: false
-    default: none
+    default: None
   - name: nexmark.us.states
     field_type: Option < String >
     required: false
@@ -699,27 +699,27 @@ NexmarkPropertiesInner:
   - name: nexmark.rate.period
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.first.event.rate
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.events.per.sec
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.next.event.rate
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.us.per.unit
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
   - name: nexmark.threads
     field_type: Option < usize >
     required: false
-    default: none
+    default: None
 PubsubProperties:
   fields:
   - name: pubsub.split_count
@@ -750,11 +750,11 @@ PulsarConfig:
   - name: properties.retry.max
     field_type: u32
     required: false
-    default: _default_max_retries
+    default: '3'
   - name: properties.retry.interval
     field_type: Duration
     required: false
-    default: _default_retry_backoff
+    default: 'Duration :: from_millis (100)'
   - name: topic
     field_type: String
     required: true
@@ -772,11 +772,11 @@ PulsarConfig:
   - name: properties.batch.size
     field_type: u32
     required: false
-    default: _default_batch_size
+    default: '10000'
   - name: properties.batch.byte.size
     field_type: usize
     required: false
-    default: _default_batch_byte_size
+    default: 1 << 20
 PulsarOauthCommon:
   fields:
   - name: oauth.issuer.url
