@@ -9,12 +9,6 @@ repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-proc-macro2 = "1"
-quote = "1"
-serde = "1"
-serde_yaml = "0.9"
-syn = { version = "2", features = ["full"] }
-walkdir = "2"
 
 [lib]
 proc-macro = true
