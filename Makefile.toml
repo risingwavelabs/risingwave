@@ -804,17 +804,12 @@ script = """
 
 set -e
 
-for tool in cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-make
+for tool in cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-make cargo-udeps
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
   cargo binstall -y --no-symlinks $tool
   echo
 done
-
-# Need https://github.com/est31/cargo-udeps/pull/147 to make --exclude work
-echo "install: $(tput setaf 4)cargo-udeps$(tput sgr0)"
-cargo install cargo-udeps --locked --git https://github.com/est31/cargo-udeps --rev 63dd458
-echo
 
 # Tools that fallback to `cargo install` when using `cargo binstall`.
 # We directly use `cargo install` here to be faster.
