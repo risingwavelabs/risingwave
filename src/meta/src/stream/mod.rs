@@ -20,9 +20,11 @@ mod stream_manager;
 #[cfg(test)]
 mod test_fragmenter;
 mod test_scale;
+mod scale_controller;
 
 pub use scale::*;
 pub use sink::*;
 pub use source_manager::*;
 pub use stream_graph::*;
 pub use stream_manager::*;
+pub use scale_controller::*;

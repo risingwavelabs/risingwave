@@ -29,7 +29,7 @@ use tokio::sync::{oneshot, Mutex, RwLock};
 use tracing::Instrument;
 use uuid::Uuid;
 
-use super::Locations;
+use super::{Locations, ScaleController, ScaleControllerRef};
 use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{ClusterManagerRef, FragmentManagerRef, MetaSrvEnv};
@@ -195,6 +195,8 @@ pub struct GlobalStreamManager {
     hummock_manager: HummockManagerRef,
 
     pub reschedule_lock: RwLock<()>,
+
+    pub(crate) scale_controller: ScaleControllerRef,
 }
 
 impl GlobalStreamManager {
@@ -206,6 +208,12 @@ impl GlobalStreamManager {
         source_manager: SourceManagerRef,
         hummock_manager: HummockManagerRef,
     ) -> MetaResult<Self> {
+        let scale_controller = Arc::new(ScaleController::new(
+            fragment_manager.clone(),
+            cluster_manager.clone(),
+            source_manager.clone(),
+            env.clone(),
+        ));
         Ok(Self {
             env,
             fragment_manager,
@@ -215,6 +223,7 @@ impl GlobalStreamManager {
             hummock_manager,
             creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
             reschedule_lock: RwLock::new(()),
+            scale_controller,
         })
     }
 
