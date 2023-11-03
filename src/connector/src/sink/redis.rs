@@ -42,7 +42,6 @@ pub const VALUE_FORMAT: &str = "value_format";
 
 #[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct RedisCommon {
-    #[with_option(required)]
     #[serde(rename = "redis.url")]
     pub url: String,
 }

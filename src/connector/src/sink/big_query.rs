@@ -53,15 +53,12 @@ pub struct BigQueryCommon {
     #[serde(rename = "bigquery.s3.path")]
     pub s3_path: Option<String>,
 
-    #[with_option(required)]
     #[serde(rename = "bigquery.project")]
     pub project: String,
 
-    #[with_option(required)]
     #[serde(rename = "bigquery.dataset")]
     pub dataset: String,
 
-    #[with_option(required)]
     #[serde(rename = "bigquery.table")]
     pub table: String,
 
@@ -108,7 +105,6 @@ pub struct BigQueryConfig {
     #[serde(flatten)]
     pub common: BigQueryCommon,
 
-    #[with_option(required)]
     pub r#type: String, // accept "append-only" or "upsert"
 }
 impl BigQueryConfig {

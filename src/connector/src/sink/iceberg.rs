@@ -64,10 +64,6 @@ pub type RemoteIcebergSink = CoordinatedRemoteSink<RemoteIceberg>;
 #[derive(Debug, Clone, Deserialize, WithOptions)]
 #[serde(deny_unknown_fields)]
 pub struct IcebergConfig {
-    #[serde(skip_serializing)]
-    pub connector: String, // Must be "iceberg" here.
-
-    #[with_option(required)]
     pub r#type: String,
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
@@ -96,11 +92,9 @@ pub struct IcebergConfig {
     #[serde(rename = "s3.endpoint")]
     pub endpoint: Option<String>,
 
-    #[with_option(required)]
     #[serde(rename = "s3.access.key")]
     pub access_key: String,
 
-    #[with_option(required)]
     #[serde(rename = "s3.secret.key")]
     pub secret_key: String,
 

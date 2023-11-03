@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::{env, fs};
 
 use serde::Serialize;
-use syn::{parse_file, Attribute, Expr, Field, Item, LitStr, Meta};
+use syn::{parse_file, Attribute, Field, Item, Lit, Meta, MetaNameValue, NestedMeta, Type};
 
 pub fn connector_crate_path() -> Option<PathBuf> {
     let mut current_dir = env::current_dir().ok()?;
@@ -36,15 +36,15 @@ pub fn connector_crate_path() -> Option<PathBuf> {
 pub fn update_with_options_yaml() -> String {
     let mut structs = vec![];
 
-    // Step 1: Recursively list all the .rs files
+    // Recursively list all the .rs files
     for entry in walkdir::WalkDir::new(connector_crate_path().unwrap().join("src")) {
         let entry = entry.expect("Failed to read directory entry");
         if entry.path().extension() == Some("rs".as_ref()) {
-            // Step 2: Parse the content of the .rs file
+            // Parse the content of the .rs file
             let content = fs::read_to_string(entry.path()).expect("Failed to read file");
             let file = parse_file(&content).expect("Failed to parse file");
 
-            // Step 3: Process each item in the file
+            // Process each item in the file
             for item in file.items {
                 if let Item::Struct(struct_item) = item {
                     // Check if the struct has the #[with_options] attribute
@@ -58,55 +58,83 @@ pub fn update_with_options_yaml() -> String {
 
     let mut struct_infos: BTreeMap<String, StructInfo> = BTreeMap::new();
 
-    // Step 4: Process each struct
+    // Process each struct
     for struct_item in structs {
         let struct_name = struct_item.ident.to_string();
 
         let mut struct_info = StructInfo::default();
         for field in struct_item.fields {
-            // Step 5: Process each field
+            // Process each field
             if let Some(field_name) = &field.ident {
-                // If specified with serde(rename), use the renamed name instead of the Rust name.
-                let field_name =
-                    extract_serde_rename_value(&field).unwrap_or_else(|| field_name.to_string());
+                let serde_props = extract_serde_properties(&field);
 
-                let field_type = &field.ty;
+                let field_type = field.ty;
+                let mut required = match extract_type_name(&field_type).as_str() {
+                    // Fields of type Option<T> or HashMap<K, V> are always considered optional.
+                    "HashMap" | "Option" => false,
+                    _ => true,
+                };
+                let field_type = quote::quote!(#field_type).to_string();
                 let comments = extract_comments(&field.attrs);
-                let required = has_required_attribute(&field.attrs);
-                let default = extract_default_attribute(&field.attrs);
+                let alias = serde_props.alias;
+                let rename = serde_props.rename;
+                let default_func = serde_props.default_func;
+                if default_func.is_some() {
+                    // If the field has a default value, it must be optional.
+                    required = false;
+                }
 
-                // Step 6: Assemble the information
+                let name = rename.unwrap_or_else(|| field_name.to_string()).to_string();
+
+                // Assemble the information
                 struct_info.fields.push(FieldInfo {
-                    name: field_name.to_string(),
-                    field_type: quote::quote!(#field_type).to_string(),
-                    comments,
+                    name,
+                    field_type,
                     required,
-                    default,
+                    comments,
+                    alias,
+                    default: default_func,
                 });
             }
         }
         struct_infos.insert(struct_name, struct_info);
     }
 
-    // Step 7: Flatten the nested options.
+    // Flatten the nested options.
     let struct_infos = flatten_nested_options(struct_infos);
     for key in struct_infos.keys() {
         println!("Struct {}", key);
     }
 
-    // Step 8: Generate the output
+    // Generate the output
     serde_yaml::to_string(&struct_infos).unwrap()
 }
 
 #[derive(Debug, Serialize, Clone)]
 struct FieldInfo {
+    // If specified with serde(rename), use the renamed name instead of the Rust name.
     name: String,
+
+    /// For Option<T>, it'll be the T.
     field_type: String,
+
     #[serde(skip_serializing_if = "String::is_empty")]
     comments: String,
+
     required: bool,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     default: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    alias: Option<String>,
+}
+
+#[derive(Default)]
+struct SerdeProperties {
+    default_func: Option<String>,
+    rename: Option<String>,
+    alias: Option<String>,
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -116,17 +144,13 @@ struct StructInfo {
 
 fn has_with_options_attribute(attrs: &[Attribute]) -> bool {
     attrs.iter().any(|attr| {
-        if attr.meta.path().is_ident("derive") {
-            if let Meta::List(meta_list) = &attr.meta {
-                let mut has_with_options = false;
-                let _ = meta_list.parse_nested_meta(|nested| {
-                    if nested.path.is_ident("WithOptions") {
-                        has_with_options = true;
-                        return Ok(());
-                    }
-                    Ok(())
-                });
-                return has_with_options;
+        if let Ok(meta) = attr.parse_meta() {
+            if let Meta::List(meta_list) = meta {
+                return meta_list.path.is_ident("derive")
+                    && meta_list.nested.iter().any(|nested| match nested {
+                        syn::NestedMeta::Meta(Meta::Path(path)) => path.is_ident("WithOptions"),
+                        _ => false,
+                    });
             }
         }
         false
@@ -137,10 +161,10 @@ fn extract_comments(attrs: &[Attribute]) -> String {
     attrs
         .iter()
         .filter_map(|attr| {
-            if let Meta::NameValue(mnv) = &attr.meta {
-                if mnv.path.is_ident("doc") {
-                    if let Expr::Lit(lit) = &mnv.value {
-                        if let syn::Lit::Str(lit_str) = &lit.lit {
+            if let Ok(meta) = attr.parse_meta() {
+                if let Meta::NameValue(mnv) = meta {
+                    if mnv.path.is_ident("doc") {
+                        if let syn::Lit::Str(lit_str) = mnv.lit {
                             return Some(lit_str.value());
                         }
                     }
@@ -154,62 +178,46 @@ fn extract_comments(attrs: &[Attribute]) -> String {
         .to_string()
 }
 
-fn extract_serde_rename_value(field: &Field) -> Option<String> {
+fn extract_serde_properties(field: &Field) -> SerdeProperties {
     for attr in &field.attrs {
-        if let Meta::List(meta_list) = &attr.meta {
-            if meta_list.path.is_ident("serde") {
-                let mut rename = None;
-                let _ = meta_list.parse_nested_meta(|nested| {
-                    if nested.path.is_ident("rename") {
-                        let value = nested.value()?;
-                        let lit_str: LitStr = value.parse()?;
-                        rename = Some(lit_str.value().to_string());
+        if let Ok(meta) = attr.parse_meta() {
+            if meta.path().is_ident("serde") {
+                // Initialize the values to be extracted
+                let mut serde_props = SerdeProperties::default();
+
+                if let Meta::List(meta_list) = meta {
+                    // Iterate over nested meta items (e.g., rename = "abc")
+                    for nested_meta in meta_list.nested {
+                        if let NestedMeta::Meta(Meta::NameValue(MetaNameValue {
+                            path, lit, ..
+                        })) = nested_meta
+                        {
+                            if path.is_ident("rename") {
+                                if let Lit::Str(lit_str) = lit {
+                                    serde_props.rename = Some(lit_str.value());
+                                }
+                            } else if path.is_ident("alias") {
+                                if let Lit::Str(lit_str) = lit {
+                                    serde_props.alias = Some(lit_str.value());
+                                }
+                            } else if path.is_ident("default") {
+                                if let Lit::Str(lit_str) = lit {
+                                    serde_props.default_func = Some(lit_str.value());
+                                }
+                            }
+                        } else if let NestedMeta::Meta(Meta::Path(path)) = nested_meta {
+                            if path.is_ident("default") {
+                                serde_props.default_func = Some("Default::default".to_string());
+                            }
+                        }
                     }
-                    Ok(())
-                });
-                return rename;
+                }
+                // Return the extracted values
+                return serde_props;
             }
         }
     }
-    None
-}
-
-fn has_required_attribute(attrs: &[Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        if let Meta::List(meta_list) = &attr.meta {
-            if meta_list.path.is_ident("with_option") {
-                let mut required = false;
-                let _ = meta_list.parse_nested_meta(|nested| {
-                    if nested.path.is_ident("required") {
-                        required = true;
-                    }
-                    Ok(())
-                });
-                return required;
-            }
-        }
-        false
-    })
-}
-
-fn extract_default_attribute(attrs: &[Attribute]) -> Option<String> {
-    attrs.iter().find_map(|attr| {
-        if let Meta::List(meta_list) = &attr.meta {
-            if meta_list.path.is_ident("with_option") {
-                let mut default: Option<String> = None;
-                let _ = meta_list.parse_nested_meta(|nested| {
-                    if nested.path.is_ident("default") {
-                        let value = nested.value()?;
-                        let lit_str: LitStr = value.parse()?;
-                        default = Some(lit_str.value().to_string());
-                    }
-                    Ok(())
-                });
-                return default;
-            }
-        }
-        None
-    })
+    SerdeProperties::default()
 }
 
 fn flatten_nested_options(options: BTreeMap<String, StructInfo>) -> BTreeMap<String, StructInfo> {
@@ -254,4 +262,15 @@ fn flatten_struct(
         }
     }
     fields
+}
+
+// If the type is Option<T>, return Option.
+// For HashMap<K, V>, return HashMap.
+fn extract_type_name(ty: &Type) -> String {
+    if let Type::Path(typepath) = ty {
+        if let Some(segment) = typepath.path.segments.last() {
+            return segment.ident.to_string();
+        }
+    }
+    panic!("Failed to extract type name: {}", quote::quote!(#ty));
 }

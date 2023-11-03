@@ -37,7 +37,6 @@ pub struct NatsProperties {
     #[serde(rename = "scan.startup.timestamp_millis")]
     pub start_time: Option<String>,
 
-    #[with_option(required)]
     #[serde(rename = "stream")]
     pub stream: String,
 }

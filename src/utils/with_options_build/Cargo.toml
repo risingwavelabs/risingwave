@@ -10,9 +10,9 @@ repository = { workspace = true }
 
 [dependencies]
 quote = "1"
-serde = "1"
+serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
-syn = { version = "2", features = ["full"] }
+syn = { version = "1", features = ["full"] }
 walkdir = "2"
 
 [lib]

@@ -47,19 +47,14 @@ const BUFFER_SIZE: usize = 1024;
 
 #[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct ClickHouseCommon {
-    #[with_option(required)]
     #[serde(rename = "clickhouse.url")]
     pub url: String,
-    #[with_option(required)]
     #[serde(rename = "clickhouse.user")]
     pub user: String,
-    #[with_option(required)]
     #[serde(rename = "clickhouse.password")]
     pub password: String,
-    #[with_option(required)]
     #[serde(rename = "clickhouse.database")]
     pub database: String,
-    #[with_option(required)]
     #[serde(rename = "clickhouse.table")]
     pub table: String,
 }
@@ -159,7 +154,6 @@ pub struct ClickHouseConfig {
     #[serde(flatten)]
     pub common: ClickHouseCommon,
 
-    #[with_option(required)]
     pub r#type: String,
 }
 

@@ -11206,7 +11206,7 @@ dependencies = [
  "quote",
  "serde",
  "serde_yaml",
- "syn 2.0.37",
+ "syn 1.0.109",
  "walkdir",
 ]
 

@@ -54,7 +54,6 @@ pub struct AwsPrivateLinkItem {
 #[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize, WithOptions)]
 pub struct KafkaCommon {
-    #[with_option(required)]
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
 
@@ -62,7 +61,6 @@ pub struct KafkaCommon {
     #[serde_as(as = "Option<JsonString>")]
     pub broker_rewrite_map: Option<HashMap<String, String>>,
 
-    #[with_option(required)]
     #[serde(rename = "topic", alias = "kafka.topic")]
     pub topic: String,
 
@@ -256,11 +254,9 @@ impl KafkaCommon {
 
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PulsarCommon {
-    #[with_option(required)]
     #[serde(rename = "topic", alias = "pulsar.topic")]
     pub topic: String,
 
-    #[with_option(required)]
     #[serde(rename = "service.url", alias = "pulsar.service.url")]
     pub service_url: String,
 
@@ -358,25 +354,21 @@ impl PulsarCommon {
 
 #[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct KinesisCommon {
-    #[with_option(required)]
     #[serde(rename = "stream", alias = "kinesis.stream.name")]
     pub stream_name: String,
 
-    #[with_option(required)]
     #[serde(rename = "aws.region", alias = "kinesis.stream.region")]
     pub stream_region: String,
 
     #[serde(rename = "endpoint", alias = "kinesis.endpoint")]
     pub endpoint: Option<String>,
 
-    #[with_option(required)]
     #[serde(
         rename = "aws.credentials.access_key_id",
         alias = "kinesis.credentials.access"
     )]
     pub credentials_access_key: Option<String>,
 
-    #[with_option(required)]
     #[serde(
         rename = "aws.credentials.secret_access_key",
         alias = "kinesis.credentials.secret"
@@ -431,18 +423,12 @@ pub struct UpsertMessage<'a> {
 #[serde_as]
 #[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct NatsCommon {
-    #[with_option(required)]
     #[serde(rename = "server_url")]
     pub server_url: String,
-
-    #[with_option(required)]
     #[serde(rename = "subject")]
     pub subject: String,
-
-    #[with_option(required)]
     #[serde(rename = "connect_mode")]
-    pub connect_mode: Option<String>,
-
+    pub connect_mode: String,
     #[serde(rename = "username")]
     pub user: Option<String>,
     #[serde(rename = "password")]
@@ -471,8 +457,8 @@ pub struct NatsCommon {
 impl NatsCommon {
     pub(crate) async fn build_client(&self) -> anyhow::Result<async_nats::Client> {
         let mut connect_options = async_nats::ConnectOptions::new();
-        match self.connect_mode.as_deref() {
-            Some("user_and_password") => {
+        match self.connect_mode.as_str() {
+            "user_and_password" => {
                 if let (Some(v_user), Some(v_password)) =
                     (self.user.as_ref(), self.password.as_ref())
                 {
@@ -485,7 +471,7 @@ impl NatsCommon {
                 }
             }
 
-            Some("credential") => {
+            "credential" => {
                 if let (Some(v_nkey), Some(v_jwt)) = (self.nkey.as_ref(), self.jwt.as_ref()) {
                     connect_options = connect_options
                         .credentials(&self.create_credential(v_nkey, v_jwt)?)
@@ -496,7 +482,7 @@ impl NatsCommon {
                     ));
                 }
             }
-            Some("plain") => {}
+            "plain" => {}
             _ => {
                 return Err(anyhow_error!(
                     "nats connect mode only accept user_and_password/credential/plain"

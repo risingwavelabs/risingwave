@@ -41,7 +41,6 @@ pub const DORIS_SINK: &str = "doris";
 
 #[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct DorisCommon {
-    #[with_option(required)]
     #[serde(rename = "doris.url")]
     pub url: String,
     #[serde(rename = "doris.user")]
@@ -72,7 +71,6 @@ pub struct DorisConfig {
     #[serde(flatten)]
     pub common: DorisCommon,
 
-    #[with_option(required)]
     pub r#type: String, // accept "append-only" or "upsert"
 }
 impl DorisConfig {

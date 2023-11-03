@@ -45,7 +45,6 @@ pub struct NatsConfig {
     #[serde(flatten)]
     pub common: NatsCommon,
     // accept "append-only"
-    #[with_option(required)]
     pub r#type: String,
 }
 
