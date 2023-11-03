@@ -613,18 +613,19 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     {
                         // update metrics
                         let actor_id_str = this.actor_ctx.id.to_string();
+                        let fragment_id_str = this.actor_ctx.fragment_id.to_string();
                         let table_id_str = this.state_table.table_id().to_string();
                         this.metrics
                             .over_window_cached_entry_count
-                            .with_label_values(&[&table_id_str, &actor_id_str])
+                            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                             .set(vars.cached_partitions.len() as _);
                         this.metrics
                             .over_window_cache_lookup_count
-                            .with_label_values(&[&table_id_str, &actor_id_str])
+                            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                             .inc_by(std::mem::take(&mut vars.stats.cache_lookup));
                         this.metrics
                             .over_window_cache_miss_count
-                            .with_label_values(&[&table_id_str, &actor_id_str])
+                            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                             .inc_by(std::mem::take(&mut vars.stats.cache_miss));
                     }
 
