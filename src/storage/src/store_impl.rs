@@ -550,14 +550,11 @@ impl StateStoreImpl {
                 catalog_bits: opts.data_file_cache_catalog_bits,
                 admissions: vec![],
                 reinsertions: vec![],
-                compression: match opts.data_file_cache_compression.as_str() {
-                    "none" => foyer::storage::compress::Compression::None,
-                    "zstd" => foyer::storage::compress::Compression::Zstd,
-                    _ => panic!(
-                        "data file cache compression type not support: {}",
-                        opts.data_file_cache_compression
-                    ),
-                },
+                compression: opts
+                    .data_file_cache_compression
+                    .as_str()
+                    .try_into()
+                    .map_err(HummockError::file_cache)?,
             };
             let cache = FileCache::open(config)
                 .await
@@ -592,14 +589,11 @@ impl StateStoreImpl {
                 catalog_bits: opts.meta_file_cache_catalog_bits,
                 admissions: vec![],
                 reinsertions: vec![],
-                compression: match opts.meta_file_cache_compression.as_str() {
-                    "none" => foyer::storage::compress::Compression::None,
-                    "zstd" => foyer::storage::compress::Compression::Zstd,
-                    _ => panic!(
-                        "meta file cache compression type not support: {}",
-                        opts.meta_file_cache_compression
-                    ),
-                },
+                compression: opts
+                    .meta_file_cache_compression
+                    .as_str()
+                    .try_into()
+                    .map_err(HummockError::file_cache)?,
             };
             FileCache::open(config)
                 .await
