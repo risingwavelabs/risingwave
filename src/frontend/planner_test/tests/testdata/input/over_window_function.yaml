@@ -183,12 +183,12 @@
 - id: multiple rank function calls
   sql: |
     create table t(x int);
-    select row_number() over(PARTITION BY x ORDER BY x), rank() over(ORDER BY x) from t;
+    select row_number() over(PARTITION BY x ORDER BY x), rank() over(PARTITION BY x ORDER BY x), dense_rank() over (PARTITION BY x ORDER BY x) from t;
   expected_outputs:
     - logical_plan
     - optimized_logical_plan_for_stream
-    - stream_error
-    - batch_error
+    - stream_plan
+    - batch_plan
 - id: row_number with valid over clause
   sql: |
     create table t(x int, y int);
@@ -251,8 +251,8 @@
     -- OFFSET for RANK() is not yet supported
   expected_outputs:
     - logical_plan
-    - stream_error
-    - batch_error
+    - stream_plan
+    - batch_plan
 # >>> TopN by row_number, with offset
 - sql: |
     create table t(x int, y int);
@@ -471,6 +471,6 @@
   expected_outputs:
     - logical_plan
     - optimized_logical_plan_for_stream
-    - stream_error
+    - stream_plan
     - optimized_logical_plan_for_batch
-    - batch_error
+    - batch_plan

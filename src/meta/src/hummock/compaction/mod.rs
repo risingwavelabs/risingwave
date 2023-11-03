@@ -23,7 +23,7 @@ use risingwave_pb::hummock::compact_task::{self, TaskStatus, TaskType};
 mod picker;
 pub mod selector;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
@@ -145,7 +145,7 @@ impl CompactStatus {
             compression_algorithm,
             target_file_size: ret.target_file_size,
             compaction_filter_mask: 0,
-            table_options: HashMap::default(),
+            table_options: BTreeMap::default(),
             current_epoch_time: 0,
             target_sub_level_id: ret.input.target_sub_level_id,
             task_type: ret.compaction_task_type as i32,

@@ -186,13 +186,17 @@ async fn test_over_window_aggregate() {
     check_with_script(
         || create_executor(calls.clone(), store.clone()),
         r###"
-- !barrier 1
-- !chunk |2
-      I T  I   i
-    + 1 p1 100 10
-    + 1 p1 101 16
-    + 4 p1 102 20
-"###,
+        - !barrier 1
+        - !chunk |2
+              I T  I   i
+            + 1 p1 100 10
+            + 1 p1 101 16
+            + 4 p1 102 20
+        - !chunk |2
+              I T  I   i
+            + 2 p1 103 30
+            + 6 p1 104 11
+        "###,
         expect![[r#"
             - input: !barrier 1
               output:
@@ -208,6 +212,17 @@ async fn test_over_window_aggregate() {
                 +---+---+----+-----+----+----+
                 | + | 1 | p1 | 100 | 10 | 26 |
                 | + | 1 | p1 | 101 | 16 | 46 |
+                +---+---+----+-----+----+----+
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 2 | p1 | 103 | 30 |
+                | + | 6 | p1 | 104 | 11 |
+                +---+---+----+-----+----+
+              output:
+              - !chunk |-
+                +---+---+----+-----+----+----+
+                | + | 4 | p1 | 102 | 20 | 66 |
+                | + | 2 | p1 | 103 | 30 | 61 |
                 +---+---+----+-----+----+----+
         "#]],
         SnapshotOptions::default(),

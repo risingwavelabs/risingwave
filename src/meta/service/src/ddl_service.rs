@@ -172,25 +172,55 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<CreateSourceRequest>,
     ) -> Result<Response<CreateSourceResponse>, Status> {
-        let mut source = request.into_inner().get_source()?.clone();
+        let req = request.into_inner();
+        let mut source = req.get_source()?.clone();
 
         // validate connection before starting the DDL procedure
         if let Some(connection_id) = source.connection_id {
             self.validate_connection(connection_id).await?;
         }
 
-        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
-        source.id = id;
+        let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+        source.id = source_id;
 
-        let version = self
-            .ddl_controller
-            .run_command(DdlCommand::CreateSource(source))
-            .await?;
-        Ok(Response::new(CreateSourceResponse {
-            status: None,
-            source_id: id,
-            version,
-        }))
+        match req.fragment_graph {
+            None => {
+                let version = self
+                    .ddl_controller
+                    .run_command(DdlCommand::CreateSource(source))
+                    .await?;
+                Ok(Response::new(CreateSourceResponse {
+                    status: None,
+                    source_id,
+                    version,
+                }))
+            }
+            Some(mut fragment_graph) => {
+                for fragment in fragment_graph.fragments.values_mut() {
+                    visit_fragment(fragment, |node_body| {
+                        if let NodeBody::Source(source_node) = node_body {
+                            source_node.source_inner.as_mut().unwrap().source_id = source_id;
+                        }
+                    });
+                }
+
+                // The id of stream job has been set above
+                let stream_job = StreamingJob::Source(source);
+                let version = self
+                    .ddl_controller
+                    .run_command(DdlCommand::CreateStreamingJob(
+                        stream_job,
+                        fragment_graph,
+                        CreateType::Foreground,
+                    ))
+                    .await?;
+                Ok(Response::new(CreateSourceResponse {
+                    status: None,
+                    source_id,
+                    version,
+                }))
+            }
+        }
     }
 
     async fn drop_source(
@@ -422,6 +452,7 @@ impl DdlService for DdlServiceImpl {
         request: Request<CreateTableRequest>,
     ) -> Result<Response<CreateTableResponse>, Status> {
         let request = request.into_inner();
+        let job_type = request.get_job_type().unwrap_or_default();
         let mut source = request.source;
         let mut mview = request.materialized_view.unwrap();
         let mut fragment_graph = request.fragment_graph.unwrap();
@@ -443,7 +474,7 @@ impl DdlService for DdlServiceImpl {
             }
         }
 
-        let mut stream_job = StreamingJob::Table(source, mview);
+        let mut stream_job = StreamingJob::Table(source, mview, job_type);
 
         stream_job.set_id(table_id);
 
@@ -550,7 +581,7 @@ impl DdlService for DdlServiceImpl {
         }
         let table_col_index_mapping =
             ColIndexMapping::from_protobuf(&req.table_col_index_mapping.unwrap());
-        let stream_job = StreamingJob::Table(source, table);
+        let stream_job = StreamingJob::Table(source, table, TableJobType::General);
 
         let version = self
             .ddl_controller

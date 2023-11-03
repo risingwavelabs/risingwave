@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
@@ -22,7 +23,7 @@ use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 
 use super::*;
-use crate::executor::BatchQueryExecutor;
+use crate::executor::{BatchQueryExecutor, DummyExecutor};
 
 pub struct BatchQueryExecutorBuilder;
 
@@ -36,7 +37,14 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         state_store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let table_desc: &StorageTableDesc = node.get_table_desc()?;
+        if node.table_desc.is_none() {
+            // used in sharing cdc source backfill as a dummy batch plan node
+            return Ok(Box::new(DummyExecutor::new()));
+        }
+
+        let table_desc: &StorageTableDesc = node
+            .get_table_desc()
+            .map_err(|err| anyhow!("batch_plan: table_desc not found! {:?}", err))?;
         let table_id = TableId {
             table_id: table_desc.table_id,
         };

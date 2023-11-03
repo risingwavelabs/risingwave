@@ -50,7 +50,7 @@ hyper = "0.14"
 hytra = { workspace = true }
 itertools = "0.11"
 itoa = "1.0"
-jsonbb = "0.1"
+jsonbb = "0.1.2"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 memcomparable = { version = "0.2", features = ["decimal"] }
 num-integer = "0.1"
@@ -113,7 +113,7 @@ tower-layer = "0.3.2"
 tower-service = "0.3.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.15", default-features = false }
+procfs = { version = "0.16", default-features = false }
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]

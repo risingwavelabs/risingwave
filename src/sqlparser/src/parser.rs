@@ -1397,6 +1397,7 @@ impl Parser {
             Token::LongArrow => Some(BinaryOperator::LongArrow),
             Token::HashArrow => Some(BinaryOperator::HashArrow),
             Token::HashLongArrow => Some(BinaryOperator::HashLongArrow),
+            Token::HashMinus => Some(BinaryOperator::HashMinus),
             Token::AtArrow => Some(BinaryOperator::Contains),
             Token::ArrowAt => Some(BinaryOperator::Contained),
             Token::QuestionMark => Some(BinaryOperator::Exists),
@@ -1741,6 +1742,7 @@ impl Parser {
             | Token::LongArrow
             | Token::HashArrow
             | Token::HashLongArrow
+            | Token::HashMinus
             | Token::AtArrow
             | Token::ArrowAt
             | Token::QuestionMark
@@ -2444,7 +2446,7 @@ impl Parser {
         let connector = option.map(|opt| opt.value.to_string());
 
         let source_schema = if let Some(connector) = connector {
-            Some(self.parse_source_schema_with_connector(&connector)?)
+            Some(self.parse_source_schema_with_connector(&connector, false)?)
         } else {
             None // Table is NOT created with an external connector.
         };
@@ -2461,6 +2463,23 @@ impl Parser {
             None
         };
 
+        let cdc_table_info = if self.parse_keyword(Keyword::FROM) {
+            let source_name = self.parse_object_name()?;
+            if self.parse_keyword(Keyword::TABLE) {
+                let external_table_name = self.parse_literal_string()?;
+                Some(CdcTableInfo {
+                    source_name,
+                    external_table_name,
+                })
+            } else {
+                return Err(ParserError::ParserError(
+                    "Expect a TABLE clause on table created by CREATE TABLE FROM".to_string(),
+                ));
+            }
+        } else {
+            None
+        };
+
         Ok(Statement::CreateTable {
             name: table_name,
             temporary,
@@ -2473,6 +2492,7 @@ impl Parser {
             source_watermarks,
             append_only,
             query,
+            cdc_table_info,
         })
     }
 

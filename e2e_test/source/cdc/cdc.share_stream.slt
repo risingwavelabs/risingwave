@@ -1,0 +1,80 @@
+control substitution on
+
+# create database and tables in mysql
+system ok
+mysql --protocol=tcp -u root -e "DROP DATABASE IF EXISTS mytest; CREATE DATABASE mytest;"
+
+system ok
+mysql --protocol=tcp -u root mytest < e2e_test/source/cdc/mysql_create.sql
+
+# enable cdc backfill in ci
+statement ok
+set cdc_backfill='true';
+
+# create a cdc source job, which format fixed to `FORMAT PLAIN ENCODE JSON`
+statement ok
+create source mysql_mytest with (
+ connector = 'mysql-cdc',
+ hostname = '${MYSQL_HOST:localhost}',
+ port = '${MYSQL_TCP_PORT:8306}',
+ username = 'dbz',
+ password = '${MYSQL_PWD:}',
+ database.name = 'mytest',
+ server.id = '5601'
+);
+
+statement ok
+create table products_test ( id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+) from mysql_mytest table 'mytest.products';
+
+statement ok
+create table orders_test (
+   order_id int,
+   order_date timestamp,
+   customer_name string,
+   price decimal,
+   product_id int,
+   order_status smallint,
+   PRIMARY KEY (order_id)
+) from mysql_mytest table 'mytest.orders';
+
+statement ok
+create materialized view products_test_cnt as select count(*) as cnt from products_test;
+
+statement ok
+create materialized view orders_test_cnt as select count(*) as cnt from orders_test;
+
+
+# generate data to mysql
+system ok
+mysql --protocol=tcp -u root mytest < e2e_test/source/cdc/mysql_init_data.sql
+
+sleep 5s
+
+# check ingestion results
+query I
+SELECT * from products_test_cnt
+----
+9
+
+query I
+SELECT * from orders_test_cnt
+----
+3
+
+query ITT
+SELECT * FROM products_test order by id limit 3
+----
+101 scooter Small 2-wheel scooter
+102 car battery 12V car battery
+103 12-pack drill bits 12-pack of drill bits with sizes ranging from #40 to #3
+
+query ITTT
+SELECT order_id,order_date,customer_name,product_id FROM orders_test order by order_id limit 3
+----
+10001 2020-07-30 10:08:22 Jark 102
+10002 2020-07-30 10:11:09 Sally 105
+10003 2020-07-30 12:00:30 Edward 106

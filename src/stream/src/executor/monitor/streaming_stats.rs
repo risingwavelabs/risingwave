@@ -42,8 +42,6 @@ pub struct StreamingMetrics {
 
     // Streaming actor metrics from tokio (disabled by default)
     pub actor_execution_time: GenericGaugeVec<AtomicF64>,
-    pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
-    pub actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
     pub actor_scheduled_duration: GenericGaugeVec<AtomicF64>,
     pub actor_scheduled_cnt: GenericGaugeVec<AtomicI64>,
     pub actor_fast_poll_duration: GenericGaugeVec<AtomicF64>,
@@ -71,6 +69,10 @@ pub struct StreamingMetrics {
 
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
+
+    // Backpressure
+    pub actor_output_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
+    pub actor_input_buffer_blocking_duration_ns: LabelGuardedIntCounterVec<3>,
 
     // Streaming Join
     pub join_lookup_miss_count: LabelGuardedIntCounterVec<5>,
@@ -158,12 +160,6 @@ pub struct StreamingMetrics {
     pub jemalloc_active_bytes: IntGauge,
     pub jvm_allocated_bytes: IntGauge,
     pub jvm_active_bytes: IntGauge,
-
-    /// User compute error reporting
-    pub user_compute_error_count: GenericCounterVec<AtomicU64>,
-
-    /// User source reader error
-    pub user_source_reader_error_count: GenericCounterVec<AtomicU64>,
 
     // Materialize
     pub materialize_cache_hit_count: GenericCounterVec<AtomicU64>,
@@ -687,7 +683,7 @@ impl StreamingMetrics {
         let over_window_cached_entry_count = register_int_gauge_vec_with_registry!(
             "stream_over_window_cached_entry_count",
             "Total entry (partition) count in over window executor cache",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -695,7 +691,7 @@ impl StreamingMetrics {
         let over_window_cache_lookup_count = register_int_counter_vec_with_registry!(
             "stream_over_window_cache_lookup_count",
             "Over window executor cache lookup count",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -703,7 +699,7 @@ impl StreamingMetrics {
         let over_window_cache_miss_count = register_int_counter_vec_with_registry!(
             "stream_over_window_cache_miss_count",
             "Over window executor cache miss count",
-            &["table_id", "actor_id"],
+            &["table_id", "actor_id", "fragment_id"],
             registry
         )
         .unwrap();
@@ -881,28 +877,6 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let user_compute_error_count = register_int_counter_vec_with_registry!(
-            "user_compute_error_count",
-            "Compute errors in the system, queryable by tags",
-            &["error_type", "error_msg", "executor_name", "fragment_id"],
-            registry,
-        )
-        .unwrap();
-
-        let user_source_reader_error_count = register_int_counter_vec_with_registry!(
-            "user_source_reader_error_count",
-            "Source reader error count",
-            &[
-                "error_type",
-                "error_msg",
-                "executor_name",
-                "actor_id",
-                "source_id"
-            ],
-            registry,
-        )
-        .unwrap();
-
         let materialize_cache_hit_count = register_int_counter_vec_with_registry!(
             "stream_materialize_cache_hit_count",
             "Materialize executor cache hit count",
@@ -931,8 +905,6 @@ impl StreamingMetrics {
             level,
             executor_row_count,
             actor_execution_time,
-            actor_output_buffer_blocking_duration_ns,
-            actor_input_buffer_blocking_duration_ns,
             actor_scheduled_duration,
             actor_scheduled_cnt,
             actor_fast_poll_duration,
@@ -952,6 +924,8 @@ impl StreamingMetrics {
             sink_input_row_count,
             mview_input_row_count,
             exchange_frag_recv_size,
+            actor_output_buffer_blocking_duration_ns,
+            actor_input_buffer_blocking_duration_ns,
             join_lookup_miss_count,
             join_lookup_total_count,
             join_insert_cache_miss_count,
@@ -1012,8 +986,6 @@ impl StreamingMetrics {
             jemalloc_active_bytes,
             jvm_allocated_bytes,
             jvm_active_bytes,
-            user_compute_error_count,
-            user_source_reader_error_count,
             materialize_cache_hit_count,
             materialize_cache_total_count,
             stream_memory_usage,

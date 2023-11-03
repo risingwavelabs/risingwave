@@ -272,3 +272,24 @@
                     │     └─BatchScan { table: t1, columns: [t1.a], distribution: SomeShard }
                     └─BatchExchange { order: [], dist: Single }
                       └─BatchScan { table: t2, columns: [], distribution: SomeShard }
+- sql: |
+    create table b (b1 varchar);
+    select * from  b cross join repeat(b1, 2);
+  logical_plan: |-
+    LogicalProject { exprs: [b.b1, ] }
+    └─LogicalApply { type: Inner, on: true, correlated_id: 1 }
+      ├─LogicalScan { table: b, columns: [b.b1, b._row_id] }
+      └─LogicalValues { rows: [[Repeat(CorrelatedInputRef { index: 0, correlated_id: 1 }, 2:Int32)]], schema: Schema { fields: [:Varchar] } }
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [b.b1, Repeat(b.b1, 2:Int32) as $expr1] }
+      └─BatchHashJoin { type: Inner, predicate: b.b1 IS NOT DISTINCT FROM b.b1, output: all }
+        ├─BatchExchange { order: [], dist: HashShard(b.b1) }
+        │ └─BatchScan { table: b, columns: [b.b1], distribution: SomeShard }
+        └─BatchExchange { order: [], dist: HashShard(b.b1) }
+          └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+            ├─BatchExchange { order: [], dist: Single }
+            │ └─BatchHashAgg { group_key: [b.b1], aggs: [] }
+            │   └─BatchExchange { order: [], dist: HashShard(b.b1) }
+            │     └─BatchScan { table: b, columns: [b.b1], distribution: SomeShard }
+            └─BatchValues { rows: [[]] }

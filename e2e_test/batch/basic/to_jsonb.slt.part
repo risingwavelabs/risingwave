@@ -1,0 +1,259 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+query T
+select to_jsonb('Fred said "Hi."'::text)
+----
+"Fred said \"Hi.\""
+
+query T
+select to_jsonb(row(42, 'Fred said "Hi."'::text))
+----
+{"f1": 42, "f2": "Fred said \"Hi.\""}
+
+query T
+SELECT to_jsonb('hello'::text);
+----
+"hello"
+
+query T
+SELECT to_jsonb('hello'::varchar);
+----
+"hello"
+
+query T
+SELECT to_jsonb(10::integer);
+----
+10
+
+query T
+SELECT to_jsonb(15.87::real);
+----
+15.869999885559082
+
+query T
+SELECT to_jsonb(99.99::numeric);
+----
+99.99
+
+query T
+SELECT to_jsonb(123.4567890123456789012345678::decimal);
+----
+123.45678901234568
+
+query T
+SELECT to_jsonb(9.9999999999999999999999999999::decimal);
+----
+10.0
+
+query T
+SELECT to_jsonb(-9.9999999999999999999999999999::decimal);
+----
+-10.0
+
+query T
+select to_jsonb('infinity'::numeric);
+----
+"Infinity"
+
+query T
+select to_jsonb('nan'::numeric);
+----
+"NaN"
+
+query T
+select to_jsonb('-infinity'::numeric);
+----
+"-Infinity"
+
+query T
+SELECT to_jsonb(true);
+----
+true
+
+query T
+SELECT to_jsonb('2023-10-01'::date);
+----
+"2023-10-01"
+
+query T
+SELECT to_jsonb('10:23:45'::time);
+----
+"10:23:45"
+
+query T
+select to_jsonb('30 second'::interval);
+----
+"00:00:30"
+
+query T
+SELECT to_jsonb('2023-10-01 10:23:45'::timestamp);
+----
+"2023-10-01T10:23:45"
+
+query T
+SELECT to_jsonb('2014-05-28 12:22:35.614298'::timestamp);
+----
+"2014-05-28T12:22:35.614298"
+
+query T
+SELECT to_jsonb('2023-06-01 00:00:00Z'::timestamptz);
+----
+"2023-06-01T00:00:00+00:00"
+
+statement ok
+set timezone to 'UTC';
+
+query T
+SELECT to_jsonb('2014-05-28 12:22:35.614298'::timestamptz);
+----
+"2014-05-28T12:22:35.614298+00:00"
+
+statement ok
+set timezone to 'Europe/London';
+
+query T
+SELECT to_jsonb('2014-05-28 12:22:35.614298'::timestamptz);
+----
+"2014-05-28T11:22:35.614298+00:00"
+
+statement ok
+SET timezone = 'EST5EDT';
+
+query T
+SELECT to_jsonb('2014-05-28 12:22:35.614298'::timestamptz);
+----
+"2014-05-28T16:22:35.614298+00:00"
+
+statement ok
+set timezone to 'UTC';
+
+query T
+SELECT to_jsonb('2014-05-28 12:22:35.614298'::timestamptz);
+----
+"2014-05-28T12:22:35.614298+00:00"
+
+query T
+SELECT to_jsonb('{"key": "value"}'::jsonb);
+----
+{"key": "value"}
+
+query T
+select to_jsonb(null::varchar);
+----
+null
+
+query T
+SELECT to_jsonb(NULL::integer);
+----
+null
+
+query T
+SELECT to_jsonb(NULL::text);
+----
+null
+
+query T
+SELECT to_jsonb(''::text);
+----
+""
+
+query T
+select to_jsonb(ARRAY[]::integer[]);
+----
+[]
+
+query I
+select to_jsonb(1::bigint);
+----
+1.0
+
+query I
+select to_jsonb(1::bigint << 55);
+----
+3.602879701896397e16
+
+query I
+select to_jsonb(1::bigint << 63);
+----
+-9.223372036854776e18
+
+query T
+SELECT to_jsonb(1456::rw_int256);
+----
+"1456"
+
+query T
+SELECT to_jsonb('\xDeAdBeEf'::bytea);
+----
+"\\xdeadbeef"
+
+query T
+select to_jsonb(ARRAY[3,4,5,6]);
+----
+[3, 4, 5, 6]
+
+query T
+SELECT to_jsonb(ARRAY['apple', 'banana', 'cherry']);
+----
+["apple", "banana", "cherry"]
+
+query T
+SELECT to_jsonb(ARRAY[ARRAY['apple', 'banana', 'cherry'], ARRAY['monkey', 'elephant', 'squid'], ARRAY['one', 'two', 'three']]);
+----
+[["apple", "banana", "cherry"], ["monkey", "elephant", "squid"], ["one", "two", "three"]]
+
+query T
+select to_jsonb(row(row(1, 5), 'tojsonb', null));
+----
+{"f1": {"f1": 1, "f2": 5}, "f2": "tojsonb", "f3": null}
+
+query T
+select to_jsonb(row(row(1, 5)::struct<a int, b int>, 'tojsonb', null));
+----
+{"f1": {"a": 1, "b": 5}, "f2": "tojsonb", "f3": null}
+
+query T
+select to_jsonb(array[row(1, 't')::struct<a int, b varchar>, row(2, 's')::struct<a int, b varchar>, row(3, 'g')::struct<a int, b varchar>]);
+----
+[{"a": 1, "b": "t"}, {"a": 2, "b": "s"}, {"a": 3, "b": "g"}]
+
+query T
+select to_jsonb(row(row(1, array[1, 3, 4], row(45, 'to_char', 'to_date', array['2023-10-10 10:55:45'::timestamp, '2023-10-01 10:23:45'::timestamp])), 'tojsonb', null));
+----
+{"f1": {"f1": 1, "f2": [1, 3, 4], "f3": {"f1": 45, "f2": "to_char", "f3": "to_date", "f4": ["2023-10-10T10:55:45", "2023-10-01T10:23:45"]}}, "f2": "tojsonb", "f3": null}
+
+statement ok
+CREATE TABLE structtype (st struct<key int, val varchar>);
+
+statement ok
+INSERT INTO structtype VALUES (row(6, 'v1')), (row(7, 'v2'));
+
+query T
+SELECT to_jsonb(st) from structtype;
+----
+{"key": 6, "val": "v1"}
+{"key": 7, "val": "v2"}
+
+statement ok
+DROP TABLE structtype;
+
+statement ok
+CREATE TABLE alltypes (c1 BOOLEAN, c2 SMALLINT, c3 INT, c4 BIGINT, c5 REAL, c6 DOUBLE, c7 NUMERIC, c8 DATE, c9 CHARACTER VARYING, c10 TIME, c11 TIMESTAMP, c12 TIMESTAMPTZ, c13 INTERVAL, c14 STRUCT<a INT>, c15 INT[], c16 CHARACTER VARYING[], c17 BYTEA, c18 JSONB);
+
+statement ok
+INSERT INTO alltypes VALUES (true, (SMALLINT '786'), (INT '1409922817'), (BIGINT '925'), (REAL '536'), (FLOAT '782'), (487), DATE '2023-09-01', 'IwfwuseZmg', TIME '22:12:54', TIMESTAMP '2023-09-01 22:12:42', '2023-09-01 22:12:42Z'::TIMESTAMPTZ, (INTERVAL '-78'), CAST(NULL AS STRUCT<a INT>), ARRAY[(INT '354'), (INT '627')], ARRAY['yRMgX7pFXW', 'r7PAN6KB2b', 'NQJbRQoVib'], NULL, JSONB '{"key1": "value1"}'), (true, (SMALLINT '82'), (INT '216'), (BIGINT '732'), (REAL '337'), (FLOAT '772'), (378), DATE '2023-09-01', '6nNf6LL2C1', TIME '22:12:25', TIMESTAMP '2023-09-01 21:12:54', '2023-09-01 21:12:54Z'::TIMESTAMPTZ, (INTERVAL '86400'), CAST(NULL AS STRUCT<a INT>), ARRAY[(INT '0')], ARRAY['3NE5ewEx4T'], BYTEA'\xDEADBEEF', JSONB '{"key2": "value2"}'), (false, (SMALLINT '761'), (INT '966'), (BIGINT '153'), (REAL '1023789467'), (FLOAT '752'), (630), DATE '2023-09-01', 'ySrgeBXDuc', TIME '22:11:17', TIMESTAMP '2023-09-01 22:11:50', NULL, (INTERVAL '-91'), CAST(NULL AS STRUCT<a INT>), ARRAY[(INT '77'), (INT '718'), (INT '401'), (INT '874')], ARRAY['k6N5rUX8p1', 'sFRQ1u2ihF'], BYTEA'\x0123456789ABCDEF', NULL), (false, (SMALLINT '255'), (INT '1'), (BIGINT '9223372036854775807'), (REAL '0'), (FLOAT '775'), (-2147483648), DATE '2023-09-01', '2498VN2txc', TIME '22:11:54', TIMESTAMP '2023-09-01 22:12:54', '2023-09-01 21:12:54Z'::TIMESTAMPTZ, (INTERVAL '-84'), CAST(NULL AS STRUCT<a INT>), ARRAY[(INT '246'), (INT '120'), (INT '154')], ARRAY['Rau1Iezv50', 'uWtqX1jIP0', 'N356wachUq', 'tDVFlmtDNk'], BYTEA'\x00FF00', JSONB '{"key3": ["value3", "value55"]}'), (true, (SMALLINT '933'), (INT '915'), (BIGINT '433'), (REAL '734'), (FLOAT '438'), (998512901), DATE '2023-09-01', 'Qgfzps4qkX', TIME '22:12:54', TIMESTAMP '2023-09-01 22:12:02', '2023-09-01 22:12:02Z'::TIMESTAMPTZ, (INTERVAL '3600'), CAST(NULL AS STRUCT<a INT>), ARRAY[(INT '329'), (INT '577'), (INT '255'), (INT '70')], ARRAY['1HQloIk7oW', 'ixxNgP8vaq', '9CSOsftyRA', 'jiqocRdrUC'], NULL, JSONB '{"key4": {"inner_key": "value4"}}'), (true, (SMALLINT '7096'), (INT '-1627323193'), (BIGINT '191'), (REAL '483'), (FLOAT '85'), (-2147483648), DATE '2023-09-01', 'sLgs9Am1iP', TIME '22:12:40', TIMESTAMP '2023-09-01 22:11:27', NULL, (INTERVAL '-60'), CAST(NULL AS STRUCT<a INT>), ARRAY[(INT '252'), (INT '137'), (INT '110'), (INT '574')], ARRAY['t5073iSwvs'], BYTEA'\x80', NULL), (false, (SMALLINT '972'), (INT '-235825836'), (BIGINT '842'), (REAL '27'), (FLOAT '675'), (0), DATE '2023-08-25', 'uwAFEeex9Y', TIME '22:12:37', TIMESTAMP '2023-09-01 22:11:40', '2023-09-01 22:12:37Z'::TIMESTAMPTZ, (INTERVAL '28'), CAST(NULL AS STRUCT<a INT>), ARRAY[(INT '355')], ARRAY['xan6o2VHID', 'MTSy3lzImo', 'UZqnEMW60w'], BYTEA'\xAABBCCDDEEFF', '"value3"'::JSONB);
+
+query T
+SELECT to_jsonb(row(c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16, c17, c18)) from alltypes;
+----
+{"f1": true, "f10": "22:12:54", "f11": "2023-09-01T22:12:42", "f12": "2023-09-01T22:12:42+00:00", "f13": "-00:01:18", "f14": null, "f15": [354, 627], "f16": ["yRMgX7pFXW", "r7PAN6KB2b", "NQJbRQoVib"], "f17": null, "f18": {"key1": "value1"}, "f2": 786, "f3": 1409922817, "f4": 925.0, "f5": 536.0, "f6": 782.0, "f7": 487.0, "f8": "2023-09-01", "f9": "IwfwuseZmg"}
+{"f1": true, "f10": "22:12:25", "f11": "2023-09-01T21:12:54", "f12": "2023-09-01T21:12:54+00:00", "f13": "24:00:00", "f14": null, "f15": [0], "f16": ["3NE5ewEx4T"], "f17": "\\xdeadbeef", "f18": {"key2": "value2"}, "f2": 82, "f3": 216, "f4": 732.0, "f5": 337.0, "f6": 772.0, "f7": 378.0, "f8": "2023-09-01", "f9": "6nNf6LL2C1"}
+{"f1": false, "f10": "22:11:17", "f11": "2023-09-01T22:11:50", "f12": null, "f13": "-00:01:31", "f14": null, "f15": [77, 718, 401, 874], "f16": ["k6N5rUX8p1", "sFRQ1u2ihF"], "f17": "\\x0123456789abcdef", "f18": null, "f2": 761, "f3": 966, "f4": 153.0, "f5": 1023789440.0, "f6": 752.0, "f7": 630.0, "f8": "2023-09-01", "f9": "ySrgeBXDuc"}
+{"f1": false, "f10": "22:11:54", "f11": "2023-09-01T22:12:54", "f12": "2023-09-01T21:12:54+00:00", "f13": "-00:01:24", "f14": null, "f15": [246, 120, 154], "f16": ["Rau1Iezv50", "uWtqX1jIP0", "N356wachUq", "tDVFlmtDNk"], "f17": "\\x00ff00", "f18": {"key3": ["value3", "value55"]}, "f2": 255, "f3": 1, "f4": 9.223372036854776e18, "f5": 0.0, "f6": 775.0, "f7": -2147483648.0, "f8": "2023-09-01", "f9": "2498VN2txc"}
+{"f1": true, "f10": "22:12:54", "f11": "2023-09-01T22:12:02", "f12": "2023-09-01T22:12:02+00:00", "f13": "01:00:00", "f14": null, "f15": [329, 577, 255, 70], "f16": ["1HQloIk7oW", "ixxNgP8vaq", "9CSOsftyRA", "jiqocRdrUC"], "f17": null, "f18": {"key4": {"inner_key": "value4"}}, "f2": 933, "f3": 915, "f4": 433.0, "f5": 734.0, "f6": 438.0, "f7": 998512901.0, "f8": "2023-09-01", "f9": "Qgfzps4qkX"}
+{"f1": true, "f10": "22:12:40", "f11": "2023-09-01T22:11:27", "f12": null, "f13": "-00:01:00", "f14": null, "f15": [252, 137, 110, 574], "f16": ["t5073iSwvs"], "f17": "\\x80", "f18": null, "f2": 7096, "f3": -1627323193, "f4": 191.0, "f5": 483.0, "f6": 85.0, "f7": -2147483648.0, "f8": "2023-09-01", "f9": "sLgs9Am1iP"}
+{"f1": false, "f10": "22:12:37", "f11": "2023-09-01T22:11:40", "f12": "2023-09-01T22:12:37+00:00", "f13": "00:00:28", "f14": null, "f15": [355], "f16": ["xan6o2VHID", "MTSy3lzImo", "UZqnEMW60w"], "f17": "\\xaabbccddeeff", "f18": "value3", "f2": 972, "f3": -235825836, "f4": 842.0, "f5": 27.0, "f6": 675.0, "f7": 0.0, "f8": "2023-08-25", "f9": "uwAFEeex9Y"}
+
+statement ok
+DROP TABLE alltypes;

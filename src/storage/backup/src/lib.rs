@@ -29,6 +29,8 @@
 
 pub mod error;
 pub mod meta_snapshot;
+pub mod meta_snapshot_v1;
+pub mod meta_snapshot_v2;
 pub mod storage;
 
 use std::collections::HashSet;
@@ -54,10 +56,12 @@ pub struct MetaSnapshotMetadata {
     pub ssts: Vec<HummockSstableObjectId>,
     pub max_committed_epoch: u64,
     pub safe_epoch: u64,
+    #[serde(default)]
+    pub format_version: u32,
 }
 
 impl MetaSnapshotMetadata {
-    pub fn new(id: MetaSnapshotId, v: &HummockVersion) -> Self {
+    pub fn new(id: MetaSnapshotId, v: &HummockVersion, format_version: u32) -> Self {
         Self {
             id,
             hummock_version_id: v.id,
@@ -66,6 +70,7 @@ impl MetaSnapshotMetadata {
                 .collect_vec(),
             max_committed_epoch: v.max_committed_epoch,
             safe_epoch: v.safe_epoch,
+            format_version,
         }
     }
 }
@@ -102,6 +107,7 @@ impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
             hummock_version_id: m.hummock_version_id,
             max_committed_epoch: m.max_committed_epoch,
             safe_epoch: m.safe_epoch,
+            format_version: Some(m.format_version),
         }
     }
 }

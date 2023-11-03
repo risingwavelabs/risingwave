@@ -34,9 +34,10 @@ use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use sea_orm::prelude::Expr;
+use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-    QuerySelect, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect,
+    TransactionTrait,
 };
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
@@ -536,9 +537,9 @@ impl ClusterControllerInner {
                 let mut property: worker_property::ActiveModel = property.into();
 
                 // keep `is_unschedulable` unchanged.
-                property.is_streaming = ActiveValue::Set(add_property.is_streaming);
-                property.is_serving = ActiveValue::Set(add_property.is_serving);
-                property.parallel_unit_ids = ActiveValue::Set(I32Array(current_parallelism));
+                property.is_streaming = Set(add_property.is_streaming);
+                property.is_serving = Set(add_property.is_serving);
+                property.parallel_unit_ids = Set(I32Array(current_parallelism));
 
                 WorkerProperty::update(property).exec(&txn).await?;
                 txn.commit().await?;
@@ -553,25 +554,25 @@ impl ClusterControllerInner {
 
         let worker = worker::ActiveModel {
             worker_id: Default::default(),
-            worker_type: ActiveValue::Set(r#type.into()),
-            host: ActiveValue::Set(host_address.host),
-            port: ActiveValue::Set(host_address.port),
-            status: ActiveValue::Set(WorkerStatus::Starting),
-            transaction_id: ActiveValue::Set(txn_id),
+            worker_type: Set(r#type.into()),
+            host: Set(host_address.host),
+            port: Set(host_address.port),
+            status: Set(WorkerStatus::Starting),
+            transaction_id: Set(txn_id),
         };
         let insert_res = Worker::insert(worker).exec(&txn).await?;
         let worker_id = insert_res.last_insert_id as WorkerId;
         if r#type == PbWorkerType::ComputeNode {
             let property = worker_property::ActiveModel {
-                worker_id: ActiveValue::Set(worker_id),
-                parallel_unit_ids: ActiveValue::Set(I32Array(derive_parallel_units(
+                worker_id: Set(worker_id),
+                parallel_unit_ids: Set(I32Array(derive_parallel_units(
                     *txn_id.as_ref().unwrap(),
                     0,
                     add_property.worker_node_parallelism as _,
                 ))),
-                is_streaming: ActiveValue::Set(add_property.is_streaming),
-                is_serving: ActiveValue::Set(add_property.is_streaming),
-                is_unschedulable: ActiveValue::Set(add_property.is_streaming),
+                is_streaming: Set(add_property.is_streaming),
+                is_serving: Set(add_property.is_streaming),
+                is_unschedulable: Set(add_property.is_streaming),
             };
             WorkerProperty::insert(property).exec(&txn).await?;
         }
@@ -588,8 +589,8 @@ impl ClusterControllerInner {
 
     pub async fn activate_worker(&self, worker_id: WorkerId) -> MetaResult<PbWorkerNode> {
         let worker = worker::ActiveModel {
-            worker_id: ActiveValue::Set(worker_id),
-            status: ActiveValue::Set(WorkerStatus::Running),
+            worker_id: Set(worker_id),
+            status: Set(WorkerStatus::Running),
             ..Default::default()
         };
 

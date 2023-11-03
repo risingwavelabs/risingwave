@@ -29,7 +29,7 @@ select jsonb_agg(v2::int2) from t;
 query T
 select jsonb_agg(v2::int8) from t;
 ----
-[null, 1, 2, 3]
+[null, 1.0, 2.0, 3.0]
 
 query T
 select jsonb_agg(v2::float4) from t;

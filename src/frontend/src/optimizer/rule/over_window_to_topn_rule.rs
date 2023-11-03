@@ -65,8 +65,6 @@ impl Rule for OverWindowToTopNRule {
         // The filter is directly on top of the over window after predicate pushdown.
         let over_window = plan.as_logical_over_window()?;
 
-        // TODO(st1page): split the OverAgg if there is some part of window function can be
-        // rewritten to group topn
         if over_window.window_functions().len() != 1 {
             // Queries with multiple window function calls are not supported yet.
             return None;
@@ -84,7 +82,10 @@ impl Rule for OverWindowToTopNRule {
             // Only `ROW_NUMBER` and `RANK` can be optimized to TopN now.
             WindowFuncKind::RowNumber => false,
             WindowFuncKind::Rank => true,
-            WindowFuncKind::DenseRank => unimplemented!("should be banned in planner"),
+            WindowFuncKind::DenseRank => {
+                ctx.warn_to_user("`dense_rank` is not supported in Top-N pattern, will fallback to inefficient implementation");
+                return None;
+            }
             _ => unreachable!("window functions other than rank functions should not reach here"),
         };
 
@@ -161,7 +162,9 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
             assert_eq!(input_ref.index, window_func_pos);
             let v = v.cast_implicit(DataType::Int64).ok()?.fold_const().ok()??;
             let v = *v.as_int64();
-            if let Some(eq) = eq && eq != v {
+            if let Some(eq) = eq
+                && eq != v
+            {
                 tracing::warn!(
                     "Failed to optimize rank predicate with conflicting equal conditions."
                 );
