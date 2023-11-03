@@ -13,6 +13,8 @@
 // limitations under the License.
 
 fn main() {
+    // This function extracts WITH options from the Rust code and maintains
+    // them in a single source of truth `with_options.yaml`.
     with_options_build::update_with_options_yaml();
 
     let proto_dir = "./src/test_data/proto_recursive";
