@@ -850,7 +850,7 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             .map(|meta| WriteResult::try_from(meta, &self.partition_type))
             .collect::<Result<Vec<WriteResult>>>()?;
         if write_results.is_empty() || write_results.iter().all(|r| r.data_files.is_empty()) {
-            tracing::info!("No data to commit in epoch {epoch}.");
+            tracing::debug!(?epoch, "no data to commit");
             return Ok(());
         }
         let mut txn = Transaction::new(&mut self.table);
