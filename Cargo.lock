@@ -7843,6 +7843,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "cfg-or-panic",
+ "expect-test",
  "futures",
  "itertools 0.11.0",
  "jni",

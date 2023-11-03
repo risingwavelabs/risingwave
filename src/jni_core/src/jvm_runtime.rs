@@ -138,12 +138,12 @@ pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::E
         () => {{
             $crate::for_all_native_methods! {gen_native_method_array}
         }};
-        ({$({ $func_name:ident, {$($ret:tt)+}, {$($args:tt)*} }),*}) => {
+        ({$({ $func_name:ident, {$($ret:tt)+}, {$($args:tt)*} })*}) => {
             [
                 $(
                     {
                         let fn_ptr = paste::paste! {[<Java_com_risingwave_java_binding_Binding_ $func_name> ]} as *mut c_void;
-                        let sig = $crate::gen_jni_sig! { $($ret)+ ($($args)*)};
+                        let sig = $crate::gen_jni_sig! { {$($ret)+}, {$($args)*}};
                         NativeMethod {
                             name: JNIString::from(stringify! {$func_name}),
                             sig: JNIString::from(sig),
@@ -161,7 +161,8 @@ pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::E
     Ok(())
 }
 
-/// Load JVM memory statistics from the runtime. If JVM is not initialized or fail to initialize, return zero.
+/// Load JVM memory statistics from the runtime. If JVM is not initialized or fail to initialize,
+/// return zero.
 pub fn load_jvm_memory_stats() -> (usize, usize) {
     match JVM_RESULT.get() {
         Some(Ok(jvm)) => {
