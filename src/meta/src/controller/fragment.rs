@@ -178,7 +178,7 @@ impl CatalogController {
         let fragment = fragment::Model {
             fragment_id: pb_fragment_id as _,
             table_id,
-            fragment_type_mask: pb_fragment_type_mask,
+            fragment_type_mask: pb_fragment_type_mask as _,
             distribution_type,
             stream_node,
             vnode_mapping,
@@ -721,7 +721,7 @@ mod tests {
         } = pb_fragment;
 
         assert_eq!(fragment_id, TEST_FRAGMENT_ID as u32);
-        assert_eq!(fragment_type_mask, fragment.fragment_type_mask);
+        assert_eq!(fragment_type_mask, fragment.fragment_type_mask as u32);
         assert_eq!(
             pb_distribution_type,
             PbFragmentDistributionType::from(fragment.distribution_type) as i32

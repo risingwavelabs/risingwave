@@ -23,7 +23,7 @@ pub struct Model {
     #[sea_orm(primary_key)]
     pub fragment_id: FragmentId,
     pub table_id: TableId,
-    pub fragment_type_mask: u32,
+    pub fragment_type_mask: i32,
     pub distribution_type: DistributionType,
     pub stream_node: StreamNode,
     pub vnode_mapping: Option<FragmentVnodeMapping>,
