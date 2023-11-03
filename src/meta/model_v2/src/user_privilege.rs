@@ -12,19 +12,69 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::user::grant_privilege::PbAction;
 use sea_orm::entity::prelude::*;
 
-use crate::{ObjectId, UserId};
+use crate::{ObjectId, PrivilegeId, UserId};
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
+#[sea_orm(rs_type = "String", db_type = "String(None)")]
+pub enum Action {
+    #[sea_orm(string_value = "INSERT")]
+    Insert,
+    #[sea_orm(string_value = "SELECT")]
+    Select,
+    #[sea_orm(string_value = "UPDATE")]
+    Update,
+    #[sea_orm(string_value = "DELETE")]
+    Delete,
+    #[sea_orm(string_value = "USAGE")]
+    Usage,
+    #[sea_orm(string_value = "CREATE")]
+    Create,
+    #[sea_orm(string_value = "CONNECT")]
+    Connect,
+}
+
+impl From<PbAction> for Action {
+    fn from(action: PbAction) -> Self {
+        match action {
+            PbAction::Unspecified => unreachable!("unspecified action"),
+            PbAction::Insert => Self::Insert,
+            PbAction::Select => Self::Select,
+            PbAction::Update => Self::Update,
+            PbAction::Delete => Self::Delete,
+            PbAction::Usage => Self::Usage,
+            PbAction::Create => Self::Create,
+            PbAction::Connect => Self::Connect,
+        }
+    }
+}
+
+impl From<Action> for PbAction {
+    fn from(action: Action) -> Self {
+        match action {
+            Action::Insert => Self::Insert,
+            Action::Select => Self::Select,
+            Action::Update => Self::Update,
+            Action::Delete => Self::Delete,
+            Action::Usage => Self::Usage,
+            Action::Create => Self::Create,
+            Action::Connect => Self::Connect,
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "user_privilege")]
 pub struct Model {
     #[sea_orm(primary_key)]
-    pub id: i32,
+    pub id: PrivilegeId,
+    pub dependent_id: Option<PrivilegeId>,
     pub user_id: UserId,
     pub oid: ObjectId,
     pub granted_by: UserId,
-    pub actions: String,
+    pub action: Action,
     pub with_grant_option: bool,
 }
 
@@ -54,6 +104,14 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     User1,
+    #[sea_orm(
+        belongs_to = "Entity",
+        from = "Column::DependentId",
+        to = "Column::Id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    SelfRef,
 }
 
 impl Related<super::object::Entity> for Entity {

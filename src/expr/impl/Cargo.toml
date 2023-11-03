@@ -29,7 +29,7 @@ futures-async-stream = { workspace = true }
 futures-util = "0.3"
 hex = "0.4"
 itertools = "0.11"
-jsonbb = "0.1"
+jsonbb = "0.1.2"
 md5 = "0.7"
 num-traits = "0.2"
 regex = "1"

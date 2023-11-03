@@ -112,7 +112,7 @@ criterion = { version = "0.5", features = ["async_futures"] }
 tonic = { package = "madsim-tonic", version = "0.4.0" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
 prost = { version = "0.12" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "186fde7663545d1d6a5856ce9fbbc541224eadfb" }
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "5a5202d1f3502f0cf82041044b0427434da59adc" }
 arrow-array = "48"
 arrow-cast = "48"
 arrow-schema = "48"
@@ -120,6 +120,7 @@ arrow-buffer = "48"
 arrow-flight = "48"
 arrow-select = "48"
 arrow-ord = "48"
+thiserror-ext = "0.0.1"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
   "profiling",

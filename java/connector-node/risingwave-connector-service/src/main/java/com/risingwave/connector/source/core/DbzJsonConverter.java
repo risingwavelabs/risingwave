@@ -12,10 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(error_generic_member_access)]
+package com.risingwave.connector.source.core;
 
-mod error;
-mod external;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.json.JsonConverter;
 
-pub use error::{Error, Result};
-pub use external::ArrowFlightUdfClient;
+/**
+ * Customize the JSON converter to avoid outputting the `schema` field but retian `payload` field in
+ * the JSON output. e.g.
+ *
+ * <pre>
+ * {
+ *     "schema": null,
+ *     "payload": {
+ *     	...
+ *     }
+ * }
+ * </pre>
+ */
+public class DbzJsonConverter extends JsonConverter {
+    @Override
+    public ObjectNode asJsonSchema(Schema schema) {
+        return null;
+    }
+}
