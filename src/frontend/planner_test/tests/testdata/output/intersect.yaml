@@ -46,12 +46,12 @@
                 └── StreamExchange Hash([0, 1, 2]) from 2
 
     Fragment 1
-    Chain { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) } { state table: 5 }
+    StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) } { state table: 5 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 2
-    Chain { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) } { state table: 6 }
+    StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) } { state table: 6 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -149,12 +149,12 @@
     └── StreamExchange Hash([0, 1, 2]) from 3
 
     Fragment 2
-    Chain { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) } { state table: 5 }
+    StreamTableScan { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) } { state table: 5 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    Chain { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) } { state table: 6 }
+    StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) } { state table: 6 }
     ├── Upstream
     └── BatchPlanNode
 

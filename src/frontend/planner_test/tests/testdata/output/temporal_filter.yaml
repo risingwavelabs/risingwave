@@ -64,7 +64,8 @@
         ├── StreamDynamicFilter { predicate: (t1.ts >= $expr1), output_watermarks: [t1.ts], output: [t1.ts, t1._row_id], cleaned_by_watermark: true }
         │   ├── left table: 2
         │   ├── right table: 3
-        │   ├── Chain { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) } { state table: 4 }
+        │   ├── StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+        │   │   ├── state table: 4
         │   │   ├── Upstream
         │   │   └── BatchPlanNode
         │   └── StreamExchange Broadcast from 1
