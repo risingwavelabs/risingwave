@@ -4244,9 +4244,9 @@ dependencies = [
 
 [[package]]
 name = "jsonbb"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efd95430271266a57cbb8fd31115559c853fcaa5f367d32c4720034f7bd37b7f"
+checksum = "1f2dc222074a1d88750778b7b0ed81925cb9f36443df447ab11c51d5686609b2"
 dependencies = [
  "bytes",
  "serde",
