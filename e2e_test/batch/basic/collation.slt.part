@@ -61,3 +61,31 @@ t
 # parser issue
 statement error
 select varchar 't' collate "C";
+
+# collate in create table
+
+statement ok
+create table t (
+  a text collate "C",
+  b int
+);
+
+statement ok
+create table t (
+  a text collate "POSIX",
+  b int
+);
+
+statement ok
+create table t (
+  a text collate "pOsIx",
+  b int
+);
+
+# PostgreSQL raise error that collate cannot apply to type `int`
+statement ok
+create table t (
+  a text collate "POSIX",
+  b int collate "C"
+);
+
