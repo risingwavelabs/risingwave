@@ -447,7 +447,7 @@ message ExchangeNode {
   DispatchStrategy strategy = 1;
 }
 
-// Decides which kind of Executor will be used 
+// Decides which kind of Executor will be used
 enum StreamScanType {
   CHAIN_UNSPECIFIED = 0;
 
