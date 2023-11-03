@@ -89,6 +89,7 @@ pub enum AlterIndexOperation {
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterViewOperation {
     RenameView { view_name: ObjectName },
+    ChangeOwner { new_owner_name: Ident },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -96,6 +97,7 @@ pub enum AlterViewOperation {
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSinkOperation {
     RenameSink { sink_name: ObjectName },
+    ChangeOwner { new_owner_name: Ident },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -104,6 +106,7 @@ pub enum AlterSinkOperation {
 pub enum AlterSourceOperation {
     RenameSource { source_name: ObjectName },
     AddColumn { column_def: ColumnDef },
+    ChangeOwner { new_owner_name: Ident },
 }
 
 impl fmt::Display for AlterTableOperation {
@@ -178,6 +181,9 @@ impl fmt::Display for AlterViewOperation {
             AlterViewOperation::RenameView { view_name } => {
                 write!(f, "RENAME TO {view_name}")
             }
+            AlterViewOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {}", new_owner_name)
+            }
         }
     }
 }
@@ -187,6 +193,9 @@ impl fmt::Display for AlterSinkOperation {
         match self {
             AlterSinkOperation::RenameSink { sink_name } => {
                 write!(f, "RENAME TO {sink_name}")
+            }
+            AlterSinkOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {}", new_owner_name)
             }
         }
     }
@@ -200,6 +209,9 @@ impl fmt::Display for AlterSourceOperation {
             }
             AlterSourceOperation::AddColumn { column_def } => {
                 write!(f, "ADD COLUMN {column_def}")
+            }
+            AlterSourceOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {}", new_owner_name)
             }
         }
     }

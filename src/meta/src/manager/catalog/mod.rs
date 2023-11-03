@@ -37,6 +37,7 @@ use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink,
     Source, StreamJobStatus, Table, View,
 };
+use risingwave_pb::ddl_service::alter_owner_request::Entity;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -1743,27 +1744,55 @@ impl CatalogManager {
         Ok(version)
     }
 
-    pub async fn alter_table_owner(
+    pub async fn alter_owner(
         &self,
-        table_id: SchemaId,
+        entity: Entity,
         owner_id: UserId,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
-        database_core.ensure_table_id(table_id)?;
 
-        let mut table = database_core.tables.get(&table_id).unwrap().clone();
-        table.owner = owner_id;
-        // CREATE TABLE (...) WITH (...) OWNER xxx
-        // TODO: table.definition = `alter_owner_if...`
+        let relation_info;
+        match entity {
+            Entity::TableId(table_id) => {
+                database_core.ensure_table_id(table_id)?;
+                let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+                let mut table = tables.get_mut(table_id).unwrap();
+                table.owner = owner_id;
+                relation_info = Some(RelationInfo::Table(table.clone()));
+                commit_meta!(self, tables)?;
+            }
+            Entity::ViewId(view_id) => {
+                database_core.ensure_view_id(view_id)?;
+                let mut views = BTreeMapTransaction::new(&mut database_core.views);
+                let mut view = views.get_mut(view_id).unwrap();
+                view.owner = owner_id;
+                relation_info = Some(RelationInfo::View(view.clone()));
+                commit_meta!(self, views)?;
+            }
+            Entity::SourceId(source_id) => {
+                let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+                let mut source = sources.get_mut(source_id).unwrap();
+                source.owner = owner_id;
+                relation_info = Some(RelationInfo::Source(source.clone()));
+                commit_meta!(self, sources)?;
+            }
+            Entity::SinkId(sink_id) => {
+                let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+                let mut sink = sinks.get_mut(sink_id).unwrap();
+                sink.owner = owner_id;
+                relation_info = Some(RelationInfo::Sink(sink.clone()));
+                commit_meta!(self, sinks)?;
+            }
+            Entity::SchemaId(_schema_id) => unimplemented!(),
+            Entity::DatabaseId(_schema_id) => unimplemented!(),
+        };
 
         let version = self
             .notify_frontend(
                 Operation::Update,
                 Info::RelationGroup(RelationGroup {
-                    relations: vec![Relation {
-                        relation_info: RelationInfo::Table(table).into(),
-                    }],
+                    relations: vec![Relation { relation_info }],
                 }),
             )
             .await;

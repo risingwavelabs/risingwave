@@ -23,6 +23,7 @@ use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_pb::ddl_service::alter_owner_request::Entity;
 use risingwave_sqlparser::ast::*;
 
 use self::util::DataChunkToRowSetAdapter;
@@ -33,11 +34,11 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_owner;
 mod alter_relation_rename;
 mod alter_source_column;
 mod alter_system;
 mod alter_table_column;
-mod alter_table_owner;
 pub mod alter_user;
 pub mod cancel_job;
 mod comment;
@@ -477,7 +478,16 @@ pub async fn handle(
         Statement::AlterTable {
             name,
             operation: AlterTableOperation::ChangeOwner { new_owner_name },
-        } => alter_table_owner::handle_alter_table_owner(handler_args, name, new_owner_name).await,
+        } => {
+            alter_owner::handle_alter_owner(
+                handler_args,
+                name,
+                new_owner_name,
+                Entity::TableId(0),
+                Some(TableType::Table),
+            )
+            .await
+        }
         Statement::AlterIndex {
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },
@@ -499,10 +509,48 @@ pub async fn handle(
                 alter_relation_rename::handle_rename_view(handler_args, name, view_name).await
             }
         }
+        Statement::AlterView {
+            materialized,
+            name,
+            operation: AlterViewOperation::ChangeOwner { new_owner_name },
+        } => {
+            if materialized {
+                alter_owner::handle_alter_owner(
+                    handler_args,
+                    name,
+                    new_owner_name,
+                    Entity::TableId(0),
+                    Some(TableType::MaterializedView),
+                )
+                .await
+            } else {
+                alter_owner::handle_alter_owner(
+                    handler_args,
+                    name,
+                    new_owner_name,
+                    Entity::ViewId(0),
+                    None,
+                )
+                .await
+            }
+        }
         Statement::AlterSink {
             name,
             operation: AlterSinkOperation::RenameSink { sink_name },
         } => alter_relation_rename::handle_rename_sink(handler_args, name, sink_name).await,
+        Statement::AlterSink {
+            name,
+            operation: AlterSinkOperation::ChangeOwner { new_owner_name },
+        } => {
+            alter_owner::handle_alter_owner(
+                handler_args,
+                name,
+                new_owner_name,
+                Entity::SinkId(0),
+                None,
+            )
+            .await
+        }
         Statement::AlterSource {
             name,
             operation: AlterSourceOperation::RenameSource { source_name },
@@ -511,6 +559,19 @@ pub async fn handle(
             name,
             operation: operation @ AlterSourceOperation::AddColumn { .. },
         } => alter_source_column::handle_alter_source_column(handler_args, name, operation).await,
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::ChangeOwner { new_owner_name },
+        } => {
+            alter_owner::handle_alter_owner(
+                handler_args,
+                name,
+                new_owner_name,
+                Entity::SourceId(0),
+                None,
+            )
+            .await
+        }
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }

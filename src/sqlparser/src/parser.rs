@@ -2908,6 +2908,11 @@ impl Parser {
             } else {
                 return self.expected("TO after RENAME", self.peek_token());
             }
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterViewOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
         } else {
             return self.expected(
                 &format!(
@@ -2934,6 +2939,11 @@ impl Parser {
             } else {
                 return self.expected("TO after RENAME", self.peek_token());
             }
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterSinkOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
         } else {
             return self.expected("RENAME after ALTER SINK", self.peek_token());
         };
@@ -2958,6 +2968,11 @@ impl Parser {
             let _if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
             let column_def = self.parse_column_def()?;
             AlterSourceOperation::AddColumn { column_def }
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterSourceOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
         } else {
             return self.expected("RENAME | ADD COLUMN after ALTER SOURCE", self.peek_token());
         };

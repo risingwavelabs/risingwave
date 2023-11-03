@@ -24,6 +24,7 @@ use risingwave_pb::catalog::{
     PbComment, PbCreateType, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
     PbView,
 };
+use risingwave_pb::ddl_service::alter_owner_request::Entity;
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::create_connection_request;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -149,7 +150,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn alter_source_name(&self, source_id: u32, source_name: &str) -> Result<()>;
 
-    async fn alter_table_owner(&self, table_id: u32, owner_id: u32) -> Result<()>;
+    async fn alter_owner(&self, entity: Entity, owner_id: u32) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -393,11 +394,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn alter_table_owner(&self, table_id: u32, owner_id: u32) -> Result<()> {
-        let version = self
-            .meta_client
-            .alter_table_owner(table_id, owner_id)
-            .await?;
+    async fn alter_owner(&self, entity: Entity, owner_id: u32) -> Result<()> {
+        let version = self.meta_client.alter_owner(entity, owner_id).await?;
         self.wait_version(version).await
     }
 }

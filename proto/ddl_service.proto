@@ -168,12 +168,19 @@ message AlterRelationNameResponse {
   uint64 version = 2;
 }
 
-message AlterTableOwnerRequest {
-  uint32 table_id = 1;
-  uint32 owner_id = 2;
+message AlterOwnerRequest {
+  oneof entity {
+    uint32 table_id = 1;
+    uint32 view_id = 2;
+    uint32 source_id = 3;
+    uint32 sink_id = 4;
+    uint32 schema_id = 5;
+    uint32 database_id = 6;
+  }
+  uint32 owner_id = 20;
 }
 
-message AlterTableOwnerResponse {
+message AlterOwnerResponse {
   common.Status status = 1;
   uint64 version = 2;
 }
@@ -351,7 +358,7 @@ service DdlService {
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
   rpc AlterRelationName(AlterRelationNameRequest) returns (AlterRelationNameResponse);
   rpc AlterSource(AlterSourceRequest) returns (AlterSourceResponse);
-  rpc AlterTableOwner(AlterTableOwnerRequest) returns (AlterTableOwnerResponse);
+  rpc AlterOwner(AlterOwnerRequest) returns (AlterOwnerResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);

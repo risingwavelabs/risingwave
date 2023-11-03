@@ -34,6 +34,7 @@ use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
+use risingwave_pb::ddl_service::alter_owner_request::Entity;
 use risingwave_pb::ddl_service::{create_connection_request, DdlProgress};
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -478,24 +479,24 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn alter_table_owner(&self, table_id: u32, owner_id: u32) -> Result<()> {
-        let mut pb_table = None;
-        'outer: for database in self.catalog.read().iter_databases() {
+    async fn alter_owner(&self, entity: Entity, owner_id: u32) -> Result<()> {
+        for database in self.catalog.read().iter_databases() {
             for schema in database.iter_schemas() {
-                if let Some(table) = schema.get_table_by_id(&TableId::from(table_id)) {
-                    pb_table = Some(table.to_prost(schema.id(), database.id()));
-                    break 'outer;
+                match entity {
+                    Entity::TableId(table_id) => {
+                        if let Some(table) = schema.get_table_by_id(&TableId::from(table_id)) {
+                            let mut pb_table = table.to_prost(schema.id(), database.id());
+                            pb_table.owner = owner_id;
+                            self.catalog.write().update_table(&pb_table);
+                            return Ok(());
+                        }
+                    }
+                    _ => unreachable!(),
                 }
             }
         }
 
-        if let Some(mut table) = pb_table {
-            table.owner = owner_id;
-            self.catalog.write().update_table(&table);
-            Ok(())
-        } else {
-            Err(ErrorCode::ItemNotFound(format!("table with id({})", table_id)).into())
-        }
+        Err(ErrorCode::ItemNotFound(format!("entity not found: {:?}", entity)).into())
     }
 
     async fn alter_view_name(&self, _view_id: u32, _view_name: &str) -> Result<()> {
