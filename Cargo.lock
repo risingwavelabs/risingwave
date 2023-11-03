@@ -5950,6 +5950,7 @@ dependencies = [
  "risingwave_common",
  "risingwave_sqlparser",
  "thiserror",
+ "thiserror-ext",
  "tokio-openssl",
  "tokio-postgres",
  "tracing",
@@ -9971,9 +9972,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext"
-version = "0.0.1"
+version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f28a4a7351f496662affc257826b85dd2a613406ce3cc2f07b849685e166d8c"
+checksum = "90c0860b29acf86e77541cdcb963b3ce92b4d69ac4d329c1d703c9f1f6ebc669"
 dependencies = [
  "thiserror",
  "thiserror-ext-derive",
@@ -9981,9 +9982,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext-derive"
-version = "0.0.1"
+version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67621f6d39449754da63668ddd2423ad0c81c27434c16090f8805ad1db59b621"
+checksum = "0d2bc86ee4edf87678c508a78f58789d5d7693acdd91b1dedbd1425fb8592182"
 dependencies = [
  "proc-macro2",
  "quote",
