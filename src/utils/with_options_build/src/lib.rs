@@ -13,18 +13,18 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
-use std::io::Write;
 use std::path::PathBuf;
 use std::{env, fs};
 
 use serde::Serialize;
 use syn::{parse_file, Attribute, Expr, Field, Item, LitStr, Meta};
 
-fn find_project_root() -> Option<PathBuf> {
+pub fn connector_crate_path() -> Option<PathBuf> {
     let mut current_dir = env::current_dir().ok()?;
     loop {
         if current_dir.join("Cargo.lock").exists() {
-            return Some(current_dir);
+            let connector_path: PathBuf = current_dir.join("./src/connector");
+            return Some(connector_path);
         }
         if !current_dir.pop() {
             break;
@@ -33,13 +33,11 @@ fn find_project_root() -> Option<PathBuf> {
     None
 }
 
-pub fn update_with_options_yaml() {
-    let connector_path = find_project_root().unwrap().join("./src/connector");
-
+pub fn update_with_options_yaml() -> String {
     let mut structs = vec![];
 
     // Step 1: Recursively list all the .rs files
-    for entry in walkdir::WalkDir::new(connector_path.join("src")) {
+    for entry in walkdir::WalkDir::new(connector_crate_path().unwrap().join("src")) {
         let entry = entry.expect("Failed to read directory entry");
         if entry.path().extension() == Some("rs".as_ref()) {
             // Step 2: Parse the content of the .rs file
@@ -97,9 +95,7 @@ pub fn update_with_options_yaml() {
     }
 
     // Step 8: Generate the output
-    let yaml_str = serde_yaml::to_string(&struct_infos).unwrap();
-    let mut file = std::fs::File::create(connector_path.join("with_options.yaml")).unwrap();
-    file.write_all(yaml_str.as_bytes()).unwrap();
+    serde_yaml::to_string(&struct_infos).unwrap()
 }
 
 #[derive(Debug, Serialize, Clone)]

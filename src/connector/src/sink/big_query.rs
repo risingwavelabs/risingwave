@@ -30,6 +30,7 @@ use serde_derive::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::serde_as;
 use url::Url;
+use with_options::WithOptions;
 use yup_oauth2::ServiceAccountKey;
 
 use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
@@ -45,18 +46,25 @@ use crate::sink::{
 pub const BIGQUERY_SINK: &str = "bigquery";
 const BIGQUERY_INSERT_MAX_NUMS: usize = 1024;
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct BigQueryCommon {
     #[serde(rename = "bigquery.local.path")]
     pub local_path: Option<String>,
     #[serde(rename = "bigquery.s3.path")]
     pub s3_path: Option<String>,
+
+    #[with_option(required)]
     #[serde(rename = "bigquery.project")]
     pub project: String,
+
+    #[with_option(required)]
     #[serde(rename = "bigquery.dataset")]
     pub dataset: String,
+
+    #[with_option(required)]
     #[serde(rename = "bigquery.table")]
     pub table: String,
+
     #[serde(flatten)]
     /// required keys refer to [`crate::aws_utils::AWS_DEFAULT_CONFIG`]
     pub s3_credentials: HashMap<String, String>,
@@ -95,11 +103,12 @@ impl BigQueryCommon {
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct BigQueryConfig {
     #[serde(flatten)]
     pub common: BigQueryCommon,
 
+    #[with_option(required)]
     pub r#type: String, // accept "append-only" or "upsert"
 }
 impl BigQueryConfig {

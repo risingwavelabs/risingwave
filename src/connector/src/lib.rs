@@ -112,3 +112,21 @@ where
         &"The String value unit support for one of:[“y”,“mon”,“w”,“d”,“h”,“m”,“s”, “ms”, “µs”, “ns”]",
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    /// This test ensures that `src/connector/with_options.yaml` is up-to-date with the default values specified
+    /// in this file. Developer should run `./risedev generate-with-options` to update it if this
+    /// test fails.
+    #[test]
+    fn test_with_options_yaml_up_to_date() {
+        let actual = include_str!("../with_options.yaml");
+        let expected = with_options_build::update_with_options_yaml();
+
+        // Compare the `Value` representation instead of string for normalization.
+        pretty_assertions::assert_eq!(
+            actual, expected,
+            "\n`src/connector/with_options.yaml` is not up-to-date.\nPlease run `./risedev generate-with-options` to update it."
+        );
+    }
+}

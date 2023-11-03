@@ -1,3 +1,27 @@
+BigQueryConfig:
+  fields:
+  - name: bigquery.local.path
+    field_type: Option < String >
+    required: false
+  - name: bigquery.s3.path
+    field_type: Option < String >
+    required: false
+  - name: bigquery.project
+    field_type: String
+    required: true
+  - name: bigquery.dataset
+    field_type: String
+    required: true
+  - name: bigquery.table
+    field_type: String
+    required: true
+  - name: s3_credentials
+    field_type: HashMap < String , String >
+    comments: required keys refer to [`crate::aws_utils::AWS_DEFAULT_CONFIG`]
+    required: false
+  - name: r#type
+    field_type: String
+    required: true
 ClickHouseConfig:
   fields:
   - name: clickhouse.url
