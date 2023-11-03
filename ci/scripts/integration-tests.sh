@@ -53,7 +53,14 @@ if [ "${format}" == "protobuf" ]; then
 fi
 
 echo "--- run Demos"
-python3 run_demos.py --case ${case} --format ${format}
+python3 run_demos.py --case ${case} --format ${format} || {
+
+  echo "-- run demos failed"
+  cd ../${case}
+  docker compose logs
+
+  exit 1
+}
 
 echo "--- run docker ps"
 docker ps
