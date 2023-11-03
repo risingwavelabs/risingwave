@@ -33,6 +33,7 @@
 #![feature(assert_matches)]
 #![feature(lazy_cell)]
 #![feature(array_methods)]
+#![feature(error_generic_member_access)]
 
 mod error;
 pub mod exchange_source;

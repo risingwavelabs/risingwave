@@ -31,6 +31,7 @@
 #![feature(if_let_guard)]
 #![feature(iterator_try_collect)]
 #![feature(try_blocks)]
+#![feature(error_generic_member_access)]
 
 use std::time::Duration;
 

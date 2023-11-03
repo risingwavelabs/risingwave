@@ -72,19 +72,24 @@ impl Display for TrackingIssue {
     }
 }
 
+// TODO(error): review backtrace providing of `RwError`
 #[derive(Error, Debug)]
 pub enum ErrorCode {
     #[error("internal error: {0}")]
     InternalError(String),
     #[error("connector error: {0}")]
-    ConnectorError(BoxedError),
+    ConnectorError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("Feature is not yet implemented: {0}\n{1}")]
     NotImplemented(String, TrackingIssue),
     // Tips: Use this only if it's intended to reject the query
     #[error("Not supported: {0}\nHINT: {1}")]
     NotSupported(String, String),
     #[error(transparent)]
-    IoError(IoError),
+    IoError(#[from] IoError),
     #[error("Storage error: {0}")]
     StorageError(
         #[backtrace]
@@ -92,11 +97,23 @@ pub enum ErrorCode {
         BoxedError,
     ),
     #[error("Expr error: {0}")]
-    ExprError(BoxedError),
+    ExprError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("BatchError: {0}")]
-    BatchError(BoxedError),
+    BatchError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("Array error: {0}")]
-    ArrayError(ArrayError),
+    ArrayError(
+        #[from]
+        #[backtrace]
+        ArrayError,
+    ),
     #[error("Stream error: {0}")]
     StreamError(
         #[backtrace]
@@ -104,15 +121,27 @@ pub enum ErrorCode {
         BoxedError,
     ),
     #[error("RPC error: {0}")]
-    RpcError(BoxedError),
+    RpcError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("Bind error: {0}")]
     BindError(String),
     #[error("Catalog error: {0}")]
-    CatalogError(BoxedError),
+    CatalogError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("Protocol error: {0}")]
     ProtocolError(String),
     #[error("Scheduler error: {0}")]
-    SchedulerError(BoxedError),
+    SchedulerError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("Task not found")]
     TaskNotFound,
     #[error("Item not found: {0}")]
@@ -120,9 +149,13 @@ pub enum ErrorCode {
     #[error("Invalid input syntax: {0}")]
     InvalidInputSyntax(String),
     #[error("Can not compare in memory: {0}")]
-    MemComparableError(MemComparableError),
+    MemComparableError(#[from] MemComparableError),
     #[error("Error while de/se values: {0}")]
-    ValueEncodingError(ValueEncodingError),
+    ValueEncodingError(
+        #[from]
+        #[backtrace]
+        ValueEncodingError,
+    ),
     #[error("Invalid value [{config_value:?}] for [{config_entry:?}]")]
     InvalidConfigValue {
         config_entry: String,
@@ -131,7 +164,11 @@ pub enum ErrorCode {
     #[error("Invalid Parameter Value: {0}")]
     InvalidParameterValue(String),
     #[error("Sink error: {0}")]
-    SinkError(BoxedError),
+    SinkError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
     #[error("unrecognized configuration parameter \"{0}\"")]
