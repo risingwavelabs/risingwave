@@ -17,7 +17,6 @@ fn main() {
 
     println!("cargo:rerun-if-changed={}", proto_dir);
 
-    let proto_dir = "./src/test_data/proto_recursive";
     let proto_files = ["recursive"];
     let protos: Vec<String> = proto_files
         .iter()
