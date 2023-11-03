@@ -182,6 +182,16 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
                 )
                 .into());
             }
+
+            match data_type {
+                AstDataType::Text | AstDataType::Varchar | AstDataType::Char(_) => {},
+                _ => {
+                    return Err(ErrorCode::NotSupported(
+                        format!("{} is not a collatable data type", data_type),
+                        "The only built-in collatable data types are `varchar`, please check your type".into()
+                    ).into());
+                }
+            }
         }
 
         check_valid_column_name(&name.real_value())?;

@@ -572,7 +572,20 @@ impl Binder {
             .into());
         }
 
-        self.bind_expr_inner(expr)
+        let bound_inner = self.bind_expr_inner(expr)?;
+        let ret_type = bound_inner.return_type();
+
+        match ret_type {
+            DataType::Varchar => {}
+            _ => {
+                return Err(ErrorCode::NotSupported(
+                        format!("{} is not a collatable data type", ret_type),
+                        "The only built-in collatable data types are `varchar`, please check your type".into()
+                    ).into());
+            }
+        }
+
+        Ok(bound_inner)
     }
 }
 
