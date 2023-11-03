@@ -24,4 +24,4 @@ seq $TEST_NUM | parallel MADSIM_TEST_SEED={} NEXTEST_PROFILE=ci-sim \
  --no-fail-fast \
  --cargo-metadata target/nextest/cargo-metadata.json \
  --binaries-metadata target/nextest/binaries-metadata.json \
- "$TEST_PATTERN" 2>$LOGDIR/deterministic-it-test-{}.log && rm $LOGDIR/deterministic-it-test-{}.log'
+ "$TEST_PATTERN" 1>$LOGDIR/deterministic-it-test-{}.log 2>&1 && rm $LOGDIR/deterministic-it-test-{}.log'
