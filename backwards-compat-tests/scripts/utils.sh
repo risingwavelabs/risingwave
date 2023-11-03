@@ -133,7 +133,7 @@ get_rw_versions() {
   git branch -r | grep origin
 
   echo "--- VERSION BRANCHES"
-  local branches=$(git branch -r | grep -E "^  origin\/v[0-9]*\.[0-9]*.*" | tr -d ' ' | sed -E 's/origin\/v([0-9]*\.[0-9])\/\1.0/' | tr -d '\-vrcorigin\/' | tr -d ' ')
+  local branches=$(git branch -r | grep -E "^  origin\/v[0-9]*\.[0-9]*.*" | tr -d ' ' | sed -E 's/origin\/v([0-9]*\.[0-9])/\1.0/' | tr -d '\-vrcorigin\/' | tr -d ' ')
   echo "$branches"
 
   # Then we sort them in descending order.
