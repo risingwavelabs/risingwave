@@ -19,9 +19,6 @@ walkdir = "2"
 [lib]
 proc-macro = true
 
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../../workspace-hack" }
-
 [dev-dependencies]
 
 [package.metadata.cargo-machete]
