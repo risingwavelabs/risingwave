@@ -550,7 +550,7 @@ impl CommandContext {
         }
     }
 
-    /// For `CreateStreamingJob`, returns the actors of the `Chain` nodes. For other commands,
+    /// For `CreateStreamingJob`, returns the actors of the `StreamScan` nodes. For other commands,
     /// returns an empty set.
     pub fn actors_to_track(&self) -> HashSet<ActorId> {
         match &self.command {
@@ -568,7 +568,7 @@ impl CommandContext {
         }
     }
 
-    /// For `CancelStreamingJob`, returns the actors of the `Chain` nodes. For other commands,
+    /// For `CancelStreamingJob`, returns the actors of the `StreamScan` nodes. For other commands,
     /// returns an empty set.
     pub fn actors_to_cancel(&self) -> HashSet<ActorId> {
         match &self.command {
