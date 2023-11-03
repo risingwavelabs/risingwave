@@ -92,7 +92,7 @@ pub fn update_with_options_yaml() {
 
     // Step 7: Flatten the nested options.
     let struct_infos = flatten_nested_options(struct_infos);
-    for (key, _) in struct_infos.iter() {
+    for key in struct_infos.keys() {
         println!("Struct {}", key);
     }
 
@@ -245,7 +245,7 @@ fn flatten_struct(
     deleted_keys: &mut HashSet<String>,
 ) -> Vec<FieldInfo> {
     let mut fields = Vec::new();
-    for field in struct_info.fields.iter() {
+    for field in &struct_info.fields {
         if let Some(nested_struct_info) = options.get(&field.field_type) {
             fields.append(&mut flatten_struct(
                 nested_struct_info,
