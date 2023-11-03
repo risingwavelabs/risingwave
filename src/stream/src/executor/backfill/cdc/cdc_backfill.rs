@@ -464,35 +464,16 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 if let Message::Barrier(barrier) = &msg {
                     // persist the backfill state
                     state_impl.commit_state(barrier.epoch).await?;
+
+                    // mark progress as finished
+                    if let Some(progress) = self.progress.as_mut() {
+                        progress.finish(barrier.epoch.curr, total_snapshot_processed_rows);
+                    }
                     yield msg;
                     // break after the state have been saved
                     break;
                 }
                 yield msg;
-            }
-        }
-
-        // NOTE(kwannoel):
-        // Progress can only be finished after at least 1 barrier.
-        // This is to make sure that downstream state table is flushed,
-        // before the mview is made visible.
-        // Otherwise the mview could be inconsistent with upstream.
-        // It also cannot be immediately `finished()` after yielding the barrier,
-        // by using the current_epoch of that barrier, since that will now be the previous epoch.
-        // When notifying the global barrier manager, local barrier manager always uses the
-        // current epoch, so it won't see the `finished` state when that happens,
-        // leading to the stream job never finishing.
-        // Instead we must wait for the next barrier, and finish the progress there.
-        if let Some(progress) = self.progress.as_mut() {
-            while let Some(Ok(msg)) = upstream.next().await {
-                if let Message::Barrier(barrier) = &msg {
-                    let epoch = barrier.epoch;
-                    progress.finish(epoch.curr, total_snapshot_processed_rows);
-                    yield msg;
-                    break;
-                } else {
-                    yield msg;
-                }
             }
         }
 

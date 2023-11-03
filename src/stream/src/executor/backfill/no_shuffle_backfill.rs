@@ -301,11 +301,6 @@ where
                                         // just use the last row to update `current_pos`.
                                         current_pos =
                                             Some(get_new_pos(&chunk, &pk_in_output_indices));
-                                        tracing::trace!(
-                                            epoch = snapshot_read_epoch,
-                                            ?current_pos,
-                                            "snapshot_read: update current_pos"
-                                        );
 
                                         let chunk_cardinality = chunk.cardinality() as u64;
                                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
@@ -343,11 +338,6 @@ where
                                     // As snapshot read streams are ordered by pk, so we can
                                     // just use the last row to update `current_pos`.
                                     current_pos = Some(get_new_pos(&chunk, &pk_in_output_indices));
-                                    tracing::trace!(
-                                        epoch = snapshot_read_epoch,
-                                        ?current_pos,
-                                        "snapshot_read_before_barrier: update current_pos"
-                                    );
 
                                     let chunk_cardinality = chunk.cardinality() as u64;
                                     cur_barrier_snapshot_processed_rows += chunk_cardinality;
@@ -382,11 +372,6 @@ where
                     let ops = vec![Op::Insert; chunk.capacity()];
                     let chunk = StreamChunk::from_parts(ops, chunk);
                     current_pos = Some(get_new_pos(&chunk, &pk_in_output_indices));
-                    tracing::trace!(
-                        epoch = ?barrier.epoch,
-                        ?current_pos,
-                        "barrier: update current_pos from residual snapshot rows"
-                    );
 
                     cur_barrier_snapshot_processed_rows += chunk_cardinality;
                     total_snapshot_processed_rows += chunk_cardinality;
@@ -471,7 +456,6 @@ where
             if let Some(msg) = mapping_message(msg, &self.output_indices) {
                 // If not finished then we need to update state, otherwise no need.
                 if let Message::Barrier(barrier) = &msg {
-                    let epoch = barrier.epoch;
                     if is_finished {
                         // If already finished, no need persist any state.
                     } else {
@@ -492,7 +476,7 @@ where
                         debug_assert_ne!(current_pos, None);
 
                         Self::persist_state(
-                            epoch,
+                            barrier.epoch,
                             &mut self.state_table,
                             true,
                             &current_pos,
@@ -502,39 +486,25 @@ where
                         )
                         .await?;
                         tracing::trace!(
-                            ?epoch,
+                            epoch = ?barrier.epoch,
                             ?current_pos,
                             total_snapshot_processed_rows,
                             "Backfill position persisted after completion"
                         );
                     }
+
+                    // For both backfill finished before recovery,
+                    // and backfill which just finished, we need to update mview tracker,
+                    // it does not persist this information.
+                    self.progress
+                        .finish(barrier.epoch.curr, total_snapshot_processed_rows);
+                    tracing::trace!(
+                        epoch = ?barrier.epoch,
+                        "Updated CreateMaterializedTracker"
+                    );
                     yield msg;
                     break;
                 }
-                yield msg;
-            }
-        }
-
-        // NOTE(kwannoel):
-        // Progress can only be finished after at least 1 barrier.
-        // This is to make sure that downstream state table is flushed,
-        // before the mview is made visible.
-        // Otherwise the mview could be inconsistent with upstream.
-        // It also cannot be immediately `finished()` after yielding the barrier,
-        // by using the current_epoch of that barrier, since that will now be the previous epoch.
-        // When notifying the global barrier manager, local barrier manager always uses the
-        // current epoch, so it won't see the `finished` state when that happens,
-        // leading to the stream job never finishing.
-        // Instead we must wait for the next barrier, and finish the progress there.
-        while let Some(Ok(msg)) = upstream.next().await {
-            if let Message::Barrier(barrier) = &msg {
-                let epoch = barrier.epoch;
-                self.progress
-                    .finish(epoch.curr, total_snapshot_processed_rows);
-                tracing::trace!(?epoch, "Updated CreateMaterializedTracker");
-                yield msg;
-                break;
-            } else {
                 yield msg;
             }
         }
