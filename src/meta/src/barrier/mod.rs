@@ -234,7 +234,7 @@ impl CheckpointControl {
     async fn finish_commands(&mut self, checkpoint: bool) -> MetaResult<bool> {
         for command in self
             .finished_commands
-            .extract_if(|c| checkpoint || c.is_barrier())
+            .extract_if(|c| checkpoint || !c.is_checkpoint())
         {
             // The command is ready to finish. We can now call `pre_finish`.
             command.pre_finish().await?;

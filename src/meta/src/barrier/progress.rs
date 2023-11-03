@@ -159,10 +159,12 @@ impl TrackingJob {
         }
     }
 
-    pub(crate) fn is_barrier(&self) -> bool {
+    pub(crate) fn is_checkpoint(&self) -> bool {
         match self {
             TrackingJob::Recovered(_) => true,
-            TrackingJob::New(command) => command.context.kind.is_barrier(),
+            TrackingJob::New(command) => {
+                command.context.kind.is_initial() || command.context.kind.is_checkpoint()
+            }
         }
     }
 
