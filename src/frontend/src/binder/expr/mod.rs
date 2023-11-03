@@ -579,9 +579,11 @@ impl Binder {
             DataType::Varchar => {}
             _ => {
                 return Err(ErrorCode::NotSupported(
-                        format!("{} is not a collatable data type", ret_type),
-                        "The only built-in collatable data types are `varchar`, please check your type".into()
-                    ).into());
+                    format!("{} is not a collatable data type", ret_type),
+                    "The only built-in collatable data types are `varchar`, please check your type"
+                        .into(),
+                )
+                .into());
             }
         }
 
