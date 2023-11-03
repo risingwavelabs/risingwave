@@ -84,7 +84,9 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
     let mut session = cluster.start_session();
 
     session.run(CREATE_TABLE).await?;
-    session.run(SEED_TABLE_500).await?;
+    session
+        .run("INSERT INTO t SELECT generate_series FROM generate_series(1, 200);")
+        .await?;
     session.flush().await?;
     session.run(SET_RATE_LIMIT_2).await?;
     session.run(SET_BACKGROUND_DDL).await?;
@@ -96,7 +98,7 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
 
     // Send some upstream updates.
     session
-        .run("INSERT INTO t SELECT generate_series FROM generate_series(501, 1000);")
+        .run("INSERT INTO t SELECT generate_series FROM generate_series(201, 400);")
         .await?;
     session.flush().await?;
 
