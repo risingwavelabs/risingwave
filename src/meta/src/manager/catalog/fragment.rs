@@ -1202,8 +1202,8 @@ impl FragmentManager {
         Ok(fragments)
     }
 
-    /// Get the downstream `Chain` fragments of the specified table.
-    pub async fn get_downstream_chain_fragments(
+    /// Get the downstream `StreamTableScan` fragments of the specified MV.
+    pub async fn get_downstream_fragments(
         &self,
         table_id: TableId,
     ) -> MetaResult<Vec<(DispatchStrategy, Fragment)>> {
