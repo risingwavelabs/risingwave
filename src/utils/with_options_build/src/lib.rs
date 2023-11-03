@@ -123,7 +123,7 @@ struct FieldInfo {
     // If specified with serde(rename), use the renamed name instead of the Rust name.
     name: String,
 
-    /// For Option<T>, it'll be the T.
+    /// For `Option<T>`, it'll be the T.
     field_type: String,
 
     #[serde(skip_serializing_if = "String::is_empty")]
