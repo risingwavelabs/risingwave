@@ -22,7 +22,7 @@ use risingwave_meta_model_v2::{
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
-use risingwave_pb::user::PbGrantPrivilege;
+use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
 use sea_orm::sea_query::{
     Alias, CommonTableExpression, Expr, Query, QueryStatementBuilder, SelectStatement, UnionType,
     WithClause,
@@ -371,6 +371,24 @@ where
     }
 
     Ok(())
+}
+
+/// `list_user_info_by_ids` lists all users' info by their ids.
+pub async fn list_user_info_by_ids<C>(user_ids: Vec<UserId>, db: &C) -> MetaResult<Vec<PbUserInfo>>
+where
+    C: ConnectionTrait,
+{
+    let mut user_infos = vec![];
+    for user_id in user_ids {
+        let user = User::find_by_id(user_id)
+            .one(db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("user", user_id))?;
+        let mut user_info: PbUserInfo = user.into();
+        user_info.grant_privileges = get_user_privilege(user_id, db).await?;
+        user_infos.push(user_info);
+    }
+    Ok(user_infos)
 }
 
 /// `construct_privilege_dependency_query` constructs a query to find all privileges that are dependent on the given one.
