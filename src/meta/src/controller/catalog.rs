@@ -344,7 +344,7 @@ impl CatalogController {
         Ok(version)
     }
 
-    pub async fn create_stream_job(
+    pub fn create_stream_job(
         &self,
         _stream_job: &StreamingJob,
         _table_fragments: &PbTableFragments,
