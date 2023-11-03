@@ -280,7 +280,7 @@ fn build_fragment(
         NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
         NodeBody::StreamScan(node) => {
-            current_fragment.fragment_type_mask |= FragmentTypeFlag::ChainNode as u32;
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
             // memorize table id for later use
             // The table id could be a upstream CDC source
             state

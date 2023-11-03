@@ -447,21 +447,23 @@ message ExchangeNode {
   DispatchStrategy strategy = 1;
 }
 
+// Decides which kind of Executor will be used 
 enum StreamScanType {
   CHAIN_UNSPECIFIED = 0;
 
-  // CHAIN is corresponding to the stream scan executor.
+  // ChainExecutor
   CHAIN = 1;
 
-  // REARRANGE is corresponding to the rearranged stream scan executor.
+  // RearrangedChainExecutor
   REARRANGE = 2;
 
-  // BACKFILL is corresponding to the backfill executor.
+  // BackfillExecutor
   BACKFILL = 3;
 
-  // UPSTREAM_ONLY is corresponding to the stream scan executor, but doesn't consume the snapshot.
+  // ChainExecutor with upstream_only = true
   UPSTREAM_ONLY = 4;
 
+  // CdcBackfillExecutor
   CDC_BACKFILL = 5;
 }
 
@@ -792,7 +794,7 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_MVIEW = 2;
   FRAGMENT_TYPE_FLAG_SINK = 4;
   FRAGMENT_TYPE_FLAG_NOW = 8; // TODO: Remove this and insert a `BarrierRecv` instead.
-  FRAGMENT_TYPE_FLAG_CHAIN_NODE = 16;
+  FRAGMENT_TYPE_FLAG_STREAM_SCAN = 16;
   FRAGMENT_TYPE_FLAG_BARRIER_RECV = 32;
   FRAGMENT_TYPE_FLAG_VALUES = 64;
   FRAGMENT_TYPE_FLAG_DML = 128;

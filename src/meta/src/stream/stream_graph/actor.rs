@@ -158,7 +158,7 @@ impl ActorBuilder {
                 })
             }
 
-            // "Leaf" node `Chain`.
+            // "Leaf" node `StreamScan`.
             NodeBody::StreamScan(stream_scan) => {
                 let cdc_backfill =
                     stream_scan.stream_scan_type == StreamScanType::CdcBackfill as i32;
@@ -182,7 +182,7 @@ impl ActorBuilder {
                 let upstream_actor_id = upstreams.actors.as_global_ids();
                 assert_eq!(upstream_actor_id.len(), 1);
 
-                let chain_input = vec![
+                let input = vec![
                     // Fill the merge node body with correct upstream info.
                     StreamNode {
                         node_body: Some(NodeBody::Merge(MergeNode {
@@ -201,7 +201,7 @@ impl ActorBuilder {
                 ];
 
                 Ok(StreamNode {
-                    input: chain_input,
+                    input,
                     ..stream_node.clone()
                 })
             }

@@ -316,7 +316,7 @@ impl TableFragments {
     /// Returns actors that contains Chain node.
     pub fn chain_actor_ids(&self) -> HashSet<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
-            (fragment_type_mask & FragmentTypeFlag::ChainNode as u32) != 0
+            (fragment_type_mask & FragmentTypeFlag::StreamScan as u32) != 0
         })
         .into_iter()
         .collect()

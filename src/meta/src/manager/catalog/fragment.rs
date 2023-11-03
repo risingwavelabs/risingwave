@@ -1242,7 +1242,7 @@ impl FragmentManager {
                             .map(|d| (d.clone(), fragment.clone()))
                     })
                     .inspect(|(_, f)| {
-                        assert!((f.fragment_type_mask & FragmentTypeFlag::ChainNode as u32) != 0)
+                        assert!((f.fragment_type_mask & FragmentTypeFlag::StreamScan as u32) != 0)
                     })
             })
             .collect_vec();
