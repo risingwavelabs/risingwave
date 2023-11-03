@@ -552,6 +552,7 @@ impl StateStoreImpl {
                 reinsertions: vec![],
                 compression: match opts.data_file_cache_compression.as_str() {
                     "none" => foyer::storage::compress::Compression::None,
+                    "zstd" => foyer::storage::compress::Compression::Zstd,
                     _ => panic!(
                         "data file cache compression type not support: {}",
                         opts.data_file_cache_compression
@@ -593,6 +594,7 @@ impl StateStoreImpl {
                 reinsertions: vec![],
                 compression: match opts.meta_file_cache_compression.as_str() {
                     "none" => foyer::storage::compress::Compression::None,
+                    "zstd" => foyer::storage::compress::Compression::Zstd,
                     _ => panic!(
                         "meta file cache compression type not support: {}",
                         opts.meta_file_cache_compression
