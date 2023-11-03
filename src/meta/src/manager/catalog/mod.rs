@@ -1771,6 +1771,7 @@ impl CatalogManager {
                 commit_meta!(self, views)?;
             }
             Entity::SourceId(source_id) => {
+                database_core.ensure_source_id(table_id)?;
                 let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
                 let mut source = sources.get_mut(source_id).unwrap();
                 source.owner = owner_id;
@@ -1778,6 +1779,7 @@ impl CatalogManager {
                 commit_meta!(self, sources)?;
             }
             Entity::SinkId(sink_id) => {
+                database_core.ensure_sink_id(table_id)?;
                 let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
                 let mut sink = sinks.get_mut(sink_id).unwrap();
                 sink.owner = owner_id;
