@@ -21,7 +21,7 @@ type ConsumedEpoch = u64;
 type ConsumedRows = u64;
 
 #[derive(Debug, Clone, Copy)]
-pub(super) enum ChainState {
+pub(super) enum BackfillState {
     ConsumingUpstream(ConsumedEpoch, ConsumedRows),
     Done(ConsumedRows),
 }
@@ -31,7 +31,7 @@ impl LocalBarrierManager {
         &mut self,
         current_epoch: u64,
         actor: ActorId,
-        state: ChainState,
+        state: BackfillState,
     ) {
         match &mut self.state {
             #[cfg(test)]
@@ -81,10 +81,10 @@ impl LocalBarrierManager {
 pub struct CreateMviewProgress {
     barrier_manager: Arc<parking_lot::Mutex<LocalBarrierManager>>,
 
-    /// The id of the actor containing the chain node.
+    /// The id of the actor containing the backfill executors.
     chain_actor_id: ActorId,
 
-    state: Option<ChainState>,
+    state: Option<BackfillState>,
 }
 
 impl CreateMviewProgress {
@@ -108,7 +108,7 @@ impl CreateMviewProgress {
         self.chain_actor_id
     }
 
-    fn update_inner(&mut self, current_epoch: u64, state: ChainState) {
+    fn update_inner(&mut self, current_epoch: u64, state: BackfillState) {
         self.state = Some(state);
         self.barrier_manager.lock().update_create_mview_progress(
             current_epoch,
@@ -128,7 +128,7 @@ impl CreateMviewProgress {
         current_consumed_rows: ConsumedRows,
     ) {
         match self.state {
-            Some(ChainState::ConsumingUpstream(last, last_consumed_rows)) => {
+            Some(BackfillState::ConsumingUpstream(last, last_consumed_rows)) => {
                 assert!(
                     last < consumed_epoch,
                     "last_epoch: {:#?} must be greater than consumed epoch: {:#?}",
@@ -137,22 +137,22 @@ impl CreateMviewProgress {
                 );
                 assert!(last_consumed_rows <= current_consumed_rows);
             }
-            Some(ChainState::Done(_)) => unreachable!(),
+            Some(BackfillState::Done(_)) => unreachable!(),
             None => {}
         };
         self.update_inner(
             current_epoch,
-            ChainState::ConsumingUpstream(consumed_epoch, current_consumed_rows),
+            BackfillState::ConsumingUpstream(consumed_epoch, current_consumed_rows),
         );
     }
 
     /// Finish the progress. If the progress is already finished, then perform no-op.
     /// `current_epoch` should be provided to locate the barrier under concurrent checkpoint.
     pub fn finish(&mut self, current_epoch: u64, current_consumed_rows: ConsumedRows) {
-        if let Some(ChainState::Done(_)) = self.state {
+        if let Some(BackfillState::Done(_)) = self.state {
             return;
         }
-        self.update_inner(current_epoch, ChainState::Done(current_consumed_rows));
+        self.update_inner(current_epoch, BackfillState::Done(current_consumed_rows));
     }
 }
 

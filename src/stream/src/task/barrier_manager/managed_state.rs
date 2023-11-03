@@ -22,7 +22,7 @@ use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgres
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::oneshot;
 
-use super::progress::ChainState;
+use super::progress::BackfillState;
 use super::CollectResult;
 use crate::error::{StreamError, StreamResult};
 use crate::executor::monitor::GLOBAL_STREAMING_METRICS;
@@ -64,7 +64,7 @@ pub(super) struct ManagedBarrierState {
     epoch_barrier_state_map: BTreeMap<u64, BarrierState>,
 
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
-    pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, ChainState>>,
+    pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
 
     /// Record all unexpected exited actors.
     failure_actors: HashMap<ActorId, StreamError>,
@@ -112,14 +112,14 @@ impl ManagedBarrierState {
                 .into_iter()
                 .map(|(actor, state)| CreateMviewProgress {
                     chain_actor_id: actor,
-                    done: matches!(state, ChainState::Done(_)),
+                    done: matches!(state, BackfillState::Done(_)),
                     consumed_epoch: match state {
-                        ChainState::ConsumingUpstream(consumed_epoch, _) => consumed_epoch,
-                        ChainState::Done(_) => epoch,
+                        BackfillState::ConsumingUpstream(consumed_epoch, _) => consumed_epoch,
+                        BackfillState::Done(_) => epoch,
                     },
                     consumed_rows: match state {
-                        ChainState::ConsumingUpstream(_, consumed_rows) => consumed_rows,
-                        ChainState::Done(consumed_rows) => consumed_rows,
+                        BackfillState::ConsumingUpstream(_, consumed_rows) => consumed_rows,
+                        BackfillState::Done(consumed_rows) => consumed_rows,
                     },
                 })
                 .collect();
