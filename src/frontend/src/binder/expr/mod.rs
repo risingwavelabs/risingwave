@@ -564,7 +564,7 @@ impl Binder {
     }
 
     pub fn bind_collate(&mut self, expr: Expr, collation: ObjectName) -> Result<ExprImpl> {
-        if !["C", "POSIX"].contains(&collation.real_value().to_uppercase().as_str()) {
+        if !["C", "POSIX"].contains(&collation.real_value().as_str()) {
             return Err(ErrorCode::NotImplemented(
                 "Collate collation other than `C` or `POSIX` is not implemented".into(),
                 None.into(),
