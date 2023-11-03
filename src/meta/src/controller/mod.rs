@@ -108,14 +108,14 @@ impl From<ObjectModel<table::Model>> for PbTable {
             owner: value.1.owner_id as _,
             properties: value.0.properties.0,
             fragment_id: value.0.fragment_id as u32,
-            vnode_col_index: value.0.vnode_col_index,
-            row_id_index: value.0.row_id_index,
+            vnode_col_index: value.0.vnode_col_index.map(|index| index as _),
+            row_id_index: value.0.row_id_index.map(|index| index as _),
             value_indices: value.0.value_indices.0,
             definition: value.0.definition,
             handle_pk_conflict_behavior: PbHandleConflictBehavior::from(
                 value.0.handle_pk_conflict_behavior,
             ) as _,
-            read_prefix_len_hint: value.0.read_prefix_len_hint,
+            read_prefix_len_hint: value.0.read_prefix_len_hint as _,
             watermark_indices: value.0.watermark_indices.0,
             dist_key_in_pk: value.0.dist_key_in_pk.0,
             dml_fragment_id: value.0.dml_fragment_id.map(|id| id as u32),
@@ -146,7 +146,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
             schema_id: value.1.schema_id.unwrap() as _,
             database_id: value.1.database_id.unwrap() as _,
             name: value.0.name,
-            row_id_index: value.0.row_id_index,
+            row_id_index: value.0.row_id_index.map(|id| id as _),
             columns: value.0.columns.0,
             pk_column_ids: value.0.pk_column_ids.0,
             properties: value.0.properties.0,
@@ -162,7 +162,7 @@ impl From<ObjectModel<source::Model>> for PbSource {
             created_at_epoch: Some(
                 Epoch::from_unix_millis(value.1.created_at.timestamp_millis() as _).0,
             ),
-            version: value.0.version,
+            version: value.0.version as _,
             optional_associated_table_id: value
                 .0
                 .optional_associated_table_id
