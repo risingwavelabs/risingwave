@@ -354,6 +354,11 @@ fn bench_expr(c: &mut Criterion) {
         });
     }
 
+    c.bench_function("cast(character varying) -> int8[]", |bencher| {
+        let expr = build_from_pretty(r#"(cast:int8[] {1,"2"}:varchar)"#);
+        bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
+    });
+
     let sigs = FUNCTION_REGISTRY
         .iter_aggregates()
         .sorted_by_cached_key(|sig| format!("{sig:?}"));
