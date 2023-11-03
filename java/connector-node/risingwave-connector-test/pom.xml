@@ -180,5 +180,11 @@
             <artifactId>risingwave-sink-cassandra</artifactId>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>com.risingwave</groupId>
+            <artifactId>risingwave-sink-dynamic</artifactId>
+            <version>0.1.0-SNAPSHOT</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>

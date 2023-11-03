@@ -45,6 +45,8 @@ public class SinkUtils {
                 return new EsSinkFactory();
             case "cassandra":
                 return new CassandraFactory();
+            case "doris_java":
+                return new FlinkDynamicAdaptFactory();
             default:
                 throw UNIMPLEMENTED
                         .withDescription("unknown sink type: " + sinkName)

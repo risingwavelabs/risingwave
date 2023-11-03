@@ -54,6 +54,7 @@
         <module>connector-node/risingwave-connector-service</module>
         <module>connector-node/assembly</module>
         <module>connector-node/s3-common</module>
+        <module>connector-node/risingwave-sink-dynamic</module>
     </modules>
 
     <properties>

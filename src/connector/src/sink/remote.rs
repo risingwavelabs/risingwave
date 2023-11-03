@@ -67,7 +67,8 @@ macro_rules! def_remote_sink {
             { ElasticSearch, ElasticSearchSink, "elasticsearch" },
             { Cassandra, CassandraSink, "cassandra" },
             { Jdbc, JdbcSink, "jdbc" },
-            { DeltaLake, DeltaLakeSink, "deltalake" }
+            { DeltaLake, DeltaLakeSink, "deltalake" },
+            { DorisJava, DorisJavaSink, "doris_java" }
         }
     };
     ($({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr }),*) => {
