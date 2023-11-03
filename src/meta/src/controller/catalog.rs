@@ -134,7 +134,7 @@ impl CatalogController {
 
     pub async fn create_database(&self, db: PbDatabase) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
-        let owner_id = db.owner;
+        let owner_id = db.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
 
@@ -225,7 +225,7 @@ impl CatalogController {
             .notify_frontend(
                 NotificationOperation::Delete,
                 NotificationInfo::Database(PbDatabase {
-                    id: database_id,
+                    id: database_id as _,
                     ..Default::default()
                 }),
             )
@@ -242,17 +242,17 @@ impl CatalogController {
 
     pub async fn create_schema(&self, schema: PbSchema) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
-        let owner_id = schema.owner;
+        let owner_id = schema.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
-        ensure_object_id(ObjectType::Database, schema.database_id, &txn).await?;
-        check_schema_name_duplicate(&schema.name, schema.database_id, &txn).await?;
+        ensure_object_id(ObjectType::Database, schema.database_id as _, &txn).await?;
+        check_schema_name_duplicate(&schema.name, schema.database_id as _, &txn).await?;
 
         let schema_obj = Self::create_object(
             &txn,
             ObjectType::Schema,
             owner_id,
-            Some(schema.database_id),
+            Some(schema.database_id as _),
             None,
         )
         .await?;
@@ -299,8 +299,8 @@ impl CatalogController {
             .notify_frontend(
                 NotificationOperation::Delete,
                 NotificationInfo::Schema(PbSchema {
-                    id: schema_id,
-                    database_id: schema_obj.database_id.unwrap(),
+                    id: schema_id as _,
+                    database_id: schema_obj.database_id.unwrap() as _,
                     ..Default::default()
                 }),
             )
@@ -313,22 +313,22 @@ impl CatalogController {
         mut pb_function: PbFunction,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
-        let owner_id = pb_function.owner;
+        let owner_id = pb_function.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
-        ensure_object_id(ObjectType::Database, pb_function.database_id, &txn).await?;
-        ensure_object_id(ObjectType::Schema, pb_function.schema_id, &txn).await?;
+        ensure_object_id(ObjectType::Database, pb_function.database_id as _, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_function.schema_id as _, &txn).await?;
         check_function_signature_duplicate(&pb_function, &txn).await?;
 
         let function_obj = Self::create_object(
             &txn,
             ObjectType::Function,
             owner_id,
-            Some(pb_function.database_id),
-            Some(pb_function.schema_id),
+            Some(pb_function.database_id as _),
+            Some(pb_function.schema_id as _),
         )
         .await?;
-        pb_function.id = function_obj.oid;
+        pb_function.id = function_obj.oid as _;
         let function: function::ActiveModel = pb_function.clone().into();
         function.insert(&txn).await?;
         txn.commit().await?;
@@ -359,9 +359,9 @@ impl CatalogController {
             .notify_frontend(
                 NotificationOperation::Delete,
                 NotificationInfo::Function(PbFunction {
-                    id: function_id,
-                    schema_id: function_obj.schema_id.unwrap(),
-                    database_id: function_obj.database_id.unwrap(),
+                    id: function_id as _,
+                    schema_id: function_obj.schema_id.unwrap() as _,
+                    database_id: function_obj.database_id.unwrap() as _,
                     ..Default::default()
                 }),
             )
@@ -374,22 +374,22 @@ impl CatalogController {
         mut pb_connection: PbConnection,
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
-        let owner_id = pb_connection.owner;
+        let owner_id = pb_connection.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
-        ensure_object_id(ObjectType::Database, pb_connection.database_id, &txn).await?;
-        ensure_object_id(ObjectType::Schema, pb_connection.schema_id, &txn).await?;
+        ensure_object_id(ObjectType::Database, pb_connection.database_id as _, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_connection.schema_id as _, &txn).await?;
         check_connection_name_duplicate(&pb_connection, &txn).await?;
 
         let conn_obj = Self::create_object(
             &txn,
             ObjectType::Connection,
             owner_id,
-            Some(pb_connection.database_id),
-            Some(pb_connection.schema_id),
+            Some(pb_connection.database_id as _),
+            Some(pb_connection.schema_id as _),
         )
         .await?;
-        pb_connection.id = conn_obj.oid;
+        pb_connection.id = conn_obj.oid as _;
         let connection: connection::ActiveModel = pb_connection.clone().into();
         connection.insert(&txn).await?;
 
@@ -438,9 +438,9 @@ impl CatalogController {
             .notify_frontend(
                 NotificationOperation::Delete,
                 NotificationInfo::Connection(PbConnection {
-                    id: connection_id,
-                    schema_id: connection_obj.schema_id.unwrap(),
-                    database_id: connection_obj.database_id.unwrap(),
+                    id: connection_id as _,
+                    schema_id: connection_obj.schema_id.unwrap() as _,
+                    database_id: connection_obj.database_id.unwrap() as _,
                     ..Default::default()
                 }),
             )
@@ -450,23 +450,28 @@ impl CatalogController {
 
     pub async fn create_view(&self, mut pb_view: PbView) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
-        let owner_id = pb_view.owner;
+        let owner_id = pb_view.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
-        ensure_object_id(ObjectType::Database, pb_view.database_id, &txn).await?;
-        ensure_object_id(ObjectType::Schema, pb_view.schema_id, &txn).await?;
-        check_relation_name_duplicate(&pb_view.name, pb_view.database_id, pb_view.schema_id, &txn)
-            .await?;
+        ensure_object_id(ObjectType::Database, pb_view.database_id as _, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_view.schema_id as _, &txn).await?;
+        check_relation_name_duplicate(
+            &pb_view.name,
+            pb_view.database_id as _,
+            pb_view.schema_id as _,
+            &txn,
+        )
+        .await?;
 
         let view_obj = Self::create_object(
             &txn,
             ObjectType::View,
             owner_id,
-            Some(pb_view.database_id),
-            Some(pb_view.schema_id),
+            Some(pb_view.database_id as _),
+            Some(pb_view.schema_id as _),
         )
         .await?;
-        pb_view.id = view_obj.oid;
+        pb_view.id = view_obj.oid as _;
         let view: view::ActiveModel = pb_view.clone().into();
         view.insert(&txn).await?;
 
@@ -474,7 +479,7 @@ impl CatalogController {
         // todo: shall we need to check existence of them Or let database handle it by FOREIGN KEY constraint.
         for obj_id in &pb_view.dependent_relations {
             object_dependency::ActiveModel {
-                oid: Set(*obj_id),
+                oid: Set(*obj_id as _),
                 used_by: Set(view_obj.oid),
                 ..Default::default()
             }
@@ -496,15 +501,15 @@ impl CatalogController {
     pub async fn comment_on(&self, comment: PbComment) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
-        ensure_object_id(ObjectType::Database, comment.database_id, &txn).await?;
-        ensure_object_id(ObjectType::Schema, comment.schema_id, &txn).await?;
-        let table_obj = Object::find_by_id(comment.table_id)
+        ensure_object_id(ObjectType::Database, comment.database_id as _, &txn).await?;
+        ensure_object_id(ObjectType::Schema, comment.schema_id as _, &txn).await?;
+        let table_obj = Object::find_by_id(comment.table_id as ObjectId)
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("table", comment.table_id))?;
 
         let table = if let Some(col_idx) = comment.column_index {
-            let mut columns: ColumnCatalogArray = Table::find_by_id(comment.table_id)
+            let mut columns: ColumnCatalogArray = Table::find_by_id(comment.table_id as TableId)
                 .select_only()
                 .column(table::Column::Columns)
                 .into_tuple()
@@ -524,7 +529,7 @@ impl CatalogController {
             })?;
             column_desc.description = comment.description;
             table::ActiveModel {
-                table_id: Set(comment.table_id),
+                table_id: Set(comment.table_id as _),
                 columns: Set(columns),
                 ..Default::default()
             }
@@ -532,7 +537,7 @@ impl CatalogController {
             .await?
         } else {
             table::ActiveModel {
-                table_id: Set(comment.table_id),
+                table_id: Set(comment.table_id as _),
                 description: Set(comment.description),
                 ..Default::default()
             }
@@ -654,41 +659,41 @@ impl CatalogController {
             .map(|obj| match obj.obj_type {
                 ObjectType::Table => PbRelation {
                     relation_info: Some(PbRelationInfo::Table(PbTable {
-                        id: obj.oid,
-                        schema_id: obj.schema_id.unwrap(),
-                        database_id: obj.database_id.unwrap(),
+                        id: obj.oid as _,
+                        schema_id: obj.schema_id.unwrap() as _,
+                        database_id: obj.database_id.unwrap() as _,
                         ..Default::default()
                     })),
                 },
                 ObjectType::Source => PbRelation {
                     relation_info: Some(PbRelationInfo::Source(PbSource {
-                        id: obj.oid,
-                        schema_id: obj.schema_id.unwrap(),
-                        database_id: obj.database_id.unwrap(),
+                        id: obj.oid as _,
+                        schema_id: obj.schema_id.unwrap() as _,
+                        database_id: obj.database_id.unwrap() as _,
                         ..Default::default()
                     })),
                 },
                 ObjectType::Sink => PbRelation {
                     relation_info: Some(PbRelationInfo::Sink(PbSink {
-                        id: obj.oid,
-                        schema_id: obj.schema_id.unwrap(),
-                        database_id: obj.database_id.unwrap(),
+                        id: obj.oid as _,
+                        schema_id: obj.schema_id.unwrap() as _,
+                        database_id: obj.database_id.unwrap() as _,
                         ..Default::default()
                     })),
                 },
                 ObjectType::View => PbRelation {
                     relation_info: Some(PbRelationInfo::View(PbView {
-                        id: obj.oid,
-                        schema_id: obj.schema_id.unwrap(),
-                        database_id: obj.database_id.unwrap(),
+                        id: obj.oid as _,
+                        schema_id: obj.schema_id.unwrap() as _,
+                        database_id: obj.database_id.unwrap() as _,
                         ..Default::default()
                     })),
                 },
                 ObjectType::Index => PbRelation {
                     relation_info: Some(PbRelationInfo::Index(PbIndex {
-                        id: obj.oid,
-                        schema_id: obj.schema_id.unwrap(),
-                        database_id: obj.database_id.unwrap(),
+                        id: obj.oid as _,
+                        schema_id: obj.schema_id.unwrap() as _,
+                        database_id: obj.database_id.unwrap() as _,
                         ..Default::default()
                     })),
                 },
@@ -854,9 +859,9 @@ impl CatalogController {
 mod tests {
     use super::*;
 
-    const TEST_DATABASE_ID: DatabaseId = 1;
-    const TEST_SCHEMA_ID: SchemaId = 2;
-    const TEST_OWNER_ID: UserId = 1;
+    const TEST_DATABASE_ID: u32 = 1;
+    const TEST_SCHEMA_ID: u32 = 2;
+    const TEST_OWNER_ID: u32 = 1;
 
     #[tokio::test]
     async fn test_create_database() -> MetaResult<()> {
@@ -881,8 +886,8 @@ mod tests {
     async fn test_create_view() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
         let pb_view = PbView {
-            schema_id: TEST_SCHEMA_ID,
-            database_id: TEST_DATABASE_ID,
+            schema_id: TEST_SCHEMA_ID as _,
+            database_id: TEST_DATABASE_ID as _,
             name: "view".to_string(),
             owner: TEST_OWNER_ID,
             sql: "CREATE VIEW view AS SELECT 1".to_string(),
@@ -906,8 +911,8 @@ mod tests {
             ..Default::default()
         };
         let pb_function = PbFunction {
-            schema_id: TEST_SCHEMA_ID,
-            database_id: TEST_DATABASE_ID,
+            schema_id: TEST_SCHEMA_ID as _,
+            database_id: TEST_DATABASE_ID as _,
             name: "test_function".to_string(),
             owner: TEST_OWNER_ID,
             arg_types: vec![],

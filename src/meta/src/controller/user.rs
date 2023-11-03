@@ -58,7 +58,7 @@ impl CatalogController {
                     privileges.push(user_privilege::ActiveModel {
                         user_id: Set(user.user_id),
                         oid: Set(id),
-                        granted_by: Set(action_with_opt.granted_by),
+                        granted_by: Set(action_with_opt.granted_by as _),
                         action: Set(action_with_opt.get_action()?.into()),
                         with_grant_option: Set(action_with_opt.with_grant_option),
                         ..Default::default()
@@ -94,7 +94,7 @@ impl CatalogController {
             check_user_name_duplicate(&update_user.name, &inner.db).await?;
         }
 
-        let user = User::find_by_id(update_user.id)
+        let user = User::find_by_id(update_user.id as UserId)
             .one(&inner.db)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("user", update_user.id))?;
@@ -113,7 +113,7 @@ impl CatalogController {
 
         let user = user.update(&inner.db).await?;
         let mut user_info: PbUserInfo = user.into();
-        user_info.grant_privileges = get_user_privilege(user_info.id, &inner.db).await?;
+        user_info.grant_privileges = get_user_privilege(user_info.id as _, &inner.db).await?;
         let version = self
             .notify_frontend(
                 NotificationOperation::Update,
@@ -193,7 +193,7 @@ impl CatalogController {
             .notify_frontend(
                 NotificationOperation::Delete,
                 NotificationInfo::User(PbUserInfo {
-                    id: user_id,
+                    id: user_id as _,
                     ..Default::default()
                 }),
             )
@@ -290,7 +290,7 @@ impl CatalogController {
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("user", user_id))?;
             let mut user_info: PbUserInfo = user.into();
-            user_info.grant_privileges = get_user_privilege(user_info.id, &txn).await?;
+            user_info.grant_privileges = get_user_privilege(user_info.id as _, &txn).await?;
             user_infos.push(user_info);
         }
         txn.commit().await?;
@@ -449,7 +449,7 @@ impl CatalogController {
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("user", user_id))?;
             let mut user_info: PbUserInfo = user.into();
-            user_info.grant_privileges = get_user_privilege(user_info.id, &txn).await?;
+            user_info.grant_privileges = get_user_privilege(user_info.id as _, &txn).await?;
             user_infos.push(user_info);
         }
         txn.commit().await?;
@@ -517,7 +517,7 @@ mod tests {
         );
         mgr.update_user(
             PbUserInfo {
-                id: user_1.user_id,
+                id: user_1.user_id as _,
                 name: "test_user_1_new".to_string(),
                 ..Default::default()
             },
@@ -528,12 +528,12 @@ mod tests {
         assert_eq!(user_1.name, "test_user_1_new".to_string());
 
         let conn_with_option = make_privilege(
-            PbObject::DatabaseId(TEST_DATABASE_ID),
+            PbObject::DatabaseId(TEST_DATABASE_ID as _),
             &[PbAction::Connect],
             true,
         );
         let create_without_option = make_privilege(
-            PbObject::DatabaseId(TEST_DATABASE_ID),
+            PbObject::DatabaseId(TEST_DATABASE_ID as _),
             &[PbAction::Create],
             false,
         );
@@ -578,14 +578,14 @@ mod tests {
         let privilege_1 = get_user_privilege(user_1.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_1.len(), 2);
         assert!(privilege_1.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID))
-            && gp.action_with_opts[0].granted_by == TEST_ROOT_USER_ID));
+            == Some(PbObject::DatabaseId(TEST_DATABASE_ID as _))
+            && gp.action_with_opts[0].granted_by == TEST_ROOT_USER_ID as u32));
 
         let privilege_2 = get_user_privilege(user_2.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_2.len(), 1);
         assert!(privilege_2.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID))
-            && gp.action_with_opts[0].granted_by == user_1.user_id
+            == Some(PbObject::DatabaseId(TEST_DATABASE_ID as _))
+            && gp.action_with_opts[0].granted_by == user_1.user_id as u32
             && gp.action_with_opts[0].with_grant_option));
 
         // revoke privilege for others by non-super user.
@@ -647,7 +647,7 @@ mod tests {
         let privilege_1 = get_user_privilege(user_1.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_1.len(), 1);
         assert!(privilege_1.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID))
+            == Some(PbObject::DatabaseId(TEST_DATABASE_ID as _))
             && gp.action_with_opts[0].action == PbAction::Connect as i32));
 
         // revoke grant option for referred privilege in cascade mode.
@@ -663,13 +663,13 @@ mod tests {
         let privilege_1 = get_user_privilege(user_1.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_1.len(), 1);
         assert!(privilege_1.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID))
+            == Some(PbObject::DatabaseId(TEST_DATABASE_ID as _))
             && gp.action_with_opts[0].action == PbAction::Connect as i32
             && !gp.action_with_opts[0].with_grant_option));
         let privilege_2 = get_user_privilege(user_2.user_id, &mgr.inner.read().await.db).await?;
         assert_eq!(privilege_2.len(), 1);
         assert!(privilege_2.iter().all(|gp| gp.object
-            == Some(PbObject::DatabaseId(TEST_DATABASE_ID))
+            == Some(PbObject::DatabaseId(TEST_DATABASE_ID as _))
             && gp.action_with_opts[0].action == PbAction::Connect as i32
             && !gp.action_with_opts[0].with_grant_option));
 
