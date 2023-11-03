@@ -1,3 +1,5 @@
+# THIS FILE IS AUTO_GENERATED. DO NOT EDIT
+
 BigQueryConfig:
   fields:
   - name: bigquery.local.path
