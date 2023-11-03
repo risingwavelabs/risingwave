@@ -72,7 +72,6 @@ impl Display for TrackingIssue {
     }
 }
 
-// TODO(error): review backtrace providing of `RwError`
 #[derive(Error, Debug)]
 pub enum ErrorCode {
     #[error("internal error: {0}")]
