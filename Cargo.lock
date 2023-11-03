@@ -8354,6 +8354,7 @@ dependencies = [
  "async-recursion",
  "async-stream",
  "async-trait",
+ "auto_enums",
  "await-tree",
  "bytes",
  "criterion",
