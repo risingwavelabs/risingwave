@@ -439,10 +439,10 @@ select array[];
 
 -- all of the following should be accepted
 select '{}'::text[];
---@ select '{{{1,2,3,4},{2,3,4,5}},{{3,4,5,6},{4,5,6,7}}}'::text[];
+select '{{{1,2,3,4},{2,3,4,5}},{{3,4,5,6},{4,5,6,7}}}'::text[][][];
 select '{0 second  ,0 second}'::interval[];
---@ select '{ { "," } , { 3 } }'::text[];
---@ select '  {   {  "  0 second  "   ,  0 second  }   }'::text[];
+select '{ { "," } , { 3 } }'::text[][];
+select '  {   {  "  0 second  "   ,  0 second  }   }'::text[][];
 --@ select '{
 --@            0 second,
 --@            @ 1 hour @ 42 minutes @ 20 seconds
