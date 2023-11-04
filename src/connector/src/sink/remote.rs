@@ -168,9 +168,9 @@ async fn validate_remote_sink(param: &SinkParam) -> Result<()> {
             .map_err(|err| SinkError::Internal(err.into()))?;
 
         let response = call_static_method!(
+            env,
             {com.risingwave.connector.JniSinkValidationHandler},
             {byte[] validate(byte[] validateSourceRequestBytes)},
-            env,
             &validate_sink_request_bytes
         )
         .map_err(|err| SinkError::Internal(err.into()))?;
@@ -620,10 +620,10 @@ impl EmbeddedConnectorClient {
             };
 
             let result = call_static_method!(
+                env,
                 class_name,
                 method_name,
                 {{void}, {long requestRx, long responseTx}},
-                env,
                 &mut request_rx as *mut JniReceiverType<REQ>,
                 &mut response_tx as *mut JniSenderType<RSP>
             );

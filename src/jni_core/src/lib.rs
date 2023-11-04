@@ -18,7 +18,6 @@
 #![feature(type_alias_impl_trait)]
 #![feature(result_option_inspect)]
 #![feature(try_blocks)]
-#![feature(trace_macros)]
 
 pub mod hummock_iterator;
 pub mod jvm_runtime;
@@ -782,45 +781,45 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetArrayValu
                 Some(val) => match val {
                     ScalarRefImpl::Int16(v) => {
                         let o = call_static_method!(
+                            env,
                             {Short},
                             {Short	valueOf(short s)},
-                            env,
                             v
                         )?;
                         env.set_object_array_element(&jarray, index, &o)?;
                     }
                     ScalarRefImpl::Int32(v) => {
                         let o = call_static_method!(
+                            env,
                             {Integer},
                             {Integer	valueOf(int i)},
-                            env,
                             v
                         )?;
                         env.set_object_array_element(&jarray, index, &o)?;
                     }
                     ScalarRefImpl::Int64(v) => {
                         let o = call_static_method!(
+                            env,
                             {Long},
                             {Long	valueOf(long l)},
-                            env,
                             v
                         )?;
                         env.set_object_array_element(&jarray, index, &o)?;
                     }
                     ScalarRefImpl::Float32(v) => {
                         let o = call_static_method!(
+                            env,
                             {Float},
                             {Float	valueOf(float f)},
-                            env,
                             v.into_inner()
                         )?;
                         env.set_object_array_element(&jarray, index, &o)?;
                     }
                     ScalarRefImpl::Float64(v) => {
                         let o = call_static_method!(
+                            env,
                             {Double},
                             {Double	valueOf(double d)},
-                            env,
                             v.into_inner()
                         )?;
                         env.set_object_array_element(&jarray, index, &o)?;

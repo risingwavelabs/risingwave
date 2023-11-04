@@ -83,9 +83,9 @@ where
             env.byte_array_from_slice(&Message::encode_to_vec(&validate_source_request))?;
 
         let response = call_static_method!(
+            env,
             {com.risingwave.connector.source.JniSourceValidateHandler},
             {byte[] validate(byte[] validateSourceRequestBytes)},
-            env,
             &validate_source_request_bytes
         )?;
 

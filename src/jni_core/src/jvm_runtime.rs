@@ -179,15 +179,15 @@ pub fn load_jvm_memory_stats() -> (usize, usize) {
                 let mut env = jvm.attach_current_thread()?;
 
                 let runtime_instance = crate::call_static_method!(
+                    env,
                     {Runtime},
-                    {Runtime getRuntime()},
-                    env
+                    {Runtime getRuntime()}
                 )?;
 
                 let total_memory =
-                    call_method!({long totalMemory()}, env, runtime_instance.as_ref())?;
+                    call_method!(env, runtime_instance.as_ref(), {long totalMemory()})?;
                 let free_memory =
-                    call_method!({long freeMemory()}, env, runtime_instance.as_ref())?;
+                    call_method!(env, runtime_instance.as_ref(), {long freeMemory()})?;
 
                 (total_memory as usize, (total_memory - free_memory) as usize)
             };

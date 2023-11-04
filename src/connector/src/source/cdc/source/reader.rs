@@ -120,9 +120,9 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
             };
 
             let result = call_static_method!(
+                env,
                 {com.risingwave.connector.source.core.JniDbzSourceHandler},
                 {void runJniDbzSourceThread(byte[] getEventStreamRequestBytes, long channelPtr)},
-                env,
                 &get_event_stream_request_bytes,
                 &mut tx as *mut JniSenderType<GetEventStreamResponse>
             );

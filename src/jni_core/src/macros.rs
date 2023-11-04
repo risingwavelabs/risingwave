@@ -727,32 +727,32 @@ macro_rules! convert_args_list {
 
 #[macro_export]
 macro_rules! call_static_method {
-    ({$($class:ident).+}, {$($method:tt)*}, $env:expr $(, $args:expr)*) => {{
+    (
+        {{$func_name:ident, {$($ret:tt)*}, {$($args:tt)*}}},
+        {$($class:ident).+},
+        {$env:expr} $(, $method_args:expr)*
+    ) => {{
+        $crate::call_static_method! {
+            $env,
+            $crate::gen_class_name!($($class).+),
+            stringify! {$func_name},
+            {{$($ret)*}, {$($args)*}}
+            $(, $method_args)*
+        }
+    }};
+    ($env:expr, {$($class:ident).+}, {$($method:tt)*} $(, $args:expr)*) => {{
         $crate::split_extract_plain_native_methods! {
             {$($method)*;},
             $crate::call_static_method,
             {$($class).+},
-            $env $(, $args)*
+            {$env} $(, $args)*
         }
     }};
     (
-        {{$func_name:ident, {$($ret:tt)*}, {$($args:tt)*}}},
-        {$($class:ident).+},
-        $env:expr $(, $method_args:expr)*
-    ) => {{
-        $crate::call_static_method! {
-            $crate::gen_class_name!($($class).+),
-            stringify! {$func_name},
-            {{$($ret)*}, {$($args)*}},
-            $env
-            $(, $method_args)*
-        }
-    }};
-    (
+        $env:expr,
         $class_name:expr,
         $func_name:expr,
-        {{$($ret:tt)*}, {$($args:tt)*}},
-        $env:expr
+        {{$($ret:tt)*}, {$($args:tt)*}}
         $(, $method_args:expr)*
     ) => {{
         $env.call_static_method(
@@ -797,7 +797,7 @@ macro_rules! call_method {
             }
         })
     }};
-    ({$($method:tt)*}, $env:expr, $obj:expr $(, $args:expr)*) => {{
+    ($env:expr, $obj:expr, {$($method:tt)*} $(, $args:expr)*) => {{
         $crate::split_extract_plain_native_methods! {
             {$($method)*;},
             $crate::call_method,
