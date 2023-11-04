@@ -266,8 +266,9 @@ macro_rules! gen_jni_type_sig {
 /// assert_eq!(cast_jvalue!({long}, JValue::Long(10)), 10);
 /// assert_eq!(cast_jvalue!({short}, JValue::Short(10)), 10);
 /// cast_jvalue!({void}, JValue::Void);
-/// cast_jvalue!({String}, JValue::Object(&jni::objects::JObject::null()));
-/// cast_jvalue!({byte[]}, JValue::Object(&jni::objects::JObject::null()));
+/// let null = jni::objects::JObject::null();
+/// let _: &jni::objects::JObject<'_> = cast_jvalue!({String}, JValue::Object(&null));
+/// let _: jni::objects::JByteArray<'_> = cast_jvalue!({byte[]}, jni::objects::JValueOwned::Object(null));
 /// ```
 #[macro_export]
 macro_rules! cast_jvalue {
@@ -298,8 +299,12 @@ macro_rules! cast_jvalue {
     ({ void }, $value:expr) => {{
         $value.v().expect("should be void")
     }};
+    ({ byte[] }, $value:expr) => {{
+        let obj = $value.l().expect("should be object");
+        unsafe { jni::objects::JByteArray::from_raw(obj.into_raw()) }
+    }};
     ({ $($class:tt)+ }, $value:expr) => {{
-        $value.l().expect("should be void")
+        $value.l().expect("should be object")
     }};
 }
 
@@ -308,16 +313,24 @@ macro_rules! cast_jvalue {
 /// ```
 /// use jni::sys::JNI_TRUE;
 /// use risingwave_jni_core::{cast_jvalue, to_jvalue};
-/// assert_eq!(cast_jvalue!({boolean}, to_jvalue!({boolean}, JNI_TRUE)), true);
-/// assert_eq!(cast_jvalue!({byte}, to_jvalue!({byte}, 10)), 10);
-/// assert_eq!(cast_jvalue!({char}, to_jvalue!({char}, 'c')), 'c' as u16);
-/// assert_eq!(cast_jvalue!({double}, to_jvalue!({double}, 3.14)), 3.14);
-/// assert_eq!(cast_jvalue!({float}, to_jvalue!({float}, 3.14)), 3.14);
-/// assert_eq!(cast_jvalue!({int}, to_jvalue!({int}, 10)), 10);
-/// assert_eq!(cast_jvalue!({long}, to_jvalue!({long}, 10)), 10);
-/// assert_eq!(cast_jvalue!({short}, to_jvalue!({short}, 10)), 10);
-/// cast_jvalue!({String}, to_jvalue!({String}, &jni::objects::JObject::null()));
-/// cast_jvalue!({byte[]}, to_jvalue!({byte[]}, &jni::objects::JObject::null()));
+/// assert_eq!(
+///     cast_jvalue!({ boolean }, to_jvalue!({ boolean }, JNI_TRUE)),
+///     true
+/// );
+/// assert_eq!(cast_jvalue!({ byte }, to_jvalue!({ byte }, 10)), 10);
+/// assert_eq!(
+///     cast_jvalue!({ char }, to_jvalue!({ char }, 'c')),
+///     'c' as u16
+/// );
+/// assert_eq!(cast_jvalue!({ double }, to_jvalue!({ double }, 3.14)), 3.14);
+/// assert_eq!(cast_jvalue!({ float }, to_jvalue!({ float }, 3.14)), 3.14);
+/// assert_eq!(cast_jvalue!({ int }, to_jvalue!({ int }, 10)), 10);
+/// assert_eq!(cast_jvalue!({ long }, to_jvalue!({ long }, 10)), 10);
+/// assert_eq!(cast_jvalue!({ short }, to_jvalue!({ short }, 10)), 10);
+/// cast_jvalue!(
+///     { String },
+///     to_jvalue!({ String }, &jni::objects::JObject::null())
+/// );
 /// ```
 #[macro_export]
 macro_rules! to_jvalue {

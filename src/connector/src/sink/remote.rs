@@ -23,7 +23,6 @@ use async_trait::async_trait;
 use futures::future::select;
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use itertools::Itertools;
-use jni::objects::JByteArray;
 use jni::JavaVM;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
@@ -167,15 +166,13 @@ async fn validate_remote_sink(param: &SinkParam) -> Result<()> {
             .byte_array_from_slice(&Message::encode_to_vec(&validate_sink_request))
             .map_err(|err| SinkError::Internal(err.into()))?;
 
-        let response = call_static_method!(
+        let validate_sink_response_bytes = call_static_method!(
             env,
             {com.risingwave.connector.JniSinkValidationHandler},
             {byte[] validate(byte[] validateSourceRequestBytes)},
             &validate_sink_request_bytes
         )
         .map_err(|err| SinkError::Internal(err.into()))?;
-
-        let validate_sink_response_bytes = unsafe { JByteArray::from_raw(response.into_raw()) };
 
         let validate_sink_response: ValidateSinkResponse = Message::decode(
             risingwave_jni_core::to_guarded_slice(&validate_sink_response_bytes, &mut env)
