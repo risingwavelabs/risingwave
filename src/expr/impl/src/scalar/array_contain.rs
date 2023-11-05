@@ -43,6 +43,7 @@ use risingwave_expr::function;
 /// select NULL @> array[3,4];
 /// ----
 /// NULL
+/// ```
 #[function("array_contains(anyarray, anyarray) -> boolean")]
 fn array_contains(left: ListRef<'_>, right: ListRef<'_>) -> bool {
     let set: HashSet<_> = left.iter().collect();
