@@ -77,10 +77,6 @@ pub enum Token {
     LtEq,
     /// Greater Than Or Equals operator `>=`
     GtEq,
-    /// Contained operator `<@`
-    LtContains,
-    /// Contains operator `@>`
-    GtContains,
     /// Spaceship operator <=>
     Spaceship,
     /// Plus operator `+`
@@ -205,8 +201,6 @@ impl fmt::Display for Token {
             Token::Gt => f.write_str(">"),
             Token::LtEq => f.write_str("<="),
             Token::GtEq => f.write_str(">="),
-            Token::LtContains => f.write_str("@<"),
-            Token::GtContains => f.write_str("@>"),
             Token::Plus => f.write_str("+"),
             Token::Minus => f.write_str("-"),
             Token::Mul => f.write_str("*"),
@@ -717,7 +711,7 @@ impl<'a> Tokenizer<'a> {
                         }
                         Some('>') => self.consume_and_return(chars, Token::Neq),
                         Some('<') => self.consume_and_return(chars, Token::ShiftLeft),
-                        Some('@') => self.consume_and_return(chars, Token::LtContains),
+                        Some('@') => self.consume_and_return(chars, Token::ArrowAt),
                         _ => Ok(Some(Token::Lt)),
                     }
                 }
@@ -786,10 +780,20 @@ impl<'a> Tokenizer<'a> {
                     }
                 }
                 '@' => {
-                    chars.next(); // consume
+                    chars.next(); // consume the '@'
                     match chars.peek() {
-                        Some('>') => self.consume_and_return(chars, Token::GtContains),
+                        Some('>') => self.consume_and_return(chars, Token::AtArrow),
+                        // a regular '@' operator
                         _ => Ok(Some(Token::AtSign)),
+                    }
+                }
+                '?' => {
+                    chars.next(); // consume the '?'
+                    match chars.peek() {
+                        Some('|') => self.consume_and_return(chars, Token::QuestionMarkPipe),
+                        Some('&') => self.consume_and_return(chars, Token::QuestionMarkAmpersand),
+                        // a regular '?' operator
+                        _ => Ok(Some(Token::QuestionMark)),
                     }
                 }
                 other => self.consume_and_return(chars, Token::Char(other)),

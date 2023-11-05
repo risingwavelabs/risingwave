@@ -193,7 +193,7 @@
     Bind error: failed to bind expression: ARRAY[1, 2] @> 2
 
     Caused by:
-      Bind error: types List(Int32) and Int32 cannot be matched
+      Bind error: operator does not exist: integer[] || integer
 - name: array_contains(int[], varchar[]) -> bool
   sql: select array[2,3] @> array['1'];
   binder_error: |-

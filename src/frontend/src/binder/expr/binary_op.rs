@@ -69,16 +69,8 @@ impl Binder {
             BinaryOperator::Eq => ExprType::Equal,
             BinaryOperator::Lt => ExprType::LessThan,
             BinaryOperator::LtEq => ExprType::LessThanOrEqual,
-            BinaryOperator::PGLtContains => {
-                // todo: for range contains
-                ExprType::ArrayContained
-            }
             BinaryOperator::Gt => ExprType::GreaterThan,
             BinaryOperator::GtEq => ExprType::GreaterThanOrEqual,
-            BinaryOperator::PGGtContains => {
-                // todo: for range contains
-                ExprType::ArrayContains
-            }
             BinaryOperator::And => ExprType::And,
             BinaryOperator::Or => ExprType::Or,
             BinaryOperator::Like => ExprType::Like,
@@ -103,8 +95,48 @@ impl Binder {
             BinaryOperator::HashArrow => ExprType::JsonbExtractPath,
             BinaryOperator::HashLongArrow => ExprType::JsonbExtractPathText,
             BinaryOperator::Prefix => ExprType::StartsWith,
-            BinaryOperator::Contains => ExprType::JsonbContains,
-            BinaryOperator::Contained => ExprType::JsonbContained,
+            BinaryOperator::Contains => {
+                let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
+                let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
+                match (left_type, right_type) {
+                    (Some(DataType::List { .. }), Some(DataType::List { .. }))
+                    | (Some(DataType::List { .. }), None)
+                    | (None, Some(DataType::List { .. })) => ExprType::ArrayContains,
+                    (Some(DataType::Jsonb), Some(DataType::Jsonb))
+                    | (Some(DataType::Jsonb), None)
+                    | (None, Some(DataType::Jsonb)) => ExprType::JsonbContains,
+                    (None, None) => ExprType::ArrayContained,
+                    (left, right) => {
+                        return Err(ErrorCode::BindError(format!(
+                            "operator does not exist: {} || {}",
+                            left.map_or_else(|| String::from("None"), |x| x.to_string()),
+                            right.map_or_else(|| String::from("None"), |x| x.to_string()),
+                        ))
+                        .into());
+                    }
+                }
+            }
+            BinaryOperator::Contained => {
+                let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
+                let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
+                match (left_type, right_type) {
+                    (Some(DataType::List { .. }), Some(DataType::List { .. }))
+                    | (Some(DataType::List { .. }), None)
+                    | (None, Some(DataType::List { .. })) => ExprType::ArrayContained,
+                    (Some(DataType::Jsonb), Some(DataType::Jsonb))
+                    | (Some(DataType::Jsonb), None)
+                    | (None, Some(DataType::Jsonb)) => ExprType::JsonbContained,
+                    (None, None) => ExprType::ArrayContained,
+                    (left, right) => {
+                        return Err(ErrorCode::BindError(format!(
+                            "operator does not exist: {} || {}",
+                            left.map_or_else(|| String::from("None"), |x| x.to_string()),
+                            right.map_or_else(|| String::from("None"), |x| x.to_string()),
+                        ))
+                        .into());
+                    }
+                }
+            }
             BinaryOperator::Exists => ExprType::JsonbExists,
             BinaryOperator::ExistsAny => ExprType::JsonbExistsAny,
             BinaryOperator::ExistsAll => ExprType::JsonbExistsAll,
