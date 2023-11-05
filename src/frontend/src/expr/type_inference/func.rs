@@ -533,6 +533,50 @@ fn infer_type_for_special(
             }
             Ok(Some(DataType::Varchar))
         }
+        ExprType::ArrayMax => {
+            ensure_arity!("array_max", | inputs | == 1);
+            inputs[0].ensure_array_type()?;
+
+            Ok(Some(inputs[0].return_type().as_list().clone()))
+        }
+        ExprType::ArraySum => {
+            ensure_arity!("array_sum", | inputs | == 1);
+            inputs[0].ensure_array_type()?;
+
+            let return_type = match inputs[0].return_type().as_list().clone() {
+                DataType::Int16 | DataType::Int32 => DataType::Int64,
+                DataType::Int64 | DataType::Decimal => DataType::Decimal,
+                DataType::Float32 => DataType::Float32,
+                DataType::Float64 => DataType::Float64,
+                DataType::Interval => DataType::Interval,
+                _ => return Err(ErrorCode::InvalidParameterValue("".to_string()).into()),
+            };
+
+            Ok(Some(return_type))
+        }
+        ExprType::ArrayContains | ExprType::ArrayContained => {
+            ensure_arity!("array_range_op", | inputs | == 2);
+            align_types(inputs.iter_mut())?;
+            Ok(Some(DataType::Boolean))
+        }     
+        ExprType::StringToArray => {
+            ensure_arity!("string_to_array", 2 <= | inputs | <= 3);
+
+            if !inputs.iter().all(|e| e.return_type() == DataType::Varchar) {
+                return Ok(None);
+            }
+
+            Ok(Some(DataType::List(Box::new(DataType::Varchar))))
+        }
+        ExprType::TrimArray => {
+            ensure_arity!("trim_array", | inputs | == 2);
+            inputs[0].ensure_array_type()?;
+
+            inputs[1].cast_implicit_mut(DataType::Int32)?;
+
+            Ok(Some(inputs[0].return_type()))
+        }
+>>>>>>> 869cb833e (feat: support array containment @>, <@ (#13180))
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);
             Ok(Some(DataType::Int16))

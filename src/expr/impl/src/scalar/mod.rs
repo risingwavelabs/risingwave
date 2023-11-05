@@ -16,6 +16,7 @@ mod arithmetic_op;
 mod array;
 mod array_access;
 mod array_concat;
+mod array_contain;
 mod array_distinct;
 mod array_length;
 mod array_min_max;

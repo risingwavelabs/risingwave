@@ -172,6 +172,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::ArrayRemove
             | expr_node::Type::ArrayReplace
             | expr_node::Type::ArrayPosition
+            | expr_node::Type::ArrayContains
+            | expr_node::Type::ArrayContained
             | expr_node::Type::HexToInt256
             | expr_node::Type::JsonbCat
             | expr_node::Type::JsonbAccess

@@ -207,6 +207,8 @@ message ExprNode {
     ARRAY_MAX = 547;
     ARRAY_SUM = 548;
     ARRAY_SORT = 549;
+    ARRAY_CONTAINS = 550;
+    ARRAY_CONTAINED = 551;
 
     // Int256 functions
     HEX_TO_INT256 = 560;

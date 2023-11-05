@@ -182,6 +182,25 @@
   logical_plan: |-
     LogicalProject { exprs: [ArrayPrepend(Array(233:Int32), Array(Array(66:Int32))) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: array_contains(int[], int[]) -> bool
+  sql: select array[1,2] @> array[2,3];
+  logical_plan: |-
+    LogicalProject { exprs: [(Array(1:Int32, 2:Int32) @> Array(2:Int32, 3:Int32)) as $expr1] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: array_contains(int[], int) -> bool
+  sql: select array[1,2] @> 2;
+  binder_error: |-
+    Bind error: failed to bind expression: ARRAY[1, 2] @> 2
+
+    Caused by:
+      Bind error: types List(Int32) and Int32 cannot be matched
+- name: array_contains(int[], varchar[]) -> bool
+  sql: select array[2,3] @> array['1'];
+  binder_error: |-
+    Bind error: failed to bind expression: ARRAY[2, 3] @> ARRAY['1']
+
+    Caused by:
+      Bind error: types List(Int32) and List(Varchar) cannot be matched
 - name: string from/to varchar[] in implicit context
   sql: |
     values (array['a', 'b']), ('{c,' || 'd}');

@@ -276,6 +276,11 @@ SELECT array_positions(ARRAY[1,2,3,4,5,6,1,2,3,4,5,6], 4);
 SELECT array_positions(ARRAY[[1,2],[3,4]], 4);
 SELECT array_positions(ARRAY[1,2,3,4,5,6,1,2,3,4,5,6], NULL);
 SELECT array_positions(ARRAY[1,2,3,NULL,5,6,1,2,3,NULL,5,6], NULL);
+
+select contains(array[1,2,3], array[2,3]);
+select contains(array[1,2,3], NULL);
+select contained(array[1,2,3], array[2,3]);
+select contained(array[1,2,3], NULL);
 --@ SELECT array_length(array_positions(ARRAY(SELECT 'AAAAAAAAAAAAAAAAAAAAAAAAA'::text || i % 10
 --@                                           FROM generate_series(1,100) g(i)),
 --@                                   'AAAAAAAAAAAAAAAAAAAAAAAAA5'), 1);

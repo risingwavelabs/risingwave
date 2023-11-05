@@ -69,8 +69,16 @@ impl Binder {
             BinaryOperator::Eq => ExprType::Equal,
             BinaryOperator::Lt => ExprType::LessThan,
             BinaryOperator::LtEq => ExprType::LessThanOrEqual,
+            BinaryOperator::PGLtContains => {
+                // todo: for range contains
+                ExprType::ArrayContained
+            }
             BinaryOperator::Gt => ExprType::GreaterThan,
             BinaryOperator::GtEq => ExprType::GreaterThanOrEqual,
+            BinaryOperator::PGGtContains => {
+                // todo: for range contains
+                ExprType::ArrayContains
+            }
             BinaryOperator::And => ExprType::And,
             BinaryOperator::Or => ExprType::Or,
             BinaryOperator::Like => ExprType::Like,
