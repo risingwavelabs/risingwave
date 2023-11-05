@@ -189,6 +189,26 @@ impl StreamTableScan {
             .build(vec![0], 1)
             .with_id(state.gen_table_id_wrapped())
     }
+
+    /// Build catalog for cdc backfill state
+    /// Right now we only persist whether the backfill is finished or not
+    pub fn build_cdc_backfill_state_catalog(&self, _state: &mut BuildFragmentGraphState) {
+        // TODO:
+        let properties = self.ctx().with_options().internal_table_subset();
+        let mut catalog_builder = TableCatalogBuilder::new(properties);
+        let upstream_schema = &self.core.get_table_columns();
+
+        // We use vnode as primary key in state table.
+        // If `Distribution::Single`, vnode will just be `VirtualNode::default()`.
+        catalog_builder.add_column(&Field::with_name(VirtualNode::RW_TYPE, "vnode"));
+        catalog_builder.add_order_column(0, OrderType::ascending());
+
+        // pk columns
+        for col_order in self.core.primary_key() {
+            let col = &upstream_schema[col_order.column_index];
+            catalog_builder.add_column(&Field::from(col));
+        }
+    }
 }
 
 impl_plan_tree_node_for_leaf! { StreamTableScan }
@@ -308,16 +328,21 @@ impl StreamTableScan {
             .to_internal_table_prost();
 
         let node_body = if cdc_upstream {
-            // don't need batch plan for cdc source
             PbNodeBody::Chain(ChainNode {
-                table_id: self.core.cdc_table_desc.table_id.table_id,
+                // The table id refers to the upstream source streaming job
+                table_id: self.core.cdc_table_desc.source_id.table_id,
                 chain_type: self.chain_type as i32,
                 // The column indices need to be forwarded to the downstream
                 output_indices,
                 upstream_column_ids,
                 // The table desc used by backfill executor
                 state_table: Some(catalog),
-                rate_limit: None,
+                rate_limit: self
+                    .base
+                    .ctx()
+                    .session_ctx()
+                    .config()
+                    .get_streaming_rate_limit(),
                 cdc_table_desc: Some(self.core.cdc_table_desc.to_protobuf()),
                 ..Default::default()
             })

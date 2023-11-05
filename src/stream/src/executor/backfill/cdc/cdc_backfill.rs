@@ -185,7 +185,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             upstream.peekable()
         };
 
-        tracing::debug!(?upstream_table_id, ?self.actor_ctx.id, ?shared_cdc_source, "start cdc backfill");
+        tracing::debug!(?upstream_table_id, ?shared_cdc_source, "start cdc backfill");
         state_impl.init_epoch(first_barrier.epoch);
 
         // start from the beginning
