@@ -149,6 +149,10 @@ pub struct StreamingMetrics {
     pub kv_log_store_storage_read_count: LabelGuardedIntCounterVec<4>,
     pub kv_log_store_storage_read_size: LabelGuardedIntCounterVec<4>,
 
+    // Sink iceberg metrics
+    pub iceberg_file_appender_write_qps: LabelGuardedIntCounterVec<3>,
+    pub iceberg_file_appender_write_latency: LabelGuardedHistogramVec<3>,
+
     // Memory management
     // FIXME(yuhao): use u64 here
     pub lru_current_watermark_time_ms: IntGauge,
@@ -901,6 +905,46 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let iceberg_file_appender_write_qps = register_guarded_int_counter_vec_with_registry!(
+            "iceberg_file_appender_write_qps",
+            "The qps of iceberg file appender write",
+            &["executor_id", "connector", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let iceberg_file_appender_write_latency = register_guarded_histogram_vec_with_registry!(
+            "iceberg_file_appender_write_latency",
+            "The latency of iceberg file appender write",
+            &["executor_id", "connector", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let iceberg_file_appender_flush_qps = register_guarded_int_counter_vec_with_registry!(
+            "iceberg_file_appender_flush_qps",
+            "The qps of iceberg file appender flush",
+            &["executor_id", "connector", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let iceberg_file_appender_flush_latency = register_guarded_histogram_vec_with_registry!(
+            "iceberg_file_appender_flush_latency",
+            "The latency of iceberg file appender flush",
+            &["executor_id", "connector", "sink_id"],
+            registry
+        )
+        .unwrap();
+
+        let iceberg_in_memory_data_file_num = register_guarded_int_gauge_vec_with_registry!(
+            "iceberg_in_memory_data_file_num",
+            "The number of in memory data file",
+            &["executor_id", "connector", "sink_id"],
+            registry
+        )
+        .unwrap();
+
         Self {
             level,
             executor_row_count,
@@ -989,6 +1033,8 @@ impl StreamingMetrics {
             materialize_cache_hit_count,
             materialize_cache_total_count,
             stream_memory_usage,
+            iceberg_file_appender_write_qps,
+            iceberg_file_appender_write_latency,
         }
     }
 
@@ -1024,6 +1070,13 @@ impl StreamingMetrics {
         let log_store_write_rows = self.log_store_write_rows.with_label_values(&label_list);
         let log_store_read_rows = self.log_store_read_rows.with_label_values(&label_list);
 
+        let iceberg_file_appender_write_qps = self
+            .iceberg_file_appender_write_qps
+            .with_label_values(&label_list);
+        let iceberg_file_appender_write_latency = self
+            .iceberg_file_appender_write_latency
+            .with_label_values(&label_list);
+
         SinkMetrics {
             sink_commit_duration_metrics,
             connector_sink_rows_received,
@@ -1032,6 +1085,8 @@ impl StreamingMetrics {
             log_store_write_rows,
             log_store_latest_read_epoch,
             log_store_read_rows,
+            iceberg_file_appender_write_qps,
+            iceberg_file_appender_write_latency,
         }
     }
 }

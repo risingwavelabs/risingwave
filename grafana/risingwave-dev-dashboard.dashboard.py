@@ -3343,6 +3343,43 @@ def section_kafka_native_metrics(outer_panels):
         )
     ]
 
+def section_iceberg_metrics(outer_panels):
+    panels = outer_panels.sub_panel()
+    return [
+        outer_panels.row_collapsed(
+            "Iceberg Sink Metrics",
+            [
+                panels.timeseries_count(
+                    "Write Qps Of Iceberg File Appender",
+                    "iceberg file appender write qps",
+                    [
+                        panels.target(
+                            f"{metric('iceberg_file_appender_write_qps')}",
+                           "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                        ),
+                    ]
+                ),
+                panels.timeseries_latency(
+                    "Write latency Of Iceberg File Appender",
+                    "",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('iceberg_file_appender_write_latency_bucket')}[$__rate_interval])) by (le, connector, sink_id))",
+                                f"p{legend}" + " @ {{connector}} {{sink_id}}",
+                            ),
+                            [50, 99, "max"],
+                        ),
+                        panels.target(
+                            f"sum by(le, connector, sink_id)(rate({metric('iceberg_file_appender_write_latency_sum')}[$__rate_interval])) / sum by(le, type, job, instance) (rate({metric('iceberg_file_appender_write_latency_count')}[$__rate_interval]))",
+                            "avg - {{connector}} @ {{sink_id}}",
+                        ),
+                    ],
+                ),
+            ]
+        )
+    ]
+
 
 def section_memory_manager(outer_panels):
     panels = outer_panels.sub_panel()
@@ -3922,5 +3959,6 @@ dashboard = Dashboard(
         *section_sink_metrics(panels),
         *section_kafka_native_metrics(panels),
         *section_network_connection(panels),
+        *section_iceberg_metrics(panels)
     ],
 ).auto_panel_ids()
