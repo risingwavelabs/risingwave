@@ -840,7 +840,9 @@ impl Binder {
                 ("array_position", raw_call(ExprType::ArrayPosition)),
                 ("array_positions", raw_call(ExprType::ArrayPositions)),
                 ("array_contains", raw_call(ExprType::ArrayContains)),
+                ("arraycontains", raw_call(ExprType::ArrayContains)),
                 ("array_contained", raw_call(ExprType::ArrayContained)),
+                ("arraycontained", raw_call(ExprType::ArrayContained)),
                 ("trim_array", raw_call(ExprType::TrimArray)),
                 (
                     "array_ndims",

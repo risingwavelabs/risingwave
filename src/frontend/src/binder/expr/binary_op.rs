@@ -105,12 +105,11 @@ impl Binder {
                     (Some(DataType::Jsonb), Some(DataType::Jsonb))
                     | (Some(DataType::Jsonb), None)
                     | (None, Some(DataType::Jsonb)) => ExprType::JsonbContains,
-                    (None, None) => ExprType::ArrayContained,
                     (left, right) => {
                         return Err(ErrorCode::BindError(format!(
                             "operator does not exist: {} || {}",
-                            left.map_or_else(|| String::from("None"), |x| x.to_string()),
-                            right.map_or_else(|| String::from("None"), |x| x.to_string()),
+                            left.map_or_else(|| String::from("unknown"), |x| x.to_string()),
+                            right.map_or_else(|| String::from("unknown"), |x| x.to_string()),
                         ))
                         .into());
                     }
@@ -126,12 +125,11 @@ impl Binder {
                     (Some(DataType::Jsonb), Some(DataType::Jsonb))
                     | (Some(DataType::Jsonb), None)
                     | (None, Some(DataType::Jsonb)) => ExprType::JsonbContained,
-                    (None, None) => ExprType::ArrayContained,
                     (left, right) => {
                         return Err(ErrorCode::BindError(format!(
                             "operator does not exist: {} || {}",
-                            left.map_or_else(|| String::from("None"), |x| x.to_string()),
-                            right.map_or_else(|| String::from("None"), |x| x.to_string()),
+                            left.map_or_else(|| String::from("unknown"), |x| x.to_string()),
+                            right.map_or_else(|| String::from("unknown"), |x| x.to_string()),
                         ))
                         .into());
                     }

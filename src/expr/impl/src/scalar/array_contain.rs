@@ -27,12 +27,12 @@ use risingwave_expr::function;
 /// query I
 /// select array[1,2,3] @> array[2,3];
 /// ----
-/// true
+/// t
 ///
 /// query I
 /// select array[1,2,3] @> array[3,4];
 /// ----
-/// false
+/// f
 ///
 /// query I
 /// select array[1,2,3] @> NULL;
@@ -47,12 +47,7 @@ use risingwave_expr::function;
 #[function("array_contains(anyarray, anyarray) -> boolean")]
 fn array_contains(left: ListRef<'_>, right: ListRef<'_>) -> bool {
     let set: HashSet<_> = left.iter().collect();
-    for item in right.iter() {
-        if !set.contains(&item) {
-            return false;
-        }
-    }
-    true
+    right.iter().all(|item| set.contains(&item))
 }
 
 #[function("array_contained(anyarray, anyarray) -> boolean")]
