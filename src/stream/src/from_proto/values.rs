@@ -28,7 +28,6 @@ use crate::task::{ExecutorParams, LocalStreamManagerCore};
 /// this executor. May refractor with `BarrierRecvExecutor` in the near future.
 pub struct ValuesExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for ValuesExecutorBuilder {
     type Node = ValuesNode;
 
