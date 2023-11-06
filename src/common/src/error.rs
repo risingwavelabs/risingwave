@@ -282,21 +282,6 @@ impl Debug for RwError {
     }
 }
 
-impl PartialEq for RwError {
-    fn eq(&self, other: &Self) -> bool {
-        self.inner == other.inner
-    }
-}
-
-impl PartialEq for ErrorCode {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (ErrorCode::InternalError(msg), ErrorCode::InternalError(msg2)) => msg == msg2,
-            (_, _) => false,
-        }
-    }
-}
-
 impl From<PbFieldNotFound> for RwError {
     fn from(err: PbFieldNotFound) -> Self {
         ErrorCode::InternalError(format!(
@@ -512,8 +497,10 @@ mod tests {
     use std::convert::Into;
     use std::result::Result::Err;
 
+    use anyhow::anyhow;
+
     use super::*;
-    use crate::error::ErrorCode::InternalError;
+    use crate::error::ErrorCode::InternalErrorAnyhow;
 
     #[test]
     fn test_display_internal_error() {
@@ -529,12 +516,13 @@ mod tests {
             let err_msg = "a < 0";
             let error = (|| {
                 ensure!(a < 0);
-                Ok(())
-            })();
+                Ok::<_, RwError>(())
+            })()
+            .unwrap_err();
 
             assert_eq!(
-                Err(RwError::from(InternalError(err_msg.to_string()))),
-                error
+                RwError::from(InternalErrorAnyhow(anyhow!(err_msg))).to_string(),
+                error.to_string(),
             );
         }
 
@@ -542,25 +530,28 @@ mod tests {
             let err_msg = "error msg without args";
             let error = (|| {
                 ensure!(a < 0, "error msg without args");
-                Ok(())
-            })();
+                Ok::<_, RwError>(())
+            })()
+            .unwrap_err();
             assert_eq!(
-                Err(RwError::from(InternalError(err_msg.to_string()))),
-                error
+                RwError::from(InternalErrorAnyhow(anyhow!(err_msg))).to_string(),
+                error.to_string()
             );
         }
 
         {
             let error = (|| {
                 ensure!(a < 0, "error msg with args: {}", "xx");
-                Ok(())
-            })();
+                Ok::<_, RwError>(())
+            })()
+            .unwrap_err();
             assert_eq!(
-                Err(RwError::from(InternalError(format!(
+                RwError::from(InternalErrorAnyhow(anyhow!(
                     "error msg with args: {}",
                     "xx"
-                )))),
-                error
+                )))
+                .to_string(),
+                error.to_string()
             );
         }
     }
@@ -574,10 +565,7 @@ mod tests {
             Ok(())
         }
         let err = ensure_a_equals_b().unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "internal error: a == b assertion failed (a is 1, b is 2)"
-        );
+        assert_eq!(err.to_string(), "a == b assertion failed (a is 1, b is 2)");
     }
 
     #[test]
@@ -596,6 +584,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // it's not a good practice to include error source in `Display`, see #13248
     fn test_internal_sources() {
         use anyhow::Context;
 
