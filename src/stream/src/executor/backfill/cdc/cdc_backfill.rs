@@ -207,7 +207,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         current_pk_pos = backfill_offset;
 
         // restore backfill done flag from state store
-        let is_finished = state_impl.check_finished().await?;
+        // let is_finished =state_impl.check_finished().await?;
+        let is_finished = state_impl.restore_state().await?;
 
         // If the snapshot is empty, we don't need to backfill.
         let is_snapshot_empty: bool = {
@@ -236,7 +237,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let mut total_snapshot_processed_rows: u64 = 0;
         let mut snapshot_read_epoch;
 
-        // Read the current binlog offset as a low watermark
+        // last binlog offset is the low watermark of the upstream changelog events
+        // let mut last_binlog_offset: Option<CdcOffset> = restored_cdc_offset.map_or(
+        //     upstream_table_reader.current_binlog_offset().await?,
+        //     |cdc_offset| Some(cdc_offset),
+        // );
         let mut last_binlog_offset: Option<CdcOffset> =
             upstream_table_reader.current_binlog_offset().await?;
 
@@ -373,7 +378,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     )?;
 
                                     tracing::trace!(
-                                        "recv changelog chunk: bin offset {:?}, capactiy {}",
+                                        target: "events::stream::cdc_backfill",
+                                        "recv changelog chunk: chunk_offset {:?}, capactiy {}",
                                         chunk_binlog_offset,
                                         chunk.capacity()
                                     );
@@ -382,15 +388,14 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     // `last_binlog_offset`, skip the chunk that *only* contains
                                     // events before `last_binlog_offset`.
                                     if let Some(last_binlog_offset) = &last_binlog_offset {
-                                        if let Some(chunk_binlog_offset) = chunk_binlog_offset {
-                                            if chunk_binlog_offset < *last_binlog_offset {
-                                                tracing::trace!(
-                                                    "skip changelog chunk: offset {:?}, capacity {}",
-                                                    chunk_binlog_offset,
-                                                    chunk.capacity()
-                                                );
-                                                continue;
-                                            }
+                                        if let Some(chunk_offset) = chunk_binlog_offset && chunk_offset < *last_binlog_offset {
+                                            tracing::trace!(
+                                                target: "events::stream::cdc_backfill",
+                                                "skip changelog chunk: chunk_offset {:?}, capacity {}",
+                                                chunk_offset,
+                                                chunk.capacity()
+                                            );
+                                            continue;
                                         }
                                     }
                                     // Buffer the upstream chunk.
@@ -464,7 +469,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         }
 
         tracing::info!(
-            actor = self.actor_id,
             "CdcBackfill has already finished and forward messages directly to the downstream"
         );
 

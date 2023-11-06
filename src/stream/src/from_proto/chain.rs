@@ -29,7 +29,7 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::external::ExternalStorageTable;
 use crate::executor::{
     BackfillExecutor, CdcBackfillExecutor, ChainExecutor, FlowControlExecutor,
-    RearrangedChainExecutor, SourceStateTableHandler,
+    RearrangedChainExecutor,
 };
 
 pub struct ChainExecutorBuilder;
@@ -137,6 +137,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 // )
                 // .await;
 
+                debug!("chain vnode_bitmap: {:?}", params.vnode_bitmap);
                 let vnodes = params.vnode_bitmap.map(Arc::new);
 
                 let state_table =

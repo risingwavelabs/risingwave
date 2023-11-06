@@ -204,10 +204,11 @@ impl StreamTableScan {
         catalog_builder.add_order_column(0, OrderType::ascending());
 
         catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
-        catalog_builder.add_column(&Field::with_name(DataType::Jsonb, "last_cdc_offset"));
+        catalog_builder.add_column(&Field::with_name(DataType::Jsonb, "cdc_offset"));
 
+        // leave dist key empty, since the cdc backfill executor is singleton
         catalog_builder
-            .build(vec![0], 1)
+            .build(vec![], 1)
             .with_id(state.gen_table_id_wrapped())
     }
 }

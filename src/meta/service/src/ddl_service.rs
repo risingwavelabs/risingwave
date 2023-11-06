@@ -890,9 +890,9 @@ fn fill_table_stream_graph_info(
 
             // fill table id for cdc backfill
             if let NodeBody::Chain(chain_node) = node_body && table_job_type == TableJobType::SharedCdcSource {
-                chain_node.cdc_table_desc.as_mut().map(|table| {
+                if let Some(table) = chain_node.cdc_table_desc.as_mut() {
                     table.table_id = table_id;
-                });
+                }
             }
         });
     }

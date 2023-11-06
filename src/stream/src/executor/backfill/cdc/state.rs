@@ -16,11 +16,9 @@ use anyhow::anyhow;
 use maplit::hashmap;
 use risingwave_common::row;
 use risingwave_common::row::Row;
-use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRef, ScalarRefImpl};
+use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_connector::source::external::{
-    CdcOffset, CdcTableType, DebeziumOffset, DebeziumSourceOffset,
-};
+use risingwave_connector::source::external::{CdcOffset, DebeziumOffset, DebeziumSourceOffset};
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_storage::StateStore;
 use serde_json::Value;
@@ -44,18 +42,10 @@ impl<S: StateStore> CdcBackfillStateImpl<S> {
         }
     }
 
-    pub async fn check_finished(&self) -> StreamExecutorResult<bool> {
+    pub async fn restore_state(&self) -> StreamExecutorResult<bool> {
         match self {
             CdcBackfillStateImpl::Undefined => Ok(false),
-            CdcBackfillStateImpl::SingleTable(state) => state.check_finished().await,
-            CdcBackfillStateImpl::MultiTable(state) => state.check_finished().await,
-        }
-    }
-
-    pub async fn restore_state(&self) -> StreamExecutorResult<(bool, Option<CdcOffset>)> {
-        match self {
-            CdcBackfillStateImpl::Undefined => Ok((false, None)),
-            CdcBackfillStateImpl::SingleTable(state) => Ok((state.check_finished().await?, None)),
+            CdcBackfillStateImpl::SingleTable(state) => Ok(state.check_finished().await?),
             CdcBackfillStateImpl::MultiTable(state) => state.restore_state().await,
         }
     }
@@ -86,14 +76,14 @@ pub const BACKFILL_STATE_KEY_SUFFIX: &str = "_backfill";
 
 pub struct MultiBackfillState<S: StateStore> {
     /// Id of the backfilling table, will be the key of the state
-    table_id: u32,
+    table_id: i64,
     state_table: StateTable<S>,
 }
 
 impl<S: StateStore> MultiBackfillState<S> {
     pub fn new(table_id: u32, state_table: StateTable<S>) -> Self {
         Self {
-            table_id,
+            table_id: table_id as _,
             state_table,
         }
     }
@@ -102,9 +92,9 @@ impl<S: StateStore> MultiBackfillState<S> {
         self.state_table.init_epoch(epoch)
     }
 
-    /// Restore the backfill state and the last cdc offset from storage
-    pub async fn restore_state(&self) -> StreamExecutorResult<(bool, Option<CdcOffset>)> {
-        let key = Some(self.table_id.to_string());
+    /// Restore the backfill state from storage
+    pub async fn restore_state(&self) -> StreamExecutorResult<bool> {
+        let key = Some(self.table_id);
         match self
             .state_table
             .get_row(row::once(key.map(ScalarImpl::from)))
@@ -116,33 +106,8 @@ impl<S: StateStore> MultiBackfillState<S> {
                     _ => return Err(anyhow!("invalid backfill state: backfill_finished").into()),
                 };
 
-                let last_cdc_offset = match row.datum_at(2) {
-                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                        let cdc_offset =
-                            serde_json::from_value::<CdcOffset>(jsonb_ref.to_owned_scalar().take())
-                                .map_err(|err| anyhow!("deserialize cdc offset fail: {:?}", err))?;
-                        Some(cdc_offset)
-                    }
-                    _ => return Err(anyhow!("invalid backfill state: last_cdc_offset").into()),
-                };
-
-                Ok((finished, last_cdc_offset))
+                Ok(finished)
             }
-            None => Ok((false, None)),
-        }
-    }
-
-    pub async fn check_finished(&self) -> StreamExecutorResult<bool> {
-        let key = Some(self.table_id.to_string());
-        match self
-            .state_table
-            .get_row(row::once(key.map(ScalarImpl::from)))
-            .await?
-        {
-            Some(row) => match row.datum_at(1) {
-                Some(ScalarRefImpl::Bool(val)) => Ok(val),
-                _ => unreachable!("invalid backfill persistent state"),
-            },
             None => Ok(false),
         }
     }
@@ -152,10 +117,10 @@ impl<S: StateStore> MultiBackfillState<S> {
         &mut self,
         last_cdc_offset: Option<CdcOffset>,
     ) -> StreamExecutorResult<()> {
-        let key = Some(self.table_id.to_string());
+        let key = Some(self.table_id);
         let row = [
-            key.clone().map(ScalarImpl::from),
-            Some(true).map(ScalarImpl::from),
+            key.map(ScalarImpl::from),
+            Some(ScalarImpl::from(true)),
             last_cdc_offset.map(|cdc_offset| {
                 let json = serde_json::to_value(cdc_offset).unwrap();
                 ScalarImpl::Jsonb(JsonbVal::from(json))
