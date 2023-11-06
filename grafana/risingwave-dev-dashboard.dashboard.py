@@ -3355,7 +3355,7 @@ def section_iceberg_metrics(outer_panels):
                     [
                         panels.target(
                             f"{metric('iceberg_file_appender_write_qps')}",
-                           "{{executor_id}} - {{connector}} @ {{sink_id}}",
+                           "{{executor_id}} @ {{sink_id}}",
                         ),
                     ]
                 ),
@@ -3365,14 +3365,14 @@ def section_iceberg_metrics(outer_panels):
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('iceberg_file_appender_write_latency_bucket')}[$__rate_interval])) by (le, connector, sink_id))",
-                                f"p{legend}" + " @ {{connector}} {{sink_id}}",
+                                f"histogram_quantile({quantile}, sum(rate({metric('iceberg_file_appender_write_latency_bucket')}[$__rate_interval])) by (le, sink_id))",
+                                f"p{legend}" + " @ {{sink_id}}",
                             ),
                             [50, 99, "max"],
                         ),
                         panels.target(
-                            f"sum by(le, connector, sink_id)(rate({metric('iceberg_file_appender_write_latency_sum')}[$__rate_interval])) / sum by(le, type, job, instance) (rate({metric('iceberg_file_appender_write_latency_count')}[$__rate_interval]))",
-                            "avg - {{connector}} @ {{sink_id}}",
+                            f"sum by(le, sink_id)(rate({metric('iceberg_file_appender_write_latency_sum')}[$__rate_interval])) / sum by(le, type, job, instance) (rate({metric('iceberg_file_appender_write_latency_count')}[$__rate_interval]))",
+                            "avg @ {{sink_id}}",
                         ),
                     ],
                 ),

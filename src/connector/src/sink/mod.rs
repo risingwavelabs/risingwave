@@ -226,8 +226,8 @@ pub struct SinkMetrics {
     pub log_store_latest_read_epoch: LabelGuardedIntGauge<3>,
     pub log_store_read_rows: LabelGuardedIntCounter<3>,
 
-    pub iceberg_file_appender_write_qps: LabelGuardedIntCounter<3>,
-    pub iceberg_file_appender_write_latency: LabelGuardedHistogram<3>,
+    pub iceberg_file_appender_write_qps: LabelGuardedIntCounter<2>,
+    pub iceberg_file_appender_write_latency: LabelGuardedHistogram<2>,
 }
 
 impl SinkMetrics {

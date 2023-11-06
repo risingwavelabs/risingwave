@@ -150,8 +150,8 @@ pub struct StreamingMetrics {
     pub kv_log_store_storage_read_size: LabelGuardedIntCounterVec<4>,
 
     // Sink iceberg metrics
-    pub iceberg_file_appender_write_qps: LabelGuardedIntCounterVec<3>,
-    pub iceberg_file_appender_write_latency: LabelGuardedHistogramVec<3>,
+    pub iceberg_file_appender_write_qps: LabelGuardedIntCounterVec<2>,
+    pub iceberg_file_appender_write_latency: LabelGuardedHistogramVec<2>,
 
     // Memory management
     // FIXME(yuhao): use u64 here
@@ -908,7 +908,7 @@ impl StreamingMetrics {
         let iceberg_file_appender_write_qps = register_guarded_int_counter_vec_with_registry!(
             "iceberg_file_appender_write_qps",
             "The qps of iceberg file appender write",
-            &["executor_id", "connector", "sink_id"],
+            &["executor_id", "sink_id"],
             registry
         )
         .unwrap();
@@ -916,7 +916,7 @@ impl StreamingMetrics {
         let iceberg_file_appender_write_latency = register_guarded_histogram_vec_with_registry!(
             "iceberg_file_appender_write_latency",
             "The latency of iceberg file appender write",
-            &["executor_id", "connector", "sink_id"],
+            &["executor_id", "sink_id"],
             registry
         )
         .unwrap();
@@ -1046,6 +1046,7 @@ impl StreamingMetrics {
         let log_store_write_rows = self.log_store_write_rows.with_label_values(&label_list);
         let log_store_read_rows = self.log_store_read_rows.with_label_values(&label_list);
 
+        let label_list = [identity, sink_id_str];
         let iceberg_file_appender_write_qps = self
             .iceberg_file_appender_write_qps
             .with_label_values(&label_list);
