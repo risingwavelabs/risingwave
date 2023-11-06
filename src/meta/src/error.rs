@@ -51,7 +51,7 @@ enum MetaErrorInner {
         HummockError,
     ),
 
-    #[error("Rpc error: {0}")]
+    #[error(transparent)]
     RpcError(
         #[from]
         #[backtrace]

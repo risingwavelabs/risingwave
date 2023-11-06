@@ -125,10 +125,9 @@ pub enum ErrorCode {
         #[source]
         BoxedError,
     ),
-    #[error("RPC error: {0}")]
+    #[error(transparent)]
     RpcError(
-        #[source]
-        #[backtrace]
+        // #[backtrace] // TODO(error-handling): there's a limitation that `#[transparent]` can't be used with `#[backtrace]` if no `#[from]`
         BoxedError,
     ),
     #[error("Bind error: {0}")]
