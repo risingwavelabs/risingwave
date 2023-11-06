@@ -144,6 +144,8 @@ mod tests {
         // count too small or large.
         case("aaa", "X", 4, Some(-123), "aaaXaaa");
         case("aaa_", "X", 4, Some(123), "aaaX");
+        // very large start and count
+        case("aaa", "X", i32::MAX, Some(i32::MAX), "aaaX");
 
         #[track_caller]
         fn case(s: &str, new_sub_str: &str, start: i32, count: Option<i32>, expected: &str) {
