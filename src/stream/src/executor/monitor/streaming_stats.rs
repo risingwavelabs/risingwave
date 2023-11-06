@@ -921,30 +921,6 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let iceberg_file_appender_flush_qps = register_guarded_int_counter_vec_with_registry!(
-            "iceberg_file_appender_flush_qps",
-            "The qps of iceberg file appender flush",
-            &["executor_id", "connector", "sink_id"],
-            registry
-        )
-        .unwrap();
-
-        let iceberg_file_appender_flush_latency = register_guarded_histogram_vec_with_registry!(
-            "iceberg_file_appender_flush_latency",
-            "The latency of iceberg file appender flush",
-            &["executor_id", "connector", "sink_id"],
-            registry
-        )
-        .unwrap();
-
-        let iceberg_in_memory_data_file_num = register_guarded_int_gauge_vec_with_registry!(
-            "iceberg_in_memory_data_file_num",
-            "The number of in memory data file",
-            &["executor_id", "connector", "sink_id"],
-            registry
-        )
-        .unwrap();
-
         Self {
             level,
             executor_row_count,
@@ -1021,6 +997,8 @@ impl StreamingMetrics {
             kv_log_store_storage_write_size,
             kv_log_store_storage_read_count,
             kv_log_store_storage_read_size,
+            iceberg_file_appender_write_qps,
+            iceberg_file_appender_write_latency,
             lru_current_watermark_time_ms,
             lru_physical_now_ms,
             lru_runtime_loop_count,
@@ -1033,8 +1011,6 @@ impl StreamingMetrics {
             materialize_cache_hit_count,
             materialize_cache_total_count,
             stream_memory_usage,
-            iceberg_file_appender_write_qps,
-            iceberg_file_appender_write_latency,
         }
     }
 
