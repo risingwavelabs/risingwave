@@ -65,6 +65,7 @@ pub struct SinkDesc {
     /// it is the name of table/mv. Otherwise, it is the name of the sink.
     pub sink_from_name: String,
 
+    /// Name of the target table for sink into table.
     pub sink_into_name: Option<String>,
 }
 
