@@ -31,6 +31,9 @@ use crate::catalog::system_catalog::SystemTableCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SinkId, SourceId, ViewId};
+use crate::user::UserId;
+
+use super::OwnedByUserCatalog;
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
@@ -89,6 +92,13 @@ impl SchemaCatalog {
         self.view_by_id
             .try_insert(sys_view.id, sys_view.clone())
             .unwrap();
+    }
+
+    pub fn update_self(&mut self, prost: &PbSchema) {
+        self.id = prost.id;
+        self.database_id = prost.database_id;
+        self.name = prost.name.clone();
+        self.owner = prost.owner;
     }
 
     pub fn update_table(&mut self, prost: &PbTable) -> Arc<TableCatalog> {
@@ -537,8 +547,10 @@ impl SchemaCatalog {
     pub fn name(&self) -> String {
         self.name.clone()
     }
+}
 
-    pub fn owner(&self) -> u32 {
+impl OwnedByUserCatalog for SchemaCatalog {
+    fn owner(&self) -> UserId {
         self.owner
     }
 }

@@ -457,6 +457,32 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterDatabase {
+            name,
+            operation: AlterDatabaseOperation::ChangeOwner { new_owner_name },
+        } => {
+            alter_owner::handle_alter_owner(
+                handler_args,
+                name,
+                new_owner_name,
+                Entity::DatabaseId(0),
+                None,
+            )
+            .await
+        }
+        Statement::AlterSchema {
+            name,
+            operation: AlterSchemaOperation::ChangeOwner { new_owner_name },
+        } => {
+            alter_owner::handle_alter_owner(
+                handler_args,
+                name,
+                new_owner_name,
+                Entity::SchemaId(0),
+                None,
+            )
+            .await
+        }
         Statement::AlterTable {
             name,
             operation:

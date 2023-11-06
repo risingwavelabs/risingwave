@@ -1752,14 +1752,18 @@ impl CatalogManager {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
 
-        let relation_info;
+        let notify_info;
         match entity {
             Entity::TableId(table_id) => {
                 database_core.ensure_table_id(table_id)?;
                 let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
                 let mut table = tables.get_mut(table_id).unwrap();
                 table.owner = owner_id;
-                relation_info = Some(RelationInfo::Table(table.clone()));
+                notify_info = Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: Some(RelationInfo::Table(table.clone()))
+                    }],
+                });
                 commit_meta!(self, tables)?;
             }
             Entity::ViewId(view_id) => {
@@ -1767,35 +1771,59 @@ impl CatalogManager {
                 let mut views = BTreeMapTransaction::new(&mut database_core.views);
                 let mut view = views.get_mut(view_id).unwrap();
                 view.owner = owner_id;
-                relation_info = Some(RelationInfo::View(view.clone()));
+                notify_info = Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: Some(RelationInfo::View(view.clone()))
+                    }],
+                });
                 commit_meta!(self, views)?;
             }
             Entity::SourceId(source_id) => {
-                database_core.ensure_source_id(table_id)?;
+                database_core.ensure_source_id(source_id)?;
                 let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
                 let mut source = sources.get_mut(source_id).unwrap();
                 source.owner = owner_id;
-                relation_info = Some(RelationInfo::Source(source.clone()));
+                notify_info = Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: Some(RelationInfo::Source(source.clone()))
+                    }],
+                });
                 commit_meta!(self, sources)?;
             }
             Entity::SinkId(sink_id) => {
-                database_core.ensure_sink_id(table_id)?;
+                database_core.ensure_sink_id(sink_id)?;
                 let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
                 let mut sink = sinks.get_mut(sink_id).unwrap();
                 sink.owner = owner_id;
-                relation_info = Some(RelationInfo::Sink(sink.clone()));
+                notify_info = Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: Some(RelationInfo::Sink(sink.clone()))
+                    }],
+                });
                 commit_meta!(self, sinks)?;
             }
-            Entity::SchemaId(_schema_id) => unimplemented!(),
-            Entity::DatabaseId(_schema_id) => unimplemented!(),
+            Entity::DatabaseId(database_id) => {
+                database_core.ensure_database_id(database_id)?;
+                let mut databases = BTreeMapTransaction::new(&mut database_core.databases);
+                let mut database = databases.get_mut(database_id).unwrap();
+                database.owner = owner_id;
+                notify_info = Info::Database(database.clone());
+                commit_meta!(self, databases)?;
+            }
+            Entity::SchemaId(schema_id) => {
+                database_core.ensure_schema_id(schema_id)?;
+                let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
+                let mut schema = schemas.get_mut(schema_id).unwrap();
+                schema.owner = owner_id;
+                notify_info = Info::Schema(schema.clone());
+                commit_meta!(self, schemas)?;
+            },
         };
 
         let version = self
             .notify_frontend(
                 Operation::Update,
-                Info::RelationGroup(RelationGroup {
-                    relations: vec![Relation { relation_info }],
-                }),
+                notify_info,
             )
             .await;
 

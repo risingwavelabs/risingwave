@@ -74,7 +74,20 @@ pub async fn handle_alter_owner(
                 *sink_id = sink.id.sink_id;
                 StatementType::ALTER_SINK
             }
-            _ => unimplemented!(),
+            Entity::DatabaseId(database_id) => {
+                let database =
+                    catalog_reader.get_database_by_name(&obj_name.real_value())?;
+                session.check_privilege_for_drop_alter_db_schema(database)?;
+                *database_id = database.id();
+                StatementType::ALTER_DATABASE
+            }
+            Entity::SchemaId(schema_id) => {
+                let schema =
+                    catalog_reader.get_schema_by_name(db_name, &obj_name.real_value())?;
+                session.check_privilege_for_drop_alter_db_schema(schema)?;
+                *schema_id = schema.id();
+                StatementType::ALTER_SCHEMA
+            }
         }
     };
 

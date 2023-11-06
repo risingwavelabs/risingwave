@@ -26,7 +26,8 @@ use itertools::Itertools;
 use tracing::{debug, instrument};
 
 use crate::ast::ddl::{
-    AlterIndexOperation, AlterSinkOperation, AlterViewOperation, SourceWatermark,
+    AlterDatabaseOperation, AlterIndexOperation, AlterSchemaOperation, AlterSinkOperation,
+    AlterViewOperation, SourceWatermark,
 };
 use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};
@@ -2765,7 +2766,11 @@ impl Parser {
     }
 
     pub fn parse_alter(&mut self) -> Result<Statement, ParserError> {
-        if self.parse_keyword(Keyword::TABLE) {
+        if self.parse_keyword(Keyword::DATABASE) {
+            self.parse_alter_database()
+        } else if self.parse_keyword(Keyword::SCHEMA) {
+            self.parse_alter_schema()
+        } else if self.parse_keyword(Keyword::TABLE) {
             self.parse_alter_table()
         } else if self.parse_keyword(Keyword::INDEX) {
             self.parse_alter_index()
@@ -2783,10 +2788,44 @@ impl Parser {
             self.parse_alter_system()
         } else {
             self.expected(
-                "TABLE, INDEX, MATERIALIZED, VIEW, SINK, SOURCE, USER or SYSTEM after ALTER",
+                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SOURCE, USER or SYSTEM after ALTER",
                 self.peek_token(),
             )
         }
+    }
+
+    pub fn parse_alter_database(&mut self) -> Result<Statement, ParserError> {
+        let database_name = self.parse_object_name()?;
+        let operation = if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterDatabaseOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
+        } else {
+            return self.expected("OWNER TO after ALTER DATABASE", self.peek_token());
+        };
+
+        Ok(Statement::AlterDatabase {
+            name: database_name,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_schema(&mut self) -> Result<Statement, ParserError> {
+        let schema_name = self.parse_object_name()?;
+        let operation = if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterSchemaOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
+        } else {
+            return self.expected("OWNER TO after ALTER SCHEMA", self.peek_token());
+        };
+
+        Ok(Statement::AlterSchema {
+            name: schema_name,
+            operation,
+        })
     }
 
     pub fn parse_alter_user(&mut self) -> Result<Statement, ParserError> {
@@ -2872,7 +2911,10 @@ impl Parser {
             };
             AlterTableOperation::AlterColumn { column_name, op }
         } else {
-            return self.expected("ADD, RENAME or DROP after ALTER TABLE", self.peek_token());
+            return self.expected(
+                "ADD, RENAME, OWNER TO or DROP after ALTER TABLE",
+                self.peek_token(),
+            );
         };
         Ok(Statement::AlterTable {
             name: table_name,
@@ -2916,7 +2958,7 @@ impl Parser {
         } else {
             return self.expected(
                 &format!(
-                    "RENAME after ALTER {}VIEW",
+                    "RENAME or OWNER TO after ALTER {}VIEW",
                     if materialized { "MATERIALIZED " } else { "" }
                 ),
                 self.peek_token(),
@@ -2945,7 +2987,7 @@ impl Parser {
                 new_owner_name: owner_name,
             }
         } else {
-            return self.expected("RENAME after ALTER SINK", self.peek_token());
+            return self.expected("RENAME or OWNER TO after ALTER SINK", self.peek_token());
         };
 
         Ok(Statement::AlterSink {
@@ -2974,7 +3016,10 @@ impl Parser {
                 new_owner_name: owner_name,
             }
         } else {
-            return self.expected("RENAME | ADD COLUMN after ALTER SOURCE", self.peek_token());
+            return self.expected(
+                "RENAME, ADD COLUMN or OWNER TO after ALTER SOURCE",
+                self.peek_token(),
+            );
         };
 
         Ok(Statement::AlterSource {

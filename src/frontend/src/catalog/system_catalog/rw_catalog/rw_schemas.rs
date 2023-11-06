@@ -19,6 +19,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::user::grant_privilege::Object;
 
+use crate::catalog::OwnedByUserCatalog;
 use crate::catalog::system_catalog::{get_acl_items, BuiltinTable, SysCatalogReaderImpl};
 
 pub const RW_SCHEMAS: BuiltinTable = BuiltinTable {
