@@ -55,7 +55,6 @@ pub const REMOTE_ICEBERG_SINK: &str = "iceberg_java";
 pub struct RemoteIceberg;
 
 impl RemoteSinkTrait for RemoteIceberg {
-    const IS_ASYNC_TRUNCATE: bool = false;
     const SINK_NAME: &'static str = REMOTE_ICEBERG_SINK;
 }
 
