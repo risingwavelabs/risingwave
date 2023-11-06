@@ -19,6 +19,7 @@ use std::io::{Error, ErrorKind, IoSlice, Result, Write};
 use byteorder::{BigEndian, ByteOrder};
 /// Part of code learned from <https://github.com/zenithdb/zenith/blob/main/zenith_utils/src/pq_proto.rs>.
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use risingwave_common::util::env_var::env_var_is_true;
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::error_or_notice::ErrorOrNoticeMessage;
@@ -634,7 +635,11 @@ impl<'a> BeMessage<'a> {
 
                 // 'E' signalizes ErrorResponse messages
                 buf.put_u8(b'E');
-                let msg = format!("{:#}", error.as_ref().as_report());
+                let msg = if env_var_is_true("RW_PRETTY_ERROR") {
+                    format!("{:#}", error.as_ref().as_report())
+                } else {
+                    format!("{}", error.as_ref().as_report())
+                };
                 write_err_or_notice(buf, &ErrorOrNoticeMessage::internal_error(&msg))?;
             }
 
