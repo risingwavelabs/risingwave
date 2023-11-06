@@ -456,20 +456,24 @@ impl GlobalBarrierManager {
             )
             .await?;
 
-        match self
+        if let Err(e) = self
             .scale_controller
             .post_apply_reschedule(&reschedule_fragment)
             .await
         {
-            Ok(_) => {}
-            Err(_e) => {
-                self.fragment_manager
-                    .cancel_apply_reschedules(applied_reschedules)
-                    .await;
-            }
+            tracing::error!(
+                "failed to apply reschedule for offline scaling in recovery: {}",
+                e.to_string()
+            );
+
+            self.fragment_manager
+                .cancel_apply_reschedules(applied_reschedules)
+                .await;
+
+            return Err(e);
         }
 
-        debug!("migrate actors succeed.");
+        debug!("scaling-in actors succeed.");
         Ok(true)
     }
 
