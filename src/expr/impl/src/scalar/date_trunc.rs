@@ -16,24 +16,39 @@ use risingwave_common::types::{Interval, Timestamp, Timestamptz};
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::{build_function, function, ExprError, Result};
 
-use super::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
+use super::timestamptz::timestamp_at_time_zone;
+
+// TODO(xiangjinwu): parse into an enum
+const MICROSECONDS: &str = "microseconds";
+const MILLISECONDS: &str = "milliseconds";
+const SECOND: &str = "second";
+const MINUTE: &str = "minute";
+const HOUR: &str = "hour";
+const DAY: &str = "day";
+const WEEK: &str = "week";
+const MONTH: &str = "month";
+const QUARTER: &str = "quarter";
+const YEAR: &str = "year";
+const DECADE: &str = "decade";
+const CENTURY: &str = "century";
+const MILLENNIUM: &str = "millennium";
 
 #[function("date_trunc(varchar, timestamp) -> timestamp")]
 pub fn date_trunc_timestamp(field: &str, ts: Timestamp) -> Result<Timestamp> {
     Ok(match field.to_ascii_lowercase().as_str() {
-        "microseconds" => ts.truncate_micros(),
-        "milliseconds" => ts.truncate_millis(),
-        "second" => ts.truncate_second(),
-        "minute" => ts.truncate_minute(),
-        "hour" => ts.truncate_hour(),
-        "day" => ts.truncate_day(),
-        "week" => ts.truncate_week(),
-        "month" => ts.truncate_month(),
-        "quarter" => ts.truncate_quarter(),
-        "year" => ts.truncate_year(),
-        "decade" => ts.truncate_decade(),
-        "century" => ts.truncate_century(),
-        "millennium" => ts.truncate_millennium(),
+        MICROSECONDS => ts.truncate_micros(),
+        MILLISECONDS => ts.truncate_millis(),
+        SECOND => ts.truncate_second(),
+        MINUTE => ts.truncate_minute(),
+        HOUR => ts.truncate_hour(),
+        DAY => ts.truncate_day(),
+        WEEK => ts.truncate_week(),
+        MONTH => ts.truncate_month(),
+        QUARTER => ts.truncate_quarter(),
+        YEAR => ts.truncate_year(),
+        DECADE => ts.truncate_decade(),
+        CENTURY => ts.truncate_century(),
+        MILLENNIUM => ts.truncate_millennium(),
         _ => return Err(invalid_field_error(field)),
     })
 }
@@ -52,33 +67,52 @@ fn build_date_trunc_timestamptz_implicit_zone(
 #[function("date_trunc(varchar, timestamptz, varchar) -> timestamptz")]
 pub fn date_trunc_timestamptz_at_timezone(
     field: &str,
-    ts: Timestamptz,
+    tsz: Timestamptz,
     timezone: &str,
 ) -> Result<Timestamptz> {
-    let timestamp = timestamptz_at_time_zone(ts, timezone)?;
-    let truncated = date_trunc_timestamp(field, timestamp)?;
-    timestamp_at_time_zone(truncated, timezone)
+    use chrono::Offset as _;
+
+    use super::timestamptz::time_zone_err;
+
+    let tz = Timestamptz::lookup_time_zone(timezone).map_err(time_zone_err)?;
+    let instant_local = tsz.to_datetime_in_zone(tz);
+
+    let truncated_naive = date_trunc_timestamp(field, Timestamp(instant_local.naive_local()))?;
+
+    match field.to_ascii_lowercase().as_str() {
+        MICROSECONDS | MILLISECONDS | SECOND | MINUTE | HOUR => {
+            // When unit < day, follow PostgreSQL to use old timezone offset.
+            // rather than reinterpret it in the timezone.
+            // https://github.com/postgres/postgres/blob/REL_16_0/src/backend/utils/adt/timestamp.c#L4270
+            // See `e2e_test/batch/functions/issue_12072.slt.part` for the difference.
+            let fixed = instant_local.offset().fix();
+            // `unwrap` is okay because `FixedOffset` always returns single unique conversion result.
+            let truncated_local = truncated_naive.0.and_local_timezone(fixed).unwrap();
+            Ok(Timestamptz::from_micros(truncated_local.timestamp_micros()))
+        }
+        _ => timestamp_at_time_zone(truncated_naive, timezone),
+    }
 }
 
 #[function("date_trunc(varchar, interval) -> interval")]
 pub fn date_trunc_interval(field: &str, interval: Interval) -> Result<Interval> {
     Ok(match field.to_ascii_lowercase().as_str() {
-        "microseconds" => interval,
-        "milliseconds" => interval.truncate_millis(),
-        "second" => interval.truncate_second(),
-        "minute" => interval.truncate_minute(),
-        "hour" => interval.truncate_hour(),
-        "day" => interval.truncate_day(),
-        "week" => return Err(ExprError::UnsupportedFunction(
+        MICROSECONDS => interval,
+        MILLISECONDS => interval.truncate_millis(),
+        SECOND => interval.truncate_second(),
+        MINUTE => interval.truncate_minute(),
+        HOUR => interval.truncate_hour(),
+        DAY => interval.truncate_day(),
+        WEEK => return Err(ExprError::UnsupportedFunction(
             "interval units \"week\" not supported because months usually have fractional weeks"
                 .into(),
         )),
-        "month" => interval.truncate_month(),
-        "quarter" => interval.truncate_quarter(),
-        "year" => interval.truncate_year(),
-        "decade" => interval.truncate_decade(),
-        "century" => interval.truncate_century(),
-        "millennium" => interval.truncate_millennium(),
+        MONTH => interval.truncate_month(),
+        QUARTER => interval.truncate_quarter(),
+        YEAR => interval.truncate_year(),
+        DECADE => interval.truncate_decade(),
+        CENTURY => interval.truncate_century(),
+        MILLENNIUM => interval.truncate_millennium(),
         _ => return Err(invalid_field_error(field)),
     })
 }

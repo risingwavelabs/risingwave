@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::any::Any;
 use std::collections::HashMap;
-use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::Deref;
+use std::pin::pin;
 use std::time::Instant;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
+use futures::future::select;
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use itertools::Itertools;
 use jni::objects::{JByteArray, JValue, JValueOwned};
@@ -29,18 +29,15 @@ use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::error::anyhow_error;
 use risingwave_common::types::DataType;
-use risingwave_common::util::await_future_with_monitor_error_stream;
 use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_jni_core::{gen_class_name, gen_jni_sig, JniReceiverType, JniSenderType};
 use risingwave_pb::connector_service::sink_coordinator_stream_request::StartCoordinator;
-use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::json_payload::RowOp;
 use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::{
-    JsonPayload, Payload, StreamChunkPayload,
+    Payload, StreamChunkPayload,
 };
 use risingwave_pb::connector_service::sink_writer_stream_request::{
     Request as SinkRequest, StartSink,
 };
-use risingwave_pb::connector_service::sink_writer_stream_response::CommitResponse;
 use risingwave_pb::connector_service::{
     sink_coordinator_stream_request, sink_coordinator_stream_response, sink_writer_stream_response,
     SinkCoordinatorStreamRequest, SinkCoordinatorStreamResponse, SinkMetadata, SinkPayloadFormat,
@@ -48,16 +45,15 @@ use risingwave_pb::connector_service::{
 };
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::{
-    BidiStreamReceiver, SinkCoordinatorStreamHandle, SinkWriterStreamHandle, DEFAULT_BUFFER_SIZE,
+    BidiStreamReceiver, BidiStreamSender, SinkCoordinatorStreamHandle, SinkWriterStreamHandle,
+    DEFAULT_BUFFER_SIZE,
 };
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{unbounded_channel, Receiver, Sender};
+use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::warn;
 
-use super::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::coordinate::CoordinatedSinkWriter;
-use crate::sink::encoder::TimestampHandlingMode;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, TruncateOffset};
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
 use crate::sink::{
@@ -112,7 +108,7 @@ impl<R: RemoteSinkTrait> TryFrom<SinkParam> for RemoteSink<R> {
 
 impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
     type Coordinator = DummySinkCommitCoordinator;
-    type LogSinker = RemoteLogSinker<R>;
+    type LogSinker = RemoteLogSinker;
 
     const SINK_NAME: &'static str = R::SINK_NAME;
 
@@ -121,9 +117,14 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
     }
 
     async fn validate(&self) -> Result<()> {
-        // FIXME: support struct and array in stream sink
-        self.param.columns.iter().map(|col| {
-            if matches!(
+        validate_remote_sink(&self.param).await
+    }
+}
+
+async fn validate_remote_sink(param: &SinkParam) -> Result<()> {
+    // FIXME: support struct and array in stream sink
+    param.columns.iter().map(|col| {
+        if matches!(
                 col.data_type,
                 DataType::Int16
                     | DataType::Int32
@@ -142,22 +143,25 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
                     | DataType::Bytea
                     | DataType::List(_)
             ) {
-                Ok(())
-            } else {
-                Err(SinkError::Remote(anyhow_error!(
+            Ok(())
+        } else {
+            Err(SinkError::Remote(anyhow_error!(
                     "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Timestamptz, List, Bytea and Varchar, got {:?}: {:?}",
                     col.name,
                     col.data_type,
                 )))
-            }
-        }).try_collect()?;
+        }
+    }).try_collect()?;
 
-        let mut env = JVM
-            .get_or_init()?
+    let jvm = JVM.get_or_init()?;
+    let sink_param = param.to_proto();
+
+    spawn_blocking(move || {
+        let mut env = jvm
             .attach_current_thread()
             .map_err(|err| SinkError::Internal(err.into()))?;
         let validate_sink_request = ValidateSinkRequest {
-            sink_param: Some(self.param.to_proto()),
+            sink_param: Some(sink_param),
         };
         let validate_sink_request_bytes = env
             .byte_array_from_slice(&Message::encode_to_vec(&validate_sink_request))
@@ -193,162 +197,162 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
                 ))))
             },
         )
-    }
+    })
+    .await
+    .map_err(|e| anyhow!("unable to validate: {:?}", e))?
 }
 
-pub struct RemoteLogSinker<R: RemoteSinkTrait> {
-    writer: RemoteSinkWriter<R>,
+pub struct RemoteLogSinker {
+    request_sender: BidiStreamSender<SinkWriterStreamRequest>,
+    response_stream: BidiStreamReceiver<SinkWriterStreamResponse>,
     sink_metrics: SinkMetrics,
 }
 
-impl<R: RemoteSinkTrait> RemoteLogSinker<R> {
+impl RemoteLogSinker {
     async fn new(sink_param: SinkParam, writer_param: SinkWriterParam) -> Result<Self> {
-        let writer = RemoteSinkWriter::new(
-            sink_param,
-            writer_param.connector_params,
-            writer_param.sink_metrics.clone(),
-        )
-        .await?;
+        let SinkWriterStreamHandle {
+            request_sender,
+            response_stream,
+        } = EmbeddedConnectorClient::new()?
+            .start_sink_writer_stream(sink_param, SinkPayloadFormat::StreamChunk)
+            .await?;
+
         let sink_metrics = writer_param.sink_metrics;
         Ok(RemoteLogSinker {
-            writer,
+            request_sender,
+            response_stream,
             sink_metrics,
         })
     }
 }
 
-/// Await the given future while monitoring on error of the receiver stream.
-async fn await_future_with_monitor_receiver_err<O, F: Future<Output = Result<O>>>(
-    receiver: &mut BidiStreamReceiver<impl Any>,
-    future: F,
-) -> Result<O> {
-    match await_future_with_monitor_error_stream(&mut receiver.stream, future).await {
-        Ok(result) => Ok(result?),
-        Err(None) => Err(SinkError::Remote(anyhow!("end of remote receiver stream"))),
-        Err(Some(err)) => Err(SinkError::Remote(err.into())),
-    }
-}
-
 #[async_trait]
-impl<R: RemoteSinkTrait> LogSinker for RemoteLogSinker<R> {
+impl LogSinker for RemoteLogSinker {
     async fn consume_log_and_sink(self, mut log_reader: impl LogReader) -> Result<()> {
-        // Note: this is a total copy of the implementation of LogSinkerOf<impl SinkWriter>,
-        // except that we monitor the future of `log_reader.next_item` with await_future_with_monitor_receiver_err
-        // to monitor the error in the response stream.
-
-        let mut sink_writer = self.writer;
+        let mut request_tx = self.request_sender;
+        let mut response_err_stream_rx = self.response_stream;
         let sink_metrics = self.sink_metrics;
-        #[derive(Debug)]
-        enum LogConsumerState {
-            /// Mark that the log consumer is not initialized yet
-            Uninitialized,
 
-            /// Mark that a new epoch has begun.
-            EpochBegun { curr_epoch: u64 },
+        let (response_tx, mut response_rx) = unbounded_channel();
 
-            /// Mark that the consumer has just received a barrier
-            BarrierReceived { prev_epoch: u64 },
-        }
-
-        let mut state = LogConsumerState::Uninitialized;
-
-        log_reader.init().await?;
-
-        loop {
-            let (epoch, item): (u64, LogStoreReadItem) = await_future_with_monitor_receiver_err(
-                &mut sink_writer.stream_handle.response_stream,
-                log_reader.next_item().map_err(SinkError::Internal),
-            )
-            .await?;
-            if let LogStoreReadItem::UpdateVnodeBitmap(_) = &item {
-                match &state {
-                    LogConsumerState::BarrierReceived { .. } => {}
-                    _ => unreachable!(
-                        "update vnode bitmap can be accepted only right after \
-                    barrier, but current state is {:?}",
-                        state
-                    ),
+        let poll_response_stream = pin!(async move {
+            loop {
+                let result = response_err_stream_rx.stream.try_next().await;
+                match result {
+                    Ok(Some(response)) => {
+                        response_tx.send(response).map_err(|err| {
+                            SinkError::Remote(anyhow!("unable to send response: {:?}", err.0))
+                        })?;
+                    }
+                    Ok(None) => return Err(SinkError::Remote(anyhow!("end of response stream"))),
+                    Err(e) => return Err(SinkError::Remote(anyhow!(e))),
                 }
             }
-            // begin_epoch when not previously began
-            state = match state {
-                LogConsumerState::Uninitialized => {
-                    sink_writer.begin_epoch(epoch).await?;
-                    LogConsumerState::EpochBegun { curr_epoch: epoch }
-                }
-                LogConsumerState::EpochBegun { curr_epoch } => {
-                    assert!(
-                        epoch >= curr_epoch,
-                        "new epoch {} should not be below the current epoch {}",
-                        epoch,
-                        curr_epoch
-                    );
-                    LogConsumerState::EpochBegun { curr_epoch: epoch }
-                }
-                LogConsumerState::BarrierReceived { prev_epoch } => {
-                    assert!(
-                        epoch > prev_epoch,
-                        "new epoch {} should be greater than prev epoch {}",
-                        epoch,
-                        prev_epoch
-                    );
-                    sink_writer.begin_epoch(epoch).await?;
-                    LogConsumerState::EpochBegun { curr_epoch: epoch }
-                }
-            };
-            match item {
-                LogStoreReadItem::StreamChunk { chunk, .. } => {
-                    if let Err(e) = sink_writer.write_batch(chunk).await {
-                        sink_writer.abort().await?;
-                        return Err(e);
+        });
+
+        let poll_consume_log_and_sink = pin!(async move {
+            let mut prev_offset: Option<TruncateOffset> = None;
+
+            log_reader.init().await?;
+
+            loop {
+                let (epoch, item): (u64, LogStoreReadItem) =
+                    log_reader.next_item().map_err(SinkError::Internal).await?;
+
+                match &prev_offset {
+                    Some(TruncateOffset::Barrier { .. }) | None => {
+                        // TODO: this start epoch is actually unnecessary
+                        request_tx.start_epoch(epoch).await?;
                     }
+                    _ => {}
                 }
-                LogStoreReadItem::Barrier { is_checkpoint } => {
-                    let prev_epoch = match state {
-                        LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,
-                        _ => unreachable!("epoch must have begun before handling barrier"),
-                    };
-                    if is_checkpoint {
-                        let start_time = Instant::now();
-                        sink_writer.barrier(true).await?;
+
+                match item {
+                    LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
+                        let offset = TruncateOffset::Chunk { epoch, chunk_id };
+                        if let Some(prev_offset) = &prev_offset {
+                            prev_offset.check_next_offset(offset)?;
+                        }
+                        let cardinality = chunk.cardinality();
                         sink_metrics
-                            .sink_commit_duration_metrics
-                            .observe(start_time.elapsed().as_millis() as f64);
-                        log_reader
-                            .truncate(TruncateOffset::Barrier { epoch })
+                            .connector_sink_rows_received
+                            .inc_by(cardinality as _);
+
+                        let payload = build_chunk_payload(chunk);
+                        request_tx
+                            .write_batch(epoch, chunk_id as u64, payload)
                             .await?;
-                    } else {
-                        sink_writer.barrier(false).await?;
+                        prev_offset = Some(offset);
                     }
-                    state = LogConsumerState::BarrierReceived { prev_epoch }
-                }
-                LogStoreReadItem::UpdateVnodeBitmap(vnode_bitmap) => {
-                    sink_writer.update_vnode_bitmap(vnode_bitmap).await?;
+                    LogStoreReadItem::Barrier { is_checkpoint } => {
+                        let offset = TruncateOffset::Barrier { epoch };
+                        if let Some(prev_offset) = &prev_offset {
+                            prev_offset.check_next_offset(offset)?;
+                        }
+                        if is_checkpoint {
+                            let start_time = Instant::now();
+                            request_tx.barrier(epoch, true).await?;
+                            match response_rx.recv().await.ok_or_else(|| {
+                                SinkError::Remote(anyhow!("end of response stream"))
+                            })? {
+                                SinkWriterStreamResponse {
+                                    response: Some(sink_writer_stream_response::Response::Commit(_)),
+                                } => {}
+                                response => {
+                                    return Err(SinkError::Remote(anyhow!(
+                                        "expected commit response, but get {:?}",
+                                        response
+                                    )));
+                                }
+                            };
+                            sink_metrics
+                                .sink_commit_duration_metrics
+                                .observe(start_time.elapsed().as_millis() as f64);
+                            log_reader
+                                .truncate(TruncateOffset::Barrier { epoch })
+                                .await?;
+                        } else {
+                            request_tx.barrier(epoch, false).await?;
+                        }
+                        prev_offset = Some(offset);
+                    }
+                    LogStoreReadItem::UpdateVnodeBitmap(_) => {}
                 }
             }
-        }
+        });
+
+        select(poll_response_stream, poll_consume_log_and_sink)
+            .await
+            .factor_first()
+            .0
     }
 }
 
 #[derive(Debug)]
-pub struct CoordinatedRemoteSink<R: RemoteSinkTrait>(pub RemoteSink<R>);
+pub struct CoordinatedRemoteSink<R: RemoteSinkTrait> {
+    param: SinkParam,
+    _phantom: PhantomData<R>,
+}
 
 impl<R: RemoteSinkTrait> TryFrom<SinkParam> for CoordinatedRemoteSink<R> {
     type Error = SinkError;
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
-        RemoteSink::try_from(param).map(Self)
+        Ok(Self {
+            param,
+            _phantom: PhantomData,
+        })
     }
 }
 
 impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
-    type Coordinator = RemoteCoordinator<R>;
-    type LogSinker = LogSinkerOf<CoordinatedSinkWriter<CoordinatedRemoteSinkWriter<R>>>;
+    type Coordinator = RemoteCoordinator;
+    type LogSinker = LogSinkerOf<CoordinatedSinkWriter<CoordinatedRemoteSinkWriter>>;
 
     const SINK_NAME: &'static str = R::SINK_NAME;
 
     async fn validate(&self) -> Result<()> {
-        self.0.validate().await
+        validate_remote_sink(&self.param).await
     }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
@@ -358,14 +362,14 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
                 .expect("should have meta client")
                 .sink_coordinate_client()
                 .await,
-            self.0.param.clone(),
+            self.param.clone(),
             writer_param.vnode_bitmap.ok_or_else(|| {
                 SinkError::Remote(anyhow_error!(
                     "sink needs coordination should not have singleton input"
                 ))
             })?,
             CoordinatedRemoteSinkWriter::new(
-                self.0.param.clone(),
+                self.param.clone(),
                 writer_param.connector_params,
                 writer_param.sink_metrics.clone(),
             )
@@ -376,25 +380,19 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
     }
 
     async fn new_coordinator(&self) -> Result<Self::Coordinator> {
-        RemoteCoordinator::new(self.0.param.clone()).await
+        RemoteCoordinator::new::<R>(self.param.clone()).await
     }
 }
 
-pub type RemoteSinkWriter<R> = RemoteSinkWriterInner<(), R>;
-pub type CoordinatedRemoteSinkWriter<R> = RemoteSinkWriterInner<Option<SinkMetadata>, R>;
-
-pub struct RemoteSinkWriterInner<SM, R: RemoteSinkTrait> {
+pub struct CoordinatedRemoteSinkWriter {
     properties: HashMap<String, String>,
     epoch: Option<u64>,
     batch_id: u64,
-    payload_format: SinkPayloadFormat,
     stream_handle: SinkWriterStreamHandle,
-    json_encoder: JsonEncoder,
     sink_metrics: SinkMetrics,
-    _phantom: PhantomData<(SM, R)>,
 }
 
-impl<SM, R: RemoteSinkTrait> RemoteSinkWriterInner<SM, R> {
+impl CoordinatedRemoteSinkWriter {
     pub async fn new(
         param: SinkParam,
         connector_params: ConnectorParams,
@@ -404,41 +402,20 @@ impl<SM, R: RemoteSinkTrait> RemoteSinkWriterInner<SM, R> {
             .start_sink_writer_stream(param.clone(), connector_params.sink_payload_format)
             .await?;
 
-        let schema = param.schema();
-
         Ok(Self {
             properties: param.properties,
             epoch: None,
             batch_id: 0,
             stream_handle,
-            payload_format: connector_params.sink_payload_format,
-            json_encoder: JsonEncoder::new(schema, None, TimestampHandlingMode::String),
             sink_metrics,
-            _phantom: PhantomData,
         })
     }
 
     fn for_test(
         response_receiver: Receiver<anyhow::Result<SinkWriterStreamResponse>>,
         request_sender: Sender<SinkWriterStreamRequest>,
-    ) -> RemoteSinkWriter<R> {
-        use risingwave_common::catalog::{Field, Schema};
+    ) -> CoordinatedRemoteSinkWriter {
         let properties = HashMap::from([("output.path".to_string(), "/tmp/rw".to_string())]);
-
-        let schema = Schema::new(vec![
-            Field {
-                data_type: DataType::Int32,
-                name: "id".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
-            },
-            Field {
-                data_type: DataType::Varchar,
-                name: "name".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
-            },
-        ]);
 
         let stream_handle = SinkWriterStreamHandle::for_test(
             request_sender,
@@ -447,92 +424,33 @@ impl<SM, R: RemoteSinkTrait> RemoteSinkWriterInner<SM, R> {
                 .boxed(),
         );
 
-        RemoteSinkWriter {
+        CoordinatedRemoteSinkWriter {
             properties,
             epoch: None,
             batch_id: 0,
-            json_encoder: JsonEncoder::new(schema, None, TimestampHandlingMode::String),
             stream_handle,
-            payload_format: SinkPayloadFormat::Json,
             sink_metrics: SinkMetrics::for_test(),
-            _phantom: PhantomData,
         }
     }
 }
 
-trait HandleBarrierResponse {
-    type SinkMetadata: Send;
-    fn handle_commit_response(rsp: CommitResponse) -> Result<Self::SinkMetadata>;
-    fn non_checkpoint_return_value() -> Self::SinkMetadata;
-}
-
-impl<R: RemoteSinkTrait> HandleBarrierResponse for RemoteSinkWriter<R> {
-    type SinkMetadata = ();
-
-    fn handle_commit_response(rsp: CommitResponse) -> Result<Self::SinkMetadata> {
-        if rsp.metadata.is_some() {
-            warn!("get metadata in commit response for non-coordinated remote sink writer");
-        }
-        Ok(())
-    }
-
-    fn non_checkpoint_return_value() -> Self::SinkMetadata {}
-}
-
-impl<R: RemoteSinkTrait> HandleBarrierResponse for CoordinatedRemoteSinkWriter<R> {
-    type SinkMetadata = Option<SinkMetadata>;
-
-    fn handle_commit_response(rsp: CommitResponse) -> Result<Self::SinkMetadata> {
-        rsp.metadata
-            .ok_or_else(|| {
-                SinkError::Remote(anyhow_error!(
-                    "get none metadata in commit response for coordinated sink writer"
-                ))
-            })
-            .map(Some)
-    }
-
-    fn non_checkpoint_return_value() -> Self::SinkMetadata {
-        None
-    }
+fn build_chunk_payload(chunk: StreamChunk) -> Payload {
+    let prost_stream_chunk = chunk.to_protobuf();
+    let binary_data = Message::encode_to_vec(&prost_stream_chunk);
+    Payload::StreamChunkPayload(StreamChunkPayload { binary_data })
 }
 
 #[async_trait]
-impl<SM: Send + 'static, R: RemoteSinkTrait> SinkWriter for RemoteSinkWriterInner<SM, R>
-where
-    Self: HandleBarrierResponse<SinkMetadata = SM>,
-{
-    type CommitMetadata = SM;
+impl SinkWriter for CoordinatedRemoteSinkWriter {
+    type CommitMetadata = Option<SinkMetadata>;
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         let cardinality = chunk.cardinality();
         self.sink_metrics
             .connector_sink_rows_received
             .inc_by(cardinality as _);
-        let payload = match self.payload_format {
-            SinkPayloadFormat::Json => {
-                let mut row_ops = Vec::with_capacity(cardinality);
-                for (op, row_ref) in chunk.rows() {
-                    let map = self.json_encoder.encode(row_ref)?;
-                    let row_op = RowOp {
-                        op_type: op.to_protobuf() as i32,
-                        line: serde_json::to_string(&map)
-                            .map_err(|e| SinkError::Remote(anyhow_error!("{:?}", e)))?,
-                    };
 
-                    row_ops.push(row_op);
-                }
-                Payload::JsonPayload(JsonPayload { row_ops })
-            }
-            SinkPayloadFormat::StreamChunk => {
-                let prost_stream_chunk = chunk.to_protobuf();
-                let binary_data = Message::encode_to_vec(&prost_stream_chunk);
-                Payload::StreamChunkPayload(StreamChunkPayload { binary_data })
-            }
-            SinkPayloadFormat::FormatUnspecified => {
-                unreachable!("should specify sink payload format")
-            }
-        };
+        let payload = build_chunk_payload(chunk);
 
         let epoch = self.epoch.ok_or_else(|| {
             SinkError::Remote(anyhow_error!(
@@ -553,7 +471,7 @@ where
         Ok(())
     }
 
-    async fn barrier(&mut self, is_checkpoint: bool) -> Result<SM> {
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<Option<SinkMetadata>> {
         let epoch = self.epoch.ok_or_else(|| {
             SinkError::Remote(anyhow_error!(
                 "epoch has not been initialize, call `begin_epoch`"
@@ -562,23 +480,26 @@ where
         if is_checkpoint {
             // TODO: add metrics to measure commit time
             let rsp = self.stream_handle.commit(epoch).await?;
-            Ok(<Self as HandleBarrierResponse>::handle_commit_response(
-                rsp,
-            )?)
+            rsp.metadata
+                .ok_or_else(|| {
+                    SinkError::Remote(anyhow_error!(
+                        "get none metadata in commit response for coordinated sink writer"
+                    ))
+                })
+                .map(Some)
         } else {
             self.stream_handle.barrier(epoch).await?;
-            Ok(<Self as HandleBarrierResponse>::non_checkpoint_return_value())
+            Ok(None)
         }
     }
 }
 
-pub struct RemoteCoordinator<R: RemoteSinkTrait> {
+pub struct RemoteCoordinator {
     stream_handle: SinkCoordinatorStreamHandle,
-    _phantom: PhantomData<R>,
 }
 
-impl<R: RemoteSinkTrait> RemoteCoordinator<R> {
-    pub async fn new(param: SinkParam) -> Result<Self> {
+impl RemoteCoordinator {
+    pub async fn new<R: RemoteSinkTrait>(param: SinkParam) -> Result<Self> {
         let stream_handle = EmbeddedConnectorClient::new()?
             .start_sink_coordinator_stream(param.clone())
             .await?;
@@ -589,15 +510,12 @@ impl<R: RemoteSinkTrait> RemoteCoordinator<R> {
             &param.properties
         );
 
-        Ok(RemoteCoordinator {
-            stream_handle,
-            _phantom: PhantomData,
-        })
+        Ok(RemoteCoordinator { stream_handle })
     }
 }
 
 #[async_trait]
-impl<R: RemoteSinkTrait> SinkCommitCoordinator for RemoteCoordinator<R> {
+impl SinkCommitCoordinator for RemoteCoordinator {
     async fn init(&mut self) -> Result<()> {
         Ok(())
     }
@@ -651,7 +569,7 @@ impl EmbeddedConnectorClient {
         }
     }
 
-    pub async fn start_sink_coordinator_stream(
+    async fn start_sink_coordinator_stream(
         &self,
         param: SinkParam,
     ) -> Result<SinkCoordinatorStreamHandle> {
@@ -734,27 +652,20 @@ mod test {
 
     use risingwave_common::array::StreamChunk;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::Payload;
     use risingwave_pb::connector_service::sink_writer_stream_request::{Barrier, Request};
     use risingwave_pb::connector_service::sink_writer_stream_response::{CommitResponse, Response};
     use risingwave_pb::connector_service::{SinkWriterStreamRequest, SinkWriterStreamResponse};
-    use risingwave_pb::data;
     use tokio::sync::mpsc;
 
-    use crate::sink::remote::{RemoteSinkTrait, RemoteSinkWriter};
+    use crate::sink::remote::{build_chunk_payload, CoordinatedRemoteSinkWriter};
     use crate::sink::SinkWriter;
-
-    struct TestRemote;
-    impl RemoteSinkTrait for TestRemote {
-        const SINK_NAME: &'static str = "test-remote";
-    }
 
     #[tokio::test]
     async fn test_epoch_check() {
         let (request_sender, mut request_recv) = mpsc::channel(16);
         let (_, resp_recv) = mpsc::channel(16);
 
-        let mut sink = <RemoteSinkWriter<TestRemote>>::for_test(resp_recv, request_sender);
+        let mut sink = CoordinatedRemoteSinkWriter::for_test(resp_recv, request_sender);
         let chunk = StreamChunk::from_pretty(
             " i T
             + 1 Ripper
@@ -791,7 +702,7 @@ mod test {
     async fn test_remote_sink() {
         let (request_sender, mut request_receiver) = mpsc::channel(16);
         let (response_sender, response_receiver) = mpsc::channel(16);
-        let mut sink = <RemoteSinkWriter<TestRemote>>::for_test(response_receiver, request_sender);
+        let mut sink = CoordinatedRemoteSinkWriter::for_test(response_receiver, request_sender);
 
         let chunk_a = StreamChunk::from_pretty(
             " i T
@@ -826,20 +737,7 @@ mod test {
             }) => {
                 assert_eq!(write.epoch, 2022);
                 assert_eq!(write.batch_id, 0);
-                match write.payload.unwrap() {
-                    Payload::JsonPayload(json) => {
-                        let row_0 = json.row_ops.get(0).unwrap();
-                        assert_eq!(row_0.line, "{\"id\":1,\"name\":\"Alice\"}");
-                        assert_eq!(row_0.op_type, data::Op::Insert as i32);
-                        let row_1 = json.row_ops.get(1).unwrap();
-                        assert_eq!(row_1.line, "{\"id\":2,\"name\":\"Bob\"}");
-                        assert_eq!(row_1.op_type, data::Op::Insert as i32);
-                        let row_2 = json.row_ops.get(2).unwrap();
-                        assert_eq!(row_2.line, "{\"id\":3,\"name\":\"Clare\"}");
-                        assert_eq!(row_2.op_type, data::Op::Insert as i32);
-                    }
-                    _ => unreachable!("should be json payload"),
-                }
+                assert_eq!(write.payload.unwrap(), build_chunk_payload(chunk_a))
             }
             _ => panic!("test failed: failed to construct write request"),
         }
@@ -854,12 +752,12 @@ mod test {
             }))
             .await
             .expect("test failed: failed to sync epoch");
-        sink.barrier(true).await.unwrap();
+        sink.barrier(false).await.unwrap();
         let commit_request = request_receiver.recv().await.unwrap();
         match commit_request.request {
             Some(Request::Barrier(Barrier {
                 epoch,
-                is_checkpoint: true,
+                is_checkpoint: false,
             })) => {
                 assert_eq!(epoch, 2022);
             }
@@ -882,20 +780,7 @@ mod test {
             }) => {
                 assert_eq!(write.epoch, 2023);
                 assert_eq!(write.batch_id, 1);
-                match write.payload.unwrap() {
-                    Payload::JsonPayload(json) => {
-                        let row_0 = json.row_ops.get(0).unwrap();
-                        assert_eq!(row_0.line, "{\"id\":4,\"name\":\"David\"}");
-                        assert_eq!(row_0.op_type, data::Op::Insert as i32);
-                        let row_1 = json.row_ops.get(1).unwrap();
-                        assert_eq!(row_1.line, "{\"id\":5,\"name\":\"Eve\"}");
-                        assert_eq!(row_1.op_type, data::Op::Insert as i32);
-                        let row_2 = json.row_ops.get(2).unwrap();
-                        assert_eq!(row_2.line, "{\"id\":6,\"name\":\"Frank\"}");
-                        assert_eq!(row_2.op_type, data::Op::Insert as i32);
-                    }
-                    _ => unreachable!("should be json payload"),
-                }
+                assert_eq!(write.payload.unwrap(), build_chunk_payload(chunk_b));
             }
             _ => panic!("test failed: failed to construct write request"),
         }

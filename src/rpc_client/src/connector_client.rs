@@ -36,7 +36,7 @@ use tonic::Streaming;
 use tracing::error;
 
 use crate::error::{Result, RpcError};
-use crate::BidiStreamHandle;
+use crate::{BidiStreamHandle, BidiStreamReceiver, BidiStreamSender};
 
 #[derive(Clone, Debug)]
 pub struct ConnectorClient {
@@ -44,10 +44,13 @@ pub struct ConnectorClient {
     endpoint: String,
 }
 
+pub type SinkWriterRequestSender = BidiStreamSender<SinkWriterStreamRequest>;
+pub type SinkWriterResponseReceiver = BidiStreamReceiver<SinkWriterStreamResponse>;
+
 pub type SinkWriterStreamHandle =
     BidiStreamHandle<SinkWriterStreamRequest, SinkWriterStreamResponse>;
 
-impl SinkWriterStreamHandle {
+impl SinkWriterRequestSender {
     pub async fn start_epoch(&mut self, epoch: u64) -> Result<()> {
         self.send_request(SinkWriterStreamRequest {
             request: Some(SinkRequest::BeginEpoch(BeginEpoch { epoch })),
@@ -66,24 +69,19 @@ impl SinkWriterStreamHandle {
         .await
     }
 
-    pub async fn barrier(&mut self, epoch: u64) -> Result<()> {
+    pub async fn barrier(&mut self, epoch: u64, is_checkpoint: bool) -> Result<()> {
         self.send_request(SinkWriterStreamRequest {
             request: Some(SinkRequest::Barrier(Barrier {
                 epoch,
-                is_checkpoint: false,
+                is_checkpoint,
             })),
         })
         .await
     }
+}
 
-    pub async fn commit(&mut self, epoch: u64) -> Result<CommitResponse> {
-        self.send_request(SinkWriterStreamRequest {
-            request: Some(SinkRequest::Barrier(Barrier {
-                epoch,
-                is_checkpoint: true,
-            })),
-        })
-        .await?;
+impl SinkWriterResponseReceiver {
+    pub async fn next_commit_response(&mut self) -> Result<CommitResponse> {
         match self.next_response().await? {
             SinkWriterStreamResponse {
                 response: Some(sink_writer_stream_response::Response::Commit(rsp)),
@@ -93,6 +91,27 @@ impl SinkWriterStreamHandle {
                 msg
             ))),
         }
+    }
+}
+
+impl SinkWriterStreamHandle {
+    pub async fn start_epoch(&mut self, epoch: u64) -> Result<()> {
+        self.request_sender.start_epoch(epoch).await
+    }
+
+    pub async fn write_batch(&mut self, epoch: u64, batch_id: u64, payload: Payload) -> Result<()> {
+        self.request_sender
+            .write_batch(epoch, batch_id, payload)
+            .await
+    }
+
+    pub async fn barrier(&mut self, epoch: u64) -> Result<()> {
+        self.request_sender.barrier(epoch, false).await
+    }
+
+    pub async fn commit(&mut self, epoch: u64) -> Result<CommitResponse> {
+        self.request_sender.barrier(epoch, true).await?;
+        self.response_stream.next_commit_response().await
     }
 }
 

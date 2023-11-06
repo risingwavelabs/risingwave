@@ -3103,7 +3103,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=2261151#2261151107ad362851f5fff9ce4fa56e61911b10"
+source = "git+https://github.com/MrCroxx/foyer?rev=9232b3a#9232b3aa468460b60c44c26eac62dadf3594a383"
 dependencies = [
  "foyer-common",
  "foyer-intrusive",
@@ -3114,7 +3114,7 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=2261151#2261151107ad362851f5fff9ce4fa56e61911b10"
+source = "git+https://github.com/MrCroxx/foyer?rev=9232b3a#9232b3aa468460b60c44c26eac62dadf3594a383"
 dependencies = [
  "bytes",
  "foyer-workspace-hack",
@@ -3129,7 +3129,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=2261151#2261151107ad362851f5fff9ce4fa56e61911b10"
+source = "git+https://github.com/MrCroxx/foyer?rev=9232b3a#9232b3aa468460b60c44c26eac62dadf3594a383"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -3146,10 +3146,9 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=2261151#2261151107ad362851f5fff9ce4fa56e61911b10"
+source = "git+https://github.com/MrCroxx/foyer?rev=9232b3a#9232b3aa468460b60c44c26eac62dadf3594a383"
 dependencies = [
  "anyhow",
- "async-channel",
  "bitflags 2.4.0",
  "bitmaps",
  "bytes",
@@ -3170,16 +3169,19 @@ dependencies = [
  "thiserror",
  "tracing",
  "twox-hash",
+ "zstd 0.13.0",
 ]
 
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=2261151#2261151107ad362851f5fff9ce4fa56e61911b10"
+source = "git+https://github.com/MrCroxx/foyer?rev=9232b3a#9232b3aa468460b60c44c26eac62dadf3594a383"
 dependencies = [
+ "cc",
  "crossbeam-utils",
  "either",
  "futures-channel",
+ "futures-core",
  "futures-executor",
  "futures-sink",
  "futures-util",
@@ -3452,9 +3454,9 @@ dependencies = [
 
 [[package]]
 name = "gcp-bigquery-client"
-version = "0.17.1"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "576b349942a1b96327b1b2e50d271d3d54dc9669eb38271c830916168e753820"
+checksum = "b0ce6fcbdaca0a4521a734f2bc7f2f6bd872fe40576e24f8bd0b05732c19a74f"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -3979,7 +3981,7 @@ dependencies = [
 [[package]]
 name = "icelake"
 version = "0.0.10"
-source = "git+https://github.com/icelake-io/icelake?rev=186fde7663545d1d6a5856ce9fbbc541224eadfb#186fde7663545d1d6a5856ce9fbbc541224eadfb"
+source = "git+https://github.com/icelake-io/icelake?rev=5a5202d1f3502f0cf82041044b0427434da59adc#5a5202d1f3502f0cf82041044b0427434da59adc"
 dependencies = [
  "anyhow",
  "apache-avro 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -4162,7 +4164,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb0889898416213fab133e1d33a0e5858a48177452750691bde3666d0fdbaf8b"
 dependencies = [
  "hermit-abi",
- "rustix 0.38.11",
+ "rustix 0.38.21",
  "windows-sys 0.48.0",
 ]
 
@@ -4244,9 +4246,9 @@ dependencies = [
 
 [[package]]
 name = "jsonbb"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efd95430271266a57cbb8fd31115559c853fcaa5f367d32c4720034f7bd37b7f"
+checksum = "1f2dc222074a1d88750778b7b0ed81925cb9f36443df447ab11c51d5686609b2"
 dependencies = [
  "bytes",
  "serde",
@@ -4494,9 +4496,9 @@ checksum = "ef53942eb7bf7ff43a617b3e2c1c4a5ecf5944a7c1bc12d7ee39bbb15e5c1519"
 
 [[package]]
 name = "linux-raw-sys"
-version = "0.4.5"
+version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57bcfdad1b858c2db7c38303a6d2ad4dfaf5eb53dfeb0910128b2c26d6158503"
+checksum = "da2479e8c062e40bf0066ffa0bc823de0a9368974af99c9f6df941d2c231e03f"
 
 [[package]]
 name = "local_stats_alloc"
@@ -6376,15 +6378,25 @@ dependencies = [
 
 [[package]]
 name = "procfs"
-version = "0.15.1"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "943ca7f9f29bab5844ecd8fdb3992c5969b6622bb9609b9502fef9b4310e3f1f"
+checksum = "731e0d9356b0c25f16f33b5be79b1c57b562f141ebfcdb0ad8ac2c13a24293b4"
 dependencies = [
- "bitflags 1.3.2",
- "byteorder",
+ "bitflags 2.4.0",
  "hex",
  "lazy_static",
- "rustix 0.36.16",
+ "procfs-core",
+ "rustix 0.38.21",
+]
+
+[[package]]
+name = "procfs-core"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d3554923a69f4ce04c4a754260c338f505ce22642d3830e049a399fc2059a29"
+dependencies = [
+ "bitflags 2.4.0",
+ "hex",
 ]
 
 [[package]]
@@ -7081,12 +7093,14 @@ version = "1.3.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bincode 1.3.3",
  "bytes",
  "itertools 0.11.0",
  "parking_lot 0.12.1",
  "prost 0.12.1",
  "risingwave_common",
  "risingwave_hummock_sdk",
+ "risingwave_meta_model_v2",
  "risingwave_object_store",
  "risingwave_pb",
  "serde",
@@ -7283,7 +7297,7 @@ dependencies = [
  "postgres-types",
  "prehash",
  "pretty_assertions",
- "procfs 0.15.1",
+ "procfs 0.16.0",
  "prometheus",
  "prost 0.12.1",
  "rand",
@@ -7831,6 +7845,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "cfg-or-panic",
+ "expect-test",
  "futures",
  "itertools 0.11.0",
  "jni",
@@ -8303,7 +8318,7 @@ dependencies = [
  "nix 0.27.1",
  "num-integer",
  "parking_lot 0.12.1",
- "procfs 0.15.1",
+ "procfs 0.16.0",
  "prometheus",
  "prost 0.12.1",
  "rand",
@@ -8342,6 +8357,7 @@ dependencies = [
  "async-recursion",
  "async-stream",
  "async-trait",
+ "auto_enums",
  "await-tree",
  "bytes",
  "criterion",
@@ -8413,6 +8429,7 @@ dependencies = [
  "madsim-tonic",
  "static_assertions",
  "thiserror",
+ "thiserror-ext",
 ]
 
 [[package]]
@@ -8566,14 +8583,14 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.38.11"
+version = "0.38.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0c3dde1fc030af041adc40e79c0e7fbcf431dd24870053d187d7c66e4b87453"
+checksum = "2b426b0506e5d50a7d8dafcf2e81471400deb602392c7dd110815afb4eaf02a3"
 dependencies = [
  "bitflags 2.4.0",
  "errno",
  "libc",
- "linux-raw-sys 0.4.5",
+ "linux-raw-sys 0.4.10",
  "windows-sys 0.48.0",
 ]
 
@@ -9927,7 +9944,7 @@ dependencies = [
  "cfg-if",
  "fastrand 2.0.0",
  "redox_syscall 0.3.5",
- "rustix 0.38.11",
+ "rustix 0.38.21",
  "windows-sys 0.48.0",
 ]
 
@@ -9953,6 +9970,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d6d7a740b8a666a7e828dd00da9c0dc290dff53154ea77ac109281de90589b7"
 dependencies = [
  "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-ext"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f28a4a7351f496662affc257826b85dd2a613406ce3cc2f07b849685e166d8c"
+dependencies = [
+ "thiserror",
+ "thiserror-ext-derive",
+]
+
+[[package]]
+name = "thiserror-ext-derive"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "67621f6d39449754da63668ddd2423ad0c81c27434c16090f8805ad1db59b621"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.37",
 ]
 
 [[package]]
@@ -10954,7 +10992,7 @@ dependencies = [
  "either",
  "home",
  "once_cell",
- "rustix 0.38.11",
+ "rustix 0.38.21",
 ]
 
 [[package]]
@@ -11192,7 +11230,6 @@ dependencies = [
  "clap_builder",
  "combine",
  "crossbeam-epoch",
- "crossbeam-queue",
  "crossbeam-utils",
  "deranged",
  "digest",

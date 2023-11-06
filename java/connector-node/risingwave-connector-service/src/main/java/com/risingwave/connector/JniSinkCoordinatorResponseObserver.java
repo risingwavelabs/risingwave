@@ -16,6 +16,7 @@ package com.risingwave.connector;
 
 import com.risingwave.java.binding.Binding;
 import com.risingwave.proto.ConnectorServiceProto;
+import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,7 +27,7 @@ public class JniSinkCoordinatorResponseObserver
             LoggerFactory.getLogger(JniSinkCoordinatorResponseObserver.class);
     private long responseTxPtr;
 
-    private boolean success;
+    private boolean success = true;
 
     public JniSinkCoordinatorResponseObserver(long responseTxPtr) {
         this.responseTxPtr = responseTxPtr;
@@ -34,13 +35,15 @@ public class JniSinkCoordinatorResponseObserver
 
     @Override
     public void onNext(ConnectorServiceProto.SinkCoordinatorStreamResponse response) {
-        this.success =
-                Binding.sendSinkCoordinatorResponseToChannel(
-                        this.responseTxPtr, response.toByteArray());
+        if (!Binding.sendSinkCoordinatorResponseToChannel(
+                this.responseTxPtr, response.toByteArray())) {
+            throw Status.INTERNAL.withDescription("unable to send response").asRuntimeException();
+        }
     }
 
     @Override
     public void onError(Throwable throwable) {
+        this.success = false;
         LOG.error("JniSinkCoordinatorHandler onError: ", throwable);
     }
 

@@ -62,6 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let btree_map_paths = [
         ".monitor_service.StackTraceResponse",
         ".plan_common.ExternalTableDesc",
+        ".hummock.CompactTask",
     ];
 
     // Build protobuf structs.
@@ -115,6 +116,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.ColumnDesc", "#[derive(Eq, Hash)]")
         .type_attribute("common.ColumnOrder", "#[derive(Eq, Hash)]")
         .type_attribute("common.OrderType", "#[derive(Eq, Hash)]")
+        // Eq is required to derive `FromJsonQueryResult` for models in risingwave_meta_model_v2.
+        .type_attribute("hummock.TableStats", "#[derive(Eq)]")
+        .type_attribute("hummock.SstableInfo", "#[derive(Eq)]")
+        .type_attribute("hummock.KeyRange", "#[derive(Eq)]")
+        .type_attribute("hummock.CompactionConfig", "#[derive(Eq)]")
+        .type_attribute("hummock.GroupDelta.delta_type", "#[derive(Eq)]")
+        .type_attribute("hummock.IntraLevelDelta", "#[derive(Eq)]")
+        .type_attribute("hummock.GroupConstruct", "#[derive(Eq)]")
+        .type_attribute("hummock.GroupDestroy", "#[derive(Eq)]")
+        .type_attribute("hummock.GroupMetaChange", "#[derive(Eq)]")
+        .type_attribute("hummock.GroupTableChange", "#[derive(Eq)]")
+        .type_attribute("hummock.GroupDelta", "#[derive(Eq)]")
+        .type_attribute("hummock.LevelHandler.RunningCompactTask", "#[derive(Eq)]")
+        .type_attribute("hummock.LevelHandler", "#[derive(Eq)]")
+        .type_attribute("hummock.TableOption", "#[derive(Eq)]")
+        .type_attribute("hummock.InputLevel", "#[derive(Eq)]")
+        .type_attribute("hummock.CompactTask", "#[derive(Eq)]")
         // ===================
         .out_dir(out_dir.as_path())
         .compile(&protos, &[proto_dir.to_string()])

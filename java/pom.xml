@@ -75,7 +75,7 @@
         <jackson.version>2.13.5</jackson.version>
         <spark_sql.version>3.3.1</spark_sql.version>
         <hadoop.version>3.3.3</hadoop.version>
-        <elasticsearch.version>7.17.10</elasticsearch.version>
+        <elasticsearch.version>7.17.13</elasticsearch.version>
         <datastax.version>4.15.0</datastax.version>
     </properties>
 

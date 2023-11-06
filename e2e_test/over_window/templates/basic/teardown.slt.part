@@ -1,0 +1,23 @@
+statement ok
+drop $view_type v_a;
+
+statement ok
+drop $view_type v_b;
+
+statement ok
+drop $view_type v_c;
+
+statement ok
+drop $view_type v_a_b;
+
+statement ok
+drop $view_type v_b_c;
+
+statement ok
+drop $view_type v_a_c;
+
+statement ok
+drop $view_type v_a_b_c;
+
+statement ok
+drop table t;

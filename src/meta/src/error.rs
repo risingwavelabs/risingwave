@@ -53,7 +53,7 @@ enum MetaErrorInner {
 
     // Used for catalog errors.
     #[error("{0} id not found: {1}")]
-    CatalogIdNotFound(&'static str, u32),
+    CatalogIdNotFound(&'static str, String),
 
     #[error("table_fragment not exist: id={0}")]
     FragmentNotFound(u32),
@@ -133,8 +133,8 @@ impl MetaError {
         MetaErrorInner::InvalidParameter(s.into()).into()
     }
 
-    pub fn catalog_id_not_found<T: Into<u32>>(relation: &'static str, id: T) -> Self {
-        MetaErrorInner::CatalogIdNotFound(relation, id.into()).into()
+    pub fn catalog_id_not_found<T: ToString>(relation: &'static str, id: T) -> Self {
+        MetaErrorInner::CatalogIdNotFound(relation, id.to_string()).into()
     }
 
     pub fn fragment_not_found<T: Into<u32>>(id: T) -> Self {

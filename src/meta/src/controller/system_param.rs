@@ -25,7 +25,8 @@ use risingwave_meta_model_v2::prelude::SystemParameter;
 use risingwave_meta_model_v2::system_parameter;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::PbSystemParams;
-use sea_orm::{ActiveModelTrait, ActiveValue, DatabaseConnection, EntityTrait, TransactionTrait};
+use sea_orm::ActiveValue::Set;
+use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, TransactionTrait};
 use tokio::sync::oneshot::Sender;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
@@ -83,10 +84,10 @@ macro_rules! impl_system_params_to_models {
             $(
                 let value = params.$field.as_ref().unwrap().to_string();
                 models.push(system_parameter::ActiveModel {
-                    name: ActiveValue::Set(key_of!($field).to_string()),
-                    value: ActiveValue::Set(value),
-                    is_mutable: ActiveValue::Set($is_mutable),
-                    description: ActiveValue::Set(None),
+                    name: Set(key_of!($field).to_string()),
+                    value: Set(value),
+                    is_mutable: Set($is_mutable),
+                    description: Set(None),
                 });
             )*
             Ok(models)
@@ -190,9 +191,8 @@ impl SystemParamsController {
         };
         let mut params = params_guard.clone();
         let mut param: system_parameter::ActiveModel = param.into();
-        param.value = ActiveValue::Set(
-            set_system_param(&mut params, name, value).map_err(MetaError::system_param)?,
-        );
+        param.value =
+            Set(set_system_param(&mut params, name, value).map_err(MetaError::system_param)?);
         param.update(&self.db).await?;
         *params_guard = params.clone();
 
@@ -281,10 +281,10 @@ mod tests {
 
         // insert deprecated params.
         let deprecated_param = system_parameter::ActiveModel {
-            name: ActiveValue::Set("deprecated_param".into()),
-            value: ActiveValue::Set("foo".into()),
-            is_mutable: ActiveValue::Set(true),
-            description: ActiveValue::Set(None),
+            name: Set("deprecated_param".into()),
+            value: Set("foo".into()),
+            is_mutable: Set(true),
+            description: Set(None),
         };
         deprecated_param.insert(&system_param_ctl.db).await.unwrap();
 
