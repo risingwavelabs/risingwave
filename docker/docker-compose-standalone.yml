@@ -15,7 +15,7 @@ services:
                     --etcd-endpoints etcd-0:2388 \
                     --state-store hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001 \
                     --data-directory hummock_001 \
-                    --config-path /risingwave.toml \
+                    --config-path /risingwave.toml\" \
                  --compute-opts=\" \
                     --config-path /risingwave.toml \
                     --listen-addr 0.0.0.0:5688 \
