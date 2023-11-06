@@ -201,6 +201,13 @@
 
     Caused by:
       Bind error: types List(Int32) and List(Varchar) cannot be matched
+- name: any contains(null, null) -> bool
+  sql: select '{}' @> '{}';
+  binder_error: |-
+    Bind error: failed to bind expression: '{}' @> '{}'
+
+    Caused by:
+      Bind error: operator does not exist: unknown || unknown
 - name: string from/to varchar[] in implicit context
   sql: |
     values (array['a', 'b']), ('{c,' || 'd}');

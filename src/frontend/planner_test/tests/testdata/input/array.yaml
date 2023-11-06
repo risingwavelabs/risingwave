@@ -157,6 +157,10 @@
   sql: select array[2,3] @> array['1'];
   expected_outputs:
   - binder_error
+- name: any contains(null, null) -> bool
+  sql: select '{}' @> '{}';
+  expected_outputs:
+  - binder_error
 - name: string from/to varchar[] in implicit context
   sql: |
     values (array['a', 'b']), ('{c,' || 'd}');
