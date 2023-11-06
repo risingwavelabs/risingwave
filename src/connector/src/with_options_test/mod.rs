@@ -19,7 +19,7 @@ use std::{env, fs};
 use serde::Serialize;
 use syn::{parse_file, Attribute, Field, Item, ItemFn, Lit, Meta, MetaNameValue, NestedMeta, Type};
 
-pub fn connector_crate_path() -> Option<PathBuf> {
+fn connector_crate_path() -> Option<PathBuf> {
     let mut current_dir = env::current_dir().ok()?;
     loop {
         if current_dir.join("Cargo.lock").exists() {

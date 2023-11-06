@@ -52,7 +52,6 @@ members = [
   "src/utils/sync-point",
   "src/utils/variables",
   "src/utils/with_options",
-  "src/utils/with_options_build",
   "src/utils/workspace-config",
   "src/workspace-hack",
 ]

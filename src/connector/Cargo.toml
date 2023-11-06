@@ -140,13 +140,17 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = { workspace = true, features = ["async_tokio", "async"] }
+expect-test = "1"
 pretty_assertions = "1"
+quote = "1"
 rand = "0.8"
+serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
+syn = { version = "1", features = ["full"] }
 tempfile = "3"
 tracing-subscriber = "0.3"
 tracing-test = "0.2"
-with_options_build = { path = "../utils/with_options_build" }
+walkdir = "2"
 
 [build-dependencies]
 prost-build = "0.12"
