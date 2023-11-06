@@ -15,7 +15,7 @@
 use std::ops::Bound;
 use std::ops::Bound::Unbounded;
 
-use futures::{pin_mut, StreamExt};
+use futures::{pin_mut, FutureExt, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
@@ -78,45 +78,49 @@ impl<S: StateStore> NowExecutor<S> {
         // Whether the first barrier is handled and `last_timestamp` is initialized.
         let mut initialized = false;
 
-        while let Some(barrier) = barrier_receiver.recv().await {
-            if !initialized {
-                // Handle the first barrier.
-                state_table.init_epoch(barrier.epoch);
-                let state_row = {
-                    let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
-                    let data_iter = state_table
-                        .iter_with_prefix(row::empty(), sub_range, Default::default())
-                        .await?;
-                    pin_mut!(data_iter);
-                    if let Some(keyed_row) = data_iter.next().await {
-                        Some(keyed_row?)
-                    } else {
-                        None
-                    }
-                };
-                last_timestamp = state_row.and_then(|row| row[0].clone());
-                paused = barrier.is_pause_on_startup();
-                initialized = true;
-            } else if paused {
-                // Assert that no data is updated.
-                state_table.commit_no_data_expected(barrier.epoch);
-            } else {
-                state_table.commit(barrier.epoch).await?;
-            }
-
-            // Extract timestamp from the current epoch.
-            let timestamp = Some(barrier.get_curr_epoch().as_scalar());
-
-            // Update paused state.
-            if let Some(mutation) = barrier.mutation.as_deref() {
-                match mutation {
-                    Mutation::Pause => paused = true,
-                    Mutation::Resume => paused = false,
-                    _ => {}
+        while let Some(barriers) = recv_multiple(&mut barrier_receiver).await {
+            let mut timestamp = None;
+            for barrier in barriers {
+                if !initialized {
+                    // Handle the first barrier.
+                    state_table.init_epoch(barrier.epoch);
+                    let state_row = {
+                        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) =
+                            &(Unbounded, Unbounded);
+                        let data_iter = state_table
+                            .iter_with_prefix(row::empty(), sub_range, Default::default())
+                            .await?;
+                        pin_mut!(data_iter);
+                        if let Some(keyed_row) = data_iter.next().await {
+                            Some(keyed_row?)
+                        } else {
+                            None
+                        }
+                    };
+                    last_timestamp = state_row.and_then(|row| row[0].clone());
+                    paused = barrier.is_pause_on_startup();
+                    initialized = true;
+                } else if paused {
+                    // Assert that no data is updated.
+                    state_table.commit_no_data_expected(barrier.epoch);
+                } else {
+                    state_table.commit(barrier.epoch).await?;
                 }
-            }
 
-            yield Message::Barrier(barrier.clone());
+                // Extract timestamp from the current epoch.
+                timestamp = Some(barrier.get_curr_epoch().as_scalar());
+
+                // Update paused state.
+                if let Some(mutation) = barrier.mutation.as_deref() {
+                    match mutation {
+                        Mutation::Pause => paused = true,
+                        Mutation::Resume => paused = false,
+                        _ => {}
+                    }
+                }
+
+                yield Message::Barrier(barrier);
+            }
 
             // Do not yield any messages if paused.
             if paused {
@@ -170,8 +174,29 @@ impl<S: StateStore> Executor for NowExecutor<S> {
     }
 }
 
+async fn recv_multiple<T>(rx: &mut UnboundedReceiver<T>) -> Option<Vec<T>> {
+    let item = rx.recv().await;
+    let mut ret = if let Some(item) = item {
+        vec![item]
+    } else {
+        return None;
+    };
+    // When rx.recv() returns None, the current function will not return None,
+    // which will trigger the next call on `rx.recv()`. The test `test_unbounded_rx_multiple_none`
+    // has tested that it is allowed to call `rx.recv()` again after it returns None.
+    while let Some(Some(item)) = rx.recv().now_or_never() {
+        ret.push(item);
+    }
+    Some(ret)
+}
+
 #[cfg(test)]
 mod tests {
+    use std::assert_matches::assert_matches;
+    use std::future::{poll_fn, Future};
+    use std::pin::pin;
+    use std::task::Poll;
+
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
@@ -182,6 +207,7 @@ mod tests {
 
     use super::NowExecutor;
     use crate::common::table::state_table::StateTable;
+    use crate::executor::now::recv_multiple;
     use crate::executor::test_utils::StreamExecutorTestExt;
     use crate::executor::{
         Barrier, BoxedMessageStream, Executor, Mutation, PkIndices, StreamExecutorResult, Watermark,
@@ -420,5 +446,38 @@ mod tests {
         let (sender, barrier_receiver) = unbounded_channel();
         let now_executor = NowExecutor::new(barrier_receiver, 1, state_table);
         (sender, Box::new(now_executor).execute())
+    }
+
+    #[tokio::test]
+    async fn test_unbounded_rx_multiple_none() {
+        let (tx, mut rx) = unbounded_channel::<()>();
+        drop(tx);
+        assert_matches!(rx.recv().await, None);
+        assert_matches!(rx.recv().await, None);
+    }
+
+    #[tokio::test]
+    async fn test_multiple_recv() {
+        let (tx, mut rx) = unbounded_channel();
+        {
+            let mut future = pin!(recv_multiple(&mut rx));
+            assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
+                .await
+                .is_pending());
+            tx.send(1).unwrap();
+            tx.send(2).unwrap();
+            tx.send(3).unwrap();
+            assert_eq!(Some(vec![1, 2, 3]), future.await);
+        }
+        {
+            let mut future = pin!(recv_multiple(&mut rx));
+            assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
+                .await
+                .is_pending());
+            tx.send(4).unwrap();
+            drop(tx);
+            assert_eq!(Some(vec![4]), future.await);
+        }
+        assert!(recv_multiple(&mut rx).await.is_none());
     }
 }
