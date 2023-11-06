@@ -646,7 +646,7 @@ impl ListValue {
         let mut elems = Vec::new();
         let mut depth = 0;
         let mut start = 0;
-        let mut chars = trimmed.chars().enumerate();
+        let mut chars = trimmed.char_indices();
         while let Some((i, c)) = chars.next() {
             match c {
                 '{' => depth += 1,
@@ -662,7 +662,7 @@ impl ListValue {
                 },
                 ',' if depth == 0 => {
                     elems.push(match trimmed[start..i].trim() {
-                        "" => return Err("Unexpected \"}\" character.".into()),
+                        "" => return Err("Unexpected \",\" character.".into()),
                         s if s.eq_ignore_ascii_case("null") => None,
                         s => Some(ScalarImpl::from_literal(&unquote(s), elem_type)?),
                     });
@@ -688,13 +688,16 @@ impl ListValue {
 }
 
 /// Remove double quotes from a string.
-fn unquote(input: &str) -> Cow<'_, str> {
-    if !(input.starts_with('"') && input.ends_with('"')) {
-        return Cow::Borrowed(input);
+fn unquote(mut input: &str) -> Cow<'_, str> {
+    if input.starts_with('"') && input.ends_with('"') {
+        input = &input[1..input.len() - 1];
+    }
+    if !input.contains('\\') {
+        return input.into();
     }
 
-    let mut output = String::with_capacity(input.len() - 2);
-    let mut chars = input[1..input.len() - 1].chars().peekable();
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
 
     while let Some(mut ch) = chars.next() {
         if ch == '\\' {
@@ -1137,6 +1140,8 @@ mod tests {
 
         test("varchar[]", "{}", None);
         test("varchar[]", "{1 2}", Some(r#"{"1 2"}"#));
+        test("varchar[]", "{🥵,🤡}", None);
+        test("varchar[]", r#"{aa\\bb}"#, Some(r#"{"aa\\bb"}"#));
         test("int[]", "{1,2,3}", None);
         test("varchar[]", r#"{"1,2"}"#, None);
         test("varchar[]", r#"{1, ""}"#, Some(r#"{1,""}"#));
@@ -1159,6 +1164,7 @@ mod tests {
         test_err("varchar[]", "()", r#"Array value must start with "{""#);
         test_err("varchar[]", "{1,", r#"Unexpected end of input."#);
         test_err("varchar[]", "{1,}", r#"Unexpected "}" character."#);
-        test_err("varchar[]", "{1,,3}", r#"Unexpected "}" character."#);
+        test_err("varchar[]", "{1,,3}", r#"Unexpected "," character."#);
+        test_err("varchar[]", r#"{"a""b"}"#, r#"Unexpected "}" character."#);
     }
 }

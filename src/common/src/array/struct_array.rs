@@ -444,8 +444,12 @@ impl ToText for StructRef<'_> {
 /// Double quote a string if it contains any special characters.
 fn quote_if_need(input: &str, writer: &mut impl Write) -> std::fmt::Result {
     if !input.is_empty() // non-empty
-        && input.trim() == input // no leading or trailing whitespace
-        && !input.contains(['(', ')', ',', '"', '\\'])
+        && !input.contains([
+            '"', '\\', '(', ')', ',',
+            // PostgreSQL `array_isspace` includes '\x0B' but rust
+            // [`char::is_ascii_whitespace`] does not.
+            ' ', '\t', '\n', '\r', '\x0B', '\x0C',
+        ])
     {
         return writer.write_str(input);
     }
@@ -466,13 +470,16 @@ fn quote_if_need(input: &str, writer: &mut impl Write) -> std::fmt::Result {
 /// Remove double quotes from a string.
 /// This is the reverse of [`quote_if_need`].
 #[allow(dead_code)]
-fn unquote_if_need(input: &str) -> Cow<'_, str> {
-    if !(input.starts_with('"') && input.ends_with('"')) {
-        return Cow::Borrowed(input);
+fn unquote_if_need(mut input: &str) -> Cow<'_, str> {
+    if input.starts_with('"') && input.ends_with('"') {
+        input = &input[1..input.len() - 1];
+    }
+    if !input.contains('\\') && !input.contains("\"\"") {
+        return input.into();
     }
 
-    let mut output = String::with_capacity(input.len() - 2);
-    let mut chars = input[1..input.len() - 1].chars().peekable();
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
 
     while let Some(ch) = chars.next() {
         match ch {
@@ -783,10 +790,12 @@ mod tests {
         test("abc", "abc");
         test("", r#""""#);
         test(" x ", r#"" x ""#);
+        test("a b", r#""a b""#);
         test(r#"a"bc"#, r#""a""bc""#);
         test(r#"a\bc"#, r#""a\\bc""#);
         test("{1}", "{1}");
         test("{1,2}", r#""{1,2}""#);
         test(r#"{"f": 1}"#, r#""{""f"": 1}""#);
+        assert_eq!(unquote_if_need(r#"  \,b"#), r#"  ,b"#);
     }
 }
