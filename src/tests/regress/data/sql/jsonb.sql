@@ -95,7 +95,7 @@ SELECT '{
 
 -- to_jsonb, timestamps
 
---@ select to_jsonb(timestamp '2014-05-28 12:22:35.614298');
+select to_jsonb(timestamp '2014-05-28 12:22:35.614298');
 --@ 
 --@ BEGIN;
 --@ SET LOCAL TIME ZONE 10.5;
@@ -104,7 +104,7 @@ SELECT '{
 --@ select to_jsonb(timestamptz '2014-05-28 12:22:35.614298-04');
 --@ COMMIT;
 --@ 
---@ select to_jsonb(date '2014-05-28');
+select to_jsonb(date '2014-05-28');
 --@ 
 --@ select to_jsonb(date 'Infinity');
 --@ select to_jsonb(date '-Infinity');
