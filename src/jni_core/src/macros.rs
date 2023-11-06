@@ -176,15 +176,26 @@ macro_rules! split_by_comma {
 /// assert_eq!(
 ///     "java/lang/String",
 ///     risingwave_jni_core::gen_class_name!(java.lang.String)
-/// )
+/// );
+/// assert_eq!(
+///     "java/lang/String",
+///     risingwave_jni_core::gen_class_name!(String)
+/// );
 /// ```
 #[macro_export]
 macro_rules! gen_class_name {
-    ($last:ident) => {
+    // A single part class name will be prefixed with `java.lang.`
+    ($single_part_class:ident $($param_name:ident)?) => {
+        $crate::gen_class_name! { @inner java.lang.$single_part_class }
+    };
+    ($($class:ident).+ $($param_name:ident)?) => {
+        $crate::gen_class_name! { @inner $($class).+ }
+    };
+    (@inner $last:ident) => {
         stringify! {$last}
     };
-    ($first:ident . $($rest:ident).+) => {
-        concat! {stringify! {$first}, "/", $crate::gen_class_name! {$($rest).+} }
+    (@inner $first:ident . $($rest:ident).+) => {
+        concat! {stringify! {$first}, "/", $crate::gen_class_name! {@inner $($rest).+} }
     }
 }
 
@@ -233,15 +244,11 @@ macro_rules! gen_jni_type_sig {
     (void) => {
         "V"
     };
-    // A single part class name will be prefixed with `java.lang.`
-    ($single_part_class:ident $($param_name:ident)?) => {
-        $crate::gen_jni_type_sig! { java.lang.$single_part_class }
-    };
     (Class $(< ? >)? $($param_name:ident)?) => {
         $crate::gen_jni_type_sig! { java.lang.Class }
     };
-    ($first_class_part:ident.$($class_part:ident).+ $($param_name:ident)?) => {
-        concat! {"L", $crate::gen_class_name! {$first_class_part.$($class_part).+}, ";"}
+    ($($class_part:ident).+ $($param_name:ident)?) => {
+        concat! {"L", $crate::gen_class_name! {$($class_part).+}, ";"}
     };
     ($($class_part:ident).+ [] $($param_name:ident)?) => {
         concat! { "[", $crate::gen_jni_type_sig! {$($class_part).+}}
