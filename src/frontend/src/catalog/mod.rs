@@ -36,6 +36,7 @@ pub(crate) mod source_catalog;
 pub(crate) mod system_catalog;
 pub(crate) mod table_catalog;
 pub(crate) mod view_catalog;
+pub(crate) mod scan_table_catalog;
 
 pub(crate) use catalog_service::CatalogReader;
 pub use index_catalog::IndexCatalog;
