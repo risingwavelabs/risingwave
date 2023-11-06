@@ -98,11 +98,8 @@ impl ToJsonb for i32 {
 }
 
 impl ToJsonb for i64 {
-    fn add_to(self, t: &DataType, builder: &mut Builder) -> Result<()> {
-        let res: F64 = self
-            .try_into()
-            .map_err(|_| ExprError::CastOutOfRange("IEEE 754 double"))?;
-        res.add_to(t, builder)?;
+    fn add_to(self, _: &DataType, builder: &mut Builder) -> Result<()> {
+        builder.add_i64(self as _);
         Ok(())
     }
 }
