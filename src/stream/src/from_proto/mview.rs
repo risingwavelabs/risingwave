@@ -25,7 +25,6 @@ use crate::executor::MaterializeExecutor;
 
 pub struct MaterializeExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for MaterializeExecutorBuilder {
     type Node = MaterializeNode;
 
@@ -85,7 +84,6 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
 pub struct ArrangeExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for ArrangeExecutorBuilder {
     type Node = ArrangeNode;
 

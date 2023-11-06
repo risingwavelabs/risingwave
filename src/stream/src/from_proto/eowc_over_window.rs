@@ -28,7 +28,6 @@ use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct EowcOverWindowExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
     type Node = PbEowcOverWindowNode;
 

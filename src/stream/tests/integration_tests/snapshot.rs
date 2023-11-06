@@ -100,7 +100,7 @@ pub async fn check_with_script<F, Fut>(
 
 /// This is a DSL for the input and output of executor snapshot tests.
 ///
-/// It immitates [`Message`], but more ser/de friendly.
+/// It imitates [`Message`], but more ser/de friendly.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum SnapshotEvent {

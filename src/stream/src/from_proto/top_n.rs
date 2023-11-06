@@ -23,7 +23,6 @@ use crate::executor::{AppendOnlyTopNExecutor, TopNExecutor};
 
 pub struct TopNExecutorBuilder<const APPEND_ONLY: bool>;
 
-#[async_trait::async_trait]
 impl<const APPEND_ONLY: bool> ExecutorBuilder for TopNExecutorBuilder<APPEND_ONLY> {
     type Node = TopNNode;
 
