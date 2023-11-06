@@ -12,13 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Result, Ok};
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
+use risingwave_common::error::RwError;
 
 use super::opendal_enumerator::OpenDALConnector;
 use super::{GCSProperties, OpenDALProperties};
-use crate::parser::ParserConfig;
+use crate::{parser::ParserConfig, source::StreamChunkWithState};
 use crate::source::filesystem::GcsSplit;
 use crate::source::{
     BoxSourceWithStateStream, Column, CommonSplitReader, SourceContextRef, SourceMessage,
@@ -49,5 +50,29 @@ impl SplitReader for OpenDALConnector {
 
     fn into_stream(self) -> BoxSourceWithStateStream {
         todo!()
+    }
+}
+
+impl OpenDALConnector{
+    #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
+    async fn into_chunk_stream(self) {
+        
+    }
+
+    async fn streaming_read(
+        &self,
+        path: &str,
+        start_pos: Option<usize>,
+    ) -> Result<()>{
+        let reader = match start_pos {
+            Some(start_position) => {
+                self.op
+                    .reader_with(path)
+                    .range(start_position as u64..)
+                    .await?
+            }
+            None => self.op.reader(path).await?,
+        };
+        Ok(())
     }
 }
