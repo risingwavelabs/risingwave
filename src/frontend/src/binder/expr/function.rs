@@ -882,6 +882,36 @@ impl Binder {
                 ("jsonb_array_element", raw_call(ExprType::JsonbAccess)),
                 ("jsonb_object_field_text", raw_call(ExprType::JsonbAccessStr)),
                 ("jsonb_array_element_text", raw_call(ExprType::JsonbAccessStr)),
+                ("jsonb_extract_path", raw(|_binder, mut inputs| {
+                    // rewrite: jsonb_extract_path(jsonb, s1, s2...)
+                    // to:      jsonb_extract_path(jsonb, array[s1, s2...])
+                    if inputs.len() < 2 {
+                        return Err(ErrorCode::ExprError("unexpected arguments number".into()).into());
+                    }
+                    inputs[0].cast_implicit_mut(DataType::Jsonb)?;
+                    let mut variadic_inputs = inputs.split_off(1);
+                    for input in &mut variadic_inputs {
+                        input.cast_implicit_mut(DataType::Varchar)?;
+                    }
+                    let array = FunctionCall::new_unchecked(ExprType::Array, variadic_inputs, DataType::List(Box::new(DataType::Varchar)));
+                    inputs.push(array.into());
+                    Ok(FunctionCall::new_unchecked(ExprType::JsonbExtractPath, inputs, DataType::Jsonb).into())
+                })),
+                ("jsonb_extract_path_text", raw(|_binder, mut inputs| {
+                    // rewrite: jsonb_extract_path_text(jsonb, s1, s2...)
+                    // to:      jsonb_extract_path_text(jsonb, array[s1, s2...])
+                    if inputs.len() < 2 {
+                        return Err(ErrorCode::ExprError("unexpected arguments number".into()).into());
+                    }
+                    inputs[0].cast_implicit_mut(DataType::Jsonb)?;
+                    let mut variadic_inputs = inputs.split_off(1);
+                    for input in &mut variadic_inputs {
+                        input.cast_implicit_mut(DataType::Varchar)?;
+                    }
+                    let array = FunctionCall::new_unchecked(ExprType::Array, variadic_inputs, DataType::List(Box::new(DataType::Varchar)));
+                    inputs.push(array.into());
+                    Ok(FunctionCall::new_unchecked(ExprType::JsonbExtractPathText, inputs, DataType::Varchar).into())
+                })),
                 ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
                 ("jsonb_object", raw_call(ExprType::JsonbObject)),
@@ -894,6 +924,7 @@ impl Binder {
                 ("jsonb_delete", raw_call(ExprType::Subtract)),
                 ("jsonb_delete_path", raw_call(ExprType::JsonbDeletePath)),
                 ("jsonb_strip_nulls", raw_call(ExprType::JsonbStripNulls)),
+                ("to_jsonb", raw_call(ExprType::ToJsonb)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least

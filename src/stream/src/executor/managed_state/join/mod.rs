@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod join_entry_state;
+mod join_row_set;
 
 use std::alloc::Global;
 use std::ops::{Bound, Deref, DerefMut};

@@ -19,6 +19,7 @@ anyhow = "1"
 async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
+auto_enums = "0.8"
 await-tree = { workspace = true }
 bytes = "1"
 educe = "0.4"

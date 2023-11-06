@@ -137,6 +137,29 @@ impl Configuration {
             etcd_data_path: None,
         }
     }
+
+    pub fn for_background_ddl() -> Self {
+        // Embed the config file and create a temporary file at runtime. The file will be deleted
+        // automatically when it's dropped.
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+            file.write_all(include_bytes!("background_ddl.toml"))
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 2,
+            compute_nodes: 3,
+            meta_nodes: 3,
+            compactor_nodes: 2,
+            compute_node_cores: 2,
+            etcd_timeout_rate: 0.0,
+            etcd_data_path: None,
+        }
+    }
 }
 
 /// A risingwave cluster.
@@ -683,5 +706,13 @@ impl KillOpts {
         kill_compute: true,
         kill_compactor: true,
         restart_delay_secs: 20,
+    };
+    pub const ALL_FAST: Self = KillOpts {
+        kill_rate: 1.0,
+        kill_meta: true,
+        kill_frontend: true,
+        kill_compute: true,
+        kill_compactor: true,
+        restart_delay_secs: 2,
     };
 }

@@ -75,6 +75,17 @@ message StorageTableDesc {
   repeated uint32 stream_key = 9;
 }
 
+// Represents a table in external database for CDC scenario
+message ExternalTableDesc {
+  uint32 table_id = 1;
+  repeated ColumnDesc columns = 2;
+  // TODO: may refactor primary key representations
+  repeated common.ColumnOrder pk = 3;
+  string table_name = 4;
+  repeated uint32 stream_key = 5;
+  map<string, string> connect_properties = 6;
+}
+
 enum JoinType {
   // Note that it comes from Calcite's JoinRelType.
   // DO NOT HAVE direction for SEMI and ANTI now.

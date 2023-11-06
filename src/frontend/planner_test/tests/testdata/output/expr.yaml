@@ -450,7 +450,7 @@
       └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |-
-    BatchProject { exprs: [Some((1:Int32 < ArrayCat($expr10039, ARRAY[2]:List(Int32)))) as $expr1] }
+    BatchProject { exprs: [Some((1:Int32 < ArrayCat($expr10041, ARRAY[2]:List(Int32)))) as $expr1] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
       └─BatchValues { rows: [[ARRAY[1]:List(Int32)]] }
@@ -473,7 +473,7 @@
       └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |-
-    BatchProject { exprs: [All((1:Int32 < ArrayCat($expr10039, ARRAY[2]:List(Int32)))) as $expr1] }
+    BatchProject { exprs: [All((1:Int32 < ArrayCat($expr10041, ARRAY[2]:List(Int32)))) as $expr1] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
       └─BatchValues { rows: [[ARRAY[1]:List(Int32)]] }
@@ -600,7 +600,7 @@
   batch_plan: 'BatchValues { rows: [[1:Int32]] }'
   stream_plan: |-
     StreamMaterialize { columns: [abs, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-    └─StreamValues { rows: [[Abs(-1:Int32), 0:Int64]] }
+    └─StreamValues { rows: [[1:Int32, 0:Int64]] }
 - sql: |
     select * from range(1,2);
   batch_plan: |-

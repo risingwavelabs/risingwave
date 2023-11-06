@@ -272,6 +272,7 @@ pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
 pub struct EpochWithGap(u64);
 
 impl EpochWithGap {
+    #[allow(unused_variables)]
     pub fn new(epoch: u64, spill_offset: u16) -> Self {
         #[cfg(not(feature = "enable_test_epoch"))]
         {
@@ -281,8 +282,7 @@ impl EpochWithGap {
         }
         #[cfg(feature = "enable_test_epoch")]
         {
-            let epoch_with_gap = epoch + spill_offset as u64 - spill_offset as u64;
-            EpochWithGap(epoch_with_gap)
+            EpochWithGap(epoch)
         }
     }
 

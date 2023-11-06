@@ -129,3 +129,9 @@
   expected_outputs:
     - logical_plan
     - batch_plan
+- sql: |
+    create table b (b1 varchar);
+    select * from  b cross join repeat(b1, 2);
+  expected_outputs:
+    - logical_plan
+    - batch_plan

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
@@ -318,7 +319,7 @@ impl DdlController {
         }
 
         self.catalog_manager
-            .finish_create_source_procedure(source)
+            .finish_create_source_procedure(source, vec![])
             .await
     }
 
@@ -456,13 +457,17 @@ impl DdlController {
             internal_tables = ctx.internal_tables();
 
             match stream_job {
-                StreamingJob::Table(Some(ref source), _) => {
+                StreamingJob::Table(Some(ref source), ..) => {
                     // Register the source on the connector node.
                     self.source_manager.register_source(source).await?;
                 }
                 StreamingJob::Sink(ref sink) => {
                     // Validate the sink on the connector node.
                     validate_sink(sink).await?;
+                }
+                StreamingJob::Source(ref source) => {
+                    // Register the source on the connector node.
+                    self.source_manager.register_source(source).await?;
                 }
                 _ => {}
             }
@@ -671,11 +676,16 @@ impl DdlController {
 
         // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
-        let upstream_mview_fragments = self
+
+        let upstream_root_fragments = self
             .fragment_manager
-            .get_upstream_mview_fragments(fragment_graph.dependent_table_ids())
+            .get_upstream_root_fragments(
+                fragment_graph.dependent_table_ids(),
+                stream_job.table_job_type(),
+            )
             .await?;
-        let upstream_mview_actors = upstream_mview_fragments
+
+        let upstream_actors: HashMap<_, _> = upstream_root_fragments
             .iter()
             .map(|(&table_id, fragment)| {
                 (
@@ -685,8 +695,11 @@ impl DdlController {
             })
             .collect();
 
-        let complete_graph =
-            CompleteStreamFragmentGraph::with_upstreams(fragment_graph, upstream_mview_fragments)?;
+        let complete_graph = CompleteStreamFragmentGraph::with_upstreams(
+            fragment_graph,
+            upstream_root_fragments,
+            stream_job.table_job_type(),
+        )?;
 
         // 2. Build the actor graph.
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
@@ -715,7 +728,7 @@ impl DdlController {
 
         let ctx = CreateStreamingJobContext {
             dispatchers,
-            upstream_mview_actors,
+            upstream_mview_actors: upstream_actors,
             internal_tables,
             building_locations,
             existing_locations,
@@ -766,7 +779,7 @@ impl DdlController {
                     .cancel_create_sink_procedure(sink)
                     .await;
             }
-            StreamingJob::Table(source, table) => {
+            StreamingJob::Table(source, table, ..) => {
                 if let Some(source) = source {
                     self.catalog_manager
                         .cancel_create_table_procedure_with_source(source, table)
@@ -790,6 +803,11 @@ impl DdlController {
                 self.catalog_manager
                     .cancel_create_index_procedure(index, table)
                     .await;
+            }
+            StreamingJob::Source(source) => {
+                self.catalog_manager
+                    .cancel_create_source_procedure(source)
+                    .await?;
             }
         }
         // 2. unmark creating tables.
@@ -823,7 +841,7 @@ impl DdlController {
                     .finish_create_sink_procedure(internal_tables, sink)
                     .await?
             }
-            StreamingJob::Table(source, table) => {
+            StreamingJob::Table(source, table, ..) => {
                 creating_internal_table_ids.push(table.id);
                 if let Some(source) = source {
                     self.catalog_manager
@@ -839,6 +857,11 @@ impl DdlController {
                 creating_internal_table_ids.push(table.id);
                 self.catalog_manager
                     .finish_create_index_procedure(internal_tables, index, table)
+                    .await?
+            }
+            StreamingJob::Source(source) => {
+                self.catalog_manager
+                    .finish_create_source_procedure(source, internal_tables)
                     .await?
             }
         };
@@ -1055,7 +1078,7 @@ impl DdlController {
         stream_job: &StreamingJob,
         table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<NotificationVersion> {
-        let StreamingJob::Table(source, table) = stream_job else {
+        let StreamingJob::Table(source, table, ..) = stream_job else {
             unreachable!("unexpected job: {stream_job:?}")
         };
 
@@ -1105,7 +1128,8 @@ impl DdlController {
     }
 
     pub async fn wait(&self) -> MetaResult<()> {
-        for _ in 0..30 * 60 {
+        let timeout_secs = 30 * 60;
+        for _ in 0..timeout_secs {
             if self
                 .catalog_manager
                 .list_creating_background_mvs()
@@ -1116,7 +1140,9 @@ impl DdlController {
             }
             sleep(Duration::from_secs(1)).await;
         }
-        Err(MetaError::cancelled("timeout".into()))
+        Err(MetaError::cancelled(format!(
+            "timeout after {timeout_secs}s"
+        )))
     }
 
     async fn comment_on(&self, comment: Comment) -> MetaResult<NotificationVersion> {

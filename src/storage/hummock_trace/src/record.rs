@@ -289,7 +289,7 @@ pub enum OperationResult {
     Get(TraceResult<Option<TracedBytes>>),
     Insert(TraceResult<()>),
     Delete(TraceResult<()>),
-    TryFlush(TraceResult<usize>),
+    TryFlush(TraceResult<()>),
     Flush(TraceResult<usize>),
     Iter(TraceResult<()>),
     IterNext(TraceResult<Option<(TracedBytes, TracedBytes)>>),

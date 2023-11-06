@@ -14,7 +14,7 @@
 
 use chrono::NaiveDate;
 use mysql_async::Row as MysqlRow;
-use risingwave_common::catalog::{Schema, OFFSET_COLUMN_NAME};
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::{
     DataType, Date, Datum, Decimal, JsonbVal, ScalarImpl, Time, Timestamp, Timestamptz,
 };
@@ -55,13 +55,8 @@ pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Dat
                     v.map(|v| ScalarImpl::from(Decimal::from(v)))
                 }
                 DataType::Varchar => {
-                    // snapshot data doesn't contain offset, just fill None
-                    if rw_field.name.as_str() == OFFSET_COLUMN_NAME {
-                        None
-                    } else {
-                        let v = mysql_row.take::<String, _>(i);
-                        v.map(ScalarImpl::from)
-                    }
+                    let v = mysql_row.take::<String, _>(i);
+                    v.map(ScalarImpl::from)
                 }
                 DataType::Date => {
                     let v = mysql_row.take::<NaiveDate, _>(i);
@@ -93,7 +88,7 @@ pub fn mysql_row_to_datums(mysql_row: &mut MysqlRow, schema: &Schema) -> Vec<Dat
                 | DataType::Int256
                 | DataType::Serial => {
                     // Interval, Struct, List, Int256 are not supported
-                    tracing::warn!(rw_field.name, ?rw_field.data_type, "unsupported data type, set to Null");
+                    tracing::warn!(rw_field.name, ?rw_field.data_type, "unsupported data type, set to null");
                     None
                 }
             }

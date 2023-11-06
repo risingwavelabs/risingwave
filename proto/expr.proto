@@ -218,9 +218,9 @@ message ExprNode {
     // jsonb ->> int, jsonb ->> text that returns text
     JSONB_ACCESS_STR = 601;
     // jsonb #> text[] -> jsonb
-    JSONB_ACCESS_MULTI = 613;
+    JSONB_EXTRACT_PATH = 613;
     // jsonb #>> text[] -> text
-    JSONB_ACCESS_MULTI_STR = 614;
+    JSONB_EXTRACT_PATH_TEXT = 614;
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
     IS_JSON = 604;
@@ -245,6 +245,7 @@ message ExprNode {
     // jsonb #- text[] -> jsonb
     JSONB_DELETE_PATH = 615;
     JSONB_STRIP_NULLS = 616;
+    TO_JSONB = 617;
 
     // Non-pure functions below (> 1000)
     // ------------------------

@@ -211,10 +211,11 @@ impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
         unreachable!("invalid debezium split")
     }
 
-    pub fn server_addr(&self) -> &Option<String> {
+    pub fn server_addr(&self) -> Option<String> {
         if let Some(split) = &self.pg_split {
-            return &split.server_addr;
+            split.server_addr.clone()
+        } else {
+            None
         }
-        unreachable!("invalid debezium split")
     }
 }

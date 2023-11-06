@@ -44,7 +44,7 @@ echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc.sql
 
 # import data to postgres
-export PGHOST=db PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test
+export PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test
 createdb
 psql < ./e2e_test/source/cdc/postgres_cdc.sql
 
@@ -65,6 +65,11 @@ sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.load.slt'
 # wait for cdc loading
 sleep 10
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
+
+# cdc share stream test cases
+export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.share_stream.slt'
+
 
 # kill cluster and the connector node
 cargo make kill

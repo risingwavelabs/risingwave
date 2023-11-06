@@ -119,6 +119,9 @@ fn parse_opt_args(opts: &StandaloneOpts) -> ParsedStandaloneOpts {
         if let Some(compactor_opts) = compactor_opts.as_mut() {
             compactor_opts.prometheus_listener_addr = prometheus_listener_addr.clone();
         }
+        if let Some(meta_opts) = meta_opts.as_mut() {
+            meta_opts.prometheus_host = Some(prometheus_listener_addr.clone());
+        }
     }
     ParsedStandaloneOpts {
         meta_opts,
@@ -224,7 +227,9 @@ mod test {
                             listen_addr: "127.0.0.1:8001",
                             advertise_addr: "127.0.0.1:9999",
                             dashboard_host: None,
-                            prometheus_host: None,
+                            prometheus_host: Some(
+                                "127.0.0.1:1234",
+                            ),
                             etcd_endpoints: "",
                             etcd_auth: false,
                             etcd_username: "",

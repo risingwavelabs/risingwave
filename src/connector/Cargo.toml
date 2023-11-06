@@ -49,6 +49,7 @@ easy-ext = "1"
 enum-as-inner = "0.6"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
+gcp-bigquery-client = "0.18.0"
 glob = "0.3"
 google-cloud-pubsub = "0.20"
 http = "0.2"
@@ -82,7 +83,7 @@ prost = { version = "0.12", features = ["no-recursion-limit"] }
 prost-reflect = "0.12"
 prost-types = "0.12"
 protobuf-native = "0.2.1"
-pulsar = { version = "6.0", default-features = false, features = [
+pulsar = { version = "6.1", default-features = false, features = [
     "tokio-runtime",
     "telemetry",
     "auth-oauth2",
@@ -131,6 +132,7 @@ tracing = "0.1"
 tracing-futures = { version = "0.2", features = ["futures-03"] }
 url = "2"
 urlencoding = "2"
+yup-oauth2 = "8.3"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

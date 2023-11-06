@@ -124,10 +124,10 @@ recover_concurrency = 8
 lfu_window_to_cache_size_ratio = 1
 lfu_tiny_lru_capacity_ratio = 0.01
 insert_rate_limit_mb = 0
-flush_rate_limit_mb = 0
 reclaim_rate_limit_mb = 0
-allocation_bits = 0
-allocation_timeout_ms = 10
+ring_buffer_capacity_mb = 256
+catalog_bits = 6
+compression = "none"
 
 [storage.meta_file_cache]
 dir = ""
@@ -141,10 +141,10 @@ recover_concurrency = 8
 lfu_window_to_cache_size_ratio = 1
 lfu_tiny_lru_capacity_ratio = 0.01
 insert_rate_limit_mb = 0
-flush_rate_limit_mb = 0
 reclaim_rate_limit_mb = 0
-allocation_bits = 0
-allocation_timeout_ms = 10
+ring_buffer_capacity_mb = 256
+catalog_bits = 6
+compression = "none"
 
 [storage.cache_refill]
 data_refill_levels = []

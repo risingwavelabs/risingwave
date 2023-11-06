@@ -15,7 +15,7 @@
 use risingwave_pb::common::worker_node::PbState;
 use risingwave_pb::common::{PbWorkerNode, PbWorkerType};
 use sea_orm::entity::prelude::*;
-use sea_orm::ActiveValue;
+use sea_orm::ActiveValue::Set;
 
 use crate::{TransactionId, WorkerId};
 
@@ -91,11 +91,11 @@ impl From<&PbWorkerNode> for ActiveModel {
     fn from(worker: &PbWorkerNode) -> Self {
         let host = worker.host.clone().unwrap();
         Self {
-            worker_id: ActiveValue::Set(worker.id),
-            worker_type: ActiveValue::Set(worker.r#type().into()),
-            host: ActiveValue::Set(host.host),
-            port: ActiveValue::Set(host.port),
-            status: ActiveValue::Set(worker.state().into()),
+            worker_id: Set(worker.id as _),
+            worker_type: Set(worker.r#type().into()),
+            host: Set(host.host),
+            port: Set(host.port),
+            status: Set(worker.state().into()),
             ..Default::default()
         }
     }

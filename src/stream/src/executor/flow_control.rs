@@ -54,13 +54,16 @@ impl FlowControlExecutor {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
+                    let chunk_cardinality = chunk.cardinality();
+                    let Some(n) = NonZeroU32::new(chunk_cardinality as u32) else {
+                        // Handle case where chunk is empty
+                        continue;
+                    };
                     if let Some(rate_limiter) = &rate_limiter {
-                        let result = rate_limiter
-                            .until_n_ready(NonZeroU32::new(chunk.cardinality() as u32).unwrap())
-                            .await;
-                        if let Err(InsufficientCapacity(n)) = result {
+                        let result = rate_limiter.until_n_ready(n).await;
+                        if let Err(InsufficientCapacity(_max_cells)) = result {
                             tracing::error!(
-                                "Rate Limit {:?} smaller than chunk cardinality {n}",
+                                "Rate Limit {:?} smaller than chunk cardinality {chunk_cardinality}",
                                 self.rate_limit,
                             );
                         }

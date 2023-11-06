@@ -255,6 +255,14 @@ pub fn is_kafka_connector(with_properties: &HashMap<String, String>) -> bool {
 }
 
 #[inline(always)]
+pub fn is_cdc_connector(with_properties: &HashMap<String, String>) -> bool {
+    let Some(connector) = get_connector(with_properties) else {
+        return false;
+    };
+    connector.contains("-cdc")
+}
+
+#[inline(always)]
 pub fn get_connection_name(with_properties: &BTreeMap<String, String>) -> Option<String> {
     with_properties
         .get(CONNECTION_NAME_KEY)

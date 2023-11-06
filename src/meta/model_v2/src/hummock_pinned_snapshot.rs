@@ -12,17 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::hummock::HummockPinnedSnapshot;
 use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+use crate::{Epoch, WorkerId};
+
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize, Default)]
 #[sea_orm(table_name = "hummock_pinned_snapshot")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub context_id: i32,
-    pub min_pinned_snapshot: i64,
+    pub context_id: WorkerId,
+    pub min_pinned_snapshot: Epoch,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+impl From<Model> for HummockPinnedSnapshot {
+    fn from(value: Model) -> Self {
+        Self {
+            context_id: value.context_id as _,
+            minimal_pinned_snapshot: value.min_pinned_snapshot as _,
+        }
+    }
+}
