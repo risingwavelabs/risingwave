@@ -189,6 +189,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::JsonbExistsAny
             | expr_node::Type::JsonbExistsAll
             | expr_node::Type::JsonbStripNulls
+            | expr_node::Type::JsonbBuildArray
+            | expr_node::Type::JsonbBuildObject
             | expr_node::Type::IsJson
             | expr_node::Type::ToJsonb
             | expr_node::Type::Sind
