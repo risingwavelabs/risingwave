@@ -32,8 +32,8 @@ use serde::{Deserialize, Serialize};
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
-    AlterColumnOperation, AlterDatabaseOperation, AlterSchemaOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
-    ReferentialAction, SourceWatermark, TableConstraint,
+    AlterColumnOperation, AlterDatabaseOperation, AlterSchemaOperation, AlterTableOperation,
+    ColumnDef, ColumnOption, ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint,
 };
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{

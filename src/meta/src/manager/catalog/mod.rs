@@ -1751,6 +1751,7 @@ impl CatalogManager {
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
+        let user_core = &mut core.user;
 
         let notify_info;
         match entity {
@@ -1758,10 +1759,11 @@ impl CatalogManager {
                 database_core.ensure_table_id(table_id)?;
                 let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
                 let mut table = tables.get_mut(table_id).unwrap();
+                user_core.decrease_ref(table.owner);
                 table.owner = owner_id;
                 notify_info = Info::RelationGroup(RelationGroup {
                     relations: vec![Relation {
-                        relation_info: Some(RelationInfo::Table(table.clone()))
+                        relation_info: Some(RelationInfo::Table(table.clone())),
                     }],
                 });
                 commit_meta!(self, tables)?;
@@ -1770,10 +1772,11 @@ impl CatalogManager {
                 database_core.ensure_view_id(view_id)?;
                 let mut views = BTreeMapTransaction::new(&mut database_core.views);
                 let mut view = views.get_mut(view_id).unwrap();
+                user_core.decrease_ref(view.owner);
                 view.owner = owner_id;
                 notify_info = Info::RelationGroup(RelationGroup {
                     relations: vec![Relation {
-                        relation_info: Some(RelationInfo::View(view.clone()))
+                        relation_info: Some(RelationInfo::View(view.clone())),
                     }],
                 });
                 commit_meta!(self, views)?;
@@ -1782,10 +1785,11 @@ impl CatalogManager {
                 database_core.ensure_source_id(source_id)?;
                 let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
                 let mut source = sources.get_mut(source_id).unwrap();
+                user_core.decrease_ref(source.owner);
                 source.owner = owner_id;
                 notify_info = Info::RelationGroup(RelationGroup {
                     relations: vec![Relation {
-                        relation_info: Some(RelationInfo::Source(source.clone()))
+                        relation_info: Some(RelationInfo::Source(source.clone())),
                     }],
                 });
                 commit_meta!(self, sources)?;
@@ -1794,10 +1798,11 @@ impl CatalogManager {
                 database_core.ensure_sink_id(sink_id)?;
                 let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
                 let mut sink = sinks.get_mut(sink_id).unwrap();
+                user_core.decrease_ref(sink.owner);
                 sink.owner = owner_id;
                 notify_info = Info::RelationGroup(RelationGroup {
                     relations: vec![Relation {
-                        relation_info: Some(RelationInfo::Sink(sink.clone()))
+                        relation_info: Some(RelationInfo::Sink(sink.clone())),
                     }],
                 });
                 commit_meta!(self, sinks)?;
@@ -1806,6 +1811,7 @@ impl CatalogManager {
                 database_core.ensure_database_id(database_id)?;
                 let mut databases = BTreeMapTransaction::new(&mut database_core.databases);
                 let mut database = databases.get_mut(database_id).unwrap();
+                user_core.decrease_ref(database.owner);
                 database.owner = owner_id;
                 notify_info = Info::Database(database.clone());
                 commit_meta!(self, databases)?;
@@ -1814,18 +1820,15 @@ impl CatalogManager {
                 database_core.ensure_schema_id(schema_id)?;
                 let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
                 let mut schema = schemas.get_mut(schema_id).unwrap();
+                user_core.decrease_ref(schema.owner);
                 schema.owner = owner_id;
                 notify_info = Info::Schema(schema.clone());
                 commit_meta!(self, schemas)?;
-            },
+            }
         };
+        user_core.increase_ref(owner_id);
 
-        let version = self
-            .notify_frontend(
-                Operation::Update,
-                notify_info,
-            )
-            .await;
+        let version = self.notify_frontend(Operation::Update, notify_info).await;
 
         Ok(version)
     }

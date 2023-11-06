@@ -263,9 +263,7 @@ impl Catalog {
     }
 
     pub fn update_database(&mut self, proto: &PbDatabase) {
-        self.get_database_mut(proto.id)
-            .unwrap()
-            .update_self(proto);
+        self.get_database_mut(proto.id).unwrap().update_self(proto);
     }
 
     pub fn update_schema(&mut self, proto: &PbSchema) {

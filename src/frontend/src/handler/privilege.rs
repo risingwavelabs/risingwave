@@ -218,12 +218,9 @@ impl SessionImpl {
         &self,
         db_schema: &impl OwnedByUserCatalog,
     ) -> Result<()> {
-        if self.user_id() != db_schema.owner()
-            && !self.is_super_user()
-        {
+        if self.user_id() != db_schema.owner() && !self.is_super_user() {
             return Err(PermissionDenied(
-                "Only the owner, and superuser can drop or alter a schema or database."
-                    .to_string(),
+                "Only the owner, and superuser can drop or alter a schema or database.".to_string(),
             )
             .into());
         }

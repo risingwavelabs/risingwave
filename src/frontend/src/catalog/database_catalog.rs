@@ -18,11 +18,10 @@ use itertools::Itertools;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_pb::catalog::{PbDatabase, PbSchema};
 
+use super::OwnedByUserCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{DatabaseId, SchemaId, TableId};
 use crate::user::UserId;
-
-use super::OwnedByUserCatalog;
 
 #[derive(Clone, Debug)]
 pub struct DatabaseCatalog {

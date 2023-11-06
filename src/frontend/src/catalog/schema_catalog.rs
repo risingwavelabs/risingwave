@@ -23,6 +23,7 @@ use risingwave_pb::catalog::{
     PbConnection, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
 
+use super::OwnedByUserCatalog;
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
@@ -32,8 +33,6 @@ use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SinkId, SourceId, ViewId};
 use crate::user::UserId;
-
-use super::OwnedByUserCatalog;
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
