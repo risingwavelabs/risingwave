@@ -14,6 +14,7 @@
 
 use anyhow::anyhow;
 use risingwave_pb::PbFieldNotFound;
+use risingwave_rpc_client::error::ToTonicStatus;
 use thiserror::Error;
 
 use crate::storage::MetaStoreError;
@@ -51,7 +52,7 @@ impl From<PbFieldNotFound> for MetadataModelError {
 
 impl From<MetadataModelError> for tonic::Status {
     fn from(e: MetadataModelError) -> Self {
-        tonic::Status::new(tonic::Code::Internal, format!("{}", e))
+        e.to_status(tonic::Code::Internal)
     }
 }
 

@@ -19,7 +19,7 @@ use aws_sdk_ec2::error::DisplayErrorContext;
 use risingwave_common::error::BoxedError;
 use risingwave_connector::sink::SinkError;
 use risingwave_pb::PbFieldNotFound;
-use risingwave_rpc_client::error::RpcError;
+use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
 
 use crate::hummock::error::Error as HummockError;
 use crate::manager::WorkerId;
@@ -233,19 +233,19 @@ where
 
 impl From<MetaError> for tonic::Status {
     fn from(err: MetaError) -> Self {
-        match &*err.inner {
-            MetaErrorInner::PermissionDenied(_) => {
-                tonic::Status::permission_denied(err.to_string())
-            }
-            MetaErrorInner::CatalogIdNotFound(_, _) => tonic::Status::not_found(err.to_string()),
-            MetaErrorInner::Duplicated(_, _) => tonic::Status::already_exists(err.to_string()),
-            MetaErrorInner::Unavailable(_) => tonic::Status::unavailable(err.to_string()),
-            MetaErrorInner::Cancelled(_) => tonic::Status::cancelled(err.to_string()),
-            MetaErrorInner::InvalidParameter(msg) => {
-                tonic::Status::invalid_argument(msg.to_owned())
-            }
-            _ => tonic::Status::internal(err.to_string()),
-        }
+        use tonic::Code;
+
+        let code = match &*err.inner {
+            MetaErrorInner::PermissionDenied(_) => Code::PermissionDenied,
+            MetaErrorInner::CatalogIdNotFound(_, _) => Code::NotFound,
+            MetaErrorInner::Duplicated(_, _) => Code::AlreadyExists,
+            MetaErrorInner::Unavailable(_) => Code::Unavailable,
+            MetaErrorInner::Cancelled(_) => Code::Cancelled,
+            MetaErrorInner::InvalidParameter(_) => Code::InvalidArgument,
+            _ => Code::Internal,
+        };
+
+        err.to_status(code)
     }
 }
 

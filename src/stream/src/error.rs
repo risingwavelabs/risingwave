@@ -19,6 +19,7 @@ use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
 use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
+use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::error::StorageError;
 
 use crate::executor::StreamExecutorError;
@@ -169,8 +170,7 @@ impl From<anyhow::Error> for StreamError {
 
 impl From<StreamError> for tonic::Status {
     fn from(error: StreamError) -> Self {
-        // Only encode the error message without the backtrace.
-        tonic::Status::internal(error.inner.to_string())
+        error.to_status(tonic::Code::Internal)
     }
 }
 
