@@ -276,7 +276,6 @@ impl EpochWithGap {
     pub fn new(epoch: u64, spill_offset: u16) -> Self {
         #[cfg(not(feature = "enable_test_epoch"))]
         {
-            debug_assert_eq!(epoch & EPOCH_MASK, 0);
             let epoch_with_gap = epoch + spill_offset as u64;
             EpochWithGap(epoch_with_gap)
         }
@@ -287,6 +286,10 @@ impl EpochWithGap {
     }
 
     pub fn new_from_epoch(epoch: u64) -> Self {
+        #[cfg(not(feature = "enable_test_epoch"))]
+        {
+            debug_assert_eq!(epoch & EPOCH_MASK, 0);
+        }
         EpochWithGap::new(epoch, 0)
     }
 
