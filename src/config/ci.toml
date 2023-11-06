@@ -1,6 +1,6 @@
 [meta]
-disable_recovery = false
-max_heartbeat_interval_secs = 10
+disable_recovery = true
+max_heartbeat_interval_secs = 600
 
 [streaming]
 in_flight_barrier_nums = 10

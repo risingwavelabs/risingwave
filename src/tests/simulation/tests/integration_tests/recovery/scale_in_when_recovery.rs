@@ -18,17 +18,9 @@ use anyhow::Result;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use tokio::time::sleep;
-use tracing_subscriber::EnvFilter;
 
 #[tokio::test]
 async fn test_scale_in_when_recovery() -> Result<()> {
-    _ = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        // no ANSI color codes when output to file
-        .with_ansi(console::colors_enabled_stderr() && console::colors_enabled())
-        .with_writer(std::io::stderr)
-        .try_init();
-
     let config = Configuration::for_auto_scale();
     let mut cluster = Cluster::start(config.clone()).await?;
     let mut session = cluster.start_session();

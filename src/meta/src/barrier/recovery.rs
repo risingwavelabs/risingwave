@@ -400,15 +400,12 @@ impl GlobalBarrierManager {
     async fn scale_actors(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
         debug!("start scaling-in offline actors.");
 
-        // 1. get expired workers.
         let expired_workers: HashSet<WorkerId> = info
             .actor_map
             .iter()
             .filter(|(&worker, actors)| !actors.is_empty() && !info.node_map.contains_key(&worker))
             .map(|(&worker, _)| worker)
             .collect();
-
-        println!("expired {:?}", expired_workers);
 
         if expired_workers.is_empty() {
             debug!("no expired workers, skipping.");

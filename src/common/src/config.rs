@@ -208,7 +208,7 @@ pub struct MetaConfig {
     #[serde(default)]
     pub disable_recovery: bool,
 
-    /// Whether to enable fail-on-recovery. Should only be used in e2e tests.
+    /// Whether to enable scale-in when recovery.
     #[serde(default)]
     pub enable_scale_in_when_recovery: bool,
 
