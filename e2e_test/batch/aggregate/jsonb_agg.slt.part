@@ -44,7 +44,7 @@ select jsonb_agg(v2::float8) from t;
 query T
 select jsonb_agg(v2::decimal) from t;
 ----
-[null, 1, 2, 3]
+[null, 1.0, 2.0, 3.0]
 
 query T
 select jsonb_agg(v3) from t;
@@ -137,7 +137,7 @@ select jsonb_object_agg(v3, v2::float8) filter (where v3 is not null) from t;
 query T
 select jsonb_object_agg(v3, v2::decimal) filter (where v3 is not null) from t;
 ----
-{"aaa": 3, "bbb": 2, "ccc": 1}
+{"aaa": 3.0, "bbb": 2.0, "ccc": 1.0}
 
 query T
 select jsonb_object_agg(v3, v3) filter (where v3 is not null) from t;
