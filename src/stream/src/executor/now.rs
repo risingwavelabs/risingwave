@@ -78,8 +78,18 @@ impl<S: StateStore> NowExecutor<S> {
         // Whether the first barrier is handled and `last_timestamp` is initialized.
         let mut initialized = false;
 
-        while let Some(barriers) = recv_multiple(&mut barrier_receiver).await {
+        const MAX_MERGE_BARRIER_SIZE: usize = 64;
+
+        while let Some(barriers) =
+            recv_multiple(&mut barrier_receiver, MAX_MERGE_BARRIER_SIZE).await
+        {
             let mut timestamp = None;
+            if barriers.len() > 1 {
+                warn!(
+                    "handle multiple barriers at once in now executor: {}",
+                    barriers.len()
+                );
+            }
             for barrier in barriers {
                 if !initialized {
                     // Handle the first barrier.
@@ -174,7 +184,7 @@ impl<S: StateStore> Executor for NowExecutor<S> {
     }
 }
 
-async fn recv_multiple<T>(rx: &mut UnboundedReceiver<T>) -> Option<Vec<T>> {
+async fn recv_multiple<T>(rx: &mut UnboundedReceiver<T>, limit: usize) -> Option<Vec<T>> {
     let item = rx.recv().await;
     let mut ret = if let Some(item) = item {
         vec![item]
@@ -184,8 +194,12 @@ async fn recv_multiple<T>(rx: &mut UnboundedReceiver<T>) -> Option<Vec<T>> {
     // When rx.recv() returns None, the current function will not return None,
     // which will trigger the next call on `rx.recv()`. The test `test_unbounded_rx_multiple_none`
     // has tested that it is allowed to call `rx.recv()` again after it returns None.
-    while let Some(Some(item)) = rx.recv().now_or_never() {
-        ret.push(item);
+    while ret.len() < limit {
+        if let Some(Some(item)) = rx.recv().now_or_never() {
+            ret.push(item);
+        } else {
+            break;
+        }
     }
     Some(ret)
 }
@@ -460,17 +474,18 @@ mod tests {
     async fn test_multiple_recv() {
         let (tx, mut rx) = unbounded_channel();
         {
-            let mut future = pin!(recv_multiple(&mut rx));
+            let mut future = pin!(recv_multiple(&mut rx, 2));
             assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
                 .await
                 .is_pending());
             tx.send(1).unwrap();
             tx.send(2).unwrap();
             tx.send(3).unwrap();
-            assert_eq!(Some(vec![1, 2, 3]), future.await);
+            assert_eq!(Some(vec![1, 2]), future.await);
         }
+        assert_eq!(Some(vec![3]), recv_multiple(&mut rx, 10).await);
         {
-            let mut future = pin!(recv_multiple(&mut rx));
+            let mut future = pin!(recv_multiple(&mut rx, 10));
             assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
                 .await
                 .is_pending());
@@ -478,6 +493,6 @@ mod tests {
             drop(tx);
             assert_eq!(Some(vec![4]), future.await);
         }
-        assert!(recv_multiple(&mut rx).await.is_none());
+        assert!(recv_multiple(&mut rx, 10).await.is_none());
     }
 }
