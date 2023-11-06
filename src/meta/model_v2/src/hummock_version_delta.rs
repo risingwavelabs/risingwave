@@ -41,24 +41,35 @@ impl ActiveModelBehavior for ActiveModel {}
 
 crate::derive_from_json_struct!(SstableObjectIds, Vec<HummockSstableObjectId>);
 
+impl From<Vec<u64>> for SstableObjectIds {
+    fn from(value: Vec<u64>) -> Self {
+        Self(value.into_iter().map(|id| id as _).collect())
+    }
+}
+
 crate::derive_from_json_struct!(GroupDeltas, HashMap<CompactionGroupId, Vec<PbGroupDelta>>);
 
 impl From<Model> for HummockVersionDelta {
     fn from(value: Model) -> Self {
         use risingwave_pb::hummock::hummock_version_delta::GroupDeltas as PbGroupDeltas;
         Self {
-            id: value.id,
-            prev_id: value.prev_id,
+            id: value.id as _,
+            prev_id: value.prev_id as _,
             group_deltas: value
                 .group_deltas
                 .0
                 .into_iter()
-                .map(|(cg_id, group_deltas)| (cg_id, PbGroupDeltas { group_deltas }))
+                .map(|(cg_id, group_deltas)| (cg_id as _, PbGroupDeltas { group_deltas }))
                 .collect(),
-            max_committed_epoch: value.max_committed_epoch,
-            safe_epoch: value.safe_epoch,
-            trivial_move: value.trivial_move,
-            gc_object_ids: value.gc_object_ids.0,
+            max_committed_epoch: value.max_committed_epoch as _,
+            safe_epoch: value.safe_epoch as _,
+            trivial_move: value.trivial_move as _,
+            gc_object_ids: value
+                .gc_object_ids
+                .into_inner()
+                .into_iter()
+                .map(|id| id as _)
+                .collect(),
         }
     }
 }

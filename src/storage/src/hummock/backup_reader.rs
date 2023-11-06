@@ -192,6 +192,7 @@ impl BackupReader {
             } else {
                 let this = self.clone();
                 let f = async move {
+                    // TODO: change to v2
                     let snapshot: meta_snapshot_v1::MetaSnapshotV1 =
                         current_store.0.get(snapshot_id).await.map_err(|e| {
                             format!("failed to get meta snapshot {}. {}", snapshot_id, e)

@@ -34,7 +34,6 @@ use crate::executor::{
 
 pub struct ChainExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for ChainExecutorBuilder {
     type Node = ChainNode;
 

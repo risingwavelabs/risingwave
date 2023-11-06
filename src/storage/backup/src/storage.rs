@@ -124,6 +124,7 @@ impl MetaSnapshotStorage for ObjectStoreMetaSnapshotStorage {
             .push(MetaSnapshotMetadata::new(
                 snapshot.id,
                 snapshot.metadata.hummock_version_ref(),
+                snapshot.format_version,
             ));
         self.update_manifest(new_manifest).await?;
         Ok(())

@@ -22,7 +22,6 @@ use crate::executor::{SortExecutor, SortExecutorArgs};
 
 pub struct SortExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for SortExecutorBuilder {
     type Node = SortNode;
 

@@ -19,6 +19,7 @@ mod meta_snapshot_builder;
 mod meta_snapshot_builder_v2;
 mod metrics;
 mod restore;
+mod restore_impl;
 mod utils;
 
 pub use restore::*;

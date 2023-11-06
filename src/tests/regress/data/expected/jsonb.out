@@ -1376,7 +1376,7 @@ SELECT jsonb_typeof('"1.0"') AS string;
 (1 row)
 
 -- jsonb_build_array, jsonb_build_object, jsonb_object_agg
-SELECT jsonb_build_array('a',1,'b',1.2,'c',true,'d',null,'e',json '{"x": 3, "y": [1,2,3]}');
+SELECT jsonb_build_array('a',1,'b',1.2,'c',true,'d',null,'e',jsonb '{"x": 3, "y": [1,2,3]}');
                             jsonb_build_array                            
 -------------------------------------------------------------------------
  ["a", 1, "b", 1.2, "c", true, "d", null, "e", {"x": 3, "y": [1, 2, 3]}]
@@ -1430,7 +1430,7 @@ SELECT jsonb_build_array(VARIADIC '{{1,4},{2,5},{3,6}}'::int[][]); -- ok
  [1, 4, 2, 5, 3, 6]
 (1 row)
 
-SELECT jsonb_build_object('a',1,'b',1.2,'c',true,'d',null,'e',json '{"x": 3, "y": [1,2,3]}');
+SELECT jsonb_build_object('a',1,'b',1.2,'c',true,'d',null,'e',jsonb '{"x": 3, "y": [1,2,3]}');
                            jsonb_build_object                            
 -------------------------------------------------------------------------
  {"a": 1, "b": 1.2, "c": true, "d": null, "e": {"x": 3, "y": [1, 2, 3]}}
@@ -1527,7 +1527,7 @@ SELECT jsonb_build_object(null,2);
 ERROR:  argument 1: key must not be null
 SELECT jsonb_build_object(r,2) FROM (SELECT 1 AS a, 2 AS b) r;
 ERROR:  key value must be scalar, not array, composite, or json
-SELECT jsonb_build_object(json '{"a":1,"b":2}', 3);
+SELECT jsonb_build_object(jsonb '{"a":1,"b":2}', 3);
 ERROR:  key value must be scalar, not array, composite, or json
 SELECT jsonb_build_object('{1,2,3}'::int[], 3);
 ERROR:  key value must be scalar, not array, composite, or json

@@ -44,7 +44,7 @@ echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc.sql
 
 # import data to postgres
-export PGHOST=db PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test
+export PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test
 createdb
 psql < ./e2e_test/source/cdc/postgres_cdc.sql
 

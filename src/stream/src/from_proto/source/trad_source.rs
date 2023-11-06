@@ -32,7 +32,6 @@ use crate::executor::{CdcBackfillExecutor, FlowControlExecutor, FsSourceExecutor
 const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for SourceExecutorBuilder {
     type Node = SourceNode;
 

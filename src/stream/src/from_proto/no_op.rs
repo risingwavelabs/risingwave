@@ -22,7 +22,6 @@ use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct NoOpExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for NoOpExecutorBuilder {
     type Node = NoOpNode;
 
