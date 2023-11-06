@@ -272,22 +272,26 @@ pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
 pub struct EpochWithGap(u64);
 
 impl EpochWithGap {
-    pub fn new(epoch: u64, spill_offset: u64) -> Self {
+    pub fn new(epoch: u64, spill_offset: u16) -> Self {
         #[cfg(not(feature = "enable_test_epoch"))]
         {
             debug_assert_eq!(epoch & EPOCH_MASK, 0);
-            let epoch_with_gap = epoch + spill_offset;
+            let epoch_with_gap = epoch + spill_offset as u64;
             EpochWithGap(epoch_with_gap)
         }
         #[cfg(feature = "enable_test_epoch")]
         {
-            let epoch_with_gap = epoch + spill_offset - spill_offset;
+            let epoch_with_gap = epoch + spill_offset as u64 - spill_offset as u64;
             EpochWithGap(epoch_with_gap)
         }
     }
 
     pub fn new_from_epoch(epoch: u64) -> Self {
         EpochWithGap::new(epoch, 0)
+    }
+
+    pub fn new_min_epoch() -> Self {
+        EpochWithGap(0)
     }
 
     pub fn new_max_epoch() -> Self {

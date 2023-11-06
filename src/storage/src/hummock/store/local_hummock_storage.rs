@@ -56,7 +56,7 @@ use crate::StateStoreIter;
 pub struct LocalHummockStorage {
     mem_table: MemTable,
 
-    spill_offset: u64,
+    spill_offset: u16,
     epoch: Option<u64>,
 
     table_id: TableId,

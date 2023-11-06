@@ -93,7 +93,7 @@ impl SharedBufferBatchInner {
     pub(crate) fn new(
         table_id: TableId,
         epoch: HummockEpoch,
-        spill_offset: u64,
+        spill_offset: u16,
         payload: Vec<SharedBufferItem>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         size: usize,
@@ -579,7 +579,7 @@ impl SharedBufferBatch {
 
     pub fn build_shared_buffer_batch(
         epoch: HummockEpoch,
-        spill_offset: u64,
+        spill_offset: u16,
         sorted_items: Vec<SharedBufferItem>,
         size: usize,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
