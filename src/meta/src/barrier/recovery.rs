@@ -21,9 +21,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::meta::get_reschedule_plan_request::{
-    PbWorkerChanges, Policy, StableResizePolicy,
-};
+use risingwave_pb::meta::get_reschedule_plan_request::{PbWorkerChanges, StableResizePolicy};
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
 use risingwave_pb::stream_plan::AddMutation;
@@ -250,8 +248,6 @@ impl GlobalBarrierManager {
         // get recovered.
         let recovery_timer = self.metrics.recovery_latency.start_timer();
 
-        let enable_auto_scaling = true;
-
         let state = tokio_retry::Retry::spawn(retry_strategy, || {
             async {
                 let recovery_result: MetaResult<_> = try {
@@ -259,7 +255,7 @@ impl GlobalBarrierManager {
                     // following steps will be no-op, while the compute nodes will still be reset.
                     let mut info = self.resolve_actor_info_for_recovery().await;
 
-                    if enable_auto_scaling {
+                    if self.env.opts.enable_scale_in_when_recovery {
                         let scaled = self.scale_actors(&info).await.inspect_err(|err| {
                             warn!(err = ?err, "scale actors failed");
                         })?;
@@ -402,7 +398,7 @@ impl GlobalBarrierManager {
     }
 
     async fn scale_actors(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
-        debug!("start migrate actors.");
+        debug!("start scaling-in offline actors.");
 
         // 1. get expired workers.
         let expired_workers: HashSet<WorkerId> = info
@@ -412,10 +408,19 @@ impl GlobalBarrierManager {
             .map(|(&worker, _)| worker)
             .collect();
 
+        println!("expired {:?}", expired_workers);
+
         if expired_workers.is_empty() {
             debug!("no expired workers, skipping.");
             return Ok(false);
         }
+
+        let all_worker_parallel_units = self.fragment_manager.all_worker_parallel_units().await;
+
+        let expired_worker_parallel_units: HashMap<_, _> = all_worker_parallel_units
+            .into_iter()
+            .filter(|(worker, _)| expired_workers.contains(worker))
+            .collect();
 
         let fragment_worker_changes = {
             let guard = self.fragment_manager.get_fragment_read_guard().await;
@@ -436,9 +441,12 @@ impl GlobalBarrierManager {
 
         let plan = self
             .scale_controller
-            .get_reschedule_plan(Policy::StableResizePolicy(StableResizePolicy {
-                fragment_worker_changes,
-            }))
+            .generate_stable_resize_plan(
+                StableResizePolicy {
+                    fragment_worker_changes,
+                },
+                Some(expired_worker_parallel_units),
+            )
             .await?;
 
         let (reschedule_fragment, applied_reschedules) = self
@@ -457,7 +465,7 @@ impl GlobalBarrierManager {
             .await
         {
             Ok(_) => {}
-            Err(e) => {
+            Err(_e) => {
                 self.fragment_manager
                     .cancel_apply_reschedules(applied_reschedules)
                     .await;

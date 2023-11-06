@@ -208,6 +208,10 @@ pub struct MetaConfig {
     #[serde(default)]
     pub disable_recovery: bool,
 
+    /// Whether to enable fail-on-recovery. Should only be used in e2e tests.
+    #[serde(default)]
+    pub enable_scale_in_when_recovery: bool,
+
     #[serde(default = "default::meta::meta_leader_lease_secs")]
     pub meta_leader_lease_secs: u64,
 

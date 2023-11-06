@@ -12,19 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::{min, Ordering};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::iter::repeat;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
-use futures::future::BoxFuture;
 use itertools::Itertools;
-use num_integer::Integer;
-use num_traits::abs;
 use risingwave_common::bail;
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
+use risingwave_common::buffer::Bitmap;
+use risingwave_common::hash::{ActorMapping, ParallelUnitId};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
@@ -37,17 +33,13 @@ use risingwave_pb::stream_plan::{DispatcherType, FragmentTypeFlag, StreamActor, 
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, UpdateActorsRequest,
 };
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use crate::barrier::{Command, Reschedule};
+use crate::barrier::Reschedule;
 use crate::manager::{ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
-use crate::storage::{MetaStore, MetaStoreError, MetaStoreRef, Transaction, DEFAULT_COLUMN_FAMILY};
-use crate::stream::{
-    rebalance_actor_vnode, GlobalStreamManager, ParallelUnitReschedule, SourceManagerRef,
-};
-use crate::{MetaError, MetaResult};
+use crate::stream::{rebalance_actor_vnode, ParallelUnitReschedule, SourceManagerRef};
+use crate::MetaResult;
 
 #[derive(Debug, Clone, Copy)]
 pub struct RescheduleOptions {
@@ -107,10 +99,8 @@ pub type ScaleControllerRef = Arc<ScaleController>;
 pub struct ScaleController {
     pub(super) fragment_manager: FragmentManagerRef,
 
-    /// Maintains information of the cluster
     pub cluster_manager: ClusterManagerRef,
 
-    /// Maintains streaming sources from external system like kafka
     pub source_manager: SourceManagerRef,
 
     pub env: MetaSrvEnv,
@@ -192,9 +182,10 @@ impl ScaleController {
         Ok(node_dropped_actors)
     }
 
-    async fn generate_stable_resize_plan(
+    pub async fn generate_stable_resize_plan(
         &self,
         policy: StableResizePolicy,
+        parallel_unit_hints: Option<HashMap<WorkerId, HashSet<ParallelUnitId>>>,
     ) -> MetaResult<HashMap<FragmentId, ParallelUnitReschedule>> {
         let StableResizePolicy {
             fragment_worker_changes,
@@ -338,7 +329,12 @@ impl ScaleController {
             }
 
             for worker_id in include_worker_ids.iter().chain(exclude_worker_ids.iter()) {
-                if !worker_parallel_units.contains_key(worker_id) {
+                if !worker_parallel_units.contains_key(worker_id)
+                    && !parallel_unit_hints
+                        .as_ref()
+                        .map(|hints| hints.contains_key(worker_id))
+                        .unwrap_or(false)
+                {
                     bail!("Worker id {} not found", worker_id);
                 }
             }
@@ -355,17 +351,55 @@ impl ScaleController {
                 })
                 .collect();
 
-            let include_worker_parallel_unit_ids = include_worker_ids
-                .iter()
-                .flat_map(|worker_id| worker_parallel_units.get(worker_id).unwrap())
-                .cloned()
-                .collect_vec();
+            let worker_to_parallel_unit_ids = |worker_ids: &BTreeSet<WorkerId>| {
+                worker_ids
+                    .iter()
+                    .flat_map(|worker_id| {
+                        worker_parallel_units
+                            .get(worker_id)
+                            .or_else(|| {
+                                parallel_unit_hints
+                                    .as_ref()
+                                    .and_then(|hints| hints.get(worker_id))
+                            })
+                            .expect("worker id should be valid")
+                    })
+                    .cloned()
+                    .collect_vec()
+            };
 
-            let exclude_worker_parallel_unit_ids = exclude_worker_ids
-                .iter()
-                .flat_map(|worker_id| worker_parallel_units.get(worker_id).unwrap())
-                .cloned()
-                .collect_vec();
+            let include_worker_parallel_unit_ids = worker_to_parallel_unit_ids(&include_worker_ids);
+            let exclude_worker_parallel_unit_ids = worker_to_parallel_unit_ids(&exclude_worker_ids);
+
+            // let include_worker_parallel_unit_ids = include_worker_ids
+            //     .iter()
+            //     .flat_map(|worker_id| {
+            //         worker_parallel_units
+            //             .get(worker_id)
+            //             .or_else(|| {
+            //                 parallel_unit_hints
+            //                     .as_ref()
+            //                     .and_then(|hints| hints.get(worker_id))
+            //             })
+            //             .expect("worker id should be valid")
+            //     })
+            //     .cloned()
+            //     .collect_vec();
+            //
+            // let exclude_worker_parallel_unit_ids = exclude_worker_ids
+            //     .iter()
+            //     .flat_map(|worker_id| {
+            //         worker_parallel_units
+            //             .get(worker_id)
+            //             .or_else(|| {
+            //                 parallel_unit_hints
+            //                     .as_ref()
+            //                     .and_then(|hints| hints.get(worker_id))
+            //             })
+            //             .expect("worker id should be valid")
+            //     })
+            //     .cloned()
+            //     .collect_vec();
 
             fn refilter_parallel_unit_id_by_target_parallelism(
                 worker_parallel_units: &HashMap<u32, HashSet<ParallelUnitId>>,
@@ -516,7 +550,9 @@ impl ScaleController {
         policy: Policy,
     ) -> MetaResult<HashMap<FragmentId, ParallelUnitReschedule>> {
         match policy {
-            Policy::StableResizePolicy(resize) => self.generate_stable_resize_plan(resize).await,
+            Policy::StableResizePolicy(resize) => {
+                self.generate_stable_resize_plan(resize, None).await
+            }
         }
     }
 

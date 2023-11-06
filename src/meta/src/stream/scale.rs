@@ -13,35 +13,20 @@
 // limitations under the License.
 
 use std::cmp::{min, Ordering};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
-use std::iter::repeat;
+use std::collections::{BTreeSet, HashMap, VecDeque};
 
-use anyhow::{anyhow, Context};
 use futures::future::BoxFuture;
 use itertools::Itertools;
 use num_integer::Integer;
 use num_traits::abs;
-use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
-use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
-use risingwave_pb::meta::get_reschedule_plan_request::{Policy, StableResizePolicy};
-use risingwave_pb::meta::table_fragments::actor_status::ActorState;
-use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
-use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{DispatcherType, FragmentTypeFlag, StreamActor, StreamNode};
-use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, UpdateActorsRequest,
-};
-use uuid::Uuid;
+use risingwave_common::hash::{ParallelUnitId, VirtualNode};
+use risingwave_pb::stream_plan::StreamActor;
 
-use crate::barrier::{Command, Reschedule};
-use crate::manager::{IdCategory, WorkerId};
-use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
+use crate::barrier::Command;
+use crate::model::{ActorId, FragmentId};
 use crate::storage::{MetaStore, MetaStoreError, MetaStoreRef, Transaction, DEFAULT_COLUMN_FAMILY};
-use crate::stream::{GlobalStreamManager, RescheduleOptions, ScaleController};
+use crate::stream::{GlobalStreamManager, RescheduleOptions};
 use crate::{MetaError, MetaResult};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
