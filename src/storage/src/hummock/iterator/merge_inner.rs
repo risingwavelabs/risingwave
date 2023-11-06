@@ -18,7 +18,8 @@ use std::future::Future;
 use std::ops::{Deref, DerefMut};
 
 use bytes::Bytes;
-use risingwave_hummock_sdk::{key::{FullKey, TableKey, UserKey}, EpochWithGap};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::hummock::iterator::{DirectionEnum, Forward, HummockIterator, HummockIteratorDirection};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
