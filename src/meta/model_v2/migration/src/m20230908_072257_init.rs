@@ -365,12 +365,12 @@ impl MigrationTrait for Migration {
                             .auto_increment(),
                     )
                     .col(ColumnDef::new(Actor::FragmentId).integer().not_null())
-                    .col(ColumnDef::new(Actor::Status).string().not_null())
+                    .col(ColumnDef::new(Actor::Status).json().not_null())
                     .col(ColumnDef::new(Actor::Splits).json())
                     .col(ColumnDef::new(Actor::ParallelUnitId).integer().not_null())
                     .col(ColumnDef::new(Actor::UpstreamActorIds).json())
                     .col(ColumnDef::new(Actor::Dispatchers).json().not_null())
-                    .col(ColumnDef::new(Actor::VnodeBitmap).string())
+                    .col(ColumnDef::new(Actor::VnodeBitmap).json())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_actor_fragment_id")

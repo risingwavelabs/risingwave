@@ -245,6 +245,9 @@ message ExprNode {
     // jsonb #- text[] -> jsonb
     JSONB_DELETE_PATH = 615;
     JSONB_STRIP_NULLS = 616;
+    TO_JSONB = 617;
+    JSONB_BUILD_ARRAY = 618;
+    JSONB_BUILD_OBJECT = 619;
 
     // Non-pure functions below (> 1000)
     // ------------------------

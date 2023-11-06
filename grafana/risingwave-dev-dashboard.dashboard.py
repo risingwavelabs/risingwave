@@ -1019,7 +1019,7 @@ def section_streaming_actors(outer_panels):
                     "Memory usage aggregated by materialized views",
                     [
                         panels.target(
-                            f"sum({metric('stream_memory_usage')} * on(table_id, actor_id) group_left(materialized_view_id) table_info) by (materialized_view_id)",
+                            f"sum({metric('stream_memory_usage')} * on(table_id, actor_id) group_left(materialized_view_id) {metric('table_info')}) by (materialized_view_id)",
                             "materialized view {{materialized_view_id}}",
                         ),
                     ],

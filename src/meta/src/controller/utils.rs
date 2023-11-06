@@ -22,7 +22,7 @@ use risingwave_meta_model_v2::{
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
 use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
-use risingwave_pb::user::PbGrantPrivilege;
+use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
 use sea_orm::sea_query::{
     Alias, CommonTableExpression, Expr, Query, QueryStatementBuilder, SelectStatement, UnionType,
     WithClause,
@@ -373,6 +373,24 @@ where
     Ok(())
 }
 
+/// `list_user_info_by_ids` lists all users' info by their ids.
+pub async fn list_user_info_by_ids<C>(user_ids: Vec<UserId>, db: &C) -> MetaResult<Vec<PbUserInfo>>
+where
+    C: ConnectionTrait,
+{
+    let mut user_infos = vec![];
+    for user_id in user_ids {
+        let user = User::find_by_id(user_id)
+            .one(db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("user", user_id))?;
+        let mut user_info: PbUserInfo = user.into();
+        user_info.grant_privileges = get_user_privilege(user_id, db).await?;
+        user_infos.push(user_info);
+    }
+    Ok(user_infos)
+}
+
 /// `construct_privilege_dependency_query` constructs a query to find all privileges that are dependent on the given one.
 ///
 /// # Examples
@@ -502,14 +520,15 @@ where
         .into_iter()
         .map(|(privilege, object)| {
             let object = object.unwrap();
+            let oid = object.oid as _;
             let obj = match object.obj_type {
-                ObjectType::Database => PbObject::DatabaseId(object.oid),
-                ObjectType::Schema => PbObject::SchemaId(object.oid),
-                ObjectType::Table => PbObject::TableId(object.oid),
-                ObjectType::Source => PbObject::SourceId(object.oid),
-                ObjectType::Sink => PbObject::SinkId(object.oid),
-                ObjectType::View => PbObject::ViewId(object.oid),
-                ObjectType::Function => PbObject::FunctionId(object.oid),
+                ObjectType::Database => PbObject::DatabaseId(oid),
+                ObjectType::Schema => PbObject::SchemaId(oid),
+                ObjectType::Table => PbObject::TableId(oid),
+                ObjectType::Source => PbObject::SourceId(oid),
+                ObjectType::Sink => PbObject::SinkId(oid),
+                ObjectType::View => PbObject::ViewId(oid),
+                ObjectType::Function => PbObject::FunctionId(oid),
                 ObjectType::Index => unreachable!("index is not supported yet"),
                 ObjectType::Connection => unreachable!("connection is not supported yet"),
             };
@@ -517,7 +536,7 @@ where
                 action_with_opts: vec![PbActionWithGrantOption {
                     action: PbAction::from(privilege.action) as _,
                     with_grant_option: privilege.with_grant_option,
-                    granted_by: privilege.granted_by,
+                    granted_by: privilege.granted_by as _,
                 }],
                 object: Some(obj),
             }
@@ -534,7 +553,7 @@ pub fn extract_grant_obj_id(object: &PbObject) -> ObjectId {
         | PbObject::SourceId(id)
         | PbObject::SinkId(id)
         | PbObject::ViewId(id)
-        | PbObject::FunctionId(id) => *id,
+        | PbObject::FunctionId(id) => *id as _,
         _ => unreachable!("invalid object type: {:?}", object),
     }
 }

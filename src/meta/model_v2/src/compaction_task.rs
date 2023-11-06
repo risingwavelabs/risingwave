@@ -39,7 +39,7 @@ impl From<Model> for CompactTaskAssignment {
     fn from(value: Model) -> Self {
         Self {
             compact_task: Some(value.task.0),
-            context_id: value.context_id,
+            context_id: value.context_id as _,
         }
     }
 }
