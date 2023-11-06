@@ -12,20 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use maplit::hashmap;
+use risingwave_common::row;
 use risingwave_common::row::Row;
-use risingwave_common::types::{JsonbVal, ScalarRefImpl};
+use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRef, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_connector::source::external::{CdcOffset, DebeziumOffset, DebeziumSourceOffset};
+use risingwave_connector::source::external::{
+    CdcOffset, CdcTableType, DebeziumOffset, DebeziumSourceOffset,
+};
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_storage::StateStore;
 use serde_json::Value;
 
+use crate::common::table::state_table::StateTable;
 use crate::executor::{SourceStateTableHandler, StreamExecutorResult};
 
+#[allow(dead_code)]
 pub enum CdcBackfillStateImpl<S: StateStore> {
     Undefined,
-    SingleTable(SingleTableState<S>),
+    SingleTable(SingleBackfillState<S>),
+    MultiTable(MultiBackfillState<S>),
 }
 
 impl<S: StateStore> CdcBackfillStateImpl<S> {
@@ -33,6 +40,7 @@ impl<S: StateStore> CdcBackfillStateImpl<S> {
         match self {
             CdcBackfillStateImpl::Undefined => {}
             CdcBackfillStateImpl::SingleTable(state) => state.init_epoch(epoch),
+            CdcBackfillStateImpl::MultiTable(state) => state.init_epoch(epoch),
         }
     }
 
@@ -40,6 +48,15 @@ impl<S: StateStore> CdcBackfillStateImpl<S> {
         match self {
             CdcBackfillStateImpl::Undefined => Ok(false),
             CdcBackfillStateImpl::SingleTable(state) => state.check_finished().await,
+            CdcBackfillStateImpl::MultiTable(state) => state.check_finished().await,
+        }
+    }
+
+    pub async fn restore_state(&self) -> StreamExecutorResult<(bool, Option<CdcOffset>)> {
+        match self {
+            CdcBackfillStateImpl::Undefined => Ok((false, None)),
+            CdcBackfillStateImpl::SingleTable(state) => Ok((state.check_finished().await?, None)),
+            CdcBackfillStateImpl::MultiTable(state) => state.restore_state().await,
         }
     }
 
@@ -52,6 +69,7 @@ impl<S: StateStore> CdcBackfillStateImpl<S> {
             CdcBackfillStateImpl::SingleTable(state) => {
                 state.mutate_state(last_binlog_offset).await
             }
+            CdcBackfillStateImpl::MultiTable(state) => state.mutate_state(last_binlog_offset).await,
         }
     }
 
@@ -59,14 +77,113 @@ impl<S: StateStore> CdcBackfillStateImpl<S> {
         match self {
             CdcBackfillStateImpl::Undefined => Ok(()),
             CdcBackfillStateImpl::SingleTable(state) => state.commit_state(new_epoch).await,
+            CdcBackfillStateImpl::MultiTable(state) => state.commit_state(new_epoch).await,
         }
     }
 }
 
 pub const BACKFILL_STATE_KEY_SUFFIX: &str = "_backfill";
 
-/// The state manager for single cdc table
-pub struct SingleTableState<S: StateStore> {
+pub struct MultiBackfillState<S: StateStore> {
+    /// Id of the backfilling table, will be the key of the state
+    table_id: u32,
+    state_table: StateTable<S>,
+}
+
+impl<S: StateStore> MultiBackfillState<S> {
+    pub fn new(table_id: u32, state_table: StateTable<S>) -> Self {
+        Self {
+            table_id,
+            state_table,
+        }
+    }
+
+    pub fn init_epoch(&mut self, epoch: EpochPair) {
+        self.state_table.init_epoch(epoch)
+    }
+
+    /// Restore the backfill state and the last cdc offset from storage
+    pub async fn restore_state(&self) -> StreamExecutorResult<(bool, Option<CdcOffset>)> {
+        let key = Some(self.table_id.to_string());
+        match self
+            .state_table
+            .get_row(row::once(key.map(ScalarImpl::from)))
+            .await?
+        {
+            Some(row) => {
+                let finished = match row.datum_at(1) {
+                    Some(ScalarRefImpl::Bool(val)) => val,
+                    _ => return Err(anyhow!("invalid backfill state: backfill_finished").into()),
+                };
+
+                let last_cdc_offset = match row.datum_at(2) {
+                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
+                        let cdc_offset =
+                            serde_json::from_value::<CdcOffset>(jsonb_ref.to_owned_scalar().take())
+                                .map_err(|err| anyhow!("deserialize cdc offset fail: {:?}", err))?;
+                        Some(cdc_offset)
+                    }
+                    _ => return Err(anyhow!("invalid backfill state: last_cdc_offset").into()),
+                };
+
+                Ok((finished, last_cdc_offset))
+            }
+            None => Ok((false, None)),
+        }
+    }
+
+    pub async fn check_finished(&self) -> StreamExecutorResult<bool> {
+        let key = Some(self.table_id.to_string());
+        match self
+            .state_table
+            .get_row(row::once(key.map(ScalarImpl::from)))
+            .await?
+        {
+            Some(row) => match row.datum_at(1) {
+                Some(ScalarRefImpl::Bool(val)) => Ok(val),
+                _ => unreachable!("invalid backfill persistent state"),
+            },
+            None => Ok(false),
+        }
+    }
+
+    /// Mark the backfill has done and save the last cdc offset
+    pub async fn mutate_state(
+        &mut self,
+        last_cdc_offset: Option<CdcOffset>,
+    ) -> StreamExecutorResult<()> {
+        let key = Some(self.table_id.to_string());
+        let row = [
+            key.clone().map(ScalarImpl::from),
+            Some(true).map(ScalarImpl::from),
+            last_cdc_offset.map(|cdc_offset| {
+                let json = serde_json::to_value(cdc_offset).unwrap();
+                ScalarImpl::Jsonb(JsonbVal::from(json))
+            }),
+        ];
+
+        match self
+            .state_table
+            .get_row(row::once(key.map(ScalarImpl::from)))
+            .await?
+        {
+            Some(prev_row) => {
+                self.state_table.update(prev_row, row);
+            }
+            None => {
+                self.state_table.insert(row);
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn commit_state(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.state_table.commit(new_epoch).await
+    }
+}
+
+/// The state manager for backfilling a single table
+pub struct SingleBackfillState<S: StateStore> {
     /// Stores the backfill done flag
     source_state_handler: SourceStateTableHandler<S>,
     cdc_table_id: u32,
@@ -74,9 +191,7 @@ pub struct SingleTableState<S: StateStore> {
     cdc_split: SplitImpl,
 }
 
-impl<S: StateStore> SingleTableState<S> {}
-
-impl<S: StateStore> SingleTableState<S> {
+impl<S: StateStore> SingleBackfillState<S> {
     pub fn new(
         source_state_handler: SourceStateTableHandler<S>,
         cdc_table_id: u32,

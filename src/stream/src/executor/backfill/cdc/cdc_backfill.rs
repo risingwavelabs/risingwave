@@ -34,7 +34,10 @@ use risingwave_connector::source::external::CdcOffset;
 use risingwave_connector::source::{SourceColumnDesc, SourceContext, SplitMetaData};
 use risingwave_storage::StateStore;
 
-use crate::executor::backfill::cdc::state::{CdcBackfillStateImpl, SingleTableState};
+use crate::common::table::state_table::StateTable;
+use crate::executor::backfill::cdc::state::{
+    CdcBackfillStateImpl, MultiBackfillState, SingleBackfillState,
+};
 use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::upstream_table::snapshot::{
     SnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
@@ -68,9 +71,12 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     info: ExecutorInfo,
 
     /// State table of the Source executor
-    source_state_handler: SourceStateTableHandler<S>,
+    source_state_handler: Option<SourceStateTableHandler<S>>,
 
     shared_cdc_source: bool,
+
+    /// State table for multi-table cdc
+    state_table: Option<StateTable<S>>,
 
     progress: Option<CreateMviewProgress>,
 
@@ -83,14 +89,15 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        upstream_table: ExternalStorageTable,
+        external_table: ExternalStorageTable,
         upstream: BoxedExecutor,
         output_indices: Vec<usize>,
         progress: Option<CreateMviewProgress>,
         schema: Schema,
         pk_indices: PkIndices,
         metrics: Arc<StreamingMetrics>,
-        source_state_handler: SourceStateTableHandler<S>,
+        state_table: Option<StateTable<S>>,
+        source_state_handler: Option<SourceStateTableHandler<S>>,
         shared_cdc_source: bool,
         chunk_size: usize,
     ) -> Self {
@@ -100,7 +107,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 pk_indices,
                 identity: "CdcBackfillExecutor".to_owned(),
             },
-            upstream_table,
+            upstream_table: external_table,
             upstream,
             output_indices,
             actor_id: 0,
@@ -109,6 +116,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             actor_ctx,
             source_state_handler,
             shared_cdc_source,
+            state_table,
             progress,
         }
     }
@@ -138,11 +146,15 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // Check whether this parallelism has been assigned splits,
         // if not, we should bypass the backfill directly.
         let mut state_impl = if shared_cdc_source {
-            CdcBackfillStateImpl::Undefined
+            assert!(self.state_table.is_some(), "expect state table for shared cdc source");
+            CdcBackfillStateImpl::MultiTable(MultiBackfillState::new(upstream_table_id, self.state_table.unwrap()))
         } else if let Some(mutation) = first_barrier.mutation.as_ref() &&
             let Mutation::Add{splits, ..} = mutation.as_ref()
         {
             tracing::info!(?mutation, ?shared_cdc_source, "got first barrier");
+
+            assert!(self.source_state_handler.is_some(), "expect source state handler");
+
             // We can assume for cdc table, the parallism of the fragment must be 1
             match splits.get(&self.actor_ctx.id) {
                 None => {
@@ -169,7 +181,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                 upstream_table_id
                             ))
                     })?;
-                    CdcBackfillStateImpl::SingleTable(SingleTableState::new(self.source_state_handler, upstream_table_id, split.id(), split.clone()))
+                    CdcBackfillStateImpl::SingleTable(SingleBackfillState::new(self.source_state_handler.unwrap(), upstream_table_id, split.id(), split.clone()))
                 }
             }
         }

@@ -131,11 +131,18 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     (0..table_desc.columns.len()).collect_vec(),
                 );
 
-                let source_state_handler = SourceStateTableHandler::from_table_catalog(
-                    node.get_state_table().as_ref().unwrap(),
-                    state_store.clone(),
-                )
-                .await;
+                // let source_state_handler = SourceStateTableHandler::from_table_catalog(
+                //     node.get_state_table().as_ref().unwrap(),
+                //     state_store.clone(),
+                // )
+                // .await;
+
+                let vnodes = params.vnode_bitmap.map(Arc::new);
+
+                let state_table =
+                    StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes)
+                        .await;
+
                 CdcBackfillExecutor::new(
                     params.actor_context.clone(),
                     external_table,
@@ -145,7 +152,8 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     schema.clone(),
                     pk_indices,
                     params.executor_stats,
-                    source_state_handler,
+                    Some(state_table),
+                    None,
                     true,
                     params.env.config().developer.chunk_size,
                 ).boxed()

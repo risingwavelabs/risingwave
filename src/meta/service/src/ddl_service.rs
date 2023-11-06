@@ -841,6 +841,7 @@ impl DdlServiceImpl {
     }
 }
 
+/// Fill in necessary information for table stream graph.
 fn fill_table_stream_graph_info(
     mut source_info: Option<(&mut PbSource, u32)>,
     table_info: (&mut PbTable, u32),

@@ -192,22 +192,23 @@ impl StreamTableScan {
 
     /// Build catalog for cdc backfill state
     /// Right now we only persist whether the backfill is finished or not
-    pub fn build_cdc_backfill_state_catalog(&self, _state: &mut BuildFragmentGraphState) {
-        // TODO:
+    pub fn build_cdc_backfill_state_catalog(
+        &self,
+        state: &mut BuildFragmentGraphState,
+    ) -> TableCatalog {
         let properties = self.ctx().with_options().internal_table_subset();
         let mut catalog_builder = TableCatalogBuilder::new(properties);
-        let upstream_schema = &self.core.get_table_columns();
 
-        // We use vnode as primary key in state table.
-        // If `Distribution::Single`, vnode will just be `VirtualNode::default()`.
-        catalog_builder.add_column(&Field::with_name(VirtualNode::RW_TYPE, "vnode"));
+        // use `table_id` as primary key in state table.
+        catalog_builder.add_column(&Field::with_name(DataType::Int64, "table_id"));
         catalog_builder.add_order_column(0, OrderType::ascending());
 
-        // pk columns
-        for col_order in self.core.primary_key() {
-            let col = &upstream_schema[col_order.column_index];
-            catalog_builder.add_column(&Field::from(col));
-        }
+        catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
+        catalog_builder.add_column(&Field::with_name(DataType::Jsonb, "last_cdc_offset"));
+
+        catalog_builder
+            .build(vec![0], 1)
+            .with_id(state.gen_table_id_wrapped())
     }
 }
 
@@ -323,11 +324,10 @@ impl StreamTableScan {
             column_ids: upstream_column_ids.clone(),
         };
 
-        let catalog = self
-            .build_backfill_state_catalog(state)
-            .to_internal_table_prost();
-
         let node_body = if cdc_upstream {
+            let catalog = self
+                .build_cdc_backfill_state_catalog(state)
+                .to_internal_table_prost();
             PbNodeBody::Chain(ChainNode {
                 // The table id refers to the upstream source streaming job
                 table_id: self.core.cdc_table_desc.source_id.table_id,
@@ -347,6 +347,9 @@ impl StreamTableScan {
                 ..Default::default()
             })
         } else {
+            let catalog = self
+                .build_backfill_state_catalog(state)
+                .to_internal_table_prost();
             PbNodeBody::Chain(ChainNode {
                 table_id: self.core.table_desc.table_id.table_id,
                 chain_type: self.chain_type as i32,
