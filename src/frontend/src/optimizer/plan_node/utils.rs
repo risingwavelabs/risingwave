@@ -181,6 +181,7 @@ impl TableCatalogBuilder {
             // It should be ignored for internal tables.
             create_type: CreateType::Foreground,
             description: None,
+            incoming_sinks: vec![],
         }
     }
 

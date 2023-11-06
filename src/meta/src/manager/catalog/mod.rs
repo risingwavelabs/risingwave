@@ -2842,6 +2842,7 @@ impl CatalogManager {
         source: &Option<Source>,
         table: &Table,
         table_col_index_mapping: ColIndexMapping,
+        incoming_sink_id: Option<SinkId>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -2899,6 +2900,9 @@ impl CatalogManager {
         let mut table = table.clone();
         table.stream_job_status = PbStreamJobStatus::Created.into();
         tables.insert(table.id, table.clone());
+        if let Some(incoming_sink_id) = incoming_sink_id {
+            table.incoming_sinks.push(incoming_sink_id);
+        }
         commit_meta!(self, tables, indexes, sources)?;
 
         // Group notification

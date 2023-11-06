@@ -128,7 +128,6 @@ impl MergeExecutor {
                     // Do nothing.
                 }
                 Message::Chunk(chunk) => {
-                    println!("merge chunk {:#?}", chunk);
                     self.metrics
                         .actor_in_record_cnt
                         .with_label_values(&[&actor_id_str, &fragment_id_str])

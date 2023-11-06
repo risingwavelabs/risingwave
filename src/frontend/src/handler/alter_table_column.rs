@@ -68,6 +68,12 @@ pub async fn handle_alter_table_column(
         table.clone()
     };
 
+    if !original_catalog.incoming_sinks.is_empty() {
+        return Err(RwError::from(ErrorCode::BindError(
+            "Alter a table with incoming sinks has not been implemented.".to_string(),
+        )));
+    }
+
     // TODO(yuhao): alter table with generated columns.
     if original_catalog.has_generated_column() {
         return Err(RwError::from(ErrorCode::BindError(

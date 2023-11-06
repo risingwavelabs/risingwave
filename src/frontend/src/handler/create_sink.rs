@@ -23,7 +23,7 @@ use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail;
 use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc};
@@ -245,6 +245,7 @@ pub async fn handle_create_sink(
 
     let mut affected_table_change = None;
     let mut table_dist = None;
+
     if let Some(table_name) = target_table {
         let db_name = session.database();
         let (schema_name, real_table_name) =
@@ -271,6 +272,12 @@ pub async fn handle_create_sink(
 
             table.clone()
         };
+
+        if !original_catalog.incoming_sinks.is_empty() {
+            return Err(RwError::from(ErrorCode::BindError(
+                "Create sink into table with incoming sinks has not been implemented.".to_string(),
+            )));
+        }
 
         // Retrieve the original table definition and parse it to AST.
         let [mut definition]: [_; 1] = Parser::parse_sql(&original_catalog.definition)

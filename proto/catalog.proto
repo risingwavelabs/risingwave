@@ -288,6 +288,8 @@ message Table {
   // This field is used to store the description set by the `comment on` clause.
   optional string description = 33;
 
+  repeated uint32 incoming_sinks = 34;
+
   // Per-table catalog version, used by schema change. `None` for internal tables and tests.
   // Not to be confused with the global catalog version for notification service.
   TableVersion version = 100;
