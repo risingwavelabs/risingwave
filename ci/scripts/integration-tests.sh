@@ -41,6 +41,11 @@ cd integration_tests/scripts
 
 echo "--- case: ${case}, format: ${format}"
 
+if [ -n "${RW_IMAGE_TAG}" ]; then
+  export RW_IMAGE="ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_TAG}"
+  echo Docker image: $RW_IMAGE
+fi
+
 if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
   # Use ghcr nightly image for scheduled build. If not specified, we use dockerhub's 'risingwavelabs/risingwave'.
   export RW_IMAGE="ghcr.io/risingwavelabs/risingwave:nightly-$(date '+%Y%m%d')"
