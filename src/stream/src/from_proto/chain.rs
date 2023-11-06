@@ -131,12 +131,6 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     (0..table_desc.columns.len()).collect_vec(),
                 );
 
-                // let source_state_handler = SourceStateTableHandler::from_table_catalog(
-                //     node.get_state_table().as_ref().unwrap(),
-                //     state_store.clone(),
-                // )
-                // .await;
-
                 debug!("chain vnode_bitmap: {:?}", params.vnode_bitmap);
                 let vnodes = params.vnode_bitmap.map(Arc::new);
 

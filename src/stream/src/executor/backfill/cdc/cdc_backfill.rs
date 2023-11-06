@@ -56,8 +56,8 @@ use crate::task::{ActorId, CreateMviewProgress};
 pub struct CdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
-    /// Upstream external table
-    upstream_table: ExternalStorageTable,
+    /// The external table to be backfilled
+    external_table: ExternalStorageTable,
 
     /// Upstream changelog stream which may contain metadata columns, e.g. `_rw_offset`
     upstream: BoxedExecutor,
@@ -107,7 +107,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 pk_indices,
                 identity: "CdcBackfillExecutor".to_owned(),
             },
-            upstream_table: external_table,
+            external_table,
             upstream,
             output_indices,
             actor_id: 0,
@@ -124,12 +124,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
-        let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
-        let pk_order = self.upstream_table.pk_order_types().to_vec();
+        let pk_in_output_indices = self.external_table.pk_in_output_indices().unwrap();
+        let pk_order = self.external_table.pk_order_types().to_vec();
 
         let shared_cdc_source = self.shared_cdc_source;
-        let upstream_table_id = self.upstream_table.table_id().table_id;
-        let upstream_table_reader = UpstreamTableReader::new(self.upstream_table);
+        let upstream_table_id = self.external_table.table_id().table_id;
+        let upstream_table_reader = UpstreamTableReader::new(self.external_table);
 
         let mut upstream = self.upstream.execute();
 
@@ -237,11 +237,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let mut total_snapshot_processed_rows: u64 = 0;
         let mut snapshot_read_epoch;
 
-        // last binlog offset is the low watermark of the upstream changelog events
-        // let mut last_binlog_offset: Option<CdcOffset> = restored_cdc_offset.map_or(
-        //     upstream_table_reader.current_binlog_offset().await?,
-        //     |cdc_offset| Some(cdc_offset),
-        // );
         let mut last_binlog_offset: Option<CdcOffset> =
             upstream_table_reader.current_binlog_offset().await?;
 

@@ -191,7 +191,8 @@ impl StreamTableScan {
     }
 
     /// Build catalog for cdc backfill state
-    /// Right now we only persist whether the backfill is finished or not
+    /// Right now we only persist whether the backfill is finished and the corresponding cdc offset
+    /// schema: | table_id | backfill_finished | cdc_offset |
     pub fn build_cdc_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,
@@ -204,6 +205,7 @@ impl StreamTableScan {
         catalog_builder.add_order_column(0, OrderType::ascending());
 
         catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
+        // The offset is only for observability, not for recovery right now
         catalog_builder.add_column(&Field::with_name(DataType::Jsonb, "cdc_offset"));
 
         // leave dist key empty, since the cdc backfill executor is singleton
