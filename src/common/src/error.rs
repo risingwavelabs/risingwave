@@ -194,6 +194,7 @@ pub struct RwError {
 
 impl From<RwError> for tonic::Status {
     fn from(err: RwError) -> Self {
+        // TODO(error-handling): `to_string()` loses the source chain, should use `rpc::error::ToStatus` instead.
         match &*err.inner {
             ErrorCode::ExprError(e) => tonic::Status::invalid_argument(e.to_string()),
             ErrorCode::PermissionDenied(e) => tonic::Status::permission_denied(e),
