@@ -78,6 +78,8 @@ fn jsonb_build_object(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
                     reason: "key value must be scalar, not array, composite, or json".into(),
                 })
             }
+            // special treatment for bool, `false` & `true` rather than `f` & `t`.
+            Some(ScalarRefImpl::Bool(b)) => builder.display(b),
             Some(s) => builder.display(ToTextDisplay(s)),
             None => {
                 return Err(ExprError::InvalidParam {

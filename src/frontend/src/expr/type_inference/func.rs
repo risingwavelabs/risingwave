@@ -541,7 +541,16 @@ fn infer_type_for_special(
             ensure_arity!("greatest/least", 1 <= | inputs |);
             Ok(Some(align_types(inputs.iter_mut())?))
         }
-        ExprType::JsonbBuildArray | ExprType::JsonbBuildObject => Ok(Some(DataType::Jsonb)),
+        ExprType::JsonbBuildArray => Ok(Some(DataType::Jsonb)),
+        ExprType::JsonbBuildObject => {
+            if inputs.len() % 2 != 0 {
+                return Err(ErrorCode::BindError(
+                    "argument list must have even number of elements".into(),
+                )
+                .into());
+            }
+            Ok(Some(DataType::Jsonb))
+        }
         _ => Ok(None),
     }
 }

@@ -47,7 +47,9 @@ fn jsonb_agg(state: &mut JsonbArrayState, input: Option<impl ToJsonb>) -> Result
 }
 
 /// Collects all the key/value pairs into a JSON object.
-/// Key arguments are coerced to text; value arguments are converted as per `to_jsonb`.
+/// // TODO: support "any" type key
+/// // Key arguments are coerced to text;
+/// value arguments are converted as per `to_jsonb`.
 /// Values can be null, but keys cannot.
 #[aggregate("jsonb_object_agg(varchar, boolean) -> jsonb")]
 #[aggregate("jsonb_object_agg(varchar, *int) -> jsonb")]
