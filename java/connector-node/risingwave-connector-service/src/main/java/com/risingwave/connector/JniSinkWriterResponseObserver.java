@@ -34,15 +34,16 @@ public class JniSinkWriterResponseObserver
 
     @Override
     public void onNext(ConnectorServiceProto.SinkWriterStreamResponse response) {
-        if (Binding.sendSinkWriterResponseToChannel(this.responseTxPtr, response.toByteArray())) {
+        if (!Binding.sendSinkWriterResponseToChannel(this.responseTxPtr, response.toByteArray())) {
             throw Status.INTERNAL.withDescription("unable to send response").asRuntimeException();
         }
     }
 
     @Override
     public void onError(Throwable throwable) {
-        this.success =
-                Binding.sendSinkWriterErrorToChannel(this.responseTxPtr, throwable.getMessage());
+        if (!Binding.sendSinkWriterErrorToChannel(this.responseTxPtr, throwable.getMessage())) {
+            LOG.warn("unable to send error: {}", throwable.getMessage());
+        }
         this.success = false;
         LOG.error("JniSinkWriterHandler onError: ", throwable);
     }

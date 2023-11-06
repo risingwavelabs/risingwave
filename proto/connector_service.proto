@@ -173,8 +173,12 @@ message GetEventStreamRequest {
 }
 
 message GetEventStreamResponse {
+  message ControlInfo {
+    bool handshake_ok = 1;
+  }
   uint64 source_id = 1;
   repeated CdcMessage events = 2;
+  ControlInfo control = 3;
 }
 
 message ValidateSourceRequest {

@@ -65,6 +65,8 @@ mod string_to_array;
 mod substr;
 mod timestamptz;
 mod to_char;
+mod to_jsonb;
+pub use to_jsonb::ToJsonb;
 mod to_timestamp;
 mod translate;
 mod trigonometric;

@@ -58,7 +58,7 @@ pub struct MetaNodeOpts {
     dashboard_host: Option<String>,
 
     #[clap(long, env = "RW_PROMETHEUS_HOST")]
-    prometheus_host: Option<String>,
+    pub prometheus_host: Option<String>,
 
     #[clap(long, env = "RW_ETCD_ENDPOINTS", default_value_t = String::from(""))]
     etcd_endpoints: String,
