@@ -388,7 +388,7 @@ pub async fn merge_imms_in_memory(
     for ((key, value), epoch) in items {
         assert!(key >= pivot, "key should be in ascending order");
         let earliest_range_delete_which_can_see_key = if key == pivot {
-            del_iter.earliest_delete_since(epoch)
+            del_iter.earliest_delete_since(epoch.pure_epoch())
         } else {
             merged_payload.push((pivot, versions));
             pivot = key;
@@ -396,14 +396,14 @@ pub async fn merge_imms_in_memory(
             versions = vec![];
             del_iter.earliest_delete_which_can_see_key(
                 UserKey::new(table_id, TableKey(pivot.as_ref())),
-                epoch,
+                epoch.pure_epoch(),
             )
         };
         if value.is_delete() {
-            pivot_last_delete_epoch = epoch;
+            pivot_last_delete_epoch = epoch.pure_epoch();
         } else if earliest_range_delete_which_can_see_key < pivot_last_delete_epoch {
             debug_assert!(
-                epoch < earliest_range_delete_which_can_see_key
+                epoch.pure_epoch() < earliest_range_delete_which_can_see_key
                     && earliest_range_delete_which_can_see_key < pivot_last_delete_epoch
             );
             pivot_last_delete_epoch = earliest_range_delete_which_can_see_key;
@@ -417,7 +417,7 @@ pub async fn merge_imms_in_memory(
                 HummockValue::Delete,
             ));
         }
-        versions.push((EpochWithGap::new_from_epoch(epoch), value));
+        versions.push((epoch, value));
     }
     // process the last key
     if !versions.is_empty() {
