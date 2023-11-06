@@ -16,7 +16,6 @@ services:
                     --state-store hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001 \
                     --data-directory hummock_001 \
                     --config-path /risingwave.toml \
-                    --dashboard-ui-path ${RW_PREFIX}/ui\" \
                  --compute-opts=\" \
                     --config-path /risingwave.toml \
                     --listen-addr 0.0.0.0:5688 \
