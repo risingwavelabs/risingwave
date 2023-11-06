@@ -71,9 +71,12 @@ export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.share_stream.slt'
 
 
-# kill cluster and the connector node
+# kill cluster
 cargo make kill
 echo "cluster killed "
+
+# insert into mytest database (cdc.share_stream.slt)
+mysql --protocol=tcp -u root mytest < e2e_test/source/cdc/mysql_cdc_insert.sql
 
 # insert new rows
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc_insert.sql

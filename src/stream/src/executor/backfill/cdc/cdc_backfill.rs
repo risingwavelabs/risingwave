@@ -75,7 +75,7 @@ pub struct CdcBackfillExecutor<S: StateStore> {
 
     shared_cdc_source: bool,
 
-    /// State table for multi-table cdc
+    /// State table of the CdcBackfill executor
     state_table: Option<StateTable<S>>,
 
     progress: Option<CreateMviewProgress>,
