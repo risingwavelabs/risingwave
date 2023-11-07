@@ -1,8 +1,34 @@
-# target table with row_id as primary key
-
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
+# currently, we only support single sink into table
+
+statement ok
+create table t_simple (v1 int, v2 int);
+
+statement ok
+create table m_simple (v1 int primary key, v2 int);
+
+statement ok
+create sink s_simple_1 into m_simple as select v1, v2 from t_simple;
+
+statement error Create sink into table with incoming sinks has not been implemented.
+create sink s_simple_2 into m_simple as select v1, v2 from t_simple;
+
+# and we can't alter a table with incoming sinks
+statement error Alter a table with incoming sinks has not been implemented.
+alter table m_simple add column v3 int;
+
+statement ok
+drop sink s_simple_1;
+
+statement ok
+drop table t_simple;
+
+statement ok
+drop table m_simple;
+
+# target table with row_id as primary key
 statement ok
 create table t_s1 (v1 int, v2 int);
 
@@ -12,9 +38,11 @@ insert into t_s1 values (1, 11), (2, 12), (3, 13);
 statement ok
 create table t_row_id_as_primary_key (v1 int, v2 int);
 
-# todo append only force
-statement ok
+statement error Only append-only sinks can sink to a table without primary keys.
 create sink s1 into t_row_id_as_primary_key as select v1, v2 from t_s1;
+
+statement ok
+create sink s1 into t_row_id_as_primary_key as select v1, v2 from t_s1 with (type = 'append-only', force_append_only = 'true');
 
 statement ok
 flush;
@@ -53,6 +81,41 @@ select * from t_row_id_as_primary_key order by v1;
 6 16
 100 100
 
+# test append only
+statement ok
+update t_s1 set v2 = 10 where v1 > 3;
+
+query II
+select * from t_row_id_as_primary_key order by v1, v2;
+----
+1 11
+2 12
+3 13
+4 10
+4 14
+5 10
+5 15
+6 10
+6 16
+100 100
+
+statement ok
+delete from t_s1;
+
+query II
+select * from t_row_id_as_primary_key order by v1,v2;
+----
+1 11
+2 12
+3 13
+4 10
+4 14
+5 10
+5 15
+6 10
+6 16
+100 100
+
 statement ok
 drop sink s1;
 
@@ -74,9 +137,11 @@ insert into t_s2 values (1, 11), (2, 12), (3, 13);
 statement ok
 create table t_append_only (v1 int, v2 int) append only;
 
-# todo, must append only sink
-statement ok
+statement error Only append-only sinks can sink to a table without primary keys.
 create sink s2 into t_append_only as select v1, v2 from t_s2;
+
+statement ok
+create sink s2 into t_append_only as select v1, v2 from t_s2 with (type = 'append-only', force_append_only = 'true');
 
 statement ok
 flush;
@@ -112,6 +177,41 @@ select * from t_append_only order by v1;
 3 13
 4 14
 5 15
+6 16
+100 100
+
+# test append only
+statement ok
+update t_s2 set v2 = 10 where v1 > 3;
+
+query II
+select * from t_append_only order by v1, v2;
+----
+1 11
+2 12
+3 13
+4 10
+4 14
+5 10
+5 15
+6 10
+6 16
+100 100
+
+statement ok
+delete from t_s2;
+
+query II
+select * from t_append_only order by v1,v2;
+----
+1 11
+2 12
+3 13
+4 10
+4 14
+5 10
+5 15
+6 10
 6 16
 100 100
 

@@ -228,10 +228,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 // Force append-only by dropping UPDATE/DELETE messages. We do this when the
                                 // user forces the sink to be append-only while it is actually not based on
                                 // the frontend derivation result.
-                                let chunk = force_delete_only(c.clone());
-                                if chunk.cardinality() != 0 {
-                                    delete_chunks.push(chunk);
-                                }
+                                delete_chunks.push(force_delete_only(c.clone()));
                             }
                             insert_chunks.push(force_append_only(c));
                         }

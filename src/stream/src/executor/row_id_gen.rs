@@ -95,7 +95,7 @@ impl RowIdGenExecutor {
             match msg {
                 Message::Chunk(chunk) => {
                     // For chunk message, we fill the row id column and then yield it.
-                    let (ops, mut columns, bitmap) = chunk.into_inner();
+                    let (ops, mut columns, bitmap) = chunk.compact().into_inner();
                     columns[self.row_id_index] =
                         self.gen_row_id_column_by_op(&columns[self.row_id_index], &ops);
                     yield Message::Chunk(StreamChunk::with_visibility(ops, columns, bitmap));
