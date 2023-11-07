@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -452,7 +453,7 @@ impl AuthContext {
 pub struct SessionImpl {
     env: FrontendEnv,
     auth_context: Arc<AuthContext>,
-    // Used for user authentication.
+    /// Used for user authentication.
     user_authenticator: UserAuthenticator,
     /// Stores the value of configurations.
     config_map: Arc<RwLock<ConfigMap>>,
@@ -462,9 +463,12 @@ pub struct SessionImpl {
     /// Identified by process_id, secret_key. Corresponds to SessionManager.
     id: (i32, i32),
 
+    /// Client address
+    peer_addr: SocketAddr,
+
     /// Transaction state.
-    // TODO: get rid of the `Mutex` here as a workaround if the `Send` requirement of
-    // async functions, there should actually be no contention.
+    /// TODO: get rid of the `Mutex` here as a workaround if the `Send` requirement of
+    /// async functions, there should actually be no contention.
     txn: Arc<Mutex<transaction::State>>,
 
     /// Query cancel flag.
@@ -472,8 +476,10 @@ pub struct SessionImpl {
     /// local query.
     current_query_cancel_flag: Mutex<Option<ShutdownSender>>,
 
+    /// Running sql
     running_sql: Mutex<Option<Arc<String>>>,
 
+    /// The instant of the running sql
     last_instant: Mutex<Option<Instant>>,
 }
 
@@ -500,6 +506,7 @@ impl SessionImpl {
         auth_context: Arc<AuthContext>,
         user_authenticator: UserAuthenticator,
         id: SessionId,
+        peer_addr: SocketAddr,
     ) -> Self {
         Self {
             env,
@@ -507,6 +514,7 @@ impl SessionImpl {
             user_authenticator,
             config_map: Default::default(),
             id,
+            peer_addr,
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
@@ -585,8 +593,14 @@ impl SessionImpl {
         self.running_sql.lock().clone()
     }
 
+    pub fn peer_addr(&self) -> &SocketAddr {
+        &self.peer_addr
+    }
+
     pub fn elapse_since_running_sql(&self) -> Option<u128> {
-        self.last_instant.lock().map(|instant| instant.elapsed().as_millis())
+        self.last_instant
+            .lock()
+            .map(|instant| instant.elapsed().as_millis())
     }
 
     pub fn check_relation_name_duplicated(
@@ -801,6 +815,7 @@ impl SessionManager for SessionManagerImpl {
         &self,
         database: &str,
         user_name: &str,
+        peer_addr: SocketAddr,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
@@ -868,6 +883,7 @@ impl SessionManager for SessionManagerImpl {
                 )),
                 user_authenticator,
                 id,
+                peer_addr,
             )
             .into();
             self.insert_session(session_impl.clone());

@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::io::Write;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -75,6 +76,7 @@ impl SessionManager for LocalFrontend {
         &self,
         _database: &str,
         _user_name: &str,
+        _peer_addr: SocketAddr,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         Ok(self.session_ref())
     }
@@ -177,6 +179,7 @@ impl LocalFrontend {
             UserAuthenticator::None,
             // Local Frontend use a non-sense id.
             (0, 0),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 6666),
         ))
     }
 }

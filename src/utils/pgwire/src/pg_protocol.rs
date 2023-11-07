@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::io::{self, Error as IoError, ErrorKind};
+use std::net::SocketAddr;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -91,6 +92,9 @@ where
     // Used in extended query protocol. When encounter error in extended query, we need to ignore
     // the following message util sync message.
     ignore_util_sync: bool,
+
+    // Client Address
+    peer_addr: SocketAddr,
 }
 
 const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
@@ -155,7 +159,12 @@ where
     S: AsyncWrite + AsyncRead + Unpin,
     SM: SessionManager,
 {
-    pub fn new(stream: S, session_mgr: Arc<SM>, tls_config: Option<TlsConfig>) -> Self {
+    pub fn new(
+        stream: S,
+        session_mgr: Arc<SM>,
+        tls_config: Option<TlsConfig>,
+        peer_addr: SocketAddr,
+    ) -> Self {
         Self {
             stream: Conn::Unencrypted(PgStream {
                 stream: Some(stream),
@@ -175,6 +184,7 @@ where
             portal_store: Default::default(),
             statement_portal_dependency: Default::default(),
             ignore_util_sync: false,
+            peer_addr,
         }
     }
 
@@ -362,7 +372,7 @@ where
 
         let session = self
             .session_mgr
-            .connect(&db_name, &user_name)
+            .connect(&db_name, &user_name, self.peer_addr)
             .map_err(PsqlError::StartupError)?;
 
         let application_name = msg.config.get("application_name");

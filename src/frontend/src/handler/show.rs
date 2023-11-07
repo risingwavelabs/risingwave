@@ -278,11 +278,10 @@ pub async fn handle_show_object(
                         Row::new(vec![
                             Some(format!("{}-{}", s.id().0, s.id().1).into()),
                             Some(s.user_name().to_owned().into()),
-                            Some("Host TODO".into()),
+                            Some(format!("{}", s.peer_addr()).into()),
                             Some(s.database().to_owned().into()),
-                            s.elapse_since_running_sql().map(|mills| {
-                                format!("{}ms", mills).into()
-                            }),
+                            s.elapse_since_running_sql()
+                                .map(|mills| format!("{}ms", mills).into()),
                             s.running_sql().map(|sql| {
                                 let mut sql = sql.to_string();
                                 let old_len = sql.len();

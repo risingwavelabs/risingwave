@@ -14,6 +14,7 @@
 
 use std::future::Future;
 use std::io;
+use std::net::SocketAddr;
 use std::result::Result;
 use std::sync::Arc;
 
@@ -39,7 +40,12 @@ pub type SessionId = (i32, i32);
 pub trait SessionManager: Send + Sync + 'static {
     type Session: Session;
 
-    fn connect(&self, database: &str, user_name: &str) -> Result<Arc<Self::Session>, BoxedError>;
+    fn connect(
+        &self,
+        database: &str,
+        user_name: &str,
+        peer_addr: SocketAddr,
+    ) -> Result<Arc<Self::Session>, BoxedError>;
 
     fn cancel_queries_in_session(&self, session_id: SessionId);
 
@@ -151,7 +157,7 @@ pub async fn pg_serve(
                 tracing::info!("New connection: {}", peer_addr);
                 stream.set_nodelay(true)?;
                 let ssl_config = ssl_config.clone();
-                let fut = handle_connection(stream, session_mgr, ssl_config);
+                let fut = handle_connection(stream, session_mgr, ssl_config, peer_addr);
                 tokio::spawn(fut.inspect_err(|e| debug!("error handling connection: {e}")));
             }
 
@@ -167,12 +173,13 @@ pub fn handle_connection<S, SM>(
     stream: S,
     session_mgr: Arc<SM>,
     tls_config: Option<TlsConfig>,
+    peer_addr: SocketAddr,
 ) -> impl Future<Output = Result<(), anyhow::Error>>
 where
     S: AsyncWrite + AsyncRead + Unpin,
     SM: SessionManager,
 {
-    let mut pg_proto = PgProtocol::new(stream, session_mgr, tls_config);
+    let mut pg_proto = PgProtocol::new(stream, session_mgr, tls_config, peer_addr);
     async {
         loop {
             let msg = pg_proto.read_message().await?;
