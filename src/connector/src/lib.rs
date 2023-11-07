@@ -53,6 +53,9 @@ pub mod common;
 
 pub use paste::paste;
 
+#[cfg(test)]
+mod with_options_test;
+
 #[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {
     pub connector_client: Option<ConnectorClient>,
@@ -111,4 +114,23 @@ where
         de::Unexpected::Str(&s),
         &"The String value unit support for one of:[“y”,“mon”,“w”,“d”,“h”,“m”,“s”, “ms”, “µs”, “ns”]",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use expect_test::expect_file;
+
+    use crate::with_options_test::update_with_options_yaml;
+
+    /// This test ensures that `src/connector/with_options.yaml` is up-to-date with the default values specified
+    /// in this file. Developer should run `./risedev generate-with-options` to update it if this
+    /// test fails.
+    #[test]
+    fn test_with_options_yaml_up_to_date() {
+        let expected = expect_file!("../with_options.yaml");
+        let actual = update_with_options_yaml();
+
+        // Compare the `Value` representation instead of string for normalization.
+        expected.assert_eq(&actual);
+    }
 }
