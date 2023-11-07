@@ -107,7 +107,7 @@ impl Binder {
                     | (None, Some(DataType::Jsonb)) => ExprType::JsonbContains,
                     (left, right) => {
                         return Err(ErrorCode::BindError(format!(
-                            "operator does not exist: {} || {}",
+                            "operator does not exist: {} @> {}",
                             left.map_or_else(|| String::from("unknown"), |x| x.to_string()),
                             right.map_or_else(|| String::from("unknown"), |x| x.to_string()),
                         ))
@@ -127,7 +127,7 @@ impl Binder {
                     | (None, Some(DataType::Jsonb)) => ExprType::JsonbContained,
                     (left, right) => {
                         return Err(ErrorCode::BindError(format!(
-                            "operator does not exist: {} || {}",
+                            "operator does not exist: {} <@ {}",
                             left.map_or_else(|| String::from("unknown"), |x| x.to_string()),
                             right.map_or_else(|| String::from("unknown"), |x| x.to_string()),
                         ))

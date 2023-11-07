@@ -193,7 +193,7 @@
     Bind error: failed to bind expression: ARRAY[1, 2] @> 2
 
     Caused by:
-      Bind error: operator does not exist: integer[] || integer
+      Bind error: operator does not exist: integer[] @> integer
 - name: array_contains(int[], varchar[]) -> bool
   sql: select array[2,3] @> array['1'];
   binder_error: |-
@@ -207,7 +207,7 @@
     Bind error: failed to bind expression: '{}' @> '{}'
 
     Caused by:
-      Bind error: operator does not exist: unknown || unknown
+      Bind error: operator does not exist: unknown @> unknown
 - name: string from/to varchar[] in implicit context
   sql: |
     values (array['a', 'b']), ('{c,' || 'd}');
