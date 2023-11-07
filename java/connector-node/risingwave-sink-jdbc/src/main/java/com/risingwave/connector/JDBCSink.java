@@ -19,8 +19,6 @@ import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.connector.api.sink.SinkWriterBase;
 import com.risingwave.connector.jdbc.JdbcDialect;
 import com.risingwave.proto.Data;
-import com.zaxxer.hikari.HikariConfig;
-import com.zaxxer.hikari.HikariDataSource;
 import io.grpc.Status;
 import java.sql.*;
 import java.util.*;
@@ -32,7 +30,8 @@ public class JDBCSink extends SinkWriterBase {
 
     private final JdbcDialect jdbcDialect;
     private final JDBCSinkConfig config;
-    private final HikariDataSource connPool;
+    private Connection conn;
+    private JdbcStatements jdbcStatements;
     private final List<String> pkColumnNames;
 
     public static final String JDBC_COLUMN_NAME_KEY = "COLUMN_NAME";
@@ -49,43 +48,36 @@ public class JDBCSink extends SinkWriterBase {
         var factory = JdbcUtils.getDialectFactory(jdbcUrl);
         this.config = config;
         try {
-            HikariConfig conf = new HikariConfig();
-            conf.setJdbcUrl(config.getJdbcUrl());
-
-            // The connection pool manages only one connection for its sink executor,
-            // we use the pool to keep the connection alive.
-            conf.setPoolName(String.format("hikari-pool-%s", config.getTableName()));
-            conf.setMaximumPoolSize(1);
-            conf.setMinimumIdle(1);
-            // disable auto commit can improve performance
-            conf.setAutoCommit(false);
-            // explicitly set isolation level to RC
-            conf.setTransactionIsolation("TRANSACTION_READ_COMMITTED");
-            connPool = new HikariDataSource(conf);
-
-            try (var conn = connPool.getConnection()) {
-                // Retrieve primary keys and column type mappings from the database
-                this.pkColumnNames =
-                        getPkColumnNames(conn, config.getTableName(), config.getSchemaName());
-                // column name -> java.sql.Types
-                Map<String, Integer> columnTypeMapping =
-                        getColumnTypeMapping(conn, config.getTableName(), config.getSchemaName());
-                // create an array that each slot corresponding to each column in TableSchema
-                var columnSqlTypes = new int[tableSchema.getNumColumns()];
-                for (int columnIdx = 0; columnIdx < tableSchema.getNumColumns(); columnIdx++) {
-                    var columnName = tableSchema.getColumnNames()[columnIdx];
-                    columnSqlTypes[columnIdx] = columnTypeMapping.get(columnName);
-                }
-                LOG.info("columnSqlTypes: {}", Arrays.toString(columnSqlTypes));
-
-                if (factory.isPresent()) {
-                    this.jdbcDialect = factory.get().create(columnSqlTypes);
-                } else {
-                    throw Status.INVALID_ARGUMENT
-                            .withDescription("Unsupported jdbc url: " + jdbcUrl)
-                            .asRuntimeException();
-                }
+            conn = JdbcUtils.getConnection(config.getJdbcUrl());
+            // Retrieve primary keys and column type mappings from the database
+            this.pkColumnNames =
+                    getPkColumnNames(conn, config.getTableName(), config.getSchemaName());
+            // column name -> java.sql.Types
+            Map<String, Integer> columnTypeMapping =
+                    getColumnTypeMapping(conn, config.getTableName(), config.getSchemaName());
+            // create an array that each slot corresponding to each column in TableSchema
+            var columnSqlTypes = new int[tableSchema.getNumColumns()];
+            for (int columnIdx = 0; columnIdx < tableSchema.getNumColumns(); columnIdx++) {
+                var columnName = tableSchema.getColumnNames()[columnIdx];
+                columnSqlTypes[columnIdx] = columnTypeMapping.get(columnName);
             }
+            LOG.info("columnSqlTypes: {}", Arrays.toString(columnSqlTypes));
+
+            if (factory.isPresent()) {
+                this.jdbcDialect = factory.get().create(columnSqlTypes);
+            } else {
+                throw Status.INVALID_ARGUMENT
+                        .withDescription("Unsupported jdbc url: " + jdbcUrl)
+                        .asRuntimeException();
+            }
+
+            JdbcUtils.configureConnection(conn);
+            LOG.info(
+                    "JDBC connection: autoCommit = {}, trxn = {}",
+                    conn.getAutoCommit(),
+                    conn.getTransactionIsolation());
+
+            jdbcStatements = new JdbcStatements(conn);
         } catch (SQLException e) {
             throw Status.INTERNAL
                     .withDescription(
@@ -136,38 +128,65 @@ public class JDBCSink extends SinkWriterBase {
 
     @Override
     public void write(Iterator<SinkRow> rows) {
-        try (var conn = connPool.getConnection();
-                var jdbcStatements = new JdbcStatements(conn)) {
-
-            // fill prepare statements with parameters
-            while (rows.hasNext()) {
-                SinkRow row = rows.next();
-                if (row.getOp() == Data.Op.UPDATE_DELETE) {
-                    updateFlag = true;
-                    continue;
-                }
-                if (config.isUpsertSink()) {
-                    if (row.getOp() == Data.Op.DELETE) {
-                        jdbcStatements.prepareDelete(row);
-                    } else {
-                        jdbcStatements.prepareUpsert(row);
+        int retryCount = 0;
+        while (true) {
+            try {
+                // fill prepare statements with parameters
+                while (rows.hasNext()) {
+                    SinkRow row = rows.next();
+                    if (row.getOp() == Data.Op.UPDATE_DELETE) {
+                        updateFlag = true;
+                        continue;
                     }
-                } else {
-                    jdbcStatements.prepareInsert(row);
+                    if (config.isUpsertSink()) {
+                        if (row.getOp() == Data.Op.DELETE) {
+                            jdbcStatements.prepareDelete(row);
+                        } else {
+                            jdbcStatements.prepareUpsert(row);
+                        }
+                    } else {
+                        jdbcStatements.prepareInsert(row);
+                    }
+                }
+                // Execute staging statements after all rows are prepared.
+                jdbcStatements.execute();
+                break;
+            } catch (SQLException e) {
+                LOG.error("Failed to execute JDBC statements, retried {} times", retryCount, e);
+                try {
+                    if (!conn.isValid(30)) {
+                        LOG.info("Recreate the JDBC conneciton due to connection broken");
+                        // close the statements and connection first
+                        jdbcStatements.close();
+                        conn.close();
+
+                        // create a new connection if the current connection is invalid
+                        conn = JdbcUtils.getConnection(config.getJdbcUrl());
+                        JdbcUtils.configureConnection(conn);
+                        jdbcStatements = new JdbcStatements(conn);
+                        ++retryCount;
+                    }
+                } catch (SQLException ex) {
+                    LOG.error(
+                            "Failed to create a new JDBC connection, retried {} times",
+                            retryCount,
+                            ex);
+                    throw io.grpc.Status.INTERNAL
+                            .withDescription(
+                                    String.format(
+                                            ERROR_REPORT_TEMPLATE,
+                                            ex.getSQLState(),
+                                            ex.getMessage()))
+                            .asRuntimeException();
                 }
             }
-
-            // Execute staging statements after all rows are prepared.
-            jdbcStatements.execute();
-        } catch (SQLException e) {
-            throw Status.INTERNAL
-                    .withDescription(
-                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
-                    .asRuntimeException();
         }
     }
 
-    /** A wrapper class for JDBC prepared statements */
+    /**
+     * A wrapper class for JDBC prepared statements We create this object one time and reuse it
+     * across multiple batches if only the JDBC connection is valid.
+     */
     class JdbcStatements implements AutoCloseable {
         private PreparedStatement deleteStatement;
         private PreparedStatement upsertStatement;
@@ -304,6 +323,7 @@ public class JDBCSink extends SinkWriterBase {
             closeStatement(this.deleteStatement);
             closeStatement(this.upsertStatement);
             closeStatement(this.insertStatement);
+            // we don't close the connection here, because we don't own it
         }
 
         private void executeStatement(PreparedStatement stmt) throws SQLException {
@@ -338,8 +358,14 @@ public class JDBCSink extends SinkWriterBase {
 
     @Override
     public void drop() {
-        if (connPool != null) {
-            connPool.close();
+        jdbcStatements.close();
+
+        try {
+            if (conn != null) {
+                conn.close();
+            }
+        } catch (SQLException e) {
+            LOG.error("unable to close conn: %s", e);
         }
     }
 
@@ -347,7 +373,7 @@ public class JDBCSink extends SinkWriterBase {
         return config.getTableName();
     }
 
-    public HikariDataSource getConnPool() {
-        return connPool;
+    public Connection getConn() {
+        return conn;
     }
 }

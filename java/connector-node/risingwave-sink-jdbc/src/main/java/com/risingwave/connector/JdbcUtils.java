@@ -17,7 +17,11 @@ package com.risingwave.connector;
 import com.risingwave.connector.jdbc.JdbcDialectFactory;
 import com.risingwave.connector.jdbc.MySqlDialectFactory;
 import com.risingwave.connector.jdbc.PostgresDialectFactory;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.util.Optional;
+import java.util.Properties;
 
 public abstract class JdbcUtils {
 
@@ -29,5 +33,22 @@ public abstract class JdbcUtils {
         } else {
             return Optional.empty();
         }
+    }
+
+    public static Connection getConnection(String jdbcUrl) throws SQLException {
+        var props = new Properties();
+        // enable TCP keep alive to avoid connection closed by server
+        // both MySQL and PG support this property
+        // https://jdbc.postgresql.org/documentation/use/
+        // https://dev.mysql.com/doc/connectors/en/connector-j-connp-props-networking.html#cj-conn-prop_tcpKeepAlive
+        props.setProperty("tcpKeepAlive", "true");
+        return DriverManager.getConnection(jdbcUrl, props);
+    }
+
+    public static void configureConnection(Connection conn) throws SQLException {
+        // disable auto commit can improve performance
+        conn.setAutoCommit(false);
+        // explicitly set isolation level to RC
+        conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
     }
 }

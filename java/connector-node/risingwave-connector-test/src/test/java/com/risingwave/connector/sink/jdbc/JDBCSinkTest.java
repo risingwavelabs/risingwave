@@ -25,7 +25,6 @@ import com.risingwave.connector.api.sink.ArraySinkRow;
 import com.risingwave.proto.Data;
 import com.risingwave.proto.Data.DataType.TypeName;
 import com.risingwave.proto.Data.Op;
-import com.zaxxer.hikari.HikariDataSource;
 import java.sql.*;
 import org.junit.Test;
 import org.testcontainers.containers.JdbcDatabaseContainer;
@@ -233,9 +232,9 @@ public class JDBCSinkTest {
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
                         getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
-        HikariDataSource connPool = sink.getConnPool();
+        Connection conn = sink.getConn();
         sink.drop();
-        assertTrue(connPool.isClosed());
+        assertTrue(conn.isClosed());
     }
 
     @Test
