@@ -155,22 +155,22 @@ WHERE
 s user1
 
 statement ok
-DROP TABLE t;
-
-statement ok
-DROP VIEW v;
-
-statement ok
-DROP MATERIALIZED VIEW mv;
-
-statement ok
-DROP SOURCE src;
-
-statement ok
-DROP SINK sink;
+DROP SCHEMA s;
 
 statement ok
 DROP DATABASE d;
 
 statement ok
-DROP SCHEMA s;
+DROP SINK sink;
+
+statement ok
+DROP SOURCE src;
+
+statement ok
+DROP MATERIALIZED VIEW mv;
+
+statement ok
+DROP VIEW v;
+
+statement ok
+DROP TABLE t;
