@@ -157,7 +157,11 @@ pub enum MetaStoreError {
     #[error("transaction abort")]
     TransactionAbort(),
     #[error("internal error: {0}")]
-    Internal(anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 pub type MetaStoreResult<T> = std::result::Result<T, MetaStoreError>;

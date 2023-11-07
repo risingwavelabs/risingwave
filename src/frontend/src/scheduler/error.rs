@@ -27,7 +27,11 @@ pub enum SchedulerError {
     PinSnapshot(QueryId, u64),
 
     #[error("Rpc error: {0}")]
-    RpcError(#[from] RpcError),
+    RpcError(
+        #[from]
+        #[backtrace]
+        RpcError,
+    ),
 
     #[error("Empty workers found")]
     EmptyWorkerNodes,
@@ -52,7 +56,11 @@ pub enum SchedulerError {
     QueryReachLimit(QueryMode, u64),
 
     #[error(transparent)]
-    Internal(#[from] anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 /// Only if the code is Internal, change it to Execution Error. Otherwise convert to Rpc Error.

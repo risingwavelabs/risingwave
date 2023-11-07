@@ -31,16 +31,32 @@ pub type MetaResult<T> = std::result::Result<T, MetaError>;
 #[derive(thiserror::Error, Debug)]
 enum MetaErrorInner {
     #[error("MetaStore transaction error: {0}")]
-    TransactionError(MetaStoreError),
+    TransactionError(
+        #[from]
+        #[backtrace]
+        MetaStoreError,
+    ),
 
     #[error("MetadataModel error: {0}")]
-    MetadataModelError(MetadataModelError),
+    MetadataModelError(
+        #[from]
+        #[backtrace]
+        MetadataModelError,
+    ),
 
     #[error("Hummock error: {0}")]
-    HummockError(HummockError),
+    HummockError(
+        #[from]
+        #[backtrace]
+        HummockError,
+    ),
 
     #[error("Rpc error: {0}")]
-    RpcError(RpcError),
+    RpcError(
+        #[from]
+        #[backtrace]
+        RpcError,
+    ),
 
     #[error("PermissionDenied: {0}")]
     PermissionDenied(String),
@@ -74,13 +90,21 @@ enum MetaErrorInner {
     SystemParams(String),
 
     #[error("Sink error: {0}")]
-    Sink(SinkError),
+    Sink(
+        #[from]
+        #[backtrace]
+        SinkError,
+    ),
 
     #[error("AWS SDK error: {}", DisplayErrorContext(& * *.0))]
-    Aws(BoxedError),
+    Aws(#[source] BoxedError),
 
     #[error(transparent)]
-    Internal(anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 impl From<MetaErrorInner> for MetaError {

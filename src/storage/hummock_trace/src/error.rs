@@ -22,13 +22,13 @@ pub type Result<T> = std::result::Result<T, TraceError>;
 #[derive(Error, Debug)]
 pub enum TraceError {
     #[error("failed to encode, {0}")]
-    Encode(EncodeError),
+    Encode(#[from] EncodeError),
 
     #[error("failed to decode, {0}")]
-    Decode(DecodeError),
+    Decode(#[from] DecodeError),
 
     #[error("failed to read or write {0}")]
-    Io(std::io::Error),
+    Io(#[from] std::io::Error),
 
     #[error("invalid magic bytes, expected {expected:?}, found {found:?}")]
     MagicBytes { expected: u32, found: u32 },
@@ -62,22 +62,4 @@ pub enum TraceError {
 
     #[error("failed to flush")]
     FlushFailed,
-}
-
-impl From<EncodeError> for TraceError {
-    fn from(err: EncodeError) -> Self {
-        TraceError::Encode(err)
-    }
-}
-
-impl From<DecodeError> for TraceError {
-    fn from(err: DecodeError) -> Self {
-        TraceError::Decode(err)
-    }
-}
-
-impl From<std::io::Error> for TraceError {
-    fn from(err: std::io::Error) -> Self {
-        TraceError::Io(err)
-    }
 }
