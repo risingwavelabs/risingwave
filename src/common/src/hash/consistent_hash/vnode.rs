@@ -18,7 +18,7 @@ use parse_display::Display;
 use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::hash::Crc32HashCode;
 use crate::row::{Row, RowExt};
-use crate::types::{DataType, ScalarRefImpl, Serial};
+use crate::types::{DataType, ScalarRefImpl};
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::row_id::extract_vnode_id_from_row_id;
 
@@ -119,11 +119,14 @@ impl VirtualNode {
         if let Ok(idx) = keys.iter().exactly_one()
             && let ArrayImpl::Serial(serial_array) = &**data_chunk.column_at(*idx)
         {
-            let fallback_row_id = Serial::from(rand::random::<i64>());
-            return serial_array
-                .iter()
-                .map(|serial| extract_vnode_id_from_row_id(serial.unwrap_or(fallback_row_id).as_row_id()))
-                .collect();
+            return serial_array.iter().enumerate().map(|(idx, serial)| {
+                if let Some(serial) = serial {
+                    extract_vnode_id_from_row_id(serial.as_row_id())
+                } else {
+                    let (row, _) = data_chunk.row_at(idx);
+                    row.hash(Crc32FastBuilder).into()
+                }
+            } ).collect();
         }
 
         data_chunk
@@ -139,6 +142,10 @@ impl VirtualNode {
         let project = row.project(indices);
         if let Ok(Some(ScalarRefImpl::Serial(s))) = project.iter().exactly_one().as_ref() {
             return extract_vnode_id_from_row_id(s.as_row_id());
+        }
+
+        if project.is_empty() {
+            return project.row().hash(Crc32FastBuilder).into();
         }
 
         project.hash(Crc32FastBuilder).into()

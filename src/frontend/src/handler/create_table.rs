@@ -887,8 +887,9 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
         pk_column_ids,
         None,
         append_only,
-        vec![], // no watermarks
+        vec![],
         Some(col_id_gen.into_version()),
+        true,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
