@@ -15,8 +15,8 @@
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
 use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::{Arc, Weak};
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
@@ -472,7 +472,9 @@ pub struct SessionImpl {
     /// local query.
     current_query_cancel_flag: Mutex<Option<ShutdownSender>>,
 
-    sql: Mutex<Weak<String>>,
+    running_sql: Mutex<Option<Arc<String>>>,
+
+    last_instant: Mutex<Option<Instant>>,
 }
 
 #[derive(Error, Debug)]
@@ -508,7 +510,8 @@ impl SessionImpl {
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
-            sql: Mutex::new(Weak::new()),
+            running_sql: Mutex::new(None),
+            last_instant: Mutex::new(None),
         }
     }
 
@@ -528,7 +531,8 @@ impl SessionImpl {
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
-            sql: Mutex::new(Weak::new()),
+            running_sql: Mutex::new(None),
+            last_instant: Mutex::new(None),
         }
     }
 
@@ -577,13 +581,12 @@ impl SessionImpl {
         self.id
     }
 
-    pub fn sql(&self) -> Option<Arc<String>> {
-        self.sql.lock().upgrade()
+    pub fn running_sql(&self) -> Option<Arc<String>> {
+        self.running_sql.lock().clone()
     }
 
-    pub fn set_sql(&self, sql: Arc<String>) {
-        let mut guard = self.sql.lock();
-        *guard = Arc::downgrade(&sql);
+    pub fn elapse_since_running_sql(&self) -> Option<u128> {
+        self.last_instant.lock().map(|instant| instant.elapsed().as_millis())
     }
 
     pub fn check_relation_name_duplicated(
@@ -745,7 +748,7 @@ impl SessionImpl {
         }
         let stmt = stmts.swap_remove(0);
         let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, &sql, formats));
+            let mut handle_fut = Box::pin(handle(self, stmt, sql.clone(), formats));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
@@ -948,11 +951,11 @@ impl Session for SessionImpl {
     async fn run_one_query(
         self: Arc<Self>,
         stmt: Statement,
-        sql: &Arc<String>,
         format: Format,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
+        let sql = Arc::new(stmt.to_string());
         let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, &sql, vec![format]));
+            let mut handle_fut = Box::pin(handle(self, stmt, sql.clone(), vec![format]));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
@@ -1012,10 +1015,9 @@ impl Session for SessionImpl {
     async fn execute(
         self: Arc<Self>,
         portal: Portal,
-        sql: &Arc<String>,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         let rsp = {
-            let mut handle_fut = Box::pin(handle_execute(self, portal, sql));
+            let mut handle_fut = Box::pin(handle_execute(self, portal));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
@@ -1089,6 +1091,16 @@ impl Session for SessionImpl {
             transaction::State::Explicit(_) => TransactionStatus::InTransaction,
             // TODO: failed transaction
         }
+    }
+
+    fn init_exec_context(&self, sql: Arc<String>) {
+        *self.running_sql.lock() = Some(sql);
+        *self.last_instant.lock() = Some(Instant::now());
+    }
+
+    fn clear_exec_context(self: Arc<Self>) {
+        *self.running_sql.lock() = None;
+        *self.last_instant.lock() = None;
     }
 }
 

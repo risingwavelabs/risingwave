@@ -179,7 +179,7 @@ pub fn handle_bind(
     }
 }
 
-pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal, sql: &Arc<String>) -> Result<RwPgResponse> {
+pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result<RwPgResponse> {
     match portal {
         Portal::Empty => Ok(RwPgResponse::empty_result(
             pgwire::pg_response::StatementType::EMPTY,
@@ -187,7 +187,8 @@ pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal, sql: &Arc
         Portal::Portal(portal) => {
             session.clear_cancel_query_flag();
             let _guard = session.txn_begin_implicit(); // TODO(bugen): is this behavior correct?
-            let handler_args = HandlerArgs::new(session, &portal.statement, sql.clone())?;
+            let sql = Arc::new(portal.statement.to_string());
+            let handler_args = HandlerArgs::new(session, &portal.statement, sql)?;
             match &portal.statement {
                 Statement::Query(_)
                 | Statement::Insert { .. }
@@ -197,6 +198,7 @@ pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal, sql: &Arc
             }
         }
         Portal::PureStatement(stmt) => {
+            let sql = Arc::new(stmt.to_string());
             handle(session, stmt, sql, vec![]).await
         }
     }

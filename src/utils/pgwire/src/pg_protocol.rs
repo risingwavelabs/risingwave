@@ -428,11 +428,19 @@ where
     }
 
     async fn process_query_msg(&mut self, query_string: io::Result<&str>) -> PsqlResult<()> {
-        let sql = query_string.map_err(|err| PsqlError::QueryError(Box::new(err)))?;
+        let sql = Arc::new(
+            query_string
+                .map_err(|err| PsqlError::QueryError(Box::new(err)))?
+                .to_string(),
+        );
         let start = Instant::now();
         let session = self.session.clone().unwrap();
         let session_id = session.id().0;
-        let result = self.inner_process_query_msg(sql, session).await;
+        session.init_exec_context(sql.clone());
+        let result = self
+            .inner_process_query_msg(sql.clone(), session.clone())
+            .await;
+        session.clear_exec_context();
 
         let mills = start.elapsed().as_millis();
 
@@ -450,11 +458,11 @@ where
 
     async fn inner_process_query_msg(
         &mut self,
-        sql: &str,
+        sql: Arc<String>,
         session: Arc<SM::Session>,
     ) -> PsqlResult<()> {
         // Parse sql.
-        let stmts = Parser::parse_sql(sql)
+        let stmts = Parser::parse_sql(&sql)
             .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
             .map_err(|err| PsqlError::QueryError(err.into()))?;
         if stmts.is_empty() {
@@ -488,12 +496,10 @@ where
         session: Arc<SM::Session>,
     ) -> PsqlResult<()> {
         let session = session.clone();
-        // Hold this sql until statement execution finished, so that show processlist can show it.
-        let sql = Arc::new(stmt.to_string());
         // execute query
         let res = session
             .clone()
-            .run_one_query(stmt.clone(), &sql, Format::Text)
+            .run_one_query(stmt.clone(), Format::Text)
             .await;
         for notice in session.take_notices() {
             self.stream
@@ -701,10 +707,10 @@ where
         } else {
             let start = Instant::now();
             let portal = self.get_portal(&portal_name)?;
-            // Hold this sql until statement execution finished, so that show processlist can show it.
             let sql = Arc::new(format!("{}", portal));
 
-            let result = session.execute(portal, &sql).await;
+            session.init_exec_context(sql.clone());
+            let result = session.clone().execute(portal).await;
 
             let mills = start.elapsed().as_millis();
 
@@ -723,6 +729,9 @@ where
             if !is_consume_completed {
                 self.result_cache.insert(portal_name, result_cache);
             }
+
+            // Clear exec context after consuming exec data.
+            session.clear_exec_context();
         }
 
         Ok(())

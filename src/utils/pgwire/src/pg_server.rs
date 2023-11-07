@@ -60,7 +60,6 @@ pub trait Session: Send + Sync {
     fn run_one_query(
         self: Arc<Self>,
         stmt: Statement,
-        sql: &Arc<String>,
         format: Format,
     ) -> impl Future<Output = Result<PgResponse<Self::ValuesStream>, BoxedError>> + Send;
 
@@ -85,7 +84,6 @@ pub trait Session: Send + Sync {
     fn execute(
         self: Arc<Self>,
         portal: Self::Portal,
-        sql: &Arc<String>,
     ) -> impl Future<Output = Result<PgResponse<Self::ValuesStream>, BoxedError>> + Send;
 
     fn describe_statement(
@@ -105,6 +103,10 @@ pub trait Session: Send + Sync {
     fn set_config(&self, key: &str, value: Vec<String>) -> Result<(), BoxedError>;
 
     fn transaction_status(&self) -> TransactionStatus;
+
+    fn init_exec_context(&self, sql: Arc<String>);
+
+    fn clear_exec_context(self: Arc<Self>);
 }
 
 #[derive(Debug, Clone)]
@@ -237,7 +239,6 @@ mod tests {
         async fn run_one_query(
             self: Arc<Self>,
             _stmt: Statement,
-            _sql: &Arc<String>,
             _format: types::Format,
         ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
             Ok(PgResponse::builder(StatementType::SELECT)
@@ -275,7 +276,6 @@ mod tests {
         async fn execute(
             self: Arc<Self>,
             _portal: String,
-            _sql: &Arc<String>,
         ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
             Ok(PgResponse::builder(StatementType::SELECT)
                 .values(
@@ -327,6 +327,10 @@ mod tests {
         fn transaction_status(&self) -> TransactionStatus {
             TransactionStatus::Idle
         }
+
+        fn init_exec_context(&self, _sql: Arc<String>) {}
+
+        fn clear_exec_context(self: Arc<Self>) {}
     }
 
     #[tokio::test]
