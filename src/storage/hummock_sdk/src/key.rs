@@ -612,7 +612,7 @@ impl<T: AsRef<[u8]>> FullKey<T> {
     pub fn from_user_key(user_key: UserKey<T>, epoch: HummockEpoch) -> Self {
         Self {
             user_key,
-            epoch_with_gap: EpochWithGap::new(epoch, 0),
+            epoch_with_gap: EpochWithGap::from_u64(epoch),
         }
     }
 
