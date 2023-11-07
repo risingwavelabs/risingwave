@@ -20,6 +20,7 @@ use std::time::Duration;
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
+use futures::TryFutureExt;
 use itertools::Itertools;
 use more_asserts::assert_gt;
 use risingwave_common::catalog::TableId;
@@ -34,7 +35,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::oneshot;
 use tracing::log::error;
 
-use super::local_hummock_storage::{HummockStorageIterator, LocalHummockStorage};
+use super::local_hummock_storage::LocalHummockStorage;
 use super::version::{CommittedVersion, HummockVersionReader};
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{FilterKeyExtractorManager, RpcFilterKeyExtractorManager};
@@ -43,6 +44,7 @@ use crate::hummock::compactor::CompactorContext;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::refiller::CacheRefillConfig;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler, ReadVersionMappingType};
+use crate::hummock::iterator::{Forward, PhantomHummockIterator};
 use crate::hummock::local_version::pinned_version::{start_pinned_version_worker, PinnedVersion};
 use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::store::version::read_filter_for_batch;
@@ -246,15 +248,26 @@ impl HummockStorage {
         key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
+    ) -> StorageResult<impl StateStoreReadIterStream> {
         let read_version_tuple = if read_options.read_version_from_backup {
             self.build_read_version_tuple_from_backup(epoch).await?
         } else {
             self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?
         };
 
+        let read_version_tuple = {
+            let (first, second, third) = read_version_tuple;
+            (first, second, third, None)
+        };
+
         self.hummock_version_reader
-            .iter(key_range, epoch, read_options, read_version_tuple)
+            .iter::<PhantomHummockIterator<Forward>>(
+                key_range,
+                epoch,
+                read_options,
+                read_version_tuple,
+            )
+            .map_ok(identity)
             .await
     }
 
@@ -370,7 +383,7 @@ impl HummockStorage {
 }
 
 impl StateStoreRead for HummockStorage {
-    type IterStream = StreamTypeOfIter<HummockStorageIterator>;
+    type IterStream = impl StateStoreReadIterStream;
 
     fn get(
         &self,

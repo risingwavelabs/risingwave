@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::ops::Bound::*;
@@ -409,6 +410,12 @@ impl<T: AsRef<[u8]>> TableKey<T> {
 
     pub fn key_part(&self) -> &[u8] {
         &self.0.as_ref()[VirtualNode::SIZE..]
+    }
+}
+
+impl<T: AsRef<[u8]>> Borrow<[u8]> for TableKey<T> {
+    fn borrow(&self) -> &[u8] {
+        self.0.as_ref()
     }
 }
 

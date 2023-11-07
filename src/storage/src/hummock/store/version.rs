@@ -35,26 +35,27 @@ use tracing::Instrument;
 use super::StagingDataIterator;
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
-    ConcatIterator, ForwardMergeRangeIterator, HummockIteratorUnion, OrderedMergeIteratorInner,
-    UnorderedMergeIteratorInner, UserIterator,
+    ConcatIterator, Forward, ForwardMergeRangeIterator, HummockIterator, HummockIteratorUnion,
+    OrderedMergeIteratorInner, UnorderedMergeIteratorInner, UserIterator,
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::store::HummockStorageIterator;
 use crate::hummock::utils::{
     check_subset_preserve_order, filter_single_sst, prune_nonoverlapping_ssts,
     prune_overlapping_ssts, range_overlap, search_sst_idx,
 };
 use crate::hummock::{
-    get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, Sstable,
-    SstableDeleteRangeIterator, SstableIterator,
+    get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, HummockStorageIteratorInner,
+    Sstable, SstableDeleteRangeIterator, SstableIterator,
 };
 use crate::mem_table::{ImmId, ImmutableMemtable};
 use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, MayExistLocalMetricsGuard, StoreLocalStatistic,
 };
-use crate::store::{gen_min_epoch, ReadOptions, StateStoreIterExt, StreamTypeOfIter};
+use crate::store::{
+    gen_min_epoch, identity, ReadOptions, StateStoreIterExt, StateStoreIterItemStream,
+};
 
 // TODO: use a custom data structure to allow in-place update instead of proto
 // pub type CommittedVersion = HummockVersion;
@@ -681,16 +682,21 @@ impl HummockVersionReader {
         Ok(None)
     }
 
-    pub async fn iter(
-        &self,
+    pub async fn iter<'a, MM: HummockIterator<Direction = Forward> + 'a>(
+        &'a self,
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-        read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
-    ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
+        read_version_tuple: (
+            Vec<ImmutableMemtable>,
+            Vec<SstableInfo>,
+            CommittedVersion,
+            Option<MM>,
+        ),
+    ) -> StorageResult<impl StateStoreIterItemStream> {
         let table_id_string = read_options.table_id.to_string();
         let table_id_label = table_id_string.as_str();
-        let (imms, uncommitted_ssts, committed) = read_version_tuple;
+        let (imms, uncommitted_ssts, committed, mem_table) = read_version_tuple;
 
         let mut local_stats = StoreLocalStatistic::default();
         let mut staging_iters = Vec::with_capacity(imms.len() + uncommitted_ssts.len());
@@ -905,7 +911,8 @@ impl HummockVersionReader {
                     non_overlapping_iters
                         .into_iter()
                         .map(HummockIteratorUnion::Third),
-                ),
+                )
+                .chain(mem_table.into_iter().map(HummockIteratorUnion::Fourth)),
         );
 
         let user_key_range = (
@@ -933,13 +940,15 @@ impl HummockVersionReader {
             + local_stats.overlapping_iter_count
             + local_stats.non_overlapping_iter_count;
 
-        Ok(HummockStorageIterator::new(
-            user_iter,
-            self.state_store_metrics.clone(),
-            read_options.table_id,
-            local_stats,
-        )
-        .into_stream())
+        Ok(identity(
+            HummockStorageIteratorInner::new(
+                user_iter,
+                self.state_store_metrics.clone(),
+                read_options.table_id,
+                local_stats,
+            )
+            .into_stream(),
+        ))
     }
 
     // Note: this method will not check the kv tomestones and delete range tomestones

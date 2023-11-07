@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
+use futures::TryFutureExt;
 use parking_lot::RwLock;
 use prometheus::IntGauge;
 use risingwave_common::catalog::{TableId, TableOption};
@@ -30,8 +31,8 @@ use super::version::{HummockReadVersion, StagingData, VersionUpdate};
 use crate::error::StorageResult;
 use crate::hummock::event_handler::{HummockEvent, LocalInstanceGuard};
 use crate::hummock::iterator::{
-    ConcatIteratorInner, Forward, HummockIteratorUnion, OrderedMergeIteratorInner,
-    UnorderedMergeIteratorInner, UserIterator,
+    ConcatIteratorInner, Forward, HummockIterator, HummockIteratorUnion, OrderedMergeIteratorInner,
+    PhantomHummockIterator, UnorderedMergeIteratorInner, UserIterator,
 };
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator,
@@ -43,11 +44,10 @@ use crate::hummock::utils::{
 };
 use crate::hummock::write_limiter::WriteLimiterRef;
 use crate::hummock::{MemoryLimiter, SstableIterator};
-use crate::mem_table::{merge_stream, KeyOp, MemTable};
+use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator};
 use crate::monitor::{HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic};
 use crate::storage_value::StorageValue;
 use crate::store::*;
-use crate::StateStoreIter;
 
 /// `LocalHummockStorage` is a handle for a state table shard to access data from and write data to
 /// the hummock state backend. It is created via `HummockStorage::new_local`.
@@ -95,6 +95,8 @@ pub struct LocalHummockStorage {
     mem_table_item_count: IntGauge,
 }
 
+pub type IterAllStream<'a> = impl StateStoreIterItemStream + 'a;
+
 impl LocalHummockStorage {
     /// See `HummockReadVersion::update` for more details.
     pub fn update(&self, info: VersionUpdate) {
@@ -128,12 +130,12 @@ impl LocalHummockStorage {
         wait_for_epoch(&self.version_update_notifier_tx, wait_epoch).await
     }
 
-    pub async fn iter_inner(
+    pub async fn iter_flushed(
         &self,
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-    ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
+    ) -> StorageResult<impl StateStoreReadIterStream> {
         let read_snapshot = read_filter_for_local(
             epoch,
             read_options.table_id,
@@ -141,8 +143,52 @@ impl LocalHummockStorage {
             self.read_version.clone(),
         )?;
 
+        let read_snapshot = {
+            let (first, second, third) = read_snapshot;
+            (first, second, third, None)
+        };
+
         self.hummock_version_reader
-            .iter(table_key_range, epoch, read_options, read_snapshot)
+            .iter::<PhantomHummockIterator<Forward>>(
+                table_key_range,
+                epoch,
+                read_options,
+                read_snapshot,
+            )
+            .map_ok(identity)
+            .await
+    }
+
+    fn mem_table_iter(&self) -> MemTableHummockIterator<'_> {
+        MemTableHummockIterator::new(&self.mem_table.buffer, self.epoch(), self.table_id)
+    }
+
+    pub async fn iter_all(
+        &self,
+        table_key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+    ) -> StorageResult<IterAllStream<'_>> {
+        let read_snapshot = read_filter_for_local(
+            epoch,
+            read_options.table_id,
+            &table_key_range,
+            self.read_version.clone(),
+        )?;
+
+        let read_snapshot = {
+            let (first, second, third) = read_snapshot;
+            (first, second, third, Some(self.mem_table_iter()))
+        };
+
+        self.hummock_version_reader
+            .iter::<MemTableHummockIterator<'_>>(
+                table_key_range,
+                epoch,
+                read_options,
+                read_snapshot,
+            )
+            .map_ok(identity)
             .await
     }
 
@@ -169,7 +215,7 @@ impl LocalHummockStorage {
 }
 
 impl StateStoreRead for LocalHummockStorage {
-    type IterStream = StreamTypeOfIter<HummockStorageIterator>;
+    type IterStream = impl StateStoreReadIterStream;
 
     fn get(
         &self,
@@ -188,13 +234,14 @@ impl StateStoreRead for LocalHummockStorage {
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
         assert!(epoch <= self.epoch());
-        self.iter_inner(key_range, epoch, read_options)
+        self.iter_flushed(key_range, epoch, read_options)
             .instrument(tracing::trace_span!("hummock_iter"))
+            .map_ok(identity)
     }
 }
 
 impl LocalStateStore for LocalHummockStorage {
-    type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+    type IterStream<'a> = IterAllStream<'a>;
 
     fn may_exist(
         &self,
@@ -224,17 +271,7 @@ impl LocalStateStore for LocalHummockStorage {
         key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
-        async move {
-            let stream = self
-                .iter_inner(key_range.clone(), self.epoch(), read_options)
-                .await?;
-            Ok(merge_stream(
-                self.mem_table.iter(key_range),
-                stream,
-                self.table_id,
-                self.epoch(),
-            ))
-        }
+        self.iter_all(key_range.clone(), self.epoch(), read_options)
     }
 
     fn insert(
@@ -516,24 +553,31 @@ impl LocalHummockStorage {
 pub type StagingDataIterator = OrderedMergeIteratorInner<
     HummockIteratorUnion<Forward, SharedBufferBatchIterator<Forward>, SstableIterator>,
 >;
-type HummockStorageIteratorPayload = UnorderedMergeIteratorInner<
+pub type HummockStorageIteratorPayloadInner<MM> = UnorderedMergeIteratorInner<
     HummockIteratorUnion<
         Forward,
         StagingDataIterator,
         SstableIterator,
         ConcatIteratorInner<SstableIterator>,
+        MM,
     >,
 >;
 
-pub struct HummockStorageIterator {
-    inner: UserIterator<HummockStorageIteratorPayload>,
+pub type HummockStorageIteratorInner<MM> =
+    MetricsGuardedUserIterator<HummockStorageIteratorPayloadInner<MM>>;
+
+pub type HummockStorageIterator = HummockStorageIteratorInner<PhantomHummockIterator<Forward>>;
+pub type LocalHummockStorageIterator<'a> = HummockStorageIteratorInner<MemTableHummockIterator<'a>>;
+
+pub struct MetricsGuardedUserIterator<I: HummockIterator<Direction = Forward>> {
+    inner: UserIterator<I>,
     stats_guard: IterLocalMetricsGuard,
 }
 
-impl StateStoreIter for HummockStorageIterator {
+impl<I: HummockIterator<Direction = Forward>> StateStoreIter for MetricsGuardedUserIterator<I> {
     type Item = StateStoreIterItem;
 
-    async fn next(&mut self) -> StorageResult<Option<Self::Item>> {
+    async fn next(&mut self) -> StorageResult<Option<StateStoreIterItem>> {
         let iter = &mut self.inner;
 
         if iter.is_valid() {
@@ -546,9 +590,9 @@ impl StateStoreIter for HummockStorageIterator {
     }
 }
 
-impl HummockStorageIterator {
+impl<I: HummockIterator<Direction = Forward>> MetricsGuardedUserIterator<I> {
     pub fn new(
-        inner: UserIterator<HummockStorageIteratorPayload>,
+        inner: UserIterator<I>,
         metrics: Arc<HummockStateStoreMetrics>,
         table_id: TableId,
         local_stats: StoreLocalStatistic,
@@ -560,7 +604,7 @@ impl HummockStorageIterator {
     }
 }
 
-impl Drop for HummockStorageIterator {
+impl<I: HummockIterator<Direction = Forward>> Drop for MetricsGuardedUserIterator<I> {
     fn drop(&mut self) {
         self.inner
             .collect_local_statistic(&mut self.stats_guard.local_stats);

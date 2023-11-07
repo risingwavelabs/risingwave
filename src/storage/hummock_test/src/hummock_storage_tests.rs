@@ -22,6 +22,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TABLE_PREFIX_LEN};
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::hummock::iterator::{Forward, PhantomHummockIterator};
 use risingwave_storage::hummock::store::version::{read_filter_for_batch, read_filter_for_local};
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::storage_value::StorageValue;
@@ -1223,8 +1224,13 @@ async fn test_hummock_version_reader() {
                 )
                 .unwrap();
 
+                let read_snapshot = {
+                    let (first, second, third) = read_snapshot;
+                    (first, second, third, None)
+                };
+
                 let iter = hummock_version_reader
-                    .iter(
+                    .iter::<PhantomHummockIterator<Forward>>(
                         (Unbounded, Unbounded),
                         epoch1,
                         ReadOptions {
@@ -1251,8 +1257,13 @@ async fn test_hummock_version_reader() {
                 )
                 .unwrap();
 
+                let read_snapshot = {
+                    let (first, second, third) = read_snapshot;
+                    (first, second, third, None)
+                };
+
                 let iter = hummock_version_reader
-                    .iter(
+                    .iter::<PhantomHummockIterator<Forward>>(
                         (Unbounded, Unbounded),
                         epoch2,
                         ReadOptions {
@@ -1279,8 +1290,13 @@ async fn test_hummock_version_reader() {
                 )
                 .unwrap();
 
+                let read_snapshot = {
+                    let (first, second, third) = read_snapshot;
+                    (first, second, third, None)
+                };
+
                 let iter = hummock_version_reader
-                    .iter(
+                    .iter::<PhantomHummockIterator<Forward>>(
                         (Unbounded, Unbounded),
                         epoch2,
                         ReadOptions {
@@ -1349,8 +1365,13 @@ async fn test_hummock_version_reader() {
                     (imms, ssts, test_env.storage.get_pinned_version())
                 };
 
+                let read_snapshot = {
+                    let (first, second, third) = read_snapshot;
+                    (first, second, third, None)
+                };
+
                 let iter = hummock_version_reader
-                    .iter(
+                    .iter::<PhantomHummockIterator<Forward>>(
                         (Unbounded, Unbounded),
                         epoch1,
                         ReadOptions {
@@ -1385,13 +1406,18 @@ async fn test_hummock_version_reader() {
                     (imms, ssts, test_env.storage.get_pinned_version())
                 };
 
+                let read_snapshot = {
+                    let (first, second, third) = read_snapshot;
+                    (first, second, third, None)
+                };
+
                 assert_eq!(
                     read_version_3.read().committed().max_committed_epoch(),
                     read_snapshot.2.max_committed_epoch()
                 );
 
                 let iter = hummock_version_reader
-                    .iter(
+                    .iter::<PhantomHummockIterator<Forward>>(
                         (Unbounded, Unbounded),
                         epoch2,
                         ReadOptions {
@@ -1426,8 +1452,13 @@ async fn test_hummock_version_reader() {
                     (imms, ssts, test_env.storage.get_pinned_version())
                 };
 
+                let read_snapshot = {
+                    let (first, second, third) = read_snapshot;
+                    (first, second, third, None)
+                };
+
                 let iter = hummock_version_reader
-                    .iter(
+                    .iter::<PhantomHummockIterator<Forward>>(
                         (Unbounded, Unbounded),
                         epoch2,
                         ReadOptions {
@@ -1463,8 +1494,13 @@ async fn test_hummock_version_reader() {
                     (imms, ssts, test_env.storage.get_pinned_version())
                 };
 
+                let read_snapshot = {
+                    let (first, second, third) = read_snapshot;
+                    (first, second, third, None)
+                };
+
                 let iter = hummock_version_reader
-                    .iter(
+                    .iter::<PhantomHummockIterator<Forward>>(
                         (Unbounded, Unbounded),
                         epoch3,
                         ReadOptions {
@@ -1505,8 +1541,13 @@ async fn test_hummock_version_reader() {
                         (imms, ssts, test_env.storage.get_pinned_version())
                     };
 
+                    let read_snapshot = {
+                        let (first, second, third) = read_snapshot;
+                        (first, second, third, None)
+                    };
+
                     let iter = hummock_version_reader
-                        .iter(
+                        .iter::<PhantomHummockIterator<Forward>>(
                             key_range.clone(),
                             epoch2,
                             ReadOptions {
@@ -1541,8 +1582,13 @@ async fn test_hummock_version_reader() {
                         (imms, ssts, test_env.storage.get_pinned_version())
                     };
 
+                    let read_snapshot = {
+                        let (first, second, third) = read_snapshot;
+                        (first, second, third, None)
+                    };
+
                     let iter = hummock_version_reader
-                        .iter(
+                        .iter::<PhantomHummockIterator<Forward>>(
                             key_range.clone(),
                             epoch3,
                             ReadOptions {

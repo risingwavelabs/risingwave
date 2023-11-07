@@ -16,6 +16,7 @@ use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::future::Future;
+use std::ops::Bound::{Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 
 use bytes::Bytes;
@@ -27,11 +28,13 @@ use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
 use thiserror::Error;
 
 use crate::error::{StorageError, StorageResult};
+use crate::hummock::iterator::{FromRustIterator, RustIteratorBuilder};
 use crate::hummock::shared_buffer::shared_buffer_batch::{SharedBufferBatch, SharedBufferBatchId};
 use crate::hummock::utils::{
     cmp_delete_range_left_bounds, do_delete_sanity_check, do_insert_sanity_check,
     do_update_sanity_check, filter_with_delete_range, ENABLE_SANITY_CHECK,
 };
+use crate::hummock::value::HummockValue;
 use crate::row_serde::value_serde::ValueRowSerde;
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -51,7 +54,7 @@ pub enum KeyOp {
 /// `MemTable` is a buffer for modify operations without encoding
 #[derive(Clone)]
 pub struct MemTable {
-    pub(crate) buffer: BTreeMap<TableKey<Bytes>, KeyOp>,
+    pub(crate) buffer: MemTableStore,
     pub(crate) is_consistent_op: bool,
     pub(crate) kv_size: KvSize,
 }
@@ -67,6 +70,42 @@ pub enum MemTableError {
 }
 
 type Result<T> = std::result::Result<T, Box<MemTableError>>;
+
+pub type MemTableStore = BTreeMap<TableKey<Bytes>, KeyOp>;
+pub struct MemTableIteratorBuilder;
+
+fn map_to_hummock_value<'a>(
+    (key, op): (&'a TableKey<Bytes>, &'a KeyOp),
+) -> (TableKey<&'a [u8]>, HummockValue<&'a [u8]>) {
+    (
+        TableKey(key.0.as_ref()),
+        match op {
+            KeyOp::Insert(value) | KeyOp::Update((_, value)) => HummockValue::Put(value),
+            KeyOp::Delete(_) => HummockValue::Delete,
+        },
+    )
+}
+
+impl RustIteratorBuilder for MemTableIteratorBuilder {
+    type Iterable = MemTableStore;
+
+    type RewindIter<'a> =
+        impl Iterator<Item = (TableKey<&'a [u8]>, HummockValue<&'a [u8]>)> + Send + 'a;
+    type SeekIter<'a> =
+        impl Iterator<Item = (TableKey<&'a [u8]>, HummockValue<&'a [u8]>)> + Send + 'a;
+
+    fn seek<'a>(iterable: &'a Self::Iterable, seek_key: TableKey<&[u8]>) -> Self::SeekIter<'a> {
+        iterable
+            .range::<[u8], _>((Included(seek_key.0), Unbounded))
+            .map(map_to_hummock_value)
+    }
+
+    fn rewind(iterable: &Self::Iterable) -> Self::RewindIter<'_> {
+        iterable.iter().map(map_to_hummock_value)
+    }
+}
+
+pub type MemTableHummockIterator<'a> = FromRustIterator<'a, MemTableIteratorBuilder>;
 
 impl MemTable {
     pub fn new(is_consistent_op: bool) -> Self {

@@ -15,7 +15,8 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::TryStreamExt;
+use futures::stream::BoxStream;
+use futures::{StreamExt, TryStreamExt};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
@@ -28,21 +29,21 @@ use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::java_binding::key_range::Bound;
 use risingwave_pb::java_binding::{KeyRange, ReadPlan};
 use risingwave_storage::error::{StorageError, StorageResult};
+use risingwave_storage::hummock::iterator::{Forward, PhantomHummockIterator};
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
-use risingwave_storage::hummock::store::HummockStorageIterator;
 use risingwave_storage::hummock::{CachePolicy, FileCache, SstableStore};
 use risingwave_storage::monitor::HummockStateStoreMetrics;
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
-use risingwave_storage::store::{ReadOptions, StateStoreReadIterStream, StreamTypeOfIter};
+use risingwave_storage::store::{ReadOptions, StateStoreIterItem, StateStoreReadIterStream};
 use tokio::sync::mpsc::unbounded_channel;
 
 type SelectAllIterStream = impl StateStoreReadIterStream + Unpin;
 
 fn select_all_vnode_stream(
-    streams: Vec<StreamTypeOfIter<HummockStorageIterator>>,
+    streams: Vec<BoxStream<'static, StorageResult<StateStoreIterItem>>>,
 ) -> SelectAllIterStream {
-    select_all(streams.into_iter().map(Box::pin))
+    select_all(streams)
 }
 
 pub struct HummockJavaBindingIterator {
@@ -80,7 +81,7 @@ impl HummockJavaBindingIterator {
 
         for vnode in read_plan.vnode_ids {
             let stream = reader
-                .iter(
+                .iter::<PhantomHummockIterator<Forward>>(
                     table_key_range_from_prost(
                         VirtualNode::from_index(vnode as usize),
                         key_range.clone(),
@@ -91,9 +92,10 @@ impl HummockJavaBindingIterator {
                         cache_policy: CachePolicy::NotFill,
                         ..Default::default()
                     },
-                    (vec![], vec![], pin_version.clone()),
+                    (vec![], vec![], pin_version.clone(), None),
                 )
-                .await?;
+                .await?
+                .boxed();
             streams.push(stream);
         }
 
