@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use either::Either;
@@ -31,11 +32,12 @@ use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_connector::source;
 use risingwave_connector::source::external::{DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
-use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
+use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, Table, WatermarkDesc};
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
+use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
     CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Format,
     ObjectName, SourceWatermark, TableConstraint,
@@ -53,8 +55,9 @@ use crate::handler::create_source::{
     check_source_schema, validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
-use crate::optimizer::property::{Order, RequiredDist};
+use crate::optimizer::plan_node::generic::PhysicalPlanRef;
+use crate::optimizer::plan_node::{LogicalCdcScan, LogicalScan, LogicalSource};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
@@ -1029,6 +1032,79 @@ pub fn check_create_table_with_source(
         })?;
     }
     Ok(source_schema)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn generate_table(
+    session: &Arc<SessionImpl>,
+    table_name: ObjectName,
+    original_catalog: &Arc<TableCatalog>,
+    source_schema: Option<ConnectorSchema>,
+    handler_args: HandlerArgs,
+    col_id_gen: ColumnIdGenerator,
+    columns: Vec<ColumnDef>,
+    constraints: Vec<TableConstraint>,
+    source_watermarks: Vec<SourceWatermark>,
+    append_only: bool,
+    with_external_sink: i32,
+) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, Distribution)> {
+    use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+
+    let context = OptimizerContext::from_handler_args(handler_args);
+    let (plan, source, table) = match source_schema {
+        Some(source_schema) => {
+            gen_create_table_plan_with_source(
+                context,
+                table_name,
+                columns,
+                constraints,
+                source_schema,
+                source_watermarks,
+                col_id_gen,
+                append_only,
+                with_external_sink,
+            )
+            .await?
+        }
+        None => gen_create_table_plan(
+            context,
+            table_name,
+            columns,
+            constraints,
+            col_id_gen,
+            source_watermarks,
+            append_only,
+            with_external_sink,
+        )?,
+    };
+
+    let dist = plan.distribution().to_owned();
+
+    // TODO: avoid this backward conversion.
+    if TableCatalog::from(&table).pk_column_ids() != original_catalog.pk_column_ids() {
+        Err(ErrorCode::InvalidInputSyntax(
+            "alter primary key of table is not supported".to_owned(),
+        ))?
+    }
+
+    let graph = StreamFragmentGraph {
+        parallelism: session
+            .config()
+            .get_streaming_parallelism()
+            .map(|parallelism| Parallelism { parallelism }),
+        ..build_graph(plan)
+    };
+
+    // Fill the original table ID.
+    let table = Table {
+        id: original_catalog.id().table_id(),
+        optional_associated_source_id: original_catalog
+            .associated_source_id()
+            .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
+        ..table
+    };
+
+    Ok((graph, table, source, dist))
 }
 
 #[cfg(test)]

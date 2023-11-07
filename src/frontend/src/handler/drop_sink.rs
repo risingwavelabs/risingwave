@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::ObjectName;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::handler::create_sink::regenerate_table;
+use crate::handler::create_table::generate_table;
 use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_sink(
@@ -131,7 +131,7 @@ pub async fn handle_drop_sink(
             panic!("unexpected statement type: {:?}", definition);
         };
 
-        let (graph, table, source, _) = regenerate_table(
+        let (graph, table, source, _) = generate_table(
             &session,
             table_name,
             &original_catalog,

@@ -26,12 +26,11 @@ use risingwave_sqlparser::ast::{
 use risingwave_sqlparser::parser::Parser;
 
 use super::create_source::get_json_schema_location;
-use super::create_table::{gen_create_table_plan, ColumnIdGenerator};
+use super::create_table::{gen_create_table_plan, generate_table, ColumnIdGenerator};
 use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
-use crate::handler::create_sink::regenerate_table;
 use crate::{Binder, WithOptions};
 
 /// Handle `ALTER TABLE [ADD|DROP] COLUMN` statements. The `operation` must be either `AddColumn` or
@@ -185,7 +184,7 @@ pub async fn handle_alter_table_column(
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (graph, table, source, _) = regenerate_table(
+    let (graph, table, source, _) = generate_table(
         &session,
         table_name,
         &original_catalog,
