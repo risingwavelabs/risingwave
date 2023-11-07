@@ -177,9 +177,7 @@ mod tests {
             )
             .unwrap(),
         );
-        let mut simple_agg: std::pin::Pin<
-            Box<dyn Stream<Item = Result<Message, StreamExecutorError>> + Send>,
-        > = simple_agg.execute();
+        let mut simple_agg = simple_agg.execute();
 
         assert_matches!(
             simple_agg.next().await.unwrap().unwrap(),
