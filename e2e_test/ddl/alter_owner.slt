@@ -174,3 +174,6 @@ DROP VIEW v;
 
 statement ok
 DROP TABLE t;
+
+statement ok
+DROP USER user1;
