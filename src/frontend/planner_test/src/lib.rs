@@ -282,7 +282,12 @@ impl TestCase {
             .chain(std::iter::once(self.sql()))
         {
             result = self
-                .run_sql(sql, session.clone(), do_check_result, result)
+                .run_sql(
+                    Arc::new(sql.to_owned()),
+                    session.clone(),
+                    do_check_result,
+                    result,
+                )
                 .await?;
         }
 
@@ -326,7 +331,7 @@ impl TestCase {
                     );
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
-                        &(sql + temp_file.path().to_str().unwrap() + "')"),
+                        Arc::new(sql + temp_file.path().to_str().unwrap() + "')"),
                         session.clone(),
                         false,
                         None,
@@ -357,7 +362,7 @@ impl TestCase {
                     );
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
-                        &(sql + temp_file.path().to_str().unwrap() + "')"),
+                        Arc::new(sql + temp_file.path().to_str().unwrap() + "')"),
                         session.clone(),
                         false,
                         None,
@@ -376,15 +381,15 @@ impl TestCase {
 
     async fn run_sql(
         &self,
-        sql: &str,
+        sql: Arc<String>,
         session: Arc<SessionImpl>,
         do_check_result: bool,
         mut result: Option<TestCaseResult>,
     ) -> Result<Option<TestCaseResult>> {
-        let statements = Parser::parse_sql(sql).unwrap();
+        let statements = Parser::parse_sql(&sql).unwrap();
         for stmt in statements {
             // TODO: `sql` may contain multiple statements here.
-            let handler_args = HandlerArgs::new(session.clone(), &stmt, sql)?;
+            let handler_args = HandlerArgs::new(session.clone(), &stmt, sql.clone())?;
             let _guard = session.txn_begin_implicit();
             match stmt.clone() {
                 Statement::Query(_)
@@ -399,7 +404,7 @@ impl TestCase {
                         ..Default::default()
                     };
                     let context = OptimizerContext::new(
-                        HandlerArgs::new(session.clone(), &stmt, sql)?,
+                        HandlerArgs::new(session.clone(), &stmt, sql.clone())?,
                         explain_options,
                     );
                     let ret = self.apply_query(&stmt, context.into())?;

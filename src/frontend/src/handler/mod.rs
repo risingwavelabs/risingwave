@@ -109,16 +109,16 @@ impl From<Vec<Row>> for PgResponseStream {
 #[derive(Clone)]
 pub struct HandlerArgs {
     pub session: Arc<SessionImpl>,
-    pub sql: String,
+    pub sql: Arc<String>,
     pub normalized_sql: String,
     pub with_options: WithOptions,
 }
 
 impl HandlerArgs {
-    pub fn new(session: Arc<SessionImpl>, stmt: &Statement, sql: &str) -> Result<Self> {
+    pub fn new(session: Arc<SessionImpl>, stmt: &Statement, sql: Arc<String>) -> Result<Self> {
         Ok(Self {
             session,
-            sql: sql.into(),
+            sql,
             with_options: WithOptions::try_from(stmt)?,
             normalized_sql: Self::normalize_sql(stmt),
         })
@@ -171,12 +171,12 @@ impl HandlerArgs {
 pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
-    sql: &str,
+    sql: Arc<String>,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     session.clear_cancel_query_flag();
     let _guard = session.txn_begin_implicit();
-
+    session.set_sql(sql.clone());
     let handler_args = HandlerArgs::new(session, &stmt, sql)?;
 
     match stmt {

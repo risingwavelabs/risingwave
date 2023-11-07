@@ -17,6 +17,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
+use pgwire::pg_server::Session;
 use pgwire::types::Row;
 use risingwave_common::catalog::{ColumnCatalog, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
@@ -263,6 +264,37 @@ pub async fn handle_show_object(
                     ])
                 })
                 .collect_vec();
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(rows.into(), row_desc)
+                .into());
+        }
+        ShowObject::ProcessList => {
+            let rows = {
+                let sessions_map = session.env().sessions_map();
+                sessions_map
+                    .read()
+                    .values()
+                    .map(|s| {
+                        Row::new(vec![
+                            Some(format!("{}-{}", s.id().0, s.id().1).into()),
+                            Some(s.user_name().to_owned().into()),
+                            Some("Host TODO".into()),
+                            Some(s.database().to_owned().into()),
+                            Some("Time TODO".into()),
+                            s.sql().map(|sql| {
+                                let mut sql = sql.to_string();
+                                let old_len = sql.len();
+                                sql.truncate(1024);
+                                if old_len > sql.len() {
+                                    sql += "...";
+                                }
+                                sql.into()
+                            }),
+                        ])
+                    })
+                    .collect_vec()
+            };
+
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
                 .values(rows.into(), row_desc)
                 .into());

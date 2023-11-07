@@ -103,8 +103,8 @@ impl LocalFrontend {
         &self,
         sql: impl Into<String>,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
-        let sql = sql.into();
-        self.session_ref().run_statement(sql.as_str(), vec![]).await
+        let sql = Arc::new(sql.into());
+        self.session_ref().run_statement(sql, vec![]).await
     }
 
     pub async fn run_sql_with_session(
@@ -112,8 +112,8 @@ impl LocalFrontend {
         session_ref: Arc<SessionImpl>,
         sql: impl Into<String>,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
-        let sql = sql.into();
-        session_ref.run_statement(sql.as_str(), vec![]).await
+        let sql = Arc::new(sql.into());
+        session_ref.run_statement(sql, vec![]).await
     }
 
     pub async fn run_user_sql(
@@ -123,9 +123,9 @@ impl LocalFrontend {
         user_name: String,
         user_id: UserId,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
-        let sql = sql.into();
+        let sql = Arc::new(sql.into());
         self.session_user_ref(database, user_name, user_id)
-            .run_statement(sql.as_str(), vec![])
+            .run_statement(sql, vec![])
             .await
     }
 

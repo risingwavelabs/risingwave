@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use anyhow::Context;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -172,7 +174,7 @@ pub async fn handle_alter_table_column(
     }
 
     // Create handler args as if we're creating a new table with the altered definition.
-    let handler_args = HandlerArgs::new(session.clone(), &definition, "")?;
+    let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::new("".to_string()))?;
     let col_id_gen = ColumnIdGenerator::new_alter(&original_catalog);
     let Statement::CreateTable {
         columns,

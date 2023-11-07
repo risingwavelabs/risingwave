@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
 use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -130,7 +130,7 @@ pub struct FrontendEnv {
 }
 
 /// Session map identified by `(process_id, secret_key)`
-type SessionMapRef = Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>;
+type SessionMapRef = Arc<RwLock<HashMap<(i32, i32), Arc<SessionImpl>>>>;
 
 impl FrontendEnv {
     pub fn mock() -> Self {
@@ -167,7 +167,7 @@ impl FrontendEnv {
             hummock_snapshot_manager,
             server_addr,
             client_pool,
-            sessions_map: Arc::new(Mutex::new(HashMap::new())),
+            sessions_map: Arc::new(RwLock::new(HashMap::new())),
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             batch_config: BatchConfig::default(),
             meta_config: MetaConfig::default(),
@@ -327,7 +327,7 @@ impl FrontendEnv {
                 server_addr: frontend_address,
                 client_pool,
                 frontend_metrics,
-                sessions_map: Arc::new(Mutex::new(HashMap::new())),
+                sessions_map: Arc::new(RwLock::new(HashMap::new())),
                 batch_config,
                 meta_config,
                 source_metrics,
@@ -413,6 +413,10 @@ impl FrontendEnv {
         &self.creating_streaming_job_tracker
     }
 
+    pub fn sessions_map(&self) -> &SessionMapRef {
+        &self.sessions_map
+    }
+
     pub fn compute_runtime(&self) -> Arc<BackgroundShutdownRuntime> {
         self.compute_runtime.clone()
     }
@@ -467,6 +471,8 @@ pub struct SessionImpl {
     /// This flag is set only when current query is executed in local mode, and used to cancel
     /// local query.
     current_query_cancel_flag: Mutex<Option<ShutdownSender>>,
+
+    sql: Mutex<Weak<String>>,
 }
 
 #[derive(Error, Debug)]
@@ -502,6 +508,7 @@ impl SessionImpl {
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
+            sql: Mutex::new(Weak::new()),
         }
     }
 
@@ -521,6 +528,7 @@ impl SessionImpl {
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
+            sql: Mutex::new(Weak::new()),
         }
     }
 
@@ -567,6 +575,15 @@ impl SessionImpl {
 
     pub fn session_id(&self) -> SessionId {
         self.id
+    }
+
+    pub fn sql(&self) -> Option<Arc<String>> {
+        self.sql.lock().upgrade()
+    }
+
+    pub fn set_sql(&self, sql: Arc<String>) {
+        let mut guard = self.sql.lock();
+        *guard = Arc::downgrade(&sql);
     }
 
     pub fn check_relation_name_duplicated(
@@ -708,11 +725,11 @@ impl SessionImpl {
     /// Maybe we can remove it in the future.
     pub async fn run_statement(
         self: Arc<Self>,
-        sql: &str,
+        sql: Arc<String>,
         formats: Vec<Format>,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         // Parse sql.
-        let mut stmts = Parser::parse_sql(sql)
+        let mut stmts = Parser::parse_sql(&sql)
             .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))?;
         if stmts.is_empty() {
             return Ok(PgResponse::empty_result(
@@ -728,7 +745,7 @@ impl SessionImpl {
         }
         let stmt = stmts.swap_remove(0);
         let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, sql, formats));
+            let mut handle_fut = Box::pin(handle(self, stmt, sql.clone(), formats));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
@@ -738,7 +755,8 @@ impl SessionImpl {
                         Ok(result) => break result,
                         Err(_) => tracing::warn!(
                             target: SLOW_QUERY_LOG,
-                            sql,
+                            "{} {}",
+                            &sql,
                             "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
                         ),
                     }
@@ -862,7 +880,7 @@ impl SessionManager for SessionManagerImpl {
 
     /// Used when cancel request happened.
     fn cancel_queries_in_session(&self, session_id: SessionId) {
-        let guard = self.env.sessions_map.lock();
+        let guard = self.env.sessions_map.read();
         if let Some(session) = guard.get(&session_id) {
             session.cancel_current_query()
         } else {
@@ -871,7 +889,7 @@ impl SessionManager for SessionManagerImpl {
     }
 
     fn cancel_creating_jobs_in_session(&self, session_id: SessionId) {
-        let guard = self.env.sessions_map.lock();
+        let guard = self.env.sessions_map.read();
         if let Some(session) = guard.get(&session_id) {
             session.cancel_current_creating_job()
         } else {
@@ -897,7 +915,7 @@ impl SessionManagerImpl {
 
     fn insert_session(&self, session: Arc<SessionImpl>) {
         let active_sessions = {
-            let mut write_guard = self.env.sessions_map.lock();
+            let mut write_guard = self.env.sessions_map.write();
             write_guard.insert(session.id(), session);
             write_guard.len()
         };
@@ -909,7 +927,7 @@ impl SessionManagerImpl {
 
     fn delete_session(&self, session_id: &SessionId) {
         let active_sessions = {
-            let mut write_guard = self.env.sessions_map.lock();
+            let mut write_guard = self.env.sessions_map.write();
             write_guard.remove(session_id);
             write_guard.len()
         };
@@ -932,9 +950,9 @@ impl Session for SessionImpl {
         stmt: Statement,
         format: Format,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
-        let sql_str = stmt.to_string();
+        let sql = Arc::new(stmt.to_string());
         let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, &sql_str, vec![format]));
+            let mut handle_fut = Box::pin(handle(self, stmt, sql.clone(), vec![format]));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
@@ -942,7 +960,8 @@ impl Session for SessionImpl {
                     match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
                         Ok(result) => break result,
                         Err(_) => tracing::warn!(
-                            sql_str,
+                            "{} {}",
+                            &sql,
                             "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
                         ),
                     }
@@ -951,7 +970,7 @@ impl Session for SessionImpl {
                 handle_fut.await
             }
         }
-        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql_str, e))?;
+        .inspect_err(|e| tracing::error!("failed to handle sql:\n{}:\n{}", sql, e))?;
         Ok(rsp)
     }
 
