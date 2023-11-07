@@ -7304,6 +7304,7 @@ dependencies = [
  "regex",
  "reqwest",
  "risingwave_common_proc_macro",
+ "risingwave_error",
  "risingwave_pb",
  "rust_decimal",
  "rusty-fork",
@@ -7613,6 +7614,19 @@ dependencies = [
  "tokio-postgres",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "risingwave_error"
+version = "1.3.0-alpha"
+dependencies = [
+ "bincode 1.3.3",
+ "bytes",
+ "easy-ext",
+ "madsim-tonic",
+ "serde-error",
+ "thiserror",
+ "thiserror-ext",
 ]
 
 [[package]]
@@ -8111,6 +8125,7 @@ dependencies = [
  "moka",
  "rand",
  "risingwave_common",
+ "risingwave_error",
  "risingwave_hummock_sdk",
  "risingwave_pb",
  "serde-error",
@@ -8299,6 +8314,7 @@ dependencies = [
 name = "risingwave_storage"
 version = "1.3.0-alpha"
 dependencies = [
+ "anyhow",
  "arc-swap",
  "async-trait",
  "auto_enums",

@@ -27,6 +27,7 @@ lru = "0.10.1"
 moka = { version = "0.12", features = ["future"] }
 rand = "0.8"
 risingwave_common = { workspace = true }
+risingwave_error = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_pb = { workspace = true }
 serde-error = "0.1"

@@ -20,6 +20,7 @@ use std::io::Error as IoError;
 use std::time::{Duration, SystemTime};
 
 use memcomparable::Error as MemComparableError;
+use risingwave_error::tonic::{ToTonicStatus, TonicStatusWrapper};
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
 use tokio::task::JoinError;
@@ -193,13 +194,41 @@ pub struct RwError {
 
 impl From<RwError> for tonic::Status {
     fn from(err: RwError) -> Self {
-        // TODO(error-handling): `to_string()` loses the source chain, should use `rpc::error::ToStatus` instead.
-        match &*err.inner {
-            ErrorCode::ExprError(e) => tonic::Status::invalid_argument(e.to_string()),
-            ErrorCode::PermissionDenied(e) => tonic::Status::permission_denied(e),
-            ErrorCode::InternalError(e) => tonic::Status::internal(e),
-            _ => tonic::Status::internal(err.to_string()),
+        use tonic::Code;
+
+        let code = match &*err.inner {
+            ErrorCode::ExprError(_) => Code::InvalidArgument,
+            ErrorCode::PermissionDenied(_) => Code::PermissionDenied,
+            ErrorCode::InternalError(_) | _ => Code::Internal,
+        };
+
+        err.to_status(code)
+    }
+}
+
+impl From<TonicStatusWrapper> for RwError {
+    fn from(status: TonicStatusWrapper) -> Self {
+        use tonic::Code;
+
+        let message = status.inner().message();
+
+        // TODO(error-handling): `message` loses the source chain.
+        match status.inner().code() {
+            Code::InvalidArgument => ErrorCode::InvalidParameterValue(message.to_string()),
+            Code::NotFound | Code::AlreadyExists => ErrorCode::CatalogError(status.into()),
+            Code::PermissionDenied => ErrorCode::PermissionDenied(message.to_string()),
+            Code::Cancelled => ErrorCode::SchedulerError(status.into()),
+
+            _ => ErrorCode::RpcError(status.into()).into(),
         }
+        .into()
+    }
+}
+
+impl From<tonic::Status> for RwError {
+    fn from(status: tonic::Status) -> Self {
+        // Always wrap the status.
+        Self::from(TonicStatusWrapper::new(status))
     }
 }
 

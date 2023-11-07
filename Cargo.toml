@@ -11,6 +11,7 @@ members = [
   "src/compute",
   "src/connector",
   "src/ctl",
+  "src/error",
   "src/expr/core",
   "src/expr/impl",
   "src/expr/macro",
@@ -138,6 +139,7 @@ risingwave_compactor = { path = "./src/storage/compactor" }
 risingwave_compute = { path = "./src/compute" }
 risingwave_ctl = { path = "./src/ctl" }
 risingwave_connector = { path = "./src/connector" }
+risingwave_error = { path = "./src/error" }
 risingwave_expr = { path = "./src/expr/core" }
 risingwave_expr_impl = { path = "./src/expr/impl" }
 risingwave_frontend = { path = "./src/frontend" }
