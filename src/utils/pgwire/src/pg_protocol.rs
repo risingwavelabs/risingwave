@@ -444,11 +444,10 @@ where
         let start = Instant::now();
         let session = self.session.clone().unwrap();
         let session_id = session.id().0;
-        session.init_exec_context(sql.clone());
+        let _exec_context_guard = session.init_exec_context(sql.clone());
         let result = self
             .inner_process_query_msg(sql.clone(), session.clone())
             .await;
-        session.clear_exec_context();
 
         let mills = start.elapsed().as_millis();
 
@@ -717,7 +716,7 @@ where
             let portal = self.get_portal(&portal_name)?;
             let sql: Arc<str> = Arc::from(format!("{}", portal));
 
-            session.init_exec_context(sql.clone());
+            let _exec_context_guard = session.init_exec_context(sql.clone());
             let result = session.clone().execute(portal).await;
 
             let mills = start.elapsed().as_millis();
@@ -737,9 +736,6 @@ where
             if !is_consume_completed {
                 self.result_cache.insert(portal_name, result_cache);
             }
-
-            // Clear exec context after consuming exec data.
-            session.clear_exec_context();
         }
 
         Ok(())

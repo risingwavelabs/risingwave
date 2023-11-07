@@ -18,7 +18,7 @@ use std::net::SocketAddr;
 #[cfg(test)]
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -26,7 +26,10 @@ use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_message::TransactionStatus;
 use pgwire::pg_response::PgResponse;
-use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
+use pgwire::pg_server::{
+    BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
+    UserAuthenticator,
+};
 use pgwire::types::{Format, FormatIterator};
 use rand::RngCore;
 use risingwave_batch::task::{ShutdownSender, ShutdownToken};
@@ -478,11 +481,7 @@ pub struct SessionImpl {
     /// local query.
     current_query_cancel_flag: Mutex<Option<ShutdownSender>>,
 
-    /// Running sql
-    running_sql: Mutex<Option<Arc<str>>>,
-
-    /// The instant of the running sql
-    last_instant: Mutex<Option<Instant>>,
+    exec_context: Mutex<Option<Weak<ExecContext>>>,
 }
 
 #[derive(Error, Debug)]
@@ -520,8 +519,7 @@ impl SessionImpl {
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
-            running_sql: Mutex::new(None),
-            last_instant: Mutex::new(None),
+            exec_context: Mutex::new(None),
         }
     }
 
@@ -541,8 +539,7 @@ impl SessionImpl {
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
-            running_sql: Mutex::new(None),
-            last_instant: Mutex::new(None),
+            exec_context: Mutex::new(None),
             peer_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
         }
     }
@@ -593,7 +590,11 @@ impl SessionImpl {
     }
 
     pub fn running_sql(&self) -> Option<Arc<str>> {
-        self.running_sql.lock().clone()
+        self.exec_context
+            .lock()
+            .as_ref()
+            .and_then(|weak| weak.upgrade())
+            .map(|context| context.running_sql.clone())
     }
 
     pub fn peer_addr(&self) -> &SocketAddr {
@@ -601,9 +602,11 @@ impl SessionImpl {
     }
 
     pub fn elapse_since_running_sql(&self) -> Option<u128> {
-        self.last_instant
+        self.exec_context
             .lock()
-            .map(|instant| instant.elapsed().as_millis())
+            .as_ref()
+            .and_then(|weak| weak.upgrade())
+            .map(|context| context.last_instant.elapsed().as_millis())
     }
 
     pub fn check_relation_name_duplicated(
@@ -1113,14 +1116,15 @@ impl Session for SessionImpl {
         }
     }
 
-    fn init_exec_context(&self, sql: Arc<str>) {
-        *self.running_sql.lock() = Some(sql);
-        *self.last_instant.lock() = Some(Instant::now());
-    }
-
-    fn clear_exec_context(self: Arc<Self>) {
-        *self.running_sql.lock() = None;
-        *self.last_instant.lock() = None;
+    /// Init and return an `Arc<ExecContext>` which could be used as a guard to represent the execution flow.
+    /// Once
+    fn init_exec_context(&self, sql: Arc<str>) -> ExecContextGuard {
+        let exec_context = Arc::new(ExecContext {
+            running_sql: sql,
+            last_instant: Instant::now(),
+        });
+        *self.exec_context.lock() = Some(Arc::downgrade(&exec_context));
+        ExecContextGuard(exec_context)
     }
 }
 

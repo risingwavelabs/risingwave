@@ -17,6 +17,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::result::Result;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::Bytes;
 use futures::TryFutureExt;
@@ -110,10 +111,16 @@ pub trait Session: Send + Sync {
 
     fn transaction_status(&self) -> TransactionStatus;
 
-    fn init_exec_context(&self, sql: Arc<str>);
-
-    fn clear_exec_context(self: Arc<Self>);
+    fn init_exec_context(&self, sql: Arc<str>) -> ExecContextGuard;
 }
+
+pub struct ExecContext {
+    pub running_sql: Arc<str>,
+    /// The instant of the running sql
+    pub last_instant: Instant,
+}
+
+pub struct ExecContextGuard(pub Arc<ExecContext>);
 
 #[derive(Debug, Clone)]
 pub enum UserAuthenticator {
@@ -209,7 +216,8 @@ mod tests {
     use crate::pg_message::TransactionStatus;
     use crate::pg_response::{PgResponse, RowSetResult, StatementType};
     use crate::pg_server::{
-        pg_serve, BoxedError, Session, SessionId, SessionManager, UserAuthenticator,
+        pg_serve, BoxedError, ExecContextGuard, Session, SessionId, SessionManager,
+        UserAuthenticator,
     };
     use crate::types;
     use crate::types::Row;
@@ -337,9 +345,9 @@ mod tests {
             TransactionStatus::Idle
         }
 
-        fn init_exec_context(&self, _sql: Arc<str>) {}
-
-        fn clear_exec_context(self: Arc<Self>) {}
+        fn init_exec_context(&self, _sql: Arc<str>) -> ExecContextGuard {
+            unreachable!()
+        }
     }
 
     #[tokio::test]
