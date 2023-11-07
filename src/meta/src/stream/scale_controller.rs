@@ -22,7 +22,6 @@ use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_meta_model_v2::WorkerId;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, WorkerNode};
 use risingwave_pb::meta::get_reschedule_plan_request::{Policy, StableResizePolicy};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -36,7 +35,7 @@ use risingwave_pb::stream_service::{
 use uuid::Uuid;
 
 use crate::barrier::Reschedule;
-use crate::manager::{ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv};
+use crate::manager::{ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::stream::{rebalance_actor_vnode, ParallelUnitReschedule, SourceManagerRef};
 use crate::MetaResult;
