@@ -195,6 +195,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::error::Error;
+    use std::net::SocketAddr;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -223,6 +224,7 @@ mod tests {
             &self,
             _database: &str,
             _user_name: &str,
+            _peer_addr: SocketAddr,
         ) -> Result<Arc<Self::Session>, Box<dyn Error + Send + Sync>> {
             Ok(Arc::new(MockSession {}))
         }

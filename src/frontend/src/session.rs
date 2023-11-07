@@ -541,6 +541,7 @@ impl SessionImpl {
             notices: Default::default(),
             running_sql: Mutex::new(None),
             last_instant: Mutex::new(None),
+            peer_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
         }
     }
 
