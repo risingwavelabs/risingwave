@@ -25,6 +25,7 @@ import com.risingwave.connector.api.sink.ArraySinkRow;
 import com.risingwave.proto.Data;
 import com.risingwave.proto.Data.DataType.TypeName;
 import com.risingwave.proto.Data.Op;
+import com.zaxxer.hikari.HikariDataSource;
 import java.sql.*;
 import org.junit.Test;
 import org.testcontainers.containers.JdbcDatabaseContainer;
@@ -81,7 +82,7 @@ public class JDBCSinkTest {
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
                         getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
-        Connection conn = sink.getConn();
+        Connection conn = sink.getConnPool().getConnection();
 
         sink.write(
                 Iterators.forArray(
@@ -125,6 +126,7 @@ public class JDBCSinkTest {
             assertEquals(2, count);
         }
         stmt.close();
+        conn.close();
 
         sink.sync();
         sink.drop();
@@ -140,7 +142,7 @@ public class JDBCSinkTest {
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
                         getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
-        Connection conn = sink.getConn();
+        Connection conn = sink.getConnPool().getConnection();
         Statement stmt = conn.createStatement();
 
         sink.write(
@@ -218,6 +220,7 @@ public class JDBCSinkTest {
 
         sink.sync();
         stmt.close();
+        conn.close();
     }
 
     static void testJDBCDrop(JdbcDatabaseContainer<?> container, TestType testType)
@@ -230,13 +233,9 @@ public class JDBCSinkTest {
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
                         getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
-        Connection conn = sink.getConn();
+        HikariDataSource connPool = sink.getConnPool();
         sink.drop();
-        try {
-            assertTrue(conn.isClosed());
-        } catch (SQLException e) {
-            fail(String.valueOf(e));
-        }
+        assertTrue(connPool.isClosed());
     }
 
     @Test

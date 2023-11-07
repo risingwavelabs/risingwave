@@ -347,10 +347,7 @@ public class JDBCSink extends SinkWriterBase {
         return config.getTableName();
     }
 
-    public Connection getConn() throws SQLException {
-        if (connPool == null) {
-            return null;
-        }
-        return connPool.getConnection();
+    public HikariDataSource getConnPool() {
+        return connPool;
     }
 }
