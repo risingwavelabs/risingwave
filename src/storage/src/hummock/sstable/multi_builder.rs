@@ -19,8 +19,9 @@ use std::sync::Arc;
 use bytes::Bytes;
 use num_integer::Integer;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, UserKey};
-use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::LocalSstableInfo;
 use tokio::task::JoinHandle;
 
 use super::MonotonicDeleteEvent;
@@ -199,7 +200,7 @@ where
         // the captured reference to `current_builder` is also required to be `Send`, and then
         // `current_builder` itself is required to be `Sync`, which is unnecessary.
         let mut need_seal_current = false;
-        let mut last_range_tombstone_epoch = HummockEpoch::MAX;
+        let mut last_range_tombstone_epoch = MAX_EPOCH;
         if let Some(builder) = self.current_builder.as_mut() {
             if is_new_user_key {
                 if switch_builder {
@@ -214,7 +215,7 @@ where
             }
             if need_seal_current
                 && let Some(event) = builder.last_range_tombstone()
-                && event.new_epoch != HummockEpoch::MAX
+                && event.new_epoch != MAX_EPOCH
             {
                 last_range_tombstone_epoch = event.new_epoch;
                 if event
@@ -228,7 +229,7 @@ where
                 } else {
                     builder.add_monotonic_delete(MonotonicDeleteEvent {
                         event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
-                        new_epoch: HummockEpoch::MAX,
+                        new_epoch: MAX_EPOCH,
                     });
                 }
             }
@@ -247,7 +248,7 @@ where
             let mut builder = self.builder_factory.open_builder().await?;
             // If last_range_tombstone_epoch is not MAX, it means that we cut one range-tombstone to
             // two half and add the right half as a new range to next sstable.
-            if need_seal_current && last_range_tombstone_epoch != HummockEpoch::MAX {
+            if need_seal_current && last_range_tombstone_epoch != MAX_EPOCH {
                 builder.add_monotonic_delete(MonotonicDeleteEvent {
                     event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
                     new_epoch: last_range_tombstone_epoch,
@@ -305,19 +306,19 @@ where
     pub async fn add_monotonic_delete(&mut self, event: MonotonicDeleteEvent) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.as_mut()
             && builder.reach_capacity()
-            && event.new_epoch != HummockEpoch::MAX
+            && event.new_epoch != MAX_EPOCH
         {
-            if builder.last_range_tombstone_epoch() != HummockEpoch::MAX {
+            if builder.last_range_tombstone_epoch() != MAX_EPOCH {
                 builder.add_monotonic_delete(MonotonicDeleteEvent {
                     event_key: event.event_key.clone(),
-                    new_epoch: HummockEpoch::MAX,
+                    new_epoch: MAX_EPOCH,
                 });
             }
             self.seal_current().await?;
         }
 
         if self.current_builder.is_none() {
-            if event.new_epoch == HummockEpoch::MAX {
+            if event.new_epoch == MAX_EPOCH {
                 return Ok(());
             }
 
@@ -694,7 +695,7 @@ mod tests {
             false,
             0,
         );
-        assert_eq!(del_iter.earliest_epoch(), HummockEpoch::MAX);
+        assert_eq!(del_iter.earliest_epoch(), MAX_EPOCH);
         while del_iter.is_valid() {
             del_iter.update_range();
             builder
@@ -793,7 +794,7 @@ mod tests {
                     UserKey::for_test(table_id, b"gggg".to_vec()),
                     false,
                 ),
-                new_epoch: HummockEpoch::MAX,
+                new_epoch: MAX_EPOCH,
             })
             .await
             .unwrap();
@@ -808,22 +809,18 @@ mod tests {
 
         let key_range = ssts[0].key_range.as_ref().unwrap();
         let expected_left =
-            FullKey::from_user_key(UserKey::for_test(table_id, b"aaaa"), HummockEpoch::MAX)
-                .encode();
+            FullKey::from_user_key(UserKey::for_test(table_id, b"aaaa"), MAX_EPOCH).encode();
         let expected_right =
-            FullKey::from_user_key(UserKey::for_test(table_id, b"eeee"), HummockEpoch::MAX)
-                .encode();
+            FullKey::from_user_key(UserKey::for_test(table_id, b"eeee"), MAX_EPOCH).encode();
         assert_eq!(key_range.left, expected_left);
         assert_eq!(key_range.right, expected_right);
         assert!(key_range.right_exclusive);
 
         let key_range = ssts[1].key_range.as_ref().unwrap();
         let expected_left =
-            FullKey::from_user_key(UserKey::for_test(table_id, b"eeee"), HummockEpoch::MAX)
-                .encode();
+            FullKey::from_user_key(UserKey::for_test(table_id, b"eeee"), MAX_EPOCH).encode();
         let expected_right =
-            FullKey::from_user_key(UserKey::for_test(table_id, b"gggg"), HummockEpoch::MAX)
-                .encode();
+            FullKey::from_user_key(UserKey::for_test(table_id, b"gggg"), MAX_EPOCH).encode();
         assert_eq!(key_range.left, expected_left);
         assert_eq!(key_range.right, expected_right);
         assert!(key_range.right_exclusive);

@@ -21,6 +21,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::must_match;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -223,17 +224,17 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     );
 
     let mut last_key = FullKey::<B>::default();
-    let mut user_key_last_delete = HummockEpoch::MAX;
+    let mut user_key_last_delete = MAX_EPOCH;
     for (mut key, value) in kv_iter {
         let is_new_user_key =
             last_key.is_empty() || key.user_key.as_ref() != last_key.user_key.as_ref();
         let epoch = key.epoch_with_gap.pure_epoch();
         if is_new_user_key {
             last_key = key.clone();
-            user_key_last_delete = HummockEpoch::MAX;
+            user_key_last_delete = MAX_EPOCH;
         }
 
-        let mut earliest_delete_epoch = HummockEpoch::MAX;
+        let mut earliest_delete_epoch = MAX_EPOCH;
         let extended_user_key = PointRange::from_user_key(key.user_key.as_ref(), false);
         for range_tombstone in &range_tombstones {
             if range_tombstone

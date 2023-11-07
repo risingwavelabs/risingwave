@@ -277,7 +277,13 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
 impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     /// Creates [`BackwardUserIterator`] with maximum epoch.
     pub(crate) fn for_test(iterator: I, key_range: UserKeyRange) -> Self {
-        Self::with_epoch(iterator, key_range, HummockEpoch::MAX, 0, None)
+        Self::with_epoch(
+            iterator,
+            key_range,
+            risingwave_common::util::epoch::MAX_EPOCH,
+            0,
+            None,
+        )
     }
 
     /// Creates [`BackwardUserIterator`] with maximum epoch.
@@ -286,7 +292,13 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
         key_range: UserKeyRange,
         min_epoch: HummockEpoch,
     ) -> Self {
-        Self::with_epoch(iterator, key_range, HummockEpoch::MAX, min_epoch, None)
+        Self::with_epoch(
+            iterator,
+            key_range,
+            risingwave_common::util::epoch::MAX_EPOCH,
+            min_epoch,
+            None,
+        )
     }
 }
 

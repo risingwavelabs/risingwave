@@ -17,6 +17,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
@@ -113,7 +114,7 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     /// epoch1 to epoch2, thus the `new epoch` is epoch2. epoch2 will be used from the event
     /// key wmk1 (5) and till the next event key wmk2 (7) (not inclusive).
     /// If there is no range deletes between current event key and next event key, `new_epoch` will
-    /// be `HummockEpoch::MAX`.
+    /// be `MAX_EPOCH`.
     monotonic_deletes: Vec<MonotonicDeleteEvent>,
     /// `table_id` of added keys.
     table_ids: BTreeSet<u32>,
@@ -197,9 +198,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
             self.table_ids.insert(table_id);
         }
-        if event.new_epoch == HummockEpoch::MAX
+        if event.new_epoch == MAX_EPOCH
             && self.monotonic_deletes.last().map_or(true, |last| {
-                last.new_epoch == HummockEpoch::MAX
+                last.new_epoch == MAX_EPOCH
                     && last.event_key.left_user_key.table_id
                         == event.event_key.left_user_key.table_id
             })
@@ -207,7 +208,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             // This range would never delete any key so we can merge it with last range.
             return;
         }
-        if event.new_epoch != HummockEpoch::MAX {
+        if event.new_epoch != MAX_EPOCH {
             self.epoch_set.insert(event.new_epoch);
         }
         self.range_tombstone_size += event.encoded_size();
@@ -217,7 +218,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     pub fn last_range_tombstone_epoch(&self) -> HummockEpoch {
         self.monotonic_deletes
             .last()
-            .map_or(HummockEpoch::MAX, |delete| delete.new_epoch)
+            .map_or(MAX_EPOCH, |delete| delete.new_epoch)
     }
 
     pub fn last_range_tombstone(&self) -> Option<&MonotonicDeleteEvent> {
@@ -398,7 +399,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         assert!(self.monotonic_deletes.is_empty() || self.monotonic_deletes.len() > 1);
 
         if let Some(monotonic_delete) = self.monotonic_deletes.last() {
-            assert_eq!(monotonic_delete.new_epoch, HummockEpoch::MAX);
+            assert_eq!(monotonic_delete.new_epoch, MAX_EPOCH);
             if monotonic_delete.event_key.is_exclude_left_key {
                 if largest_key.is_empty()
                     || !KeyComparator::encoded_greater_than_unencoded(
@@ -419,18 +420,18 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 )
             {
                 // use MAX as epoch because the last monotonic delete must be
-                // `HummockEpoch::MAX`, so we can not include any version of
+                // `MAX_EPOCH`, so we can not include any version of
                 // this key.
                 largest_key = FullKey::from_user_key(
                     monotonic_delete.event_key.left_user_key.clone(),
-                    HummockEpoch::MAX,
+                    MAX_EPOCH,
                 )
                 .encode();
                 right_exclusive = true;
             }
         }
         if let Some(monotonic_delete) = self.monotonic_deletes.first() {
-            assert_ne!(monotonic_delete.new_epoch, HummockEpoch::MAX);
+            assert_ne!(monotonic_delete.new_epoch, MAX_EPOCH);
             if smallest_key.is_empty()
                 || !KeyComparator::encoded_less_than_unencoded(
                     user_key(&smallest_key),
@@ -439,7 +440,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             {
                 smallest_key = FullKey::from_user_key(
                     monotonic_delete.event_key.left_user_key.clone(),
-                    HummockEpoch::MAX,
+                    MAX_EPOCH,
                 )
                 .encode();
             }
@@ -494,7 +495,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             let mut tombstone_max_epoch = u64::MIN;
 
             for monotonic_delete in &meta.monotonic_tombstone_events {
-                if monotonic_delete.new_epoch != HummockEpoch::MAX {
+                if monotonic_delete.new_epoch != MAX_EPOCH {
                     tombstone_min_epoch = cmp::min(tombstone_min_epoch, monotonic_delete.new_epoch);
                     tombstone_max_epoch = cmp::max(tombstone_max_epoch, monotonic_delete.new_epoch);
                 }
@@ -692,7 +693,7 @@ pub(super) mod tests {
         let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
         b.add_monotonic_deletes(vec![
             MonotonicDeleteEvent::new(table_id, b"abcd".to_vec(), 0),
-            MonotonicDeleteEvent::new(table_id, b"eeee".to_vec(), HummockEpoch::MAX),
+            MonotonicDeleteEvent::new(table_id, b"eeee".to_vec(), MAX_EPOCH),
         ]);
         let s = b.finish().await.unwrap().sst_info;
         let key_range = s.sst_info.key_range.unwrap();

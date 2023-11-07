@@ -35,7 +35,6 @@ use crate::hummock::utils::{
 use crate::row_serde::value_serde::ValueRowSerde;
 use crate::storage_value::StorageValue;
 use crate::store::*;
-const MEM_TABLE_SPILL_THRESHOLD: usize = 64 << 20;
 pub type ImmutableMemtable = SharedBufferBatch;
 
 pub type ImmId = SharedBufferBatchId;
@@ -577,21 +576,6 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
     }
 
     async fn try_flush(&mut self) -> StorageResult<()> {
-        tracing::info!("In memory state store");
-        if self.mem_table.kv_size.size() > MEM_TABLE_SPILL_THRESHOLD {
-            tracing::info!(
-                "The size of mem table exceeds {} Mb and spill occurs. table_id {}",
-                MEM_TABLE_SPILL_THRESHOLD >> 20,
-                self.table_id.table_id()
-            );
-            let gap_epoch = self.epoch() + 1;
-
-            self.epoch
-                .replace(gap_epoch)
-                .expect("should have init epoch before seal the first epoch");
-            self.flush(vec![]).await?;
-        }
-
         Ok(())
     }
 }

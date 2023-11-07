@@ -25,6 +25,7 @@ use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, TableKeyRange, UserKey};
 use risingwave_hummock_sdk::EpochWithGap;
 
@@ -168,7 +169,7 @@ impl SharedBufferBatchInner {
             });
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
                 event_key: end_point_range,
-                new_epoch: HummockEpoch::MAX,
+                new_epoch: MAX_EPOCH,
             });
         }
 
@@ -327,7 +328,7 @@ impl SharedBufferBatchInner {
             },
         );
         if idx == 0 {
-            HummockEpoch::MAX
+            MAX_EPOCH
         } else {
             self.monotonic_tombstone_events[idx - 1].new_epoch
         }
@@ -866,7 +867,7 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
         if self.next_idx > 0 {
             self.inner.monotonic_tombstone_events[self.next_idx - 1].new_epoch
         } else {
-            HummockEpoch::MAX
+            MAX_EPOCH
         }
     }
 
@@ -906,6 +907,7 @@ mod tests {
     use std::ops::Bound::{Excluded, Included};
 
     use risingwave_common::must_match;
+    use risingwave_common::util::epoch::MAX_EPOCH;
     use risingwave_hummock_sdk::key::map_table_key_range;
 
     use super::*;
@@ -1200,7 +1202,7 @@ mod tests {
                 .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"aaa"),))
         );
         assert_eq!(
-            HummockEpoch::MAX,
+            MAX_EPOCH,
             shared_buffer_batch
                 .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"bbb"),))
         );
@@ -1210,7 +1212,7 @@ mod tests {
                 .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"ddd"),))
         );
         assert_eq!(
-            HummockEpoch::MAX,
+            MAX_EPOCH,
             shared_buffer_batch
                 .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"eee"),))
         );

@@ -19,13 +19,14 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
 use risingwave_hummock_sdk::key::{FullKey, PointRange};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::{can_concat, EpochWithGap, HummockEpoch};
+use risingwave_hummock_sdk::{can_concat, EpochWithGap};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType, SstableInfo};
 use tokio::sync::oneshot::Receiver;
@@ -158,7 +159,7 @@ impl CompactorRunner {
                         tombstone.event_key.left_user_key.as_ref(),
                         tombstone.new_epoch,
                     )) {
-                        tombstone.new_epoch = HummockEpoch::MAX;
+                        tombstone.new_epoch = MAX_EPOCH;
                     }
                 });
                 builder.add_delete_events(range_tombstone_list);
@@ -665,7 +666,7 @@ where
         del_iter.seek(full_key.user_key);
         if !task_config.gc_delete_keys
             && del_iter.is_valid()
-            && del_iter.earliest_epoch() != HummockEpoch::MAX
+            && del_iter.earliest_epoch() != MAX_EPOCH
         {
             sst_builder
                 .add_monotonic_delete(MonotonicDeleteEvent {
@@ -688,7 +689,7 @@ where
 
     let mut last_key = FullKey::default();
     let mut watermark_can_see_last_key = false;
-    let mut user_key_last_delete_epoch = HummockEpoch::MAX;
+    let mut user_key_last_delete_epoch = MAX_EPOCH;
     let mut local_stats = StoreLocalStatistic::default();
 
     // Keep table stats changes due to dropping KV.
@@ -724,7 +725,7 @@ where
             }
             last_key.set(iter_key);
             watermark_can_see_last_key = false;
-            user_key_last_delete_epoch = HummockEpoch::MAX;
+            user_key_last_delete_epoch = MAX_EPOCH;
             if value.is_delete() {
                 local_stats.skip_delete_key_count += 1;
             }
@@ -850,7 +851,7 @@ where
                 sst_builder
                     .add_monotonic_delete(MonotonicDeleteEvent {
                         event_key: extended_largest_user_key,
-                        new_epoch: HummockEpoch::MAX,
+                        new_epoch: MAX_EPOCH,
                     })
                     .await?;
                 break;
