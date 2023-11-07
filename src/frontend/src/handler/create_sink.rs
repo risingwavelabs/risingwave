@@ -22,7 +22,7 @@ use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail;
-use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
+use risingwave_common::catalog::{ColumnCatalog, ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -50,7 +50,9 @@ use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::handler::create_table::{generate_table, ColumnIdGenerator};
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::{generic, Explain, PlanTreeNodeUnary, StreamProject};
+use crate::optimizer::plan_node::{
+    generic, Explain, LogicalSource, PlanTreeNodeUnary, StreamProject,
+};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
@@ -414,71 +416,65 @@ pub async fn handle_create_sink(
                             .to_string(),
                     )));
                 }
-
-                let sink_plan = plan.as_stream_sink().unwrap();
-                let mut input = sink_plan.input();
-                input = RequiredDist::PhysicalDist(table_dist.unwrap())
-                    .enforce_if_not_satisfies(input, &Order::any())?;
-                plan = sink_plan.clone_with_input(input).into();
             }
 
-            let sink_plan: PlanRef = {
-                let mut exprs = vec![];
+            let mut exprs = vec![];
 
-                let table_columns = affected_table_catalog
-                    .get_columns()
-                    .iter()
-                    .map(|col| {
-                        let col_desc = col.get_column_desc().unwrap();
-                        let generated = col_desc.generated_or_default_column.is_some();
-                        let data_type = col_desc.get_column_type().unwrap();
-                        (DataType::from(data_type), generated)
-                    })
-                    .collect_vec();
+            let table_columns = affected_table_catalog
+                .get_columns()
+                .iter()
+                .map(|col| ColumnCatalog::from(col.clone()))
+                .collect_vec();
 
-                let sink_visible_columns = sink
-                    .full_columns()
-                    .iter()
-                    .enumerate()
-                    .filter(|(_i, c)| !c.is_hidden())
-                    .collect_vec();
+            let sink_visible_columns = sink
+                .full_columns()
+                .iter()
+                .enumerate()
+                .filter(|(_i, c)| !c.is_hidden())
+                .collect_vec();
 
-                for (idx, (data_type, generated)) in table_columns.iter().enumerate() {
-                    if *generated {
-                        continue;
-                    }
-
-                    if idx < sink_visible_columns.len() {
-                        let (sink_col_idx, sink_column) = sink_visible_columns[idx];
-
-                        let sink_col_type = sink_column.data_type();
-                        if data_type != sink_col_type {
-                            bail!(
-                                "column type mismatch: {:?} vs {:?}",
-                                data_type,
-                                sink_col_type
-                            );
-                        } else {
-                            exprs.push(ExprImpl::InputRef(Box::new(InputRef::new(
-                                sink_col_idx,
-                                data_type.clone(),
-                            ))));
-                        }
-                    } else {
-                        exprs.push(ExprImpl::Literal(Box::new(Literal::new(
-                            None,
-                            data_type.clone(),
-                        ))));
-                    };
+            for (idx, table_column) in table_columns.iter().enumerate() {
+                if table_column.is_generated() {
+                    continue;
                 }
 
+                let data_type = table_column.data_type();
+
+                if idx < sink_visible_columns.len() {
+                    let (sink_col_idx, sink_column) = sink_visible_columns[idx];
+
+                    let sink_col_type = sink_column.data_type();
+
+                    if data_type != sink_col_type {
+                        bail!(
+                            "column type mismatch: {:?} vs {:?}",
+                            data_type,
+                            sink_col_type
+                        );
+                    } else {
+                        exprs.push(ExprImpl::InputRef(Box::new(InputRef::new(
+                            sink_col_idx,
+                            data_type.clone(),
+                        ))));
+                    }
+                } else {
+                    exprs.push(ExprImpl::Literal(Box::new(Literal::new(
+                        None,
+                        data_type.clone(),
+                    ))));
+                };
+            }
+
+            let logical_project = generic::Project::new(exprs, plan);
+
+            plan = StreamProject::new(logical_project).into();
+
+            let exprs = LogicalSource::derive_output_exprs_from_generated_columns(&table_columns)?;
+            if let Some(exprs) = exprs {
                 let logical_project = generic::Project::new(exprs, plan);
-
-                StreamProject::new(logical_project).into()
-            };
-
-            plan = sink_plan;
-        }
+                plan = StreamProject::new(logical_project).into();
+            }
+        };
 
         let has_order_by = !query.order_by.is_empty();
         if has_order_by {

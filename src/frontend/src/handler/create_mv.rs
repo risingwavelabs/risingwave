@@ -89,8 +89,6 @@ pub fn gen_create_mv_plan(
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
 
-    println!("table name {}", table_name);
-
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     let definition = context.normalized_sql().to_owned();
@@ -113,7 +111,6 @@ pub fn gen_create_mv_plan(
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
 
-    println!("plan root {:#?}", plan_root);
     if let Some(col_names) = col_names {
         for name in &col_names {
             check_valid_column_name(name)?;

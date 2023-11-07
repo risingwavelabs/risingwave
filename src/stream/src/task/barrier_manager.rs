@@ -153,9 +153,6 @@ impl LocalBarrierManager {
             }
         };
 
-        // println!("to send {:#?}", to_send);
-        // println!("exists {:#?}", self.senders.keys().collect_vec());
-
         for actor_id in to_send {
             match self.senders.get(&actor_id) {
                 Some(senders) => {

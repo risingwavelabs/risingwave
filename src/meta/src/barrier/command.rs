@@ -202,8 +202,6 @@ impl Command {
                     let to_add = new_table_fragments.actor_ids().into_iter().collect();
                     let to_remove = old_table_fragments.actor_ids().into_iter().collect();
 
-                    println!("to add {:?}", to_add);
-
                     CommandChanges::Combined(vec![
                         CommandChanges::CreateTable(table_fragments.table_id()),
                         CommandChanges::Actor { to_add, to_remove },
