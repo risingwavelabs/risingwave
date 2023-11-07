@@ -14,28 +14,38 @@
 
 package com.risingwave.java.binding;
 
-public class StreamChunkIterator implements AutoCloseable {
+public class StreamChunk implements AutoCloseable {
     private final long pointer;
     private boolean isClosed;
 
-    public StreamChunkIterator(StreamChunk chunk) {
-        this.pointer = Binding.iteratorNewStreamChunk(chunk.getPointer());
+    StreamChunk(long pointer) {
+        this.pointer = pointer;
         this.isClosed = false;
     }
 
-    public StreamChunkRow next() {
-        boolean hasNext = Binding.iteratorNext(this.pointer);
-        if (!hasNext) {
-            return null;
-        }
-        return new StreamChunkRow(pointer);
+    public static StreamChunk fromPayload(byte[] streamChunkPayload) {
+        return new StreamChunk(Binding.newStreamChunkFromPayload(streamChunkPayload));
+    }
+
+    /**
+     * This method generate the StreamChunk
+     *
+     * @param str A string that represent table format, content and operation. Example:"I I\n + 199
+     *     40"
+     */
+    public static StreamChunk fromPretty(String str) {
+        return new StreamChunk(Binding.newStreamChunkFromPretty(str));
     }
 
     @Override
     public void close() {
         if (!isClosed) {
-            isClosed = true;
-            Binding.iteratorClose(pointer);
+            Binding.streamChunkClose(pointer);
+            this.isClosed = true;
         }
+    }
+
+    long getPointer() {
+        return this.pointer;
     }
 }
