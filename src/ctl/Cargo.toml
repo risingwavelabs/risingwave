@@ -53,5 +53,8 @@ uuid = { version = "1", features = ["v4"] }
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
+[dev-dependencies]
+risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
+
 [lints]
 workspace = true
