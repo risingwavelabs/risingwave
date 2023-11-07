@@ -5942,6 +5942,7 @@ name = "pgwire"
 version = "1.3.0-alpha"
 dependencies = [
  "anyhow",
+ "auto_enums",
  "byteorder",
  "bytes",
  "futures",
@@ -5951,6 +5952,7 @@ dependencies = [
  "panic-message",
  "risingwave_common",
  "risingwave_sqlparser",
+ "tempfile",
  "thiserror",
  "tokio-openssl",
  "tokio-postgres",
