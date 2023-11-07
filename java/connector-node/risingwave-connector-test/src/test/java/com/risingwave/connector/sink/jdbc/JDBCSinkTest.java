@@ -82,7 +82,7 @@ public class JDBCSinkTest {
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
                         getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
-        Connection conn = sink.getConnPool().getConnection();
+        Connection conn = DriverManager.getConnection(container.getJdbcUrl());
 
         sink.write(
                 Iterators.forArray(
@@ -142,7 +142,7 @@ public class JDBCSinkTest {
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
                         getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
-        Connection conn = sink.getConnPool().getConnection();
+        Connection conn = DriverManager.getConnection(container.getJdbcUrl());
         Statement stmt = conn.createStatement();
 
         sink.write(
