@@ -402,7 +402,7 @@ impl StateStore for HummockStorage {
         self.validate_read_epoch(wait_epoch)?;
         let wait_epoch = match wait_epoch {
             HummockReadEpoch::Committed(epoch) => {
-                assert_ne!(epoch, MAX_EPOCH, "epoch should not be u64::MAX");
+                assert_ne!(epoch, MAX_EPOCH, "epoch should not be MAX_EPOCH");
                 epoch
             }
             _ => return Ok(()),

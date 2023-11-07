@@ -491,7 +491,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         // Expand the epoch of the whole sst by tombstone epoch
         let (tombstone_min_epoch, tombstone_max_epoch) = {
-            let mut tombstone_min_epoch = u64::MAX;
+            let mut tombstone_min_epoch = MAX_EPOCH;
             let mut tombstone_max_epoch = u64::MIN;
 
             for monotonic_delete in &meta.monotonic_tombstone_events {
@@ -537,7 +537,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         let (min_epoch, max_epoch) = {
             if self.epoch_set.is_empty() {
-                (u64::MAX, u64::MIN)
+                (MAX_EPOCH, u64::MIN)
             } else {
                 (
                     *self.epoch_set.first().unwrap(),

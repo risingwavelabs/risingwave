@@ -181,7 +181,7 @@ impl StateStore for HummockStorage {
         self.validate_read_epoch(wait_epoch)?;
         let wait_epoch = match wait_epoch {
             HummockReadEpoch::Committed(epoch) => {
-                assert_ne!(epoch, MAX_EPOCH, "epoch should not be u64::MAX");
+                assert_ne!(epoch, MAX_EPOCH, "epoch should not be MAX_EPOCH");
                 epoch
             }
             _ => return Ok(()),
@@ -247,7 +247,7 @@ impl StateStore for HummockStorage {
             assert_ne!(
                 read_current_epoch,
                 MAX_EPOCH,
-                "epoch should not be u64::MAX"
+                "epoch should not be MAX_EPOCH"
             );
             let sealed_epoch = self.seal_epoch.load(MemOrdering::SeqCst);
             if read_current_epoch > sealed_epoch {

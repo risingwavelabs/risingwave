@@ -268,6 +268,11 @@ pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
     checkpoint_path.trim_end_matches(|c| c != '/').to_string()
 }
 
+/// Represents an epoch with a gap.
+///
+/// When a spill of the mem table occurs between two epochs, `EpochWithGap` generates an offset.
+/// This offset is encoded when performing full key encoding. When returning to the upper-level
+/// interface, a pure epoch with the lower 16 bits set to 0 should be returned.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug, PartialOrd, Ord)]
 pub struct EpochWithGap(u64);
 
