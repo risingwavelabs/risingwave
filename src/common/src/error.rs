@@ -28,9 +28,6 @@ use tokio::task::JoinError;
 use crate::array::ArrayError;
 use crate::util::value_encoding::error::ValueEncodingError;
 
-/// Header used to store serialized [`RwError`] in grpc status.
-pub const RW_ERROR_GRPC_HEADER: &str = "risingwave-error-bin";
-
 const ERROR_SUPPRESSOR_RESET_DURATION: Duration = Duration::from_millis(60 * 60 * 1000); // 1h
 
 pub trait Error = std::error::Error + Send + Sync + 'static;
@@ -129,6 +126,7 @@ pub enum ErrorCode {
     #[error(transparent)]
     RpcError(
         // #[backtrace] // TODO(error-handling): there's a limitation that `#[transparent]` can't be used with `#[backtrace]` if no `#[from]`
+        // `tonic::transport::Error`, `TonicStatusWrapper`, or `RpcError`
         BoxedError,
     ),
     #[error("Bind error: {0}")]

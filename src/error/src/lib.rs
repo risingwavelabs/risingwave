@@ -12,4 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Error handling utilities.
+//!
+//! This will eventually replace the `RwError` in `risingwave_common`.
+
 pub mod tonic;

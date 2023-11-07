@@ -16,8 +16,6 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-bincode = "1"
-bytes = "1"
 easy-ext = "1"
 either = "1.9.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -30,10 +28,8 @@ risingwave_common = { workspace = true }
 risingwave_error = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_pb = { workspace = true }
-serde-error = "0.1"
 static_assertions = "1"
 thiserror = "1"
-thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
