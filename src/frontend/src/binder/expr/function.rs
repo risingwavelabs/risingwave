@@ -839,6 +839,10 @@ impl Binder {
                 ("array_sum", raw_call(ExprType::ArraySum)),
                 ("array_position", raw_call(ExprType::ArrayPosition)),
                 ("array_positions", raw_call(ExprType::ArrayPositions)),
+                ("array_contains", raw_call(ExprType::ArrayContains)),
+                ("arraycontains", raw_call(ExprType::ArrayContains)),
+                ("array_contained", raw_call(ExprType::ArrayContained)),
+                ("arraycontained", raw_call(ExprType::ArrayContained)),
                 ("trim_array", raw_call(ExprType::TrimArray)),
                 (
                     "array_ndims",
@@ -925,6 +929,8 @@ impl Binder {
                 ("jsonb_delete_path", raw_call(ExprType::JsonbDeletePath)),
                 ("jsonb_strip_nulls", raw_call(ExprType::JsonbStripNulls)),
                 ("to_jsonb", raw_call(ExprType::ToJsonb)),
+                ("jsonb_build_array", raw_call(ExprType::JsonbBuildArray)),
+                ("jsonb_build_object", raw_call(ExprType::JsonbBuildObject)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least

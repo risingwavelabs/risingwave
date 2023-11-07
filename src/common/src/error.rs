@@ -76,15 +76,26 @@ impl Display for TrackingIssue {
 pub enum ErrorCode {
     #[error("internal error: {0}")]
     InternalError(String),
+    // TODO: unify with the above
+    #[error(transparent)]
+    InternalErrorAnyhow(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("connector error: {0}")]
-    ConnectorError(BoxedError),
+    ConnectorError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("Feature is not yet implemented: {0}\n{1}")]
     NotImplemented(String, TrackingIssue),
     // Tips: Use this only if it's intended to reject the query
     #[error("Not supported: {0}\nHINT: {1}")]
     NotSupported(String, String),
     #[error(transparent)]
-    IoError(IoError),
+    IoError(#[from] IoError),
     #[error("Storage error: {0}")]
     StorageError(
         #[backtrace]
@@ -92,11 +103,23 @@ pub enum ErrorCode {
         BoxedError,
     ),
     #[error("Expr error: {0}")]
-    ExprError(BoxedError),
+    ExprError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("BatchError: {0}")]
-    BatchError(BoxedError),
+    BatchError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("Array error: {0}")]
-    ArrayError(ArrayError),
+    ArrayError(
+        #[from]
+        #[backtrace]
+        ArrayError,
+    ),
     #[error("Stream error: {0}")]
     StreamError(
         #[backtrace]
@@ -104,15 +127,27 @@ pub enum ErrorCode {
         BoxedError,
     ),
     #[error("RPC error: {0}")]
-    RpcError(BoxedError),
+    RpcError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("Bind error: {0}")]
     BindError(String),
     #[error("Catalog error: {0}")]
-    CatalogError(BoxedError),
+    CatalogError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("Protocol error: {0}")]
     ProtocolError(String),
     #[error("Scheduler error: {0}")]
-    SchedulerError(BoxedError),
+    SchedulerError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("Task not found")]
     TaskNotFound,
     #[error("Item not found: {0}")]
@@ -120,9 +155,13 @@ pub enum ErrorCode {
     #[error("Invalid input syntax: {0}")]
     InvalidInputSyntax(String),
     #[error("Can not compare in memory: {0}")]
-    MemComparableError(MemComparableError),
+    MemComparableError(#[from] MemComparableError),
     #[error("Error while de/se values: {0}")]
-    ValueEncodingError(ValueEncodingError),
+    ValueEncodingError(
+        #[from]
+        #[backtrace]
+        ValueEncodingError,
+    ),
     #[error("Invalid value [{config_value:?}] for [{config_entry:?}]")]
     InvalidConfigValue {
         config_entry: String,
@@ -131,7 +170,11 @@ pub enum ErrorCode {
     #[error("Invalid Parameter Value: {0}")]
     InvalidParameterValue(String),
     #[error("Sink error: {0}")]
-    SinkError(BoxedError),
+    SinkError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
     #[error("unrecognized configuration parameter \"{0}\"")]
@@ -211,7 +254,7 @@ impl From<std::net::AddrParseError> for RwError {
 
 impl From<anyhow::Error> for RwError {
     fn from(e: anyhow::Error) -> Self {
-        ErrorCode::InternalError(e.to_error_str()).into()
+        ErrorCode::InternalErrorAnyhow(e).into()
     }
 }
 
@@ -236,21 +279,6 @@ impl Debug for RwError {
             // Use inner error's backtrace by default, otherwise use the generated one in `From`.
             std::error::request_ref::<Backtrace>(&self.inner).unwrap_or(&*self.backtrace)
         )
-    }
-}
-
-impl PartialEq for RwError {
-    fn eq(&self, other: &Self) -> bool {
-        self.inner == other.inner
-    }
-}
-
-impl PartialEq for ErrorCode {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (ErrorCode::InternalError(msg), ErrorCode::InternalError(msg2)) => msg == msg2,
-            (_, _) => false,
-        }
     }
 }
 
@@ -325,13 +353,6 @@ impl<T> ToErrorStr for std::sync::mpsc::SendError<T> {
 impl<T> ToErrorStr for tokio::sync::mpsc::error::SendError<T> {
     fn to_error_str(self) -> String {
         self.to_string()
-    }
-}
-
-impl ToErrorStr for anyhow::Error {
-    fn to_error_str(self) -> String {
-        // Note: use alternate Display to print the source chain.
-        format!("{:#}", self)
     }
 }
 
@@ -476,8 +497,10 @@ mod tests {
     use std::convert::Into;
     use std::result::Result::Err;
 
+    use anyhow::anyhow;
+
     use super::*;
-    use crate::error::ErrorCode::InternalError;
+    use crate::error::ErrorCode::InternalErrorAnyhow;
 
     #[test]
     fn test_display_internal_error() {
@@ -493,12 +516,13 @@ mod tests {
             let err_msg = "a < 0";
             let error = (|| {
                 ensure!(a < 0);
-                Ok(())
-            })();
+                Ok::<_, RwError>(())
+            })()
+            .unwrap_err();
 
             assert_eq!(
-                Err(RwError::from(InternalError(err_msg.to_string()))),
-                error
+                RwError::from(InternalErrorAnyhow(anyhow!(err_msg))).to_string(),
+                error.to_string(),
             );
         }
 
@@ -506,25 +530,28 @@ mod tests {
             let err_msg = "error msg without args";
             let error = (|| {
                 ensure!(a < 0, "error msg without args");
-                Ok(())
-            })();
+                Ok::<_, RwError>(())
+            })()
+            .unwrap_err();
             assert_eq!(
-                Err(RwError::from(InternalError(err_msg.to_string()))),
-                error
+                RwError::from(InternalErrorAnyhow(anyhow!(err_msg))).to_string(),
+                error.to_string()
             );
         }
 
         {
             let error = (|| {
                 ensure!(a < 0, "error msg with args: {}", "xx");
-                Ok(())
-            })();
+                Ok::<_, RwError>(())
+            })()
+            .unwrap_err();
             assert_eq!(
-                Err(RwError::from(InternalError(format!(
+                RwError::from(InternalErrorAnyhow(anyhow!(
                     "error msg with args: {}",
                     "xx"
-                )))),
-                error
+                )))
+                .to_string(),
+                error.to_string()
             );
         }
     }
@@ -538,10 +565,7 @@ mod tests {
             Ok(())
         }
         let err = ensure_a_equals_b().unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "internal error: a == b assertion failed (a is 1, b is 2)"
-        );
+        assert_eq!(err.to_string(), "a == b assertion failed (a is 1, b is 2)");
     }
 
     #[test]
@@ -560,6 +584,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // it's not a good practice to include error source in `Display`, see #13248
     fn test_internal_sources() {
         use anyhow::Context;
 

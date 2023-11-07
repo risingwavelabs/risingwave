@@ -1437,6 +1437,14 @@ EOF
 cargo run -p risingwave_common --bin example-config >> src/config/example.toml
 '''
 
+[tasks.generate-with-options]
+private = true
+category = "Misc"
+description = "This command extracts WITH options from the Rust code and maintains them in a single source of truth `with_options.yaml`"
+script = '''
+UPDATE_EXPECT=1 cargo nextest run risingwave_connector tests::test_with_options_yaml_up_to_date
+'''
+
 [tasks.backwards-compat-test]
 category = "RiseDev - Backwards Compatibility Test"
 description = "Run backwards compatibility test"

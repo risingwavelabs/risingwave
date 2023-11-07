@@ -37,6 +37,7 @@ use risingwave_pb::connector_service::SinkMetadata;
 use serde::de;
 use serde_derive::Deserialize;
 use url::Url;
+use with_options::WithOptions;
 
 use super::{
     Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
@@ -60,12 +61,9 @@ impl RemoteSinkTrait for RemoteIceberg {
 
 pub type RemoteIcebergSink = CoordinatedRemoteSink<RemoteIceberg>;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 #[serde(deny_unknown_fields)]
 pub struct IcebergConfig {
-    #[serde(skip_serializing)]
-    pub connector: String, // Must be "iceberg" here.
-
     pub r#type: String, // accept "append-only" or "upsert"
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]

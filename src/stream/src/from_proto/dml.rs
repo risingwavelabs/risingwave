@@ -25,7 +25,6 @@ use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct DmlExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for DmlExecutorBuilder {
     type Node = DmlNode;
 

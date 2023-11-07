@@ -31,10 +31,18 @@ pub enum StorageError {
     ),
 
     #[error("Deserialize row error {0}.")]
-    DeserializeRow(ValueEncodingError),
+    DeserializeRow(
+        #[source]
+        #[backtrace]
+        ValueEncodingError,
+    ),
 
     #[error("Serialize/deserialize error: {0}")]
-    SerdeError(memcomparable::Error),
+    SerdeError(
+        #[source]
+        #[backtrace]
+        memcomparable::Error,
+    ),
 
     #[error("Sled error: {0}")]
     Sled(

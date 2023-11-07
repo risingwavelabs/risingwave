@@ -20,7 +20,6 @@ use crate::executor::StatelessSimpleAggExecutor;
 
 pub struct StatelessSimpleAggExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for StatelessSimpleAggExecutorBuilder {
     type Node = SimpleAggNode;
 

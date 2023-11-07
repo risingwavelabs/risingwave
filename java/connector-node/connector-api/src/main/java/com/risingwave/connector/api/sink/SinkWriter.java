@@ -17,13 +17,12 @@
 package com.risingwave.connector.api.sink;
 
 import com.risingwave.proto.ConnectorServiceProto;
-import java.util.Iterator;
 import java.util.Optional;
 
 public interface SinkWriter {
     void beginEpoch(long epoch);
 
-    boolean write(Iterator<SinkRow> rows);
+    boolean write(Iterable<SinkRow> rows);
 
     Optional<ConnectorServiceProto.SinkMetadata> barrier(boolean isCheckpoint);
 
