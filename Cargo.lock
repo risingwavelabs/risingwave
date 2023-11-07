@@ -5508,6 +5508,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "opentelemetry"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e32339a5dc40459130b3bd269e9892439f55b33e772d2a9d402a789baaf4e8a"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "indexmap 2.0.0",
+ "js-sys",
+ "once_cell",
+ "thiserror",
+ "urlencoding",
+]
+
+[[package]]
 name = "opentelemetry-otlp"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5517,7 +5532,7 @@ dependencies = [
  "futures-core",
  "http",
  "opentelemetry-proto",
- "opentelemetry-semantic-conventions",
+ "opentelemetry-semantic-conventions 0.12.0",
  "opentelemetry_api",
  "opentelemetry_sdk",
  "prost 0.11.9",
@@ -5544,7 +5559,16 @@ version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73c9f9340ad135068800e7f1b24e9e09ed9e7143f5bf8518ded3d3ec69789269"
 dependencies = [
- "opentelemetry",
+ "opentelemetry 0.20.0",
+]
+
+[[package]]
+name = "opentelemetry-semantic-conventions"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5774f1ef1f982ef2a447f6ee04ec383981a3ab99c8e77a1a7b30182e65bbc84"
+dependencies = [
+ "opentelemetry 0.21.0",
 ]
 
 [[package]]
@@ -7171,7 +7195,7 @@ dependencies = [
  "libc",
  "madsim-tokio",
  "nix 0.27.1",
- "opentelemetry",
+ "opentelemetry 0.20.0",
  "parking_lot 0.12.1",
  "prometheus",
  "rand",
@@ -7290,7 +7314,7 @@ dependencies = [
  "num-integer",
  "num-traits",
  "number_prefix",
- "opentelemetry",
+ "opentelemetry 0.20.0",
  "parking_lot 0.12.1",
  "parse-display",
  "paste",
@@ -8132,9 +8156,9 @@ dependencies = [
  "futures",
  "hostname",
  "madsim-tokio",
- "opentelemetry",
+ "opentelemetry 0.20.0",
  "opentelemetry-otlp",
- "opentelemetry-semantic-conventions",
+ "opentelemetry-semantic-conventions 0.13.0",
  "parking_lot 0.12.1",
  "pprof",
  "risingwave_common",
@@ -10563,7 +10587,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75327c6b667828ddc28f5e3f169036cb793c3f588d83bf0f262a7f062ffed3c8"
 dependencies = [
  "once_cell",
- "opentelemetry",
+ "opentelemetry 0.20.0",
  "opentelemetry_sdk",
  "smallvec",
  "tracing",
