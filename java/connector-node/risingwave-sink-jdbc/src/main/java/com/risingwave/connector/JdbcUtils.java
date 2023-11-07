@@ -35,6 +35,7 @@ public abstract class JdbcUtils {
         }
     }
 
+    /** The connection returned by this method is *not* autoCommit */
     public static Connection getConnection(String jdbcUrl) throws SQLException {
         var props = new Properties();
         // enable TCP keep alive to avoid connection closed by server
@@ -42,13 +43,11 @@ public abstract class JdbcUtils {
         // https://jdbc.postgresql.org/documentation/use/
         // https://dev.mysql.com/doc/connectors/en/connector-j-connp-props-networking.html#cj-conn-prop_tcpKeepAlive
         props.setProperty("tcpKeepAlive", "true");
-        return DriverManager.getConnection(jdbcUrl, props);
-    }
-
-    public static void configureConnection(Connection conn) throws SQLException {
+        var conn = DriverManager.getConnection(jdbcUrl, props);
         // disable auto commit can improve performance
         conn.setAutoCommit(false);
         // explicitly set isolation level to RC
         conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+        return conn;
     }
 }

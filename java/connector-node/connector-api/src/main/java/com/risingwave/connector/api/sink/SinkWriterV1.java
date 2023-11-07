@@ -15,11 +15,10 @@
 package com.risingwave.connector.api.sink;
 
 import com.risingwave.proto.ConnectorServiceProto;
-import java.util.Iterator;
 import java.util.Optional;
 
 public interface SinkWriterV1 {
-    void write(Iterator<SinkRow> rows);
+    void write(Iterable<SinkRow> rows);
 
     void sync();
 
@@ -47,7 +46,7 @@ public interface SinkWriterV1 {
             if (!hasBegun) {
                 hasBegun = true;
             }
-            this.inner.write(rows.iterator());
+            this.inner.write(rows);
         }
 
         @Override

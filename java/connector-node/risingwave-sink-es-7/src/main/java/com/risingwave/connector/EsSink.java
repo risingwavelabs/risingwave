@@ -274,9 +274,8 @@ public class EsSink extends SinkWriterBase {
     }
 
     @Override
-    public void write(Iterator<SinkRow> rows) {
-        while (rows.hasNext()) {
-            SinkRow row = rows.next();
+    public void write(Iterable<SinkRow> rows) {
+        for (SinkRow row : rows) {
             try {
                 writeRow(row);
             } catch (Exception ex) {

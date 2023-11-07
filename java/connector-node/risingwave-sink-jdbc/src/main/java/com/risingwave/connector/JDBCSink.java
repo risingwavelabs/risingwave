@@ -70,8 +70,6 @@ public class JDBCSink extends SinkWriterBase {
                         .withDescription("Unsupported jdbc url: " + jdbcUrl)
                         .asRuntimeException();
             }
-
-            JdbcUtils.configureConnection(conn);
             LOG.info(
                     "JDBC connection: autoCommit = {}, trxn = {}",
                     conn.getAutoCommit(),
@@ -127,13 +125,12 @@ public class JDBCSink extends SinkWriterBase {
     }
 
     @Override
-    public void write(Iterator<SinkRow> rows) {
+    public void write(Iterable<SinkRow> rows) {
         int retryCount = 0;
         while (true) {
             try {
                 // fill prepare statements with parameters
-                while (rows.hasNext()) {
-                    SinkRow row = rows.next();
+                for (SinkRow row : rows) {
                     if (row.getOp() == Data.Op.UPDATE_DELETE) {
                         updateFlag = true;
                         continue;
@@ -154,7 +151,7 @@ public class JDBCSink extends SinkWriterBase {
             } catch (SQLException e) {
                 LOG.error("Failed to execute JDBC statements, retried {} times", retryCount, e);
                 try {
-                    if (!conn.isValid(30)) {
+                    if (!conn.isValid(30)) { // 30 seconds timeout
                         LOG.info("Recreate the JDBC conneciton due to connection broken");
                         // close the statements and connection first
                         jdbcStatements.close();
@@ -162,7 +159,6 @@ public class JDBCSink extends SinkWriterBase {
 
                         // create a new connection if the current connection is invalid
                         conn = JdbcUtils.getConnection(config.getJdbcUrl());
-                        JdbcUtils.configureConnection(conn);
                         jdbcStatements = new JdbcStatements(conn);
                         ++retryCount;
                     }
@@ -358,7 +354,9 @@ public class JDBCSink extends SinkWriterBase {
 
     @Override
     public void drop() {
-        jdbcStatements.close();
+        if (jdbcStatements != null) {
+            jdbcStatements.close();
+        }
 
         try {
             if (conn != null) {
