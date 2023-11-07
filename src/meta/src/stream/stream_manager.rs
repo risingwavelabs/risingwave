@@ -19,13 +19,16 @@ use futures::future::{join_all, try_join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::{CreateType, Table};
+use risingwave_pb::meta::get_reschedule_plan_request::{PbWorkerChanges, StableResizePolicy};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, UpdateActorsRequest,
 };
 use tokio::sync::mpsc::Sender;
+use tokio::sync::oneshot::Receiver;
 use tokio::sync::{oneshot, Mutex, RwLock};
+use tokio::task::JoinHandle;
 use tracing::Instrument;
 use uuid::Uuid;
 
@@ -34,7 +37,9 @@ use super::{
 };
 use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::HummockManagerRef;
-use crate::manager::{ClusterManagerRef, FragmentManagerRef, MetaSrvEnv};
+use crate::manager::{
+    ClusterManagerRef, FragmentManagerRef, LocalNotification, MetaSrvEnv, WorkerId,
+};
 use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
@@ -638,11 +643,11 @@ impl GlobalStreamManager {
                 Ok(_) => {
                     tracing::info!(?id, "cancelled recovered streaming job");
                     Some(id)
-                },
+                }
                 Err(_) => {
                     tracing::error!(?id, "failed to cancel recovered streaming job, does it correspond to any jobs in `SHOW JOBS`?");
                     None
-                },
+                }
             }
         });
         let cancelled_recovered_ids = join_all(futures).await.into_iter().flatten().collect_vec();
@@ -704,6 +709,87 @@ impl GlobalStreamManager {
             .await?;
 
         Ok(())
+    }
+
+    async fn trigger_scale_out(&self, workers: Vec<WorkerId>) -> MetaResult<()> {
+        let _reschedule_job_lock = self.reschedule_lock.write().await;
+
+        let fragment_worker_changes = {
+            let guard = self.fragment_manager.get_fragment_read_guard().await;
+            let mut policy = HashMap::new();
+            for table_fragments in guard.table_fragments().values() {
+                for fragment_id in table_fragments.fragment_ids() {
+                    policy.insert(
+                        fragment_id,
+                        PbWorkerChanges {
+                            include_worker_ids: workers.iter().cloned().collect(),
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+            policy
+        };
+
+        let reschedules = self
+            .scale_controller
+            .generate_stable_resize_plan(
+                StableResizePolicy {
+                    fragment_worker_changes,
+                },
+                None,
+            )
+            .await?;
+
+        self.reschedule_actors(
+            reschedules,
+            RescheduleOptions {
+                resolve_no_shuffle_upstream: true,
+            },
+        )
+        .await?;
+
+        Ok(())
+    }
+
+    async fn run(&self, mut shutdown_rx: Receiver<()>) {
+        let (local_notification_tx, mut local_notification_rx) =
+            tokio::sync::mpsc::unbounded_channel();
+
+        self.env
+            .notification_manager()
+            .insert_local_sender(local_notification_tx)
+            .await;
+
+        loop {
+            tokio::select! {
+                biased;
+
+                _ = &mut shutdown_rx => {
+                    tracing::info!("Barrier manager is stopped");
+                    break;
+                }
+
+                notification = local_notification_rx.recv() => {
+                    let notification = notification.expect("local notification channel closed in loop of stream manager");
+                    if let LocalNotification::WorkerNodeActivated(worker) = &notification {
+                        self.env.opts.enable_scale_in_when_recovery
+                        if let Err(e) = self.trigger_scale_out(vec![worker.id]).await {
+                            tracing::error!(error = ?e, "Failed to trigger scale out");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn start(stream_manager: GlobalStreamManagerRef) -> (JoinHandle<()>, oneshot::Sender<()>) {
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            stream_manager.run(shutdown_rx).await;
+        });
+
+        (join_handle, shutdown_tx)
     }
 }
 
