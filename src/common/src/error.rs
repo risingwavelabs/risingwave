@@ -134,6 +134,13 @@ pub enum ErrorCode {
     ),
     #[error("Bind error: {0}")]
     BindError(String),
+    #[error("Failed to bind expression: {expr}: {error}")]
+    BindErrorRoot {
+        expr: String,
+        #[source]
+        #[backtrace]
+        error: BoxedError,
+    },
     #[error("Catalog error: {0}")]
     CatalogError(
         #[source]

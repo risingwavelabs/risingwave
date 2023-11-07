@@ -69,10 +69,10 @@ impl Binder {
         //   Feature is not yet implemented: Equal[Int32, Boolean]
         // ```
         self.bind_expr_inner(expr.clone()).map_err(|e| {
-            RwError::from(ErrorCode::BindError(format!(
-                "failed to bind expression: {}\n\nCaused by:\n  {}",
-                expr, e
-            )))
+            RwError::from(ErrorCode::BindErrorRoot {
+                expr: expr.to_string(),
+                error: Box::new(e),
+            })
         })
     }
 
