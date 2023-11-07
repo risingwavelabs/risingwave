@@ -14,8 +14,8 @@
 
 use std::cmp::Ordering;
 use std::fmt::Debug;
+use std::future::Future;
 
-use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef};
 use risingwave_common::estimate_size::EstimateSize;
@@ -116,7 +116,6 @@ impl<const WITH_TIES: bool> Debug for TopNCache<WITH_TIES> {
 /// This trait is used as a bound. It is needed since
 /// `TopNCache::<true>::f` and `TopNCache::<false>::f`
 /// don't imply `TopNCache::<WITH_TIES>::f`.
-#[async_trait]
 pub trait TopNCacheTrait {
     /// Insert input row to corresponding cache range according to its order key.
     ///
@@ -140,7 +139,7 @@ pub trait TopNCacheTrait {
     /// operation, we need to pass in `group_key`, `epoch` and `managed_state` to do a prefix
     /// scan of the state table.
     #[allow(clippy::too_many_arguments)]
-    async fn delete<S: StateStore>(
+    fn delete<S: StateStore>(
         &mut self,
         group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
@@ -148,7 +147,7 @@ pub trait TopNCacheTrait {
         row: impl Row + Send,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
-    ) -> StreamExecutorResult<()>;
+    ) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 }
 
 impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
@@ -249,7 +248,6 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     }
 }
 
-#[async_trait]
 impl TopNCacheTrait for TopNCache<false> {
     fn insert(
         &mut self,
@@ -387,7 +385,6 @@ impl TopNCacheTrait for TopNCache<false> {
     }
 }
 
-#[async_trait]
 impl TopNCacheTrait for TopNCache<true> {
     fn insert(
         &mut self,
@@ -547,7 +544,6 @@ impl TopNCacheTrait for TopNCache<true> {
 }
 
 /// Similar to [`TopNCacheTrait`], but for append-only TopN.
-#[async_trait]
 pub trait AppendOnlyTopNCacheTrait {
     /// Insert input row to corresponding cache range according to its order key.
     ///
@@ -567,7 +563,6 @@ pub trait AppendOnlyTopNCacheTrait {
     ) -> StreamExecutorResult<()>;
 }
 
-#[async_trait]
 impl AppendOnlyTopNCacheTrait for TopNCache<false> {
     fn insert<S: StateStore>(
         &mut self,
@@ -630,7 +625,6 @@ impl AppendOnlyTopNCacheTrait for TopNCache<false> {
     }
 }
 
-#[async_trait]
 impl AppendOnlyTopNCacheTrait for TopNCache<true> {
     fn insert<S: StateStore>(
         &mut self,

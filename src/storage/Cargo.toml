@@ -25,7 +25,7 @@ dyn-clone = "1.0.14"
 either = "1"
 enum-as-inner = "0.6"
 fail = "0.5"
-foyer = { git = "https://github.com/MrCroxx/foyer", rev = "2261151" }
+foyer = { git = "https://github.com/MrCroxx/foyer", rev = "9232b3a" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 hex = "0.4"
@@ -73,7 +73,7 @@ xxhash-rust = { version = "0.8.7", features = ["xxh32", "xxh64"] }
 zstd = { version = "0.13", default-features = false }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-procfs = { version = "0.15", default-features = false }
+procfs = { version = "0.16", default-features = false }
 libc = "0.2"
 nix = { version = "0.27", features = ["fs", "mman"] }
 

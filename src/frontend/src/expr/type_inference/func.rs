@@ -533,6 +533,11 @@ fn infer_type_for_special(
             }
             Ok(Some(DataType::Varchar))
         }
+        ExprType::ArrayContains | ExprType::ArrayContained => {
+            ensure_arity!("array_contains/array_contained", | inputs | == 2);
+            align_types(inputs.iter_mut())?;
+            Ok(Some(DataType::Boolean))
+        }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);
             Ok(Some(DataType::Int16))
@@ -540,6 +545,16 @@ fn infer_type_for_special(
         ExprType::Greatest | ExprType::Least => {
             ensure_arity!("greatest/least", 1 <= | inputs |);
             Ok(Some(align_types(inputs.iter_mut())?))
+        }
+        ExprType::JsonbBuildArray => Ok(Some(DataType::Jsonb)),
+        ExprType::JsonbBuildObject => {
+            if inputs.len() % 2 != 0 {
+                return Err(ErrorCode::BindError(
+                    "argument list must have even number of elements".into(),
+                )
+                .into());
+            }
+            Ok(Some(DataType::Jsonb))
         }
         _ => Ok(None),
     }

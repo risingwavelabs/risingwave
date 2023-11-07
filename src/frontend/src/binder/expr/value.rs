@@ -345,30 +345,30 @@ mod tests {
             "1 month",
         ];
         let data = vec![
-            Ok(Literal::new(
+            Literal::new(
                 Some(ScalarImpl::Interval(Interval::from_minutes(60))),
                 DataType::Interval,
-            )),
-            Ok(Literal::new(
+            ),
+            Literal::new(
                 Some(ScalarImpl::Interval(Interval::from_minutes(60))),
                 DataType::Interval,
-            )),
-            Ok(Literal::new(
+            ),
+            Literal::new(
                 Some(ScalarImpl::Interval(Interval::from_ymd(1, 0, 0))),
                 DataType::Interval,
-            )),
-            Ok(Literal::new(
+            ),
+            Literal::new(
                 Some(ScalarImpl::Interval(Interval::from_millis(6 * 1000))),
                 DataType::Interval,
-            )),
-            Ok(Literal::new(
+            ),
+            Literal::new(
                 Some(ScalarImpl::Interval(Interval::from_minutes(2))),
                 DataType::Interval,
-            )),
-            Ok(Literal::new(
+            ),
+            Literal::new(
                 Some(ScalarImpl::Interval(Interval::from_month(1))),
                 DataType::Interval,
-            )),
+            ),
         ];
 
         for i in 0..values.len() {
@@ -379,7 +379,7 @@ mod tests {
                 last_field: None,
                 fractional_seconds_precision: None,
             };
-            assert_eq!(binder.bind_value(value), data[i]);
+            assert_eq!(binder.bind_value(value).unwrap(), data[i]);
         }
     }
 }

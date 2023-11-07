@@ -19,7 +19,6 @@ use crate::executor::LookupUnionExecutor;
 
 pub struct LookupUnionExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for LookupUnionExecutorBuilder {
     type Node = LookupUnionNode;
 

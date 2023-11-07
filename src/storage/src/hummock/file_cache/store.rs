@@ -16,13 +16,13 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::{Buf, BufMut, Bytes};
 use foyer::common::code::{Key, Value};
 use foyer::intrusive::eviction::lfu::LfuConfig;
 use foyer::storage::admission::rated_ticket::RatedTicketAdmissionPolicy;
 use foyer::storage::admission::AdmissionPolicy;
+use foyer::storage::compress::Compression;
 use foyer::storage::device::fs::FsDeviceConfig;
 pub use foyer::storage::metrics::set_metrics_registry as set_foyer_metrics_registry;
 use foyer::storage::reinsertion::ReinsertionPolicy;
@@ -59,21 +59,20 @@ where
     pub dir: PathBuf,
     pub capacity: usize,
     pub file_capacity: usize,
-    pub buffer_pool_size: usize,
     pub device_align: usize,
     pub device_io_size: usize,
     pub flushers: usize,
-    pub flush_rate_limit: usize,
     pub reclaimers: usize,
     pub reclaim_rate_limit: usize,
     pub recover_concurrency: usize,
     pub lfu_window_to_cache_size_ratio: usize,
     pub lfu_tiny_lru_capacity_ratio: f64,
     pub insert_rate_limit: usize,
-    pub allocator_bits: usize,
-    pub allocation_timeout: Duration,
+    pub ring_buffer_capacity: usize,
+    pub catalog_bits: usize,
     pub admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
     pub reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
+    pub compression: Compression,
 }
 
 impl<K, V> Clone for FileCacheConfig<K, V>
@@ -87,21 +86,20 @@ where
             dir: self.dir.clone(),
             capacity: self.capacity,
             file_capacity: self.file_capacity,
-            buffer_pool_size: self.buffer_pool_size,
             device_align: self.device_align,
             device_io_size: self.device_io_size,
             flushers: self.flushers,
-            flush_rate_limit: self.flush_rate_limit,
             reclaimers: self.reclaimers,
             reclaim_rate_limit: self.reclaim_rate_limit,
             recover_concurrency: self.recover_concurrency,
             lfu_window_to_cache_size_ratio: self.lfu_window_to_cache_size_ratio,
             lfu_tiny_lru_capacity_ratio: self.lfu_tiny_lru_capacity_ratio,
             insert_rate_limit: self.insert_rate_limit,
-            allocator_bits: self.allocator_bits,
-            allocation_timeout: self.allocation_timeout,
+            ring_buffer_capacity: self.ring_buffer_capacity,
+            catalog_bits: self.catalog_bits,
             admissions: self.admissions.clone(),
             reinsertions: self.reinsertions.clone(),
+            compression: self.compression,
         }
     }
 }
@@ -255,18 +253,17 @@ where
                     align: config.device_align,
                     io_size: config.device_io_size,
                 },
-                allocator_bits: config.allocator_bits,
-                catalog_bits: 6,
+                ring_buffer_capacity: config.ring_buffer_capacity,
+                catalog_bits: config.catalog_bits,
                 admissions,
                 reinsertions: config.reinsertions,
-                buffer_pool_size: config.buffer_pool_size,
+                flusher_buffer_size: 131072, // TODO: make it configurable
                 flushers: config.flushers,
-                flush_rate_limit: config.flush_rate_limit,
                 reclaimers: config.reclaimers,
                 reclaim_rate_limit: config.reclaim_rate_limit,
-                allocation_timeout: config.allocation_timeout,
                 clean_region_threshold: config.reclaimers + config.reclaimers / 2,
                 recover_concurrency: config.recover_concurrency,
+                compression: config.compression,
             }
             .into(),
             runtime: RuntimeConfig {

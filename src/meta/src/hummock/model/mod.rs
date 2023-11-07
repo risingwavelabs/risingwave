@@ -15,6 +15,7 @@
 mod compact_task_assignment;
 mod compaction_group_config;
 mod compaction_status;
+pub mod ext;
 mod pinned_snapshot;
 mod pinned_version;
 mod version_delta;

@@ -190,7 +190,11 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
             if data_struct.fields.is_empty() {
                 // Empty structs are easy to implement.
                 let gen = quote! {
-                    impl EstimateSize for #name {}
+                    impl EstimateSize for #name {
+                        fn estimated_heap_size(&self) -> usize {
+                            0
+                        }
+                    }
                 };
                 return gen.into();
             }

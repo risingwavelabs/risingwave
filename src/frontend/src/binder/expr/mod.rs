@@ -193,6 +193,7 @@ impl Binder {
                 count,
             } => self.bind_overlay(*expr, *new_substring, *start, count),
             Expr::Parameter { index } => self.bind_parameter(index),
+            Expr::Collate { expr, collation } => self.bind_collate(*expr, collation),
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported expression {:?}", expr),
                 112.into(),
@@ -560,6 +561,33 @@ impl Binder {
         }
         let lhs = self.bind_expr_inner(expr)?;
         lhs.cast_explicit(data_type).map_err(Into::into)
+    }
+
+    pub fn bind_collate(&mut self, expr: Expr, collation: ObjectName) -> Result<ExprImpl> {
+        if !["C", "POSIX"].contains(&collation.real_value().as_str()) {
+            return Err(ErrorCode::NotImplemented(
+                "Collate collation other than `C` or `POSIX` is not implemented".into(),
+                None.into(),
+            )
+            .into());
+        }
+
+        let bound_inner = self.bind_expr_inner(expr)?;
+        let ret_type = bound_inner.return_type();
+
+        match ret_type {
+            DataType::Varchar => {}
+            _ => {
+                return Err(ErrorCode::NotSupported(
+                    format!("{} is not a collatable data type", ret_type),
+                    "The only built-in collatable data types are `varchar`, please check your type"
+                        .into(),
+                )
+                .into());
+            }
+        }
+
+        Ok(bound_inner)
     }
 }
 

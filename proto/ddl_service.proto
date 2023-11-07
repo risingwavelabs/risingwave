@@ -49,6 +49,7 @@ message DropSchemaResponse {
 
 message CreateSourceRequest {
   catalog.Source source = 1;
+  stream_plan.StreamFragmentGraph fragment_graph = 2;
 }
 
 message CreateSourceResponse {
@@ -138,12 +139,25 @@ message DropViewResponse {
   uint64 version = 2;
 }
 
+// An enum to distinguish different types of the Table streaming job.
+// - GENERAL: Table streaming jobs w/ or w/o a connector
+// - SHARED_CDC_SOURCE: The table streaming job is created based on a shared CDC source job (risingwavelabs/rfcs#73).
+// And one may add other types to support Table jobs that based on other backfill-able sources (risingwavelabs/rfcs#72).
+enum TableJobType {
+  UNSPECIFIED = 0;
+  // table streaming jobs excepts the `SHARED_CDC_SOURCE` type
+  GENERAL = 1;
+  // table streaming job sharing a CDC source job
+  SHARED_CDC_SOURCE = 2;
+}
+
 message CreateTableRequest {
   // An optional field and will be `Some` for tables with an external connector. If so, the table
   // will subscribe to the changes of the external connector and materialize the data.
   catalog.Source source = 1;
   catalog.Table materialized_view = 2;
   stream_plan.StreamFragmentGraph fragment_graph = 3;
+  TableJobType job_type = 4;
 }
 
 message CreateTableResponse {

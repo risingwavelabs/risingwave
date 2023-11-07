@@ -24,7 +24,6 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -140,9 +139,8 @@ public class UpsertIcebergSinkWriter extends IcebergSinkWriterBase {
     }
 
     @Override
-    public void write(Iterator<SinkRow> rows) {
-        while (rows.hasNext()) {
-            SinkRow row = rows.next();
+    public void write(Iterable<SinkRow> rows) {
+        for (SinkRow row : rows) {
             if (row.size() != tableSchema.getColumnNames().length) {
                 throw Status.FAILED_PRECONDITION
                         .withDescription("row values do not match table schema")
