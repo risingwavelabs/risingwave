@@ -205,8 +205,8 @@ mod tests {
         assert_eq!(risingwave_st, *UNIX_RISINGWAVE_DATE_EPOCH);
     }
 
-    #[test]
-    fn test_epoch_generate() {
+    #[tokio::test]
+    async fn test_epoch_generate() {
         let mut prev_epoch = Epoch::now();
         for _ in 0..1000 {
             let epoch = prev_epoch.next();
