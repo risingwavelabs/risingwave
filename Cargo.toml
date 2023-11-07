@@ -121,7 +121,7 @@ arrow-buffer = "48"
 arrow-flight = "48"
 arrow-select = "48"
 arrow-ord = "48"
-thiserror-ext = "0.0.4"
+thiserror-ext = "0.0.5"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
   "profiling",

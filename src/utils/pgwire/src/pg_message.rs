@@ -635,11 +635,8 @@ impl<'a> BeMessage<'a> {
 
                 // 'E' signalizes ErrorResponse messages
                 buf.put_u8(b'E');
-                let msg = if env_var_is_true("RW_PRETTY_ERROR") {
-                    format!("{:#}", error.as_ref().as_report())
-                } else {
-                    format!("{}", error.as_ref().as_report())
-                };
+                // Format the error as a pretty report.
+                let msg = format!("{:#}", error.as_ref().as_report());
                 write_err_or_notice(buf, &ErrorOrNoticeMessage::internal_error(&msg))?;
             }
 
