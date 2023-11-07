@@ -3981,7 +3981,7 @@ dependencies = [
 [[package]]
 name = "icelake"
 version = "0.0.10"
-source = "git+https://github.com/icelake-io/icelake?rev=5a5202d1f3502f0cf82041044b0427434da59adc#5a5202d1f3502f0cf82041044b0427434da59adc"
+source = "git+https://github.com/icelake-io/icelake?rev=5cdcdffd24f4624a0a43f92c5f368988169a799b#5cdcdffd24f4624a0a43f92c5f368988169a799b"
 dependencies = [
  "anyhow",
  "apache-avro 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -4009,6 +4009,7 @@ dependencies = [
  "opendal",
  "ordered-float 3.9.1",
  "parquet",
+ "prometheus",
  "regex",
  "reqwest",
  "rust_decimal",
