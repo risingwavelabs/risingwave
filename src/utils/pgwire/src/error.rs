@@ -23,33 +23,33 @@ pub type PsqlResult<T> = std::result::Result<T, PsqlError>;
 #[derive(Error, Debug)]
 pub enum PsqlError {
     #[error("Startup Error when connect to session: {0}")]
-    StartupError(BoxedError),
+    StartupError(#[source] BoxedError),
 
-    #[error("PasswordError: {0}")]
-    PasswordError(IoError),
+    #[error("Invalid password")]
+    PasswordError,
 
     #[error("QueryError: {0}")]
-    QueryError(BoxedError),
+    QueryError(#[source] BoxedError),
 
     #[error("ParseError: {0}")]
-    ParseError(BoxedError),
+    ParseError(#[source] BoxedError),
 
     #[error("ExecuteError: {0}")]
-    ExecuteError(BoxedError),
+    ExecuteError(#[source] BoxedError),
 
-    #[error("{0}")]
+    #[error(transparent)]
     IoError(#[from] IoError),
 
-    #[error("{0}")]
     /// Include error for describe, bind.
+    #[error(transparent)]
     Internal(BoxedError),
 
-    #[error("Panicked when processing: {0}.
-This is a bug. We would appreciate a bug report at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Fbug&template=bug_report.yml")]
+    #[error("Panicked when processing: {0}.\n
+This is a bug. We would appreciate a bug report at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Fbug&template=bug_report.yml.")]
     Panic(String),
 
-    #[error("{0}")]
-    SslError(String),
+    #[error("Unable to set up an ssl connection")]
+    SslError(#[from] openssl::ssl::Error),
 }
 
 impl PsqlError {

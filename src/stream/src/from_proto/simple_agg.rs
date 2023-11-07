@@ -27,7 +27,6 @@ use crate::executor::SimpleAggExecutor;
 
 pub struct SimpleAggExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for SimpleAggExecutorBuilder {
     type Node = SimpleAggNode;
 

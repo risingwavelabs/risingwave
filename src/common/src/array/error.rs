@@ -29,7 +29,11 @@ pub enum ArrayError {
     Io(#[from] std::io::Error),
 
     #[error(transparent)]
-    Internal(#[from] anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 
     #[error("Convert from arrow error: {0}")]
     FromArrow(String),

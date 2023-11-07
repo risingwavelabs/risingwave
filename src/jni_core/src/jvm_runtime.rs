@@ -24,6 +24,8 @@ use jni::{InitArgsBuilder, JNIVersion, JavaVM, NativeMethod};
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use tracing::error;
 
+use crate::call_method;
+
 /// Use 10% of compute total memory by default. Compute node uses 0.7 * system memory by default.
 const DEFAULT_MEMORY_PROPORTION: f64 = 0.07;
 
@@ -176,25 +178,16 @@ pub fn load_jvm_memory_stats() -> (usize, usize) {
             let result: Result<(usize, usize), jni::errors::Error> = try {
                 let mut env = jvm.attach_current_thread()?;
 
-                let runtime_instance = env
-                    .call_static_method(
-                        "java/lang/Runtime",
-                        "getRuntime",
-                        "()Ljava/lang/Runtime;",
-                        &[],
-                    )?
-                    .l()
-                    .expect("should be object");
+                let runtime_instance = crate::call_static_method!(
+                    env,
+                    {Runtime},
+                    {Runtime getRuntime()}
+                )?;
 
-                let total_memory = env
-                    .call_method(runtime_instance.as_ref(), "totalMemory", "()J", &[])?
-                    .j()
-                    .expect("should be long");
-
-                let free_memory = env
-                    .call_method(runtime_instance, "freeMemory", "()J", &[])?
-                    .j()
-                    .expect("should be long");
+                let total_memory =
+                    call_method!(env, runtime_instance.as_ref(), {long totalMemory()})?;
+                let free_memory =
+                    call_method!(env, runtime_instance.as_ref(), {long freeMemory()})?;
 
                 (total_memory as usize, (total_memory - free_memory) as usize)
             };

@@ -26,7 +26,6 @@ use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct AppendOnlyDedupExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for AppendOnlyDedupExecutorBuilder {
     type Node = DedupNode;
 

@@ -22,7 +22,6 @@ use crate::executor::ProjectSetExecutor;
 
 pub struct ProjectSetExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for ProjectSetExecutorBuilder {
     type Node = ProjectSetNode;
 

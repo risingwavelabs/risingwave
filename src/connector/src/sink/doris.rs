@@ -25,6 +25,7 @@ use serde::Deserialize;
 use serde_derive::Serialize;
 use serde_json::Value;
 use serde_with::serde_as;
+use with_options::WithOptions;
 
 use super::doris_connector::{
     DorisField, DorisGet, DorisInsert, DorisInsertClient, DORIS_DELETE_SIGN,
@@ -38,7 +39,7 @@ use crate::sink::{
 
 pub const DORIS_SINK: &str = "doris";
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct DorisCommon {
     #[serde(rename = "doris.url")]
     pub url: String,
@@ -65,7 +66,7 @@ impl DorisCommon {
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct DorisConfig {
     #[serde(flatten)]
     pub common: DorisCommon,
