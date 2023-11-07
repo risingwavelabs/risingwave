@@ -274,10 +274,6 @@ pub struct EpochWithGap(u64);
 impl EpochWithGap {
     #[allow(unused_variables)]
     pub fn new(epoch: u64, spill_offset: u16) -> Self {
-        #[cfg(all(feature = "enable_test_epoch", not(debug_assertions)))]
-        {
-            compile_error!("enable_test_epoch only allowed in debug mode")
-        }
         #[cfg(not(feature = "enable_test_epoch"))]
         {
             debug_assert_eq!(epoch & EPOCH_MASK, 0);

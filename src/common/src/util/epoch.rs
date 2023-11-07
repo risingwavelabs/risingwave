@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::sync::LazyLock;
 use std::time::{Duration, SystemTime};
 
@@ -42,26 +41,23 @@ impl Epoch {
 
     #[must_use]
     pub fn next(self) -> Self {
-        let physical_now = Epoch::physical_now();
+        let mut physical_now = Epoch::physical_now();
         let prev_physical_time = self.physical_time();
 
+        loop {
+            if physical_now > prev_physical_time {
+                break;
+            }
+            physical_now = Epoch::physical_now();
+
+            #[cfg(madsim)]
+            tokio::time::advance(std::time::Duration::from_micros(10));
+            #[cfg(not(madsim))]
+            std::hint::spin_loop();
+        }
         // The last 16 bits of the previous epoch ((prev_epoch + 1, prev_epoch + 65536)) will be
         // used as the gap epoch when the mem table spill occurs.
-        let next_epoch = match physical_now.cmp(&prev_physical_time) {
-            Ordering::Greater => Self::from_physical_time(physical_now),
-            Ordering::Equal => {
-                tracing::warn!("New generate epoch is too close to the previous one.");
-                Epoch(self.0 + 1)
-            }
-            Ordering::Less => {
-                tracing::warn!(
-                    "Clock goes backwards when calling Epoch::next(): prev={}, curr={}",
-                    prev_physical_time,
-                    physical_now
-                );
-                Epoch(self.0 + 1)
-            }
-        };
+        let next_epoch = Self::from_physical_time(physical_now);
 
         assert!(next_epoch.0 > self.0);
         next_epoch
