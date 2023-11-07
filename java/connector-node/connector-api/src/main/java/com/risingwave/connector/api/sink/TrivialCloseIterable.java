@@ -18,4 +18,19 @@ package com.risingwave.connector.api.sink;
 
 import java.util.Iterator;
 
-public interface CloseableIterator<E> extends AutoCloseable, Iterator<E> {}
+public class TrivialCloseIterable<E> implements CloseableIterable<E> {
+
+    private final Iterable<E> inner;
+
+    public TrivialCloseIterable(Iterable<E> inner) {
+        this.inner = inner;
+    }
+
+    @Override
+    public void close() throws Exception {}
+
+    @Override
+    public Iterator<E> iterator() {
+        return inner.iterator();
+    }
+}

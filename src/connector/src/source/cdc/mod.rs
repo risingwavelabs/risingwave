@@ -56,6 +56,17 @@ impl<'a> From<&'a str> for CdcSourceType {
     }
 }
 
+impl CdcSourceType {
+    pub fn as_str_name(&self) -> &str {
+        match self {
+            CdcSourceType::Mysql => "MySQL",
+            CdcSourceType::Postgres => "Postgres",
+            CdcSourceType::Citus => "Citus",
+            CdcSourceType::Unspecified => "Unspecified",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct CdcProperties<T: CdcSourceTypeTrait> {
     /// Properties specified in the WITH clause by user

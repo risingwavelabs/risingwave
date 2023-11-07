@@ -23,7 +23,6 @@ use crate::executor::ProjectExecutor;
 
 pub struct ProjectExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for ProjectExecutorBuilder {
     type Node = ProjectNode;
 

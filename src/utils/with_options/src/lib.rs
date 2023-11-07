@@ -12,17 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_common::array::StreamChunk;
-use risingwave_common::row::{OwnedRow, Row};
-use risingwave_pb::data::Op;
+use proc_macro::TokenStream;
 
-pub(crate) type StreamChunkRowIterator = impl Iterator<Item = (Op, OwnedRow)> + 'static;
-
-pub(crate) fn into_iter(stream_chunk: StreamChunk) -> StreamChunkRowIterator {
-    stream_chunk
-        .rows()
-        .map(|(op, row_ref)| (op.to_protobuf(), row_ref.to_owned_row()))
-        .collect_vec()
-        .into_iter()
+/// Annotates that the struct represents the WITH properties for a connector.
+#[proc_macro_derive(WithOptions, attributes(with_option))]
+pub fn derive_helper_attr(_item: TokenStream) -> TokenStream {
+    TokenStream::new()
 }

@@ -1128,7 +1128,8 @@ impl DdlController {
     }
 
     pub async fn wait(&self) -> MetaResult<()> {
-        for _ in 0..30 * 60 {
+        let timeout_secs = 30 * 60;
+        for _ in 0..timeout_secs {
             if self
                 .catalog_manager
                 .list_creating_background_mvs()
@@ -1139,7 +1140,9 @@ impl DdlController {
             }
             sleep(Duration::from_secs(1)).await;
         }
-        Err(MetaError::cancelled("timeout".into()))
+        Err(MetaError::cancelled(format!(
+            "timeout after {timeout_secs}s"
+        )))
     }
 
     async fn comment_on(&self, comment: Comment) -> MetaResult<NotificationVersion> {

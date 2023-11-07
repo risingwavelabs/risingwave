@@ -28,7 +28,6 @@ use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct OverWindowExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for OverWindowExecutorBuilder {
     type Node = PbOverWindowNode;
 

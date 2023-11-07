@@ -18,7 +18,6 @@ import static com.risingwave.proto.Data.*;
 import static org.junit.Assert.*;
 import static org.junit.Assert.assertEquals;
 
-import com.google.common.collect.Iterators;
 import com.google.common.collect.Sets;
 import com.risingwave.connector.AppendOnlyIcebergSinkWriter;
 import com.risingwave.connector.IcebergSinkCoordinator;
@@ -121,7 +120,7 @@ public class IcebergSinkLocalTest {
 
         try {
             sink.beginEpoch(233);
-            sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 1, "Alice")));
+            sink.write(Arrays.asList(new ArraySinkRow(Op.INSERT, 1, "Alice")));
             ConnectorServiceProto.SinkMetadata metadata = sink.barrier(true).get();
             coordinator.commit(233, Collections.singletonList(metadata));
 
@@ -133,7 +132,7 @@ public class IcebergSinkLocalTest {
             validateTableWithSpark(expected);
 
             sink.beginEpoch(234);
-            sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 2, "Bob")));
+            sink.write(Arrays.asList(new ArraySinkRow(Op.INSERT, 2, "Bob")));
             validateTableWithIceberg(expected);
             validateTableWithSpark(expected);
 
@@ -171,7 +170,7 @@ public class IcebergSinkLocalTest {
         try {
             sink.beginEpoch(233);
             sink.write(
-                    Iterators.forArray(
+                    Arrays.asList(
                             new ArraySinkRow(Op.INSERT, 1, "Alice"),
                             new ArraySinkRow(Op.INSERT, 2, "Bob")));
             ConnectorServiceProto.SinkMetadata metadata = sink.barrier(true).get();
