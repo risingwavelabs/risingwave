@@ -13,7 +13,6 @@
 // limitations under the License.
 
 mod scale;
-mod scale_controller;
 mod sink;
 mod source_manager;
 mod stream_graph;
@@ -23,7 +22,6 @@ mod test_fragmenter;
 mod test_scale;
 
 pub use scale::*;
-pub use scale_controller::*;
 pub use sink::*;
 pub use source_manager::*;
 pub use stream_graph::*;
