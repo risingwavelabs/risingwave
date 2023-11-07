@@ -152,7 +152,7 @@ public class JDBCSink extends SinkWriterBase {
                 LOG.error("Failed to execute JDBC statements, retried {} times", retryCount, e);
                 try {
                     if (!conn.isValid(30)) { // 30 seconds timeout
-                        LOG.info("Recreate the JDBC conneciton due to connection broken");
+                        LOG.info("Recreate the JDBC connection due to connection broken");
                         // close the statements and connection first
                         jdbcStatements.close();
                         conn.close();

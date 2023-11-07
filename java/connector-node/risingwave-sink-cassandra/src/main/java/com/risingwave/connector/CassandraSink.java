@@ -95,7 +95,7 @@ public class CassandraSink extends SinkWriterBase {
     }
 
     @Override
-    public void write(Iterator<SinkRow> rows) {
+    public void write(Iterable<SinkRow> rows) {
         if (this.config.getType().equals("append-only")) {
             write_append_only(rows);
         } else {
@@ -103,9 +103,8 @@ public class CassandraSink extends SinkWriterBase {
         }
     }
 
-    private void write_append_only(Iterator<SinkRow> rows) {
-        while (rows.hasNext()) {
-            SinkRow row = rows.next();
+    private void write_append_only(Iterable<SinkRow> rows) {
+        for (SinkRow row : rows) {
             Data.Op op = row.getOp();
             switch (op) {
                 case INSERT:
@@ -125,9 +124,8 @@ public class CassandraSink extends SinkWriterBase {
         }
     }
 
-    private void write_upsert(Iterator<SinkRow> rows) {
-        while (rows.hasNext()) {
-            SinkRow row = rows.next();
+    private void write_upsert(Iterable<SinkRow> rows) {
+        for (SinkRow row : rows) {
             Data.Op op = row.getOp();
             switch (op) {
                 case INSERT:

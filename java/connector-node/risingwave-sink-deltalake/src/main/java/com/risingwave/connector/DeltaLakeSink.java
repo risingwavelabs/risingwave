@@ -55,7 +55,7 @@ public class DeltaLakeSink extends SinkWriterBase {
     }
 
     @Override
-    public void write(Iterator<SinkRow> rows) {
+    public void write(Iterable<SinkRow> rows) {
         if (this.parquetWriter == null) {
             this.dataFileNum += 1;
             this.parquetPath =
@@ -74,8 +74,7 @@ public class DeltaLakeSink extends SinkWriterBase {
                 throw INTERNAL.withCause(ioException).asRuntimeException();
             }
         }
-        while (rows.hasNext()) {
-            SinkRow row = rows.next();
+        for (SinkRow row : rows) {
             switch (row.getOp()) {
                 case INSERT:
                     GenericRecord record = new GenericData.Record(this.sinkSchema);
