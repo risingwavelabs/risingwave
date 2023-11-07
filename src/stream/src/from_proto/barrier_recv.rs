@@ -20,7 +20,6 @@ use crate::executor::BarrierRecvExecutor;
 
 pub struct BarrierRecvExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for BarrierRecvExecutorBuilder {
     type Node = BarrierRecvNode;
 

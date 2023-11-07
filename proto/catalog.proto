@@ -61,7 +61,10 @@ message StreamSourceInfo {
   plan_common.EncodeType row_encode = 9;
   SchemaRegistryNameStrategy name_strategy = 10;
   optional string key_message_name = 11;
-  plan_common.StorageTableDesc upstream_table = 12;
+  plan_common.ExternalTableDesc external_table = 12;
+  // Whether the stream source is a cdc source streaming job.
+  // We need this field to differentiate the cdc source job until we fully implement risingwavelabs/rfcs#72.
+  bool cdc_source_job = 13;
 }
 
 message Source {

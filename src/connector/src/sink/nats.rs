@@ -23,7 +23,9 @@ use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
+use with_options::WithOptions;
 
+use super::encoder::TimestamptzHandlingMode;
 use super::utils::chunk_to_json;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::common::NatsCommon;
@@ -38,7 +40,7 @@ use crate::sink::{Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY};
 pub const NATS_SINK: &str = "nats";
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct NatsConfig {
     #[serde(flatten)]
     pub common: NatsCommon,
@@ -138,7 +140,12 @@ impl NatsSinkWriter {
             config: config.clone(),
             context,
             schema: schema.clone(),
-            json_encoder: JsonEncoder::new(schema, None, TimestampHandlingMode::Milli),
+            json_encoder: JsonEncoder::new(
+                schema,
+                None,
+                TimestampHandlingMode::Milli,
+                TimestamptzHandlingMode::UtcWithoutSuffix,
+            ),
         })
     }
 

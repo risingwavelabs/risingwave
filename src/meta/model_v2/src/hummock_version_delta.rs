@@ -12,24 +12,64 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use sea_orm::entity::prelude::*;
+use std::collections::HashMap;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+use risingwave_pb::hummock::{GroupDelta as PbGroupDelta, HummockVersionDelta};
+use sea_orm::entity::prelude::*;
+use sea_orm::FromJsonQueryResult;
+use serde::{Deserialize, Serialize};
+
+use crate::{CompactionGroupId, Epoch, HummockSstableObjectId, HummockVersionId};
+
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize, Default)]
 #[sea_orm(table_name = "hummock_version_delta")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: i64,
-    pub prev_id: i64,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub group_deltas: Option<Json>,
-    pub max_committed_epoch: i64,
-    pub safe_epoch: i64,
+    pub id: HummockVersionId,
+    pub prev_id: HummockVersionId,
+    pub group_deltas: GroupDeltas,
+    pub max_committed_epoch: Epoch,
+    pub safe_epoch: Epoch,
     pub trivial_move: bool,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub gc_object_ids: Option<Json>,
+    pub gc_object_ids: SstableObjectIds,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+crate::derive_from_json_struct!(SstableObjectIds, Vec<HummockSstableObjectId>);
+
+impl From<Vec<u64>> for SstableObjectIds {
+    fn from(value: Vec<u64>) -> Self {
+        Self(value.into_iter().map(|id| id as _).collect())
+    }
+}
+
+crate::derive_from_json_struct!(GroupDeltas, HashMap<CompactionGroupId, Vec<PbGroupDelta>>);
+
+impl From<Model> for HummockVersionDelta {
+    fn from(value: Model) -> Self {
+        use risingwave_pb::hummock::hummock_version_delta::GroupDeltas as PbGroupDeltas;
+        Self {
+            id: value.id as _,
+            prev_id: value.prev_id as _,
+            group_deltas: value
+                .group_deltas
+                .0
+                .into_iter()
+                .map(|(cg_id, group_deltas)| (cg_id as _, PbGroupDeltas { group_deltas }))
+                .collect(),
+            max_committed_epoch: value.max_committed_epoch as _,
+            safe_epoch: value.safe_epoch as _,
+            trivial_move: value.trivial_move as _,
+            gc_object_ids: value
+                .gc_object_ids
+                .into_inner()
+                .into_iter()
+                .map(|id| id as _)
+                .collect(),
+        }
+    }
+}

@@ -56,7 +56,7 @@
   batch_plan: 'BatchValues { rows: [[ARRAY[]:List(Timestamptz)]] }'
   stream_plan: |-
     StreamMaterialize { columns: [array, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-    └─StreamValues { rows: [[Array, 0:Int64]] }
+    └─StreamValues { rows: [[ARRAY[]:List(Timestamptz), 0:Int64]] }
 - sql: |
     select ARRAY[]::STRUCT<f1 INT>[];
   logical_plan: |-
@@ -65,7 +65,7 @@
   batch_plan: 'BatchValues { rows: [[ARRAY[]:List(Struct(StructType { field_names: ["f1"], field_types: [Int32] }))]] }'
   stream_plan: |-
     StreamMaterialize { columns: [array, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-    └─StreamValues { rows: [[Array, 0:Int64]] }
+    └─StreamValues { rows: [[ARRAY[]:List(Struct(StructType { field_names: ["f1"], field_types: [Int32] })), 0:Int64]] }
 - sql: |
     select array_cat(array[66], array[123]);
   logical_plan: |-
@@ -182,6 +182,32 @@
   logical_plan: |-
     LogicalProject { exprs: [ArrayPrepend(Array(233:Int32), Array(Array(66:Int32))) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: array_contains(int[], int[]) -> bool
+  sql: select array[1,2] @> array[2,3];
+  logical_plan: |-
+    LogicalProject { exprs: [(Array(1:Int32, 2:Int32) @> Array(2:Int32, 3:Int32)) as $expr1] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- name: array_contains(int[], int) -> bool
+  sql: select array[1,2] @> 2;
+  binder_error: |-
+    Bind error: failed to bind expression: ARRAY[1, 2] @> 2
+
+    Caused by:
+      Bind error: operator does not exist: integer[] @> integer
+- name: array_contains(int[], varchar[]) -> bool
+  sql: select array[2,3] @> array['1'];
+  binder_error: |-
+    Bind error: failed to bind expression: ARRAY[2, 3] @> ARRAY['1']
+
+    Caused by:
+      Bind error: types List(Int32) and List(Varchar) cannot be matched
+- name: any contains(null, null) -> bool
+  sql: select '{}' @> '{}';
+  binder_error: |-
+    Bind error: failed to bind expression: '{}' @> '{}'
+
+    Caused by:
+      Bind error: operator does not exist: unknown @> unknown
 - name: string from/to varchar[] in implicit context
   sql: |
     values (array['a', 'b']), ('{c,' || 'd}');

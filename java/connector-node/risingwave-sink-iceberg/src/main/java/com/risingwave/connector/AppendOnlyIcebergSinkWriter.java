@@ -22,7 +22,6 @@ import com.risingwave.connector.api.sink.SinkRow;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -53,9 +52,8 @@ public class AppendOnlyIcebergSinkWriter extends IcebergSinkWriterBase {
     }
 
     @Override
-    public void write(Iterator<SinkRow> rows) {
-        while (rows.hasNext()) {
-            SinkRow row = rows.next();
+    public void write(Iterable<SinkRow> rows) {
+        for (SinkRow row : rows) {
             switch (row.getOp()) {
                 case INSERT:
                     Record record = GenericRecord.create(rowSchema);

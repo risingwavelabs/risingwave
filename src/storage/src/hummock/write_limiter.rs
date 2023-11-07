@@ -80,13 +80,13 @@ impl WriteLimiter {
                 Some(reason) => {
                     if first_block_msg {
                         first_block_msg = false;
-                        tracing::warn!(
+                        tracing::debug!(
                             "write to table {} is blocked: {}",
                             table_id.table_id,
                             reason,
                         );
                     } else {
-                        tracing::warn!(
+                        tracing::debug!(
                             "write limiter is updated, but write to table {} is still blocked: {}",
                             table_id.table_id,
                             reason,
@@ -99,6 +99,6 @@ impl WriteLimiter {
             }
             notified.await;
         }
-        tracing::info!("write to table {} is unblocked", table_id.table_id,);
+        tracing::debug!("write to table {} is unblocked", table_id.table_id,);
     }
 }

@@ -30,6 +30,9 @@ use crate::source::{SourceProperties, SplitImpl, TryFromHashmap};
 use crate::{for_all_classified_sources, impl_cdc_source_type};
 
 pub const CDC_CONNECTOR_NAME_SUFFIX: &str = "-cdc";
+pub const CDC_SNAPSHOT_MODE_KEY: &str = "debezium.snapshot.mode";
+pub const CDC_SNAPSHOT_BACKFILL: &str = "rw_cdc_backfill";
+pub const CDC_SHARING_MODE_KEY: &str = "rw.sharing.mode.enable";
 
 pub const MYSQL_CDC_CONNECTOR: &str = Mysql::CDC_CONNECTOR_NAME;
 pub const POSTGRES_CDC_CONNECTOR: &str = Postgres::CDC_CONNECTOR_NAME;
@@ -49,6 +52,17 @@ impl<'a> From<&'a str> for CdcSourceType {
             POSTGRES_CDC_CONNECTOR => CdcSourceType::Postgres,
             CITUS_CDC_CONNECTOR => CdcSourceType::Citus,
             _ => CdcSourceType::Unspecified,
+        }
+    }
+}
+
+impl CdcSourceType {
+    pub fn as_str_name(&self) -> &str {
+        match self {
+            CdcSourceType::Mysql => "MySQL",
+            CdcSourceType::Postgres => "Postgres",
+            CdcSourceType::Citus => "Citus",
+            CdcSourceType::Unspecified => "Unspecified",
         }
     }
 }

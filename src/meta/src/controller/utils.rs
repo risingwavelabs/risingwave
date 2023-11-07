@@ -17,10 +17,12 @@ use risingwave_meta_model_migration::WithQuery;
 use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::{
-    connection, function, index, object, object_dependency, schema, sink, source, table, view,
-    DataTypeArray, DatabaseId, ObjectId, SchemaId, UserId,
+    connection, function, index, object, object_dependency, schema, sink, source, table, user,
+    user_privilege, view, DataTypeArray, DatabaseId, ObjectId, PrivilegeId, SchemaId, UserId,
 };
 use risingwave_pb::catalog::{PbConnection, PbFunction};
+use risingwave_pb::user::grant_privilege::{PbAction, PbActionWithGrantOption, PbObject};
+use risingwave_pb::user::{PbGrantPrivilege, PbUserInfo};
 use sea_orm::sea_query::{
     Alias, CommonTableExpression, Expr, Query, QueryStatementBuilder, SelectStatement, UnionType,
     WithClause,
@@ -220,6 +222,22 @@ where
     Ok(())
 }
 
+/// `check_user_name_duplicate` checks whether the user is already existed in the cluster.
+pub async fn check_user_name_duplicate<C>(name: &str, db: &C) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    let count = User::find()
+        .filter(user::Column::Name.eq(name))
+        .count(db)
+        .await?;
+    if count > 0 {
+        assert_eq!(count, 1);
+        return Err(MetaError::catalog_duplicated("user", name));
+    }
+    Ok(())
+}
+
 /// `check_relation_name_duplicate` checks whether the relation name is already used in the target namespace.
 pub async fn check_relation_name_duplicate<C>(
     name: &str,
@@ -353,4 +371,189 @@ where
     }
 
     Ok(())
+}
+
+/// `list_user_info_by_ids` lists all users' info by their ids.
+pub async fn list_user_info_by_ids<C>(user_ids: Vec<UserId>, db: &C) -> MetaResult<Vec<PbUserInfo>>
+where
+    C: ConnectionTrait,
+{
+    let mut user_infos = vec![];
+    for user_id in user_ids {
+        let user = User::find_by_id(user_id)
+            .one(db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("user", user_id))?;
+        let mut user_info: PbUserInfo = user.into();
+        user_info.grant_privileges = get_user_privilege(user_id, db).await?;
+        user_infos.push(user_info);
+    }
+    Ok(user_infos)
+}
+
+/// `construct_privilege_dependency_query` constructs a query to find all privileges that are dependent on the given one.
+///
+/// # Examples
+///
+/// ```
+/// use risingwave_meta::controller::utils::construct_privilege_dependency_query;
+/// use sea_orm::sea_query::*;
+/// use sea_orm::*;
+///
+/// let query = construct_privilege_dependency_query(vec![1, 2, 3]);
+///
+/// assert_eq!(
+///    query.to_string(MysqlQueryBuilder),
+///   r#"WITH RECURSIVE `granted_privilege_ids` (`id`, `user_id`) AS (SELECT `id`, `user_id` FROM `user_privilege` WHERE `user_privilege`.`id` IN (1, 2, 3) UNION ALL (SELECT `user_privilege`.`id`, `user_privilege`.`user_id` FROM `user_privilege` INNER JOIN `granted_privilege_ids` ON `granted_privilege_ids`.`id` = `dependent_id`)) SELECT `id`, `user_id` FROM `granted_privilege_ids`"#
+/// );
+/// assert_eq!(
+///   query.to_string(PostgresQueryBuilder),
+///  r#"WITH RECURSIVE "granted_privilege_ids" ("id", "user_id") AS (SELECT "id", "user_id" FROM "user_privilege" WHERE "user_privilege"."id" IN (1, 2, 3) UNION ALL (SELECT "user_privilege"."id", "user_privilege"."user_id" FROM "user_privilege" INNER JOIN "granted_privilege_ids" ON "granted_privilege_ids"."id" = "dependent_id")) SELECT "id", "user_id" FROM "granted_privilege_ids""#
+/// );
+/// assert_eq!(
+///  query.to_string(SqliteQueryBuilder),
+///  r#"WITH RECURSIVE "granted_privilege_ids" ("id", "user_id") AS (SELECT "id", "user_id" FROM "user_privilege" WHERE "user_privilege"."id" IN (1, 2, 3) UNION ALL SELECT "user_privilege"."id", "user_privilege"."user_id" FROM "user_privilege" INNER JOIN "granted_privilege_ids" ON "granted_privilege_ids"."id" = "dependent_id") SELECT "id", "user_id" FROM "granted_privilege_ids""#
+/// );
+/// ```
+pub fn construct_privilege_dependency_query(ids: Vec<PrivilegeId>) -> WithQuery {
+    let cte_alias = Alias::new("granted_privilege_ids");
+    let cte_return_privilege_alias = Alias::new("id");
+    let cte_return_user_alias = Alias::new("user_id");
+
+    let mut base_query = SelectStatement::new()
+        .columns([user_privilege::Column::Id, user_privilege::Column::UserId])
+        .from(UserPrivilege)
+        .and_where(user_privilege::Column::Id.is_in(ids))
+        .to_owned();
+
+    let cte_referencing = Query::select()
+        .columns([
+            (UserPrivilege, user_privilege::Column::Id),
+            (UserPrivilege, user_privilege::Column::UserId),
+        ])
+        .from(UserPrivilege)
+        .inner_join(
+            cte_alias.clone(),
+            Expr::col((cte_alias.clone(), cte_return_privilege_alias.clone()))
+                .equals(user_privilege::Column::DependentId),
+        )
+        .to_owned();
+
+    let common_table_expr = CommonTableExpression::new()
+        .query(base_query.union(UnionType::All, cte_referencing).to_owned())
+        .columns([
+            cte_return_privilege_alias.clone(),
+            cte_return_user_alias.clone(),
+        ])
+        .table_name(cte_alias.clone())
+        .to_owned();
+
+    SelectStatement::new()
+        .columns([cte_return_privilege_alias, cte_return_user_alias])
+        .from(cte_alias.clone())
+        .to_owned()
+        .with(
+            WithClause::new()
+                .recursive(true)
+                .cte(common_table_expr)
+                .to_owned(),
+        )
+        .to_owned()
+}
+
+#[derive(Clone, DerivePartialModel, FromQueryResult)]
+#[sea_orm(entity = "UserPrivilege")]
+pub struct PartialUserPrivilege {
+    pub id: PrivilegeId,
+    pub user_id: UserId,
+}
+
+pub async fn get_referring_privileges_cascade<C>(
+    ids: Vec<PrivilegeId>,
+    db: &C,
+) -> MetaResult<Vec<PartialUserPrivilege>>
+where
+    C: ConnectionTrait,
+{
+    let query = construct_privilege_dependency_query(ids);
+    let (sql, values) = query.build_any(&*db.get_database_backend().get_query_builder());
+    let privileges = PartialUserPrivilege::find_by_statement(Statement::from_sql_and_values(
+        db.get_database_backend(),
+        sql,
+        values,
+    ))
+    .all(db)
+    .await?;
+
+    Ok(privileges)
+}
+
+/// `ensure_privileges_not_referred` ensures that the privileges are not granted to any other users.
+pub async fn ensure_privileges_not_referred<C>(ids: Vec<PrivilegeId>, db: &C) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    let count = UserPrivilege::find()
+        .filter(user_privilege::Column::DependentId.is_in(ids))
+        .count(db)
+        .await?;
+    if count != 0 {
+        return Err(MetaError::permission_denied(format!(
+            "privileges granted to {} other ones.",
+            count
+        )));
+    }
+    Ok(())
+}
+
+/// `get_user_privilege` returns the privileges of the given user.
+pub async fn get_user_privilege<C>(user_id: UserId, db: &C) -> MetaResult<Vec<PbGrantPrivilege>>
+where
+    C: ConnectionTrait,
+{
+    let user_privileges = UserPrivilege::find()
+        .find_also_related(Object)
+        .filter(user_privilege::Column::UserId.eq(user_id))
+        .all(db)
+        .await?;
+    Ok(user_privileges
+        .into_iter()
+        .map(|(privilege, object)| {
+            let object = object.unwrap();
+            let oid = object.oid as _;
+            let obj = match object.obj_type {
+                ObjectType::Database => PbObject::DatabaseId(oid),
+                ObjectType::Schema => PbObject::SchemaId(oid),
+                ObjectType::Table => PbObject::TableId(oid),
+                ObjectType::Source => PbObject::SourceId(oid),
+                ObjectType::Sink => PbObject::SinkId(oid),
+                ObjectType::View => PbObject::ViewId(oid),
+                ObjectType::Function => PbObject::FunctionId(oid),
+                ObjectType::Index => unreachable!("index is not supported yet"),
+                ObjectType::Connection => unreachable!("connection is not supported yet"),
+            };
+            PbGrantPrivilege {
+                action_with_opts: vec![PbActionWithGrantOption {
+                    action: PbAction::from(privilege.action) as _,
+                    with_grant_option: privilege.with_grant_option,
+                    granted_by: privilege.granted_by as _,
+                }],
+                object: Some(obj),
+            }
+        })
+        .collect())
+}
+
+// todo: remove it after migrated to sql backend.
+pub fn extract_grant_obj_id(object: &PbObject) -> ObjectId {
+    match object {
+        PbObject::DatabaseId(id)
+        | PbObject::SchemaId(id)
+        | PbObject::TableId(id)
+        | PbObject::SourceId(id)
+        | PbObject::SinkId(id)
+        | PbObject::ViewId(id)
+        | PbObject::FunctionId(id) => *id as _,
+        _ => unreachable!("invalid object type: {:?}", object),
+    }
 }

@@ -13,38 +13,72 @@
 // limitations under the License.
 
 use risingwave_common::estimate_size::EstimateSize;
-use risingwave_common::types::{JsonbRef, JsonbVal, ScalarImpl, F32, F64};
+use risingwave_common::types::{DataType, JsonbVal, ScalarImpl};
 use risingwave_expr::aggregate::AggStateDyn;
 use risingwave_expr::{aggregate, ExprError, Result};
 
+use crate::scalar::ToJsonb;
+
+/// Collects all the input values, including nulls, into a JSON array.
+/// Values are converted to JSON as per `to_jsonb`.
 #[aggregate("jsonb_agg(boolean) -> jsonb")]
 #[aggregate("jsonb_agg(*int) -> jsonb")]
 #[aggregate("jsonb_agg(*float) -> jsonb")]
+#[aggregate("jsonb_agg(decimal) -> jsonb")]
+#[aggregate("jsonb_agg(serial) -> jsonb")]
+#[aggregate("jsonb_agg(int256) -> jsonb")]
+#[aggregate("jsonb_agg(date) -> jsonb")]
+#[aggregate("jsonb_agg(time) -> jsonb")]
+#[aggregate("jsonb_agg(timestamp) -> jsonb")]
+#[aggregate("jsonb_agg(timestamptz) -> jsonb")]
+#[aggregate("jsonb_agg(interval) -> jsonb")]
 #[aggregate("jsonb_agg(varchar) -> jsonb")]
+#[aggregate("jsonb_agg(bytea) -> jsonb")]
 #[aggregate("jsonb_agg(jsonb) -> jsonb")]
-fn jsonb_agg(state: &mut JsonbArrayState, input: Option<impl ToJson>) {
-    match input {
-        Some(input) => input.add_to(&mut state.0),
-        None => state.0.add_null(),
-    }
+fn jsonb_agg(state: &mut JsonbArrayState, input: Option<impl ToJsonb>) -> Result<()> {
+    // FIXME(runji):
+    // None of the input types we currently support depend on `data_type` in `add_to`.
+    // So we just use a dummy type here.
+    // To get the correct type, we need to support `ctx: &Context` argument in `#[aggregate]`.
+    let data_type = &DataType::Int32;
+
+    input.add_to(data_type, &mut state.0)?;
+    Ok(())
 }
 
+/// Collects all the key/value pairs into a JSON object.
+/// // TODO: support "any" type key
+/// // Key arguments are coerced to text;
+/// value arguments are converted as per `to_jsonb`.
+/// Values can be null, but keys cannot.
 #[aggregate("jsonb_object_agg(varchar, boolean) -> jsonb")]
 #[aggregate("jsonb_object_agg(varchar, *int) -> jsonb")]
 #[aggregate("jsonb_object_agg(varchar, *float) -> jsonb")]
+#[aggregate("jsonb_object_agg(varchar, decimal) -> jsonb")]
+#[aggregate("jsonb_object_agg(varchar, serial) -> jsonb")]
+#[aggregate("jsonb_object_agg(varchar, int256) -> jsonb")]
+#[aggregate("jsonb_object_agg(varchar, date) -> jsonb")]
+#[aggregate("jsonb_object_agg(varchar, time) -> jsonb")]
+#[aggregate("jsonb_object_agg(varchar, timestamp) -> jsonb")]
+#[aggregate("jsonb_object_agg(varchar, timestamptz) -> jsonb")]
+#[aggregate("jsonb_object_agg(varchar, interval) -> jsonb")]
 #[aggregate("jsonb_object_agg(varchar, varchar) -> jsonb")]
+#[aggregate("jsonb_object_agg(varchar, bytea) -> jsonb")]
 #[aggregate("jsonb_object_agg(varchar, jsonb) -> jsonb")]
 fn jsonb_object_agg(
     state: &mut JsonbObjectState,
     key: Option<&str>,
-    value: Option<impl ToJson>,
+    value: Option<impl ToJsonb>,
 ) -> Result<()> {
+    // FIXME(runji):
+    // None of the input types we currently support depend on `data_type` in `add_to`.
+    // So we just use a dummy type here.
+    // To get the correct type, we need to support `ctx: &Context` argument in `#[aggregate]`.
+    let data_type = &DataType::Int32;
+
     let key = key.ok_or(ExprError::FieldNameNull)?;
     state.0.add_string(key);
-    match value {
-        Some(value) => value.add_to(&mut state.0),
-        None => state.0.add_null(),
-    }
+    value.add_to(data_type, &mut state.0)?;
     Ok(())
 }
 
@@ -107,58 +141,5 @@ impl From<&JsonbObjectState> for ScalarImpl {
         builder.end_object();
         let jsonb: JsonbVal = builder.finish().into();
         jsonb.into()
-    }
-}
-
-/// Values that can be converted to JSON.
-trait ToJson {
-    fn add_to(self, builder: &mut jsonbb::Builder);
-}
-
-impl ToJson for bool {
-    fn add_to(self, builder: &mut jsonbb::Builder) {
-        builder.add_bool(self);
-    }
-}
-
-impl ToJson for i16 {
-    fn add_to(self, builder: &mut jsonbb::Builder) {
-        builder.add_i64(self as _);
-    }
-}
-
-impl ToJson for i32 {
-    fn add_to(self, builder: &mut jsonbb::Builder) {
-        builder.add_i64(self as _);
-    }
-}
-
-impl ToJson for i64 {
-    fn add_to(self, builder: &mut jsonbb::Builder) {
-        builder.add_i64(self);
-    }
-}
-
-impl ToJson for F32 {
-    fn add_to(self, builder: &mut jsonbb::Builder) {
-        builder.add_f64(self.0 as f64);
-    }
-}
-
-impl ToJson for F64 {
-    fn add_to(self, builder: &mut jsonbb::Builder) {
-        builder.add_f64(self.0);
-    }
-}
-
-impl ToJson for &str {
-    fn add_to(self, builder: &mut jsonbb::Builder) {
-        builder.add_string(self);
-    }
-}
-
-impl ToJson for JsonbRef<'_> {
-    fn add_to(self, builder: &mut jsonbb::Builder) {
-        builder.add_value(self.into());
     }
 }

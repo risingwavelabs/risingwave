@@ -17,8 +17,8 @@ use risingwave_pb::catalog::PbHandleConflictBehavior;
 use sea_orm::entity::prelude::*;
 
 use crate::{
-    Cardinality, ColumnCatalogArray, ColumnOrderArray, CreateType, I32Array, JobStatus, Property,
-    SourceId, TableId, TableVersion,
+    Cardinality, ColumnCatalogArray, ColumnOrderArray, CreateType, FragmentId, I32Array, JobStatus,
+    Property, SourceId, TableId, TableVersion,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
@@ -80,16 +80,16 @@ pub struct Model {
     pub stream_key: I32Array,
     pub append_only: bool,
     pub properties: Property,
-    pub fragment_id: i32,
-    pub vnode_col_index: Option<u32>,
-    pub row_id_index: Option<u32>,
+    pub fragment_id: FragmentId,
+    pub vnode_col_index: Option<i32>,
+    pub row_id_index: Option<i32>,
     pub value_indices: I32Array,
     pub definition: String,
     pub handle_pk_conflict_behavior: HandleConflictBehavior,
-    pub read_prefix_len_hint: u32,
+    pub read_prefix_len_hint: i32,
     pub watermark_indices: I32Array,
     pub dist_key_in_pk: I32Array,
-    pub dml_fragment_id: Option<i32>,
+    pub dml_fragment_id: Option<FragmentId>,
     pub cardinality: Option<Cardinality>,
     pub cleaned_by_watermark: bool,
     pub job_status: JobStatus,

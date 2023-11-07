@@ -20,6 +20,7 @@
 #![feature(coroutines)]
 #![feature(arc_unwrap_or_clone)]
 #![feature(never_type)]
+#![feature(error_generic_member_access)]
 
 extern crate self as risingwave_expr;
 
