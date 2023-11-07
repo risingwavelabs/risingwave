@@ -34,7 +34,7 @@ use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
-use risingwave_pb::ddl_service::alter_owner_request::Entity;
+use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{create_connection_request, DdlProgress};
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -479,11 +479,11 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn alter_owner(&self, entity: Entity, owner_id: u32) -> Result<()> {
+    async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()> {
         for database in self.catalog.read().iter_databases() {
             for schema in database.iter_schemas() {
-                match entity {
-                    Entity::TableId(table_id) => {
+                match object {
+                    Object::TableId(table_id) => {
                         if let Some(table) = schema.get_table_by_id(&TableId::from(table_id)) {
                             let mut pb_table = table.to_prost(schema.id(), database.id());
                             pb_table.owner = owner_id;
@@ -496,7 +496,7 @@ impl CatalogWriter for MockCatalogWriter {
             }
         }
 
-        Err(ErrorCode::ItemNotFound(format!("entity not found: {:?}", entity)).into())
+        Err(ErrorCode::ItemNotFound(format!("object not found: {:?}", object)).into())
     }
 
     async fn alter_view_name(&self, _view_id: u32, _view_name: &str) -> Result<()> {

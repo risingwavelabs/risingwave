@@ -625,10 +625,10 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<AlterOwnerRequest>,
     ) -> Result<Response<AlterOwnerResponse>, Status> {
-        let AlterOwnerRequest { entity, owner_id } = request.into_inner();
+        let AlterOwnerRequest { object, owner_id } = request.into_inner();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterTableOwner(entity.unwrap(), owner_id))
+            .run_command(DdlCommand::AlterTableOwner(object.unwrap(), owner_id))
             .await?;
         Ok(Response::new(AlterOwnerResponse {
             status: None,

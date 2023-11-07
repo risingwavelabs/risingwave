@@ -14,12 +14,11 @@
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::error::Result;
-use risingwave_pb::ddl_service::alter_owner_request::Entity;
+use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_sqlparser::ast::{Ident, ObjectName};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::table_catalog::TableType;
 use crate::catalog::CatalogError;
 use crate::Binder;
 
@@ -27,8 +26,7 @@ pub async fn handle_alter_owner(
     handler_args: HandlerArgs,
     obj_name: ObjectName,
     new_owner_name: Ident,
-    mut entity: Entity,
-    table_type: Option<TableType>,
+    stmt_type: StatementType,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = session.database();
@@ -38,69 +36,58 @@ pub async fn handle_alter_owner(
     let user_name = &session.auth_context().user_name;
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let stmt_type = {
+    let object = {
         let catalog_reader = session.env().catalog_reader().read_guard();
-        match &mut entity {
-            Entity::TableId(table_id) => {
+        match stmt_type {
+            StatementType::ALTER_TABLE | StatementType::ALTER_MATERIALIZED_VIEW => {
                 let (table, schema_name) =
                     catalog_reader.get_table_by_name(db_name, schema_path, &real_obj_name)?;
                 session.check_privilege_for_drop_alter(schema_name, &**table)?;
-                *table_id = table.id.table_id;
-
-                match table_type.unwrap() {
-                    TableType::Table => StatementType::ALTER_TABLE,
-                    TableType::MaterializedView => StatementType::ALTER_MATERIALIZED_VIEW,
-                    _ => unreachable!(),
-                }
+                Object::TableId(table.id.table_id)
             }
-            Entity::ViewId(view_id) => {
+            StatementType::ALTER_VIEW => {
                 let (view, schema_name) =
                     catalog_reader.get_view_by_name(db_name, schema_path, &real_obj_name)?;
                 session.check_privilege_for_drop_alter(schema_name, &**view)?;
-                *view_id = view.id;
-                StatementType::ALTER_VIEW
+                Object::ViewId(view.id)
             }
-            Entity::SourceId(source_id) => {
+            StatementType::ALTER_SOURCE => {
                 let (source, schema_name) =
                     catalog_reader.get_source_by_name(db_name, schema_path, &real_obj_name)?;
                 session.check_privilege_for_drop_alter(schema_name, &**source)?;
-                *source_id = source.id;
-                StatementType::ALTER_SOURCE
+                Object::SourceId(source.id)
             }
-            Entity::SinkId(sink_id) => {
+            StatementType::ALTER_SINK => {
                 let (sink, schema_name) =
                     catalog_reader.get_sink_by_name(db_name, schema_path, &real_obj_name)?;
                 session.check_privilege_for_drop_alter(schema_name, &**sink)?;
-                *sink_id = sink.id.sink_id;
-                StatementType::ALTER_SINK
+                Object::SinkId(sink.id.sink_id)
             }
-            Entity::DatabaseId(database_id) => {
+            StatementType::ALTER_DATABASE => {
                 let database = catalog_reader.get_database_by_name(&obj_name.real_value())?;
                 session.check_privilege_for_drop_alter_db_schema(database)?;
-                *database_id = database.id();
-                StatementType::ALTER_DATABASE
+                Object::DatabaseId(database.id())
             }
-            Entity::SchemaId(schema_id) => {
+            StatementType::ALTER_SCHEMA => {
                 let schema = catalog_reader.get_schema_by_name(db_name, &obj_name.real_value())?;
                 session.check_privilege_for_drop_alter_db_schema(schema)?;
-                *schema_id = schema.id();
-                StatementType::ALTER_SCHEMA
+                Object::SchemaId(schema.id())
             }
+            _ => unreachable!(),
         }
     };
 
-    let new_owner_name = new_owner_name.real_value();
+    let new_owner_name = Binder::resolve_user_name(vec![new_owner_name].into())?;
     let owner_id = session
         .env()
         .user_info_reader()
         .read_guard()
         .get_user_by_name(&new_owner_name)
-        .ok_or(CatalogError::NotFound("user", new_owner_name))?
-        .to_prost()
-        .get_id();
+        .map(|u| u.id)
+        .ok_or(CatalogError::NotFound("user", new_owner_name))?;
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.alter_owner(entity, owner_id).await?;
+    catalog_writer.alter_owner(object, owner_id).await?;
 
     Ok(RwPgResponse::empty_result(stmt_type))
 }

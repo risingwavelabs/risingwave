@@ -18,12 +18,11 @@ use std::task::{Context, Poll};
 
 use futures::stream::{self, BoxStream};
 use futures::{Stream, StreamExt};
-use pgwire::pg_response::StatementType::{ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
+use pgwire::pg_response::StatementType::{self, ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
 use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::ddl_service::alter_owner_request::Entity;
 use risingwave_sqlparser::ast::*;
 
 use self::util::DataChunkToRowSetAdapter;
@@ -465,8 +464,7 @@ pub async fn handle(
                 handler_args,
                 name,
                 new_owner_name,
-                Entity::DatabaseId(0),
-                None,
+                StatementType::ALTER_DATABASE,
             )
             .await
         }
@@ -478,8 +476,7 @@ pub async fn handle(
                 handler_args,
                 name,
                 new_owner_name,
-                Entity::SchemaId(0),
-                None,
+                StatementType::ALTER_SCHEMA,
             )
             .await
         }
@@ -509,8 +506,7 @@ pub async fn handle(
                 handler_args,
                 name,
                 new_owner_name,
-                Entity::TableId(0),
-                Some(TableType::Table),
+                StatementType::ALTER_TABLE,
             )
             .await
         }
@@ -545,8 +541,7 @@ pub async fn handle(
                     handler_args,
                     name,
                     new_owner_name,
-                    Entity::TableId(0),
-                    Some(TableType::MaterializedView),
+                    StatementType::ALTER_MATERIALIZED_VIEW,
                 )
                 .await
             } else {
@@ -554,8 +549,7 @@ pub async fn handle(
                     handler_args,
                     name,
                     new_owner_name,
-                    Entity::ViewId(0),
-                    None,
+                    StatementType::ALTER_VIEW,
                 )
                 .await
             }
@@ -572,8 +566,7 @@ pub async fn handle(
                 handler_args,
                 name,
                 new_owner_name,
-                Entity::SinkId(0),
-                None,
+                StatementType::ALTER_SINK,
             )
             .await
         }
@@ -593,8 +586,7 @@ pub async fn handle(
                 handler_args,
                 name,
                 new_owner_name,
-                Entity::SourceId(0),
-                None,
+                StatementType::ALTER_SOURCE,
             )
             .await
         }

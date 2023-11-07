@@ -47,7 +47,7 @@ use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
-use risingwave_pb::ddl_service::alter_owner_request::Entity;
+use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
@@ -440,9 +440,9 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn alter_owner(&self, entity: Entity, owner_id: u32) -> Result<CatalogVersion> {
+    pub async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<CatalogVersion> {
         let request = AlterOwnerRequest {
-            entity: Some(entity),
+            object: Some(object),
             owner_id,
         };
         let resp = self.inner.alter_owner(request).await?;

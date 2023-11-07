@@ -26,7 +26,7 @@ use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvi
 use risingwave_pb::catalog::{
     connection, Comment, Connection, CreateType, Database, Function, Schema, Source, Table, View,
 };
-use risingwave_pb::ddl_service::alter_owner_request::Entity;
+use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
@@ -102,7 +102,7 @@ pub enum DdlCommand {
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterRelationName(Relation, String),
     AlterSourceColumn(Source),
-    AlterTableOwner(Entity, UserId),
+    AlterTableOwner(Object, UserId),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
     CommentOn(Comment),
@@ -256,8 +256,8 @@ impl DdlController {
                 DdlCommand::AlterRelationName(relation, name) => {
                     ctrl.alter_relation_name(relation, &name).await
                 }
-                DdlCommand::AlterTableOwner(entity, owner_id) => {
-                    ctrl.alter_owner(entity, owner_id).await
+                DdlCommand::AlterTableOwner(object, owner_id) => {
+                    ctrl.alter_owner(object, owner_id).await
                 }
                 DdlCommand::CreateConnection(connection) => {
                     ctrl.create_connection(connection).await
@@ -1111,10 +1111,10 @@ impl DdlController {
 
     async fn alter_owner(
         &self,
-        entity: Entity,
+        object: Object,
         owner_id: UserId,
     ) -> MetaResult<NotificationVersion> {
-        self.catalog_manager.alter_owner(entity, owner_id).await
+        self.catalog_manager.alter_owner(object, owner_id).await
     }
 
     pub async fn wait(&self) -> MetaResult<()> {

@@ -169,7 +169,7 @@ message AlterRelationNameResponse {
 }
 
 message AlterOwnerRequest {
-  oneof entity {
+  oneof object {
     uint32 table_id = 1;
     uint32 view_id = 2;
     uint32 source_id = 3;
