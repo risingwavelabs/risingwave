@@ -57,11 +57,7 @@ impl std::fmt::Display for Portal {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match &self {
             Portal::Empty => write!(f, "Empty"),
-            Portal::Portal(portal) => write!(
-                f,
-                "{}, params = {:?}",
-                portal.statement, portal.bound_result.parsed_params
-            ),
+            Portal::Portal(portal) => portal.fmt(f),
             Portal::PureStatement(stmt) => write!(f, "{}", stmt),
         }
     }
@@ -72,6 +68,16 @@ pub struct PortalResult {
     pub statement: Statement,
     pub bound_result: BoundResult,
     pub result_formats: Vec<Format>,
+}
+
+impl std::fmt::Display for PortalResult {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}, params = {:?}",
+            self.statement, self.bound_result.parsed_params
+        )
+    }
 }
 
 pub fn handle_parse(
@@ -173,7 +179,7 @@ pub fn handle_bind(
     }
 }
 
-pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result<RwPgResponse> {
+pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal, sql: &Arc<String>) -> Result<RwPgResponse> {
     match portal {
         Portal::Empty => Ok(RwPgResponse::empty_result(
             pgwire::pg_response::StatementType::EMPTY,
@@ -181,8 +187,7 @@ pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result
         Portal::Portal(portal) => {
             session.clear_cancel_query_flag();
             let _guard = session.txn_begin_implicit(); // TODO(bugen): is this behavior correct?
-            let sql = Arc::new(portal.statement.to_string());
-            let handler_args = HandlerArgs::new(session, &portal.statement, sql)?;
+            let handler_args = HandlerArgs::new(session, &portal.statement, sql.clone())?;
             match &portal.statement {
                 Statement::Query(_)
                 | Statement::Insert { .. }
@@ -192,7 +197,6 @@ pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result
             }
         }
         Portal::PureStatement(stmt) => {
-            let sql = Arc::new(stmt.to_string());
             handle(session, stmt, sql, vec![]).await
         }
     }

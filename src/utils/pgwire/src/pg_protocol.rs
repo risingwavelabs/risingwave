@@ -488,10 +488,12 @@ where
         session: Arc<SM::Session>,
     ) -> PsqlResult<()> {
         let session = session.clone();
+        // Hold this sql until statement execution finished, so that show processlist can show it.
+        let sql = Arc::new(stmt.to_string());
         // execute query
         let res = session
             .clone()
-            .run_one_query(stmt.clone(), Format::Text)
+            .run_one_query(stmt.clone(), &sql, Format::Text)
             .await;
         for notice in session.take_notices() {
             self.stream
@@ -699,9 +701,10 @@ where
         } else {
             let start = Instant::now();
             let portal = self.get_portal(&portal_name)?;
-            let sql = format!("{}", portal);
+            // Hold this sql until statement execution finished, so that show processlist can show it.
+            let sql = Arc::new(format!("{}", portal));
 
-            let result = session.execute(portal).await;
+            let result = session.execute(portal, &sql).await;
 
             let mills = start.elapsed().as_millis();
 

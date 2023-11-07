@@ -59,7 +59,8 @@ pub trait Session: Send + Sync {
     /// view, see <https://github.com/risingwavelabs/risingwave/issues/6801>.
     fn run_one_query(
         self: Arc<Self>,
-        sql: Statement,
+        stmt: Statement,
+        sql: &Arc<String>,
         format: Format,
     ) -> impl Future<Output = Result<PgResponse<Self::ValuesStream>, BoxedError>> + Send;
 
@@ -84,6 +85,7 @@ pub trait Session: Send + Sync {
     fn execute(
         self: Arc<Self>,
         portal: Self::Portal,
+        sql: &Arc<String>,
     ) -> impl Future<Output = Result<PgResponse<Self::ValuesStream>, BoxedError>> + Send;
 
     fn describe_statement(
@@ -234,7 +236,8 @@ mod tests {
 
         async fn run_one_query(
             self: Arc<Self>,
-            _sql: Statement,
+            _stmt: Statement,
+            _sql: &Arc<String>,
             _format: types::Format,
         ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
             Ok(PgResponse::builder(StatementType::SELECT)
@@ -272,6 +275,7 @@ mod tests {
         async fn execute(
             self: Arc<Self>,
             _portal: String,
+            _sql: &Arc<String>,
         ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
             Ok(PgResponse::builder(StatementType::SELECT)
                 .values(

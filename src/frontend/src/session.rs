@@ -745,7 +745,7 @@ impl SessionImpl {
         }
         let stmt = stmts.swap_remove(0);
         let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, sql.clone(), formats));
+            let mut handle_fut = Box::pin(handle(self, stmt, &sql, formats));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
@@ -948,11 +948,11 @@ impl Session for SessionImpl {
     async fn run_one_query(
         self: Arc<Self>,
         stmt: Statement,
+        sql: &Arc<String>,
         format: Format,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
-        let sql = Arc::new(stmt.to_string());
         let rsp = {
-            let mut handle_fut = Box::pin(handle(self, stmt, sql.clone(), vec![format]));
+            let mut handle_fut = Box::pin(handle(self, stmt, &sql, vec![format]));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);
@@ -1012,9 +1012,10 @@ impl Session for SessionImpl {
     async fn execute(
         self: Arc<Self>,
         portal: Portal,
+        sql: &Arc<String>,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         let rsp = {
-            let mut handle_fut = Box::pin(handle_execute(self, portal));
+            let mut handle_fut = Box::pin(handle_execute(self, portal, sql));
             if cfg!(debug_assertions) {
                 // Report the SQL in the log periodically if the query is slow.
                 const SLOW_QUERY_LOG_PERIOD: Duration = Duration::from_secs(60);

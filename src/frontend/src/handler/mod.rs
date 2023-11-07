@@ -116,6 +116,7 @@ pub struct HandlerArgs {
 
 impl HandlerArgs {
     pub fn new(session: Arc<SessionImpl>, stmt: &Statement, sql: Arc<String>) -> Result<Self> {
+        session.set_sql(sql.clone());
         Ok(Self {
             session,
             sql,
@@ -171,13 +172,12 @@ impl HandlerArgs {
 pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
-    sql: Arc<String>,
+    sql: &Arc<String>,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     session.clear_cancel_query_flag();
     let _guard = session.txn_begin_implicit();
-    session.set_sql(sql.clone());
-    let handler_args = HandlerArgs::new(session, &stmt, sql)?;
+    let handler_args = HandlerArgs::new(session, &stmt, sql.clone())?;
 
     match stmt {
         Statement::Explain {
