@@ -720,8 +720,7 @@ impl ListValue {
 
             /// Parse a double quoted scalar value.
             fn parse_quoted(&mut self) -> Result<Datum, String> {
-                assert_eq!(self.peek(), Some('"'));
-                self.input = &self.input[1..];
+                assert!(self.try_consume('"'));
                 // peek until the next unescaped '"'
                 let mut chars = self.input.char_indices();
                 let mut has_escape = false;
@@ -793,8 +792,7 @@ impl ListValue {
                 self.input = match self
                     .input
                     .char_indices()
-                    .skip_while(|(_, c)| c.is_whitespace())
-                    .next()
+                    .find(|(_, c)| !c.is_ascii_whitespace())
                 {
                     Some((i, _)) => &self.input[i..],
                     None => "",
