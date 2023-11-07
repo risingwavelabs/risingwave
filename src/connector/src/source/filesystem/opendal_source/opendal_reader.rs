@@ -14,9 +14,12 @@
 
 use anyhow::{anyhow, Result, Ok};
 use async_trait::async_trait;
+use aws_smithy_http::byte_stream::ByteStream;
 use futures_async_stream::try_stream;
 use risingwave_common::error::RwError;
-
+use tokio::io::AsyncReadExt;
+use tokio_stream::Stream;
+use tokio::io::{AsyncRead, AsyncSeek};
 use super::opendal_enumerator::OpenDALConnector;
 use super::{GCSProperties, OpenDALProperties};
 use crate::{parser::ParserConfig, source::StreamChunkWithState};
@@ -74,5 +77,49 @@ impl OpenDALConnector{
             None => self.op.reader(path).await?,
         };
         Ok(())
+    }
+
+    pub async fn get_object(
+        &self,
+        object_name: &str,
+        start: usize,
+    ) -> Result<ByteStream> {
+        let mut reader = self.op
+                    .reader_with(object_name)
+                    .range(start as u64..)
+                    .await?;
+        // Seek to the beginning of the object
+    reader.seek(0).await?;
+
+    let mut buffer = vec![0u8; 1024];
+    let mut chunk = Vec::new();
+    let mut total_bytes_read = 0;
+
+    // Read the object and convert it into chunks
+    loop {
+        let bytes_read = reader.read(&mut buffer).await?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        chunk.extend_from_slice(&buffer[..bytes_read]);
+        total_bytes_read += bytes_read;
+
+        if total_bytes_read >= 1024 {
+            // Create a new StreamChunk and emit it
+            let stream_chunk = StreamChunk::new(chunk);
+            yield stream_chunk;
+
+            // Reset the chunk and byte counter
+            chunk = Vec::new();
+            total_bytes_read = 0;
+        }
+    }
+
+    // If there are remaining bytes in the last chunk, emit it
+    if !chunk.is_empty() {
+        let stream_chunk = StreamChunk::new(chunk);
+        yield stream_chunk;
+    }
     }
 }
