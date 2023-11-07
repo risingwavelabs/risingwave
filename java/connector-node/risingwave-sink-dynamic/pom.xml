@@ -95,6 +95,33 @@
             <version>30.1.1-jre-16.0</version>
         </dependency>
 
+        <!-- https://mvnrepository.com/artifact/com.getindata/flink-http-connector -->
+        <dependency>
+            <groupId>com.getindata</groupId>
+            <artifactId>flink-http-connector</artifactId>
+            <version>0.10.0</version>
+        </dependency>
+
+        <!-- https://mvnrepository.com/artifact/org.apache.flink/flink-connector-base -->
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-connector-base</artifactId>
+            <version>1.16.0</version>
+        </dependency>
+        <!-- https://mvnrepository.com/artifact/org.apache.flink/flink-json -->
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-json</artifactId>
+            <version>1.16.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-json</artifactId>
+            <version>1.16.0</version>
+            <scope>compile</scope>
+        </dependency>
+
 
     </dependencies>
 

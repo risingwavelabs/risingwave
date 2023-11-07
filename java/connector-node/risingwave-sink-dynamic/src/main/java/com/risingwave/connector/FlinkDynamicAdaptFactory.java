@@ -16,59 +16,17 @@ import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.catalog.*;
-import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.connector.sink.*;
 import org.apache.flink.table.data.RowData;
-import org.apache.flink.table.factories.CatalogFactory;
 import org.apache.flink.table.factories.DynamicTableSinkFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.runtime.connector.sink.SinkRuntimeProviderContext;
-import org.apache.flink.table.types.DataType;
 
 public class FlinkDynamicAdaptFactory implements SinkFactory {
 
-    public org.apache.flink.table.catalog.Catalog buildCatalog(
-            TableSchema tableSchema, FlinkDynamicAdaptConfig config) {
-        Configuration configuration = new Configuration();
-        ClassLoader contextClassLoader = Thread.currentThread().getContextClassLoader();
-        CatalogFactory catalogFactory =
-                FactoryUtil.discoverFactory(
-                        contextClassLoader, CatalogFactory.class, config.getConnector());
-        Set<ConfigOption<?>> configOptions = catalogFactory.requiredOptions();
-        configOptions.addAll(catalogFactory.optionalOptions());
-        config.processOption(configOptions);
-
-        Schema.Builder schemaBuilder = Schema.newBuilder();
-        tableSchema
-                .getColumnDescs()
-                .forEach(
-                        (columnDesc) ->
-                                schemaBuilder.column(
-                                        columnDesc.getName(), columnDesc.getDataType().toString()));
-        // Start with the default value, and add as needed later
-        FactoryUtil.DefaultCatalogContext defaultCatalogContext =
-                new FactoryUtil.DefaultCatalogContext(
-                        "catalog", config.getOption(), configuration, contextClassLoader);
-
-        return FactoryUtil.discoverFactory(
-                        contextClassLoader, CatalogFactory.class, config.getConnector())
-                .createCatalog(defaultCatalogContext);
-    }
-
     public DynamicTableSink.SinkRuntimeProvider buildDynamicTableSinkProvider(
             TableSchema tableSchema, FlinkDynamicAdaptConfig config) {
-        org.apache.flink.table.catalog.Catalog catalog = buildCatalog(tableSchema, config);
-
-        List<Column> flinkColumns = new ArrayList<>();
-        try {
-            catalog.open();
-            List<Schema.UnresolvedColumn> columns =
-                    catalog.getTable(config.getTablePath()).getUnresolvedSchema().getColumns();
-            flinkColumns = getFlinkColumns(columns);
-            catalog.close();
-        } catch (TableNotExistException e) {
-            throw new RuntimeException(e);
-        }
+        List<Column> flinkColumns = FlinkDynamicAdaptUtil.getFlinkColumnsFromSchema(tableSchema);
 
         // Start with the default value, and add as needed later
         ObjectIdentifier objectIdentifier =
@@ -77,7 +35,8 @@ public class FlinkDynamicAdaptFactory implements SinkFactory {
         DynamicTableSinkFactory dynamicTableSinkFactory =
                 FactoryUtil.discoverFactory(
                         contextClassLoader, DynamicTableSinkFactory.class, config.getConnector());
-        Set<ConfigOption<?>> configOptions = dynamicTableSinkFactory.requiredOptions();
+        Set<ConfigOption<?>> configOptions = new HashSet<>();
+        configOptions.addAll(dynamicTableSinkFactory.requiredOptions());
         configOptions.addAll(dynamicTableSinkFactory.optionalOptions());
         config.processOption(configOptions);
 
@@ -150,31 +109,7 @@ public class FlinkDynamicAdaptFactory implements SinkFactory {
         ObjectMapper mapper = new ObjectMapper();
         FlinkDynamicAdaptConfig flinkDynamicAdaptConfig =
                 mapper.convertValue(tableProperties, FlinkDynamicAdaptConfig.class);
-        org.apache.flink.table.catalog.Catalog catalog =
-                buildCatalog(tableSchema, flinkDynamicAdaptConfig);
-        try {
-            catalog.open();
-            CatalogBaseTable table = catalog.getTable(flinkDynamicAdaptConfig.getTablePath());
-            List<Schema.UnresolvedColumn> columns = table.getUnresolvedSchema().getColumns();
-            FlinkDynamicAdaptUtil.checkSchema(tableSchema.getColumnDescs(), columns);
-            catalog.close();
-        } catch (TableNotExistException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    private List<Column> getFlinkColumns(List<Schema.UnresolvedColumn> columns) {
-        List<Column> flinkColumns = new ArrayList<Column>();
-        for (int i = 0; i < columns.size(); i++) {
-            Schema.UnresolvedColumn unresolvedColumn = columns.get(i);
-            if (unresolvedColumn instanceof Schema.UnresolvedPhysicalColumn) {
-                Schema.UnresolvedPhysicalColumn c1 =
-                        (Schema.UnresolvedPhysicalColumn) unresolvedColumn;
-                flinkColumns.add(Column.physical(c1.getName(), (DataType) (c1.getDataType())));
-            } else {
-                throw new RuntimeException("Only support physical column");
-            }
-        }
-        return flinkColumns;
+        FlinkDynamicAdaptUtil.discoverSchemaFinder(tableSchema, flinkDynamicAdaptConfig)
+                .validate(tableSchema.getColumnDescs());
     }
 }

@@ -76,8 +76,10 @@ public class FlinkDynamicAdaptSink<CommT> extends SinkWriterBase {
 
         @Override
         public void commit() {
-
             try {
+                if (writer == null) {
+                    return;
+                }
                 Optional<? extends Committer<CommT>> committer = sink.createCommitter();
                 if (committer.isEmpty()) {
                     return;
@@ -89,7 +91,6 @@ public class FlinkDynamicAdaptSink<CommT> extends SinkWriterBase {
                 throw new RuntimeException(e);
             } finally {
                 closeWriter();
-                // Need create writer with new jobId;
                 this.writer = null;
             }
         }
@@ -129,6 +130,9 @@ public class FlinkDynamicAdaptSink<CommT> extends SinkWriterBase {
         }
 
         private void closeWriter() {
+            if (writer == null) {
+                return;
+            }
             try {
                 writer.close();
             } catch (Exception e) {
@@ -211,20 +215,23 @@ public class FlinkDynamicAdaptSink<CommT> extends SinkWriterBase {
 
         @Override
         public void commit() {
+            if (writer == null) {
+                return;
+            }
             try {
                 this.writer.flush(true);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            } finally {
+                System.out.println("error 1");
                 closeWriter();
-                // Need create writer with new jobId;
                 this.writer = null;
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
             }
         }
 
         @Override
         public void writer(RowData rowData) {
+            System.out.println(this.writer == null);
             try {
                 if (this.writer == null) {
                     this.writer = sink.createWriter(new SinkWriterContextV2());
@@ -262,6 +269,9 @@ public class FlinkDynamicAdaptSink<CommT> extends SinkWriterBase {
         }
 
         private void closeWriter() {
+            if (writer == null) {
+                return;
+            }
             try {
                 writer.close();
             } catch (Exception e) {

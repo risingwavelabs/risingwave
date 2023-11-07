@@ -1,11 +1,17 @@
 package com.risingwave.connector;
 
 import java.util.OptionalLong;
+import java.util.concurrent.*;
 import org.apache.flink.api.common.operators.MailboxExecutor;
 import org.apache.flink.api.common.operators.ProcessingTimeService;
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.connector.sink2.Sink;
 import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
+import org.apache.flink.runtime.metrics.NoOpMetricRegistry;
+import org.apache.flink.runtime.metrics.groups.GenericMetricGroup;
+import org.apache.flink.runtime.metrics.groups.InternalSinkWriterMetricGroup;
+import org.apache.flink.streaming.runtime.tasks.ProcessingTimeServiceUtil;
+import org.apache.flink.streaming.runtime.tasks.mailbox.MailboxProcessor;
 import org.apache.flink.util.SimpleUserCodeClassLoader;
 import org.apache.flink.util.UserCodeClassLoader;
 
@@ -51,6 +57,51 @@ class SinkWriterContext implements org.apache.flink.api.connector.sink.Sink.Init
 }
 
 class SinkWriterContextV2 implements Sink.InitContext {
+    class ProcessingTimeServiceImpl implements ProcessingTimeService {
+        private final ScheduledThreadPoolExecutor timerService;
+
+        ProcessingTimeServiceImpl() {
+            this.timerService = new ScheduledThreadPoolExecutor(1);
+        }
+
+        @Override
+        public long getCurrentProcessingTime() {
+            return System.currentTimeMillis();
+        }
+
+        @Override
+        public ScheduledFuture<?> registerTimer(long timestamp, ProcessingTimeCallback target) {
+            long delay =
+                    ProcessingTimeServiceUtil.getProcessingTimeDelay(
+                            timestamp, getCurrentProcessingTime());
+            return timerService.schedule(
+                    new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                target.onProcessingTime(timestamp);
+                            } catch (Exception e) {
+                                throw new RuntimeException("Callback error" + e.getMessage());
+                            }
+                        }
+                    },
+                    delay,
+                    TimeUnit.MILLISECONDS);
+        }
+    }
+
+    SinkWriterMetricGroup sinkWriterMetricGroup;
+    ProcessingTimeService processingTimeService;
+
+    MailboxExecutor mailboxExecutor;
+
+    public SinkWriterContextV2() {
+        sinkWriterMetricGroup =
+                InternalSinkWriterMetricGroup.mock(
+                        new GenericMetricGroup(new NoOpMetricRegistry(), null, "rootMetricGroup"));
+        processingTimeService = new ProcessingTimeServiceImpl();
+        mailboxExecutor = new MailboxProcessor().getMainMailboxExecutor();
+    }
 
     // Can't use for sink
     @Override
@@ -61,12 +112,12 @@ class SinkWriterContextV2 implements Sink.InitContext {
     // Can't use for sink
     @Override
     public MailboxExecutor getMailboxExecutor() {
-        return null;
+        return mailboxExecutor;
     }
 
     @Override
     public ProcessingTimeService getProcessingTimeService() {
-        return null;
+        return processingTimeService;
     }
 
     // Can't use for sink
@@ -83,11 +134,9 @@ class SinkWriterContextV2 implements Sink.InitContext {
     }
 
     // Can't use for sink
-
-    // Can't use for sink
     @Override
     public SinkWriterMetricGroup metricGroup() {
-        return null;
+        return sinkWriterMetricGroup;
     }
 
     @Override

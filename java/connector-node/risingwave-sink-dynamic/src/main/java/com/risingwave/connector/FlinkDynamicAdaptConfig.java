@@ -18,25 +18,10 @@ public class FlinkDynamicAdaptConfig extends CommonSinkConfig {
                 Boolean.valueOf(tableProperties.get("force_append_only")),
                 tableProperties.get("primary_key"));
         this.option = tableProperties;
-        processConnector();
     }
 
     public ObjectPath getTablePath() {
-        if (getConnector().equals("doris")) {
-            String tableIdentifier = option.get("table.identifier");
-            String[] split = tableIdentifier.split("\\.");
-            return new ObjectPath(split[0], split[1]);
-        } else {
-            throw new RuntimeException("Cannot support connector type");
-        }
-    }
-
-    public void processConnector() {
-        if (getConnector().equals("doris_java")) {
-            super.setConnector("doris");
-        } else {
-            throw new RuntimeException("Cannot support connector type");
-        }
+        throw new RuntimeException("Cannot get table with connector type " + getConnector());
     }
 
     public void processOption(Set<ConfigOption<?>> needOptionSet) {

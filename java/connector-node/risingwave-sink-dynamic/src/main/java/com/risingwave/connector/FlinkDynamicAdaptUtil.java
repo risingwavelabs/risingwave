@@ -1,94 +1,63 @@
 package com.risingwave.connector;
 
 import com.risingwave.connector.api.ColumnDesc;
+import com.risingwave.connector.api.TableSchema;
 import com.risingwave.proto.Data;
 import io.grpc.Status;
-import java.util.List;
-import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
+import java.util.*;
 import org.apache.flink.table.api.DataTypes;
-import org.apache.flink.table.api.Schema;
+import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.types.DataType;
 
 public class FlinkDynamicAdaptUtil {
-    public static void checkSchema(
-            List<ColumnDesc> rwColumnDescs, List<Schema.UnresolvedColumn> flinkColumns) {
-        if (rwColumnDescs.size() != flinkColumns.size()) {
-            throw Status.FAILED_PRECONDITION
-                    .withDescription("Don't match in the number of columns in the table")
-                    .asRuntimeException();
-        }
 
-        Map<String, DataType> flinkColumnMap =
-                flinkColumns.stream()
-                        .map(
-                                c -> {
-                                    if (c instanceof Schema.UnresolvedPhysicalColumn) {
-                                        Schema.UnresolvedPhysicalColumn c1 =
-                                                (Schema.UnresolvedPhysicalColumn) c;
-                                        return Map.entry(c1.getName(), c1.getDataType());
-                                    } else {
-                                        throw new RuntimeException("Only support physical column");
-                                    }
-                                })
-                        .collect(Collectors.toMap(e -> e.getKey(), e -> (DataType) e.getValue()));
-
-        for (ColumnDesc columnDesc : rwColumnDescs) {
-            if (!flinkColumnMap.containsKey(columnDesc.getName())) {
-                throw Status.FAILED_PRECONDITION
-                        .withDescription(
-                                String.format(
-                                        "Don't match in the name, rw is %s", columnDesc.getName()))
-                        .asRuntimeException();
-            }
-            if (!getCorrespondingFlinkType(
-                    columnDesc.getDataType(), flinkColumnMap.get(columnDesc.getName()))) {
-                throw Status.FAILED_PRECONDITION
-                        .withDescription(
-                                String.format(
-                                        "Don't match in the type, name is %s, Sink is %s, rw is %s",
-                                        columnDesc.getName(),
-                                        flinkColumnMap.get(columnDesc.getName()),
-                                        columnDesc.getDataType().getTypeName()))
-                        .asRuntimeException();
-            }
+    public static FlinkSinkTableSchemaFinder discoverSchemaFinder(
+            TableSchema tableSchema, FlinkDynamicAdaptConfig config) {
+        if (config.getConnector().equals("http-sink")) {
+            return new HttpTableSchemaFinder(tableSchema, config);
         }
+        throw new RuntimeException("Cannot support connector" + config.getConnector());
     }
 
-    private static boolean getCorrespondingFlinkType(Data.DataType dataType, DataType flinkType) {
+    public static List<Column> getFlinkColumnsFromSchema(TableSchema tableSchema) {
+        List<Column> columns = new ArrayList<>();
+        for (ColumnDesc columnDesc : tableSchema.getColumnDescs()) {
+            columns.add(
+                    Column.physical(
+                            columnDesc.getName(),
+                            getCorrespondingFlinkType(columnDesc.getDataType())));
+        }
+        return columns;
+    }
+
+    public static DataType getCorrespondingFlinkType(Data.DataType dataType) {
         switch (dataType.getTypeName()) {
             case INT16:
-                return DataTypes.SMALLINT().equals(flinkType);
+                return DataTypes.SMALLINT();
             case INT32:
-                return DataTypes.INT().equals(flinkType);
+                return DataTypes.INT();
             case INT64:
-                return DataTypes.BIGINT().equals(flinkType);
+                return DataTypes.BIGINT();
             case FLOAT:
-                return DataTypes.FLOAT().equals(flinkType);
+                return DataTypes.FLOAT();
             case DOUBLE:
-                return DataTypes.DOUBLE().equals(flinkType);
+                return DataTypes.DOUBLE();
             case BOOLEAN:
-                return DataTypes.BOOLEAN().equals(flinkType);
+                return DataTypes.BOOLEAN();
             case VARCHAR:
-                System.out.println(flinkType.toString() + DataTypes.STRING().toString());
-                return DataTypes.STRING().equals(flinkType);
+                return DataTypes.STRING();
             case DECIMAL:
-                return flinkType.toString().contains("DECIMAL");
+                return DataTypes.DECIMAL(9, 1);
             case TIMESTAMP:
-                return flinkType.toString().contains("TIMESTAMP");
+                return DataTypes.TIMESTAMP();
             case TIMESTAMPTZ:
-                String pattern = "TIMESTAMP\\(\\d+\\) WITH TIME ZONE";
-                Pattern regex = Pattern.compile(pattern);
-                Matcher matcher = regex.matcher(flinkType.toString());
-                return matcher.matches();
+                return DataTypes.TIMESTAMP_WITH_TIME_ZONE();
             case DATE:
-                return DataTypes.DATE().equals(flinkType);
+                return DataTypes.DATE();
             case TIME:
-                return DataTypes.TIME().equals(flinkType);
+                return DataTypes.TIME();
             case BYTEA:
-                return DataTypes.BYTES().equals(flinkType);
+                return DataTypes.BYTES();
             case LIST:
             case STRUCT:
             case INTERVAL:

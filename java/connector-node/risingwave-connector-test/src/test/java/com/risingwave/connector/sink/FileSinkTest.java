@@ -72,6 +72,43 @@ public class FileSinkTest {
             Files.delete(file);
         }
     }
+    //
+    //    @Test
+    //    public void test() throws IOException, InterruptedException {
+    //        HashMap<String,String> map = new HashMap<>();
+    //        map.put("url","http://localhost:8080/endpoint");
+    //        map.put("format","json");
+    //        map.put("connector","http-sink");
+    //        map.put("gid.connector.http.sink.header.Origin","*");
+    //        map.put("gid.connector.http.sink.header.X-Content-Type-Options","'nosniff'");
+    //        map.put("gid.connector.http.sink.header.Content-Type","application/json");
+    //        map.put("primary_key","v1");
+    //
+    //        TableSchema tableSchema = new TableSchema(
+    //                Lists.newArrayList("v1", "v2", "v3"),
+    //                Lists.newArrayList(
+    //                        DataType.newBuilder().setTypeName(DataType.TypeName.INT32).build(),
+    //                        DataType.newBuilder().setTypeName(DataType.TypeName.INT32).build(),
+    //                        DataType.newBuilder().setTypeName(DataType.TypeName.INT32).build()),
+    //                Lists.newArrayList("v1"));
+    //
+    //        SinkWriter writer = new FlinkDynamicAdaptFactory().createWriter(tableSchema, map);
+    //        writer.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 1, 2, 3)));
+    //        try {
+    //            writer.barrier(true);
+    //        }catch (Exception e){
+    //            System.out.println(1);
+    //        }
+    //        Thread.sleep(10000);
+    //        writer.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 12, 2, 3)));
+    //        try {
+    //            writer.barrier(true);
+    //        }catch (Exception e){
+    //            System.out.println(12);
+    //        }
+    //        Thread.sleep(10000);
+    //        System.out.println(1111);
+    //    }
 
     @Test
     public void testWrite() throws IOException {
