@@ -190,7 +190,7 @@ dependencies = [
 [[package]]
 name = "apache-avro"
 version = "0.15.0"
-source = "git+https://github.com/risingwavelabs/avro?branch=idx0dev/resolved_schema#89c2c128de93586465a7ea85b0a1c1a53082bba2"
+source = "git+https://github.com/risingwavelabs/avro?rev=89c2c128de93586465a7ea85b0a1c1a53082bba2"
 dependencies = [
  "byteorder",
  "bzip2",
@@ -7473,7 +7473,7 @@ name = "risingwave_connector"
 version = "1.3.0-alpha"
 dependencies = [
  "anyhow",
- "apache-avro 0.15.0 (git+https://github.com/risingwavelabs/avro?branch=idx0dev/resolved_schema)",
+ "apache-avro 0.15.0 (git+https://github.com/risingwavelabs/avro?rev=89c2c128de93586465a7ea85b0a1c1a53082bba2)",
  "arrow-array",
  "arrow-schema",
  "async-nats",
@@ -9484,9 +9484,9 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.17.0"
+version = "0.17.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c711f88532f6c84d912ecd2ae9d8bdf48c4780ee88d257e0301dbfb151a1b033"
+checksum = "78ea1056caa9180e7e5727eed1a377d96c9f4615303fa82d2f4c202c64736dee"
 dependencies = [
  "async-trait",
  "educe",
