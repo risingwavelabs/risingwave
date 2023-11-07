@@ -55,6 +55,7 @@ use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
+use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::coordinate::CoordinatedSinkWriter;
 use crate::sink::log_store::{LogReader, LogStoreReadItem, TruncateOffset};
 use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
@@ -67,28 +68,54 @@ use crate::ConnectorParams;
 macro_rules! def_remote_sink {
     () => {
         def_remote_sink! {
-            { ElasticSearch, ElasticSearchSink, "elasticsearch" },
-            { Cassandra, CassandraSink, "cassandra" },
-            { Jdbc, JdbcSink, "jdbc" },
+            { ElasticSearch, ElasticSearchSink, "elasticsearch" }
+            { Cassandra, CassandraSink, "cassandra" }
+            { Jdbc, JdbcSink, "jdbc", |desc| {
+                desc.sink_type.is_append_only()
+            } }
             { DeltaLake, DeltaLakeSink, "deltalake" }
         }
     };
-    ($({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr }),*) => {
-        $(
-            #[derive(Debug)]
-            pub struct $variant_name;
-            impl RemoteSinkTrait for $variant_name {
-                const SINK_NAME: &'static str = $sink_name;
-            }
-            pub type $sink_type_name = RemoteSink<$variant_name>;
-        )*
+    () => {};
+    ({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr }) => {
+        #[derive(Debug)]
+        pub struct $variant_name;
+        impl RemoteSinkTrait for $variant_name {
+            const SINK_NAME: &'static str = $sink_name;
+        }
+        pub type $sink_type_name = RemoteSink<$variant_name>;
     };
+    ({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr, |$desc:ident| $body:expr }) => {
+        #[derive(Debug)]
+        pub struct $variant_name;
+        impl RemoteSinkTrait for $variant_name {
+            const SINK_NAME: &'static str = $sink_name;
+            fn default_sink_decouple($desc: &SinkDesc) -> bool {
+                $body
+            }
+        }
+        pub type $sink_type_name = RemoteSink<$variant_name>;
+    };
+    ({ $($first:tt)+ } $({$($rest:tt)+})*) => {
+        def_remote_sink! {
+            {$($first)+}
+        }
+        def_remote_sink! {
+            $({$($rest)+})*
+        }
+    };
+    ($($invalid:tt)*) => {
+        compile_error! {concat! {"invalid `", stringify!{$($invalid)*}, "`"}}
+    }
 }
 
 def_remote_sink!();
 
 pub trait RemoteSinkTrait: Send + Sync + 'static {
     const SINK_NAME: &'static str;
+    fn default_sink_decouple(_desc: &SinkDesc) -> bool {
+        false
+    }
 }
 
 #[derive(Debug)]
@@ -113,6 +140,10 @@ impl<R: RemoteSinkTrait> Sink for RemoteSink<R> {
     type LogSinker = RemoteLogSinker;
 
     const SINK_NAME: &'static str = R::SINK_NAME;
+
+    fn default_sink_decouple(desc: &SinkDesc) -> bool {
+        R::default_sink_decouple(desc)
+    }
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         RemoteLogSinker::new(self.param.clone(), writer_param).await
