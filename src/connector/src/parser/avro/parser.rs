@@ -207,7 +207,7 @@ mod test {
     use apache_avro::{Codec, Days, Duration, Millis, Months, Reader, Schema, Writer};
     use itertools::Itertools;
     use risingwave_common::array::Op;
-    use risingwave_common::catalog::ColumnId;
+    use risingwave_common::catalog::{ColumnId, DEFAULT_KEY_COLUMN_NAME};
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Date, Interval, ScalarImpl, Timestamptz};
     use risingwave_common::{error, try_match_expand};
@@ -220,10 +220,11 @@ mod test {
         AvroParserConfig,
     };
     use crate::aws_auth::AwsAuthProps;
+    use crate::parser::bytes_parser::BytesAccessBuilder;
     use crate::parser::plain_parser::PlainParser;
     use crate::parser::unified::avro::unix_epoch_days;
     use crate::parser::{
-        AccessBuilderImpl, EncodingType, SourceStreamChunkBuilder, SpecificParserConfig,
+        AccessBuilderImpl, EncodingType, SourceStreamChunkBuilder, SpecificParserConfig, BytesProperties, EncodingProperties,
     };
     use crate::source::SourceColumnDesc;
 
@@ -309,6 +310,11 @@ mod test {
         let conf = new_avro_conf_from_local(file_name).await?;
 
         Ok(PlainParser {
+            key_builder: AccessBuilderImpl::Bytes(BytesAccessBuilder::new(EncodingProperties::Bytes(
+                BytesProperties {
+                    column_name: Some(DEFAULT_KEY_COLUMN_NAME.into()),
+                },
+            ))?),
             payload_builder: AccessBuilderImpl::Avro(AvroAccessBuilder::new(
                 conf,
                 EncodingType::Value,
@@ -332,11 +338,12 @@ mod test {
         let flush = writer.flush().unwrap();
         assert!(flush > 0);
         let input_data = writer.into_inner().unwrap();
+        let key_data = vec![];
         let columns = build_rw_columns();
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 1);
         {
             let writer = builder.row_writer();
-            parser.parse_inner(input_data, writer).await.unwrap();
+            parser.parse_inner(Some(key_data), Some(input_data), writer).await.unwrap();
         }
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();

@@ -577,6 +577,7 @@ pub(crate) async fn bind_columns_from_source(
                 .join(","),
         ))));
     }
+
     Ok(res)
 }
 
@@ -704,12 +705,16 @@ pub(crate) async fn bind_source_pk(
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
-        (Format::Native, Encode::Native) | (Format::Plain, _) => sql_defined_pk_names,
+        (Format::Native, Encode::Native) => sql_defined_pk_names,
+        (Format::Plain, _) => {
+            add_default_key_column(columns);
+            sql_defined_pk_names
+        }
         (Format::Upsert, Encode::Json) => {
             if sql_defined_pk {
                 sql_defined_pk_names
             } else {
-                add_upsert_default_key_column(columns);
+                add_default_key_column(columns);
                 vec![DEFAULT_KEY_COLUMN_NAME.into()]
             }
         }
@@ -727,7 +732,7 @@ pub(crate) async fn bind_source_pk(
                 extracted_pk_names
             } else {
                 // For upsert avro, if we can't extract pk from schema, use message key as primary key
-                add_upsert_default_key_column(columns);
+                add_default_key_column(columns);
                 vec![DEFAULT_KEY_COLUMN_NAME.into()]
             }
         }
@@ -822,7 +827,7 @@ fn check_and_add_timestamp_column(
     }
 }
 
-fn add_upsert_default_key_column(columns: &mut Vec<ColumnCatalog>) {
+fn add_default_key_column(columns: &mut Vec<ColumnCatalog>) {
     let column = ColumnCatalog {
         column_desc: ColumnDesc {
             data_type: DataType::Bytea,
