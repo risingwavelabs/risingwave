@@ -1,7 +1,25 @@
-package com.risingwave.connector;
+/*
+ * Copyright 2023 RisingWave Labs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.risingwave.connector.context;
 
 import java.util.OptionalLong;
-import java.util.concurrent.*;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import org.apache.flink.api.common.operators.MailboxExecutor;
 import org.apache.flink.api.common.operators.ProcessingTimeService;
 import org.apache.flink.api.common.serialization.SerializationSchema;
@@ -15,48 +33,7 @@ import org.apache.flink.streaming.runtime.tasks.mailbox.MailboxProcessor;
 import org.apache.flink.util.SimpleUserCodeClassLoader;
 import org.apache.flink.util.UserCodeClassLoader;
 
-public class SinkAllContext {}
-
-class SinkWriterContext implements org.apache.flink.api.connector.sink.Sink.InitContext {
-
-    @Override
-    public UserCodeClassLoader getUserCodeClassLoader() {
-        return SimpleUserCodeClassLoader.create(Thread.currentThread().getContextClassLoader());
-    }
-
-    @Override
-    public MailboxExecutor getMailboxExecutor() {
-        return null;
-    }
-
-    @Override
-    public org.apache.flink.api.connector.sink.Sink.ProcessingTimeService
-            getProcessingTimeService() {
-        return null;
-    }
-
-    @Override
-    public int getSubtaskId() {
-        return (int) (Math.random() * 1000000);
-    }
-
-    @Override
-    public int getNumberOfParallelSubtasks() {
-        return 0;
-    }
-
-    @Override
-    public SinkWriterMetricGroup metricGroup() {
-        return null;
-    }
-
-    @Override
-    public OptionalLong getRestoredCheckpointId() {
-        return OptionalLong.empty();
-    }
-}
-
-class SinkWriterContextV2 implements Sink.InitContext {
+public class SinkWriterContextV2 implements Sink.InitContext {
     class ProcessingTimeServiceImpl implements ProcessingTimeService {
         private final ScheduledThreadPoolExecutor timerService;
 
@@ -94,6 +71,7 @@ class SinkWriterContextV2 implements Sink.InitContext {
     ProcessingTimeService processingTimeService;
 
     MailboxExecutor mailboxExecutor;
+    SimpleUserCodeClassLoader simpleUserCodeClassLoader;
 
     public SinkWriterContextV2() {
         sinkWriterMetricGroup =
@@ -101,15 +79,15 @@ class SinkWriterContextV2 implements Sink.InitContext {
                         new GenericMetricGroup(new NoOpMetricRegistry(), null, "rootMetricGroup"));
         processingTimeService = new ProcessingTimeServiceImpl();
         mailboxExecutor = new MailboxProcessor().getMainMailboxExecutor();
+        simpleUserCodeClassLoader =
+                SimpleUserCodeClassLoader.create(Thread.currentThread().getContextClassLoader());
     }
 
-    // Can't use for sink
     @Override
     public UserCodeClassLoader getUserCodeClassLoader() {
-        return null;
+        return simpleUserCodeClassLoader;
     }
 
-    // Can't use for sink
     @Override
     public MailboxExecutor getMailboxExecutor() {
         return mailboxExecutor;
@@ -120,20 +98,16 @@ class SinkWriterContextV2 implements Sink.InitContext {
         return processingTimeService;
     }
 
-    // Can't use for sink
-
     @Override
     public int getSubtaskId() {
         return (int) (Math.random() * 1000000);
     }
 
-    // Can't use for sink
     @Override
     public int getNumberOfParallelSubtasks() {
         return 0;
     }
 
-    // Can't use for sink
     @Override
     public SinkWriterMetricGroup metricGroup() {
         return sinkWriterMetricGroup;
@@ -144,7 +118,6 @@ class SinkWriterContextV2 implements Sink.InitContext {
         return OptionalLong.empty();
     }
 
-    // Can't use for sink
     @Override
     public SerializationSchema.InitializationContext asSerializationSchemaInitializationContext() {
         return null;

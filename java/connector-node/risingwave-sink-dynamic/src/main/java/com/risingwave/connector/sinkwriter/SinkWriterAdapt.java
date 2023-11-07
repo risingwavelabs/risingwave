@@ -14,12 +14,16 @@
  * limitations under the License.
  */
 
-package com.risingwave.connector;
+package com.risingwave.connector.sinkwriter;
 
-import com.risingwave.connector.api.ColumnDesc;
-import io.grpc.StatusRuntimeException;
-import java.util.List;
+import org.apache.flink.table.data.RowData;
 
-public interface FlinkSinkTableSchemaFinder {
-    public void validate(List<ColumnDesc> rwColumnDescs) throws StatusRuntimeException;
+public interface SinkWriterAdapt<CommT> {
+    public void commit();
+
+    public void writer(RowData rowData);
+
+    public void abort();
+
+    public void drop();
 }

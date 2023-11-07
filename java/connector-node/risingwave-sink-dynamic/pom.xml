@@ -108,13 +108,6 @@
             <artifactId>flink-connector-base</artifactId>
             <version>1.16.0</version>
         </dependency>
-        <!-- https://mvnrepository.com/artifact/org.apache.flink/flink-json -->
-        <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-json</artifactId>
-            <version>1.16.0</version>
-            <scope>test</scope>
-        </dependency>
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-json</artifactId>

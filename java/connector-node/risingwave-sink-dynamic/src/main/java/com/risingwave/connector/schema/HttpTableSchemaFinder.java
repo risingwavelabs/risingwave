@@ -14,12 +14,24 @@
  * limitations under the License.
  */
 
-package com.risingwave.connector;
+package com.risingwave.connector.schema;
 
+import com.risingwave.connector.FlinkDynamicAdaptConfig;
+import com.risingwave.connector.FlinkSinkTableSchemaFinder;
 import com.risingwave.connector.api.ColumnDesc;
+import com.risingwave.connector.api.TableSchema;
 import io.grpc.StatusRuntimeException;
 import java.util.List;
 
-public interface FlinkSinkTableSchemaFinder {
-    public void validate(List<ColumnDesc> rwColumnDescs) throws StatusRuntimeException;
+public class HttpTableSchemaFinder implements FlinkSinkTableSchemaFinder {
+
+    public HttpTableSchemaFinder(TableSchema tableSchema, FlinkDynamicAdaptConfig config) {
+        return;
+    }
+
+    @Override
+    public void validate(List<ColumnDesc> rwColumnDescs) throws StatusRuntimeException {
+        // Don't need check schema
+        return;
+    }
 }
