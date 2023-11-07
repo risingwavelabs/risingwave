@@ -1132,7 +1132,7 @@
     JOIN side_input FOR SYSTEM_TIME AS OF PROCTIME() S
     ON mod(B.auction, 10000) = S.key
   sink_plan: |-
-    StreamSink { type: append-only, columns: [auction, bidder, price, date_time, value, bid._row_id(hidden), $expr10040(hidden), side_input.key(hidden)] }
+    StreamSink { type: append-only, columns: [auction, bidder, price, date_time, value, bid._row_id(hidden), $expr10042(hidden), side_input.key(hidden)] }
     └─StreamTemporalJoin { type: Inner, predicate: $expr1 = side_input.key, output: [bid.auction, bid.bidder, bid.price, bid.date_time, side_input.value, bid._row_id, $expr1, side_input.key] }
       ├─StreamExchange { dist: HashShard($expr1) }
       │ └─StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.date_time, (bid.auction % 10000:Int32) as $expr1, bid._row_id] }
