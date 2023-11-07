@@ -76,7 +76,11 @@ cargo make kill
 echo "cluster killed "
 
 # insert into mytest database (cdc.share_stream.slt)
-mysql --protocol=tcp -u root mytest < e2e_test/source/cdc/mysql_cdc_insert.sql
+mysql --protocol=tcp -u root mytest -e "INSERT INTO products
+       VALUES (default,'RisingWave','Next generation Streaming Database'),
+              (default,'Materialize','The Streaming Database You Already Know How to Use');
+       INSERT INTO orders VALUES (default, '2022-12-01 15:08:22', 'Sam', 1000.52, 110, false);"
+
 
 # insert new rows
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc_insert.sql
