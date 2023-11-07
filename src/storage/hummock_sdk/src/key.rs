@@ -855,8 +855,6 @@ pub fn bound_table_key_range<T: AsRef<[u8]> + EmptySliceRef>(
 mod tests {
     use std::cmp::Ordering;
 
-    use risingwave_common::util::epoch::MAX_EPOCH;
-
     use super::*;
 
     #[test]
@@ -953,7 +951,7 @@ mod tests {
         full_key = next_full_key(full_key.as_slice());
         assert_eq!(
             full_key,
-            key_with_epoch("aab".as_bytes().to_vec(), MAX_EPOCH)
+            key_with_epoch("aab".as_bytes().to_vec(), HummockEpoch::MAX)
         );
         assert_eq!(
             next_full_key(&key_with_epoch(b"\xff".to_vec(), 0)),
@@ -964,19 +962,25 @@ mod tests {
     #[test]
     fn test_prev_full_key() {
         let user_key = b"aab";
-        let epoch: HummockEpoch = MAX_EPOCH - 3;
+        let epoch: HummockEpoch = HummockEpoch::MAX - 3;
         let mut full_key = key_with_epoch(user_key.to_vec(), epoch);
         full_key = prev_full_key(full_key.as_slice());
-        assert_eq!(full_key, key_with_epoch(b"aab".to_vec(), MAX_EPOCH - 2));
+        assert_eq!(
+            full_key,
+            key_with_epoch(b"aab".to_vec(), HummockEpoch::MAX - 2)
+        );
         full_key = prev_full_key(full_key.as_slice());
-        assert_eq!(full_key, key_with_epoch(b"aab".to_vec(), MAX_EPOCH - 1));
+        assert_eq!(
+            full_key,
+            key_with_epoch(b"aab".to_vec(), HummockEpoch::MAX - 1)
+        );
         full_key = prev_full_key(full_key.as_slice());
-        assert_eq!(full_key, key_with_epoch(b"aab".to_vec(), MAX_EPOCH));
+        assert_eq!(full_key, key_with_epoch(b"aab".to_vec(), HummockEpoch::MAX));
         full_key = prev_full_key(full_key.as_slice());
         assert_eq!(full_key, key_with_epoch(b"aaa".to_vec(), 0));
 
         assert_eq!(
-            prev_full_key(&key_with_epoch(b"\x00".to_vec(), MAX_EPOCH)),
+            prev_full_key(&key_with_epoch(b"\x00".to_vec(), HummockEpoch::MAX)),
             Vec::<u8>::new()
         );
     }

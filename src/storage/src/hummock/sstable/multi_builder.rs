@@ -653,7 +653,7 @@ mod tests {
             FullKey::for_test(
                 table_id,
                 &[VirtualNode::ZERO.to_be_bytes().as_slice(), b"aaa"].concat(),
-                u64::MAX,
+                MAX_EPOCH,
             )
             .encode()
         );
@@ -662,7 +662,7 @@ mod tests {
             FullKey::for_test(
                 table_id,
                 &[VirtualNode::ZERO.to_be_bytes().as_slice(), b"kkk"].concat(),
-                u64::MAX
+                MAX_EPOCH
             )
             .encode()
         );
