@@ -629,83 +629,194 @@ impl<'a> From<&'a ListValue> for ListRef<'a> {
 impl ListValue {
     /// Construct an array from literal string.
     pub fn from_str(input: &str, data_type: &DataType) -> Result<Self, String> {
-        let elem_type = data_type.as_list();
-        let trimmed = input.trim();
-        if !trimmed.starts_with('{') {
-            return Err(r#"Array value must start with "{""#.into());
-        }
-        if !trimmed.ends_with('}') {
-            return Err(eoi());
-        }
-        let trimmed = &trimmed[1..trimmed.len() - 1];
-
-        fn eoi() -> String {
-            "Unexpected end of input.".into()
+        struct Parser<'a> {
+            input: &'a str,
+            data_type: &'a DataType,
         }
 
-        let mut elems = Vec::new();
-        let mut depth = 0;
-        let mut start = 0;
-        let mut chars = trimmed.char_indices();
-        while let Some((i, c)) = chars.next() {
-            match c {
-                '{' => depth += 1,
-                '}' => depth -= 1,
-                '"' => loop {
-                    match chars.next().ok_or_else(eoi)?.1 {
-                        '\\' => {
-                            chars.next().ok_or_else(eoi)?;
+        impl Parser<'_> {
+            /// Parse a datum.
+            fn parse(&mut self) -> Result<Datum, String> {
+                self.skip_whitespace();
+                if self.try_parse_null() {
+                    return Ok(None);
+                }
+                if self.data_type.is_array() {
+                    Ok(Some(self.parse_array()?.into()))
+                } else {
+                    self.parse_value()
+                }
+            }
+
+            /// Parse an array.
+            fn parse_array(&mut self) -> Result<ListValue, String> {
+                self.skip_whitespace();
+                if !self.try_consume('{') {
+                    return Err("Array value must start with \"{\"".to_string());
+                }
+                self.skip_whitespace();
+                if self.try_consume('}') {
+                    return Ok(ListValue::new(vec![]));
+                }
+                let mut elems = Vec::new();
+                loop {
+                    let mut parser = Self {
+                        input: self.input,
+                        data_type: self.data_type.as_list(),
+                    };
+                    elems.push(parser.parse()?);
+                    self.input = parser.input;
+
+                    // expect ',' or '}'
+                    self.skip_whitespace();
+                    match self.peek() {
+                        Some(',') => {
+                            self.try_consume(',');
                         }
-                        '"' => break,
+                        Some('}') => {
+                            self.try_consume('}');
+                            break;
+                        }
+                        None => return Err(Self::eoi()),
+                        _ => return Err("Unexpected array element.".to_string()),
+                    }
+                }
+                Ok(ListValue::new(elems))
+            }
+
+            /// Parse a scalar value.
+            fn parse_value(&mut self) -> Result<Datum, String> {
+                if self.peek() == Some('"') {
+                    return self.parse_quoted();
+                }
+                // peek until the next unescaped ',' or '}'
+                let mut chars = self.input.char_indices();
+                let mut has_escape = false;
+                let s = loop {
+                    match chars.next().ok_or_else(Self::eoi)? {
+                        (_, '\\') => {
+                            has_escape = true;
+                            chars.next().ok_or_else(Self::eoi)?;
+                        }
+                        (i, c @ ',' | c @ '}') => {
+                            let s = self.input[..i].trim_end();
+                            self.input = &self.input[i..];
+                            if s.is_empty() {
+                                return Err(format!("Unexpected \"{c}\" character."));
+                            }
+                            break if has_escape {
+                                Cow::Owned(Self::unescape(s))
+                            } else {
+                                Cow::Borrowed(s)
+                            };
+                        }
+                        (_, '{') => return Err("Unexpected \"{\" character.".to_string()),
+                        (_, '"') => return Err("Unexpected array element.".to_string()),
                         _ => {}
                     }
-                },
-                ',' if depth == 0 => {
-                    elems.push(match trimmed[start..i].trim() {
-                        "" => return Err("Unexpected \",\" character.".into()),
-                        s if s.eq_ignore_ascii_case("null") => None,
-                        s => Some(ScalarImpl::from_literal(&unquote(s), elem_type)?),
-                    });
-                    start = i + 1;
+                };
+                Ok(Some(ScalarImpl::from_literal(&s, self.data_type)?))
+            }
+
+            /// Parse a double quoted scalar value.
+            fn parse_quoted(&mut self) -> Result<Datum, String> {
+                assert_eq!(self.peek(), Some('"'));
+                self.input = &self.input[1..];
+                // peek until the next unescaped '"'
+                let mut chars = self.input.char_indices();
+                let mut has_escape = false;
+                let s = loop {
+                    match chars.next().ok_or_else(Self::eoi)? {
+                        (_, '\\') => {
+                            has_escape = true;
+                            chars.next().ok_or_else(Self::eoi)?;
+                        }
+                        (i, '"') => {
+                            let s = &self.input[..i];
+                            self.input = &self.input[i + 1..];
+                            break if has_escape {
+                                Cow::Owned(Self::unescape(s))
+                            } else {
+                                Cow::Borrowed(s)
+                            };
+                        }
+                        _ => {}
+                    }
+                };
+                Ok(Some(ScalarImpl::from_literal(&s, self.data_type)?))
+            }
+
+            /// Unescape a string.
+            fn unescape(s: &str) -> String {
+                let mut unescaped = String::with_capacity(s.len());
+                let mut chars = s.chars();
+                while let Some(mut c) = chars.next() {
+                    if c == '\\' {
+                        c = chars.next().unwrap();
+                    }
+                    unescaped.push(c);
                 }
-                _ => {}
+                unescaped
+            }
+
+            /// Consume the next 4 characters if it matches "null".
+            fn try_parse_null(&mut self) -> bool {
+                if let Some(s) = self.input.get(..4) && s.eq_ignore_ascii_case("null") {
+                    self.input = &self.input[4..];
+                    true
+                } else {
+                    false
+                }
+            }
+
+            /// Consume the next character if it matches `c`.
+            fn try_consume(&mut self, c: char) -> bool {
+                if self.peek() == Some(c) {
+                    self.input = &self.input[c.len_utf8()..];
+                    true
+                } else {
+                    false
+                }
+            }
+
+            /// Expect end of input.
+            fn expect_end(&mut self) -> Result<(), String> {
+                self.skip_whitespace();
+                match self.peek() {
+                    Some(_) => Err("Junk after closing right brace.".to_string()),
+                    None => Ok(()),
+                }
+            }
+
+            /// Skip whitespaces.
+            fn skip_whitespace(&mut self) {
+                self.input = match self
+                    .input
+                    .char_indices()
+                    .skip_while(|(_, c)| c.is_whitespace())
+                    .next()
+                {
+                    Some((i, _)) => &self.input[i..],
+                    None => "",
+                };
+            }
+
+            /// Peek the next character.
+            fn peek(&self) -> Option<char> {
+                self.input.chars().next()
+            }
+
+            /// Return the error message for unexpected end of input.
+            fn eoi() -> String {
+                "Unexpected end of input.".into()
             }
         }
-        if depth != 0 {
-            return Err(eoi());
-        }
-        match trimmed[start..].trim() {
-            "" => {
-                if !elems.is_empty() {
-                    return Err("Unexpected \"}\" character.".into());
-                }
-            }
-            s if s.eq_ignore_ascii_case("null") => elems.push(None),
-            s => elems.push(Some(ScalarImpl::from_literal(&unquote(s), elem_type)?)),
-        }
-        Ok(ListValue::new(elems))
-    }
-}
 
-/// Remove double quotes from a string.
-fn unquote(mut input: &str) -> Cow<'_, str> {
-    if input.starts_with('"') && input.ends_with('"') {
-        input = &input[1..input.len() - 1];
+        let mut parser = Parser { input, data_type };
+        let array = parser.parse_array()?;
+        parser.expect_end()?;
+        Ok(array)
     }
-    if !input.contains('\\') {
-        return input.into();
-    }
-
-    let mut output = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-
-    while let Some(mut ch) = chars.next() {
-        if ch == '\\' {
-            ch = chars.next().unwrap();
-        }
-        output.push(ch);
-    }
-    output.into()
 }
 
 #[cfg(test)]
@@ -1165,6 +1276,7 @@ mod tests {
         test_err("varchar[]", "{1,", r#"Unexpected end of input."#);
         test_err("varchar[]", "{1,}", r#"Unexpected "}" character."#);
         test_err("varchar[]", "{1,,3}", r#"Unexpected "," character."#);
-        test_err("varchar[]", r#"{"a""b"}"#, r#"Unexpected "}" character."#);
+        test_err("varchar[]", r#"{"a""b"}"#, r#"Unexpected array element."#);
+        test_err("varchar[]", r#"{}{"#, r#"Junk after closing right brace."#);
     }
 }
