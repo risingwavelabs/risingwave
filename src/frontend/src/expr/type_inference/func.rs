@@ -533,6 +533,11 @@ fn infer_type_for_special(
             }
             Ok(Some(DataType::Varchar))
         }
+        ExprType::ArrayContains | ExprType::ArrayContained => {
+            ensure_arity!("array_contains/array_contained", | inputs | == 2);
+            align_types(inputs.iter_mut())?;
+            Ok(Some(DataType::Boolean))
+        }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);
             Ok(Some(DataType::Int16))
