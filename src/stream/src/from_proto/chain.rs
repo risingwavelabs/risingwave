@@ -130,9 +130,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     (0..table_desc.columns.len()).collect_vec(),
                 );
 
-                debug!("chain vnode_bitmap: {:?}", params.vnode_bitmap);
                 let vnodes = params.vnode_bitmap.map(Arc::new);
-
                 let state_table =
                     StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes)
                         .await;

@@ -382,7 +382,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     // Since we don't need changelog before the
                                     // `last_binlog_offset`, skip the chunk that *only* contains
                                     // events before `last_binlog_offset`.
-                                    if let Some(last_binlog_offset) = &last_binlog_offset {
+                                    if let Some(last_binlog_offset) = last_binlog_offset.as_ref() {
                                         if let Some(chunk_offset) = chunk_binlog_offset && chunk_offset < *last_binlog_offset {
                                             tracing::trace!(
                                                 target: "events::stream::cdc_backfill",
