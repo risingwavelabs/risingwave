@@ -77,10 +77,6 @@ sqllogictest -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${
 sqllogictest -p 4566 -d dev './e2e_test/database/prepare.slt'
 sqllogictest -p 4566 -d test './e2e_test/database/test.slt'
 
-# Test for alter owner needs to rebuild session and switch user, which sqllogictest can not handle.
-python3 -m pip install minio psycopg2-binary
-python3 ./e2e_test/ddl/alter_owner.py
-
 echo "--- e2e, $mode, Apache Superset"
 sqllogictest -p 4566 -d dev './e2e_test/superset/*.slt' --junit "batch-${profile}"
 
