@@ -115,7 +115,7 @@
   batch_plan: 'BatchValues { rows: [[ARRAY[a, b]:List(Varchar)]] }'
 - name: array_cat(unknown as text[], unknown as text[]) -> text[]
   sql: |
-    select array_cat('{a}', '{{b}}') = array['a', '{b}'];
+    select array_cat('{a}', '{"{b}"}') = array['a', '{b}'];
   batch_plan: 'BatchValues { rows: [[true:Boolean]] }'
 - name: array_cat(unknown as int[], int[]) -> int[]
   sql: |
@@ -200,19 +200,19 @@
 - name: unknown to varchar[] in implicit context
   sql: |
     values (array['a', 'b']), ('{c,d}');
-  logical_plan: 'LogicalValues { rows: [[Array(''a'':Varchar, ''b'':Varchar)], [''{c,d}'':Varchar::List(Varchar)]], schema: Schema { fields: [*VALUES*_0.column_0:List(Varchar)] } }'
+  logical_plan: 'LogicalValues { rows: [[Array(''a'':Varchar, ''b'':Varchar)], [ARRAY[c, d]:List(Varchar)]], schema: Schema { fields: [*VALUES*_0.column_0:List(Varchar)] } }'
 - name: unknown to varchar[] in assign context
   sql: |
     create table t (v1 varchar[]);
     insert into t values ('{c,d}');
   logical_plan: |-
     LogicalInsert { table: t, mapping: [0:0] }
-    └─LogicalValues { rows: [['{c,d}':Varchar::List(Varchar)]], schema: Schema { fields: [*VALUES*_0.column_0:List(Varchar)] } }
+    └─LogicalValues { rows: [[ARRAY[c, d]:List(Varchar)]], schema: Schema { fields: [*VALUES*_0.column_0:List(Varchar)] } }
 - name: unknown to varchar[] in explicit context
   sql: |
     select ('{c,d}')::varchar[];
   logical_plan: |-
-    LogicalProject { exprs: ['{c,d}':Varchar::List(Varchar) as $expr1] }
+    LogicalProject { exprs: [ARRAY[c, d]:List(Varchar)] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: varchar[] to string in assign context
   sql: |
@@ -249,7 +249,7 @@
   sql: |
     select array[1] = '{1}';
   logical_plan: |-
-    LogicalProject { exprs: [(Array(1:Int32) = '{1}':Varchar::List(Int32)) as $expr1] }
+    LogicalProject { exprs: [(Array(1:Int32) = ARRAY[1]:List(Int32)) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - name: compare with different type
   sql: |

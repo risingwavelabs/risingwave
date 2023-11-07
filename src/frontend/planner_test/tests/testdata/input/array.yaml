@@ -84,7 +84,7 @@
   expected_outputs:
   - batch_plan
 - sql: |
-    select array_cat('{a}', '{{b}}') = array['a', '{b}'];
+    select array_cat('{a}', '{"{b}"}') = array['a', '{b}'];
   name: array_cat(unknown as text[], unknown as text[]) -> text[]
   expected_outputs:
   - batch_plan
