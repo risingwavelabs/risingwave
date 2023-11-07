@@ -23,14 +23,13 @@ use async_trait::async_trait;
 use futures::future::select;
 use futures::{StreamExt, TryFutureExt, TryStreamExt};
 use itertools::Itertools;
-use jni::objects::{JByteArray, JValue, JValueOwned};
 use jni::JavaVM;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::error::anyhow_error;
 use risingwave_common::types::DataType;
 use risingwave_jni_core::jvm_runtime::JVM;
-use risingwave_jni_core::{gen_class_name, gen_jni_sig, JniReceiverType, JniSenderType};
+use risingwave_jni_core::{call_static_method, gen_class_name, JniReceiverType, JniSenderType};
 use risingwave_pb::connector_service::sink_coordinator_stream_request::StartCoordinator;
 use risingwave_pb::connector_service::sink_writer_stream_request::write_batch::{
     Payload, StreamChunkPayload,
@@ -167,19 +166,13 @@ async fn validate_remote_sink(param: &SinkParam) -> Result<()> {
             .byte_array_from_slice(&Message::encode_to_vec(&validate_sink_request))
             .map_err(|err| SinkError::Internal(err.into()))?;
 
-        let response = env
-            .call_static_method(
-                "com/risingwave/connector/JniSinkValidationHandler",
-                "validate",
-                "([B)[B",
-                &[JValue::Object(&validate_sink_request_bytes)],
-            )
-            .map_err(|err| SinkError::Internal(err.into()))?;
-
-        let validate_sink_response_bytes = match response {
-            JValueOwned::Object(o) => unsafe { JByteArray::from_raw(o.into_raw()) },
-            _ => unreachable!(),
-        };
+        let validate_sink_response_bytes = call_static_method!(
+            env,
+            {com.risingwave.connector.JniSinkValidationHandler},
+            {byte[] validate(byte[] validateSourceRequestBytes)},
+            &validate_sink_request_bytes
+        )
+        .map_err(|err| SinkError::Internal(err.into()))?;
 
         let validate_sink_response: ValidateSinkResponse = Message::decode(
             risingwave_jni_core::to_guarded_slice(&validate_sink_response_bytes, &mut env)
@@ -623,14 +616,13 @@ impl EmbeddedConnectorClient {
                 }
             };
 
-            let result = env.call_static_method(
+            let result = call_static_method!(
+                env,
                 class_name,
                 method_name,
-                gen_jni_sig!(void f(long, long)),
-                &[
-                    JValue::from(&mut request_rx as *mut JniReceiverType<REQ> as i64),
-                    JValue::from(&mut response_tx as *mut JniSenderType<RSP> as i64),
-                ],
+                {{void}, {long requestRx, long responseTx}},
+                &mut request_rx as *mut JniReceiverType<REQ>,
+                &mut response_tx as *mut JniSenderType<RSP>
             );
 
             match result {

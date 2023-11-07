@@ -19,9 +19,9 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
-use jni::objects::{JByteArray, JValue, JValueOwned};
 use prost::Message;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_jni_core::call_static_method;
 use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_pb::connector_service::{SourceType, ValidateSourceRequest, ValidateSourceResponse};
 
@@ -81,18 +81,12 @@ where
         let validate_source_request_bytes =
             env.byte_array_from_slice(&Message::encode_to_vec(&validate_source_request))?;
 
-        // validate connector properties
-        let response = env.call_static_method(
-            "com/risingwave/connector/source/JniSourceValidateHandler",
-            "validate",
-            "([B)[B",
-            &[JValue::Object(&validate_source_request_bytes)],
+        let validate_source_response_bytes = call_static_method!(
+            env,
+            {com.risingwave.connector.source.JniSourceValidateHandler},
+            {byte[] validate(byte[] validateSourceRequestBytes)},
+            &validate_source_request_bytes
         )?;
-
-        let validate_source_response_bytes = match response {
-            JValueOwned::Object(o) => unsafe { JByteArray::from_raw(o.into_raw()) },
-            _ => unreachable!(),
-        };
 
         let validate_source_response: ValidateSourceResponse = Message::decode(
             risingwave_jni_core::to_guarded_slice(&validate_source_response_bytes, &mut env)?

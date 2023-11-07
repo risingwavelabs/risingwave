@@ -176,15 +176,26 @@ macro_rules! split_by_comma {
 /// assert_eq!(
 ///     "java/lang/String",
 ///     risingwave_jni_core::gen_class_name!(java.lang.String)
-/// )
+/// );
+/// assert_eq!(
+///     "java/lang/String",
+///     risingwave_jni_core::gen_class_name!(String)
+/// );
 /// ```
 #[macro_export]
 macro_rules! gen_class_name {
-    ($last:ident) => {
+    // A single part class name will be prefixed with `java.lang.`
+    ($single_part_class:ident $($param_name:ident)?) => {
+        $crate::gen_class_name! { @inner java.lang.$single_part_class }
+    };
+    ($($class:ident).+ $($param_name:ident)?) => {
+        $crate::gen_class_name! { @inner $($class).+ }
+    };
+    (@inner $last:ident) => {
         stringify! {$last}
     };
-    ($first:ident . $($rest:ident).+) => {
-        concat! {stringify! {$first}, "/", $crate::gen_class_name! {$($rest).+} }
+    (@inner $first:ident . $($rest:ident).+) => {
+        concat! {stringify! {$first}, "/", $crate::gen_class_name! {@inner $($rest).+} }
     }
 }
 
@@ -233,12 +244,6 @@ macro_rules! gen_jni_type_sig {
     (void) => {
         "V"
     };
-    (String $($param_name:ident)?) => {
-        $crate::gen_jni_type_sig! { java.lang.String }
-    };
-    (Object $($param_name:ident)?) => {
-        $crate::gen_jni_type_sig! { java.lang.Object }
-    };
     (Class $(< ? >)? $($param_name:ident)?) => {
         $crate::gen_jni_type_sig! { java.lang.Class }
     };
@@ -251,6 +256,121 @@ macro_rules! gen_jni_type_sig {
     ($($invalid:tt)*) => {
         compile_error!(concat!("unsupported type `", stringify!($($invalid)*), "`"))
     };
+}
+
+/// Cast a `JValueGen` to a concrete type by the given type
+///
+/// ```
+/// use jni::objects::JValue;
+/// use jni::sys::JNI_TRUE;
+/// use risingwave_jni_core::cast_jvalue;
+/// assert_eq!(cast_jvalue!({boolean}, JValue::Bool(JNI_TRUE)), true);
+/// assert_eq!(cast_jvalue!({byte}, JValue::Byte(10 as i8)), 10);
+/// assert_eq!(cast_jvalue!({char}, JValue::Char('c' as u16)), 'c' as u16);
+/// assert_eq!(cast_jvalue!({double}, JValue::Double(3.14)), 3.14);
+/// assert_eq!(cast_jvalue!({float}, JValue::Float(3.14)), 3.14);
+/// assert_eq!(cast_jvalue!({int}, JValue::Int(10)), 10);
+/// assert_eq!(cast_jvalue!({long}, JValue::Long(10)), 10);
+/// assert_eq!(cast_jvalue!({short}, JValue::Short(10)), 10);
+/// cast_jvalue!({void}, JValue::Void);
+/// let null = jni::objects::JObject::null();
+/// let _: &jni::objects::JObject<'_> = cast_jvalue!({String}, JValue::Object(&null));
+/// let _: jni::objects::JByteArray<'_> = cast_jvalue!({byte[]}, jni::objects::JValueOwned::Object(null));
+/// ```
+#[macro_export]
+macro_rules! cast_jvalue {
+    ({ boolean }, $value:expr) => {{
+        $value.z().expect("should be bool")
+    }};
+    ({ byte }, $value:expr) => {{
+        $value.b().expect("should be byte")
+    }};
+    ({ char }, $value:expr) => {{
+        $value.c().expect("should be char")
+    }};
+    ({ double }, $value:expr) => {{
+        $value.d().expect("should be double")
+    }};
+    ({ float }, $value:expr) => {{
+        $value.f().expect("should be float")
+    }};
+    ({ int }, $value:expr) => {{
+        $value.i().expect("should be int")
+    }};
+    ({ long }, $value:expr) => {{
+        $value.j().expect("should be long")
+    }};
+    ({ short }, $value:expr) => {{
+        $value.s().expect("should be short")
+    }};
+    ({ void }, $value:expr) => {{
+        $value.v().expect("should be void")
+    }};
+    ({ byte[] }, $value:expr) => {{
+        let obj = $value.l().expect("should be object");
+        unsafe { jni::objects::JByteArray::from_raw(obj.into_raw()) }
+    }};
+    ({ $($class:tt)+ }, $value:expr) => {{
+        $value.l().expect("should be object")
+    }};
+}
+
+/// Cast a `JValueGen` to a concrete type by the given type
+///
+/// ```
+/// use jni::sys::JNI_TRUE;
+/// use risingwave_jni_core::{cast_jvalue, to_jvalue};
+/// assert_eq!(
+///     cast_jvalue!({ boolean }, to_jvalue!({ boolean }, JNI_TRUE)),
+///     true
+/// );
+/// assert_eq!(cast_jvalue!({ byte }, to_jvalue!({ byte }, 10)), 10);
+/// assert_eq!(
+///     cast_jvalue!({ char }, to_jvalue!({ char }, 'c')),
+///     'c' as u16
+/// );
+/// assert_eq!(cast_jvalue!({ double }, to_jvalue!({ double }, 3.14)), 3.14);
+/// assert_eq!(cast_jvalue!({ float }, to_jvalue!({ float }, 3.14)), 3.14);
+/// assert_eq!(cast_jvalue!({ int }, to_jvalue!({ int }, 10)), 10);
+/// assert_eq!(cast_jvalue!({ long }, to_jvalue!({ long }, 10)), 10);
+/// assert_eq!(cast_jvalue!({ short }, to_jvalue!({ short }, 10)), 10);
+/// cast_jvalue!(
+///     { String },
+///     to_jvalue!({ String }, &jni::objects::JObject::null())
+/// );
+/// ```
+#[macro_export]
+macro_rules! to_jvalue {
+    ({ boolean $($param_name:ident)? }, $value:expr) => {{
+        jni::objects::JValue::Bool($value as _)
+    }};
+    ({ byte $($param_name:ident)? }, $value:expr) => {{
+        jni::objects::JValue::Byte($value as _)
+    }};
+    ({ char $($param_name:ident)? }, $value:expr) => {{
+        jni::objects::JValue::Char($value as _)
+    }};
+    ({ double $($param_name:ident)? }, $value:expr) => {{
+        jni::objects::JValue::Double($value as _)
+    }};
+    ({ float $($param_name:ident)? }, $value:expr) => {{
+        jni::objects::JValue::Float($value as _)
+    }};
+    ({ int $($param_name:ident)? }, $value:expr) => {{
+        jni::objects::JValue::Int($value as _)
+    }};
+    ({ long $($param_name:ident)? }, $value:expr) => {{
+        jni::objects::JValue::Long($value as _)
+    }};
+    ({ short $($param_name:ident)? }, $value:expr) => {{
+        jni::objects::JValue::Short($value as _)
+    }};
+    ({ void }, $value:expr) => {{
+        compile_error! {concat! {"unlike to pass void value: ", stringify! {$value} }}
+    }};
+    ({ $($class:ident)+ $([])? $($param_name:ident)? }, $value:expr) => {{
+        jni::objects::JValue::Object($value as _)
+    }};
 }
 
 /// Generate the jni signature of a given function
@@ -551,6 +671,161 @@ macro_rules! for_all_native_methods {
             $crate::for_all_native_methods,
             $macro
             $(,$extra_args)*
+        }
+    }};
+}
+
+/// Convert the argument value list when invoking a method to a list of `JValue` by the argument type list in the signature
+/// ```
+/// use risingwave_jni_core::convert_args_list;
+/// use jni::objects::{JObject, JValue};
+/// use jni::sys::JNI_TRUE;
+/// let list: [JValue<'static, 'static>; 3] = convert_args_list!(
+///     {boolean first, int second, byte third},
+///     {true, 10, 20}
+/// );
+/// match &list[0] {
+///     JValue::Bool(b) => assert_eq!(*b, JNI_TRUE),
+///     value => unreachable!("wrong value: {:?}", value),
+/// }
+/// match &list[1] {
+///     JValue::Int(v) => assert_eq!(*v, 10),
+///     value => unreachable!("wrong value: {:?}", value),
+/// }
+/// match &list[2] {
+///     JValue::Byte(v) => assert_eq!(*v, 20),
+///     value => unreachable!("wrong value: {:?}", value),
+/// }
+/// ```
+#[macro_export]
+macro_rules! convert_args_list {
+    (
+        {
+            {$($first_args:tt)+}
+            $({$($args:tt)+})*
+        },
+        {
+            {$first_value:expr}
+            $({$value:expr})*
+        },
+        {
+            $({$converted:expr})*
+        }) => {
+        $crate::convert_args_list! {
+            {$({$($args)+})*},
+            {$({$value})*},
+            {
+                $({$converted})*
+                {
+                    $crate::to_jvalue! {
+                        {$($first_args)+},
+                        {$first_value}
+                    }
+                }
+            }
+        }
+    };
+    ({$($args:tt)+}, {}, {$({$converted:expr})*}) => {
+        compile_error! {concat!{"trailing argument not passed: ", stringify!{$($args)+}}}
+    };
+    ({}, {$($value:tt)+}, {$({$converted:expr})*}) => {
+        compile_error! {concat!{"trailing extra value passed: ", stringify!{$($value)+}}}
+    };
+    ({}, {}, {$({$converted:expr})*}) => {
+        [$(
+            $converted
+        ),*]
+    };
+    ({$($args:tt)*}, {$($value:expr),*}) => {{
+        $crate::split_by_comma! {
+            {$($args)*},
+            $crate::convert_args_list,
+            {$({$value})*},
+            {}
+        }
+    }};
+    ($($invalid:tt)*) => {
+        compile_error!(concat!("failed to convert `", stringify!($($invalid)*), "`"))
+    };
+}
+
+#[macro_export]
+macro_rules! call_static_method {
+    (
+        {{$func_name:ident, {$($ret:tt)*}, {$($args:tt)*}}},
+        {$($class:ident).+},
+        {$env:expr} $(, $method_args:expr)*
+    ) => {{
+        $crate::call_static_method! {
+            $env,
+            $crate::gen_class_name!($($class).+),
+            stringify! {$func_name},
+            {{$($ret)*}, {$($args)*}}
+            $(, $method_args)*
+        }
+    }};
+    ($env:expr, {$($class:ident).+}, {$($method:tt)*} $(, $args:expr)*) => {{
+        $crate::split_extract_plain_native_methods! {
+            {$($method)*;},
+            $crate::call_static_method,
+            {$($class).+},
+            {$env} $(, $args)*
+        }
+    }};
+    (
+        $env:expr,
+        $class_name:expr,
+        $func_name:expr,
+        {{$($ret:tt)*}, {$($args:tt)*}}
+        $(, $method_args:expr)*
+    ) => {{
+        $env.call_static_method(
+            $class_name,
+            $func_name,
+            $crate::gen_jni_sig! { {$($ret)+}, {$($args)*}},
+            &{
+                $crate::convert_args_list! {
+                    {$($args)*},
+                    {$($method_args),*}
+                }
+            },
+        ).map(|jvalue| {
+            $crate::cast_jvalue! {
+                {$($ret)*},
+                jvalue
+            }
+        })
+    }};
+}
+
+#[macro_export]
+macro_rules! call_method {
+    (
+        {{$func_name:ident, {$($ret:tt)*}, {$($args:tt)*}}},
+        $env:expr, $obj:expr $(, $method_args:expr)*
+    ) => {{
+        $env.call_method(
+            $obj,
+            stringify!{$func_name},
+            $crate::gen_jni_sig! { {$($ret)+}, {$($args)*}},
+            &{
+                $crate::convert_args_list! {
+                    {$($args)*},
+                    {$($method_args),*}
+                }
+            },
+        ).map(|jvalue| {
+            $crate::cast_jvalue! {
+                {$($ret)*},
+                jvalue
+            }
+        })
+    }};
+    ($env:expr, $obj:expr, {$($method:tt)*} $(, $args:expr)*) => {{
+        $crate::split_extract_plain_native_methods! {
+            {$($method)*;},
+            $crate::call_method,
+            $env, $obj $(, $args)*
         }
     }};
 }

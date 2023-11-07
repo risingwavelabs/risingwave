@@ -34,7 +34,7 @@ use bytes::Bytes;
 use cfg_or_panic::cfg_or_panic;
 use jni::objects::{
     AutoElements, GlobalRef, JByteArray, JClass, JMethodID, JObject, JStaticMethodID, JString,
-    JValue, JValueGen, JValueOwned, ReleaseMode,
+    JValueGen, JValueOwned, ReleaseMode,
 };
 use jni::signature::ReturnType;
 use jni::sys::{
@@ -800,59 +800,49 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetArrayValu
                 None => env.set_object_array_element(&jarray, i as jsize, JObject::null())?,
                 Some(val) => match val {
                     ScalarRefImpl::Int16(v) => {
-                        let obj = env.call_static_method(
-                            &class,
-                            "valueOf",
-                            "(S)Ljava/lang/Short;",
-                            &[JValue::from(v as jshort)],
+                        let o = call_static_method!(
+                            env,
+                            {Short},
+                            {Short	valueOf(short s)},
+                            v
                         )?;
-                        if let JValueOwned::Object(o) = obj {
-                            env.set_object_array_element(&jarray, index, &o)?
-                        }
+                        env.set_object_array_element(&jarray, index, &o)?;
                     }
                     ScalarRefImpl::Int32(v) => {
-                        let obj = env.call_static_method(
-                            &class,
-                            "valueOf",
-                            "(I)Ljava/lang/Integer;",
-                            &[JValue::from(v as jint)],
+                        let o = call_static_method!(
+                            env,
+                            {Integer},
+                            {Integer	valueOf(int i)},
+                            v
                         )?;
-                        if let JValueOwned::Object(o) = obj {
-                            env.set_object_array_element(&jarray, index, &o)?
-                        }
+                        env.set_object_array_element(&jarray, index, &o)?;
                     }
                     ScalarRefImpl::Int64(v) => {
-                        let obj = env.call_static_method(
-                            &class,
-                            "valueOf",
-                            "(J)Ljava/lang/Long;",
-                            &[JValue::from(v as jlong)],
+                        let o = call_static_method!(
+                            env,
+                            {Long},
+                            {Long	valueOf(long l)},
+                            v
                         )?;
-                        if let JValueOwned::Object(o) = obj {
-                            env.set_object_array_element(&jarray, index, &o)?
-                        }
+                        env.set_object_array_element(&jarray, index, &o)?;
                     }
                     ScalarRefImpl::Float32(v) => {
-                        let obj = env.call_static_method(
-                            &class,
-                            "valueOf",
-                            "(F)Ljava/lang/Float;",
-                            &[JValue::from(v.into_inner() as jfloat)],
+                        let o = call_static_method!(
+                            env,
+                            {Float},
+                            {Float	valueOf(float f)},
+                            v.into_inner()
                         )?;
-                        if let JValueOwned::Object(o) = obj {
-                            env.set_object_array_element(&jarray, index, &o)?
-                        }
+                        env.set_object_array_element(&jarray, index, &o)?;
                     }
                     ScalarRefImpl::Float64(v) => {
-                        let obj = env.call_static_method(
-                            &class,
-                            "valueOf",
-                            "(D)Ljava/lang/Double;",
-                            &[JValue::from(v.into_inner() as jdouble)],
+                        let o = call_static_method!(
+                            env,
+                            {Double},
+                            {Double	valueOf(double d)},
+                            v.into_inner()
                         )?;
-                        if let JValueOwned::Object(o) = obj {
-                            env.set_object_array_element(&jarray, index, &o)?
-                        }
+                        env.set_object_array_element(&jarray, index, &o)?;
                     }
                     ScalarRefImpl::Utf8(v) => {
                         let obj = env.new_string(v)?;
