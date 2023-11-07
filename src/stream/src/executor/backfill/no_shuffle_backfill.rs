@@ -164,6 +164,7 @@ where
             mut old_state,
         } = Self::recover_backfill_state(self.state_table.as_ref(), pk_in_output_indices.len())
             .await?;
+        tracing::trace!(is_finished, row_count, "backfill state recovered");
 
         let mut builder =
             DataChunkBuilder::new(self.upstream_table.schema().data_types(), self.chunk_size);

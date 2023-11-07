@@ -145,6 +145,22 @@
     select array_prepend(array[233], array[array[66]]);
   expected_outputs:
   - logical_plan
+- name: array_contains(int[], int[]) -> bool
+  sql: select array[1,2] @> array[2,3];
+  expected_outputs:
+  - logical_plan
+- name: array_contains(int[], int) -> bool
+  sql: select array[1,2] @> 2;
+  expected_outputs:
+  - binder_error
+- name: array_contains(int[], varchar[]) -> bool
+  sql: select array[2,3] @> array['1'];
+  expected_outputs:
+  - binder_error
+- name: any contains(null, null) -> bool
+  sql: select '{}' @> '{}';
+  expected_outputs:
+  - binder_error
 - name: string from/to varchar[] in implicit context
   sql: |
     values (array['a', 'b']), ('{c,' || 'd}');

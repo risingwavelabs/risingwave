@@ -28,7 +28,7 @@ pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub source_id: SourceId,
     pub name: String,
-    pub row_id_index: Option<u32>,
+    pub row_id_index: Option<i32>,
     pub columns: ColumnCatalogArray,
     pub pk_column_ids: I32Array,
     pub properties: Property,
@@ -37,7 +37,7 @@ pub struct Model {
     pub watermark_descs: WatermarkDescArray,
     pub optional_associated_table_id: Option<TableId>,
     pub connection_id: Option<ConnectionId>,
-    pub version: u64,
+    pub version: i64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -85,12 +85,12 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<PbSource> for ActiveModel {
     fn from(source: PbSource) -> Self {
         let optional_associated_table_id = source.optional_associated_table_id.map(|x| match x {
-            OptionalAssociatedTableId::AssociatedTableId(id) => id,
+            OptionalAssociatedTableId::AssociatedTableId(id) => id as TableId,
         });
         Self {
             source_id: Set(source.id as _),
             name: Set(source.name),
-            row_id_index: Set(source.row_id_index as _),
+            row_id_index: Set(source.row_id_index.map(|x| x as _)),
             columns: Set(ColumnCatalogArray(source.columns)),
             pk_column_ids: Set(I32Array(source.pk_column_ids)),
             properties: Set(Property(source.properties)),
@@ -98,8 +98,8 @@ impl From<PbSource> for ActiveModel {
             source_info: Set(source.info.map(StreamSourceInfo)),
             watermark_descs: Set(WatermarkDescArray(source.watermark_descs)),
             optional_associated_table_id: Set(optional_associated_table_id),
-            connection_id: Set(source.connection_id),
-            version: Set(source.version),
+            connection_id: Set(source.connection_id.map(|id| id as _)),
+            version: Set(source.version as _),
         }
     }
 }

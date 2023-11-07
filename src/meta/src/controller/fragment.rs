@@ -19,8 +19,8 @@ use anyhow::Context;
 use risingwave_common::bail;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_meta_model_v2::{
-    actor, fragment, ActorStatus, ActorUpstreamActors, ConnectorSplits, Dispatchers,
-    FragmentVnodeMapping, StreamNode, TableId, U32Array, VnodeBitmap,
+    actor, fragment, ActorStatus, ConnectorSplits, Dispatchers, FragmentVnodeMapping, StreamNode,
+    TableId, VnodeBitmap,
 };
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment, PbState};
@@ -48,7 +48,7 @@ impl CatalogController {
 
         for (_, fragment) in fragments {
             let (fragment, actors) = Self::extract_fragment_and_actors(
-                table_id,
+                table_id as _,
                 fragment,
                 &actor_status,
                 &actor_splits,
@@ -76,7 +76,7 @@ impl CatalogController {
             upstream_fragment_ids: pb_upstream_fragment_ids,
         } = pb_fragment;
 
-        let state_table_ids = U32Array(pb_state_table_ids);
+        let state_table_ids = pb_state_table_ids.into();
 
         assert!(!pb_actors.is_empty());
 
@@ -154,18 +154,18 @@ impl CatalogController {
             );
 
             actors.push(actor::Model {
-                actor_id,
-                fragment_id,
+                actor_id: actor_id as _,
+                fragment_id: fragment_id as _,
                 status,
                 splits,
                 parallel_unit_id,
-                upstream_actor_ids: ActorUpstreamActors(upstream_actors),
+                upstream_actor_ids: upstream_actors.into(),
                 dispatchers: Dispatchers(pb_dispatcher),
                 vnode_bitmap: pb_vnode_bitmap.map(VnodeBitmap),
             });
         }
 
-        let upstream_fragment_id = U32Array(pb_upstream_fragment_ids);
+        let upstream_fragment_id = pb_upstream_fragment_ids.into();
 
         let vnode_mapping = pb_vnode_mapping.map(FragmentVnodeMapping);
 
@@ -176,9 +176,9 @@ impl CatalogController {
             .into();
 
         let fragment = fragment::Model {
-            fragment_id: pb_fragment_id,
+            fragment_id: pb_fragment_id as _,
             table_id,
-            fragment_type_mask: pb_fragment_type_mask,
+            fragment_type_mask: pb_fragment_type_mask as _,
             distribution_type,
             stream_node,
             vnode_mapping,
@@ -276,9 +276,9 @@ impl CatalogController {
 
                 visit_stream_node(&mut nodes, |body| {
                     if let NodeBody::Merge(m) = body
-                        && let Some(upstream_actor_ids) = upstream_fragment_actors.get(&m.upstream_fragment_id)
+                        && let Some(upstream_actor_ids) = upstream_fragment_actors.get(&(m.upstream_fragment_id as _))
                     {
-                        m.upstream_actor_id = upstream_actor_ids.to_vec();
+                        m.upstream_actor_id = upstream_actor_ids.iter().map(|id| *id as _).collect();
                     }
                 });
 
@@ -290,20 +290,20 @@ impl CatalogController {
             let pb_upstream_actor_id = upstream_fragment_actors
                 .values()
                 .flatten()
-                .cloned()
+                .map(|&id| id as _)
                 .collect();
 
             let pb_dispatcher = dispatchers.into_inner();
 
-            pb_actor_status.insert(actor_id, status.into_inner());
+            pb_actor_status.insert(actor_id as _, status.into_inner());
 
             if let Some(splits) = splits {
-                pb_actor_splits.insert(actor_id, splits.into_inner());
+                pb_actor_splits.insert(actor_id as _, splits.into_inner());
             }
 
             pb_actors.push(StreamActor {
-                actor_id,
-                fragment_id,
+                actor_id: actor_id as _,
+                fragment_id: fragment_id as _,
                 nodes: pb_nodes,
                 dispatcher: pb_dispatcher,
                 upstream_actor_id: pb_upstream_actor_id,
@@ -312,12 +312,12 @@ impl CatalogController {
             })
         }
 
-        let pb_upstream_fragment_ids = upstream_fragment_id.into_inner().into_iter().collect();
+        let pb_upstream_fragment_ids = upstream_fragment_id.into_u32_array();
         let pb_vnode_mapping = vnode_mapping.map(|mapping| mapping.into_inner());
-        let pb_state_table_ids = state_table_ids.into_inner().into_iter().collect();
+        let pb_state_table_ids = state_table_ids.into_u32_array();
         let pb_distribution_type = PbFragmentDistributionType::from(distribution_type) as _;
         let pb_fragment = PbFragment {
-            fragment_id,
+            fragment_id: fragment_id as _,
             fragment_type_mask: fragment_type_mask as _,
             distribution_type: pb_distribution_type,
             actors: pb_actors,
@@ -341,8 +341,8 @@ mod tests {
     use risingwave_common::util::stream_graph_visitor::visit_stream_node;
     use risingwave_meta_model_v2::fragment::DistributionType;
     use risingwave_meta_model_v2::{
-        actor, fragment, ActorStatus, ActorUpstreamActors, ConnectorSplits, Dispatchers,
-        FragmentVnodeMapping, StreamNode, U32Array, VnodeBitmap,
+        actor, fragment, ActorId, ActorStatus, ActorUpstreamActors, ConnectorSplits, Dispatchers,
+        FragmentId, FragmentVnodeMapping, I32Array, StreamNode, TableId, VnodeBitmap,
     };
     use risingwave_pb::common::ParallelUnit;
     use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
@@ -355,8 +355,6 @@ mod tests {
     };
 
     use crate::controller::catalog::CatalogController;
-    use crate::manager::TableId;
-    use crate::model::{ActorId, FragmentId};
     use crate::MetaResult;
 
     const TEST_FRAGMENT_ID: FragmentId = 1;
@@ -402,8 +400,8 @@ mod tests {
         for (upstream_fragment_id, upstream_actor_ids) in actor_upstream_actor_ids {
             input.push(PbStreamNode {
                 node_body: Some(PbNodeBody::Merge(MergeNode {
-                    upstream_actor_id: upstream_actor_ids.clone(),
-                    upstream_fragment_id: *upstream_fragment_id,
+                    upstream_actor_id: upstream_actor_ids.iter().map(|id| *id as _).collect(),
+                    upstream_fragment_id: *upstream_fragment_id as _,
                     ..Default::default()
                 })),
                 ..Default::default()
@@ -426,23 +424,29 @@ mod tests {
 
         let upstream_actor_ids: HashMap<ActorId, BTreeMap<FragmentId, Vec<ActorId>>> = (0
             ..actor_count)
-            .map(|actor_id| (actor_id, generate_upstream_actor_ids_for_actor(actor_id)))
+            .map(|actor_id| {
+                (
+                    actor_id as _,
+                    generate_upstream_actor_ids_for_actor(actor_id),
+                )
+            })
             .collect();
 
         let pb_actors = (0..actor_count)
             .map(|actor_id| {
-                let actor_upstream_actor_ids = upstream_actor_ids.get(&actor_id).cloned().unwrap();
+                let actor_upstream_actor_ids =
+                    upstream_actor_ids.get(&(actor_id as _)).cloned().unwrap();
                 let stream_node = generate_merger_stream_node(&actor_upstream_actor_ids);
 
                 PbStreamActor {
                     actor_id: actor_id as _,
-                    fragment_id: TEST_FRAGMENT_ID,
+                    fragment_id: TEST_FRAGMENT_ID as _,
                     nodes: Some(stream_node),
                     dispatcher: generate_dispatchers_for_actor(actor_id),
                     upstream_actor_id: actor_upstream_actor_ids
                         .values()
                         .flatten()
-                        .cloned()
+                        .map(|id| *id as _)
                         .collect(),
                     vnode_bitmap: actor_vnode_bitmaps
                         .get(&actor_id)
@@ -454,16 +458,15 @@ mod tests {
             .collect_vec();
 
         let pb_fragment = PbFragment {
-            fragment_id: TEST_FRAGMENT_ID,
+            fragment_id: TEST_FRAGMENT_ID as _,
             fragment_type_mask: PbFragmentTypeFlag::Source as _,
             distribution_type: PbFragmentDistributionType::Hash as _,
             actors: pb_actors.clone(),
             vnode_mapping: Some(parallel_unit_mapping.to_protobuf()),
-            state_table_ids: vec![TEST_STATE_TABLE_ID],
+            state_table_ids: vec![TEST_STATE_TABLE_ID as _],
             upstream_fragment_ids: upstream_actor_ids
                 .values()
-                .flat_map(|m| m.keys())
-                .cloned()
+                .flat_map(|m| m.keys().map(|x| *x as _))
                 .collect(),
         };
 
@@ -508,12 +511,13 @@ mod tests {
         {
             let mut template_node = stream_node_template.clone().into_inner();
             let nodes = nodes.unwrap();
-            let actor_upstream_actor_ids = upstream_actor_ids.get(&actor_id).cloned().unwrap();
+            let actor_upstream_actor_ids =
+                upstream_actor_ids.get(&(actor_id as _)).cloned().unwrap();
             visit_stream_node(&mut template_node, |body| {
                 if let NodeBody::Merge(m) = body {
                     m.upstream_actor_id = actor_upstream_actor_ids
-                        .get(&m.upstream_fragment_id)
-                        .cloned()
+                        .get(&(m.upstream_fragment_id as _))
+                        .map(|actors| actors.iter().map(|id| *id as _).collect())
                         .unwrap();
                 }
             });
@@ -531,7 +535,12 @@ mod tests {
 
         let upstream_actor_ids: HashMap<ActorId, BTreeMap<FragmentId, Vec<ActorId>>> = (0
             ..actor_count)
-            .map(|actor_id| (actor_id, generate_upstream_actor_ids_for_actor(actor_id)))
+            .map(|actor_id| {
+                (
+                    actor_id as _,
+                    generate_upstream_actor_ids_for_actor(actor_id),
+                )
+            })
             .collect();
 
         let actors = (0..actor_count)
@@ -554,7 +563,8 @@ mod tests {
                     }],
                 }));
 
-                let actor_upstream_actor_ids = upstream_actor_ids.get(&actor_id).cloned().unwrap();
+                let actor_upstream_actor_ids =
+                    upstream_actor_ids.get(&(actor_id as _)).cloned().unwrap();
                 let dispatchers = generate_dispatchers_for_actor(actor_id);
 
                 actor::Model {
@@ -590,8 +600,8 @@ mod tests {
             distribution_type: DistributionType::Hash,
             stream_node: StreamNode(stream_node),
             vnode_mapping: Some(FragmentVnodeMapping(parallel_unit_mapping.to_protobuf())),
-            state_table_ids: U32Array(vec![TEST_STATE_TABLE_ID]),
-            upstream_fragment_id: U32Array::default(),
+            state_table_ids: I32Array(vec![TEST_STATE_TABLE_ID]),
+            upstream_fragment_id: I32Array::default(),
         };
 
         let (pb_fragment, pb_actor_status, pb_actor_splits) =
@@ -645,13 +655,17 @@ mod tests {
             },
         ) in actors.into_iter().zip_eq_debug(pb_actors.into_iter())
         {
-            assert_eq!(actor_id, pb_actor_id);
-            assert_eq!(fragment_id, pb_fragment_id);
+            assert_eq!(actor_id, pb_actor_id as ActorId);
+            assert_eq!(fragment_id, pb_fragment_id as FragmentId);
             assert_eq!(parallel_unit_id, pb_actor_id as i32);
             let upstream_actor_ids = upstream_actor_ids.into_inner();
 
             assert_eq!(
-                upstream_actor_ids.values().flatten().cloned().collect_vec(),
+                upstream_actor_ids
+                    .values()
+                    .flatten()
+                    .map(|id| *id as u32)
+                    .collect_vec(),
                 pb_upstream_actor_id
             );
             assert_eq!(dispatchers, Dispatchers(pb_dispatcher));
@@ -669,8 +683,8 @@ mod tests {
             visit_stream_node(&mut pb_nodes, |body| {
                 if let PbNodeBody::Merge(m) = body {
                     let upstream_actor_ids = upstream_actor_ids
-                        .get(&m.upstream_fragment_id)
-                        .cloned()
+                        .get(&(m.upstream_fragment_id as _))
+                        .map(|actors| actors.iter().map(|id| *id as u32).collect_vec())
                         .unwrap();
                     assert_eq!(upstream_actor_ids, m.upstream_actor_id);
                 }
@@ -706,8 +720,8 @@ mod tests {
             upstream_fragment_ids: pb_upstream_fragment_ids,
         } = pb_fragment;
 
-        assert_eq!(fragment_id, TEST_FRAGMENT_ID);
-        assert_eq!(fragment_type_mask, fragment.fragment_type_mask);
+        assert_eq!(fragment_id, TEST_FRAGMENT_ID as u32);
+        assert_eq!(fragment_type_mask, fragment.fragment_type_mask as u32);
         assert_eq!(
             pb_distribution_type,
             PbFragmentDistributionType::from(fragment.distribution_type) as i32
@@ -718,10 +732,13 @@ mod tests {
         );
 
         assert_eq!(
-            U32Array(pb_upstream_fragment_ids),
-            fragment.upstream_fragment_id
+            pb_upstream_fragment_ids,
+            fragment.upstream_fragment_id.into_u32_array()
         );
 
-        assert_eq!(U32Array(pb_state_table_ids), fragment.state_table_ids);
+        assert_eq!(
+            pb_state_table_ids,
+            fragment.state_table_ids.into_u32_array()
+        );
     }
 }

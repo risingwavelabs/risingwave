@@ -38,7 +38,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 39] = [
+const CONFIG_KEYS: [&str; 40] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -78,6 +78,7 @@ const CONFIG_KEYS: [&str; 39] = [
     "RW_STREAMING_OVER_WINDOW_CACHE_POLICY",
     "BACKGROUND_DDL",
     "SERVER_ENCODING",
+    "STREAMING_ENABLE_ARRANGEMENT_BACKFILL",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -121,6 +122,7 @@ const CDC_BACKFILL: usize = 35;
 const STREAMING_OVER_WINDOW_CACHE_POLICY: usize = 36;
 const BACKGROUND_DDL: usize = 37;
 const SERVER_ENCODING: usize = 38;
+const STREAMING_ENABLE_ARRANGEMENT_BACKFILL: usize = 39;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -346,6 +348,7 @@ type StreamingRateLimit = ConfigU64<STREAMING_RATE_LIMIT, 0>;
 type CdcBackfill = ConfigBool<CDC_BACKFILL, false>;
 type BackgroundDdl = ConfigBool<BACKGROUND_DDL, false>;
 type ServerEncoding = ConfigString<SERVER_ENCODING>;
+type StreamingEnableArrangementBackfill = ConfigBool<STREAMING_ENABLE_ARRANGEMENT_BACKFILL, false>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {
@@ -418,6 +421,9 @@ pub struct ConfigMap {
 
     /// Enable bushy join for streaming queries. Defaults to true.
     streaming_enable_bushy_join: StreamingEnableBushyJoin,
+
+    /// Enable arrangement backfill for streaming queries. Defaults to false.
+    streaming_enable_arrangement_backfill: StreamingEnableArrangementBackfill,
 
     /// Enable join ordering for streaming and batch queries. Defaults to true.
     enable_join_ordering: EnableJoinOrdering,
@@ -552,6 +558,8 @@ impl ConfigMap {
             self.streaming_enable_delta_join = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
             self.streaming_enable_bushy_join = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(StreamingEnableArrangementBackfill::entry_name()) {
+            self.streaming_enable_arrangement_backfill = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(EnableJoinOrdering::entry_name()) {
             self.enable_join_ordering = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
@@ -674,6 +682,8 @@ impl ConfigMap {
             Ok(self.streaming_enable_delta_join.to_string())
         } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
             Ok(self.streaming_enable_bushy_join.to_string())
+        } else if key.eq_ignore_ascii_case(StreamingEnableArrangementBackfill::entry_name()) {
+            Ok(self.streaming_enable_arrangement_backfill.to_string())
         } else if key.eq_ignore_ascii_case(EnableJoinOrdering::entry_name()) {
             Ok(self.enable_join_ordering.to_string())
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
@@ -809,6 +819,11 @@ impl ConfigMap {
                 name : StreamingEnableBushyJoin::entry_name().to_lowercase(),
                 setting : self.streaming_enable_bushy_join.to_string(),
                 description: String::from("Enable bushy join in streaming queries.")
+            },
+            VariableInfo{
+                name : StreamingEnableArrangementBackfill::entry_name().to_lowercase(),
+                setting : self.streaming_enable_arrangement_backfill.to_string(),
+                description: String::from("Enable arrangement backfill in streaming queries.")
             },
             VariableInfo{
                 name : EnableJoinOrdering::entry_name().to_lowercase(),
@@ -1000,6 +1015,10 @@ impl ConfigMap {
 
     pub fn get_streaming_enable_bushy_join(&self) -> bool {
         *self.streaming_enable_bushy_join
+    }
+
+    pub fn get_streaming_enable_arrangement_backfill(&self) -> bool {
+        *self.streaming_enable_arrangement_backfill
     }
 
     pub fn get_enable_join_ordering(&self) -> bool {

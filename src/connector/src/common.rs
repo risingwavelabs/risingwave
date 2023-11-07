@@ -32,6 +32,7 @@ use serde_with::{serde_as, DisplayFromStr};
 use tempfile::NamedTempFile;
 use time::OffsetDateTime;
 use url::Url;
+use with_options::WithOptions;
 
 use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::load_file_descriptor_from_s3;
@@ -51,7 +52,7 @@ pub struct AwsPrivateLinkItem {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, WithOptions)]
 pub struct KafkaCommon {
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
@@ -137,7 +138,7 @@ const fn default_kafka_sync_call_timeout() -> Duration {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, WithOptions)]
 pub struct RdKafkaPropertiesCommon {
     /// Maximum Kafka protocol request message size. Due to differing framing overhead between
     /// protocol versions the producer is unable to reliably enforce a strict max message limit at
@@ -251,7 +252,7 @@ impl KafkaCommon {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PulsarCommon {
     #[serde(rename = "topic", alias = "pulsar.topic")]
     pub topic: String,
@@ -266,7 +267,7 @@ pub struct PulsarCommon {
     pub oauth: Option<PulsarOauthCommon>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PulsarOauthCommon {
     #[serde(rename = "oauth.issuer.url")]
     pub issuer_url: String,
@@ -351,7 +352,7 @@ impl PulsarCommon {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct KinesisCommon {
     #[serde(rename = "stream", alias = "kinesis.stream.name")]
     pub stream_name: String,
@@ -413,14 +414,14 @@ pub struct UpsertMessage<'a> {
 }
 
 #[serde_as]
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct NatsCommon {
     #[serde(rename = "server_url")]
     pub server_url: String,
     #[serde(rename = "subject")]
     pub subject: String,
     #[serde(rename = "connect_mode")]
-    pub connect_mode: Option<String>,
+    pub connect_mode: String,
     #[serde(rename = "username")]
     pub user: Option<String>,
     #[serde(rename = "password")]
@@ -449,8 +450,8 @@ pub struct NatsCommon {
 impl NatsCommon {
     pub(crate) async fn build_client(&self) -> anyhow::Result<async_nats::Client> {
         let mut connect_options = async_nats::ConnectOptions::new();
-        match self.connect_mode.as_deref() {
-            Some("user_and_password") => {
+        match self.connect_mode.as_str() {
+            "user_and_password" => {
                 if let (Some(v_user), Some(v_password)) =
                     (self.user.as_ref(), self.password.as_ref())
                 {
@@ -463,7 +464,7 @@ impl NatsCommon {
                 }
             }
 
-            Some("credential") => {
+            "credential" => {
                 if let (Some(v_nkey), Some(v_jwt)) = (self.nkey.as_ref(), self.jwt.as_ref()) {
                     connect_options = connect_options
                         .credentials(&self.create_credential(v_nkey, v_jwt)?)
@@ -474,7 +475,7 @@ impl NatsCommon {
                     ));
                 }
             }
-            Some("plain") => {}
+            "plain" => {}
             _ => {
                 return Err(anyhow_error!(
                     "nats connect mode only accept user_and_password/credential/plain"

@@ -55,7 +55,11 @@ pub enum BackupError {
     #[error("Meta storage is not empty before being restored")]
     NonemptyMetaStorage,
     #[error(transparent)]
-    Other(#[from] anyhow::Error),
+    Other(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 impl From<bincode::Error> for BackupError {

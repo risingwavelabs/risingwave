@@ -24,7 +24,6 @@ use crate::executor::{LookupExecutor, LookupExecutorParams};
 
 pub struct LookupExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for LookupExecutorBuilder {
     type Node = LookupNode;
 

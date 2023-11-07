@@ -88,13 +88,13 @@ impl MetaSnapshotV2Builder {
             }
             redo_state
         };
-        let version_stats = model_v2::prelude::HummockVersionStats::find_by_id(hummock_version.id)
-            .one(&txn)
-            .await
-            .map_err(|e| BackupError::MetaStorage(e.into()))?
-            .unwrap_or_else(|| {
-                panic!("version stats for version {} not found", hummock_version.id)
-            });
+        let version_stats = model_v2::prelude::HummockVersionStats::find_by_id(
+            hummock_version.id as model_v2::HummockVersionId,
+        )
+        .one(&txn)
+        .await
+        .map_err(|e| BackupError::MetaStorage(e.into()))?
+        .unwrap_or_else(|| panic!("version stats for version {} not found", hummock_version.id));
         let compaction_configs = model_v2::prelude::CompactionConfig::find()
             .all(&txn)
             .await

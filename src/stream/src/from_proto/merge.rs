@@ -21,7 +21,6 @@ use crate::executor::{MergeExecutor, ReceiverExecutor};
 
 pub struct MergeExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for MergeExecutorBuilder {
     type Node = MergeNode;
 
