@@ -678,7 +678,6 @@ impl DdlController {
                         if let NodeBody::Merge(m) = body && m.upstream_actor_id.is_empty() {
                             target_fragment_id = Some(*fragment_id);
                             fragment.fragment_type_mask &= !(FragmentTypeFlag::Source as u32);
-                            return
                         };
                     })
                 };
@@ -743,7 +742,7 @@ impl DdlController {
             .map(|(a, _)| a as u32)
             .collect_vec();
 
-        for actor_id in sink_actor_ids.iter() {
+        for actor_id in &sink_actor_ids {
             let downstream_actor_id = sink_to_merge.get(actor_id).unwrap();
 
             replace_table_ctx.dispatchers.insert(

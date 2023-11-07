@@ -1,0 +1,209 @@
+# target table with row_id as primary key
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t_s1 (v1 int, v2 int);
+
+statement ok
+insert into t_s1 values (1, 11), (2, 12), (3, 13);
+
+statement ok
+create table t_row_id_as_primary_key (v1 int, v2 int);
+
+# todo append only force
+statement ok
+create sink s1 into t_row_id_as_primary_key as select v1, v2 from t_s1;
+
+statement ok
+flush;
+
+query II rowsort
+select * from t_row_id_as_primary_key;
+----
+1 11
+2 12
+3 13
+
+statement ok
+insert into t_s1 values (4, 14), (5, 15), (6, 16);
+
+query II rowsort
+select * from t_row_id_as_primary_key;
+----
+1 11
+2 12
+3 13
+4 14
+5 15
+6 16
+
+statement ok
+insert into t_row_id_as_primary_key values (100, 100);
+
+query II
+select * from t_row_id_as_primary_key order by v1;
+----
+1 11
+2 12
+3 13
+4 14
+5 15
+6 16
+100 100
+
+statement ok
+drop sink s1;
+
+statement ok
+drop table t_row_id_as_primary_key;
+
+statement ok
+drop table t_s1;
+
+
+# target table with append only
+
+statement ok
+create table t_s2 (v1 int, v2 int);
+
+statement ok
+insert into t_s2 values (1, 11), (2, 12), (3, 13);
+
+statement ok
+create table t_append_only (v1 int, v2 int) append only;
+
+# todo, must append only sink
+statement ok
+create sink s2 into t_append_only as select v1, v2 from t_s2;
+
+statement ok
+flush;
+
+query II rowsort
+select * from t_append_only;
+----
+1 11
+2 12
+3 13
+
+statement ok
+insert into t_s2 values (4, 14), (5, 15), (6, 16);
+
+query II rowsort
+select * from t_append_only;
+----
+1 11
+2 12
+3 13
+4 14
+5 15
+6 16
+
+statement ok
+insert into t_append_only values (100, 100);
+
+query II
+select * from t_append_only order by v1;
+----
+1 11
+2 12
+3 13
+4 14
+5 15
+6 16
+100 100
+
+statement ok
+drop sink s2;
+
+statement ok
+drop table t_append_only;
+
+statement ok
+drop table t_s2;
+
+
+# target table with primary key
+
+statement ok
+create table t_s3 (v1 int, v2 int);
+
+statement ok
+insert into t_s3 values (1, 11), (2, 12), (3, 13);
+
+statement ok
+create table t_primary_key (v1 int primary key, v2 int);
+
+statement ok
+create sink s3 into t_primary_key as select v1, v2 from t_s3;
+
+statement ok
+flush;
+
+query II rowsort
+select * from t_primary_key;
+----
+1 11
+2 12
+3 13
+
+statement ok
+insert into t_s3 values (4, 14), (5, 15), (6, 16);
+
+query II rowsort
+select * from t_primary_key;
+----
+1 11
+2 12
+3 13
+4 14
+5 15
+6 16
+
+statement ok
+delete from t_s3 where v1 > 3;
+
+query I rowsort
+select * from t_primary_key;
+----
+1 11
+2 12
+3 13
+
+statement ok
+update t_s3 set v2 = 111 where v1 = 1;
+
+query I rowsort
+select * from t_primary_key;
+----
+1 111
+2 12
+3 13
+
+statement ok
+insert into t_primary_key values (100, 100);
+
+query II
+select * from t_primary_key order by v1;
+----
+1 111
+2 12
+3 13
+100 100
+
+statement ok
+delete from t_s3 where v1 > 3;
+
+query II
+select * from t_primary_key order by v1;
+----
+1 111
+2 12
+3 13
+100 100
+
+
+
+

@@ -654,6 +654,7 @@ mod tests {
             stream_job_status: PbStreamJobStatus::Creating.into(),
             create_type: PbCreateType::Foreground.into(),
             description: Some("description".to_string()),
+            incoming_sinks: vec![],
         }
         .into();
 
@@ -710,7 +711,8 @@ mod tests {
                 initialized_at_epoch: None,
                 cleaned_by_watermark: false,
                 create_type: CreateType::Foreground,
-                description: Some("description".to_string())
+                description: Some("description".to_string()),
+                incoming_sinks: vec![],
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
