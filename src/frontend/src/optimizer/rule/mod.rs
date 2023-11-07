@@ -29,6 +29,8 @@ pub trait Description {
 
 pub(super) type BoxedRule = Box<dyn Rule>;
 
+mod over_window_merge_rule;
+pub use over_window_merge_rule::*;
 mod project_join_merge_rule;
 pub use project_join_merge_rule::*;
 mod project_eliminate_rule;
@@ -180,6 +182,7 @@ macro_rules! for_all_rules {
             , { OverWindowToTopNRule }
             , { OverWindowToAggAndJoinRule }
             , { OverWindowSplitRule }
+            , { OverWindowMergeRule }
             , { JoinCommuteRule }
             , { UnionToDistinctRule }
             , { AggProjectMergeRule }

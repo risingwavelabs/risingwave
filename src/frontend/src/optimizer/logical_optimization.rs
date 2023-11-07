@@ -325,6 +325,14 @@ static CONVERT_OVER_WINDOW: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+static MERGE_OVER_WINDOW: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Merge Over Window",
+        vec![OverWindowMergeRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 static REWRITE_LIKE_EXPR: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Rewrite Like Expr",
@@ -567,6 +575,7 @@ impl LogicalOptimizer {
         // optimized to TopN.
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW);
+        plan = plan.optimize_by_rules(&MERGE_OVER_WINDOW);
 
         let force_split_distinct_agg = ctx.session_ctx().config().get_force_split_distinct_agg();
         // TODO: better naming of the OptimizationStage
@@ -647,6 +656,7 @@ impl LogicalOptimizer {
         // optimized to TopN.
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW);
+        plan = plan.optimize_by_rules(&MERGE_OVER_WINDOW);
 
         // Convert distinct aggregates.
         plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH);
