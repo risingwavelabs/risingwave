@@ -383,7 +383,7 @@ enum IcebergWriterEnum {
 }
 
 impl IcebergWriter {
-    pub fn metrics_layer(write_param: &SinkWriterParam) -> WriterPrometheusLayer {
+    fn metrics_layer(write_param: &SinkWriterParam) -> WriterPrometheusLayer {
         let iceberg_metrics = FileAppenderMetrics::new(
             write_param
                 .sink_metrics
