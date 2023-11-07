@@ -16,7 +16,6 @@ package com.risingwave.connector.sink.jdbc;
 
 import static org.junit.Assert.*;
 
-import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.risingwave.connector.JDBCSink;
 import com.risingwave.connector.JDBCSinkConfig;
@@ -26,6 +25,7 @@ import com.risingwave.proto.Data;
 import com.risingwave.proto.Data.DataType.TypeName;
 import com.risingwave.proto.Data.Op;
 import java.sql.*;
+import java.util.List;
 import org.junit.Test;
 import org.testcontainers.containers.JdbcDatabaseContainer;
 import org.testcontainers.containers.MySQLContainer;
@@ -84,7 +84,7 @@ public class JDBCSinkTest {
         Connection conn = DriverManager.getConnection(container.getJdbcUrl());
 
         sink.write(
-                Iterators.forArray(
+                List.of(
                         new ArraySinkRow(
                                 Op.INSERT,
                                 1,
@@ -106,7 +106,7 @@ public class JDBCSinkTest {
         }
 
         sink.write(
-                Iterators.forArray(
+                List.of(
                         new ArraySinkRow(
                                 Op.INSERT,
                                 2,
@@ -145,7 +145,7 @@ public class JDBCSinkTest {
         Statement stmt = conn.createStatement();
 
         sink.write(
-                Iterators.forArray(
+                List.of(
                         new ArraySinkRow(
                                 Op.INSERT,
                                 1,
@@ -172,7 +172,7 @@ public class JDBCSinkTest {
         }
 
         sink.write(
-                Iterators.forArray(
+                List.of(
                         new ArraySinkRow(
                                 Op.UPDATE_DELETE,
                                 1,

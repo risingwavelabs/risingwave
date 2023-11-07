@@ -17,7 +17,6 @@ package com.risingwave.connector.sink.deltalake;
 import static com.risingwave.proto.Data.*;
 import static org.apache.spark.sql.types.DataTypes.*;
 
-import com.google.common.collect.Iterators;
 import com.risingwave.connector.DeltaLakeSink;
 import com.risingwave.connector.TestUtils;
 import com.risingwave.connector.api.sink.ArraySinkRow;
@@ -65,7 +64,7 @@ public class DeltaLakeLocalSinkTest {
         DeltaLakeSink sink = createMockSink(location);
 
         sink.write(
-                Iterators.forArray(
+                List.of(
                         new ArraySinkRow(Op.INSERT, 1, "Alice"),
                         new ArraySinkRow(Op.INSERT, 2, "Bob")));
         sink.sync();
@@ -93,14 +92,14 @@ public class DeltaLakeLocalSinkTest {
                             createStructField("name", StringType, false),
                         });
 
-        sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 1, "Alice")));
+        sink.write(List.of(new ArraySinkRow(Op.INSERT, 1, "Alice")));
         validateTableWithSpark(location, List.of(), schema);
 
         sink.sync();
         List<Row> rows = List.of(RowFactory.create(1, "Alice"));
         validateTableWithSpark(location, rows, schema);
 
-        sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 2, "Bob")));
+        sink.write(List.of(new ArraySinkRow(Op.INSERT, 2, "Bob")));
         sink.sync();
         rows = List.of(RowFactory.create(1, "Alice"), RowFactory.create(2, "Bob"));
         validateTableWithSpark(location, rows, schema);
