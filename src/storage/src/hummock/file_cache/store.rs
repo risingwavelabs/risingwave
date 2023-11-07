@@ -348,6 +348,74 @@ impl Key for SstableBlockIndex {
     }
 }
 
+#[derive(Debug)]
+pub enum CachedBlock {
+    Loaded {
+        block: Box<Block>,
+    },
+    Fetched {
+        bytes: Bytes,
+        uncompressed_capacity: usize,
+    },
+}
+
+impl CachedBlock {
+    pub fn should_compress(&self) -> bool {
+        match self {
+            CachedBlock::Loaded { .. } => true,
+            // TODO(MrCroxx): based on block original compression algorithm?
+            CachedBlock::Fetched { .. } => false,
+        }
+    }
+}
+
+impl Value for CachedBlock {
+    fn serialized_len(&self) -> usize {
+        1 /* type */ + match self {
+            CachedBlock::Loaded { block } => block.raw_data().len(),
+            CachedBlock::Fetched { bytes, uncompressed_capacity: _ } => 8 + bytes.len(),
+        }
+    }
+
+    fn write(&self, mut buf: &mut [u8]) {
+        match self {
+            CachedBlock::Loaded { block } => {
+                buf.put_u8(0);
+                buf.put_slice(block.raw_data())
+            }
+            CachedBlock::Fetched {
+                bytes,
+                uncompressed_capacity,
+            } => {
+                buf.put_u8(1);
+                buf.put_u64(*uncompressed_capacity as u64);
+                buf.put_slice(bytes);
+            }
+        }
+    }
+
+    fn read(mut buf: &[u8]) -> Self {
+        let v = buf.get_u8();
+        match v {
+            0 => {
+                let data = Bytes::copy_from_slice(buf);
+                let block = Block::decode_from_raw(data);
+                let block = Box::new(block);
+                Self::Loaded { block }
+            }
+            1 => {
+                let uncompressed_capacity = buf.get_u64() as usize;
+                let data = Bytes::copy_from_slice(buf);
+                // TODO(MrCroxx): handle it!
+                let block = Block::decode(data, uncompressed_capacity).unwrap();
+                let block = Box::new(block);
+                Self::Loaded { block }
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
 impl Value for Box<Block> {
     fn serialized_len(&self) -> usize {
         self.raw_data().len()
