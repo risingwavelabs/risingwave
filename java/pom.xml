@@ -77,6 +77,7 @@
         <hadoop.version>3.3.3</hadoop.version>
         <elasticsearch.version>7.17.13</elasticsearch.version>
         <datastax.version>4.15.0</datastax.version>
+        <hikaricp.version>5.1.0</hikaricp.version>
     </properties>
 
     <dependencyManagement>
@@ -206,6 +207,11 @@
                 <artifactId>junit</artifactId>
                 <version>4.13.2</version>
                 <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.zaxxer</groupId>
+                <artifactId>HikariCP</artifactId>
+                <version>${hikaricp.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.risingwave</groupId>
