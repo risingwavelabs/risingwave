@@ -25,29 +25,35 @@ use risingwave_expr::function;
 ///
 /// ```slt
 /// query I
-/// select array[1,2,3] @> array[2,3];
+/// select array_contains(array[1,2,3], array[2,3]);
 /// ----
 /// t
 ///
 /// query I
-/// select array[1,2,3] @> array[3,4];
+/// select array_contains(array[1,2,3], array[3,4]);
 /// ----
 /// f
 ///
 /// query I
-/// select array[1,2,3] @> NULL;
+/// select array_contains(array[[[1,2],[3,4]],[[5,6],[7,8]]], array[2,3]);
+/// ----
+/// t
+///
+/// query I
+/// select array_contains(array[1,2,3], null::int[]);
 /// ----
 /// NULL
 ///
 /// query I
-/// select NULL @> array[3,4];
+/// select array_contains(null::int[], array[3,4]);
 /// ----
 /// NULL
 /// ```
 #[function("array_contains(anyarray, anyarray) -> boolean")]
 fn array_contains(left: ListRef<'_>, right: ListRef<'_>) -> bool {
-    let set: HashSet<_> = left.iter().collect();
-    right.iter().all(|item| set.contains(&item))
+    let flatten = left.flatten();
+    let set: HashSet<_> = flatten.iter().collect();
+    right.flatten().iter().all(|item| set.contains(&item))
 }
 
 #[function("array_contained(anyarray, anyarray) -> boolean")]
