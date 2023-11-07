@@ -109,13 +109,13 @@ impl From<Vec<Row>> for PgResponseStream {
 #[derive(Clone)]
 pub struct HandlerArgs {
     pub session: Arc<SessionImpl>,
-    pub sql: Arc<String>,
+    pub sql: Arc<str>,
     pub normalized_sql: String,
     pub with_options: WithOptions,
 }
 
 impl HandlerArgs {
-    pub fn new(session: Arc<SessionImpl>, stmt: &Statement, sql: Arc<String>) -> Result<Self> {
+    pub fn new(session: Arc<SessionImpl>, stmt: &Statement, sql: Arc<str>) -> Result<Self> {
         Ok(Self {
             session,
             sql,
@@ -171,7 +171,7 @@ impl HandlerArgs {
 pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
-    sql: Arc<String>,
+    sql: Arc<str>,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     session.clear_cancel_query_flag();

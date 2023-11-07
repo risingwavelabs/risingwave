@@ -479,7 +479,7 @@ pub struct SessionImpl {
     current_query_cancel_flag: Mutex<Option<ShutdownSender>>,
 
     /// Running sql
-    running_sql: Mutex<Option<Arc<String>>>,
+    running_sql: Mutex<Option<Arc<str>>>,
 
     /// The instant of the running sql
     last_instant: Mutex<Option<Instant>>,
@@ -592,7 +592,7 @@ impl SessionImpl {
         self.id
     }
 
-    pub fn running_sql(&self) -> Option<Arc<String>> {
+    pub fn running_sql(&self) -> Option<Arc<str>> {
         self.running_sql.lock().clone()
     }
 
@@ -745,7 +745,7 @@ impl SessionImpl {
     /// Maybe we can remove it in the future.
     pub async fn run_statement(
         self: Arc<Self>,
-        sql: Arc<String>,
+        sql: Arc<str>,
         formats: Vec<Format>,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
         // Parse sql.
@@ -972,7 +972,9 @@ impl Session for SessionImpl {
         stmt: Statement,
         format: Format,
     ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
-        let sql = Arc::new(stmt.to_string());
+        let string = stmt.to_string();
+        let sql_str = string.as_str();
+        let sql: Arc<str> = Arc::from(sql_str);
         let rsp = {
             let mut handle_fut = Box::pin(handle(self, stmt, sql.clone(), vec![format]));
             if cfg!(debug_assertions) {
@@ -982,8 +984,7 @@ impl Session for SessionImpl {
                     match tokio::time::timeout(SLOW_QUERY_LOG_PERIOD, &mut handle_fut).await {
                         Ok(result) => break result,
                         Err(_) => tracing::warn!(
-                            "{} {}",
-                            &sql,
+                            sql_str,
                             "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
                         ),
                     }
@@ -1112,7 +1113,7 @@ impl Session for SessionImpl {
         }
     }
 
-    fn init_exec_context(&self, sql: Arc<String>) {
+    fn init_exec_context(&self, sql: Arc<str>) {
         *self.running_sql.lock() = Some(sql);
         *self.last_instant.lock() = Some(Instant::now());
     }

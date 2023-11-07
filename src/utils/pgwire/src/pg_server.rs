@@ -110,7 +110,7 @@ pub trait Session: Send + Sync {
 
     fn transaction_status(&self) -> TransactionStatus;
 
-    fn init_exec_context(&self, sql: Arc<String>);
+    fn init_exec_context(&self, sql: Arc<str>);
 
     fn clear_exec_context(self: Arc<Self>);
 }
@@ -337,7 +337,7 @@ mod tests {
             TransactionStatus::Idle
         }
 
-        fn init_exec_context(&self, _sql: Arc<String>) {}
+        fn init_exec_context(&self, _sql: Arc<str>) {}
 
         fn clear_exec_context(self: Arc<Self>) {}
     }

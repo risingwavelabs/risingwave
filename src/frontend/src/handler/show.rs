@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
+use pgwire::pg_protocol::truncated_fmt;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::pg_server::Session;
 use pgwire::types::Row;
@@ -283,13 +284,7 @@ pub async fn handle_show_object(
                             s.elapse_since_running_sql()
                                 .map(|mills| format!("{}ms", mills).into()),
                             s.running_sql().map(|sql| {
-                                let mut sql = sql.to_string();
-                                let old_len = sql.len();
-                                sql.truncate(1024);
-                                if old_len > sql.len() {
-                                    sql += "...";
-                                }
-                                sql.into()
+                                format!("{}", truncated_fmt::TruncatedFmt(&sql, 1024)).into()
                             }),
                         ])
                     })

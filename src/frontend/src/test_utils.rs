@@ -105,7 +105,7 @@ impl LocalFrontend {
         &self,
         sql: impl Into<String>,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
-        let sql = Arc::new(sql.into());
+        let sql: Arc<str> = Arc::from(sql.into());
         self.session_ref().run_statement(sql, vec![]).await
     }
 
@@ -114,7 +114,7 @@ impl LocalFrontend {
         session_ref: Arc<SessionImpl>,
         sql: impl Into<String>,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
-        let sql = Arc::new(sql.into());
+        let sql: Arc<str> = Arc::from(sql.into());
         session_ref.run_statement(sql, vec![]).await
     }
 
@@ -125,7 +125,7 @@ impl LocalFrontend {
         user_name: String,
         user_id: UserId,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
-        let sql = Arc::new(sql.into());
+        let sql: Arc<str> = Arc::from(sql.into());
         self.session_user_ref(database, user_name, user_id)
             .run_statement(sql, vec![])
             .await

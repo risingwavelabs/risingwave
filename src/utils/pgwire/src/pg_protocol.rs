@@ -439,11 +439,8 @@ where
     }
 
     async fn process_query_msg(&mut self, query_string: io::Result<&str>) -> PsqlResult<()> {
-        let sql = Arc::new(
-            query_string
-                .map_err(|err| PsqlError::QueryError(Box::new(err)))?
-                .to_string(),
-        );
+        let sql: Arc<str> =
+            Arc::from(query_string.map_err(|err| PsqlError::QueryError(Box::new(err)))?);
         let start = Instant::now();
         let session = self.session.clone().unwrap();
         let session_id = session.id().0;
@@ -469,7 +466,7 @@ where
 
     async fn inner_process_query_msg(
         &mut self,
-        sql: Arc<String>,
+        sql: Arc<str>,
         session: Arc<SM::Session>,
     ) -> PsqlResult<()> {
         // Parse sql.
@@ -718,7 +715,7 @@ where
         } else {
             let start = Instant::now();
             let portal = self.get_portal(&portal_name)?;
-            let sql = Arc::new(format!("{}", portal));
+            let sql: Arc<str> = Arc::from(format!("{}", portal));
 
             session.init_exec_context(sql.clone());
             let result = session.clone().execute(portal).await;
@@ -1065,7 +1062,7 @@ fn build_ssl_ctx_from_config(tls_config: &TlsConfig) -> PsqlResult<SslContext> {
     Ok(acceptor.into_context())
 }
 
-mod truncated_fmt {
+pub mod truncated_fmt {
     use std::fmt::*;
 
     struct TruncatedFormatter<'a, 'b> {

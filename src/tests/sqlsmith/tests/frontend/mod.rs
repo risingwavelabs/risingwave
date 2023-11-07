@@ -44,7 +44,7 @@ pub struct SqlsmithEnv {
 /// Returns `Ok(true)` if query result was ignored.
 /// Skip status is required, so that we know if a SQL statement writing to the database was skipped.
 /// Then, we can infer the correct state of the database.
-async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: Arc<String>) -> Result<bool> {
+async fn handle(session: Arc<SessionImpl>, stmt: Statement, sql: Arc<str>) -> Result<bool> {
     let result = handler::handle(session.clone(), stmt, sql, vec![])
         .await
         .map(|_| ())

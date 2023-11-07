@@ -283,7 +283,7 @@ impl TestCase {
         {
             result = self
                 .run_sql(
-                    Arc::new(sql.to_owned()),
+                    Arc::from(sql.to_owned()),
                     session.clone(),
                     do_check_result,
                     result,
@@ -331,7 +331,7 @@ impl TestCase {
                     );
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
-                        Arc::new(sql + temp_file.path().to_str().unwrap() + "')"),
+                        Arc::from(sql + temp_file.path().to_str().unwrap() + "')"),
                         session.clone(),
                         false,
                         None,
@@ -362,7 +362,7 @@ impl TestCase {
                     );
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
-                        Arc::new(sql + temp_file.path().to_str().unwrap() + "')"),
+                        Arc::from(sql + temp_file.path().to_str().unwrap() + "')"),
                         session.clone(),
                         false,
                         None,
@@ -381,7 +381,7 @@ impl TestCase {
 
     async fn run_sql(
         &self,
-        sql: Arc<String>,
+        sql: Arc<str>,
         session: Arc<SessionImpl>,
         do_check_result: bool,
         mut result: Option<TestCaseResult>,

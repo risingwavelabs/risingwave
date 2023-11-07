@@ -86,7 +86,7 @@ pub fn handle_parse(
     specific_param_types: Vec<Option<DataType>>,
 ) -> Result<PrepareStatement> {
     session.clear_cancel_query_flag();
-    let sql = Arc::new(statement.to_string());
+    let sql: Arc<str> = Arc::from(statement.to_string());
     let handler_args = HandlerArgs::new(session, &statement, sql)?;
     match &statement {
         Statement::Query(_)
@@ -187,7 +187,7 @@ pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result
         Portal::Portal(portal) => {
             session.clear_cancel_query_flag();
             let _guard = session.txn_begin_implicit(); // TODO(bugen): is this behavior correct?
-            let sql = Arc::new(portal.statement.to_string());
+            let sql: Arc<str> = Arc::from(portal.statement.to_string());
             let handler_args = HandlerArgs::new(session, &portal.statement, sql)?;
             match &portal.statement {
                 Statement::Query(_)
@@ -198,7 +198,7 @@ pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result
             }
         }
         Portal::PureStatement(stmt) => {
-            let sql = Arc::new(stmt.to_string());
+            let sql: Arc<str> = Arc::from(stmt.to_string());
             handle(session, stmt, sql, vec![]).await
         }
     }
