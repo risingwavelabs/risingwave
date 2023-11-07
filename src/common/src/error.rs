@@ -197,7 +197,8 @@ impl From<RwError> for tonic::Status {
         let code = match &*err.inner {
             ErrorCode::ExprError(_) => Code::InvalidArgument,
             ErrorCode::PermissionDenied(_) => Code::PermissionDenied,
-            ErrorCode::InternalError(_) | _ => Code::Internal,
+            ErrorCode::InternalError(_) => Code::Internal,
+            _ => Code::Internal,
         };
 
         err.to_status(code)
@@ -216,8 +217,7 @@ impl From<TonicStatusWrapper> for RwError {
             Code::NotFound | Code::AlreadyExists => ErrorCode::CatalogError(status.into()),
             Code::PermissionDenied => ErrorCode::PermissionDenied(message.to_string()),
             Code::Cancelled => ErrorCode::SchedulerError(status.into()),
-
-            _ => ErrorCode::RpcError(status.into()).into(),
+            _ => ErrorCode::RpcError(status.into()),
         }
         .into()
     }
