@@ -15,6 +15,8 @@
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
 use std::net::SocketAddr;
+#[cfg(test)]
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
