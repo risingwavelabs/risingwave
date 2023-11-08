@@ -15,9 +15,9 @@
 use std::cmp::{min, Ordering};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::iter::repeat;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
-use futures::future::BoxFuture;
 use itertools::Itertools;
 use num_integer::Integer;
 use num_traits::abs;
@@ -37,11 +37,11 @@ use risingwave_pb::stream_service::{
 };
 use uuid::Uuid;
 
-use crate::barrier::{Command, Reschedule};
-use crate::manager::{IdCategory, WorkerId};
+use crate::barrier::Reschedule;
+use crate::manager::{ClusterManagerRef, FragmentManagerRef, IdCategory, MetaSrvEnv, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::storage::{MetaStore, MetaStoreError, MetaStoreRef, Transaction, DEFAULT_COLUMN_FAMILY};
-use crate::stream::GlobalStreamManager;
+use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -90,11 +90,6 @@ impl TableRevision {
 pub struct ParallelUnitReschedule {
     pub added_parallel_units: BTreeSet<ParallelUnitId>,
     pub removed_parallel_units: BTreeSet<ParallelUnitId>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct RescheduleOptions {
-    pub resolve_no_shuffle_upstream: bool,
 }
 
 pub struct RescheduleContext {
@@ -346,7 +341,39 @@ pub fn rebalance_actor_vnode(
     result
 }
 
-impl GlobalStreamManager {
+#[derive(Debug, Clone, Copy)]
+pub struct RescheduleOptions {
+    /// Whether to resolve the upstream of NoShuffle when scaling. It will check whether all the reschedules in the no shuffle dependency tree are corresponding, and rewrite them to the root of the no shuffle dependency tree.
+    pub resolve_no_shuffle_upstream: bool,
+}
+
+pub type ScaleControllerRef = Arc<ScaleController>;
+
+pub struct ScaleController {
+    pub(super) fragment_manager: FragmentManagerRef,
+
+    pub cluster_manager: ClusterManagerRef,
+
+    pub source_manager: SourceManagerRef,
+
+    pub env: MetaSrvEnv,
+}
+
+impl ScaleController {
+    pub fn new(
+        fragment_manager: FragmentManagerRef,
+        cluster_manager: ClusterManagerRef,
+        source_manager: SourceManagerRef,
+        env: MetaSrvEnv,
+    ) -> Self {
+        Self {
+            fragment_manager,
+            cluster_manager,
+            source_manager,
+            env,
+        }
+    }
+
     /// Build the context for rescheduling and do some validation for the request.
     async fn build_reschedule_context(
         &self,
@@ -622,123 +649,68 @@ impl GlobalStreamManager {
         })
     }
 
-    fn resolve_no_shuffle_upstream<T>(
-        reschedule: &mut HashMap<FragmentId, T>,
-        fragment_map: &HashMap<FragmentId, Fragment>,
-        no_shuffle_source_fragment_ids: &HashSet<FragmentId>,
-        no_shuffle_target_fragment_ids: &HashSet<FragmentId>,
-    ) -> MetaResult<()>
-    where
-        T: Clone + Eq,
-    {
-        let mut queue: VecDeque<FragmentId> = reschedule.keys().cloned().collect();
-
-        // We trace the upstreams of each downstream under the hierarchy until we reach the top
-        // for every no_shuffle relation.
-        while let Some(fragment_id) = queue.pop_front() {
-            if !no_shuffle_target_fragment_ids.contains(&fragment_id)
-                && !no_shuffle_source_fragment_ids.contains(&fragment_id)
-            {
-                continue;
-            }
-
-            // for upstream
-            for upstream_fragment_id in &fragment_map
-                .get(&fragment_id)
-                .unwrap()
-                .upstream_fragment_ids
-            {
-                if !no_shuffle_source_fragment_ids.contains(upstream_fragment_id) {
-                    continue;
-                }
-
-                let reschedule_plan = reschedule.get(&fragment_id).unwrap();
-
-                if let Some(upstream_reschedule_plan) = reschedule.get(upstream_fragment_id) {
-                    if upstream_reschedule_plan != reschedule_plan {
-                        bail!("Inconsistent NO_SHUFFLE plan, check target worker ids of fragment {} and {}", fragment_id, upstream_fragment_id);
-                    }
-
-                    continue;
-                }
-
-                reschedule.insert(*upstream_fragment_id, reschedule_plan.clone());
-                queue.push_back(*upstream_fragment_id);
-            }
-        }
-
-        reschedule.retain(|fragment_id, _| !no_shuffle_target_fragment_ids.contains(fragment_id));
-
-        Ok(())
-    }
-
-    fn build_fragment_dispatcher_index(
-        actor_map: &HashMap<ActorId, StreamActor>,
-        fragment_dispatcher_map: &mut HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
-    ) {
-        for actor in actor_map.values() {
-            for dispatcher in &actor.dispatcher {
-                for downstream_actor_id in &dispatcher.downstream_actor_id {
-                    if let Some(downstream_actor) = actor_map.get(downstream_actor_id) {
-                        fragment_dispatcher_map
-                            .entry(actor.fragment_id as FragmentId)
-                            .or_default()
-                            .insert(
-                                downstream_actor.fragment_id as FragmentId,
-                                dispatcher.r#type(),
-                            );
-                    }
-                }
-            }
-        }
-    }
-
-    fn build_no_shuffle_relation_index(
-        actor_map: &HashMap<ActorId, StreamActor>,
-        no_shuffle_source_fragment_ids: &mut HashSet<FragmentId>,
-        no_shuffle_target_fragment_ids: &mut HashSet<FragmentId>,
-    ) {
-        for actor in actor_map.values() {
-            for dispatcher in &actor.dispatcher {
-                for downstream_actor_id in &dispatcher.downstream_actor_id {
-                    if let Some(downstream_actor) = actor_map.get(downstream_actor_id) {
-                        // Checking for no shuffle dispatchers
-                        if dispatcher.r#type() == DispatcherType::NoShuffle {
-                            no_shuffle_source_fragment_ids.insert(actor.fragment_id as FragmentId);
-                            no_shuffle_target_fragment_ids
-                                .insert(downstream_actor.fragment_id as FragmentId);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    pub async fn reschedule_actors(
+    async fn create_actors_on_compute_node(
         &self,
-        reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
-        options: RescheduleOptions,
+        worker_nodes: &HashMap<WorkerId, WorkerNode>,
+        actor_infos_to_broadcast: BTreeMap<u32, ActorInfo>,
+        node_actors_to_create: HashMap<WorkerId, Vec<StreamActor>>,
+        broadcast_worker_ids: HashSet<u32>,
     ) -> MetaResult<()> {
-        let mut revert_funcs = vec![];
-        if let Err(e) = self
-            .reschedule_actors_impl(&mut revert_funcs, reschedules, options)
-            .await
-        {
-            for revert_func in revert_funcs.into_iter().rev() {
-                revert_func.await;
-            }
-            return Err(e);
+        for worker_id in &broadcast_worker_ids {
+            let node = worker_nodes.get(worker_id).unwrap();
+            let client = self.env.stream_client_pool().get(node).await?;
+
+            let actor_infos_to_broadcast = actor_infos_to_broadcast.values().cloned().collect();
+
+            client
+                .to_owned()
+                .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
+                    info: actor_infos_to_broadcast,
+                })
+                .await?;
+        }
+
+        for (node_id, stream_actors) in &node_actors_to_create {
+            let node = worker_nodes.get(node_id).unwrap();
+            let client = self.env.stream_client_pool().get(node).await?;
+            let request_id = Uuid::new_v4().to_string();
+            let request = UpdateActorsRequest {
+                request_id,
+                actors: stream_actors.clone(),
+            };
+
+            client.to_owned().update_actors(request).await?;
+        }
+
+        for (node_id, stream_actors) in node_actors_to_create {
+            let node = worker_nodes.get(&node_id).unwrap();
+            let client = self.env.stream_client_pool().get(node).await?;
+            let request_id = Uuid::new_v4().to_string();
+
+            client
+                .to_owned()
+                .build_actors(BuildActorsRequest {
+                    request_id,
+                    actor_id: stream_actors
+                        .iter()
+                        .map(|stream_actor| stream_actor.actor_id)
+                        .collect(),
+                })
+                .await?;
         }
 
         Ok(())
     }
 
-    async fn reschedule_actors_impl(
+    // Results are the generated reschedule plan and the changes that need to be updated to the meta store.
+    pub(crate) async fn prepare_reschedule_command(
         &self,
-        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
         mut reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
         options: RescheduleOptions,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<(
+        HashMap<FragmentId, Reschedule>,
+        HashMap<FragmentId, HashSet<ActorId>>,
+    )> {
         let ctx = self
             .build_reschedule_context(&mut reschedules, options)
             .await?;
@@ -1297,78 +1269,7 @@ impl GlobalStreamManager {
             .pre_apply_reschedules(fragment_created_actors)
             .await;
 
-        let fragment_manager_ref = self.fragment_manager.clone();
-
-        revert_funcs.push(Box::pin(async move {
-            fragment_manager_ref
-                .cancel_apply_reschedules(applied_reschedules)
-                .await;
-        }));
-
-        let _source_pause_guard = self.source_manager.paused.lock().await;
-
-        tracing::debug!("reschedule plan: {:#?}", reschedule_fragment);
-
-        self.barrier_scheduler
-            .run_config_change_command_with_pause(Command::RescheduleFragment {
-                reschedules: reschedule_fragment,
-            })
-            .await?;
-
-        Ok(())
-    }
-
-    async fn create_actors_on_compute_node(
-        &self,
-        worker_nodes: &HashMap<WorkerId, WorkerNode>,
-        actor_infos_to_broadcast: BTreeMap<u32, ActorInfo>,
-        node_actors_to_create: HashMap<WorkerId, Vec<StreamActor>>,
-        broadcast_worker_ids: HashSet<u32>,
-    ) -> MetaResult<()> {
-        for worker_id in &broadcast_worker_ids {
-            let node = worker_nodes.get(worker_id).unwrap();
-            let client = self.env.stream_client_pool().get(node).await?;
-
-            let actor_infos_to_broadcast = actor_infos_to_broadcast.values().cloned().collect();
-
-            client
-                .to_owned()
-                .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
-                    info: actor_infos_to_broadcast,
-                })
-                .await?;
-        }
-
-        for (node_id, stream_actors) in &node_actors_to_create {
-            let node = worker_nodes.get(node_id).unwrap();
-            let client = self.env.stream_client_pool().get(node).await?;
-            let request_id = Uuid::new_v4().to_string();
-            let request = UpdateActorsRequest {
-                request_id,
-                actors: stream_actors.clone(),
-            };
-
-            client.to_owned().update_actors(request).await?;
-        }
-
-        for (node_id, stream_actors) in node_actors_to_create {
-            let node = worker_nodes.get(&node_id).unwrap();
-            let client = self.env.stream_client_pool().get(node).await?;
-            let request_id = Uuid::new_v4().to_string();
-
-            client
-                .to_owned()
-                .build_actors(BuildActorsRequest {
-                    request_id,
-                    actor_id: stream_actors
-                        .iter()
-                        .map(|stream_actor| stream_actor.actor_id)
-                        .collect(),
-                })
-                .await?;
-        }
-
-        Ok(())
+        Ok((reschedule_fragment, applied_reschedules))
     }
 
     async fn arrange_reschedules(
@@ -1593,12 +1494,72 @@ impl GlobalStreamManager {
 
         Ok(())
     }
-}
 
-impl GlobalStreamManager {
-    async fn generate_stable_resize_plan(
+    pub async fn post_apply_reschedule(
+        &self,
+        reschedules: &HashMap<FragmentId, Reschedule>,
+    ) -> MetaResult<HashMap<WorkerId, Vec<ActorId>>> {
+        let mut node_dropped_actors = HashMap::new();
+        for table_fragments in self
+            .fragment_manager
+            .get_fragment_read_guard()
+            .await
+            .table_fragments()
+            .values()
+        {
+            for fragment_id in table_fragments.fragments.keys() {
+                if let Some(reschedule) = reschedules.get(fragment_id) {
+                    for actor_id in &reschedule.removed_actors {
+                        let node_id = table_fragments
+                            .actor_status
+                            .get(actor_id)
+                            .unwrap()
+                            .parallel_unit
+                            .as_ref()
+                            .unwrap()
+                            .worker_node_id;
+                        node_dropped_actors
+                            .entry(node_id as WorkerId)
+                            .or_insert(vec![])
+                            .push(*actor_id as ActorId);
+                    }
+                }
+            }
+        }
+
+        // Update fragment info after rescheduling in meta store.
+        self.fragment_manager
+            .post_apply_reschedules(reschedules.clone())
+            .await?;
+
+        let mut stream_source_actor_splits = HashMap::new();
+        let mut stream_source_dropped_actors = HashSet::new();
+
+        for (fragment_id, reschedule) in reschedules {
+            if !reschedule.actor_splits.is_empty() {
+                stream_source_actor_splits
+                    .insert(*fragment_id as FragmentId, reschedule.actor_splits.clone());
+                stream_source_dropped_actors.extend(reschedule.removed_actors.clone());
+            }
+        }
+
+        if !stream_source_actor_splits.is_empty() {
+            self.source_manager
+                .apply_source_change(
+                    None,
+                    Some(stream_source_actor_splits),
+                    Some(stream_source_dropped_actors),
+                )
+                .await;
+        }
+
+        Ok(node_dropped_actors)
+    }
+
+    pub async fn generate_stable_resize_plan(
         &self,
         policy: StableResizePolicy,
+        parallel_unit_hints: Option<HashMap<WorkerId, HashSet<ParallelUnitId>>>,
     ) -> MetaResult<HashMap<FragmentId, ParallelUnitReschedule>> {
         let StableResizePolicy {
             fragment_worker_changes,
@@ -1742,7 +1703,12 @@ impl GlobalStreamManager {
             }
 
             for worker_id in include_worker_ids.iter().chain(exclude_worker_ids.iter()) {
-                if !worker_parallel_units.contains_key(worker_id) {
+                if !worker_parallel_units.contains_key(worker_id)
+                    && !parallel_unit_hints
+                        .as_ref()
+                        .map(|hints| hints.contains_key(worker_id))
+                        .unwrap_or(false)
+                {
                     bail!("Worker id {} not found", worker_id);
                 }
             }
@@ -1759,17 +1725,25 @@ impl GlobalStreamManager {
                 })
                 .collect();
 
-            let include_worker_parallel_unit_ids = include_worker_ids
-                .iter()
-                .flat_map(|worker_id| worker_parallel_units.get(worker_id).unwrap())
-                .cloned()
-                .collect_vec();
+            let worker_to_parallel_unit_ids = |worker_ids: &BTreeSet<WorkerId>| {
+                worker_ids
+                    .iter()
+                    .flat_map(|worker_id| {
+                        worker_parallel_units
+                            .get(worker_id)
+                            .or_else(|| {
+                                parallel_unit_hints
+                                    .as_ref()
+                                    .and_then(|hints| hints.get(worker_id))
+                            })
+                            .expect("worker id should be valid")
+                    })
+                    .cloned()
+                    .collect_vec()
+            };
 
-            let exclude_worker_parallel_unit_ids = exclude_worker_ids
-                .iter()
-                .flat_map(|worker_id| worker_parallel_units.get(worker_id).unwrap())
-                .cloned()
-                .collect_vec();
+            let include_worker_parallel_unit_ids = worker_to_parallel_unit_ids(&include_worker_ids);
+            let exclude_worker_parallel_unit_ids = worker_to_parallel_unit_ids(&exclude_worker_ids);
 
             fn refilter_parallel_unit_id_by_target_parallelism(
                 worker_parallel_units: &HashMap<u32, HashSet<ParallelUnitId>>,
@@ -1920,7 +1894,101 @@ impl GlobalStreamManager {
         policy: Policy,
     ) -> MetaResult<HashMap<FragmentId, ParallelUnitReschedule>> {
         match policy {
-            Policy::StableResizePolicy(resize) => self.generate_stable_resize_plan(resize).await,
+            Policy::StableResizePolicy(resize) => {
+                self.generate_stable_resize_plan(resize, None).await
+            }
         }
+    }
+
+    pub fn build_no_shuffle_relation_index(
+        actor_map: &HashMap<ActorId, StreamActor>,
+        no_shuffle_source_fragment_ids: &mut HashSet<FragmentId>,
+        no_shuffle_target_fragment_ids: &mut HashSet<FragmentId>,
+    ) {
+        for actor in actor_map.values() {
+            for dispatcher in &actor.dispatcher {
+                for downstream_actor_id in &dispatcher.downstream_actor_id {
+                    if let Some(downstream_actor) = actor_map.get(downstream_actor_id) {
+                        // Checking for no shuffle dispatchers
+                        if dispatcher.r#type() == DispatcherType::NoShuffle {
+                            no_shuffle_source_fragment_ids.insert(actor.fragment_id as FragmentId);
+                            no_shuffle_target_fragment_ids
+                                .insert(downstream_actor.fragment_id as FragmentId);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn build_fragment_dispatcher_index(
+        actor_map: &HashMap<ActorId, StreamActor>,
+        fragment_dispatcher_map: &mut HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
+    ) {
+        for actor in actor_map.values() {
+            for dispatcher in &actor.dispatcher {
+                for downstream_actor_id in &dispatcher.downstream_actor_id {
+                    if let Some(downstream_actor) = actor_map.get(downstream_actor_id) {
+                        fragment_dispatcher_map
+                            .entry(actor.fragment_id as FragmentId)
+                            .or_default()
+                            .insert(
+                                downstream_actor.fragment_id as FragmentId,
+                                dispatcher.r#type(),
+                            );
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn resolve_no_shuffle_upstream<T>(
+        reschedule: &mut HashMap<FragmentId, T>,
+        fragment_map: &HashMap<FragmentId, Fragment>,
+        no_shuffle_source_fragment_ids: &HashSet<FragmentId>,
+        no_shuffle_target_fragment_ids: &HashSet<FragmentId>,
+    ) -> MetaResult<()>
+    where
+        T: Clone + Eq,
+    {
+        let mut queue: VecDeque<FragmentId> = reschedule.keys().cloned().collect();
+
+        // We trace the upstreams of each downstream under the hierarchy until we reach the top
+        // for every no_shuffle relation.
+        while let Some(fragment_id) = queue.pop_front() {
+            if !no_shuffle_target_fragment_ids.contains(&fragment_id)
+                && !no_shuffle_source_fragment_ids.contains(&fragment_id)
+            {
+                continue;
+            }
+
+            // for upstream
+            for upstream_fragment_id in &fragment_map
+                .get(&fragment_id)
+                .unwrap()
+                .upstream_fragment_ids
+            {
+                if !no_shuffle_source_fragment_ids.contains(upstream_fragment_id) {
+                    continue;
+                }
+
+                let reschedule_plan = reschedule.get(&fragment_id).unwrap();
+
+                if let Some(upstream_reschedule_plan) = reschedule.get(upstream_fragment_id) {
+                    if upstream_reschedule_plan != reschedule_plan {
+                        bail!("Inconsistent NO_SHUFFLE plan, check target worker ids of fragment {} and {}", fragment_id, upstream_fragment_id);
+                    }
+
+                    continue;
+                }
+
+                reschedule.insert(*upstream_fragment_id, reschedule_plan.clone());
+                queue.push_back(*upstream_fragment_id);
+            }
+        }
+
+        reschedule.retain(|fragment_id, _| !no_shuffle_target_fragment_ids.contains(fragment_id));
+
+        Ok(())
     }
 }

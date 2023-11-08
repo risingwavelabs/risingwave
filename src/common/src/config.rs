@@ -208,6 +208,10 @@ pub struct MetaConfig {
     #[serde(default)]
     pub disable_recovery: bool,
 
+    /// Whether to enable scale-in when recovery.
+    #[serde(default)]
+    pub enable_scale_in_when_recovery: bool,
+
     #[serde(default = "default::meta::meta_leader_lease_secs")]
     pub meta_leader_lease_secs: u64,
 
