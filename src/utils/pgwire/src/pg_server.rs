@@ -21,8 +21,8 @@ use bytes::Bytes;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Statement;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 
+use crate::net::Listener;
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_message::TransactionStatus;
 use crate::pg_protocol::{PgProtocol, TlsConfig};
@@ -128,72 +128,7 @@ impl UserAuthenticator {
     }
 }
 
-/// A wrapper of either [`TcpListener`] or [`UnixListener`].
-enum Listener {
-    Tcp(TcpListener),
-    Unix(UnixListener),
-}
-
-/// A wrapper of either [`TcpStream`] or [`UnixStream`].
-#[auto_enums::enum_derive(tokio1::AsyncRead, tokio1::AsyncWrite)]
-enum Stream {
-    Tcp(TcpStream),
-    Unix(UnixStream),
-}
-
-/// A wrapper of either [`std::net::SocketAddr`] or [`tokio::net::unix::SocketAddr`].
-enum Address {
-    Tcp(std::net::SocketAddr),
-    Unix(tokio::net::unix::SocketAddr),
-}
-
-impl std::fmt::Display for Address {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Address::Tcp(addr) => addr.fmt(f),
-            Address::Unix(addr) => {
-                if let Some(path) = addr.as_pathname() {
-                    path.display().fmt(f)
-                } else {
-                    std::fmt::Debug::fmt(addr, f)
-                }
-            }
-        }
-    }
-}
-
-impl Listener {
-    /// Creates a new [`Listener`] bound to the specified address.
-    ///
-    /// If the address starts with `unix:`, it will create a [`UnixListener`].
-    /// Otherwise, it will create a [`TcpListener`].
-    async fn bind(addr: &str) -> io::Result<Self> {
-        if let Some(path) = addr.strip_prefix("unix:") {
-            UnixListener::bind(path).map(Self::Unix)
-        } else {
-            TcpListener::bind(addr).await.map(Self::Tcp)
-        }
-    }
-
-    /// Accepts a new incoming connection from this listener.
-    ///
-    /// Returns a tuple of the stream and the string representation of the peer address.
-    async fn accept(&self) -> io::Result<(Stream, Address)> {
-        match self {
-            Self::Tcp(listener) => {
-                let (stream, addr) = listener.accept().await?;
-                stream.set_nodelay(true)?;
-                Ok((Stream::Tcp(stream), Address::Tcp(addr)))
-            }
-            Self::Unix(listener) => {
-                let (stream, addr) = listener.accept().await?;
-                Ok((Stream::Unix(stream), Address::Unix(addr)))
-            }
-        }
-    }
-}
-
-/// Binds a Tcp or Unox listener at `addr`. Spawn a coroutine to serve every new connection.
+/// Binds a Tcp or Unix listener at `addr`. Spawn a coroutine to serve every new connection.
 pub async fn pg_serve(
     addr: &str,
     session_mgr: Arc<impl SessionManager>,
