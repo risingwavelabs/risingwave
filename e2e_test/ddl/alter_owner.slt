@@ -1,0 +1,179 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE USER user1;
+
+statement ok
+CREATE TABLE t (v1 INT primary key, v2 STRUCT<v1 INT, v2 STRUCT<v1 INT, v2 INT>>);
+
+statement ok
+ALTER TABLE t OWNER TO user1;
+
+query TT
+SELECT
+    pg_class.relname AS rel_name,
+    pg_roles.rolname AS owner
+FROM
+    pg_class
+    JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace
+    JOIN pg_roles ON pg_roles.oid = pg_class.relowner
+WHERE
+    pg_namespace.nspname NOT LIKE 'pg_%'
+    AND pg_namespace.nspname != 'information_schema'
+    AND pg_class.relname = 't';
+----
+t user1
+
+statement ok
+CREATE VIEW v AS ( SELECT * FROM t WHERE v1 = 1);
+
+statement ok
+ALTER VIEW v OWNER TO user1;
+
+query TT
+SELECT
+    pg_class.relname AS rel_name,
+    pg_roles.rolname AS owner
+FROM
+    pg_class
+    JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace
+    JOIN pg_roles ON pg_roles.oid = pg_class.relowner
+WHERE
+    pg_namespace.nspname NOT LIKE 'pg_%'
+    AND pg_namespace.nspname != 'information_schema'
+    AND pg_class.relname = 'v';
+----
+v user1
+
+statement ok
+CREATE MATERIALIZED VIEW mv AS SELECT v1, (t.v2).v1 AS v21 FROM t;
+
+statement ok
+ALTER MATERIALIZED VIEW mv OWNER TO user1;
+
+query TT
+SELECT
+    pg_class.relname AS rel_name,
+    pg_roles.rolname AS owner
+FROM
+    pg_class
+    JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace
+    JOIN pg_roles ON pg_roles.oid = pg_class.relowner
+WHERE
+    pg_namespace.nspname NOT LIKE 'pg_%'
+    AND pg_namespace.nspname != 'information_schema'
+    AND pg_class.relname = 'mv';
+----
+mv user1
+
+statement ok
+CREATE SOURCE src (v INT) WITH (
+    connector = 'datagen',
+    fields.v.kind = 'sequence',
+    fields.v.start = '1',
+    fields.v.end  = '10',
+    datagen.rows.per.second='15',
+    datagen.split.num = '1'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+ALTER SOURCE src OWNER TO user1;
+
+query TT
+SELECT
+    pg_class.relname AS rel_name,
+    pg_roles.rolname AS owner
+FROM
+    pg_class
+    JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace
+    JOIN pg_roles ON pg_roles.oid = pg_class.relowner
+WHERE
+    pg_namespace.nspname NOT LIKE 'pg_%'
+    AND pg_namespace.nspname != 'information_schema'
+    AND pg_class.relname = 'src';
+----
+src user1
+
+statement ok
+CREATE SINK sink AS SELECT mv3.v1 AS v1, mv3.v21 AS v2 FROM mv AS mv3 WITH (
+    connector = 'blackhole'
+);
+
+statement ok
+ALTER SINK sink OWNER TO user1;
+
+query TT
+SELECT
+    pg_class.relname AS rel_name,
+    pg_roles.rolname AS owner
+FROM
+    pg_class
+    JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace
+    JOIN pg_roles ON pg_roles.oid = pg_class.relowner
+WHERE
+    pg_namespace.nspname NOT LIKE 'pg_%'
+    AND pg_namespace.nspname != 'information_schema'
+    AND pg_class.relname = 'sink';
+----
+sink user1
+
+statement ok
+CREATE DATABASE d;
+
+statement ok
+ALTER DATABASE d OWNER TO user1;
+
+query TT
+SELECT
+    rw_databases.name AS db_name,
+    pg_roles.rolname AS owner
+FROM
+    rw_databases
+    JOIN pg_roles ON pg_roles.oid = rw_databases.owner
+WHERE
+    rw_databases.name = 'd';
+----
+d user1
+
+statement ok
+CREATE SCHEMA s;
+
+statement ok
+ALTER SCHEMA s OWNER TO user1;
+
+query TT
+SELECT
+    rw_schemas.name AS schema_name,
+    pg_roles.rolname AS owner
+FROM
+    rw_schemas
+    JOIN pg_roles ON pg_roles.oid = rw_schemas.owner
+WHERE
+    rw_schemas.name = 's';
+----
+s user1
+
+statement ok
+DROP SCHEMA s;
+
+statement ok
+DROP DATABASE d;
+
+statement ok
+DROP SINK sink;
+
+statement ok
+DROP SOURCE src;
+
+statement ok
+DROP MATERIALIZED VIEW mv;
+
+statement ok
+DROP VIEW v;
+
+statement ok
+DROP TABLE t;
+
+statement ok
+DROP USER user1;

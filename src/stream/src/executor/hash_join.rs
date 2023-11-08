@@ -766,6 +766,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         .join_match_duration_ns
                         .with_label_values(&[&actor_id_str, &fragment_id_str, "left"])
                         .inc_by(left_time.as_nanos() as u64);
+                    self.try_flush_data().await?;
                 }
                 AlignedMessage::Right(chunk) => {
                     let mut right_time = Duration::from_nanos(0);
@@ -792,6 +793,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         .join_match_duration_ns
                         .with_label_values(&[&actor_id_str, &fragment_id_str, "right"])
                         .inc_by(right_time.as_nanos() as u64);
+                    self.try_flush_data().await?;
                 }
                 AlignedMessage::Barrier(barrier) => {
                     let barrier_start_time = Instant::now();
@@ -836,6 +838,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         // `commit` them here.
         self.side_l.ht.flush(epoch).await?;
         self.side_r.ht.flush(epoch).await?;
+        Ok(())
+    }
+
+    async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
+        // All changes to the state has been buffered in the mem-table of the state table. Just
+        // `commit` them here.
+        self.side_l.ht.try_flush().await?;
+        self.side_r.ht.try_flush().await?;
         Ok(())
     }
 

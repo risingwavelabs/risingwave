@@ -1,3 +1,9 @@
+#############################################################################################
+#                                     !!! IMPORTANT !!!                                     #
+# If you want to bump CI Docker image, please update BUILD_ENV_VERSION in build-ci-image.sh #
+# and corresponding rw-build-env version in docker-compose.yml.                             #
+#############################################################################################
+
 FROM ubuntu:22.04 AS risingwave-build-env
 
 ENV LANG en_US.utf8
@@ -42,7 +48,7 @@ ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
 RUN curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 RUN cargo binstall -y --no-symlinks cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-cache cargo-audit \
     cargo-make@0.36.10 \
-    sqllogictest-bin@0.17.0 \
+    sqllogictest-bin@0.17.2 \
     && cargo install sccache \
     && cargo cache -a \
     && rm -rf "/root/.cargo/registry/index" \

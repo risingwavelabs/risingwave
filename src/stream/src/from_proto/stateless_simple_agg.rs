@@ -39,9 +39,12 @@ impl ExecutorBuilder for StatelessSimpleAggExecutorBuilder {
         Ok(StatelessSimpleAggExecutor::new(
             params.actor_context,
             input,
+            ExecutorInfo {
+                schema: params.schema,
+                pk_indices: params.pk_indices,
+                identity: params.identity,
+            },
             agg_calls,
-            params.pk_indices,
-            params.executor_id,
         )?
         .boxed())
     }

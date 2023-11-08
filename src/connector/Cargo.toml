@@ -15,7 +15,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "idx0dev/resolved_schema", features = [
+apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "89c2c128de93586465a7ea85b0a1c1a53082bba2", features = [
     "snappy",
     "zstandard",
     "bzip",

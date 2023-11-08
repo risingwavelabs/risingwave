@@ -196,8 +196,31 @@ impl SessionImpl {
             && !self.is_super_user()
         {
             return Err(PermissionDenied(
-                "Only the relation owner, the schema owner, and superuser can drop a relation."
+                "Only the relation owner, the schema owner, and superuser can drop or alter a relation."
                     .to_string(),
+            )
+            .into());
+        }
+
+        Ok(())
+    }
+
+    /// Check whether the user of the current session has the privilege to drop or alter the
+    /// `db_schema`, which is either a database or schema.
+    /// > Only the owner of the database, or a superuser, can drop a database.
+    /// >
+    /// > Reference: <https://www.postgresql.org/docs/current/manage-ag-dropdb.html>
+    /// >
+    /// > A schema can only be dropped by its owner or a superuser.
+    /// >
+    /// > Reference: <https://www.postgresql.org/docs/current/sql-dropschema.html>
+    pub fn check_privilege_for_drop_alter_db_schema(
+        &self,
+        db_schema: &impl OwnedByUserCatalog,
+    ) -> Result<()> {
+        if self.user_id() != db_schema.owner() && !self.is_super_user() {
+            return Err(PermissionDenied(
+                "Only the owner, and superuser can drop or alter a schema or database.".to_string(),
             )
             .into());
         }
