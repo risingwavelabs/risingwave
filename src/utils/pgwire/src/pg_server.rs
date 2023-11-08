@@ -204,6 +204,7 @@ mod tests {
     use std::error::Error;
     use std::net::SocketAddr;
     use std::sync::Arc;
+    use std::time::Instant;
 
     use bytes::Bytes;
     use futures::stream::BoxStream;
@@ -216,7 +217,7 @@ mod tests {
     use crate::pg_message::TransactionStatus;
     use crate::pg_response::{PgResponse, RowSetResult, StatementType};
     use crate::pg_server::{
-        pg_serve, BoxedError, ExecContextGuard, Session, SessionId, SessionManager,
+        pg_serve, BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
         UserAuthenticator,
     };
     use crate::types;
@@ -345,8 +346,12 @@ mod tests {
             TransactionStatus::Idle
         }
 
-        fn init_exec_context(&self, _sql: Arc<str>) -> ExecContextGuard {
-            unreachable!()
+        fn init_exec_context(&self, sql: Arc<str>) -> ExecContextGuard {
+            let exec_context = Arc::new(ExecContext {
+                running_sql: sql,
+                last_instant: Instant::now(),
+            });
+            ExecContextGuard(exec_context)
         }
     }
 

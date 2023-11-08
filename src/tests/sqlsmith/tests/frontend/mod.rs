@@ -97,14 +97,14 @@ async fn create_tables(
     let (mut tables, statements) = parse_create_table_statements(sql);
 
     for s in statements {
-        let create_sql = Arc::new(s.to_string());
+        let create_sql: Arc<str> = Arc::from(s.to_string());
         handle(session.clone(), s, create_sql).await?;
     }
 
     // Generate some mviews
     for i in 0..20 {
         let (sql, table) = mview_sql_gen(rng, tables.clone(), &format!("m{}", i));
-        let sql = Arc::new(sql);
+        let sql: Arc<str> = Arc::from(sql);
         reproduce_failing_queries(&setup_sql, &sql);
         setup_sql.push_str(&format!("{};", &sql));
         let stmts = parse_sql(&sql);
@@ -159,13 +159,13 @@ async fn test_stream_query(
     }
 
     let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
-    let sql = Arc::new(sql);
+    let sql: Arc<str> = Arc::from(sql);
     reproduce_failing_queries(setup_sql, &sql);
     // The generated SQL must be parsable.
     let stmt = round_trip_parse_test(&sql)?;
     let skipped = handle(session.clone(), stmt, sql).await?;
     if !skipped {
-        let drop_sql = Arc::new(format!("DROP MATERIALIZED VIEW {}", table.name));
+        let drop_sql: Arc<str> = Arc::from(format!("DROP MATERIALIZED VIEW {}", table.name));
         let drop_stmts = parse_sql(&drop_sql);
         let drop_stmt = drop_stmts[0].clone();
         handle(session.clone(), drop_stmt, drop_sql).await?;
