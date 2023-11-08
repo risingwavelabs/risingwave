@@ -108,13 +108,17 @@ macro_rules! for_all_plain_native_methods {
                 // Return a pointer to the iterator
                 static native long iteratorNewHummock(byte[] readPlan);
 
+                static native long iteratorNewStreamChunk(long pointer);
+
                 static native boolean iteratorNext(long pointer);
 
                 static native void iteratorClose(long pointer);
 
-                static native long iteratorNewFromStreamChunkPayload(byte[] streamChunkPayload);
+                static native long newStreamChunkFromPayload(byte[] streamChunkPayload);
 
-                static native long iteratorNewFromStreamChunkPretty(String str);
+                static native long newStreamChunkFromPretty(String str);
+
+                static native void streamChunkClose(long pointer);
 
                 static native byte[] iteratorGetKey(long pointer);
 

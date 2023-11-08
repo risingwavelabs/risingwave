@@ -21,7 +21,7 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.*;
 import com.risingwave.connector.deserializer.StreamChunkDeserializer;
 import com.risingwave.metrics.ConnectorNodeMetrics;
-import com.risingwave.metrics.MonitoredRowIterator;
+import com.risingwave.metrics.MonitoredRowIterable;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.grpc.stub.StreamObserver;
 import java.util.Optional;
@@ -125,9 +125,9 @@ public class SinkWriterStreamObserver
                             .asRuntimeException();
                 }
 
-                try (CloseableIterator<SinkRow> rowIter = deserializer.deserialize(batch)) {
+                try (CloseableIterable<SinkRow> rowIter = deserializer.deserialize(batch)) {
                     sink.write(
-                            new MonitoredRowIterator(
+                            new MonitoredRowIterable(
                                     rowIter, connectorName, String.valueOf(sinkId)));
                 }
 
