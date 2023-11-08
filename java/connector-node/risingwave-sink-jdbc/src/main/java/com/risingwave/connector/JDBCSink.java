@@ -16,8 +16,9 @@ package com.risingwave.connector;
 
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
-import com.risingwave.connector.api.sink.SinkWriterBase;
+import com.risingwave.connector.api.sink.SinkWriter;
 import com.risingwave.connector.jdbc.JdbcDialect;
+import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data;
 import io.grpc.Status;
 import java.sql.*;
@@ -25,7 +26,7 @@ import java.util.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class JDBCSink extends SinkWriterBase {
+public class JDBCSink implements SinkWriter {
     private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
 
     private final JdbcDialect jdbcDialect;
@@ -33,6 +34,8 @@ public class JDBCSink extends SinkWriterBase {
     private Connection conn;
     private JdbcStatements jdbcStatements;
     private final List<String> pkColumnNames;
+
+    private final TableSchema tableSchema;
 
     public static final String JDBC_COLUMN_NAME_KEY = "COLUMN_NAME";
     public static final String JDBC_DATA_TYPE_KEY = "DATA_TYPE";
@@ -42,7 +45,7 @@ public class JDBCSink extends SinkWriterBase {
     private static final Logger LOG = LoggerFactory.getLogger(JDBCSink.class);
 
     public JDBCSink(JDBCSinkConfig config, TableSchema tableSchema) {
-        super(tableSchema);
+        this.tableSchema = tableSchema;
 
         var jdbcUrl = config.getJdbcUrl().toLowerCase();
         var factory = JdbcUtils.getDialectFactory(jdbcUrl);
@@ -125,13 +128,13 @@ public class JDBCSink extends SinkWriterBase {
     }
 
     @Override
-    public void write(Iterator<SinkRow> rows) {
+    public void write(Iterable<SinkRow> rows) {
+        final int maxRetryCount = 4;
         int retryCount = 0;
         while (true) {
             try {
                 // fill prepare statements with parameters
-                while (rows.hasNext()) {
-                    SinkRow row = rows.next();
+                for (SinkRow row : rows) {
                     if (row.getOp() == Data.Op.UPDATE_DELETE) {
                         updateFlag = true;
                         continue;
@@ -151,6 +154,14 @@ public class JDBCSink extends SinkWriterBase {
                 break;
             } catch (SQLException e) {
                 LOG.error("Failed to execute JDBC statements, retried {} times", retryCount, e);
+                if (++retryCount > maxRetryCount) {
+                    throw Status.INTERNAL
+                            .withDescription(
+                                    "Failed to execute JDBC statements and exceeded max retry times")
+                            .withCause(e)
+                            .asRuntimeException();
+                }
+
                 try {
                     if (!conn.isValid(30)) { // 30 seconds timeout
                         LOG.info("Recreate the JDBC connection due to connection broken");
@@ -161,7 +172,6 @@ public class JDBCSink extends SinkWriterBase {
                         // create a new connection if the current connection is invalid
                         conn = JdbcUtils.getConnection(config.getJdbcUrl());
                         jdbcStatements = new JdbcStatements(conn);
-                        ++retryCount;
                     }
                 } catch (SQLException ex) {
                     LOG.error(
@@ -201,7 +211,7 @@ public class JDBCSink extends SinkWriterBase {
                 var upsertSql =
                         jdbcDialect.getUpsertStatement(
                                 schemaTableName,
-                                List.of(getTableSchema().getColumnNames()),
+                                List.of(tableSchema.getColumnNames()),
                                 pkColumnNames);
                 // MySQL and Postgres have upsert SQL
                 if (upsertSql.isEmpty()) {
@@ -219,7 +229,7 @@ public class JDBCSink extends SinkWriterBase {
             } else {
                 var insertSql =
                         jdbcDialect.getInsertIntoStatement(
-                                schemaTableName, List.of(getTableSchema().getColumnNames()));
+                                schemaTableName, List.of(tableSchema.getColumnNames()));
                 this.insertStatement =
                         conn.prepareStatement(insertSql, Statement.RETURN_GENERATED_KEYS);
             }
@@ -229,8 +239,7 @@ public class JDBCSink extends SinkWriterBase {
             try {
                 switch (row.getOp()) {
                     case INSERT:
-                        jdbcDialect.bindUpsertStatement(
-                                upsertStatement, conn, getTableSchema(), row);
+                        jdbcDialect.bindUpsertStatement(upsertStatement, conn, tableSchema, row);
                         break;
                     case UPDATE_INSERT:
                         if (!updateFlag) {
@@ -239,8 +248,7 @@ public class JDBCSink extends SinkWriterBase {
                                             "an UPDATE_DELETE should precede an UPDATE_INSERT")
                                     .asRuntimeException();
                         }
-                        jdbcDialect.bindUpsertStatement(
-                                upsertStatement, conn, getTableSchema(), row);
+                        jdbcDialect.bindUpsertStatement(upsertStatement, conn, tableSchema, row);
                         updateFlag = false;
                         break;
                     default:
@@ -274,7 +282,7 @@ public class JDBCSink extends SinkWriterBase {
             try {
                 int placeholderIdx = 1;
                 for (String primaryKey : pkColumnNames) {
-                    Object fromRow = getTableSchema().getFromRow(primaryKey, row);
+                    Object fromRow = tableSchema.getFromRow(primaryKey, row);
                     deleteStatement.setObject(placeholderIdx++, fromRow);
                 }
                 deleteStatement.addBatch();
@@ -294,7 +302,7 @@ public class JDBCSink extends SinkWriterBase {
                         .asRuntimeException();
             }
             try {
-                jdbcDialect.bindInsertIntoStatement(insertStatement, conn, getTableSchema(), row);
+                jdbcDialect.bindInsertIntoStatement(insertStatement, conn, tableSchema, row);
                 insertStatement.addBatch();
             } catch (SQLException e) {
                 throw io.grpc.Status.INTERNAL
@@ -344,13 +352,17 @@ public class JDBCSink extends SinkWriterBase {
     }
 
     @Override
-    public void sync() {
+    public void beginEpoch(long epoch) {}
+
+    @Override
+    public Optional<ConnectorServiceProto.SinkMetadata> barrier(boolean isCheckpoint) {
         if (updateFlag) {
             throw Status.FAILED_PRECONDITION
                     .withDescription(
                             "expected UPDATE_INSERT to complete an UPDATE operation, got `sync`")
                     .asRuntimeException();
         }
+        return Optional.empty();
     }
 
     @Override
