@@ -39,6 +39,7 @@ impl StreamUnion {
     pub fn new(core: generic::Union<PlanRef>) -> Self {
         let inputs = &core.inputs;
         let dist = inputs[0].distribution().clone();
+        assert!(inputs.iter().all(|input| *input.distribution() == dist));
         let watermark_columns = inputs.iter().fold(
             {
                 let mut bitset = FixedBitSet::with_capacity(core.schema().len());
