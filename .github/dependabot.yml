@@ -24,3 +24,6 @@ updates:
       patterns:
         - "tonic*"
         - "prost*"
+    opentelemetry:
+      patterns:
+        - "opentelemetry*"
