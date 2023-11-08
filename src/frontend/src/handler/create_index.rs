@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -411,17 +412,9 @@ pub async fn handle_create_index(
 
     let (graph, index_table, index) = {
         {
-            match session.check_relation_name_duplicated(index_name.clone()) {
-                Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name)))
-                    if if_not_exists =>
-                {
-                    return Ok(PgResponse::builder(StatementType::CREATE_INDEX)
-                        .notice(format!("relation \"{}\" already exists, skipping", name))
-                        .into());
-                }
-                Err(e) => return Err(e.into()),
-                Ok(_) => {}
-            };
+            if let Either::Right(resp) = session.check_relation_name_duplicated(index_name.clone(), StatementType::CREATE_INDEX, if_not_exists)? {
+                return Ok(resp);
+            }
         }
 
         let context = OptimizerContext::from_handler_args(handler_args);

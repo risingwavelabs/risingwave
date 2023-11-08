@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
@@ -154,15 +155,9 @@ pub async fn handle_create_mv(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
-    match session.check_relation_name_duplicated(name.clone()) {
-        Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
-            return Ok(PgResponse::builder(StatementType::CREATE_MATERIALIZED_VIEW)
-                .notice(format!("relation \"{}\" already exists, skipping", name))
-                .into());
-        }
-        Err(e) => return Err(e.into()),
-        Ok(_) => {}
-    };
+    if let Either::Right(resp) = session.check_relation_name_duplicated(name.clone(), StatementType::CREATE_MATERIALIZED_VIEW, if_not_exists)? {
+        return Ok(resp);
+    }
 
     let (mut table, graph) = {
         let context = OptimizerContext::from_handler_args(handler_args);

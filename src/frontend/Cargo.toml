@@ -23,6 +23,7 @@ async-trait = "0.1"
 auto_enums = { version = "0.8", features = ["futures03"] }
 auto_impl = "1"
 bk-tree = "0.5.0"
+either = "1"
 bytes = "1"
 clap = { version = "4", features = ["derive"] }
 downcast-rs = "1.2"

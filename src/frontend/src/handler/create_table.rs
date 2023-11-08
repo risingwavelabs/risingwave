@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use anyhow::anyhow;
+use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -954,15 +955,9 @@ pub async fn handle_create_table(
         session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");
     }
 
-    match session.check_relation_name_duplicated(table_name.clone()) {
-        Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
-            return Ok(PgResponse::builder(StatementType::CREATE_TABLE)
-                .notice(format!("relation \"{}\" already exists, skipping", name))
-                .into());
-        }
-        Err(e) => return Err(e.into()),
-        Ok(_) => {}
-    };
+    if let Either::Right(resp) = session.check_relation_name_duplicated(table_name.clone(), StatementType::CREATE_TABLE, if_not_exists)? {
+        return Ok(resp);
+    }
 
     let (graph, source, table, job_type) = {
         let context = OptimizerContext::from_handler_args(handler_args);

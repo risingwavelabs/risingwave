@@ -19,10 +19,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
+use either::Either;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_message::TransactionStatus;
-use pgwire::pg_response::PgResponse;
+use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::pg_server::{BoxedError, Session, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::{Format, FormatIterator};
 use rand::RngCore;
@@ -69,7 +70,7 @@ use crate::catalog::{check_schema_writable, CatalogError, DatabaseId, SchemaId};
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
 };
-use crate::handler::handle;
+use crate::handler::{handle, RwPgResponse};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::util::to_pg_field;
 use crate::health_service::HealthServiceImpl;
@@ -569,10 +570,13 @@ impl SessionImpl {
         self.id
     }
 
+    #[must_use]
     pub fn check_relation_name_duplicated(
         &self,
         name: ObjectName,
-    ) -> std::result::Result<(), CheckRelationError> {
+        stmt_type: StatementType,
+        if_not_exists: bool,
+    ) -> std::result::Result<Either<(), RwPgResponse>, CheckRelationError> {
         let db_name = self.database();
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, relation_name) = {
@@ -588,9 +592,15 @@ impl SessionImpl {
             };
             (schema_name, relation_name)
         };
-        catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name)?;
-
-        Ok(())
+        match catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name) {
+            Err(CatalogError::Duplicated(_, name)) if if_not_exists => {
+                return Ok(Either::Right( PgResponse::builder(stmt_type)
+                    .notice(format!("relation \"{}\" already exists, skipping", name))
+                    .into()));
+            }
+            Err(e) => Err(e.into()),
+            Ok(_) => Ok(Either::Left(()))
+        }
     }
 
     pub fn check_connection_name_duplicated(&self, name: ObjectName) -> Result<()> {

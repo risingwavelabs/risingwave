@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
+use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -1087,7 +1088,9 @@ pub async fn handle_create_source(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
-    session.check_relation_name_duplicated(stmt.source_name.clone())?;
+    if let Either::Right(resp) = session.check_relation_name_duplicated(stmt.source_name.clone(), StatementType::CREATE_SOURCE, stmt.if_not_exists)? {
+        return Ok(resp);
+    }
 
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
