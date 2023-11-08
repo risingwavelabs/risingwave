@@ -502,7 +502,7 @@ pub async fn compact(
             compact_done(compact_task, context.clone(), output_ssts, task_status);
         let cost_time = timer.stop_and_record() * 1000.0;
         tracing::info!(
-            "Finished compaction task in {:?}ms: {}",
+            "Finished fast compaction task in {:?}ms: {}",
             cost_time,
             compact_task_to_string(&compact_task)
         );
