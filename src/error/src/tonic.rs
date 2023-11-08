@@ -15,6 +15,11 @@
 use std::error::Error;
 use std::sync::Arc;
 
+use tonic::metadata::{MetadataMap, MetadataValue};
+
+/// The key of the metadata field that contains the serialized error.
+const ERROR_KEY: &str = "risingwave-error-bin";
+
 #[easy_ext::ext(ToTonicStatus)]
 impl<T> T
 where
@@ -29,9 +34,12 @@ where
         // At the same time, set the message field to the error message of `self` (without source chain).
         // The redundancy of the current error's message is intentional in case the client ignores the `details` field.
         let source = serde_error::Error::new(self);
-        let details = bincode::serialize(&source).unwrap_or_default();
+        let serialized = bincode::serialize(&source).unwrap();
 
-        let mut status = tonic::Status::with_details(code, self.to_string(), details.into());
+        let mut metadata = MetadataMap::new();
+        metadata.insert_bin(ERROR_KEY, MetadataValue::from_bytes(&serialized));
+
+        let mut status = tonic::Status::with_metadata(code, self.to_string(), metadata);
         // Set the source of `tonic::Status`, though it's not likely to be used.
         // This is only available before serializing to the wire. That's why we need to manually embed it
         // into the `details` field.
@@ -50,8 +58,14 @@ impl TonicStatusWrapper {
     /// the source chain from its `details` field.
     pub fn new(mut status: tonic::Status) -> Self {
         if status.source().is_none() {
-            if let Ok(e) = bincode::deserialize::<serde_error::Error>(status.details()) {
-                status.set_source(Arc::new(e));
+            if let Some(value) = status.metadata().get_bin(ERROR_KEY) {
+                if let Some(e) = value.to_bytes().ok().and_then(|serialized| {
+                    bincode::deserialize::<serde_error::Error>(serialized.as_ref()).ok()
+                }) {
+                    status.set_source(Arc::new(e));
+                } else {
+                    tracing::warn!("failed to deserialize error from gRPC metadata");
+                }
             }
         }
         Self(status)
@@ -92,7 +106,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ui() {
+    fn test_source_chain_preserved() {
         #[derive(thiserror::Error, Debug)]
         #[error("{message}")]
         struct MyError {

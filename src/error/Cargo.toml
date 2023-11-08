@@ -17,6 +17,7 @@ serde-error = "0.1"
 thiserror = "1"
 thiserror-ext = { workspace = true }
 tonic = { workspace = true }
+tracing = "0.1"
 
 [lints]
 workspace = true

@@ -7630,6 +7630,7 @@ dependencies = [
  "serde-error",
  "thiserror",
  "thiserror-ext",
+ "tracing",
 ]
 
 [[package]]
