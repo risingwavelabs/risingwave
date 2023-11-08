@@ -52,7 +52,7 @@ public class AppendOnlyIcebergSinkWriter extends IcebergSinkWriterBase {
     }
 
     @Override
-    public void write(Iterable<SinkRow> rows) {
+    public boolean write(Iterable<SinkRow> rows) {
         for (SinkRow row : rows) {
             switch (row.getOp()) {
                 case INSERT:
@@ -106,6 +106,7 @@ public class AppendOnlyIcebergSinkWriter extends IcebergSinkWriterBase {
                             .asRuntimeException();
             }
         }
+        return false;
     }
 
     @Override

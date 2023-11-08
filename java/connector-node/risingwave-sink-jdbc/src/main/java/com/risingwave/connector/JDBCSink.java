@@ -128,7 +128,7 @@ public class JDBCSink implements SinkWriter {
     }
 
     @Override
-    public void write(Iterable<SinkRow> rows) {
+    public boolean write(Iterable<SinkRow> rows) {
         final int maxRetryCount = 4;
         int retryCount = 0;
         while (true) {
@@ -198,6 +198,7 @@ public class JDBCSink implements SinkWriter {
                 }
             }
         }
+        return true;
     }
 
     /**

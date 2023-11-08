@@ -94,7 +94,7 @@ public class JDBCSinkTest {
                                 new Timestamp(1000000000),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes())));
-        sink.barrier(false);
+        sink.barrier(true);
 
         Statement stmt = conn.createStatement();
         try (var rs = stmt.executeQuery(String.format("SELECT * FROM %s", tableName))) {
@@ -116,7 +116,7 @@ public class JDBCSinkTest {
                                 new Timestamp(1000000000),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes())));
-        sink.barrier(false);
+        sink.barrier(true);
         try (var rs = stmt.executeQuery(String.format("SELECT * FROM %s", tableName))) {
             int count;
             for (count = 0; rs.next(); ) {
@@ -127,7 +127,7 @@ public class JDBCSinkTest {
         stmt.close();
         conn.close();
 
-        sink.barrier(false);
+        sink.barrier(true);
         sink.drop();
     }
 
@@ -217,7 +217,7 @@ public class JDBCSinkTest {
             assertFalse(rs.next());
         }
 
-        sink.barrier(false);
+        sink.barrier(true);
         stmt.close();
         conn.close();
     }
