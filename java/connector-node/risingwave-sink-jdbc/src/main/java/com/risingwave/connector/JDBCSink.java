@@ -125,12 +125,13 @@ public class JDBCSink extends SinkWriterBase {
     }
 
     @Override
-    public void write(Iterable<SinkRow> rows) {
+    public void write(Iterator<SinkRow> rows) {
         int retryCount = 0;
         while (true) {
             try {
                 // fill prepare statements with parameters
-                for (SinkRow row : rows) {
+                while (rows.hasNext()) {
+                    SinkRow row = rows.next();
                     if (row.getOp() == Data.Op.UPDATE_DELETE) {
                         updateFlag = true;
                         continue;

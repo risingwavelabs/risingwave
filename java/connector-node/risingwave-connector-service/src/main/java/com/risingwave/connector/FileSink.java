@@ -25,6 +25,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Iterator;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
@@ -57,8 +58,9 @@ public class FileSink extends SinkWriterBase {
     }
 
     @Override
-    public void write(Iterable<SinkRow> rows) {
-        for (SinkRow row : rows) {
+    public void write(Iterator<SinkRow> rows) {
+        while (rows.hasNext()) {
+            SinkRow row = rows.next();
             switch (row.getOp()) {
                 case INSERT:
                     String buf =
