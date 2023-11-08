@@ -25,27 +25,27 @@ use risingwave_expr::function;
 ///
 /// ```slt
 /// query I
-/// select array_contains(array[1,2,3], array[2,3]);
+/// select array[1,2,3] @> array[2,3];
 /// ----
 /// t
 ///
 /// query I
-/// select array_contains(array[1,2,3], array[3,4]);
+/// select array[1,2,3] @> array[3,4];
 /// ----
 /// f
 ///
 /// query I
-/// select array_contains(array[[[1,2],[3,4]],[[5,6],[7,8]]], array[2,3]);
+/// select array[[[1,2],[3,4]],[[5,6],[7,8]]] @> array[2,3];
 /// ----
 /// t
 ///
 /// query I
-/// select array_contains(array[1,2,3], null::int[]);
+/// select array[1,2,3] @> null;
 /// ----
 /// NULL
 ///
 /// query I
-/// select array_contains(null::int[], array[3,4]);
+/// select null @> array[3,4];
 /// ----
 /// NULL
 /// ```
