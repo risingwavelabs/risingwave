@@ -16,13 +16,14 @@ use std::future::Future;
 use std::io;
 use std::result::Result;
 use std::sync::Arc;
+use std::time::Instant;
 
 use bytes::Bytes;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Statement;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::net::Listener;
+use crate::net::{AddressRef, Listener};
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_message::TransactionStatus;
 use crate::pg_protocol::{PgProtocol, TlsConfig};
@@ -37,7 +38,12 @@ pub type SessionId = (i32, i32);
 pub trait SessionManager: Send + Sync + 'static {
     type Session: Session;
 
-    fn connect(&self, database: &str, user_name: &str) -> Result<Arc<Self::Session>, BoxedError>;
+    fn connect(
+        &self,
+        database: &str,
+        user_name: &str,
+        peer_addr: AddressRef,
+    ) -> Result<Arc<Self::Session>, BoxedError>;
 
     fn cancel_queries_in_session(&self, session_id: SessionId);
 
@@ -57,7 +63,7 @@ pub trait Session: Send + Sync {
     /// view, see <https://github.com/risingwavelabs/risingwave/issues/6801>.
     fn run_one_query(
         self: Arc<Self>,
-        sql: Statement,
+        stmt: Statement,
         format: Format,
     ) -> impl Future<Output = Result<PgResponse<Self::ValuesStream>, BoxedError>> + Send;
 
@@ -101,6 +107,26 @@ pub trait Session: Send + Sync {
     fn set_config(&self, key: &str, value: Vec<String>) -> Result<(), BoxedError>;
 
     fn transaction_status(&self) -> TransactionStatus;
+
+    fn init_exec_context(&self, sql: Arc<str>) -> ExecContextGuard;
+}
+
+/// Each session could run different SQLs multiple times.
+/// `ExecContext` represents the lifetime of a running SQL in the current session.
+pub struct ExecContext {
+    pub running_sql: Arc<str>,
+    /// The instant of the running sql
+    pub last_instant: Instant,
+}
+
+/// `ExecContextGuard` holds a `Arc` pointer. Once `ExecContextGuard` is dropped,
+/// the inner `Arc<ExecContext>` should not be referred anymore, so that its `Weak` reference (used in `SessionImpl`) will be the same lifecycle of the running sql execution context.
+pub struct ExecContextGuard(Arc<ExecContext>);
+
+impl ExecContextGuard {
+    pub fn new(exec_context: Arc<ExecContext>) -> Self {
+        Self(exec_context)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -146,6 +172,7 @@ pub async fn pg_serve(
                     stream,
                     session_mgr.clone(),
                     tls_config.clone(),
+                    Arc::new(peer_addr),
                 ));
             }
 
@@ -163,11 +190,12 @@ pub async fn handle_connection<S, SM>(
     stream: S,
     session_mgr: Arc<SM>,
     tls_config: Option<TlsConfig>,
+    peer_addr: AddressRef,
 ) where
     S: AsyncWrite + AsyncRead + Unpin,
     SM: SessionManager,
 {
-    let mut pg_proto = PgProtocol::new(stream, session_mgr, tls_config);
+    let mut pg_proto = PgProtocol::new(stream, session_mgr, tls_config, peer_addr);
     loop {
         let msg = match pg_proto.read_message().await {
             Ok(msg) => msg,
@@ -191,6 +219,7 @@ pub async fn handle_connection<S, SM>(
 mod tests {
     use std::error::Error;
     use std::sync::Arc;
+    use std::time::Instant;
 
     use bytes::Bytes;
     use futures::stream::BoxStream;
@@ -203,7 +232,8 @@ mod tests {
     use crate::pg_message::TransactionStatus;
     use crate::pg_response::{PgResponse, RowSetResult, StatementType};
     use crate::pg_server::{
-        pg_serve, BoxedError, Session, SessionId, SessionManager, UserAuthenticator,
+        pg_serve, BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
+        UserAuthenticator,
     };
     use crate::types;
     use crate::types::Row;
@@ -218,6 +248,7 @@ mod tests {
             &self,
             _database: &str,
             _user_name: &str,
+            _peer_addr: crate::net::AddressRef,
         ) -> Result<Arc<Self::Session>, Box<dyn Error + Send + Sync>> {
             Ok(Arc::new(MockSession {}))
         }
@@ -240,7 +271,7 @@ mod tests {
 
         async fn run_one_query(
             self: Arc<Self>,
-            _sql: Statement,
+            _stmt: Statement,
             _format: types::Format,
         ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
             Ok(PgResponse::builder(StatementType::SELECT)
@@ -328,6 +359,14 @@ mod tests {
 
         fn transaction_status(&self) -> TransactionStatus {
             TransactionStatus::Idle
+        }
+
+        fn init_exec_context(&self, sql: Arc<str>) -> ExecContextGuard {
+            let exec_context = Arc::new(ExecContext {
+                running_sql: sql,
+                last_instant: Instant::now(),
+            });
+            ExecContextGuard::new(exec_context)
         }
     }
 
