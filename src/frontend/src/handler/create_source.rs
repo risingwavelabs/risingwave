@@ -1255,7 +1255,7 @@ pub mod tests {
 
     use risingwave_common::catalog::{
         cdc_table_name_column_name, offset_column_name, row_id_column_name, DEFAULT_DATABASE_NAME,
-        DEFAULT_SCHEMA_NAME,
+        DEFAULT_KEY_COLUMN_NAME, DEFAULT_SCHEMA_NAME,
     };
     use risingwave_common::types::DataType;
 
@@ -1297,6 +1297,7 @@ pub mod tests {
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Serial,
+            DEFAULT_KEY_COLUMN_NAME => DataType::Bytea,
             "id" => DataType::Int32,
             "zipcode" => DataType::Int64,
             "rate" => DataType::Float32,
@@ -1342,6 +1343,7 @@ pub mod tests {
         let table_name_col_name = cdc_table_name_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Serial,
+            DEFAULT_KEY_COLUMN_NAME => DataType::Bytea,
             "payload" => DataType::Jsonb,
             offset_col_name.as_str() => DataType::Varchar,
             table_name_col_name.as_str() => DataType::Varchar,

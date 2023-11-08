@@ -39,12 +39,11 @@ impl PlainParser {
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> Result<Self> {
-        let key_builder =
-            AccessBuilderImpl::Bytes(BytesAccessBuilder::new(EncodingProperties::Bytes(
-                BytesProperties {
-                    column_name: Some(DEFAULT_KEY_COLUMN_NAME.into()),
-                },
-            ))?);
+        let key_builder = AccessBuilderImpl::Bytes(BytesAccessBuilder::new(
+            EncodingProperties::Bytes(BytesProperties {
+                column_name: Some(DEFAULT_KEY_COLUMN_NAME.into()),
+            }),
+        )?);
         let payload_builder = match props.encoding_config {
             EncodingProperties::Protobuf(_)
             | EncodingProperties::Avro(_)
@@ -71,20 +70,24 @@ impl PlainParser {
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<()> {
-        // if key is empty, set it as vec![]
-        let key_data = key.unwrap_or(vec![]);
+        // if key is empty, set it as vec![]su
+        let key_data = key.unwrap_or_default();
         // if payload is empty, report error
         let payload_data = payload.ok_or_else(|| {
-            RwError::from(ErrorCode::InternalError("Empty payload with nonempty key".into()))
+            RwError::from(ErrorCode::InternalError(
+                "Empty payload with nonempty key".into(),
+            ))
         })?;
-        
+
         let key_accessor = self.key_builder.generate_accessor(key_data).await?;
         let payload_accessor = self.payload_builder.generate_accessor(payload_data).await?;
         apply_key_val_accessor_on_stream_chunk_writer(
             DEFAULT_KEY_COLUMN_NAME,
             key_accessor,
             payload_accessor,
-            &mut writer).map_err(Into::into)
+            &mut writer,
+        )
+        .map_err(Into::into)
     }
 }
 

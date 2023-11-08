@@ -55,14 +55,15 @@ mod tests {
         SourceStreamChunkBuilder, SpecificParserConfig,
     };
 
-    fn get_item() -> Vec<(Vec<u8>, Vec<u8>)> {
+    type Item = (Vec<u8>, Vec<u8>);
+    fn get_item() -> Vec<Item> {
         vec![
-            (br#"a"#.to_vec() , br#"t"#.to_vec()),
-            (br#"r"#.to_vec(), br#"random"#.to_vec())
+            (br#"a"#.to_vec(), br#"t"#.to_vec()),
+            (br#"r"#.to_vec(), br#"random"#.to_vec()),
         ]
     }
 
-    async fn test_bytes_parser(get_item: fn() -> Vec<(Vec<u8>, Vec<u8>)>) {
+    async fn test_bytes_parser(get_item: fn() -> Vec<Item>) {
         let descs = vec![SourceColumnDesc::simple("id", DataType::Bytea, 0.into())];
         let props = SpecificParserConfig {
             key_encoding_config: None,
@@ -77,7 +78,10 @@ mod tests {
 
         for item in get_item() {
             let writer = builder.row_writer();
-            parser.parse_inner(Some(item.0), Some(item.1), writer).await.unwrap();
+            parser
+                .parse_inner(Some(item.0), Some(item.1), writer)
+                .await
+                .unwrap();
         }
 
         let chunk = builder.finish();

@@ -224,7 +224,8 @@ mod test {
     use crate::parser::plain_parser::PlainParser;
     use crate::parser::unified::avro::unix_epoch_days;
     use crate::parser::{
-        AccessBuilderImpl, EncodingType, SourceStreamChunkBuilder, SpecificParserConfig, BytesProperties, EncodingProperties,
+        AccessBuilderImpl, BytesProperties, EncodingProperties, EncodingType,
+        SourceStreamChunkBuilder, SpecificParserConfig,
     };
     use crate::source::SourceColumnDesc;
 
@@ -310,11 +311,11 @@ mod test {
         let conf = new_avro_conf_from_local(file_name).await?;
 
         Ok(PlainParser {
-            key_builder: AccessBuilderImpl::Bytes(BytesAccessBuilder::new(EncodingProperties::Bytes(
-                BytesProperties {
+            key_builder: AccessBuilderImpl::Bytes(BytesAccessBuilder::new(
+                EncodingProperties::Bytes(BytesProperties {
                     column_name: Some(DEFAULT_KEY_COLUMN_NAME.into()),
-                },
-            ))?),
+                }),
+            )?),
             payload_builder: AccessBuilderImpl::Avro(AvroAccessBuilder::new(
                 conf,
                 EncodingType::Value,
@@ -338,69 +339,75 @@ mod test {
         let flush = writer.flush().unwrap();
         assert!(flush > 0);
         let input_data = writer.into_inner().unwrap();
-        let key_data = vec![];
+        // _rw_key test cases
+        let key_testcases = vec![Some(br#"r"#.to_vec()), Some(vec![]), None];
         let columns = build_rw_columns();
-        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 1);
-        {
-            let writer = builder.row_writer();
-            parser.parse_inner(Some(key_data), Some(input_data), writer).await.unwrap();
-        }
-        let chunk = builder.finish();
-        let (op, row) = chunk.rows().next().unwrap();
-        assert_eq!(op, Op::Insert);
-        let row = row.into_owned_row();
-        for (i, field) in record.fields.iter().enumerate() {
-            let value = field.clone().1;
-            match value {
-                Value::String(str) | Value::Union(_, box Value::String(str)) => {
-                    assert_eq!(row[i], Some(ScalarImpl::Utf8(str.into_boxed_str())));
-                }
-                Value::Boolean(bool_val) => {
-                    assert_eq!(row[i], Some(ScalarImpl::Bool(bool_val)));
-                }
-                Value::Int(int_val) => {
-                    assert_eq!(row[i], Some(ScalarImpl::Int32(int_val)));
-                }
-                Value::Long(i64_val) => {
-                    assert_eq!(row[i], Some(ScalarImpl::Int64(i64_val)));
-                }
-                Value::Float(f32_val) => {
-                    assert_eq!(row[i], Some(ScalarImpl::Float32(f32_val.into())));
-                }
-                Value::Double(f64_val) => {
-                    assert_eq!(row[i], Some(ScalarImpl::Float64(f64_val.into())));
-                }
-                Value::Date(days) => {
-                    assert_eq!(
-                        row[i],
-                        Some(ScalarImpl::Date(
-                            Date::with_days(days + unix_epoch_days()).unwrap(),
-                        ))
-                    );
-                }
-                Value::TimestampMillis(millis) => {
-                    assert_eq!(
-                        row[i],
-                        Some(Timestamptz::from_millis(millis).unwrap().into())
-                    );
-                }
-                Value::TimestampMicros(micros) => {
-                    assert_eq!(row[i], Some(Timestamptz::from_micros(micros).into()));
-                }
-                Value::Bytes(bytes) => {
-                    assert_eq!(row[i], Some(ScalarImpl::Bytea(bytes.into_boxed_slice())));
-                }
-                Value::Duration(duration) => {
-                    let months = u32::from(duration.months()) as i32;
-                    let days = u32::from(duration.days()) as i32;
-                    let usecs = (u32::from(duration.millis()) as i64) * 1000; // never overflows
-                    assert_eq!(
-                        row[i],
-                        Some(Interval::from_month_day_usec(months, days, usecs).into())
-                    );
-                }
-                _ => {
-                    unreachable!()
+        for key_data in key_testcases {
+            let mut builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 1);
+            {
+                let writer = builder.row_writer();
+                parser
+                    .parse_inner(key_data, Some(input_data.clone()), writer)
+                    .await
+                    .unwrap();
+            }
+            let chunk = builder.finish();
+            let (op, row) = chunk.rows().next().unwrap();
+            assert_eq!(op, Op::Insert);
+            let row = row.into_owned_row();
+            for (i, field) in record.fields.iter().enumerate() {
+                let value = field.clone().1;
+                match value {
+                    Value::String(str) | Value::Union(_, box Value::String(str)) => {
+                        assert_eq!(row[i], Some(ScalarImpl::Utf8(str.into_boxed_str())));
+                    }
+                    Value::Boolean(bool_val) => {
+                        assert_eq!(row[i], Some(ScalarImpl::Bool(bool_val)));
+                    }
+                    Value::Int(int_val) => {
+                        assert_eq!(row[i], Some(ScalarImpl::Int32(int_val)));
+                    }
+                    Value::Long(i64_val) => {
+                        assert_eq!(row[i], Some(ScalarImpl::Int64(i64_val)));
+                    }
+                    Value::Float(f32_val) => {
+                        assert_eq!(row[i], Some(ScalarImpl::Float32(f32_val.into())));
+                    }
+                    Value::Double(f64_val) => {
+                        assert_eq!(row[i], Some(ScalarImpl::Float64(f64_val.into())));
+                    }
+                    Value::Date(days) => {
+                        assert_eq!(
+                            row[i],
+                            Some(ScalarImpl::Date(
+                                Date::with_days(days + unix_epoch_days()).unwrap(),
+                            ))
+                        );
+                    }
+                    Value::TimestampMillis(millis) => {
+                        assert_eq!(
+                            row[i],
+                            Some(Timestamptz::from_millis(millis).unwrap().into())
+                        );
+                    }
+                    Value::TimestampMicros(micros) => {
+                        assert_eq!(row[i], Some(Timestamptz::from_micros(micros).into()));
+                    }
+                    Value::Bytes(bytes) => {
+                        assert_eq!(row[i], Some(ScalarImpl::Bytea(bytes.into_boxed_slice())));
+                    }
+                    Value::Duration(duration) => {
+                        let months = u32::from(duration.months()) as i32;
+                        let days = u32::from(duration.days()) as i32;
+                        let usecs = (u32::from(duration.millis()) as i64) * 1000; // never overflows
+                        assert_eq!(
+                            row[i],
+                            Some(Interval::from_month_day_usec(months, days, usecs).into())
+                        );
+                    }
+                    _ => {
+                        unreachable!()
+                    }
                 }
             }
         }
