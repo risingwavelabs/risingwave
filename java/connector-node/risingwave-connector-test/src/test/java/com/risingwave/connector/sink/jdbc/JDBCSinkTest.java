@@ -25,7 +25,7 @@ import com.risingwave.proto.Data;
 import com.risingwave.proto.Data.DataType.TypeName;
 import com.risingwave.proto.Data.Op;
 import java.sql.*;
-import java.util.Arrays;
+import java.util.List;
 import org.junit.Test;
 import org.testcontainers.containers.JdbcDatabaseContainer;
 import org.testcontainers.containers.MySQLContainer;
@@ -81,10 +81,10 @@ public class JDBCSinkTest {
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
                         getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
-        Connection conn = sink.getConn();
+        Connection conn = DriverManager.getConnection(container.getJdbcUrl());
 
         sink.write(
-                Arrays.asList(
+                List.of(
                         new ArraySinkRow(
                                 Op.INSERT,
                                 1,
@@ -106,7 +106,7 @@ public class JDBCSinkTest {
         }
 
         sink.write(
-                Arrays.asList(
+                List.of(
                         new ArraySinkRow(
                                 Op.INSERT,
                                 2,
@@ -125,6 +125,7 @@ public class JDBCSinkTest {
             assertEquals(2, count);
         }
         stmt.close();
+        conn.close();
 
         sink.barrier(true);
         sink.drop();
@@ -140,11 +141,11 @@ public class JDBCSinkTest {
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
                         getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
-        Connection conn = sink.getConn();
+        Connection conn = DriverManager.getConnection(container.getJdbcUrl());
         Statement stmt = conn.createStatement();
 
         sink.write(
-                Arrays.asList(
+                List.of(
                         new ArraySinkRow(
                                 Op.INSERT,
                                 1,
@@ -171,7 +172,7 @@ public class JDBCSinkTest {
         }
 
         sink.write(
-                Arrays.asList(
+                List.of(
                         new ArraySinkRow(
                                 Op.UPDATE_DELETE,
                                 1,
@@ -218,6 +219,7 @@ public class JDBCSinkTest {
 
         sink.barrier(true);
         stmt.close();
+        conn.close();
     }
 
     static void testJDBCDrop(JdbcDatabaseContainer<?> container, TestType testType)
@@ -232,11 +234,7 @@ public class JDBCSinkTest {
         assertEquals(tableName, sink.getTableName());
         Connection conn = sink.getConn();
         sink.drop();
-        try {
-            assertTrue(conn.isClosed());
-        } catch (SQLException e) {
-            fail(String.valueOf(e));
-        }
+        assertTrue(conn.isClosed());
     }
 
     @Test
