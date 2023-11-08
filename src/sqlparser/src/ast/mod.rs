@@ -32,8 +32,8 @@ use serde::{Deserialize, Serialize};
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
-    AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
-    ReferentialAction, SourceWatermark, TableConstraint,
+    AlterColumnOperation, AlterDatabaseOperation, AlterSchemaOperation, AlterTableOperation,
+    ColumnDef, ColumnOption, ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint,
 };
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
@@ -1137,6 +1137,16 @@ pub enum Statement {
         append_only: bool,
         params: CreateFunctionBody,
     },
+    /// ALTER DATABASE
+    AlterDatabase {
+        name: ObjectName,
+        operation: AlterDatabaseOperation,
+    },
+    /// ALTER SCHEMA
+    AlterSchema {
+        name: ObjectName,
+        operation: AlterSchemaOperation,
+    },
     /// ALTER TABLE
     AlterTable {
         /// Table name
@@ -1603,6 +1613,12 @@ impl fmt::Display for Statement {
             ),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
+            Statement::AlterDatabase { name, operation } => {
+                write!(f, "ALTER DATABASE {} {}", name, operation)
+            }
+            Statement::AlterSchema { name, operation } => {
+                write!(f, "ALTER SCHEMA {} {}", name, operation)
+            }
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
             }

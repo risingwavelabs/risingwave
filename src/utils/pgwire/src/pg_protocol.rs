@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -36,6 +35,7 @@ use tokio_openssl::SslStream;
 use tracing::{error, warn, Instrument};
 
 use crate::error::{PsqlError, PsqlResult};
+use crate::net::AddressRef;
 use crate::pg_extended::ResultCache;
 use crate::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCancelMessage,
@@ -93,7 +93,7 @@ where
     ignore_util_sync: bool,
 
     // Client Address
-    peer_addr: SocketAddr,
+    peer_addr: AddressRef,
 }
 
 const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
@@ -162,7 +162,7 @@ where
         stream: S,
         session_mgr: Arc<SM>,
         tls_config: Option<TlsConfig>,
-        peer_addr: SocketAddr,
+        peer_addr: AddressRef,
     ) -> Self {
         Self {
             stream: Conn::Unencrypted(PgStream {
@@ -376,7 +376,7 @@ where
 
         let session = self
             .session_mgr
-            .connect(&db_name, &user_name, self.peer_addr)
+            .connect(&db_name, &user_name, self.peer_addr.clone())
             .map_err(PsqlError::StartupError)?;
 
         let application_name = msg.config.get("application_name");

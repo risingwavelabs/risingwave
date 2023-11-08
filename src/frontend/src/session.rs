@@ -14,15 +14,15 @@
 
 use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
-use std::net::SocketAddr;
 #[cfg(test)]
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
+use pgwire::net::{Address, AddressRef};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_message::TransactionStatus;
 use pgwire::pg_response::PgResponse;
@@ -71,7 +71,9 @@ use crate::binder::{Binder, BoundStatement, ResolveQualifiedNameError};
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::{check_schema_writable, CatalogError, DatabaseId, SchemaId};
+use crate::catalog::{
+    check_schema_writable, CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId,
+};
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
 };
@@ -469,7 +471,7 @@ pub struct SessionImpl {
     id: (i32, i32),
 
     /// Client address
-    peer_addr: SocketAddr,
+    peer_addr: AddressRef,
 
     /// Transaction state.
     /// TODO: get rid of the `Mutex` here as a workaround if the `Send` requirement of
@@ -508,7 +510,7 @@ impl SessionImpl {
         auth_context: Arc<AuthContext>,
         user_authenticator: UserAuthenticator,
         id: SessionId,
-        peer_addr: SocketAddr,
+        peer_addr: AddressRef,
     ) -> Self {
         Self {
             env,
@@ -541,7 +543,11 @@ impl SessionImpl {
             current_query_cancel_flag: Mutex::new(None),
             notices: Default::default(),
             exec_context: Mutex::new(None),
-            peer_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080),
+            peer_addr: Address::Tcp(SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                8080,
+            ))
+            .into(),
         }
     }
 
@@ -598,7 +604,7 @@ impl SessionImpl {
             .map(|context| context.running_sql.clone())
     }
 
-    pub fn peer_addr(&self) -> &SocketAddr {
+    pub fn peer_addr(&self) -> &Address {
         &self.peer_addr
     }
 
@@ -821,7 +827,7 @@ impl SessionManager for SessionManagerImpl {
         &self,
         database: &str,
         user_name: &str,
-        peer_addr: SocketAddr,
+        peer_addr: AddressRef,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();

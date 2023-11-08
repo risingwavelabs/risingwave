@@ -18,7 +18,7 @@ use std::task::{Context, Poll};
 
 use futures::stream::{self, BoxStream};
 use futures::{Stream, StreamExt};
-use pgwire::pg_response::StatementType::{ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
+use pgwire::pg_response::StatementType::{self, ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
 use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
@@ -33,6 +33,7 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_owner;
 mod alter_relation_rename;
 mod alter_source_column;
 mod alter_system;
@@ -456,6 +457,30 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterDatabase {
+            name,
+            operation: AlterDatabaseOperation::ChangeOwner { new_owner_name },
+        } => {
+            alter_owner::handle_alter_owner(
+                handler_args,
+                name,
+                new_owner_name,
+                StatementType::ALTER_DATABASE,
+            )
+            .await
+        }
+        Statement::AlterSchema {
+            name,
+            operation: AlterSchemaOperation::ChangeOwner { new_owner_name },
+        } => {
+            alter_owner::handle_alter_owner(
+                handler_args,
+                name,
+                new_owner_name,
+                StatementType::ALTER_SCHEMA,
+            )
+            .await
+        }
         Statement::AlterTable {
             name,
             operation:
@@ -471,6 +496,18 @@ pub async fn handle(
                 TableType::Table,
                 name,
                 table_name,
+            )
+            .await
+        }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::ChangeOwner { new_owner_name },
+        } => {
+            alter_owner::handle_alter_owner(
+                handler_args,
+                name,
+                new_owner_name,
+                StatementType::ALTER_TABLE,
             )
             .await
         }
@@ -495,10 +532,45 @@ pub async fn handle(
                 alter_relation_rename::handle_rename_view(handler_args, name, view_name).await
             }
         }
+        Statement::AlterView {
+            materialized,
+            name,
+            operation: AlterViewOperation::ChangeOwner { new_owner_name },
+        } => {
+            if materialized {
+                alter_owner::handle_alter_owner(
+                    handler_args,
+                    name,
+                    new_owner_name,
+                    StatementType::ALTER_MATERIALIZED_VIEW,
+                )
+                .await
+            } else {
+                alter_owner::handle_alter_owner(
+                    handler_args,
+                    name,
+                    new_owner_name,
+                    StatementType::ALTER_VIEW,
+                )
+                .await
+            }
+        }
         Statement::AlterSink {
             name,
             operation: AlterSinkOperation::RenameSink { sink_name },
         } => alter_relation_rename::handle_rename_sink(handler_args, name, sink_name).await,
+        Statement::AlterSink {
+            name,
+            operation: AlterSinkOperation::ChangeOwner { new_owner_name },
+        } => {
+            alter_owner::handle_alter_owner(
+                handler_args,
+                name,
+                new_owner_name,
+                StatementType::ALTER_SINK,
+            )
+            .await
+        }
         Statement::AlterSource {
             name,
             operation: AlterSourceOperation::RenameSource { source_name },
@@ -507,6 +579,18 @@ pub async fn handle(
             name,
             operation: operation @ AlterSourceOperation::AddColumn { .. },
         } => alter_source_column::handle_alter_source_column(handler_args, name, operation).await,
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::ChangeOwner { new_owner_name },
+        } => {
+            alter_owner::handle_alter_owner(
+                handler_args,
+                name,
+                new_owner_name,
+                StatementType::ALTER_SOURCE,
+            )
+            .await
+        }
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }

@@ -1090,6 +1090,11 @@ where
         self.local_store.seal_current_epoch(next_epoch);
         Ok(())
     }
+
+    pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
+        self.local_store.try_flush().await?;
+        Ok(())
+    }
 }
 
 // Iterator functions

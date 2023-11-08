@@ -14,19 +14,16 @@
 
 use std::future::Future;
 use std::io;
-use std::net::SocketAddr;
 use std::result::Result;
 use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
-use futures::TryFutureExt;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Statement;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpListener;
-use tracing::debug;
 
+use crate::net::{AddressRef, Listener};
 use crate::pg_field_descriptor::PgFieldDescriptor;
 use crate::pg_message::TransactionStatus;
 use crate::pg_protocol::{PgProtocol, TlsConfig};
@@ -45,7 +42,7 @@ pub trait SessionManager: Send + Sync + 'static {
         &self,
         database: &str,
         user_name: &str,
-        peer_addr: SocketAddr,
+        peer_addr: AddressRef,
     ) -> Result<Arc<Self::Session>, BoxedError>;
 
     fn cancel_queries_in_session(&self, session_id: SessionId);
@@ -157,54 +154,63 @@ impl UserAuthenticator {
     }
 }
 
-/// Binds a Tcp listener at `addr`. Spawn a coroutine to serve every new connection.
+/// Binds a Tcp or Unix listener at `addr`. Spawn a coroutine to serve every new connection.
 pub async fn pg_serve(
     addr: &str,
     session_mgr: Arc<impl SessionManager>,
-    ssl_config: Option<TlsConfig>,
+    tls_config: Option<TlsConfig>,
 ) -> io::Result<()> {
-    let listener = TcpListener::bind(addr).await.unwrap();
-    // accept connections and process them, spawning a new thread for each one
-    tracing::info!("Server Listening at {}", addr);
+    let listener = Listener::bind(addr).await?;
+    tracing::info!(addr, "server started");
+
     loop {
-        let session_mgr = session_mgr.clone();
         let conn_ret = listener.accept().await;
         match conn_ret {
             Ok((stream, peer_addr)) => {
-                tracing::info!("New connection: {}", peer_addr);
-                stream.set_nodelay(true)?;
-                let ssl_config = ssl_config.clone();
-                let fut = handle_connection(stream, session_mgr, ssl_config, peer_addr);
-                tokio::spawn(fut.inspect_err(|e| debug!("error handling connection: {e}")));
+                tracing::info!(%peer_addr, "accept connection");
+                tokio::spawn(handle_connection(
+                    stream,
+                    session_mgr.clone(),
+                    tls_config.clone(),
+                    Arc::new(peer_addr),
+                ));
             }
 
             Err(e) => {
-                tracing::error!("Connection failure: {}", e);
+                tracing::error!(
+                    error = &e as &dyn std::error::Error,
+                    "failed to accept connection",
+                );
             }
         }
     }
 }
 
-#[tracing::instrument(level = "debug", skip_all)]
-pub fn handle_connection<S, SM>(
+pub async fn handle_connection<S, SM>(
     stream: S,
     session_mgr: Arc<SM>,
     tls_config: Option<TlsConfig>,
-    peer_addr: SocketAddr,
-) -> impl Future<Output = Result<(), anyhow::Error>>
-where
+    peer_addr: AddressRef,
+) where
     S: AsyncWrite + AsyncRead + Unpin,
     SM: SessionManager,
 {
     let mut pg_proto = PgProtocol::new(stream, session_mgr, tls_config, peer_addr);
-    async {
-        loop {
-            let msg = pg_proto.read_message().await?;
-            tracing::trace!("Received message: {:?}", msg);
-            let ret = pg_proto.process(msg).await;
-            if ret {
-                return Ok(());
+    loop {
+        let msg = match pg_proto.read_message().await {
+            Ok(msg) => msg,
+            Err(e) => {
+                tracing::error!(
+                    error = &e as &dyn std::error::Error,
+                    "error when reading message"
+                );
+                break;
             }
+        };
+        tracing::trace!("Received message: {:?}", msg);
+        let ret = pg_proto.process(msg).await;
+        if ret {
+            break;
         }
     }
 }
@@ -212,7 +218,6 @@ where
 #[cfg(test)]
 mod tests {
     use std::error::Error;
-    use std::net::SocketAddr;
     use std::sync::Arc;
     use std::time::Instant;
 
@@ -243,7 +248,7 @@ mod tests {
             &self,
             _database: &str,
             _user_name: &str,
-            _peer_addr: SocketAddr,
+            _peer_addr: crate::net::AddressRef,
         ) -> Result<Arc<Self::Session>, Box<dyn Error + Send + Sync>> {
             Ok(Arc::new(MockSession {}))
         }
@@ -365,17 +370,17 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_query() {
+    async fn do_test_query(bind_addr: impl Into<String>, pg_config: impl Into<String>) {
+        let bind_addr = bind_addr.into();
+        let pg_config = pg_config.into();
+
         let session_mgr = Arc::new(MockSessionManager {});
-        tokio::spawn(async move { pg_serve("127.0.0.1:10000", session_mgr, None).await });
+        tokio::spawn(async move { pg_serve(&bind_addr, session_mgr, None).await });
         // wait for server to start
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         // Connect to the database.
-        let (client, connection) = tokio_postgres::connect("host=localhost port=10000", NoTls)
-            .await
-            .unwrap();
+        let (client, connection) = tokio_postgres::connect(&pg_config, NoTls).await.unwrap();
 
         // The connection object performs the actual communication with the database,
         // so spawn it off to run on its own.
@@ -397,5 +402,24 @@ mod tests {
             .await
             .expect("Error executing query");
         assert_eq!(rows.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_query_tcp() {
+        do_test_query("127.0.0.1:10000", "host=localhost port=10000").await;
+    }
+
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn test_query_unix() {
+        let port: i16 = 10000;
+        let dir = tempfile::TempDir::new().unwrap();
+        let sock = dir.path().join(format!(".s.PGSQL.{port}"));
+
+        do_test_query(
+            format!("unix:{}", sock.to_str().unwrap()),
+            format!("host={} port={}", dir.path().to_str().unwrap(), port),
+        )
+        .await;
     }
 }

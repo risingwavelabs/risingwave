@@ -182,6 +182,7 @@ impl DeleteRangeIterator for ConcatDeleteRangeIterator {
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::MAX_EPOCH;
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -246,7 +247,7 @@ mod tests {
             sstable_store,
         );
         concat_iterator.rewind().await.unwrap();
-        assert_eq!(concat_iterator.current_epoch(), HummockEpoch::MAX);
+        assert_eq!(concat_iterator.current_epoch(), MAX_EPOCH);
         assert_eq!(
             concat_iterator.next_extended_user_key().left_user_key,
             test_user_key(b"aaaa").as_ref()
