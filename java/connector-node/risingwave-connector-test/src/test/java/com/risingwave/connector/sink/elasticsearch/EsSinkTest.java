@@ -17,6 +17,7 @@ package com.risingwave.connector.sink.elasticsearch;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
+import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.risingwave.connector.EsSink;
 import com.risingwave.connector.EsSinkConfig;
@@ -26,7 +27,6 @@ import com.risingwave.proto.Data;
 import com.risingwave.proto.Data.DataType.TypeName;
 import com.risingwave.proto.Data.Op;
 import java.io.IOException;
-import java.util.List;
 import java.util.Map;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
@@ -60,7 +60,7 @@ public class EsSinkTest {
                                 .withPassword(password),
                         getTestTableSchema());
         sink.write(
-                List.of(
+                Iterators.forArray(
                         new ArraySinkRow(Op.INSERT, 1, "Alice"),
                         new ArraySinkRow(Op.INSERT, 2, "Bob")));
         sink.sync();
