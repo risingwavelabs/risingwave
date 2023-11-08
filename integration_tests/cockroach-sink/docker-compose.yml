@@ -57,7 +57,7 @@ services:
   prepare_postgres:
     image: postgres
     depends_on:
-      - postgres
+      - cockroachdb
     command:
       - /bin/sh
       - -c
