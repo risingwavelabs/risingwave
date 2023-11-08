@@ -68,11 +68,6 @@ pub type StateStoreIterItem = (FullKey<Bytes>, Bytes);
 pub trait StateStoreIterItemStream = Stream<Item = StorageResult<StateStoreIterItem>> + Send;
 pub trait StateStoreReadIterStream = StateStoreIterItemStream + 'static;
 
-/// A util function to break the type connection between two opaque return types defined by `impl`.
-pub fn identity(input: impl StateStoreIterItemStream) -> impl StateStoreIterItemStream {
-    input
-}
-
 pub trait StateStoreRead: StaticSendSync {
     type IterStream: StateStoreReadIterStream;
 

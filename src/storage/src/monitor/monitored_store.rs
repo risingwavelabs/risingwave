@@ -75,6 +75,11 @@ impl<S> MonitoredStateStore<S> {
     }
 }
 
+/// A util function to break the type connection between two opaque return types defined by `impl`.
+pub(crate) fn identity(input: impl StateStoreIterItemStream) -> impl StateStoreIterItemStream {
+    input
+}
+
 pub type MonitoredStateStoreIterStream<S: StateStoreIterItemStream> = impl StateStoreIterItemStream;
 
 // Note: it is important to define the `MonitoredStateStoreIterStream` type alias, as it marks that
