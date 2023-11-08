@@ -370,6 +370,7 @@ mod tests {
         do_test_query("127.0.0.1:10000", "host=localhost port=10000").await;
     }
 
+    #[cfg(not(madsim))]
     #[tokio::test]
     async fn test_query_unix() {
         let port: i16 = 10000;
