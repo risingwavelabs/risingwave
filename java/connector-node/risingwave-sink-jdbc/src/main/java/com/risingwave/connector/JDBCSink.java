@@ -163,7 +163,7 @@ public class JDBCSink implements SinkWriter {
                 }
 
                 try {
-                    if (!conn.isValid(30)) { // 30 seconds timeout
+                    if (!conn.isValid(10)) { // 10 seconds timeout
                         LOG.info("Recreate the JDBC connection due to connection broken");
                         // close the statements and connection first
                         jdbcStatements.close();
@@ -171,7 +171,17 @@ public class JDBCSink implements SinkWriter {
 
                         // create a new connection if the current connection is invalid
                         conn = JdbcUtils.getConnection(config.getJdbcUrl());
+                        // reset the flag since we will retry to prepare the batch again
+                        updateFlag = false;
                         jdbcStatements = new JdbcStatements(conn);
+                    } else {
+                        throw io.grpc.Status.INTERNAL
+                                .withDescription(
+                                        String.format(
+                                                ERROR_REPORT_TEMPLATE,
+                                                e.getSQLState(),
+                                                e.getMessage()))
+                                .asRuntimeException();
                     }
                 } catch (SQLException ex) {
                     LOG.error(
