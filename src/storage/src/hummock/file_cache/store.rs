@@ -48,6 +48,7 @@ pub type DeviceConfig = foyer::storage::device::fs::FsDeviceConfig;
 
 pub type FileCacheResult<T> = foyer::storage::error::Result<T>;
 pub type FileCacheError = foyer::storage::error::Error;
+pub type FileCacheCompression = foyer::storage::compress::Compression;
 
 #[derive(Debug)]
 pub struct FileCacheConfig<K, V>
@@ -363,6 +364,9 @@ impl Key for SstableBlockIndex {
     }
 }
 
+/// [`CachedBlock`] uses different coding for writing to use/bypass compression.
+///
+/// But when reading, it will always be `Loaded`.
 #[derive(Debug)]
 pub enum CachedBlock {
     Loaded {
@@ -380,6 +384,13 @@ impl CachedBlock {
             CachedBlock::Loaded { .. } => true,
             // TODO(MrCroxx): based on block original compression algorithm?
             CachedBlock::Fetched { .. } => false,
+        }
+    }
+
+    pub fn into_inner(self) -> Box<Block> {
+        match self {
+            CachedBlock::Loaded { block } => block,
+            CachedBlock::Fetched { .. } => unreachable!(),
         }
     }
 }

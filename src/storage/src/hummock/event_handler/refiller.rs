@@ -37,7 +37,8 @@ use tokio::task::JoinHandle;
 use crate::hummock::file_cache::preclude::*;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::{
-    Block, HummockError, HummockResult, Sstable, SstableBlockIndex, SstableStoreRef, TableHolder,
+    CachedBlock, FileCacheCompression, HummockError, HummockResult, Sstable, SstableBlockIndex,
+    SstableStoreRef, TableHolder,
 };
 use crate::monitor::StoreLocalStatistic;
 
@@ -422,13 +423,16 @@ impl CacheRefillTask {
                         let bytes = data.slice(offset..offset + len);
 
                         let future = async move {
-                            let block = Block::decode(
+                            let value = CachedBlock::Fetched {
                                 bytes,
-                                writer.weight() - writer.key().serialized_len(),
-                            )?;
-                            let block = Box::new(block);
+                                uncompressed_capacity: writer.weight()
+                                    - writer.key().serialized_len(),
+                            };
                             writer.force();
-                            let res = writer.finish(block).await.map_err(HummockError::file_cache);
+                            // TODO(MrCroxx): compress if raw is not compressed?
+                            // skip compression for it may already be compressed.
+                            writer.set_compression(FileCacheCompression::None);
+                            let res = writer.finish(value).await.map_err(HummockError::file_cache);
                             if matches!(res, Ok(true)) {
                                 GLOBAL_CACHE_REFILL_METRICS
                                     .data_refill_success_bytes
