@@ -112,11 +112,11 @@ async fn test_scale_in_when_recovery() -> Result<()> {
         used_parallel_units.len()
     );
 
-    let chain_fragment = cluster
-        .locate_one_fragment(vec![identity_contains("chain")])
+    let stream_scan_fragment = cluster
+        .locate_one_fragment(vec![identity_contains("streamTableScan")])
         .await?;
 
-    let (_, used_parallel_units) = chain_fragment.parallel_unit_usage();
+    let (_, used_parallel_units) = stream_scan_fragment.parallel_unit_usage();
 
     assert_eq!(
         initialized_parallelism - config.compute_node_cores,
