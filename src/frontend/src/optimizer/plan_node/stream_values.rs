@@ -18,6 +18,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::values_node::ExprTuple;
 use risingwave_pb::stream_plan::ValuesNode;
 
+use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, LogicalValues, PlanBase, StreamNode};
 use crate::expr::{Expr, ExprImpl};
@@ -27,7 +28,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// `StreamValues` implements `LogicalValues.to_stream()`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamValues {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     logical: LogicalValues,
 }
 
@@ -87,4 +88,19 @@ impl StreamNode for StreamValues {
     }
 }
 
-impl ExprRewritable for StreamValues {}
+impl ExprRewritable for StreamValues {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn crate::expr::ExprRewriter) -> crate::PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_values()
+                .unwrap()
+                .clone(),
+        )
+        .into()
+    }
+}

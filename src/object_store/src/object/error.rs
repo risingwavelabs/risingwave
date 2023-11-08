@@ -29,7 +29,7 @@ use crate::object::Error;
 #[derive(Error, Debug)]
 enum ObjectErrorInner {
     #[error("s3 error: {}", DisplayErrorContext(&**.0))]
-    S3(BoxedError),
+    S3(#[source] BoxedError),
     #[error("disk error: {msg}")]
     Disk {
         msg: String,
@@ -37,9 +37,9 @@ enum ObjectErrorInner {
         inner: io::Error,
     },
     #[error(transparent)]
-    Opendal(opendal::Error),
+    Opendal(#[from] opendal::Error),
     #[error(transparent)]
-    Mem(crate::object::mem::Error),
+    Mem(#[from] crate::object::mem::Error),
     #[error("Internal error: {0}")]
     Internal(String),
 }

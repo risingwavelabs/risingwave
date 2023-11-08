@@ -503,12 +503,13 @@ impl StarrocksSchemaClient {
             STARROCK_MYSQL_WAIT_TIMEOUT
         );
         let pool = mysql_async::Pool::new(
-            Opts::from_url(&conn_uri).map_err(|err| SinkError::Http(err.into()))?,
+            Opts::from_url(&conn_uri)
+                .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?,
         );
         let conn = pool
             .get_conn()
             .await
-            .map_err(|err| SinkError::Http(err.into()))?;
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
 
         Ok(Self { table, db, conn })
     }
@@ -521,7 +522,7 @@ impl StarrocksSchemaClient {
                 query_map.insert(column_name, column_type)
             })
             .await
-            .map_err(|err| SinkError::Http(err.into()))?;
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
         Ok(query_map)
     }
 
@@ -533,7 +534,7 @@ impl StarrocksSchemaClient {
                 (table_model, primary_key)
             })
             .await
-            .map_err(|err| SinkError::Http(err.into()))?
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?
             .get(0)
             .ok_or_else(|| {
                 SinkError::Starrocks(format!(
@@ -595,11 +596,11 @@ impl StarrocksClient {
 
     pub async fn finish(self) -> Result<StarrocksInsertResultResponse> {
         let raw = self.insert.finish().await?;
-        let res: StarrocksInsertResultResponse =
-            serde_json::from_slice(&raw).map_err(|err| SinkError::Http(err.into()))?;
+        let res: StarrocksInsertResultResponse = serde_json::from_slice(&raw)
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
 
         if !DORIS_SUCCESS_STATUS.contains(&res.status.as_str()) {
-            return Err(SinkError::Http(anyhow::anyhow!(
+            return Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
                 "Insert error: {:?}",
                 res.message,
             )));

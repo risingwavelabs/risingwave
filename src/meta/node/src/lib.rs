@@ -14,13 +14,15 @@
 
 #![feature(lint_reasons)]
 #![feature(let_chains)]
-#![cfg_attr(coverage, feature(no_coverage))]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 mod server;
+
 use std::time::Duration;
 
 use clap::Parser;
 pub use error::{MetaError, MetaResult};
+use redact::Secret;
 use risingwave_common::config::OverrideConfig;
 use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
@@ -56,7 +58,7 @@ pub struct MetaNodeOpts {
     dashboard_host: Option<String>,
 
     #[clap(long, env = "RW_PROMETHEUS_HOST")]
-    prometheus_host: Option<String>,
+    pub prometheus_host: Option<String>,
 
     #[clap(long, env = "RW_ETCD_ENDPOINTS", default_value_t = String::from(""))]
     etcd_endpoints: String,
@@ -71,7 +73,7 @@ pub struct MetaNodeOpts {
 
     /// Password of etcd, required when --etcd-auth is enabled.
     #[clap(long, env = "RW_ETCD_PASSWORD", default_value = "")]
-    etcd_password: String,
+    etcd_password: Secret<String>,
 
     /// Endpoint of the SQL service, make it non-option when SQL service is required.
     #[clap(long, env = "RW_SQL_ENDPOINT")]
@@ -196,7 +198,10 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .map(|x| x.to_string())
                     .collect(),
                 credentials: match opts.etcd_auth {
-                    true => Some((opts.etcd_username, opts.etcd_password)),
+                    true => Some((
+                        opts.etcd_username,
+                        opts.etcd_password.expose_secret().to_string(),
+                    )),
                     false => None,
                 },
             },

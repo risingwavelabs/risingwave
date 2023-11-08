@@ -25,6 +25,7 @@ pub use enumerator::*;
 pub use private_link::*;
 pub use source::*;
 pub use split::*;
+use with_options::WithOptions;
 
 use crate::common::KafkaCommon;
 use crate::source::SourceProperties;
@@ -39,7 +40,7 @@ pub const PRIVATELINK_CONNECTION: &str = "privatelink";
 ///
 /// See also <https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md>
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, Default)]
+#[derive(Clone, Debug, Deserialize, Default, WithOptions)]
 pub struct RdKafkaPropertiesConsumer {
     /// Minimum number of messages per topic+partition librdkafka tries to maintain in the local
     /// consumer queue.
@@ -87,7 +88,7 @@ pub struct RdKafkaPropertiesConsumer {
     pub enable_auto_commit: Option<bool>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct KafkaProperties {
     /// This parameter is not intended to be exposed to users.
     /// This parameter specifies only for one parallelism. The parallelism of kafka source

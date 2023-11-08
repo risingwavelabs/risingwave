@@ -42,7 +42,7 @@ use uuid::Uuid;
 use super::SchedulerError;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::TableId;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
@@ -103,7 +103,7 @@ impl Serialize for ExecutionPlanNode {
 impl From<PlanRef> for ExecutionPlanNode {
     fn from(plan_node: PlanRef) -> Self {
         Self {
-            plan_node_id: plan_node.plan_base().id,
+            plan_node_id: plan_node.plan_base().id(),
             plan_node_type: plan_node.node_type(),
             node: plan_node.to_batch_prost_body(),
             children: vec![],
@@ -919,7 +919,7 @@ impl BatchPlanFragmenter {
 
         if let Some(scan_node) = node.as_batch_seq_scan() {
             let name = scan_node.core().table_name.to_owned();
-            let info = if scan_node.core().is_sys_table {
+            let info = if scan_node.core().is_sys_table() {
                 TableScanInfo::system_table(name)
             } else {
                 let table_desc = &*scan_node.core().table_desc;

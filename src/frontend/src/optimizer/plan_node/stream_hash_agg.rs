@@ -18,16 +18,18 @@ use pretty_xmlish::XmlNode;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::{self, PlanAggCall};
+use super::generic::{self, GenericPlanRef, PlanAggCall};
+use super::stream::prelude::*;
 use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, IndexSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHashAgg {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::Agg<PlanRef>,
 
     /// An optional column index which is the vnode of each row computed by the input's consistent
@@ -85,7 +87,7 @@ impl StreamHashAgg {
         }
 
         // Hash agg executor might change the append-only behavior of the stream.
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             dist,
             emit_on_window_close, // in EOWC mode, we produce append only output
@@ -142,7 +144,7 @@ impl StreamHashAgg {
 impl Distill for StreamHashAgg {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let mut vec = self.core.fields_pretty();
-        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+        if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             vec.push(("output_watermarks", ow));
         }
         childless_record(
@@ -214,7 +216,8 @@ impl StreamNode for StreamHashAgg {
                 })
                 .collect(),
             row_count_index: self.row_count_idx as u32,
-            emit_on_window_close: self.base.emit_on_window_close,
+            emit_on_window_close: self.base.emit_on_window_close(),
+            version: PbAggNodeVersion::Issue12140 as _,
         })
     }
 }

@@ -17,6 +17,9 @@ use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ProjectNode;
 
+use super::generic::GenericPlanRef;
+use super::stream::prelude::*;
+use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{try_derive_watermark, Expr, ExprImpl, ExprRewriter, WatermarkDerivation};
@@ -27,7 +30,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 /// rows.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamProject {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::Project<PlanRef>,
     /// All the watermark derivations, (input_column_index, output_column_index). And the
     /// derivation expression is the project's expression itself.
@@ -41,7 +44,7 @@ impl Distill for StreamProject {
         let schema = self.schema();
         let mut vec = self.core.fields_pretty(schema);
         if let Some(display_output_watermarks) =
-            watermark_pretty(&self.base.watermark_columns, schema)
+            watermark_pretty(self.base.watermark_columns(), schema)
         {
             vec.push(("output_watermarks", display_output_watermarks));
         }
@@ -79,7 +82,7 @@ impl StreamProject {
         }
         // Project executor won't change the append-only behavior of the stream, so it depends on
         // input's `append_only`.
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
             input.append_only(),

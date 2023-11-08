@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use simd_json::{BorrowedValue, ValueAccess};
+use simd_json::prelude::ValueAsContainer;
+use simd_json::BorrowedValue;
 
 /// Get a value from a json object by key, case insensitive.
 ///

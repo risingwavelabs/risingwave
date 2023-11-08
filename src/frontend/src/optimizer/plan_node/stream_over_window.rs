@@ -19,14 +19,16 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{GenericPlanNode, PlanWindowFunction};
+use super::stream::prelude::*;
 use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamOverWindow {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::OverWindow<PlanRef>,
 }
 
@@ -37,7 +39,7 @@ impl StreamOverWindow {
         let input = &core.input;
         let watermark_columns = FixedBitSet::with_capacity(core.output_len());
 
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             input.distribution().clone(),
             false, // general over window cannot be append-only
@@ -122,7 +124,7 @@ impl StreamNode for StreamOverWindow {
             .to_internal_table_prost();
         let cache_policy = self
             .base
-            .ctx
+            .ctx()
             .session_ctx()
             .config()
             .get_streaming_over_window_cache_policy();

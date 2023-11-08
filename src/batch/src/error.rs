@@ -37,13 +37,21 @@ pub enum BatchError {
     Cast(&'static str, &'static str),
 
     #[error("Array error: {0}")]
-    Array(#[from] ArrayError),
+    Array(
+        #[from]
+        #[backtrace]
+        ArrayError,
+    ),
 
     #[error("Failed to send result to channel")]
     SenderError,
 
     #[error(transparent)]
-    Internal(#[from] anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 
     #[error("Prometheus error: {0}")]
     Prometheus(#[from] prometheus::Error),

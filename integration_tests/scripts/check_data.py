@@ -54,7 +54,7 @@ def run_psql(sql):
 
 demo = sys.argv[1]
 upstream = sys.argv[2]  # mysql, postgres, etc. see scripts/integration_tests.sh
-if demo in ['docker', 'iceberg-sink','clickhouse-sink']:
+if demo in ['docker', 'iceberg-sink','clickhouse-sink', 'iceberg-cdc']:
     print('Skip for running test for `%s`' % demo)
     sys.exit(0)
 

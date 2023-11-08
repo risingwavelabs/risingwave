@@ -26,8 +26,8 @@ use super::generic::{
 };
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown,
-    StreamHashJoin, StreamProject, ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeBinary,
+    PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::DynamicFilter;
@@ -49,13 +49,13 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Condit
 /// right columns, dependent on the output indices provided. A repeat output index is illegal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Join<PlanRef>,
 }
 
 impl Distill for LogicalJoin {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let verbose = self.base.ctx.is_explain_verbose();
+        let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
         vec.push(("type", Pretty::debug(&self.join_type())));
 
@@ -518,8 +518,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
                 *i += left.schema().len();
             }
             map.append(&mut right_map);
-            let mut mapping =
-                ColIndexMapping::with_target_size(map, left.schema().len() + right.schema().len());
+            let mut mapping = ColIndexMapping::new(map, left.schema().len() + right.schema().len());
 
             let new_output_indices = self
                 .output_indices()
@@ -866,6 +865,8 @@ impl LogicalJoin {
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
     ) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         assert!(predicate.has_eq());
         let mut right = self.right().to_stream_with_dist_required(
             &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
@@ -976,7 +977,10 @@ impl LogicalJoin {
         // Use primary table.
         let mut result_plan = self.to_stream_temporal_join(predicate.clone(), ctx);
         // Return directly if this temporal join can match the pk of its right table.
-        if let Ok(temporal_join) = &result_plan && temporal_join.eq_join_predicate().eq_indexes().len() == logical_scan.primary_key().len() {
+        if let Ok(temporal_join) = &result_plan
+            && temporal_join.eq_join_predicate().eq_indexes().len()
+                == logical_scan.primary_key().len()
+        {
             return result_plan;
         }
         let indexes = logical_scan.indexes();
@@ -1009,6 +1013,8 @@ impl LogicalJoin {
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
     ) -> Result<StreamTemporalJoin> {
+        use super::stream::prelude::*;
+
         assert!(predicate.has_eq());
 
         let right = self.right();
@@ -1179,6 +1185,8 @@ impl LogicalJoin {
         predicate: Condition,
         ctx: &mut ToStreamContext,
     ) -> Result<Option<PlanRef>> {
+        use super::stream::prelude::*;
+
         // If there is exactly one predicate, it is a comparison (<, <=, >, >=), and the
         // join is a `Inner` or `LeftSemi` join, we can convert the scalar subquery into a
         // `StreamDynamicFilter`
@@ -1296,7 +1304,8 @@ impl ToBatch for LogicalJoin {
         logical_join.left = logical_join.left.to_batch()?;
         logical_join.right = logical_join.right.to_batch()?;
 
-        let config = self.base.ctx.session_ctx().config();
+        let ctx = self.base.ctx();
+        let config = ctx.session_ctx().config();
 
         if predicate.has_eq() {
             if !predicate.eq_keys_are_type_aligned() {
@@ -2000,7 +2009,7 @@ mod tests {
             // 0 --> 1
             values
                 .base
-                .functional_dependency
+                .functional_dependency_mut()
                 .add_functional_dependency_by_column_indices(&[0], &[1]);
             values
         };
@@ -2014,7 +2023,7 @@ mod tests {
             // 0 --> 1, 2
             values
                 .base
-                .functional_dependency
+                .functional_dependency_mut()
                 .add_functional_dependency_by_column_indices(&[0], &[1, 2]);
             values
         };

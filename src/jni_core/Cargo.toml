@@ -10,6 +10,7 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
+anyhow = "1"
 bytes = "1"
 cfg-or-panic = "0.2"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -37,6 +38,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tracing = "0.1"
 
 [dev-dependencies]
+expect-test = "1"
 risingwave_expr = { workspace = true }
 
 [lints]

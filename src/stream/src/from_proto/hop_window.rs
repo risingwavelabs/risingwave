@@ -22,7 +22,6 @@ use crate::executor::HopWindowExecutor;
 
 pub struct HopWindowExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for HopWindowExecutorBuilder {
     type Node = HopWindowNode;
 

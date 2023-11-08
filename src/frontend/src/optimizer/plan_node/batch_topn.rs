@@ -16,6 +16,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TopNNode;
 
+use super::batch::prelude::*;
 use super::generic::TopNLimit;
 use super::utils::impl_distill_by_unit;
 use super::{
@@ -28,14 +29,14 @@ use crate::optimizer::property::{Order, RequiredDist};
 /// `BatchTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchTopN {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::TopN<PlanRef>,
 }
 
 impl BatchTopN {
     pub fn new(core: generic::TopN<PlanRef>) -> Self {
         assert!(core.group_key.is_empty());
-        let base = PlanBase::new_batch_from_logical(
+        let base = PlanBase::new_batch_with_core(
             &core,
             core.input.distribution().clone(),
             // BatchTopN outputs data in the order of specified order

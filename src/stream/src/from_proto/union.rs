@@ -19,7 +19,6 @@ use crate::executor::UnionExecutor;
 
 pub struct UnionExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for UnionExecutorBuilder {
     type Node = UnionNode;
 

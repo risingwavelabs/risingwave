@@ -219,10 +219,8 @@ mod tests {
         let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
         let context_id = worker_node.id;
         let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
-        let backup_manager = Arc::new(BackupManager::for_test(
-            env.clone(),
-            hummock_manager.clone(),
-        ));
+        let backup_manager =
+            Arc::new(BackupManager::for_test(env.clone(), hummock_manager.clone()).await);
         let vacuum = Arc::new(VacuumManager::new(
             env,
             hummock_manager.clone(),

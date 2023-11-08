@@ -39,6 +39,7 @@ mod alter_system;
 mod alter_table_column;
 pub mod alter_user;
 pub mod cancel_job;
+mod comment;
 pub mod create_connection;
 mod create_database;
 pub mod create_function;
@@ -73,6 +74,7 @@ mod show;
 mod transaction;
 pub mod util;
 pub mod variable;
+mod wait;
 
 /// The [`PgResponseBuilder`] used by RisingWave.
 pub type RwPgResponseBuilder = PgResponseBuilder<PgResponseStream>;
@@ -222,6 +224,7 @@ pub async fn handle(
             source_schema,
             source_watermarks,
             append_only,
+            cdc_table_info,
         } => {
             if or_replace {
                 return Err(ErrorCode::NotImplemented(
@@ -265,6 +268,7 @@ pub async fn handle(
                 source_watermarks,
                 append_only,
                 notice,
+                cdc_table_info,
             )
             .await
         }
@@ -419,6 +423,7 @@ pub async fn handle(
             }
         }
         Statement::Flush => flush::handle_flush(handler_args).await,
+        Statement::Wait => wait::handle_wait(handler_args).await,
         Statement::SetVariable {
             local: _,
             variable,
@@ -523,6 +528,11 @@ pub async fn handle(
             session,
         } => transaction::handle_set(handler_args, modes, snapshot, session).await,
         Statement::CancelJobs(jobs) => handle_cancel(handler_args, jobs).await,
+        Statement::Comment {
+            object_type,
+            object_name,
+            comment,
+        } => comment::handle_comment(handler_args, object_type, object_name, comment).await,
         _ => Err(
             ErrorCode::NotImplemented(format!("Unhandled statement: {}", stmt), None.into()).into(),
         ),

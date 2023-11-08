@@ -48,7 +48,6 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
 
 pub struct HashAggExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for HashAggExecutorBuilder {
     type Node = HashAggNode;
 
@@ -97,6 +96,8 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
 
         HashAggExecutorDispatcherArgs {
             args: AggExecutorArgs {
+                version: node.version(),
+
                 input,
                 actor_ctx: params.actor_context,
                 pk_indices: params.pk_indices,

@@ -13,14 +13,13 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::io::{self, Error as IoError, ErrorKind};
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::str;
 use std::str::Utf8Error;
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
+use std::{io, str};
 
 use bytes::{Bytes, BytesMut};
 use futures::stream::StreamExt;
@@ -195,7 +194,12 @@ where
                     panic_message::panic_message(&payload).to_owned(),
                 ))
             })
-            .inspect_err(|error| error!(%error, "error when process message"));
+            .inspect_err(|error| {
+                error!(
+                    error = error as &dyn std::error::Error,
+                    "error when process message"
+                )
+            });
 
         match result {
             Ok(()) => Some(()),
@@ -213,7 +217,7 @@ where
                         return None;
                     }
 
-                    PsqlError::StartupError(_) | PsqlError::PasswordError(_) => {
+                    PsqlError::StartupError(_) | PsqlError::PasswordError => {
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
                             .ok()?;
@@ -405,10 +409,7 @@ where
     fn process_password_msg(&mut self, msg: FePasswordMessage) -> PsqlResult<()> {
         let authenticator = self.session.as_ref().unwrap().user_authenticator();
         if !authenticator.authenticate(&msg.password) {
-            return Err(PsqlError::PasswordError(IoError::new(
-                ErrorKind::InvalidInput,
-                "Invalid password",
-            )));
+            return Err(PsqlError::PasswordError);
         }
         self.stream.write_no_flush(&BeMessage::AuthenticationOk)?;
         self.stream
@@ -952,9 +953,9 @@ where
         let ssl = openssl::ssl::Ssl::new(ssl_ctx).unwrap();
         let mut stream = tokio_openssl::SslStream::new(ssl, stream).unwrap();
         if let Err(e) = Pin::new(&mut stream).accept().await {
-            warn!("Unable to set up a ssl connection, reason: {}", e);
+            warn!("Unable to set up an ssl connection, reason: {}", e);
             let _ = stream.shutdown().await;
-            return Err(PsqlError::SslError(e.to_string()));
+            return Err(e.into());
         }
 
         Ok(PgStream {

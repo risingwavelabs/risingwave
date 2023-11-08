@@ -182,74 +182,56 @@ impl InserterInnerBuilder {
         let (builder, client) = self.build_request_and_client(self.url.clone());
         let request_get_url = builder
             .body(Body::empty())
-            .map_err(|err| SinkError::Http(err.into()))?;
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
         let resp = client
             .request(request_get_url)
             .await
-            .map_err(|err| SinkError::Http(err.into()))?;
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
         let be_url = if resp.status() == StatusCode::TEMPORARY_REDIRECT {
             resp.headers()
                 .get("location")
                 .ok_or_else(|| {
-                    SinkError::Http(anyhow::anyhow!("Can't get doris BE url in header",))
+                    SinkError::DorisStarrocksConnect(anyhow::anyhow!(
+                        "Can't get doris BE url in header",
+                    ))
                 })?
                 .to_str()
                 .map_err(|err| {
-                    SinkError::Http(anyhow::anyhow!(
+                    SinkError::DorisStarrocksConnect(anyhow::anyhow!(
                         "Can't get doris BE url in header {:?}",
                         err
                     ))
                 })?
         } else {
-            return Err(SinkError::Http(anyhow::anyhow!("Can't get doris BE url",)));
+            return Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
+                "Can't get doris BE url",
+            )));
         };
 
         let (builder, client) = self.build_request_and_client(be_url.to_string());
         let (sender, body) = Body::channel();
         let request = builder
             .body(body)
-            .map_err(|err| SinkError::Http(err.into()))?;
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
         let feature = client.request(request);
 
         let handle: JoinHandle<Result<Vec<u8>>> = tokio::spawn(async move {
-            let response = feature.await.map_err(|err| SinkError::Http(err.into()))?;
+            let response = feature
+                .await
+                .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
             let status = response.status();
             let raw = body::to_bytes(response.into_body())
                 .await
-                .map_err(|err| SinkError::Http(err.into()))?
+                .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?
                 .to_vec();
             if status == StatusCode::OK && !raw.is_empty() {
                 Ok(raw)
-
-            // let raw_string = String::from_utf8(
-            //     body::to_bytes(response.into_body())
-            //         .await
-            //         .map_err(|err| SinkError::Http(err.into()))?
-            //         .to_vec(),
-            // )
-            // .map_err(|err| SinkError::Http(err.into()))?;
-
-            // if status == StatusCode::OK && !raw_string.is_empty() {
-            //     let response = if send_type.eq(DORIS) {
-            //         let response: DorisInsertResultResponse = serde_json::from_str(&raw_string)
-            //             .map_err(|err| SinkError::Http(err.into()))?;
-            //         InsertResultResponse::Doris(response)
-            //     } else if send_type.eq(STARROCKS) {
-            //         let response: StarrocksInsertResultResponse = serde_json::from_str(&raw_string)
-            //             .map_err(|err| SinkError::Http(err.into()))?;
-            //         InsertResultResponse::Starrocks(response)
-            //     } else {
-            //         return Err(SinkError::Http(anyhow::anyhow!(
-            //             "Can't convert {:?}'s http response to struct",
-            //             send_type
-            //         )));
-            //     };
-            //     Ok(response)
             } else {
-                Err(SinkError::Http(anyhow::anyhow!(
+                Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
                     "Failed connection {:?},{:?}",
                     status,
-                    String::from_utf8(raw).map_err(|err| SinkError::Http(err.into()))?
+                    String::from_utf8(raw)
+                        .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?
                 )))
             }
         });
@@ -293,10 +275,12 @@ impl InserterInner {
         let res = self.wait_handle().await;
 
         if is_timed_out {
-            Err(SinkError::Http(anyhow::anyhow!("timeout")))
+            Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!("timeout")))
         } else {
             res?;
-            Err(SinkError::Http(anyhow::anyhow!("channel closed")))
+            Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
+                "channel closed"
+            )))
         }
     }
 
@@ -320,8 +304,8 @@ impl InserterInner {
             match tokio::time::timeout(WAIT_HANDDLE_TIMEOUT, self.join_handle.as_mut().unwrap())
                 .await
             {
-                Ok(res) => res.map_err(|err| SinkError::Http(err.into()))??,
-                Err(err) => return Err(SinkError::Http(err.into())),
+                Ok(res) => res.map_err(|err| SinkError::DorisStarrocksConnect(err.into()))??,
+                Err(err) => return Err(SinkError::DorisStarrocksConnect(err.into())),
             };
         Ok(res)
     }

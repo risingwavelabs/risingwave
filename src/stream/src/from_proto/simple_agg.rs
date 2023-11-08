@@ -27,7 +27,6 @@ use crate::executor::SimpleAggExecutor;
 
 pub struct SimpleAggExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for SimpleAggExecutorBuilder {
     type Node = SimpleAggNode;
 
@@ -58,6 +57,8 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
                 .await;
 
         Ok(SimpleAggExecutor::new(AggExecutorArgs {
+            version: node.version(),
+
             input,
             actor_ctx: params.actor_context,
             pk_indices: params.pk_indices,

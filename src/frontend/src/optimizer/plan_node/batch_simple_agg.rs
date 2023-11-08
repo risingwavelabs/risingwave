@@ -16,7 +16,8 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortAggNode;
 
-use super::generic::{self, PlanAggCall};
+use super::batch::prelude::*;
+use super::generic::{self, GenericPlanRef, PlanAggCall};
 use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::expr::ExprRewriter;
@@ -25,14 +26,14 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSimpleAgg {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::Agg<PlanRef>,
 }
 
 impl BatchSimpleAgg {
     pub fn new(core: generic::Agg<PlanRef>) -> Self {
         let input_dist = core.input.distribution().clone();
-        let base = PlanBase::new_batch_from_logical(&core, input_dist, Order::any());
+        let base = PlanBase::new_batch_with_core(&core, input_dist, Order::any());
         BatchSimpleAgg { base, core }
     }
 
@@ -41,8 +42,11 @@ impl BatchSimpleAgg {
     }
 
     fn two_phase_agg_enabled(&self) -> bool {
-        let session_ctx = self.base.ctx.session_ctx();
-        session_ctx.config().get_enable_two_phase_agg()
+        self.base
+            .ctx()
+            .session_ctx()
+            .config()
+            .get_enable_two_phase_agg()
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {

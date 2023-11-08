@@ -145,9 +145,11 @@ impl Binder {
                     let user_name = &self.auth_context.user_name;
 
                     for path in self.search_path.path() {
-                        if is_system_schema(path) &&
-                            let Ok(sys_table_catalog) =
-                                self.catalog.get_sys_table_by_name(&self.db_name, path, table_name) {
+                        if is_system_schema(path)
+                            && let Ok(sys_table_catalog) =
+                                self.catalog
+                                    .get_sys_table_by_name(&self.db_name, path, table_name)
+                        {
                             return Ok(resolve_sys_table_relation(sys_table_catalog));
                         } else {
                             let schema_name = if path == USER_NAME_WILD_CARD {

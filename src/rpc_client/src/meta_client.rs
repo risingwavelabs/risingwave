@@ -40,7 +40,8 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
-    Connection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
+    Connection, PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
+    PbView, Table,
 };
 use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
@@ -246,7 +247,8 @@ impl MetaClient {
                 })
                 .await?;
             if let Some(status) = &add_worker_resp.status
-                && status.code() == risingwave_pb::common::status::Code::UnknownWorker {
+                && status.code() == risingwave_pb::common::status::Code::UnknownWorker
+            {
                 tracing::error!("invalid worker: {}", status.message);
                 std::process::exit(1);
             }
@@ -360,6 +362,21 @@ impl MetaClient {
     pub async fn create_source(&self, source: PbSource) -> Result<(u32, CatalogVersion)> {
         let request = CreateSourceRequest {
             source: Some(source),
+            fragment_graph: None,
+        };
+
+        let resp = self.inner.create_source(request).await?;
+        Ok((resp.source_id, resp.version))
+    }
+
+    pub async fn create_source_with_graph(
+        &self,
+        source: PbSource,
+        graph: StreamFragmentGraph,
+    ) -> Result<(u32, CatalogVersion)> {
+        let request = CreateSourceRequest {
+            source: Some(source),
+            fragment_graph: Some(graph),
         };
 
         let resp = self.inner.create_source(request).await?;
@@ -396,15 +413,25 @@ impl MetaClient {
         source: Option<PbSource>,
         table: PbTable,
         graph: StreamFragmentGraph,
+        job_type: PbTableJobType,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateTableRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
             source,
+            job_type: job_type as _,
         };
         let resp = self.inner.create_table(request).await?;
         // TODO: handle error in `resp.status` here
         Ok((resp.table_id.into(), resp.version))
+    }
+
+    pub async fn comment_on(&self, comment: PbComment) -> Result<CatalogVersion> {
+        let request = CommentOnRequest {
+            comment: Some(comment),
+        };
+        let resp = self.inner.comment_on(request).await?;
+        Ok(resp.version)
     }
 
     pub async fn alter_relation_name(
@@ -696,6 +723,12 @@ impl MetaClient {
         let request = FlushRequest { checkpoint };
         let resp = self.inner.flush(request).await?;
         Ok(resp.snapshot.unwrap())
+    }
+
+    pub async fn wait(&self) -> Result<()> {
+        let request = WaitRequest {};
+        self.inner.wait(request).await?;
+        Ok(())
     }
 
     pub async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>> {
@@ -1718,7 +1751,9 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
             ,{ ddl_client, list_connections, ListConnectionsRequest, ListConnectionsResponse }
             ,{ ddl_client, drop_connection, DropConnectionRequest, DropConnectionResponse }
+            ,{ ddl_client, comment_on, CommentOnRequest, CommentOnResponse }
             ,{ ddl_client, get_tables, GetTablesRequest, GetTablesResponse }
+            ,{ ddl_client, wait, WaitRequest, WaitResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

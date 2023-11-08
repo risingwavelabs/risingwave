@@ -140,9 +140,6 @@ impl CompactorRunner {
         Ok((self.split_index, ssts, compaction_stat))
     }
 
-    // This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
-    // TODO: remove `allow` here after the issued is closed.
-    #[expect(clippy::needless_pass_by_ref_mut)]
     pub async fn build_delete_range_iter<F: CompactionFilter>(
         sstable_infos: &Vec<SstableInfo>,
         sstable_store: &SstableStoreRef,
@@ -475,8 +472,8 @@ pub async fn compact(
             task_progress_guard.progress.clone(),
         );
         match runner.run().await {
-            Ok(ssts) => {
-                output_ssts.push((0, ssts, CompactionStatistics::default()));
+            Ok((ssts, statistics)) => {
+                output_ssts.push((0, ssts, statistics));
             }
             Err(e) => {
                 task_status = TaskStatus::ExecuteFailed;
@@ -704,7 +701,9 @@ where
     while iter.is_valid() {
         progress_key_num += 1;
 
-        if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
+        if let Some(task_progress) = task_progress.as_ref()
+            && progress_key_num >= PROGRESS_KEY_INTERVAL
+        {
             task_progress.inc_progress_key(progress_key_num);
             progress_key_num = 0;
         }
@@ -754,7 +753,9 @@ where
             }
             del_iter.next();
             progress_key_num += 1;
-            if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
+            if let Some(task_progress) = task_progress.as_ref()
+                && progress_key_num >= PROGRESS_KEY_INTERVAL
+            {
                 task_progress.inc_progress_key(progress_key_num);
                 progress_key_num = 0;
             }
@@ -861,14 +862,18 @@ where
                 .await?;
             del_iter.next();
             progress_key_num += 1;
-            if let Some(task_progress) = task_progress.as_ref() && progress_key_num >= PROGRESS_KEY_INTERVAL {
+            if let Some(task_progress) = task_progress.as_ref()
+                && progress_key_num >= PROGRESS_KEY_INTERVAL
+            {
                 task_progress.inc_progress_key(progress_key_num);
                 progress_key_num = 0;
             }
         }
     }
 
-    if let Some(task_progress) = task_progress.as_ref() && progress_key_num > 0 {
+    if let Some(task_progress) = task_progress.as_ref()
+        && progress_key_num > 0
+    {
         // Avoid losing the progress_key_num in the last Interval
         task_progress.inc_progress_key(progress_key_num);
     }

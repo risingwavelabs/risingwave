@@ -1333,7 +1333,9 @@ mod tests {
             assert_eq!(epoch, uploader.max_sealed_epoch);
             // check sealed data has two imms
             let imms_by_epoch = uploader.sealed_data.imms_by_epoch();
-            if let Some((e, imms)) = imms_by_epoch.last_key_value() && *e == epoch{
+            if let Some((e, imms)) = imms_by_epoch.last_key_value()
+                && *e == epoch
+            {
                 assert_eq!(2, imms.len());
             }
 
@@ -1641,9 +1643,6 @@ mod tests {
         (buffer_tracker, uploader, new_task_notifier)
     }
 
-    // This is a clippy bug, see https://github.com/rust-lang/rust-clippy/issues/11380.
-    // TODO: remove `allow` here after the issued is closed.
-    #[expect(clippy::needless_pass_by_ref_mut)]
     async fn assert_uploader_pending(uploader: &mut HummockUploader) {
         for _ in 0..10 {
             yield_now().await;

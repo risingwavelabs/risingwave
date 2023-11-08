@@ -22,7 +22,7 @@ use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamSimpleAgg,
     StreamStatelessSimpleAgg, ToBatch, ToStream,
 };
@@ -48,7 +48,7 @@ use crate::utils::{
 /// The output schema will first include the group key and then the aggregation calls.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LogicalAgg {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: Agg<PlanRef>,
 }
 
@@ -182,6 +182,8 @@ impl LogicalAgg {
 
     /// Generates distributed stream plan.
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         let input_dist = stream_input.distribution();
         debug_assert!(*input_dist != Distribution::Broadcast);
 
@@ -1137,6 +1139,8 @@ fn new_stream_hash_agg(core: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> Stre
 
 impl ToStream for LogicalAgg {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         for agg_call in self.agg_calls() {
             if matches!(agg_call.agg_kind, agg_kinds::unimplemented_in_stream!()) {
                 return Err(ErrorCode::NotImplemented(
@@ -1210,7 +1214,7 @@ impl ToStream for LogicalAgg {
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);
         let (map, _) = out_col_change.into_parts();
-        let out_col_change = ColIndexMapping::with_target_size(map, agg.schema().len());
+        let out_col_change = ColIndexMapping::new(map, agg.schema().len());
         Ok((agg.into(), out_col_change))
     }
 }

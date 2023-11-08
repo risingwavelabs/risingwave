@@ -122,11 +122,8 @@ impl Rule for IndexDeltaJoinRule {
 
                 if chain_type != table_scan.chain_type() {
                     Some(
-                        StreamTableScan::new_with_chain_type(
-                            table_scan.core().clone(),
-                            chain_type,
-                        )
-                        .into(),
+                        StreamTableScan::new_with_chain_type(table_scan.core().clone(), chain_type)
+                            .into(),
                     )
                 } else {
                     Some(table_scan.clone().into())

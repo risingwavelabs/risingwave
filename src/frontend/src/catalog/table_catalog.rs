@@ -152,6 +152,9 @@ pub struct TableCatalog {
 
     /// Indicate whether to create table in background or foreground.
     pub create_type: CreateType,
+
+    /// description of table, set by `comment on`.
+    pub description: Option<String>,
 }
 
 // How the stream job was created will determine
@@ -438,6 +441,7 @@ impl TableCatalog {
             cleaned_by_watermark: self.cleaned_by_watermark,
             stream_job_status: PbStreamJobStatus::Creating.into(),
             create_type: self.create_type.to_prost().into(),
+            description: self.description.clone(),
         }
     }
 
@@ -551,6 +555,7 @@ impl From<PbTable> for TableCatalog {
             initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
             cleaned_by_watermark: matches!(tb.cleaned_by_watermark, true),
             create_type: CreateType::from_prost(create_type),
+            description: tb.description,
         }
     }
 }
@@ -643,6 +648,7 @@ mod tests {
             cleaned_by_watermark: false,
             stream_job_status: PbStreamJobStatus::Creating.into(),
             create_type: PbCreateType::Foreground.into(),
+            description: Some("description".to_string()),
         }
         .into();
 
@@ -668,6 +674,7 @@ mod tests {
                                 ColumnDesc::new_atomic(DataType::Varchar, "zipcode", 3),
                             ],
                             type_name: ".test.Country".to_string(),
+                            description: None,
                             generated_or_default_column: None,
                         },
                         is_hidden: false
@@ -698,6 +705,7 @@ mod tests {
                 initialized_at_epoch: None,
                 cleaned_by_watermark: false,
                 create_type: CreateType::Foreground,
+                description: Some("description".to_string())
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

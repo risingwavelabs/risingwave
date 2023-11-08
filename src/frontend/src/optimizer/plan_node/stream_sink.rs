@@ -37,6 +37,8 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use tracing::info;
 
 use super::derive::{derive_columns, derive_pk};
+use super::generic::GenericPlanRef;
+use super::stream::prelude::*;
 use super::utils::{childless_record, Distill, IndicesDisplay, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
@@ -49,7 +51,7 @@ const DOWNSTREAM_PK_KEY: &str = "primary_key";
 /// [`StreamSink`] represents a table/connector sink at the very end of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSink {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     input: PlanRef,
     sink_desc: SinkDesc,
 }
@@ -57,7 +59,11 @@ pub struct StreamSink {
 impl StreamSink {
     #[must_use]
     pub fn new(input: PlanRef, sink_desc: SinkDesc) -> Self {
-        let base = PlanBase::derive_stream_plan_base(&input);
+        let base = input
+            .plan_base()
+            .into_stream()
+            .expect("input should be stream plan")
+            .clone_with_new_plan_id();
         Self {
             base,
             input,
@@ -389,7 +395,7 @@ impl Distill for StreamSink {
                     .iter()
                     .map(|k| k.column_index)
                     .collect_vec(),
-                schema: &self.base.schema,
+                schema: self.base.schema(),
             };
             vec.push(("pk", pk.distill()));
         }
@@ -409,7 +415,7 @@ impl StreamNode for StreamSink {
         PbNodeBody::Sink(SinkNode {
             sink_desc: Some(self.sink_desc.to_proto()),
             table: Some(table.to_internal_table_prost()),
-            log_store_type: match self.base.ctx.session_ctx().config().get_sink_decouple() {
+            log_store_type: match self.base.ctx().session_ctx().config().get_sink_decouple() {
                 SinkDecouple::Default => {
                     let enable_sink_decouple =
                         match_sink_name_str!(

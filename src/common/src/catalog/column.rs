@@ -20,7 +20,7 @@ use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 
 use super::row_id_column_desc;
-use crate::catalog::{offset_column_desc, Field, ROW_ID_COLUMN_ID};
+use crate::catalog::{cdc_table_name_column_desc, offset_column_desc, Field, ROW_ID_COLUMN_ID};
 use crate::error::ErrorCode;
 use crate::types::DataType;
 
@@ -101,6 +101,7 @@ pub struct ColumnDesc {
     pub field_descs: Vec<ColumnDesc>,
     pub type_name: String,
     pub generated_or_default_column: Option<GeneratedOrDefaultColumn>,
+    pub description: Option<String>,
 }
 
 impl ColumnDesc {
@@ -112,6 +113,19 @@ impl ColumnDesc {
             field_descs: vec![],
             type_name: String::new(),
             generated_or_default_column: None,
+            description: None,
+        }
+    }
+
+    pub fn named(name: String, column_id: ColumnId, data_type: DataType) -> ColumnDesc {
+        ColumnDesc {
+            data_type,
+            column_id,
+            name,
+            field_descs: vec![],
+            type_name: String::new(),
+            generated_or_default_column: None,
+            description: None,
         }
     }
 
@@ -129,6 +143,7 @@ impl ColumnDesc {
                 .collect_vec(),
             type_name: self.type_name.clone(),
             generated_or_default_column: self.generated_or_default_column.clone(),
+            description: self.description.clone(),
         }
     }
 
@@ -172,6 +187,7 @@ impl ColumnDesc {
             field_descs: vec![],
             type_name: "".to_string(),
             generated_or_default_column: None,
+            description: None,
         }
     }
 
@@ -192,6 +208,7 @@ impl ColumnDesc {
             field_descs: fields,
             type_name: type_name.to_string(),
             generated_or_default_column: None,
+            description: None,
         }
     }
 
@@ -206,6 +223,7 @@ impl ColumnDesc {
                 .map(Self::from_field_without_column_id)
                 .collect_vec(),
             type_name: field.type_name.clone(),
+            description: None,
             generated_or_default_column: None,
         }
     }
@@ -243,6 +261,7 @@ impl From<PbColumnDesc> for ColumnDesc {
             type_name: prost.type_name,
             field_descs,
             generated_or_default_column: prost.generated_or_default_column,
+            description: prost.description.clone(),
         }
     }
 }
@@ -262,6 +281,7 @@ impl From<&ColumnDesc> for PbColumnDesc {
             field_descs: c.field_descs.iter().map(ColumnDesc::to_protobuf).collect(),
             type_name: c.type_name.clone(),
             generated_or_default_column: c.generated_or_default_column.clone(),
+            description: c.description.clone(),
         }
     }
 }
@@ -333,6 +353,13 @@ impl ColumnCatalog {
     pub fn offset_column() -> Self {
         Self {
             column_desc: offset_column_desc(),
+            is_hidden: true,
+        }
+    }
+
+    pub fn cdc_table_name_column() -> Self {
+        Self {
+            column_desc: cdc_table_name_column_desc(),
             is_hidden: true,
         }
     }

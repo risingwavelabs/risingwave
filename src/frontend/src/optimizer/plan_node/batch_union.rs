@@ -16,6 +16,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::UnionNode;
 
+use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable, PlanRef, ToBatchPb, ToDistributedBatch};
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNode, ToLocalBatch};
@@ -24,7 +25,7 @@ use crate::optimizer::property::{Distribution, Order, RequiredDist};
 /// `BatchUnion` implements [`super::LogicalUnion`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchUnion {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::Union<PlanRef>,
 }
 
@@ -40,7 +41,7 @@ impl BatchUnion {
             Distribution::SomeShard
         };
 
-        let base = PlanBase::new_batch_from_logical(&core, dist, Order::any());
+        let base = PlanBase::new_batch_with_core(&core, dist, Order::any());
         BatchUnion { base, core }
     }
 }

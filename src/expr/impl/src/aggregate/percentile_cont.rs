@@ -118,19 +118,22 @@ impl AggregateFunction for PercentileCont {
 
     async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
         let state = &state.downcast_ref::<State>().0;
-        Ok(if let Some(fraction) = self.fraction && !state.is_empty() {
-            let rn = fraction * (state.len() - 1) as f64;
-            let crn = f64::ceil(rn);
-            let frn = f64::floor(rn);
-            let result = if crn == frn {
-                state[crn as usize]
+        Ok(
+            if let Some(fraction) = self.fraction
+                && !state.is_empty()
+            {
+                let rn = fraction * (state.len() - 1) as f64;
+                let crn = f64::ceil(rn);
+                let frn = f64::floor(rn);
+                let result = if crn == frn {
+                    state[crn as usize]
+                } else {
+                    (crn - rn) * state[frn as usize] + (rn - frn) * state[crn as usize]
+                };
+                Some(result.into())
             } else {
-                (crn - rn) * state[frn as usize]
-                    + (rn - frn) * state[crn as usize]
-            };
-            Some(result.into())
-        } else {
-            None
-        })
+                None
+            },
+        )
     }
 }

@@ -524,7 +524,9 @@ impl<R: RangeKv> RangeKvStateStore<R> {
                 }
                 last_user_key = Some(key.user_key.clone());
             }
-            if let Some(limit) = limit && data.len() >= limit {
+            if let Some(limit) = limit
+                && data.len() >= limit
+            {
                 break;
             }
         }

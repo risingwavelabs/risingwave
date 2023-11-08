@@ -1003,6 +1003,13 @@ impl fmt::Display for ExplainOptions {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CdcTableInfo {
+    pub source_name: ObjectName,
+    pub external_table_name: String,
+}
+
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1084,6 +1091,8 @@ pub enum Statement {
         append_only: bool,
         /// `AS ( query )`
         query: Option<Box<Query>>,
+        /// `FROM cdc_source TABLE database_name.table_name`
+        cdc_table_info: Option<CdcTableInfo>,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -1294,6 +1303,9 @@ pub enum Statement {
     ///
     /// Note: RisingWave specific statement.
     Flush,
+    /// WAIT for ALL running stream jobs to finish.
+    /// It will block the current session the condition is met.
+    Wait,
 }
 
 impl fmt::Display for Statement {
@@ -1512,6 +1524,7 @@ impl fmt::Display for Statement {
                 source_watermarks,
                 append_only,
                 query,
+                cdc_table_info,
             } => {
                 // We want to allow the following options
                 // Empty column list, allowed by PostgreSQL:
@@ -1545,6 +1558,10 @@ impl fmt::Display for Statement {
                 }
                 if let Some(query) = query {
                     write!(f, " AS {}", query)?;
+                }
+                if let Some(info) = cdc_table_info {
+                    write!(f, " FROM {}", info.source_name)?;
+                    write!(f, " TABLE {}", info.external_table_name)?;
                 }
                 Ok(())
             }
@@ -1786,6 +1803,9 @@ impl fmt::Display for Statement {
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
+            }
+            Statement::Wait => {
+                write!(f, "WAIT")
             }
             Statement::Begin { modes } => {
                 write!(f, "BEGIN")?;

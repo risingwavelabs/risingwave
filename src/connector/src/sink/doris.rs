@@ -31,6 +31,7 @@ use serde::Deserialize;
 use serde_derive::Serialize;
 use serde_json::Value;
 use serde_with::serde_as;
+use with_options::WithOptions;
 
 use super::doris_starrocks_connector::{
     HeaderBuilder, InserterInner, InserterInnerBuilder, DORIS_DELETE_SIGN, DORIS_SUCCESS_STATUS,
@@ -43,7 +44,7 @@ use crate::sink::{DummySinkCommitCoordinator, Sink, SinkParam, SinkWriter, SinkW
 
 pub const DORIS_SINK: &str = "doris";
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct DorisCommon {
     #[serde(rename = "doris.url")]
     pub url: String,
@@ -70,7 +71,7 @@ impl DorisCommon {
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct DorisConfig {
     #[serde(flatten)]
     pub common: DorisCommon,
@@ -447,31 +448,34 @@ impl DorisSchemaClient {
                 ),
             )
             .body(Body::empty())
-            .map_err(|err| SinkError::Http(err.into()))?;
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
 
         let response = client
             .request(request)
             .await
-            .map_err(|err| SinkError::Http(err.into()))?;
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
 
         let raw_bytes = String::from_utf8(match body::to_bytes(response.into_body()).await {
             Ok(bytes) => bytes.to_vec(),
-            Err(err) => return Err(SinkError::Http(err.into())),
+            Err(err) => return Err(SinkError::DorisStarrocksConnect(err.into())),
         })
-        .map_err(|err| SinkError::Http(err.into()))?;
+        .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
 
-        let json_map: HashMap<String, Value> =
-            serde_json::from_str(&raw_bytes).map_err(|err| SinkError::Http(err.into()))?;
+        let json_map: HashMap<String, Value> = serde_json::from_str(&raw_bytes)
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
         let json_data = if json_map.contains_key("code") && json_map.contains_key("msg") {
-            let data = json_map
-                .get("data")
-                .ok_or_else(|| SinkError::Http(anyhow::anyhow!("Can't find data")))?;
+            let data = json_map.get("data").ok_or_else(|| {
+                SinkError::DorisStarrocksConnect(anyhow::anyhow!("Can't find data"))
+            })?;
             data.to_string()
         } else {
             raw_bytes
         };
         let schema: DorisSchema = serde_json::from_str(&json_data).map_err(|err| {
-            SinkError::Http(anyhow::anyhow!("Can't get schema from json {:?}", err))
+            SinkError::DorisStarrocksConnect(anyhow::anyhow!(
+                "Can't get schema from json {:?}",
+                err
+            ))
         })?;
         Ok(schema)
     }
@@ -568,11 +572,11 @@ impl DorisClient {
 
     pub async fn finish(self) -> Result<DorisInsertResultResponse> {
         let raw = self.insert.finish().await?;
-        let res: DorisInsertResultResponse =
-            serde_json::from_slice(&raw).map_err(|err| SinkError::Http(err.into()))?;
+        let res: DorisInsertResultResponse = serde_json::from_slice(&raw)
+            .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?;
 
         if !DORIS_SUCCESS_STATUS.contains(&res.status.as_str()) {
-            return Err(SinkError::Http(anyhow::anyhow!(
+            return Err(SinkError::DorisStarrocksConnect(anyhow::anyhow!(
                 "Insert error: {:?}, error url: {:?}",
                 res.message,
                 res.err_url
