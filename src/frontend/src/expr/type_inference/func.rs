@@ -549,12 +549,10 @@ fn infer_type_for_special(
                     if left.equals_datatype(right) {
                         Ok(Some(DataType::Boolean))
                     } else {
-                        Err(ErrorCode::BindError(
-                            (format!(
-                                "Cannot array_contains unnested type {} to unnested type {}",
-                                left, right
-                            )),
-                        )
+                        Err(ErrorCode::BindError(format!(
+                            "Cannot array_contains unnested type {} to unnested type {}",
+                            left, right
+                        ))
                         .into())
                     }
                 }
