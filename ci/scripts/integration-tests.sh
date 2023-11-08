@@ -41,7 +41,7 @@ cd integration_tests/scripts
 
 echo "--- case: ${case}, format: ${format}"
 
-if [ -n "${RW_IMAGE_TAG}" ]; then
+if [[ -n "${RW_IMAGE_TAG+x}" ]]; then
   export RW_IMAGE="ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_TAG}"
   echo Docker image: $RW_IMAGE
 fi

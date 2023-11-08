@@ -16,6 +16,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = { version = "1.0", default-features = false }
+auto_enums = { version = "0.8", features = ["tokio1"] }
 byteorder = "1.5"
 bytes = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -34,6 +35,7 @@ tracing = "0.1"
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
+tempfile = "3"
 tokio-postgres = "0.7"
 
 [lints]
