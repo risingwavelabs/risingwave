@@ -92,17 +92,16 @@ use crate::executor::{BoxedExecutor, Executor, ExecutorInfo};
 use crate::from_proto::values::ValuesExecutorBuilder;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
-#[async_trait::async_trait]
 trait ExecutorBuilder {
     type Node;
 
     /// Create a [`BoxedExecutor`] from [`StreamNode`].
-    async fn new_boxed_executor(
+    fn new_boxed_executor(
         params: ExecutorParams,
         node: &Self::Node,
         store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
-    ) -> StreamResult<BoxedExecutor>;
+    ) -> impl std::future::Future<Output = StreamResult<BoxedExecutor>> + Send;
 }
 
 macro_rules! build_executor {

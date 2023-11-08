@@ -193,6 +193,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 70
     retry: *auto-retry
 
@@ -205,6 +206,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 70
     retry: *auto-retry
 
@@ -217,6 +219,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+      - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 70
     retry: *auto-retry
 

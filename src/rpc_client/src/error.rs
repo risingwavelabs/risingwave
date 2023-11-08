@@ -27,7 +27,11 @@ pub enum RpcError {
     GrpcStatus(#[source] Box<tonic::Status>),
 
     #[error(transparent)]
-    Internal(#[from] anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 static_assertions::const_assert_eq!(std::mem::size_of::<RpcError>(), 16);

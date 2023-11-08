@@ -744,7 +744,7 @@
     Bind error: failed to bind expression: avg(a) FILTER(WHERE abs(a))
 
     Caused by:
-      internal error: argument of FILTER must be boolean, not type Int32
+      argument of FILTER must be boolean, not type Int32
 - name: filter clause + subquery
   sql: |
     create table t(a int, b int);

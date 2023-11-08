@@ -48,6 +48,7 @@ futures = { version = "0.3", default-features = false, features = [
 ] }
 
 futures-async-stream = "0.2.9"
+risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
 risingwave_test_runner = { workspace = true }
 serial_test = "2.0"
 sync-point = { path = "../../utils/sync-point" }

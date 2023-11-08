@@ -804,17 +804,12 @@ script = """
 
 set -e
 
-for tool in cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-make
+for tool in cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-make cargo-udeps
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
   cargo binstall -y --no-symlinks $tool
   echo
 done
-
-# Need https://github.com/est31/cargo-udeps/pull/147 to make --exclude work
-echo "install: $(tput setaf 4)cargo-udeps$(tput sgr0)"
-cargo install cargo-udeps --locked --git https://github.com/est31/cargo-udeps --rev 63dd458
-echo
 
 # Tools that fallback to `cargo install` when using `cargo binstall`.
 # We directly use `cargo install` here to be faster.
@@ -1338,7 +1333,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.17.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.17.2", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ], install_command = "binstall" }
 dependencies = ["check-risedev-env-file"]
@@ -1440,6 +1435,14 @@ cat << EOF > src/config/example.toml
 # Check detailed comments in src/common/src/config.rs
 EOF
 cargo run -p risingwave_common --bin example-config >> src/config/example.toml
+'''
+
+[tasks.generate-with-options]
+private = true
+category = "Misc"
+description = "This command extracts WITH options from the Rust code and maintains them in a single source of truth `with_options.yaml`"
+script = '''
+UPDATE_EXPECT=1 cargo nextest run risingwave_connector tests::test_with_options_yaml_up_to_date
 '''
 
 [tasks.backwards-compat-test]

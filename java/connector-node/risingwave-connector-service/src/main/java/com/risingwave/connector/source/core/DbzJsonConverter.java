@@ -12,17 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-use risingwave_common::array::StreamChunk;
-use risingwave_common::row::{OwnedRow, Row};
-use risingwave_pb::data::Op;
+package com.risingwave.connector.source.core;
 
-pub(crate) type StreamChunkRowIterator = impl Iterator<Item = (Op, OwnedRow)> + 'static;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.json.JsonConverter;
 
-pub(crate) fn into_iter(stream_chunk: StreamChunk) -> StreamChunkRowIterator {
-    stream_chunk
-        .rows()
-        .map(|(op, row_ref)| (op.to_protobuf(), row_ref.to_owned_row()))
-        .collect_vec()
-        .into_iter()
+/**
+ * Customize the JSON converter to avoid outputting the `schema` field but retian `payload` field in
+ * the JSON output. e.g.
+ *
+ * <pre>
+ * {
+ *     "schema": null,
+ *     "payload": {
+ *     	...
+ *     }
+ * }
+ * </pre>
+ */
+public class DbzJsonConverter extends JsonConverter {
+    @Override
+    public ObjectNode asJsonSchema(Schema schema) {
+        return null;
+    }
 }

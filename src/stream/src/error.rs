@@ -46,24 +46,44 @@ enum ErrorKind {
     #[error("Storage error: {0}")]
     Storage(
         #[backtrace]
-        #[source]
+        #[from]
         StorageError,
     ),
 
     #[error("Expression error: {0}")]
-    Expression(#[source] ExprError),
+    Expression(
+        #[from]
+        #[backtrace]
+        ExprError,
+    ),
 
     #[error("Array/Chunk error: {0}")]
-    Array(#[source] ArrayError),
+    Array(
+        #[from]
+        #[backtrace]
+        ArrayError,
+    ),
 
     #[error("Executor error: {0:?}")]
-    Executor(#[source] StreamExecutorError),
+    Executor(
+        #[from]
+        #[backtrace]
+        StreamExecutorError,
+    ),
 
     #[error("Sink error: {0:?}")]
-    Sink(#[source] SinkError),
+    Sink(
+        #[from]
+        #[backtrace]
+        SinkError,
+    ),
 
     #[error(transparent)]
-    Internal(anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 impl std::fmt::Debug for StreamError {

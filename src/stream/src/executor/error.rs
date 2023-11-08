@@ -49,25 +49,45 @@ enum ErrorKind {
     #[error("Storage error: {0}")]
     Storage(
         #[backtrace]
-        #[source]
+        #[from]
         StorageError,
     ),
 
     #[error("Chunk operation error: {0}")]
-    ArrayError(#[source] ArrayError),
+    ArrayError(
+        #[from]
+        #[backtrace]
+        ArrayError,
+    ),
 
     #[error("Chunk operation error: {0}")]
-    ExprError(#[source] ExprError),
+    ExprError(
+        #[from]
+        #[backtrace]
+        ExprError,
+    ),
 
     // TODO: remove this after state table is fully used
     #[error("Serialize/deserialize error: {0}")]
-    SerdeError(#[source] BoxedError),
+    SerdeError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
 
     #[error("Sink error: {0}")]
-    SinkError(#[source] SinkError),
+    SinkError(
+        #[from]
+        #[backtrace]
+        SinkError,
+    ),
 
     #[error("RPC error: {0}")]
-    RpcError(#[source] RpcError),
+    RpcError(
+        #[from]
+        #[backtrace]
+        RpcError,
+    ),
 
     #[error("Channel closed: {0}")]
     ChannelClosed(String),
@@ -76,16 +96,28 @@ enum ErrorKind {
     AlignBarrier(Box<Barrier>, Box<Barrier>),
 
     #[error("Connector error: {0}")]
-    ConnectorError(#[source] BoxedError),
+    ConnectorError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
 
     #[error("Dml error: {0}")]
-    DmlError(#[source] BoxedError),
+    DmlError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
 
     #[error("Feature is not yet implemented: {0}, {1}")]
     NotImplemented(String, TrackingIssue),
 
     #[error(transparent)]
-    Internal(anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 impl StreamExecutorError {
