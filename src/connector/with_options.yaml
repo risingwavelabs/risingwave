@@ -382,9 +382,13 @@ KafkaProperties:
     field_type: Option < usize >
     comments: Maximum time the broker may wait to fill the Fetch response with `fetch.min.`bytes of  messages.
     required: false
+  - name: properties.fetch.queue.backoff.ms
+    field_type: Option < usize >
+    comments: How long to postpone the next fetch request for a topic+partition in case the current fetch  queue thresholds (`queued.min.messages` or `queued.max.messages.kbytes`) have been  exceeded. This property may need to be decreased if the queue thresholds are set low  and the application is experiencing long (~1s) delays between messages. Low values may  increase CPU utilization.
+    required: false
   - name: properties.fetch.max.bytes
     field_type: Option < usize >
-    comments: How long to postpone the next fetch request for a topic+partition in case the current fetch  queue thresholds (`queued.min.messages` or `queued.max.messages.kbytes`) have been  exceeded. This property may need to be decreased if the queue thresholds are set low  and the application is experiencing long (~1s) delays between messages. Low values may  increase CPU utilization.  Maximum amount of data the broker shall return for a Fetch request. Messages are fetched in  batches by the consumer and if the first message batch in the first non-empty partition of  the Fetch request is larger than this value, then the message batch will still be returned  to ensure the consumer can make progress. The maximum message batch size accepted by the  broker is defined via `message.max.bytes` (broker config) or `max.message.bytes` (broker  topic config). `fetch.max.bytes` is automatically adjusted upwards to be at least  `message.max.bytes` (consumer config).
+    comments: Maximum amount of data the broker shall return for a Fetch request. Messages are fetched in  batches by the consumer and if the first message batch in the first non-empty partition of  the Fetch request is larger than this value, then the message batch will still be returned  to ensure the consumer can make progress. The maximum message batch size accepted by the  broker is defined via `message.max.bytes` (broker config) or `max.message.bytes` (broker  topic config). `fetch.max.bytes` is automatically adjusted upwards to be at least  `message.max.bytes` (consumer config).
     required: false
   - name: properties.enable.auto.commit
     field_type: Option < bool >
