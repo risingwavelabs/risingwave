@@ -412,7 +412,11 @@ pub async fn handle_create_index(
 
     let (graph, index_table, index) = {
         {
-            if let Either::Right(resp) = session.check_relation_name_duplicated(index_name.clone(), StatementType::CREATE_INDEX, if_not_exists)? {
+            if let Either::Right(resp) = session.check_relation_name_duplicated(
+                index_name.clone(),
+                StatementType::CREATE_INDEX,
+                if_not_exists,
+            )? {
                 return Ok(resp);
             }
         }

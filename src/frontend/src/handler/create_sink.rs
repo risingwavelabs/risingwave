@@ -189,7 +189,11 @@ pub async fn handle_create_sink(
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
 
-    if let Either::Right(resp) = session.check_relation_name_duplicated(stmt.sink_name.clone(), StatementType::CREATE_SINK, stmt.if_not_exists)? {
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        stmt.sink_name.clone(),
+        StatementType::CREATE_SINK,
+        stmt.if_not_exists,
+    )? {
         return Ok(resp);
     }
 

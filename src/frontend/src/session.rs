@@ -70,9 +70,9 @@ use crate::catalog::{check_schema_writable, CatalogError, DatabaseId, SchemaId};
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
 };
-use crate::handler::{handle, RwPgResponse};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::util::to_pg_field;
+use crate::handler::{handle, RwPgResponse};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::{FrontendMetrics, GLOBAL_FRONTEND_METRICS};
@@ -594,12 +594,14 @@ impl SessionImpl {
         };
         match catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name) {
             Err(CatalogError::Duplicated(_, name)) if if_not_exists => {
-                return Ok(Either::Right( PgResponse::builder(stmt_type)
-                    .notice(format!("relation \"{}\" already exists, skipping", name))
-                    .into()));
+                return Ok(Either::Right(
+                    PgResponse::builder(stmt_type)
+                        .notice(format!("relation \"{}\" already exists, skipping", name))
+                        .into(),
+                ));
             }
             Err(e) => Err(e.into()),
-            Ok(_) => Ok(Either::Left(()))
+            Ok(_) => Ok(Either::Left(())),
         }
     }
 

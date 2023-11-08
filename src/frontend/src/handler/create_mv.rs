@@ -155,7 +155,11 @@ pub async fn handle_create_mv(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
-    if let Either::Right(resp) = session.check_relation_name_duplicated(name.clone(), StatementType::CREATE_MATERIALIZED_VIEW, if_not_exists)? {
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        name.clone(),
+        StatementType::CREATE_MATERIALIZED_VIEW,
+        if_not_exists,
+    )? {
         return Ok(resp);
     }
 

@@ -44,7 +44,11 @@ pub async fn handle_create_as(
     }
     let session = handler_args.session.clone();
 
-    if let Either::Right(resp) = session.check_relation_name_duplicated(table_name.clone(), StatementType::CREATE_TABLE, if_not_exists)? {
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        table_name.clone(),
+        StatementType::CREATE_TABLE,
+        if_not_exists,
+    )? {
         return Ok(resp);
     }
 

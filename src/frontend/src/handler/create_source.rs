@@ -1088,7 +1088,11 @@ pub async fn handle_create_source(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
-    if let Either::Right(resp) = session.check_relation_name_duplicated(stmt.source_name.clone(), StatementType::CREATE_SOURCE, stmt.if_not_exists)? {
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        stmt.source_name.clone(),
+        StatementType::CREATE_SOURCE,
+        stmt.if_not_exists,
+    )? {
         return Ok(resp);
     }
 

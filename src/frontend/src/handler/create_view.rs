@@ -44,7 +44,11 @@ pub async fn handle_create_view(
 
     let properties = handler_args.with_options.clone();
 
-    if let Either::Right(resp) = session.check_relation_name_duplicated(name.clone(), StatementType::CREATE_VIEW, if_not_exists)? {
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        name.clone(),
+        StatementType::CREATE_VIEW,
+        if_not_exists,
+    )? {
         return Ok(resp);
     }
 
