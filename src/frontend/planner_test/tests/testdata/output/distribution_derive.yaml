@@ -13,7 +13,7 @@
   sql: select A.v, B.v as Bv from A join B using(k1);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: a.k1 = bk1.k1, output: [a.v, bk1.v] }
+    └─BatchLookupJoin { type: Inner, predicate: a.k1 = bk1.k1, output: [a.v, bk1.v], lookup table: bk1 }
       └─BatchExchange { order: [], dist: UpstreamHashShard(a.k1) }
         └─BatchScan { table: a, columns: [a.k1, a.v], distribution: SomeShard }
   stream_plan: |-
@@ -65,7 +65,7 @@
   sql: select A.v, B.v as Bv from Ak1 as A join B using(k1)
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v] }
+    └─BatchLookupJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v], lookup table: bk1 }
       └─BatchExchange { order: [], dist: UpstreamHashShard(ak1.k1) }
         └─BatchScan { table: ak1, columns: [ak1.k1, ak1.v], distribution: UpstreamHashShard(ak1.k1) }
   stream_plan: |-
@@ -117,7 +117,7 @@
   sql: select A.v, B.v as Bv from A join Bk1 as B using(k1)
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: a.k1 = bk1.k1, output: [a.v, bk1.v] }
+    └─BatchLookupJoin { type: Inner, predicate: a.k1 = bk1.k1, output: [a.v, bk1.v], lookup table: bk1 }
       └─BatchExchange { order: [], dist: UpstreamHashShard(a.k1) }
         └─BatchScan { table: a, columns: [a.k1, a.v], distribution: SomeShard }
   stream_plan: |-
@@ -169,7 +169,7 @@
   sql: select A.v, B.v as Bv from Ak1 as A join Bk1 as B using(k1)
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v] }
+    └─BatchLookupJoin { type: Inner, predicate: ak1.k1 = bk1.k1, output: [ak1.v, bk1.v], lookup table: bk1 }
       └─BatchExchange { order: [], dist: UpstreamHashShard(ak1.k1) }
         └─BatchScan { table: ak1, columns: [ak1.k1, ak1.v], distribution: UpstreamHashShard(ak1.k1) }
   stream_plan: |-
@@ -1051,7 +1051,7 @@
       └─LogicalScan { table: ak1, columns: [ak1.k1, ak1.k2, ak1.k3, ak1.v, ak1.a._row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: a.k1 = ak1.k1, output: [ak1.v, count] }
+    └─BatchLookupJoin { type: Inner, predicate: a.k1 = ak1.k1, output: [ak1.v, count], lookup table: ak1 }
       └─BatchExchange { order: [], dist: UpstreamHashShard(a.k1) }
         └─BatchHashAgg { group_key: [a.k1], aggs: [count] }
           └─BatchExchange { order: [], dist: HashShard(a.k1) }
