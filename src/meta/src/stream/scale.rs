@@ -343,6 +343,7 @@ pub fn rebalance_actor_vnode(
 
 #[derive(Debug, Clone, Copy)]
 pub struct RescheduleOptions {
+    /// Whether to resolve the upstream of NoShuffle when scaling. It will check whether all the reschedules in the no shuffle dependency tree are corresponding, and rewrite them to the root of the no shuffle dependency tree.
     pub resolve_no_shuffle_upstream: bool,
 }
 
