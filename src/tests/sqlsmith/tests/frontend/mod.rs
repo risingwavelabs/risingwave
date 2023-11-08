@@ -217,7 +217,7 @@ fn test_batch_query(
         rng = SmallRng::seed_from_u64(seed);
     }
 
-    let sql = Arc::new(sql_gen(&mut rng, tables));
+    let sql: Arc<str> = Arc::from(sql_gen(&mut rng, tables));
     reproduce_failing_queries(setup_sql, &sql);
 
     // The generated SQL must be parsable.
