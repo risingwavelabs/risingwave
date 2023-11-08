@@ -570,7 +570,6 @@ impl SessionImpl {
         self.id
     }
 
-    #[must_use]
     pub fn check_relation_name_duplicated(
         &self,
         name: ObjectName,
@@ -593,13 +592,11 @@ impl SessionImpl {
             (schema_name, relation_name)
         };
         match catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name) {
-            Err(CatalogError::Duplicated(_, name)) if if_not_exists => {
-                return Ok(Either::Right(
-                    PgResponse::builder(stmt_type)
-                        .notice(format!("relation \"{}\" already exists, skipping", name))
-                        .into(),
-                ));
-            }
+            Err(CatalogError::Duplicated(_, name)) if if_not_exists => Ok(Either::Right(
+                PgResponse::builder(stmt_type)
+                    .notice(format!("relation \"{}\" already exists, skipping", name))
+                    .into(),
+            )),
             Err(e) => Err(e.into()),
             Ok(_) => Ok(Either::Left(())),
         }

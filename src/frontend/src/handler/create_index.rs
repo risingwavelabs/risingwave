@@ -32,7 +32,6 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::CatalogError;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
@@ -41,7 +40,7 @@ use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMa
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
-use crate::session::{CheckRelationError, SessionImpl};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
 pub(crate) fn gen_create_index_plan(

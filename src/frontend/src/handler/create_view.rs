@@ -24,10 +24,8 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Query, Statement};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::CatalogError;
 use crate::handler::HandlerArgs;
 use crate::optimizer::OptimizerContext;
-use crate::session::CheckRelationError;
 
 pub async fn handle_create_view(
     handler_args: HandlerArgs,

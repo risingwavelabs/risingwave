@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use either::Either;
-use pgwire::pg_response::{PgResponse, StatementType};
+use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::ddl_service::TableJobType;
@@ -22,10 +22,8 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Query, Statement};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::BoundStatement;
-use crate::catalog::CatalogError;
 use crate::handler::create_table::{gen_create_table_plan_without_bind, ColumnIdGenerator};
 use crate::handler::query::handle_query;
-use crate::session::CheckRelationError;
 use crate::{build_graph, Binder, OptimizerContext};
 
 pub async fn handle_create_as(

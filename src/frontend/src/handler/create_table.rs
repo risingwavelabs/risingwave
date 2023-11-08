@@ -48,7 +48,7 @@ use crate::binder::{bind_data_type, bind_struct_field, Clause};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableVersion;
-use crate::catalog::{check_valid_column_name, CatalogError, ColumnId};
+use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
     bind_all_columns, bind_columns_from_source, bind_source_pk, bind_source_watermark,
@@ -58,7 +58,7 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
-use crate::session::{CheckRelationError, SessionImpl};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::resolve_privatelink_in_with_option;
 use crate::{Binder, TableCatalog, WithOptions};
