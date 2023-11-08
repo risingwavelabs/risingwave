@@ -37,8 +37,9 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
+use crate::executor::backfill::cdc::BACKFILL_STATE_KEY_SUFFIX;
 use crate::executor::error::StreamExecutorError;
-use crate::executor::{StreamExecutorResult, BACKFILL_STATE_KEY_SUFFIX};
+use crate::executor::StreamExecutorResult;
 
 const COMPLETE_SPLIT_PREFIX: &str = "SsGLdzRDqBuKzMf9bDap";
 
@@ -226,10 +227,13 @@ impl<S: StateStore> SourceStateTableHandler<S> {
             Some(row) => match row.datum_at(1) {
                 Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
                     let mut split_impl = SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?;
-                    if let SplitImpl::MysqlCdc(ref mut split) = split_impl && let Some(mysql_split) = split.mysql_split.as_mut() {
+                    if let SplitImpl::MysqlCdc(ref mut split) = split_impl
+                        && let Some(mysql_split) = split.mysql_split.as_mut()
+                    {
                         // if the snapshot_done is not set, we should check whether the backfill is finished
                         if !mysql_split.inner.snapshot_done {
-                            mysql_split.inner.snapshot_done = self.recover_cdc_snapshot_state(split_id).await?;
+                            mysql_split.inner.snapshot_done =
+                                self.recover_cdc_snapshot_state(split_id).await?;
                         }
                     }
                     Some(split_impl)

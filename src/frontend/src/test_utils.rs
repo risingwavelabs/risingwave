@@ -32,9 +32,9 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
+    PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
-use risingwave_pb::ddl_service::{create_connection_request, DdlProgress};
+use risingwave_pb::ddl_service::{create_connection_request, DdlProgress, PbTableJobType};
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactionGroupInfo, HummockSnapshot, HummockVersion, HummockVersionDelta,
@@ -105,6 +105,15 @@ impl LocalFrontend {
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
         self.session_ref().run_statement(sql.as_str(), vec![]).await
+    }
+
+    pub async fn run_sql_with_session(
+        &self,
+        session_ref: Arc<SessionImpl>,
+        sql: impl Into<String>,
+    ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let sql = sql.into();
+        session_ref.run_statement(sql.as_str(), vec![]).await
     }
 
     pub async fn run_user_sql(
@@ -254,6 +263,7 @@ impl CatalogWriter for MockCatalogWriter {
         source: Option<PbSource>,
         mut table: PbTable,
         graph: StreamFragmentGraph,
+        _job_type: PbTableJobType,
     ) -> Result<()> {
         if let Some(source) = source {
             let source_id = self.create_source_inner(source)?;
@@ -276,6 +286,14 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn create_source(&self, source: PbSource) -> Result<()> {
+        self.create_source_inner(source).map(|_| ())
+    }
+
+    async fn create_source_with_graph(
+        &self,
+        source: PbSource,
+        _graph: StreamFragmentGraph,
+    ) -> Result<()> {
         self.create_source_inner(source).map(|_| ())
     }
 
@@ -315,6 +333,10 @@ impl CatalogWriter for MockCatalogWriter {
         _owner_id: u32,
         _connection: create_connection_request::Payload,
     ) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn comment_on(&self, _comment: PbComment) -> Result<()> {
         unreachable!()
     }
 
@@ -640,8 +662,10 @@ impl UserInfoWriter for MockUserInfoWriter {
     ) -> Result<()> {
         let mut lock = self.user_info.write();
         let id = update_user.get_id();
-        let old_name = lock.get_user_name_by_id(id).unwrap();
-        let mut user_info = lock.get_user_by_name(&old_name).unwrap().clone();
+        let Some(old_name) = lock.get_user_name_by_id(id) else {
+            return Ok(());
+        };
+        let mut user_info = lock.get_user_by_name(&old_name).unwrap().to_prost();
         update_fields.into_iter().for_each(|field| match field {
             UpdateField::Super => user_info.is_super = update_user.is_super,
             UpdateField::Login => user_info.can_login = update_user.can_login,
@@ -675,7 +699,7 @@ impl UserInfoWriter for MockUserInfoWriter {
             .collect::<Vec<_>>();
         for user_id in users {
             if let Some(u) = self.user_info.write().get_user_mut(user_id) {
-                u.grant_privileges.extend(privileges.clone());
+                u.extend_privileges(privileges.clone());
             }
         }
         Ok(())
@@ -694,32 +718,7 @@ impl UserInfoWriter for MockUserInfoWriter {
     ) -> Result<()> {
         for user_id in users {
             if let Some(u) = self.user_info.write().get_user_mut(user_id) {
-                u.grant_privileges.iter_mut().for_each(|p| {
-                    for rp in &privileges {
-                        if rp.object != p.object {
-                            continue;
-                        }
-                        if revoke_grant_option {
-                            for ao in &mut p.action_with_opts {
-                                if rp
-                                    .action_with_opts
-                                    .iter()
-                                    .any(|rao| rao.action == ao.action)
-                                {
-                                    ao.with_grant_option = false;
-                                }
-                            }
-                        } else {
-                            p.action_with_opts.retain(|po| {
-                                rp.action_with_opts
-                                    .iter()
-                                    .all(|rao| rao.action != po.action)
-                            });
-                        }
-                    }
-                });
-                u.grant_privileges
-                    .retain(|p| !p.action_with_opts.is_empty());
+                u.revoke_privileges(privileges.clone(), revoke_grant_option);
             }
         }
         Ok(())
@@ -771,6 +770,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
             committed_epoch: 0,
             current_epoch: 0,
         })
+    }
+
+    async fn wait(&self) -> RpcResult<()> {
+        Ok(())
     }
 
     async fn cancel_creating_jobs(&self, _infos: PbJobs) -> RpcResult<Vec<u32>> {

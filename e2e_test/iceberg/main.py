@@ -42,14 +42,16 @@ def init_iceberg_table(args,init_sqls):
         spark.sql(sql)
 
 
-def init_risingwave_mv(args,slt):
+def execute_slt(args,slt):
+    if slt is None or slt == "":
+        return
     rw_config = args['risingwave']
     cmd = f"sqllogictest -p {rw_config['port']} -d {rw_config['db']} {slt}"
     print(f"Command line is [{cmd}]")
     subprocess.run(cmd,
                    shell=True,
                    check=True)
-    time.sleep(10)
+    time.sleep(30)
 
 
 def verify_result(args,verify_sql,verify_schema,verify_data):
@@ -110,6 +112,6 @@ if __name__ == "__main__":
         print({section: dict(config[section]) for section in config.sections()})
 
         init_iceberg_table(config,init_sqls)
-        init_risingwave_mv(config,slt)
+        execute_slt(config,slt)
         verify_result(config,verify_sql,verify_schema,verify_data)
         drop_table(config,drop_sqls)

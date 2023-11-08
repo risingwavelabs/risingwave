@@ -568,10 +568,10 @@ impl LocalStreamManagerCore {
         // Build the executor with params.
         let executor_params = ExecutorParams {
             env: env.clone(),
-            pk_indices,
+            pk_indices: pk_indices.clone(),
             executor_id,
             operator_id,
-            identity,
+            identity: identity.clone(),
             op_info,
             schema,
             input,
@@ -583,6 +583,12 @@ impl LocalStreamManagerCore {
         };
 
         let executor = create_executor(executor_params, self, node, store).await?;
+        assert_eq!(
+            executor.pk_indices(),
+            &pk_indices,
+            "`pk_indices` of {} not consistent with what derived by optimizer",
+            executor.identity()
+        );
 
         // Wrap the executor for debug purpose.
         let executor = WrapperExecutor::new(
@@ -815,7 +821,9 @@ impl LocalStreamManagerCore {
         let mut actor_infos = self.context.actor_infos.write();
         for actor in new_actor_infos {
             let ret = actor_infos.insert(actor.get_actor_id(), actor.clone());
-            if let Some(prev_actor) = ret && actor != &prev_actor {
+            if let Some(prev_actor) = ret
+                && actor != &prev_actor
+            {
                 bail!(
                     "actor info mismatch when broadcasting {}",
                     actor.get_actor_id()

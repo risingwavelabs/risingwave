@@ -19,7 +19,6 @@ use crate::executor::ExpandExecutor;
 
 pub struct ExpandExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for ExpandExecutorBuilder {
     type Node = ExpandNode;
 

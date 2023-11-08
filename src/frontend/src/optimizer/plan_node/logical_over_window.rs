@@ -23,7 +23,7 @@ use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, BatchOverWindow, ColPrunable, ExprRewritable, LogicalProject,
+    gen_filter_and_pushdown, BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalProject,
     PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow, StreamEowcSort,
     StreamOverWindow, ToBatch, ToStream,
 };
@@ -115,45 +115,44 @@ impl<'a> LogicalOverWindowBuilder<'a> {
             match agg_kind {
                 AggKind::Avg => {
                     assert_eq!(args.len(), 1);
-                    let left_ref =  ExprImpl::from(self.push_window_func(WindowFunction::new(
+                    let left_ref = ExprImpl::from(self.push_window_func(WindowFunction::new(
                         WindowFuncKind::Aggregate(AggKind::Sum),
                         partition_by.clone(),
                         order_by.clone(),
                         args.clone(),
                         frame.clone(),
-                    )?)).cast_explicit(return_type)?;
+                    )?))
+                    .cast_explicit(return_type)?;
                     let right_ref = ExprImpl::from(self.push_window_func(WindowFunction::new(
-                            WindowFuncKind::Aggregate(AggKind::Count),
-                            partition_by,
-                            order_by,
-                            args,
-                            frame,
-                        )?));
+                        WindowFuncKind::Aggregate(AggKind::Count),
+                        partition_by,
+                        order_by,
+                        args,
+                        frame,
+                    )?));
 
-                    let new_expr = ExprImpl::from(
-                        FunctionCall::new(ExprType::Divide, vec![left_ref, right_ref])?,
-                    );
+                    let new_expr = ExprImpl::from(FunctionCall::new(
+                        ExprType::Divide,
+                        vec![left_ref, right_ref],
+                    )?);
                     Ok(new_expr)
                 }
-                AggKind::StddevPop
-                | AggKind::StddevSamp
-                | AggKind::VarPop
-                | AggKind::VarSamp => {
+                AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp => {
                     let input = args.first().unwrap();
-                    let squared_input_expr = ExprImpl::from(
-                        FunctionCall::new(
-                            ExprType::Multiply,
-                            vec![input.clone(), input.clone()],
-                        )?,
-                    );
+                    let squared_input_expr = ExprImpl::from(FunctionCall::new(
+                        ExprType::Multiply,
+                        vec![input.clone(), input.clone()],
+                    )?);
 
-                    let sum_of_squares_expr = ExprImpl::from(self.push_window_func(WindowFunction::new(
-                        WindowFuncKind::Aggregate(AggKind::Sum),
-                        partition_by.clone(),
-                        order_by.clone(),
-                        vec![squared_input_expr],
-                        frame.clone(),
-                    )?)).cast_explicit(return_type.clone())?;
+                    let sum_of_squares_expr =
+                        ExprImpl::from(self.push_window_func(WindowFunction::new(
+                            WindowFuncKind::Aggregate(AggKind::Sum),
+                            partition_by.clone(),
+                            order_by.clone(),
+                            vec![squared_input_expr],
+                            frame.clone(),
+                        )?))
+                        .cast_explicit(return_type.clone())?;
 
                     let sum_expr = ExprImpl::from(self.push_window_func(WindowFunction::new(
                         WindowFuncKind::Aggregate(AggKind::Sum),
@@ -161,7 +160,8 @@ impl<'a> LogicalOverWindowBuilder<'a> {
                         order_by.clone(),
                         args.clone(),
                         frame.clone(),
-                    )?)).cast_explicit(return_type.clone())?;
+                    )?))
+                    .cast_explicit(return_type.clone())?;
 
                     let count_expr = ExprImpl::from(self.push_window_func(WindowFunction::new(
                         WindowFuncKind::Aggregate(AggKind::Count),
@@ -171,32 +171,26 @@ impl<'a> LogicalOverWindowBuilder<'a> {
                         frame,
                     )?));
 
-                    let square_of_sum_expr = ExprImpl::from(
-                        FunctionCall::new(
-                            ExprType::Multiply,
-                            vec![sum_expr.clone(), sum_expr],
-                        )?,
-                    );
+                    let square_of_sum_expr = ExprImpl::from(FunctionCall::new(
+                        ExprType::Multiply,
+                        vec![sum_expr.clone(), sum_expr],
+                    )?);
 
-                    let numerator_expr = ExprImpl::from(
-                        FunctionCall::new(
-                            ExprType::Subtract,
-                            vec![
-                                sum_of_squares_expr,
-                                ExprImpl::from(
-                                    FunctionCall::new(
-                                        ExprType::Divide,
-                                        vec![square_of_sum_expr, count_expr.clone()],
-                                    )?,
-                                ),
-                            ],
-                        )?,
-                    );
+                    let numerator_expr = ExprImpl::from(FunctionCall::new(
+                        ExprType::Subtract,
+                        vec![
+                            sum_of_squares_expr,
+                            ExprImpl::from(FunctionCall::new(
+                                ExprType::Divide,
+                                vec![square_of_sum_expr, count_expr.clone()],
+                            )?),
+                        ],
+                    )?);
 
                     let denominator_expr = match agg_kind {
                         AggKind::StddevPop | AggKind::VarPop => count_expr.clone(),
-                        AggKind::StddevSamp | AggKind::VarSamp => ExprImpl::from(
-                            FunctionCall::new(
+                        AggKind::StddevSamp | AggKind::VarSamp => {
+                            ExprImpl::from(FunctionCall::new(
                                 ExprType::Subtract,
                                 vec![
                                     count_expr.clone(),
@@ -205,17 +199,15 @@ impl<'a> LogicalOverWindowBuilder<'a> {
                                         DataType::Int64,
                                     )),
                                 ],
-                            )?,
-                        ),
+                            )?)
+                        }
                         _ => unreachable!(),
                     };
 
-                    let mut target_expr = ExprImpl::from(
-                        FunctionCall::new(
-                            ExprType::Divide,
-                            vec![numerator_expr, denominator_expr],
-                        )?,
-                    );
+                    let mut target_expr = ExprImpl::from(FunctionCall::new(
+                        ExprType::Divide,
+                        vec![numerator_expr, denominator_expr],
+                    )?);
 
                     if matches!(agg_kind, AggKind::StddevPop | AggKind::StddevSamp) {
                         target_expr = ExprImpl::from(
@@ -224,31 +216,24 @@ impl<'a> LogicalOverWindowBuilder<'a> {
                     }
 
                     match agg_kind {
-                        AggKind::VarPop | AggKind::StddevPop => {
-                            Ok(target_expr)
-                        }
+                        AggKind::VarPop | AggKind::StddevPop => Ok(target_expr),
                         AggKind::StddevSamp | AggKind::VarSamp => {
-                            let less_than_expr = ExprImpl::from(
-                                FunctionCall::new(
-                                    ExprType::LessThanOrEqual,
-                                    vec![
-                                        count_expr,
-                                        ExprImpl::from(Literal::new(
-                                            Datum::from(ScalarImpl::Int64(1)),
-                                            DataType::Int64,
-                                        )),
-                                    ],
-                                )?,
-                            );
-                            let null_expr =
-                                ExprImpl::from(Literal::new(None, return_type));
+                            let less_than_expr = ExprImpl::from(FunctionCall::new(
+                                ExprType::LessThanOrEqual,
+                                vec![
+                                    count_expr,
+                                    ExprImpl::from(Literal::new(
+                                        Datum::from(ScalarImpl::Int64(1)),
+                                        DataType::Int64,
+                                    )),
+                                ],
+                            )?);
+                            let null_expr = ExprImpl::from(Literal::new(None, return_type));
 
-                            let case_expr = ExprImpl::from(
-                                FunctionCall::new(
-                                    ExprType::Case,
-                                    vec![less_than_expr, null_expr, target_expr],
-                                )?,
-                            );
+                            let case_expr = ExprImpl::from(FunctionCall::new(
+                                ExprType::Case,
+                                vec![less_than_expr, null_expr, target_expr],
+                            )?);
                             Ok(case_expr)
                         }
                         _ => unreachable!(),
@@ -307,21 +292,19 @@ impl<'a> OverWindowProjectBuilder<'a> {
         window_function: &WindowFunction,
     ) -> std::result::Result<(), ErrorCode> {
         if let WindowFuncKind::Aggregate(agg_kind) = window_function.kind
-        && matches!(
-            agg_kind,
-            AggKind::StddevPop
-                | AggKind::StddevSamp
-                | AggKind::VarPop
-                | AggKind::VarSamp
-        )
-    {
-        let input = window_function.args.iter().exactly_one().unwrap();
-        let squared_input_expr = ExprImpl::from(
-            FunctionCall::new(ExprType::Multiply, vec![input.clone(), input.clone()])
-                .unwrap(),
-        );
-        self.builder.add_expr(&squared_input_expr).map_err(|err| ErrorCode::NotImplemented(format!("{err} inside args"), None.into()))?;
-    }
+            && matches!(
+                agg_kind,
+                AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp
+            )
+        {
+            let input = window_function.args.iter().exactly_one().unwrap();
+            let squared_input_expr = ExprImpl::from(
+                FunctionCall::new(ExprType::Multiply, vec![input.clone(), input.clone()]).unwrap(),
+            );
+            self.builder.add_expr(&squared_input_expr).map_err(|err| {
+                ErrorCode::NotImplemented(format!("{err} inside args"), None.into())
+            })?;
+        }
         for arg in &window_function.args {
             self.builder.add_expr(arg).map_err(|err| {
                 ErrorCode::NotImplemented(format!("{err} inside args"), None.into())
@@ -341,7 +324,9 @@ impl<'a> OverWindowProjectBuilder<'a> {
     }
 }
 
-impl<'a> ExprVisitor<()> for OverWindowProjectBuilder<'a> {
+impl<'a> ExprVisitor for OverWindowProjectBuilder<'a> {
+    type Result = ();
+
     fn merge(_a: (), _b: ()) {}
 
     fn visit_window_function(&mut self, window_function: &WindowFunction) {
@@ -356,7 +341,7 @@ impl<'a> ExprVisitor<()> for OverWindowProjectBuilder<'a> {
 /// The output schema is the input schema plus the window functions.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalOverWindow {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: OverWindow<PlanRef>,
 }
 
@@ -397,21 +382,12 @@ impl LogicalOverWindow {
         let rewritten_selected_items = over_window_builder.rewrite_selected_items(select_exprs)?;
 
         for window_func in &window_functions {
-            if window_func.kind.is_rank() {
-                if window_func.order_by.sort_exprs.is_empty() {
-                    return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "window rank function without order by: {:?}",
-                        window_func
-                    ))
-                    .into());
-                }
-                if window_func.kind == WindowFuncKind::DenseRank {
-                    return Err(ErrorCode::NotImplemented(
-                        format!("window rank function: {}", window_func.kind),
-                        4847.into(),
-                    )
-                    .into());
-                }
+            if window_func.kind.is_rank() && window_func.order_by.sort_exprs.is_empty() {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "window rank function without order by: {:?}",
+                    window_func
+                ))
+                .into());
             }
         }
 
@@ -544,6 +520,14 @@ impl LogicalOverWindow {
 
     pub fn window_functions(&self) -> &[PlanWindowFunction] {
         &self.core.window_functions
+    }
+
+    pub fn partition_key_indices(&self) -> Vec<usize> {
+        self.core.partition_key_indices()
+    }
+
+    pub fn order_key(&self) -> &[ColumnOrder] {
+        self.core.order_key()
     }
 
     #[must_use]
@@ -724,19 +708,6 @@ impl PredicatePushdown for LogicalOverWindow {
 
 impl ToBatch for LogicalOverWindow {
     fn to_batch(&self) -> Result<PlanRef> {
-        if self
-            .window_functions()
-            .iter()
-            .any(|x| matches!(x.kind, WindowFuncKind::Rank | WindowFuncKind::DenseRank))
-        {
-            return Err(ErrorCode::NotImplemented(
-                "`rank` and `dense_rank` function calls that don't match TopN pattern are not supported yet"
-                    .to_string(),
-                8965.into(),
-            )
-            .into());
-        }
-
         if !self.core.funcs_have_same_partition_and_order() {
             return Err(ErrorCode::InvalidInputSyntax(
                 "All window functions must have the same PARTITION BY and ORDER BY".to_string(),
@@ -770,18 +741,7 @@ impl ToBatch for LogicalOverWindow {
 
 impl ToStream for LogicalOverWindow {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        if self
-            .window_functions()
-            .iter()
-            .any(|x| matches!(x.kind, WindowFuncKind::Rank | WindowFuncKind::DenseRank))
-        {
-            return Err(ErrorCode::NotImplemented(
-                "`rank` and `dense_rank` function calls that don't match TopN pattern are not supported yet"
-                    .to_string(),
-                8965.into(),
-            )
-            .into());
-        }
+        use super::stream::prelude::*;
 
         let stream_input = self.core.input.to_stream(ctx)?;
 
@@ -832,9 +792,9 @@ impl ToStream for LogicalOverWindow {
                     .enforce_if_not_satisfies(stream_input, &Order::any())?;
             let sort = StreamEowcSort::new(sort_input, order_key_index);
 
-            let mut logical = self.core.clone();
-            logical.input = sort.into();
-            Ok(StreamEowcOverWindow::new(logical).into())
+            let mut core = self.core.clone();
+            core.input = sort.into();
+            Ok(StreamEowcOverWindow::new(core).into())
         } else {
             // General (Emit-On-Update) case
 
@@ -863,9 +823,9 @@ impl ToStream for LogicalOverWindow {
             let new_input =
                 RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
                     .enforce_if_not_satisfies(stream_input, &Order::any())?;
-            let mut logical = self.core.clone();
-            logical.input = new_input;
-            Ok(StreamOverWindow::new(logical).into())
+            let mut core = self.core.clone();
+            core.input = new_input;
+            Ok(StreamOverWindow::new(core).into())
         }
     }
 

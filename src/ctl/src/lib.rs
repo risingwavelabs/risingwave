@@ -19,6 +19,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 
@@ -156,7 +157,7 @@ enum HummockCommands {
     DisableCommitEpoch,
     /// list all Hummock key-value pairs
     ListKv {
-        #[clap(short, long = "epoch", default_value_t = u64::MAX)]
+        #[clap(short, long = "epoch", default_value_t = MAX_EPOCH)]
         epoch: u64,
 
         #[clap(short, long = "table-id")]
@@ -244,6 +245,10 @@ enum HummockCommands {
     ListCompactionStatus {
         #[clap(short, long = "verbose", default_value_t = false)]
         verbose: bool,
+    },
+    GetCompactionScore {
+        #[clap(long)]
+        compaction_group_id: u64,
     },
     /// Validate the current HummockVersion.
     ValidateVersion,
@@ -607,6 +612,11 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Hummock(HummockCommands::ListCompactionStatus { verbose }) => {
             cmd_impl::hummock::list_compaction_status(context, verbose).await?;
+        }
+        Commands::Hummock(HummockCommands::GetCompactionScore {
+            compaction_group_id,
+        }) => {
+            cmd_impl::hummock::get_compaction_score(context, compaction_group_id).await?;
         }
         Commands::Hummock(HummockCommands::ValidateVersion) => {
             cmd_impl::hummock::validate_version(context).await?;

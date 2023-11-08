@@ -351,7 +351,9 @@ macro_rules! impl_has_variant {
                     pub fn [<has_ $variant:snake>](&self) -> bool {
                         struct Has {}
 
-                        impl ExprVisitor<bool> for Has {
+                        impl ExprVisitor for Has {
+
+                            type Result = bool;
 
                             fn merge(a: bool, b: bool) -> bool {
                                 a | b
@@ -422,7 +424,9 @@ impl ExprImpl {
             depth: usize,
         }
 
-        impl ExprVisitor<bool> for Has {
+        impl ExprVisitor for Has {
+            type Result = bool;
+
             fn merge(a: bool, b: bool) -> bool {
                 a | b
             }
@@ -480,7 +484,9 @@ impl ExprImpl {
             correlated_id: CorrelatedId,
         }
 
-        impl ExprVisitor<bool> for Has {
+        impl ExprVisitor for Has {
+            type Result = bool;
+
             fn merge(a: bool, b: bool) -> bool {
                 a | b
             }
@@ -600,7 +606,9 @@ impl ExprImpl {
             struct HasOthers {
                 has_others: bool,
             }
-            impl ExprVisitor<()> for HasOthers {
+            impl ExprVisitor for HasOthers {
+                type Result = ();
+
                 fn merge(_: (), _: ()) {}
 
                 fn visit_expr(&mut self, expr: &ExprImpl) {
@@ -814,13 +822,19 @@ impl ExprImpl {
                 match expr_type {
                     ExprType::Add | ExprType::Subtract => {
                         let (_, lhs, rhs) = function_call.clone().decompose_as_binary();
-                        if let ExprImpl::InputRef(input_ref) = &lhs && rhs.is_const() {
+                        if let ExprImpl::InputRef(input_ref) = &lhs
+                            && rhs.is_const()
+                        {
                             // Currently we will return `None` for non-literal because the result of the expression might be '1 day'. However, there will definitely exist false positives such as '1 second + 1 second'.
                             // We will treat the expression as an input offset when rhs is `null`.
-                            if rhs.return_type() == DataType::Interval && rhs.as_literal().map_or(true, |literal| literal.get_data().as_ref().map_or(false, |scalar| {
-                                let interval = scalar.as_interval();
-                                interval.months() != 0 || interval.days() != 0
-                            })) {
+                            if rhs.return_type() == DataType::Interval
+                                && rhs.as_literal().map_or(true, |literal| {
+                                    literal.get_data().as_ref().map_or(false, |scalar| {
+                                        let interval = scalar.as_interval();
+                                        interval.months() != 0 || interval.days() != 0
+                                    })
+                                })
+                            {
                                 None
                             } else {
                                 Some((input_ref.index(), Some((expr_type, rhs))))

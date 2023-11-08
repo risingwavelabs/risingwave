@@ -32,7 +32,7 @@ use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::expr::NonStrictExpression;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -57,7 +57,7 @@ pub struct TemporalJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrim
     left_join_keys: Vec<usize>,
     right_join_keys: Vec<usize>,
     null_safe: Vec<bool>,
-    condition: Option<BoxedExpression>,
+    condition: Option<NonStrictExpression>,
     output_indices: Vec<usize>,
     pk_indices: PkIndices,
     schema: Schema,
@@ -338,7 +338,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
         left_join_keys: Vec<usize>,
         right_join_keys: Vec<usize>,
         null_safe: Vec<bool>,
-        condition: Option<BoxedExpression>,
+        condition: Option<NonStrictExpression>,
         pk_indices: PkIndices,
         output_indices: Vec<usize>,
         table_output_indices: Vec<usize>,
@@ -444,7 +444,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                         };
                         if key.null_bitmap().is_subset(&null_matched)
                             && let join_entry = self.right_table.lookup(&key, epoch).await?
-                            && !join_entry.is_empty() {
+                            && !join_entry.is_empty()
+                        {
                             for right_row in join_entry.cached.values() {
                                 // check join condition
                                 let ok = if let Some(ref mut cond) = self.condition {
@@ -458,7 +459,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                                 };
 
                                 if ok {
-                                    if let Some(chunk) = builder.append_row(op, left_row, right_row) {
+                                    if let Some(chunk) = builder.append_row(op, left_row, right_row)
+                                    {
                                         yield Message::Chunk(chunk);
                                     }
                                 }

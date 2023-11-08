@@ -23,7 +23,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
-use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
+use risingwave_hummock_sdk::{EpochWithGap, KeyComparator};
 use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec, SstableInfo};
 use tokio::time::Instant;
 
@@ -183,14 +183,14 @@ fn generate_splits_fast(
         indexes.push(
             FullKey {
                 user_key: FullKey::decode(&key_range.left).user_key,
-                epoch: HummockEpoch::MAX,
+                epoch_with_gap: EpochWithGap::new_max_epoch(),
             }
             .encode(),
         );
         indexes.push(
             FullKey {
                 user_key: FullKey::decode(&key_range.right).user_key,
-                epoch: HummockEpoch::MAX,
+                epoch_with_gap: EpochWithGap::new_max_epoch(),
             }
             .encode(),
         );
@@ -241,7 +241,7 @@ pub async fn generate_splits(
                         let data_size = block.len;
                         let full_key = FullKey {
                             user_key: FullKey::decode(&block.smallest_key).user_key,
-                            epoch: HummockEpoch::MAX,
+                            epoch_with_gap: EpochWithGap::new_max_epoch(),
                         }
                         .encode();
                         (data_size as u64, full_key)

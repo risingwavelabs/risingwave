@@ -23,6 +23,7 @@ use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 
 use crate::backup_restore::RestoreOpts;
+use crate::controller::SqlMetaStore;
 use crate::storage::{EtcdMetaStore, MemStore, WrappedEtcdClient as EtcdClient};
 use crate::MetaStoreBackend;
 
@@ -30,6 +31,8 @@ use crate::MetaStoreBackend;
 pub enum MetaStoreBackendImpl {
     Etcd(EtcdMetaStore),
     Mem(MemStore),
+    #[expect(dead_code, reason = "WIP")]
+    Sql(SqlMetaStore),
 }
 
 #[macro_export]
@@ -38,6 +41,7 @@ macro_rules! dispatch_meta_store {
         match $impl {
             MetaStoreBackendImpl::Etcd($store) => $body,
             MetaStoreBackendImpl::Mem($store) => $body,
+            MetaStoreBackendImpl::Sql(_) => panic!("not supported"),
         }
     }};
 }

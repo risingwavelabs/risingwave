@@ -31,7 +31,7 @@ use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
 use risingwave_connector::source::SplitImpl;
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::expr::{Expression, NonStrictExpression};
 use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, PbMutation};
@@ -100,10 +100,11 @@ mod wrapper;
 #[cfg(test)]
 mod integration_tests;
 pub mod test_utils;
+mod utils;
 
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
-pub use backfill::cdc_backfill::*;
+pub use backfill::cdc::cdc_backfill::CdcBackfillExecutor;
 pub use backfill::no_shuffle_backfill::*;
 pub use backfill::upstream_table::*;
 pub use barrier_recv::BarrierRecvExecutor;
@@ -141,6 +142,7 @@ pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
 };
 pub use union::UnionExecutor;
+pub use utils::DummyExecutor;
 pub use values::ValuesExecutor;
 pub use watermark_filter::WatermarkFilterExecutor;
 pub use wrapper::WrapperExecutor;
@@ -645,7 +647,7 @@ impl Watermark {
 
     pub async fn transform_with_expr(
         self,
-        expr: &BoxedExpression,
+        expr: &NonStrictExpression<impl Expression>,
         new_col_idx: usize,
     ) -> Option<Self> {
         let Self { col_idx, val, .. } = self;
@@ -655,7 +657,7 @@ impl Watermark {
             OwnedRow::new(row)
         };
         let val = expr.eval_row_infallible(&row).await?;
-        Some(Self::new(new_col_idx, expr.return_type(), val))
+        Some(Self::new(new_col_idx, expr.inner().return_type(), val))
     }
 
     /// Transform the watermark with the given output indices. If this watermark is not in the

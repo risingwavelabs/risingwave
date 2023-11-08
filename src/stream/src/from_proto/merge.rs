@@ -21,7 +21,6 @@ use crate::executor::{MergeExecutor, ReceiverExecutor};
 
 pub struct MergeExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for MergeExecutorBuilder {
     type Node = MergeNode;
 
@@ -59,7 +58,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             // There could be arbitrary number of upstreams with simple dispatcher.
             DispatcherType::Simple => false,
             // There should be always only one upstream with no-shuffle dispatcher.
-            DispatcherType::NoShuffle => true,
+            DispatcherType::NoShuffle | DispatcherType::CdcTablename => true,
         };
 
         if always_single_input {

@@ -32,35 +32,38 @@ use super::*;
 /// It is used to throttle problematic MVs that are consuming too much resources.
 pub struct FlowControlExecutor {
     input: BoxedExecutor,
-    rate_limit: u32,
+    rate_limit: Option<u32>,
 }
 
 impl FlowControlExecutor {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(input: Box<dyn Executor>, rate_limit: u32) -> Self {
-        #[cfg(madsim)]
-        println!("FlowControlExecutor rate limiter is disabled in madsim as it will spawn system threads");
+    pub fn new(input: Box<dyn Executor>, rate_limit: Option<u32>) -> Self {
         Self { input, rate_limit }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self) {
-        let quota = Quota::per_second(NonZeroU32::new(self.rate_limit).unwrap());
-        let clock = MonotonicClock;
-        let rate_limiter = RateLimiter::direct_with_clock(quota, &clock);
+        let get_rate_limiter = |rate_limit: u32| {
+            let quota = Quota::per_second(NonZeroU32::new(rate_limit).unwrap());
+            let clock = MonotonicClock;
+            RateLimiter::direct_with_clock(quota, &clock)
+        };
+        let rate_limiter = self.rate_limit.map(get_rate_limiter);
         #[for_await]
         for msg in self.input.execute() {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    #[cfg(not(madsim))]
-                    {
-                        let result = rate_limiter
-                            .until_n_ready(NonZeroU32::new(chunk.cardinality() as u32).unwrap())
-                            .await;
-                        if let Err(InsufficientCapacity(n)) = result {
+                    let chunk_cardinality = chunk.cardinality();
+                    let Some(n) = NonZeroU32::new(chunk_cardinality as u32) else {
+                        // Handle case where chunk is empty
+                        continue;
+                    };
+                    if let Some(rate_limiter) = &rate_limiter {
+                        let result = rate_limiter.until_n_ready(n).await;
+                        if let Err(InsufficientCapacity(_max_cells)) = result {
                             tracing::error!(
-                                "Rate Limit {} smaller than chunk cardinality {n}",
+                                "Rate Limit {:?} smaller than chunk cardinality {chunk_cardinality}",
                                 self.rate_limit,
                             );
                         }

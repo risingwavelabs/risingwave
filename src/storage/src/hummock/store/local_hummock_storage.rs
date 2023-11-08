@@ -21,6 +21,7 @@ use bytes::Bytes;
 use parking_lot::RwLock;
 use prometheus::IntGauge;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::util::epoch::{MAX_EPOCH, MAX_SPILL_TIMES};
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
 use tokio::sync::mpsc;
@@ -49,12 +50,13 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::StateStoreIter;
 
-const MEM_TABLE_SPILL_THRESHOLD: usize = 64 << 20;
 /// `LocalHummockStorage` is a handle for a state table shard to access data from and write data to
 /// the hummock state backend. It is created via `HummockStorage::new_local`.
+
 pub struct LocalHummockStorage {
     mem_table: MemTable,
 
+    spill_offset: u16,
     epoch: Option<u64>,
 
     table_id: TableId,
@@ -94,6 +96,8 @@ pub struct LocalHummockStorage {
     mem_table_size: IntGauge,
 
     mem_table_item_count: IntGauge,
+
+    mem_table_spill_threshold: usize,
 }
 
 impl LocalHummockStorage {
@@ -157,7 +161,7 @@ impl LocalHummockStorage {
         }
 
         let read_snapshot = read_filter_for_local(
-            HummockEpoch::MAX, // Use MAX epoch to make sure we read from latest
+            MAX_EPOCH, // Use MAX epoch to make sure we read from latest
             read_options.table_id,
             &key_range,
             self.read_version.clone(),
@@ -339,14 +343,19 @@ impl LocalStateStore for LocalHummockStorage {
     }
 
     async fn try_flush(&mut self) -> StorageResult<()> {
-        if self.mem_table.kv_size.size() > MEM_TABLE_SPILL_THRESHOLD {
+        if self.mem_table.kv_size.size() > self.mem_table_spill_threshold {
             tracing::info!(
-                "The size of mem table exceeds {} Mb and spill occurs. table_id {}",
-                MEM_TABLE_SPILL_THRESHOLD >> 20,
+                "The size of mem table is {} Mb and it exceeds {} Mb and spill occurs. table_id {}",
+                self.mem_table.kv_size.size() >> 20,
+                self.mem_table_spill_threshold >> 20,
                 self.table_id.table_id()
             );
 
-            self.flush(vec![]).await?;
+            if self.spill_offset < MAX_SPILL_TIMES {
+                self.flush(vec![]).await?;
+            } else {
+                tracing::warn!("No mem table spill occurs, the gap epoch exceeds available range.");
+            }
         }
 
         Ok(())
@@ -370,6 +379,7 @@ impl LocalStateStore for LocalHummockStorage {
             "local state store of table id {:?} is init for more than once",
             self.table_id
         );
+
         Ok(())
     }
 
@@ -378,6 +388,7 @@ impl LocalStateStore for LocalHummockStorage {
             .epoch
             .replace(next_epoch)
             .expect("should have init epoch before seal the first epoch");
+        self.spill_offset = 0;
         assert!(
             next_epoch > prev_epoch,
             "new epoch {} should be greater than current epoch: {}",
@@ -440,6 +451,7 @@ impl LocalHummockStorage {
             let instance_id = self.instance_guard.instance_id;
             let imm = SharedBufferBatch::build_shared_buffer_batch(
                 epoch,
+                self.spill_offset,
                 sorted_items,
                 size,
                 delete_ranges,
@@ -447,6 +459,7 @@ impl LocalHummockStorage {
                 Some(instance_id),
                 Some(tracker),
             );
+            self.spill_offset += 1;
             let imm_size = imm.size();
             self.update(VersionUpdate::Staging(StagingData::ImmMem(imm.clone())));
 
@@ -482,6 +495,7 @@ impl LocalHummockStorage {
         write_limiter: WriteLimiterRef,
         option: NewLocalOptions,
         version_update_notifier_tx: Arc<tokio::sync::watch::Sender<HummockEpoch>>,
+        mem_table_spill_threshold: usize,
     ) -> Self {
         let stats = hummock_version_reader.stats().clone();
         let mem_table_size = stats.mem_table_memory_size.with_label_values(&[
@@ -494,6 +508,7 @@ impl LocalHummockStorage {
         ]);
         Self {
             mem_table: MemTable::new(option.is_consistent_op),
+            spill_offset: 0,
             epoch: None,
             table_id: option.table_id,
             is_consistent_op: option.is_consistent_op,
@@ -509,6 +524,7 @@ impl LocalHummockStorage {
             version_update_notifier_tx,
             mem_table_size,
             mem_table_item_count,
+            mem_table_spill_threshold,
         }
     }
 

@@ -193,6 +193,7 @@ impl Binder {
                 count,
             } => self.bind_overlay(*expr, *new_substring, *start, count),
             Expr::Parameter { index } => self.bind_parameter(index),
+            Expr::Collate { expr, collation } => self.bind_collate(*expr, collation),
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported expression {:?}", expr),
                 112.into(),
@@ -561,6 +562,33 @@ impl Binder {
         let lhs = self.bind_expr_inner(expr)?;
         lhs.cast_explicit(data_type).map_err(Into::into)
     }
+
+    pub fn bind_collate(&mut self, expr: Expr, collation: ObjectName) -> Result<ExprImpl> {
+        if !["C", "POSIX"].contains(&collation.real_value().as_str()) {
+            return Err(ErrorCode::NotImplemented(
+                "Collate collation other than `C` or `POSIX` is not implemented".into(),
+                None.into(),
+            )
+            .into());
+        }
+
+        let bound_inner = self.bind_expr_inner(expr)?;
+        let ret_type = bound_inner.return_type();
+
+        match ret_type {
+            DataType::Varchar => {}
+            _ => {
+                return Err(ErrorCode::NotSupported(
+                    format!("{} is not a collatable data type", ret_type),
+                    "The only built-in collatable data types are `varchar`, please check your type"
+                        .into(),
+                )
+                .into());
+            }
+        }
+
+        Ok(bound_inner)
+    }
 }
 
 /// Given a type `STRUCT<v1 int>`, this function binds the field `v1 int`.
@@ -576,6 +604,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
                     field_descs: vec![],
                     type_name: "".to_string(),
                     generated_or_default_column: None,
+                    description: None,
                 })
             })
             .collect::<Result<Vec<_>>>()?
@@ -589,6 +618,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         field_descs,
         type_name: "".to_string(),
         generated_or_default_column: None,
+        description: None,
     })
 }
 
@@ -640,7 +670,6 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "float4" => DataType::Float32,
                 "float8" => DataType::Float64,
                 "timestamptz" => DataType::Timestamptz,
-                "jsonb" => DataType::Jsonb,
                 "serial" => {
                     return Err(ErrorCode::NotSupported(
                         "Column type SERIAL is not supported".into(),
@@ -652,6 +681,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
             }
         }
         AstDataType::Bytea => DataType::Bytea,
+        AstDataType::Jsonb => DataType::Jsonb,
         AstDataType::Regclass
         | AstDataType::Regproc
         | AstDataType::Uuid

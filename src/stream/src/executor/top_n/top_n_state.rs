@@ -136,7 +136,9 @@ impl<S: StateStore> ManagedTopNState<S> {
         while let Some(item) = state_table_iter.next().await {
             // Note(bugen): should first compare with start key before constructing TopNStateRow.
             let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
-            if let Some(start_key) = start_key.as_ref() && &topn_row.cache_key <= start_key {
+            if let Some(start_key) = start_key.as_ref()
+                && &topn_row.cache_key <= start_key
+            {
                 continue;
             }
             // let row= &topn_row.row;
@@ -225,7 +227,9 @@ impl<S: StateStore> ManagedTopNState<S> {
             topn_cache.high_capacity > 0,
             "topn cache high_capacity should always > 0"
         );
-        while !topn_cache.is_high_cache_full() && let Some(item) = state_table_iter.next().await {
+        while !topn_cache.is_high_cache_full()
+            && let Some(item) = state_table_iter.next().await
+        {
             let topn_row = self.get_topn_row(item?.into_owned_row(), group_key.len());
             topn_cache
                 .high

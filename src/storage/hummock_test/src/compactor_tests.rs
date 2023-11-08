@@ -15,7 +15,7 @@
 #[cfg(test)]
 pub(crate) mod tests {
 
-    use std::collections::{BTreeSet, HashMap, VecDeque};
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
     use std::ops::Bound;
     use std::sync::atomic::AtomicU32;
     use std::sync::Arc;
@@ -280,7 +280,7 @@ pub(crate) mod tests {
             let compaction_filter_flag = CompactionFilterFlag::TTL;
             compact_task.watermark = (TEST_WATERMARK * 1000) << 16;
             compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-            compact_task.table_options = HashMap::from([(
+            compact_task.table_options = BTreeMap::from([(
                 0,
                 TableOption {
                     retention_seconds: 64,
@@ -952,7 +952,7 @@ pub(crate) mod tests {
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
         let retention_seconds_expire_second = 1;
-        compact_task.table_options = HashMap::from_iter([(
+        compact_task.table_options = BTreeMap::from_iter([(
             existing_table_id,
             TableOption {
                 retention_seconds: retention_seconds_expire_second,
@@ -1157,8 +1157,6 @@ pub(crate) mod tests {
 
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-        // compact_task.table_options =
-        //     HashMap::from_iter([(existing_table_id, TableOption { ttl: 0 })]);
         compact_task.current_epoch_time = epoch;
 
         // 3. compact
@@ -1454,13 +1452,8 @@ pub(crate) mod tests {
             .await
             .unwrap();
         let ret = ret1.into_iter().map(|sst| sst.sst_info).collect_vec();
-        let fast_ret = fast_compact_runner
-            .run()
-            .await
-            .unwrap()
-            .into_iter()
-            .map(|sst| sst.sst_info)
-            .collect_vec();
+        let (ssts, _) = fast_compact_runner.run().await.unwrap();
+        let fast_ret = ssts.into_iter().map(|sst| sst.sst_info).collect_vec();
         println!("ssts: {} vs {}", fast_ret.len(), ret.len());
         let mut fast_tables = Vec::with_capacity(fast_ret.len());
         let mut normal_tables = Vec::with_capacity(ret.len());

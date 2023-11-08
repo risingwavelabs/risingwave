@@ -17,11 +17,12 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::types::Interval;
 
-use super::generic::GenericPlanNode;
+use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, ExprRewritable, LogicalFilter,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, ExprRewritable, Logical,
+    LogicalFilter, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow,
+    ToBatch, ToStream,
 };
 use crate::expr::{ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
@@ -32,7 +33,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 /// `LogicalHopWindow` implements Hop Table Function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalHopWindow {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::HopWindow<PlanRef>,
 }
 
@@ -446,7 +447,7 @@ mod test {
         // 0, 1 --> 2
         values
             .base
-            .functional_dependency
+            .functional_dependency_mut()
             .add_functional_dependency_by_column_indices(&[0, 1], &[2]);
         let hop_window: PlanRef = LogicalHopWindow::new(
             values.into(),

@@ -15,6 +15,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::ops::Deref;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -23,7 +24,8 @@ use arrow_schema::{DataType as ArrowDataType, Schema as ArrowSchema, SchemaRef};
 use async_trait::async_trait;
 use icelake::catalog::{load_catalog, CATALOG_NAME, CATALOG_TYPE};
 use icelake::io::file_writer::DeltaWriterResult;
-use icelake::io::EmptyLayer;
+use icelake::io::prometheus::{FileAppenderMetrics, WriterPrometheusLayer};
+use icelake::io::{ChainedFileAppenderLayer, EmptyLayer, RollingWriter};
 use icelake::transaction::Transaction;
 use icelake::types::{data_file_from_json, data_file_to_json, Any, DataFile};
 use icelake::{Table, TableIdentifier};
@@ -37,6 +39,7 @@ use risingwave_pb::connector_service::SinkMetadata;
 use serde::de;
 use serde_derive::Deserialize;
 use url::Url;
+use with_options::WithOptions;
 
 use super::{
     Sink, SinkError, SinkWriterParam, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
@@ -60,12 +63,9 @@ impl RemoteSinkTrait for RemoteIceberg {
 
 pub type RemoteIcebergSink = CoordinatedRemoteSink<RemoteIceberg>;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 #[serde(deny_unknown_fields)]
 pub struct IcebergConfig {
-    #[serde(skip_serializing)]
-    pub connector: String, // Must be "iceberg" here.
-
     pub r#type: String, // accept "append-only" or "upsert"
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
@@ -340,9 +340,9 @@ impl Sink for IcebergSink {
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let table = self.create_table().await?;
         let inner = if let Some(unique_column_ids) = &self.unique_column_ids {
-            IcebergWriter::new_upsert(table, unique_column_ids.clone()).await?
+            IcebergWriter::new_upsert(table, unique_column_ids.clone(), &writer_param).await?
         } else {
-            IcebergWriter::new_append_only(table).await?
+            IcebergWriter::new_append_only(table, &writer_param).await?
         };
         Ok(CoordinatedSinkWriter::new(
             writer_param
@@ -381,15 +381,37 @@ enum IcebergWriterEnum {
 }
 
 impl IcebergWriter {
-    pub async fn new_append_only(table: Table) -> Result<Self> {
+    fn metrics_layer(write_param: &SinkWriterParam) -> WriterPrometheusLayer {
+        let iceberg_metrics = FileAppenderMetrics::new(
+            write_param
+                .sink_metrics
+                .iceberg_file_appender_write_qps
+                .deref()
+                .clone(),
+            write_param
+                .sink_metrics
+                .iceberg_file_appender_write_latency
+                .deref()
+                .clone(),
+        );
+        WriterPrometheusLayer::new(iceberg_metrics)
+    }
+
+    pub async fn new_append_only(table: Table, writer_param: &SinkWriterParam) -> Result<Self> {
+        let metrics_layer = Self::metrics_layer(writer_param);
         Ok(Self(IcebergWriterEnum::AppendOnly(
-            AppendOnlyWriter::new(table).await?,
+            AppendOnlyWriter::new(table, metrics_layer).await?,
         )))
     }
 
-    pub async fn new_upsert(table: Table, unique_column_ids: Vec<usize>) -> Result<Self> {
+    pub async fn new_upsert(
+        table: Table,
+        unique_column_ids: Vec<usize>,
+        writer_param: &SinkWriterParam,
+    ) -> Result<Self> {
+        let metrics_layer = Self::metrics_layer(writer_param);
         Ok(Self(IcebergWriterEnum::Upsert(
-            UpsertWriter::new(table, unique_column_ids).await?,
+            UpsertWriter::new(table, unique_column_ids, metrics_layer).await?,
         )))
     }
 }
@@ -438,12 +460,15 @@ impl SinkWriter for IcebergWriter {
 
 struct AppendOnlyWriter {
     table: Table,
-    writer: icelake::io::task_writer::TaskWriter<EmptyLayer>,
+    writer: icelake::io::task_writer::TaskWriter<
+        ChainedFileAppenderLayer<EmptyLayer, RollingWriter, WriterPrometheusLayer>,
+    >,
     schema: SchemaRef,
+    metrics_layer: WriterPrometheusLayer,
 }
 
 impl AppendOnlyWriter {
-    pub async fn new(table: Table) -> Result<Self> {
+    pub async fn new(table: Table, metrics_layer: WriterPrometheusLayer) -> Result<Self> {
         let schema = Arc::new(
             table
                 .current_table_metadata()
@@ -458,11 +483,13 @@ impl AppendOnlyWriter {
             writer: table
                 .writer_builder()
                 .await?
+                .with_file_appender_layer(metrics_layer.clone())
                 .build_task_writer()
                 .await
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
             table,
             schema,
+            metrics_layer,
         })
     }
 
@@ -489,6 +516,7 @@ impl AppendOnlyWriter {
             self.table
                 .writer_builder()
                 .await?
+                .with_file_appender_layer(self.metrics_layer.clone())
                 .build_task_writer()
                 .await
                 .map_err(|err| SinkError::Iceberg(anyhow!(err)))?,
@@ -516,7 +544,11 @@ enum UpsertWriterInner {
 }
 
 impl UpsertWriter {
-    pub async fn new(table: Table, unique_column_ids: Vec<usize>) -> Result<Self> {
+    pub async fn new(
+        table: Table,
+        unique_column_ids: Vec<usize>,
+        metrics_layer: WriterPrometheusLayer,
+    ) -> Result<Self> {
         let schema = Arc::new(
             table
                 .current_table_metadata()
@@ -531,10 +563,11 @@ impl UpsertWriter {
                 table,
                 partition_splitter,
                 unique_column_ids,
+                metrics_layer,
             ))
         } else {
             UpsertWriterInner::Unpartition(
-                UnpartitionDeltaWriter::new(table, unique_column_ids).await?,
+                UnpartitionDeltaWriter::new(table, unique_column_ids, metrics_layer).await?,
             )
         };
         Ok(Self {
@@ -613,18 +646,27 @@ impl UpsertWriter {
 
 struct UnpartitionDeltaWriter {
     table: Table,
-    writer: icelake::io::file_writer::EqualityDeltaWriter<EmptyLayer>,
+    writer: icelake::io::file_writer::EqualityDeltaWriter<
+        ChainedFileAppenderLayer<EmptyLayer, RollingWriter, WriterPrometheusLayer>,
+    >,
+    metrics_layer: WriterPrometheusLayer,
     unique_column_ids: Vec<usize>,
 }
 
 impl UnpartitionDeltaWriter {
-    pub async fn new(table: Table, unique_column_ids: Vec<usize>) -> Result<Self> {
+    pub async fn new(
+        table: Table,
+        unique_column_ids: Vec<usize>,
+        metrics_layer: WriterPrometheusLayer,
+    ) -> Result<Self> {
         Ok(Self {
             writer: table
                 .writer_builder()
                 .await?
+                .with_file_appender_layer(metrics_layer.clone())
                 .build_equality_delta_writer(unique_column_ids.clone())
                 .await?,
+            metrics_layer,
             table,
             unique_column_ids,
         })
@@ -646,6 +688,7 @@ impl UnpartitionDeltaWriter {
             self.table
                 .writer_builder()
                 .await?
+                .with_file_appender_layer(self.metrics_layer.clone())
                 .build_equality_delta_writer(self.unique_column_ids.clone())
                 .await?,
         );
@@ -657,10 +700,13 @@ struct PartitionDeltaWriter {
     table: Table,
     writers: HashMap<
         icelake::types::PartitionKey,
-        icelake::io::file_writer::EqualityDeltaWriter<EmptyLayer>,
+        icelake::io::file_writer::EqualityDeltaWriter<
+            ChainedFileAppenderLayer<EmptyLayer, RollingWriter, WriterPrometheusLayer>,
+        >,
     >,
     partition_splitter: icelake::types::PartitionSplitter,
     unique_column_ids: Vec<usize>,
+    metrics_layer: WriterPrometheusLayer,
 }
 
 impl PartitionDeltaWriter {
@@ -668,10 +714,12 @@ impl PartitionDeltaWriter {
         table: Table,
         partition_splitter: icelake::types::PartitionSplitter,
         unique_column_ids: Vec<usize>,
+        metrics_layer: WriterPrometheusLayer,
     ) -> Self {
         Self {
             table,
             writers: HashMap::new(),
+            metrics_layer,
             partition_splitter,
             unique_column_ids,
         }
@@ -686,6 +734,7 @@ impl PartitionDeltaWriter {
                         self.table
                             .writer_builder()
                             .await?
+                            .with_file_appender_layer(self.metrics_layer.clone())
                             .build_equality_delta_writer(self.unique_column_ids.clone())
                             .await?,
                     )
@@ -707,6 +756,7 @@ impl PartitionDeltaWriter {
                         self.table
                             .writer_builder()
                             .await?
+                            .with_file_appender_layer(self.metrics_layer.clone())
                             .build_equality_delta_writer(self.unique_column_ids.clone())
                             .await?,
                     )
@@ -849,7 +899,10 @@ impl SinkCommitCoordinator for IcebergSinkCommitter {
             .iter()
             .map(|meta| WriteResult::try_from(meta, &self.partition_type))
             .collect::<Result<Vec<WriteResult>>>()?;
-
+        if write_results.is_empty() || write_results.iter().all(|r| r.data_files.is_empty()) {
+            tracing::debug!(?epoch, "no data to commit");
+            return Ok(());
+        }
         let mut txn = Transaction::new(&mut self.table);
         write_results.into_iter().for_each(|s| {
             txn.append_data_file(s.data_files);

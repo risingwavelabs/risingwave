@@ -56,9 +56,10 @@ impl Default for EnumeratorMetrics {
 #[derive(Debug, Clone)]
 pub struct SourceMetrics {
     pub partition_input_count: GenericCounterVec<AtomicU64>,
+
+    // **Note**: for normal messages, the metric is the message's payload size.
+    // For messages from load generator, the metric is the size of stream chunk.
     pub partition_input_bytes: GenericCounterVec<AtomicU64>,
-    /// User error reporting
-    pub user_source_error_count: GenericCounterVec<AtomicU64>,
     /// Report latest message id
     pub latest_message_id: GenericGaugeVec<AtomicI64>,
     pub rdkafka_native_metric: Arc<RdKafkaStats>,
@@ -85,19 +86,6 @@ impl SourceMetrics {
             registry
         )
         .unwrap();
-        let user_source_error_count = register_int_counter_vec_with_registry!(
-            "user_source_error_count",
-            "Source errors in the system, queryable by tags",
-            &[
-                "error_type",
-                "error_msg",
-                "executor_name",
-                "fragment_id",
-                "table_id"
-            ],
-            registry,
-        )
-        .unwrap();
         let latest_message_id = register_int_gauge_vec_with_registry!(
             "latest_message_id",
             "Latest message id for a exec per partition",
@@ -118,7 +106,6 @@ impl SourceMetrics {
         SourceMetrics {
             partition_input_count,
             partition_input_bytes,
-            user_source_error_count,
             latest_message_id,
             rdkafka_native_metric,
             connector_source_rows_received,

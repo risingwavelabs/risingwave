@@ -1,0 +1,69 @@
+{
+  "type": "record",
+  "name": "AllTypes",
+  "fields": [
+    {"name": "bool_field", "type": ["null", "boolean"]},
+    {"name": "string_field", "type": ["null", "string"]},
+    {"name": "bytes_field", "type": ["null", "bytes"]},
+    {"name": "float_field", "type": ["null", "float"]},
+    {"name": "double_field", "type": ["null", "double"]},
+    {"name": "int32_field", "type": ["null", "int"]},
+    {"name": "int64_field", "type": ["null", "long"]},
+    {"name": "record_field", "type": ["null", {
+      "type": "record",
+      "name": "Nested",
+      "fields": [
+        {"name": "id", "type": ["null", "int"]},
+        {"name": "name", "type": ["null", "string"]}
+      ]
+    }]},
+    {"name": "array_field", "type": ["null", {
+      "type": "array",
+      "items": ["null", {
+          "type": "array",
+          "items": ["null", "int"]
+      }]
+    }]},
+    {"name": "timestamp_micros_field", "type": ["null", {"type": "long", "logicalType": "timestamp-micros"}]},
+    {"name": "timestamp_millis_field", "type": ["null", {"type": "long", "logicalType": "timestamp-millis"}]},
+    {"name": "date_field", "type": ["null", {"type": "int", "logicalType": "date"}]},
+    {"name": "time_micros_field", "type": ["null", {"type": "long", "logicalType": "time-micros"}]},
+    {"name": "time_millis_field", "type": ["null", {"type": "int", "logicalType": "time-millis"}]},
+    {"name": "mon_day_sec_field", "type": ["null", {
+      "type": "fixed",
+      "name": "Duration",
+      "size": 12,
+      "logicalType": "duration"
+    }]},
+    {"name": "unsupported", "type": ["null", {
+      "type": "record",
+      "name": "Unsupported",
+      "fields": [
+        {"name": "enum_field", "type": ["null", {
+          "type": "enum",
+          "name": "Suit",
+          "symbols": ["SPADES", "HEARTS", "DIAMONDS", "CLUBS"]
+        }]},
+        {"name": "map_field", "type": ["null", {
+          "type": "map",
+          "values": ["null", "string"]
+        }]},
+        {"name": "union_field", "type": ["null", "string", "double", "boolean"]},
+        {"name": "fixed_field", "type": ["null", {
+          "type": "fixed",
+          "name": "Int256",
+          "size": 32
+        }]},
+        {"name": "decimal_field", "type": ["null", {
+          "type": "bytes",
+          "logicalType": "decimal",
+          "precision": 38,
+          "scale": 10
+        }]},
+        {"name": "uuid_field", "type": ["null", {"type": "string", "logicalType": "uuid"}]},
+        {"name": "local_micros_field", "type": ["null", {"type": "long", "logicalType": "local-timestamp-micros"}]},
+        {"name": "local_millis_field", "type": ["null", {"type": "long", "logicalType": "local-timestamp-millis"}]}
+      ]
+    }]}
+  ]
+}

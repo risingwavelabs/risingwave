@@ -28,7 +28,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::HashKey;
@@ -151,7 +150,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
         })
     }
 }
-#[async_trait]
+
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool> TopNExecutorBase
     for InnerAppendOnlyGroupTopNExecutor<K, S, WITH_TIES>
 where

@@ -34,11 +34,11 @@ pub mod prelude {
     pub use risingwave_common::test_prelude::StreamChunkTestExt;
     pub use risingwave_common::types::DataType;
     pub use risingwave_common::util::sort_util::OrderType;
-    pub use risingwave_expr::expr::build_from_pretty;
     pub use risingwave_storage::memory::MemoryStateStore;
     pub use risingwave_storage::StateStore;
 
     pub use crate::common::table::state_table::StateTable;
+    pub use crate::executor::test_utils::expr::build_from_pretty;
     pub use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
     pub use crate::executor::{ActorContext, BoxedMessageStream, Executor, PkIndices};
 }
@@ -67,6 +67,10 @@ impl MessageSender {
         if stop {
             barrier = barrier.with_stop();
         }
+        self.0.send(Message::Barrier(barrier)).unwrap();
+    }
+
+    pub fn send_barrier(&self, barrier: Barrier) {
         self.0.send(Message::Barrier(barrier)).unwrap();
     }
 
@@ -263,6 +267,14 @@ pub trait StreamExecutorTestExt: MessageStream + Unpin {
 // FIXME: implement on any `impl MessageStream` if the analyzer works well.
 impl StreamExecutorTestExt for BoxedMessageStream {}
 
+pub mod expr {
+    use risingwave_expr::expr::NonStrictExpression;
+
+    pub fn build_from_pretty(s: impl AsRef<str>) -> NonStrictExpression {
+        NonStrictExpression::for_test(risingwave_expr::expr::build_from_pretty(s))
+    }
+}
+
 pub mod agg_executor {
     use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
@@ -272,6 +284,7 @@ pub mod agg_executor {
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::aggregate::{AggCall, AggKind};
+    use risingwave_pb::stream_plan::PbAggNodeVersion;
     use risingwave_storage::StateStore;
 
     use crate::common::table::state_table::StateTable;
@@ -436,6 +449,8 @@ pub mod agg_executor {
         .await;
 
         HashAggExecutor::<SerializedKey, S>::new(AggExecutorArgs {
+            version: PbAggNodeVersion::Max,
+
             input,
             actor_ctx: ActorContext::create(123),
             pk_indices,
@@ -499,6 +514,8 @@ pub mod agg_executor {
         .await;
 
         SimpleAggExecutor::new(AggExecutorArgs {
+            version: PbAggNodeVersion::Max,
+
             input,
             actor_ctx,
             pk_indices,

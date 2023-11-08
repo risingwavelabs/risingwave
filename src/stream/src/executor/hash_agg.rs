@@ -29,6 +29,7 @@ use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
+use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, HashAggExecutorExtraArgs};
@@ -80,6 +81,9 @@ pub struct HashAggExecutor<K: HashKey, S: StateStore> {
 
 struct ExecutorInner<K: HashKey, S: StateStore> {
     _phantom: PhantomData<K>,
+
+    /// Version of aggregation executors.
+    version: PbAggNodeVersion,
 
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
@@ -233,6 +237,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             input: args.input,
             inner: ExecutorInner {
                 _phantom: PhantomData,
+                version: args.version,
                 actor_ctx: args.actor_ctx,
                 info: ExecutorInfo {
                     schema,
@@ -318,6 +323,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             // Create `AggGroup` for the current group if not exists. This will
                             // restore agg states from the intermediate state table.
                             let agg_group = AggGroup::create(
+                                this.version,
                                 Some(GroupKey::new(
                                     key.deserialize(group_key_types)?,
                                     Some(this.group_key_table_pk_projection.clone()),
@@ -378,7 +384,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .zip_eq_fast(&mut this.storages)
             .zip_eq_fast(call_visibilities.iter())
         {
-            if let AggStateStorage::MaterializedInput { table, mapping } = storage && !call.distinct {
+            if let AggStateStorage::MaterializedInput { table, mapping } = storage
+                && !call.distinct
+            {
                 let chunk = chunk.project_with_vis(mapping.upstream_columns(), visibility.clone());
                 table.write_chunk(chunk);
             }
@@ -407,8 +415,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 .zip_eq_fast(&mut this.storages)
                 .zip_eq_fast(visibilities.iter())
             {
-                if let AggStateStorage::MaterializedInput { table, mapping } = storage && call.distinct {
-                    let chunk = chunk.project_with_vis(mapping.upstream_columns(), visibility.clone());
+                if let AggStateStorage::MaterializedInput { table, mapping } = storage
+                    && call.distinct
+                {
+                    let chunk =
+                        chunk.project_with_vis(mapping.upstream_columns(), visibility.clone());
                     table.write_chunk(chunk);
                 }
             }
@@ -466,6 +477,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     let states = row.into_iter().skip(this.group_key_indices.len()).collect();
 
                     let mut agg_group = AggGroup::create_eowc(
+                        this.version,
                         Some(GroupKey::new(
                             group_key,
                             Some(this.group_key_table_pk_projection.clone()),

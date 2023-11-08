@@ -11,17 +11,19 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 
+//
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
-use super::generic::{self, push_down_into_join, push_down_join_condition, GenericPlanNode};
+use super::generic::{
+    self, push_down_into_join, push_down_join_condition, GenericPlanNode, GenericPlanRef,
+};
 use super::utils::{childless_record, Distill};
 use super::{
-    ColPrunable, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
+    ColPrunable, Logical, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
     PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{CorrelatedId, Expr, ExprImpl, ExprRewriter, InputRef};
@@ -36,7 +38,7 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 /// left side.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalApply {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     left: PlanRef,
     right: PlanRef,
     on: Condition,

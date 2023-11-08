@@ -22,6 +22,9 @@ use std::time::{Duration, SystemTime};
 use itertools::Itertools;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_hummock_sdk::HummockSstableObjectId;
+use risingwave_meta_model_v2::prelude::{Worker, WorkerProperty};
+use risingwave_meta_model_v2::worker::{WorkerStatus, WorkerType};
+use risingwave_meta_model_v2::{worker, worker_property, I32Array, TransactionId, WorkerId};
 use risingwave_pb::common::worker_node::{PbProperty, PbState};
 use risingwave_pb::common::{
     HostAddress, ParallelUnit, PbHostAddress, PbParallelUnit, PbWorkerNode, PbWorkerType,
@@ -31,18 +34,16 @@ use risingwave_pb::meta::heartbeat_request;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use sea_orm::prelude::Expr;
+use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
-    QuerySelect, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect,
+    TransactionTrait,
 };
 use tokio::sync::oneshot::Sender;
 use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
-use crate::manager::prelude::{Worker, WorkerProperty};
-use crate::manager::{LocalNotification, MetaSrvEnv, WorkerId, WorkerKey};
-use crate::model_v2::worker::{WorkerStatus, WorkerType};
-use crate::model_v2::{worker, worker_property, I32Array};
+use crate::manager::{LocalNotification, MetaSrvEnv, WorkerKey};
 use crate::{MetaError, MetaResult};
 
 pub type ClusterControllerRef = Arc<ClusterController>;
@@ -84,65 +85,7 @@ impl From<WorkerInfo> for PbWorkerNode {
                 is_serving: p.is_serving,
                 is_unschedulable: p.is_unschedulable,
             }),
-            transactional_id: info.0.transaction_id.map(|txn| txn as _),
-        }
-    }
-}
-
-impl From<PbWorkerType> for WorkerType {
-    fn from(worker_type: PbWorkerType) -> Self {
-        match worker_type {
-            PbWorkerType::Unspecified => unreachable!("unspecified worker type"),
-            PbWorkerType::Frontend => Self::Frontend,
-            PbWorkerType::ComputeNode => Self::ComputeNode,
-            PbWorkerType::RiseCtl => Self::RiseCtl,
-            PbWorkerType::Compactor => Self::Compactor,
-            PbWorkerType::Meta => Self::Meta,
-        }
-    }
-}
-
-impl From<WorkerType> for PbWorkerType {
-    fn from(worker_type: WorkerType) -> Self {
-        match worker_type {
-            WorkerType::Frontend => Self::Frontend,
-            WorkerType::ComputeNode => Self::ComputeNode,
-            WorkerType::RiseCtl => Self::RiseCtl,
-            WorkerType::Compactor => Self::Compactor,
-            WorkerType::Meta => Self::Meta,
-        }
-    }
-}
-
-impl From<PbState> for WorkerStatus {
-    fn from(state: PbState) -> Self {
-        match state {
-            PbState::Unspecified => unreachable!("unspecified worker status"),
-            PbState::Starting => Self::Starting,
-            PbState::Running => Self::Running,
-        }
-    }
-}
-
-impl From<WorkerStatus> for PbState {
-    fn from(status: WorkerStatus) -> Self {
-        match status {
-            WorkerStatus::Starting => Self::Starting,
-            WorkerStatus::Running => Self::Running,
-        }
-    }
-}
-
-impl From<&PbWorkerNode> for worker::ActiveModel {
-    fn from(worker: &PbWorkerNode) -> Self {
-        let host = worker.host.clone().unwrap();
-        Self {
-            worker_id: ActiveValue::Set(worker.id as i32),
-            worker_type: ActiveValue::Set(worker.r#type().into()),
-            host: ActiveValue::Set(host.host),
-            port: ActiveValue::Set(host.port),
-            status: ActiveValue::Set(worker.state().into()),
-            ..Default::default()
+            transactional_id: info.0.transaction_id.map(|id| id as _),
         }
     }
 }
@@ -312,14 +255,7 @@ impl ClusterController {
                 };
 
                 if let Err(err) = Worker::delete_many()
-                    .filter(
-                        worker::Column::WorkerId.is_in(
-                            worker_to_delete
-                                .into_iter()
-                                .map(|id| id as i32)
-                                .collect_vec(),
-                        ),
-                    )
+                    .filter(worker::Column::WorkerId.is_in(worker_to_delete))
                     .exec(&inner.db)
                     .await
                 {
@@ -457,7 +393,7 @@ pub struct StreamingClusterInfo {
 pub struct ClusterControllerInner {
     db: DatabaseConnection,
     /// Record for tracking available machine ids, one is available.
-    available_transactional_ids: VecDeque<i32>,
+    available_transactional_ids: VecDeque<TransactionId>,
     worker_extra_info: HashMap<WorkerId, WorkerExtraInfo>,
 }
 
@@ -466,7 +402,7 @@ impl ClusterControllerInner {
     pub const MAX_WORKER_REUSABLE_ID_COUNT: usize = 1 << Self::MAX_WORKER_REUSABLE_ID_BITS;
 
     pub async fn new(db: DatabaseConnection) -> MetaResult<Self> {
-        let workers: Vec<(i32, Option<i32>)> = Worker::find()
+        let workers: Vec<(WorkerId, Option<TransactionId>)> = Worker::find()
             .select_only()
             .column(worker::Column::WorkerId)
             .column(worker::Column::TransactionId)
@@ -478,13 +414,13 @@ impl ClusterControllerInner {
             .cloned()
             .filter_map(|(_, txn_id)| txn_id)
             .collect();
-        let available_transactional_ids = (0..Self::MAX_WORKER_REUSABLE_ID_COUNT as i32)
+        let available_transactional_ids = (0..Self::MAX_WORKER_REUSABLE_ID_COUNT as TransactionId)
             .filter(|id| !inuse_txn_ids.contains(id))
             .collect();
 
         let worker_extra_info = workers
             .into_iter()
-            .map(|(w, _)| (w as u32, WorkerExtraInfo::default()))
+            .map(|(w, _)| (w, WorkerExtraInfo::default()))
             .collect();
 
         Ok(Self {
@@ -521,13 +457,13 @@ impl ClusterControllerInner {
             Ok(())
         } else {
             Err(MetaError::invalid_worker(
-                worker_id,
+                worker_id as _,
                 "worker not found".into(),
             ))
         }
     }
 
-    fn apply_transaction_id(&self, r#type: PbWorkerType) -> MetaResult<Option<i32>> {
+    fn apply_transaction_id(&self, r#type: PbWorkerType) -> MetaResult<Option<TransactionId>> {
         match (self.available_transactional_ids.front(), r#type) {
             (None, _) => Err(MetaError::unavailable(
                 "no available reusable machine id".to_string(),
@@ -548,9 +484,9 @@ impl ClusterControllerInner {
         let txn = self.db.begin().await?;
 
         // TODO: remove this workaround when we deprecate parallel unit ids.
-        let derive_parallel_units = |txn_id: i32, start: u32, end: u32| {
+        let derive_parallel_units = |txn_id: TransactionId, start: i32, end: i32| {
             (start..end)
-                .map(|idx| (idx << Self::MAX_WORKER_REUSABLE_ID_BITS) as i32 + txn_id)
+                .map(|idx| (idx << Self::MAX_WORKER_REUSABLE_ID_BITS) + txn_id)
                 .collect_vec()
         };
 
@@ -601,42 +537,42 @@ impl ClusterControllerInner {
                 let mut property: worker_property::ActiveModel = property.into();
 
                 // keep `is_unschedulable` unchanged.
-                property.is_streaming = ActiveValue::Set(add_property.is_streaming);
-                property.is_serving = ActiveValue::Set(add_property.is_serving);
-                property.parallel_unit_ids = ActiveValue::Set(I32Array(current_parallelism));
+                property.is_streaming = Set(add_property.is_streaming);
+                property.is_serving = Set(add_property.is_serving);
+                property.parallel_unit_ids = Set(I32Array(current_parallelism));
 
                 WorkerProperty::update(property).exec(&txn).await?;
                 txn.commit().await?;
-                self.update_worker_ttl(worker.worker_id as _, ttl)?;
-                Ok(worker.worker_id as WorkerId)
+                self.update_worker_ttl(worker.worker_id, ttl)?;
+                Ok(worker.worker_id)
             } else {
-                self.update_worker_ttl(worker.worker_id as _, ttl)?;
-                Ok(worker.worker_id as WorkerId)
+                self.update_worker_ttl(worker.worker_id, ttl)?;
+                Ok(worker.worker_id)
             };
         }
         let txn_id = self.apply_transaction_id(r#type)?;
 
         let worker = worker::ActiveModel {
             worker_id: Default::default(),
-            worker_type: ActiveValue::Set(r#type.into()),
-            host: ActiveValue::Set(host_address.host),
-            port: ActiveValue::Set(host_address.port),
-            status: ActiveValue::Set(WorkerStatus::Starting),
-            transaction_id: ActiveValue::Set(txn_id),
+            worker_type: Set(r#type.into()),
+            host: Set(host_address.host),
+            port: Set(host_address.port),
+            status: Set(WorkerStatus::Starting),
+            transaction_id: Set(txn_id),
         };
         let insert_res = Worker::insert(worker).exec(&txn).await?;
         let worker_id = insert_res.last_insert_id as WorkerId;
         if r#type == PbWorkerType::ComputeNode {
             let property = worker_property::ActiveModel {
-                worker_id: ActiveValue::Set(insert_res.last_insert_id),
-                parallel_unit_ids: ActiveValue::Set(I32Array(derive_parallel_units(
+                worker_id: Set(worker_id),
+                parallel_unit_ids: Set(I32Array(derive_parallel_units(
                     *txn_id.as_ref().unwrap(),
                     0,
                     add_property.worker_node_parallelism as _,
                 ))),
-                is_streaming: ActiveValue::Set(add_property.is_streaming),
-                is_serving: ActiveValue::Set(add_property.is_streaming),
-                is_unschedulable: ActiveValue::Set(add_property.is_streaming),
+                is_streaming: Set(add_property.is_streaming),
+                is_serving: Set(add_property.is_streaming),
+                is_unschedulable: Set(add_property.is_streaming),
             };
             WorkerProperty::insert(property).exec(&txn).await?;
         }
@@ -653,8 +589,8 @@ impl ClusterControllerInner {
 
     pub async fn activate_worker(&self, worker_id: WorkerId) -> MetaResult<PbWorkerNode> {
         let worker = worker::ActiveModel {
-            worker_id: ActiveValue::Set(worker_id as i32),
-            status: ActiveValue::Set(WorkerStatus::Running),
+            worker_id: Set(worker_id),
+            status: Set(WorkerStatus::Running),
             ..Default::default()
         };
 
@@ -676,10 +612,7 @@ impl ClusterControllerInner {
                 worker_property::Column::IsUnschedulable,
                 Expr::value(is_unschedulable),
             )
-            .filter(
-                worker_property::Column::WorkerId
-                    .is_in(worker_ids.into_iter().map(|id| id as i32).collect_vec()),
-            )
+            .filter(worker_property::Column::WorkerId.is_in(worker_ids))
             .exec(&self.db)
             .await?;
 
@@ -707,10 +640,9 @@ impl ClusterControllerInner {
             return Err(MetaError::invalid_parameter("worker not found!"));
         }
 
-        self.worker_extra_info
-            .remove(&(worker.worker_id as WorkerId));
+        self.worker_extra_info.remove(&worker.worker_id);
         if let Some(txn_id) = &worker.transaction_id {
-            self.available_transactional_ids.push_back(*txn_id as _);
+            self.available_transactional_ids.push_back(*txn_id);
         }
         Ok(WorkerInfo(worker, property).into())
     }
@@ -776,7 +708,7 @@ impl ClusterControllerInner {
     }
 
     pub async fn list_active_parallel_units(&self) -> MetaResult<Vec<ParallelUnit>> {
-        let parallel_units: Vec<(i32, I32Array)> = WorkerProperty::find()
+        let parallel_units: Vec<(WorkerId, I32Array)> = WorkerProperty::find()
             .select_only()
             .column(worker_property::Column::WorkerId)
             .column(worker_property::Column::ParallelUnitIds)
@@ -848,7 +780,7 @@ impl ClusterControllerInner {
     }
 
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> MetaResult<Option<PbWorkerNode>> {
-        let worker = Worker::find_by_id(worker_id as i32)
+        let worker = Worker::find_by_id(worker_id)
             .find_also_related(WorkerProperty)
             .one(&self.db)
             .await?;

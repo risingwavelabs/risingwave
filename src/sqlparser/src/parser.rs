@@ -259,6 +259,7 @@ impl Parser {
                 Keyword::PREPARE => Ok(self.parse_prepare()?),
                 Keyword::COMMENT => Ok(self.parse_comment()?),
                 Keyword::FLUSH => Ok(Statement::Flush),
+                Keyword::WAIT => Ok(Statement::Wait),
                 _ => self.expected(
                     "an SQL statement",
                     Token::Word(w).with_location(token.location),
@@ -1396,6 +1397,12 @@ impl Parser {
             Token::LongArrow => Some(BinaryOperator::LongArrow),
             Token::HashArrow => Some(BinaryOperator::HashArrow),
             Token::HashLongArrow => Some(BinaryOperator::HashLongArrow),
+            Token::HashMinus => Some(BinaryOperator::HashMinus),
+            Token::AtArrow => Some(BinaryOperator::Contains),
+            Token::ArrowAt => Some(BinaryOperator::Contained),
+            Token::QuestionMark => Some(BinaryOperator::Exists),
+            Token::QuestionMarkPipe => Some(BinaryOperator::ExistsAny),
+            Token::QuestionMarkAmpersand => Some(BinaryOperator::ExistsAll),
             Token::Word(w) => match w.keyword {
                 Keyword::AND => Some(BinaryOperator::And),
                 Keyword::OR => Some(BinaryOperator::Or),
@@ -1734,7 +1741,13 @@ impl Parser {
             | Token::Arrow
             | Token::LongArrow
             | Token::HashArrow
-            | Token::HashLongArrow => Ok(P::Other),
+            | Token::HashLongArrow
+            | Token::HashMinus
+            | Token::AtArrow
+            | Token::ArrowAt
+            | Token::QuestionMark
+            | Token::QuestionMarkPipe
+            | Token::QuestionMarkAmpersand => Ok(P::Other),
             Token::Word(w)
                 if w.keyword == Keyword::OPERATOR && self.peek_nth_token(1) == Token::LParen =>
             {
@@ -2433,7 +2446,7 @@ impl Parser {
         let connector = option.map(|opt| opt.value.to_string());
 
         let source_schema = if let Some(connector) = connector {
-            Some(self.parse_source_schema_with_connector(&connector)?)
+            Some(self.parse_source_schema_with_connector(&connector, false)?)
         } else {
             None // Table is NOT created with an external connector.
         };
@@ -2450,6 +2463,23 @@ impl Parser {
             None
         };
 
+        let cdc_table_info = if self.parse_keyword(Keyword::FROM) {
+            let source_name = self.parse_object_name()?;
+            if self.parse_keyword(Keyword::TABLE) {
+                let external_table_name = self.parse_literal_string()?;
+                Some(CdcTableInfo {
+                    source_name,
+                    external_table_name,
+                })
+            } else {
+                return Err(ParserError::ParserError(
+                    "Expect a TABLE clause on table created by CREATE TABLE FROM".to_string(),
+                ));
+            }
+        } else {
+            None
+        };
+
         Ok(Statement::CreateTable {
             name: table_name,
             temporary,
@@ -2462,6 +2492,7 @@ impl Parser {
             source_watermarks,
             append_only,
             query,
+            cdc_table_info,
         })
     }
 
@@ -3253,7 +3284,12 @@ impl Parser {
                 _ => {
                     self.prev_token();
                     let type_name = self.parse_object_name()?;
-                    Ok(DataType::Custom(type_name))
+                    // JSONB is not a keyword
+                    if type_name.to_string().eq_ignore_ascii_case("jsonb") {
+                        Ok(DataType::Jsonb)
+                    } else {
+                        Ok(DataType::Custom(type_name))
+                    }
                 }
             },
             unexpected => {

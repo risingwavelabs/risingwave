@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod big_query;
 pub mod blackhole;
 pub mod boxed;
 pub mod catalog;
@@ -34,9 +35,9 @@ pub mod utils;
 pub mod writer;
 
 use std::collections::HashMap;
-use std::future::Future;
 
 use ::clickhouse::error::Error as ClickHouseError;
+use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_common::buffer::Bitmap;
@@ -78,6 +79,7 @@ macro_rules! for_all_sinks {
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { Doris, $crate::sink::doris::DorisSink },
+                { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { Test, $crate::sink::test_sink::TestSink }
             }
             $(,$arg)*
@@ -223,6 +225,9 @@ pub struct SinkMetrics {
     pub log_store_write_rows: LabelGuardedIntCounter<3>,
     pub log_store_latest_read_epoch: LabelGuardedIntGauge<3>,
     pub log_store_read_rows: LabelGuardedIntCounter<3>,
+
+    pub iceberg_file_appender_write_qps: LabelGuardedIntCounter<2>,
+    pub iceberg_file_appender_write_latency: LabelGuardedHistogram<2>,
 }
 
 impl SinkMetrics {
@@ -235,6 +240,8 @@ impl SinkMetrics {
             log_store_latest_read_epoch: LabelGuardedIntGauge::test_int_gauge(),
             log_store_write_rows: LabelGuardedIntCounter::test_int_counter(),
             log_store_read_rows: LabelGuardedIntCounter::test_int_counter(),
+            iceberg_file_appender_write_qps: LabelGuardedIntCounter::test_int_counter(),
+            iceberg_file_appender_write_latency: LabelGuardedHistogram::test_histogram(),
         }
     }
 }
@@ -277,11 +284,9 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     }
 }
 
-pub trait LogSinker: Send + 'static {
-    fn consume_log_and_sink(
-        self,
-        log_reader: impl LogReader,
-    ) -> impl Future<Output = Result<()>> + Send + 'static;
+#[async_trait]
+pub trait LogSinker: 'static {
+    async fn consume_log_and_sink(self, log_reader: impl LogReader) -> Result<()>;
 }
 
 #[async_trait]
@@ -370,29 +375,73 @@ pub enum SinkError {
     #[error("Kafka error: {0}")]
     Kafka(#[from] rdkafka::error::KafkaError),
     #[error("Kinesis error: {0}")]
-    Kinesis(anyhow::Error),
+    Kinesis(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Remote sink error: {0}")]
-    Remote(anyhow::Error),
+    Remote(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Encode error: {0}")]
     Encode(String),
     #[error("Iceberg error: {0}")]
-    Iceberg(anyhow::Error),
+    Iceberg(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("config error: {0}")]
-    Config(#[from] anyhow::Error),
+    Config(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("coordinator error: {0}")]
-    Coordinator(anyhow::Error),
+    Coordinator(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("ClickHouse error: {0}")]
     ClickHouse(String),
+    #[error("Redis error: {0}")]
+    Redis(String),
     #[error("Nats error: {0}")]
-    Nats(anyhow::Error),
+    Nats(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Doris http error: {0}")]
-    Http(anyhow::Error),
+    Http(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Doris error: {0}")]
     Doris(String),
     #[error("Pulsar error: {0}")]
-    Pulsar(anyhow::Error),
+    Pulsar(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Internal error: {0}")]
-    Internal(anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
+    #[error("BigQuery error: {0}")]
+    BigQuery(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 impl From<icelake::Error> for SinkError {
@@ -410,6 +459,12 @@ impl From<RpcError> for SinkError {
 impl From<ClickHouseError> for SinkError {
     fn from(value: ClickHouseError) -> Self {
         SinkError::ClickHouse(format!("{}", value))
+    }
+}
+
+impl From<RedisError> for SinkError {
+    fn from(value: RedisError) -> Self {
+        SinkError::Redis(format!("{}", value))
     }
 }
 

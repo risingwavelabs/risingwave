@@ -18,6 +18,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
+use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
@@ -52,6 +53,9 @@ pub struct SimpleAggExecutor<S: StateStore> {
 }
 
 struct ExecutorInner<S: StateStore> {
+    /// Version of aggregation executors.
+    version: PbAggNodeVersion,
+
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
 
@@ -135,6 +139,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         Ok(Self {
             input: args.input,
             inner: ExecutorInner {
+                version: args.version,
                 actor_ctx: args.actor_ctx,
                 info: ExecutorInfo {
                     schema,
@@ -259,9 +264,23 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             table.init_epoch(barrier.epoch);
         });
 
+        let mut distinct_dedup = DistinctDeduplicater::new(
+            &this.agg_calls,
+            &this.watermark_epoch,
+            &this.distinct_dedup_tables,
+            this.actor_ctx.id,
+            this.metrics.clone(),
+        );
+        distinct_dedup.dedup_caches_mut().for_each(|cache| {
+            cache.update_epoch(barrier.epoch.curr);
+        });
+
+        yield Message::Barrier(barrier);
+
         let mut vars = ExecutionVars {
             // This will fetch previous agg states from the intermediate state table.
             agg_group: AggGroup::create(
+                this.version,
                 None,
                 &this.agg_calls,
                 &this.agg_funcs,
@@ -273,21 +292,9 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 &this.input_schema,
             )
             .await?,
-            distinct_dedup: DistinctDeduplicater::new(
-                &this.agg_calls,
-                &this.watermark_epoch,
-                &this.distinct_dedup_tables,
-                this.actor_ctx.id,
-                this.metrics.clone(),
-            ),
+            distinct_dedup,
             state_changed: false,
         };
-
-        vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
-            cache.update_epoch(barrier.epoch.curr);
-        });
-
-        yield Message::Barrier(barrier);
 
         #[for_await]
         for msg in input {

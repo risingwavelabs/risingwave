@@ -18,10 +18,11 @@ use risingwave_common::bail;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
+use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
-    generic, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
@@ -36,7 +37,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// If the condition allows nulls, then a null value is treated the same as false.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalFilter {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Filter<PlanRef>,
 }
 
@@ -462,7 +463,7 @@ mod tests {
         // 3 --> 1, 2
         values
             .base
-            .functional_dependency
+            .functional_dependency_mut()
             .add_functional_dependency_by_column_indices(&[3], &[1, 2]);
         // v1 = 0 AND v2 = v3
         let predicate = ExprImpl::FunctionCall(Box::new(

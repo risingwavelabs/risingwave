@@ -18,7 +18,9 @@ use super::{ExprImpl, ExprVisitor};
 use crate::expr::FunctionCall;
 pub(crate) struct ImpureAnalyzer {}
 
-impl ExprVisitor<bool> for ImpureAnalyzer {
+impl ExprVisitor for ImpureAnalyzer {
+    type Result = bool;
+
     fn merge(a: bool, b: bool) -> bool {
         // the expr will be impure if any of its input is impure
         a || b
@@ -106,6 +108,7 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::RegexpReplace
             | expr_node::Type::RegexpCount
             | expr_node::Type::RegexpSplitToArray
+            | expr_node::Type::RegexpEq
             | expr_node::Type::Pow
             | expr_node::Type::Exp
             | expr_node::Type::Ln
@@ -169,13 +172,29 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::ArrayRemove
             | expr_node::Type::ArrayReplace
             | expr_node::Type::ArrayPosition
+            | expr_node::Type::ArrayContains
+            | expr_node::Type::ArrayContained
             | expr_node::Type::HexToInt256
             | expr_node::Type::JsonbCat
-            | expr_node::Type::JsonbAccessInner
+            | expr_node::Type::JsonbAccess
             | expr_node::Type::JsonbAccessStr
+            | expr_node::Type::JsonbExtractPath
+            | expr_node::Type::JsonbExtractPathText
             | expr_node::Type::JsonbTypeof
             | expr_node::Type::JsonbArrayLength
+            | expr_node::Type::JsonbObject
+            | expr_node::Type::JsonbPretty
+            | expr_node::Type::JsonbDeletePath
+            | expr_node::Type::JsonbContains
+            | expr_node::Type::JsonbContained
+            | expr_node::Type::JsonbExists
+            | expr_node::Type::JsonbExistsAny
+            | expr_node::Type::JsonbExistsAll
+            | expr_node::Type::JsonbStripNulls
+            | expr_node::Type::JsonbBuildArray
+            | expr_node::Type::JsonbBuildObject
             | expr_node::Type::IsJson
+            | expr_node::Type::ToJsonb
             | expr_node::Type::Sind
             | expr_node::Type::Cosd
             | expr_node::Type::Cotd
@@ -198,6 +217,8 @@ impl ExprVisitor<bool> for ImpureAnalyzer {
             | expr_node::Type::ArrayPositions
             | expr_node::Type::StringToArray
             | expr_node::Type::Format
+            | expr_node::Type::PgwireSend
+            | expr_node::Type::PgwireRecv
             | expr_node::Type::ArrayTransform
             | expr_node::Type::Greatest
             | expr_node::Type::Least =>

@@ -89,9 +89,55 @@ impl Binder {
             BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
             BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
-            BinaryOperator::Arrow => ExprType::JsonbAccessInner,
+            BinaryOperator::Arrow => ExprType::JsonbAccess,
             BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
+            BinaryOperator::HashMinus => ExprType::JsonbDeletePath,
+            BinaryOperator::HashArrow => ExprType::JsonbExtractPath,
+            BinaryOperator::HashLongArrow => ExprType::JsonbExtractPathText,
             BinaryOperator::Prefix => ExprType::StartsWith,
+            BinaryOperator::Contains => {
+                let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
+                let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
+                match (left_type, right_type) {
+                    (Some(DataType::List { .. }), Some(DataType::List { .. }))
+                    | (Some(DataType::List { .. }), None)
+                    | (None, Some(DataType::List { .. })) => ExprType::ArrayContains,
+                    (Some(DataType::Jsonb), Some(DataType::Jsonb))
+                    | (Some(DataType::Jsonb), None)
+                    | (None, Some(DataType::Jsonb)) => ExprType::JsonbContains,
+                    (left, right) => {
+                        return Err(ErrorCode::BindError(format!(
+                            "operator does not exist: {} @> {}",
+                            left.map_or_else(|| String::from("unknown"), |x| x.to_string()),
+                            right.map_or_else(|| String::from("unknown"), |x| x.to_string()),
+                        ))
+                        .into());
+                    }
+                }
+            }
+            BinaryOperator::Contained => {
+                let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
+                let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
+                match (left_type, right_type) {
+                    (Some(DataType::List { .. }), Some(DataType::List { .. }))
+                    | (Some(DataType::List { .. }), None)
+                    | (None, Some(DataType::List { .. })) => ExprType::ArrayContained,
+                    (Some(DataType::Jsonb), Some(DataType::Jsonb))
+                    | (Some(DataType::Jsonb), None)
+                    | (None, Some(DataType::Jsonb)) => ExprType::JsonbContained,
+                    (left, right) => {
+                        return Err(ErrorCode::BindError(format!(
+                            "operator does not exist: {} <@ {}",
+                            left.map_or_else(|| String::from("unknown"), |x| x.to_string()),
+                            right.map_or_else(|| String::from("unknown"), |x| x.to_string()),
+                        ))
+                        .into());
+                    }
+                }
+            }
+            BinaryOperator::Exists => ExprType::JsonbExists,
+            BinaryOperator::ExistsAny => ExprType::JsonbExistsAny,
+            BinaryOperator::ExistsAll => ExprType::JsonbExistsAll,
             BinaryOperator::Concat => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
@@ -135,13 +181,10 @@ impl Binder {
                     }
                 }
             }
-            BinaryOperator::PGRegexMatch => {
-                func_types.push(ExprType::IsNotNull);
-                ExprType::RegexpMatch
-            }
+            BinaryOperator::PGRegexMatch => ExprType::RegexpEq,
             BinaryOperator::PGRegexNotMatch => {
-                func_types.push(ExprType::IsNull);
-                ExprType::RegexpMatch
+                func_types.push(ExprType::Not);
+                ExprType::RegexpEq
             }
             _ => {
                 return Err(

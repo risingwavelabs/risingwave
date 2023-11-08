@@ -257,8 +257,14 @@ fn build_fragment(
             current_fragment.fragment_type_mask |= FragmentTypeFlag::BarrierRecv as u32
         }
 
-        NodeBody::Source(_) => {
+        NodeBody::Source(node) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32;
+
+            if let Some(source) = node.source_inner.as_ref() &&
+                let Some(source_info) = source.info.as_ref() && source_info.cdc_source_job {
+                tracing::debug!("mark cdc source job as singleton");
+                current_fragment.requires_singleton = true;
+            }
         }
 
         NodeBody::Dml(_) => {
@@ -276,6 +282,7 @@ fn build_fragment(
         NodeBody::Chain(node) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::ChainNode as u32;
             // memorize table id for later use
+            // The table id could be a upstream CDC source
             state
                 .dependent_table_ids
                 .insert(TableId::new(node.table_id));
@@ -356,6 +363,7 @@ fn build_fragment(
                             r#type: DispatcherType::NoShuffle as i32,
                             dist_key_indices: vec![],
                             output_indices: (0..ref_fragment_node.fields.len() as u32).collect(),
+                            downstream_table_name: None,
                         };
 
                         let no_shuffle_exchange_operator_id = state.gen_operator_id() as u64;

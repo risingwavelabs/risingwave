@@ -16,8 +16,7 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_connector::source::{SourceEncode, SourceStruct};
-use risingwave_source::source_desc::extract_source_struct;
+use risingwave_connector::source::{extract_source_struct, SourceEncode, SourceStruct};
 use risingwave_sqlparser::ast::{
     AlterSourceOperation, ColumnDef, CreateSourceStatement, ObjectName, Statement,
 };

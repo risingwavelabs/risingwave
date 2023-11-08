@@ -18,7 +18,7 @@
 // (found in the LICENSE.Apache file in the root directory).
 
 mod emergency_selector;
-mod level_selector;
+pub(crate) mod level_selector;
 mod manual_selector;
 mod space_reclaim_selector;
 mod tombstone_compaction_selector;
