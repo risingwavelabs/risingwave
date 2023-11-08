@@ -20,6 +20,7 @@ use std::task::{ready, Context, Poll};
 use std::time::{Duration, Instant};
 
 use foyer::common::code::Key;
+use foyer::common::range::RangeBoundsExt;
 use futures::future::{join_all, try_join_all};
 use futures::{Future, FutureExt};
 use itertools::Itertools;
@@ -383,14 +384,15 @@ impl CacheRefillTask {
             let mut admits = 0;
 
             for block_index in block_index_start..block_index_end {
-                let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
+                let (range, _uncompressed_capacity) = sst.calculate_block_info(block_index);
                 let key = SstableBlockIndex {
                     sst_id: object_id,
                     block_idx: block_index as u64,
                 };
+                // see `CachedBlock::serialized_len()`
                 let mut writer = sstable_store
                     .data_file_cache()
-                    .writer(key, key.serialized_len() + uncompressed_capacity);
+                    .writer(key, key.serialized_len() + 1 + 8 + range.size().unwrap());
 
                 if writer.judge() {
                     admits += 1;
