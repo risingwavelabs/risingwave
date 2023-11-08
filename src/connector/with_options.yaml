@@ -66,6 +66,9 @@ DorisConfig:
     required: true
 IcebergConfig:
   fields:
+  - name: connector
+    field_type: String
+    required: true
   - name: r#type
     field_type: String
     required: true

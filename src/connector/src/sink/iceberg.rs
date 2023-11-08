@@ -66,6 +66,8 @@ pub type RemoteIcebergSink = CoordinatedRemoteSink<RemoteIceberg>;
 #[derive(Debug, Clone, Deserialize, WithOptions)]
 #[serde(deny_unknown_fields)]
 pub struct IcebergConfig {
+    pub connector: String, // Avoid deny unknown field. Must be "iceberg"
+
     pub r#type: String, // accept "append-only" or "upsert"
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
