@@ -16,35 +16,3 @@ FROM
         type = 'upsert',
         primary_key = 'target_id'
     );
-
--- ingest back to RW
-CREATE table rw_typed_data (
-    id BIGINT PRIMARY KEY,
-    varchar_column VARCHAR,
-    text_column TEXT,
-    integer_column INTEGER,
-    smallint_column SMALLINT,
-    bigint_column BIGINT,
-    decimal_column DECIMAL,
-    real_column REAL,
-    double_column DOUBLE PRECISION,
-    boolean_column BOOLEAN,
-    date_column DATE,
-    time_column TIME,
-    timestamp_column TIMESTAMP,
-    timestamptz_column TIMESTAMPTZ,
-    interval_column INTERVAL,
-    jsonb_column JSONB,
-    bytea_column BYTEA,
-    array_column VARCHAR[]
-) WITH (
-    connector = 'postgres-cdc',
-    hostname = 'postgres',
-    port = '5432',
-    username = 'myuser',
-    password = '123456',
-    database.name = 'mydb',
-    schema.name = 'public',
-    table.name = 'data_types',
-    slot.name = 'data_types'
-);
