@@ -71,7 +71,7 @@ pub async fn get_from_sstable_info(
     read_options: &ReadOptions,
     dist_key_hash: Option<u64>,
     local_stats: &mut StoreLocalStatistic,
-) -> HummockResult<Option<(HummockValue<Bytes>, HummockEpoch)>> {
+) -> HummockResult<Option<(HummockValue<Bytes>, EpochWithGap)>> {
     let sstable = sstable_store_ref.sstable(sstable_info, local_stats).await?;
 
     // Bloom filter key is the distribution key, which is no need to be the prefix of pk, and do not
@@ -92,8 +92,8 @@ pub async fn get_from_sstable_info(
                 sstable.value().as_ref(),
                 full_key.user_key,
             );
-            if delete_epoch <= full_key.epoch {
-                return Ok(Some((HummockValue::Delete, delete_epoch)));
+            if delete_epoch <= full_key.epoch_with_gap.pure_epoch() {
+                return Ok(Some((HummockValue::Delete, EpochWithGap::new_from_epoch(delete_epoch))));
             }
         }
 
@@ -115,8 +115,11 @@ pub async fn get_from_sstable_info(
                 iter.sst().value().as_ref(),
                 full_key.user_key,
             );
-            if delete_epoch <= full_key.epoch {
-                return Ok(Some((HummockValue::Delete, delete_epoch)));
+            if delete_epoch <= full_key.epoch_with_gap.pure_epoch() {
+                return Ok(Some((
+                    HummockValue::Delete,
+                    EpochWithGap::new_from_epoch(delete_epoch),
+                )));
             }
         }
 
@@ -126,12 +129,15 @@ pub async fn get_from_sstable_info(
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
     let value = if iter.key().user_key == full_key.user_key {
-        Some((iter.value().to_bytes(), iter.key().epoch))
+        Some((iter.value().to_bytes(), iter.key().epoch_with_gap))
     } else if !read_options.ignore_range_tombstone {
         let delete_epoch =
             get_min_delete_range_epoch_from_sstable(iter.sst().value().as_ref(), full_key.user_key);
-        if delete_epoch <= full_key.epoch {
-            Some((HummockValue::Delete, delete_epoch))
+        if delete_epoch <= full_key.epoch_with_gap.pure_epoch() {
+            Some((
+                HummockValue::Delete,
+                EpochWithGap::new_from_epoch(delete_epoch),
+            ))
         } else {
             None
         }
@@ -165,7 +171,7 @@ pub fn get_from_batch(
     read_epoch: HummockEpoch,
     read_options: &ReadOptions,
     local_stats: &mut StoreLocalStatistic,
-) -> Option<(HummockValue<Bytes>, HummockEpoch)> {
+) -> Option<(HummockValue<Bytes>, EpochWithGap)> {
     imm.get(table_key, read_epoch, read_options).map(|v| {
         local_stats.get_shared_buffer_hit_counts += 1;
         v

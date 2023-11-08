@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
-use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::CtlContext;
 
@@ -62,7 +62,7 @@ pub async fn replay_version(context: &CtlContext) -> anyhow::Result<()> {
     let mut current_delta_id = base_version.id + 1;
     loop {
         let deltas = meta_client
-            .list_version_deltas(current_delta_id, delta_fetch_size, HummockEpoch::MAX)
+            .list_version_deltas(current_delta_id, delta_fetch_size, MAX_EPOCH)
             .await
             .unwrap();
         if deltas.version_deltas.is_empty() {
