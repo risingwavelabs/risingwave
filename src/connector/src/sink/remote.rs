@@ -281,33 +281,35 @@ impl LogSinker for RemoteLogSinker {
 
             async fn truncate_matched_offset(
                 queue: &mut VecDeque<(TruncateOffset, Option<Instant>)>,
-                offset: TruncateOffset,
+                persisted_offset: TruncateOffset,
                 log_reader: &mut impl LogReader,
                 metrics: &SinkMetrics,
             ) -> Result<()> {
-                while let Some((sent_offset, _)) = queue.front() && sent_offset < &offset {
+                while let Some((sent_offset, _)) = queue.front() && sent_offset < &persisted_offset {
                     queue.pop_front();
                 }
 
-                let (sent_offset, start_time) = queue
-                    .pop_front()
-                    .ok_or_else(|| anyhow!("get unsent offset {:?} in response", offset))?;
-                if sent_offset != offset {
+                let (sent_offset, start_time) = queue.pop_front().ok_or_else(|| {
+                    anyhow!("get unsent offset {:?} in response", persisted_offset)
+                })?;
+                if sent_offset != persisted_offset {
                     return Err(anyhow!(
                         "new response offset {:?} not match the buffer offset {:?}",
-                        offset,
+                        persisted_offset,
                         sent_offset
                     )
                     .into());
                 }
 
-                if let (TruncateOffset::Barrier { .. }, Some(start_time)) = (offset, start_time) {
+                if let (TruncateOffset::Barrier { .. }, Some(start_time)) =
+                    (persisted_offset, start_time)
+                {
                     metrics
                         .sink_commit_duration_metrics
                         .observe(start_time.elapsed().as_millis() as f64);
                 }
 
-                log_reader.truncate(offset).await?;
+                log_reader.truncate(persisted_offset).await?;
                 Ok(())
             }
 
