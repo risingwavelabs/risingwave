@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::sync::LazyLock;
 use std::time::{Duration, SystemTime};
 
@@ -42,24 +41,23 @@ impl Epoch {
 
     #[must_use]
     pub fn next(self) -> Self {
-        let physical_now = Epoch::physical_now();
+        let mut physical_now = Epoch::physical_now();
         let prev_physical_time = self.physical_time();
 
-        let next_epoch = match physical_now.cmp(&prev_physical_time) {
-            Ordering::Greater => Self::from_physical_time(physical_now),
-            Ordering::Equal => {
-                tracing::warn!("New generate epoch is too close to the previous one.");
-                Epoch(self.0 + 1)
+        loop {
+            if physical_now > prev_physical_time {
+                break;
             }
-            Ordering::Less => {
-                tracing::warn!(
-                    "Clock goes backwards when calling Epoch::next(): prev={}, curr={}",
-                    prev_physical_time,
-                    physical_now
-                );
-                Epoch(self.0 + 1)
-            }
-        };
+            physical_now = Epoch::physical_now();
+
+            #[cfg(madsim)]
+            tokio::time::advance(std::time::Duration::from_micros(10));
+            #[cfg(not(madsim))]
+            std::hint::spin_loop();
+        }
+        // The last 16 bits of the previous epoch ((prev_epoch + 1, prev_epoch + 65536)) will be
+        // used as the gap epoch when the mem table spill occurs.
+        let next_epoch = Self::from_physical_time(physical_now);
 
         assert!(next_epoch.0 > self.0);
         next_epoch
@@ -117,7 +115,7 @@ impl Epoch {
 }
 
 pub const EPOCH_AVAILABLE_BITS: u64 = 16;
-pub const MAX_SPILL_TIMES: u64 = 1 << EPOCH_AVAILABLE_BITS;
+pub const MAX_SPILL_TIMES: u16 = ((1 << EPOCH_AVAILABLE_BITS) - 1) as u16;
 pub const EPOCH_MASK: u64 = (1 << EPOCH_AVAILABLE_BITS) - 1;
 pub const MAX_EPOCH: u64 = u64::MAX & !EPOCH_MASK;
 impl From<u64> for Epoch {
@@ -207,8 +205,8 @@ mod tests {
         assert_eq!(risingwave_st, *UNIX_RISINGWAVE_DATE_EPOCH);
     }
 
-    #[test]
-    fn test_epoch_generate() {
+    #[tokio::test]
+    async fn test_epoch_generate() {
         let mut prev_epoch = Epoch::now();
         for _ in 0..1000 {
             let epoch = prev_epoch.next();

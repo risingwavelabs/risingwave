@@ -62,6 +62,7 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 futures-async-stream = { workspace = true }
 rand = "0.8"
+risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
 tempfile = "3"
 
 [lints]
