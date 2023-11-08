@@ -62,7 +62,7 @@ pub async fn handle_drop_sink(
     let mut affected_table_change = None;
     if let Some(target_table_name) = &sink.sink_into_name {
         use anyhow::Context;
-        use risingwave_common::error::{ErrorCode, RwError};
+        use risingwave_common::error::ErrorCode;
         use risingwave_common::util::column_index_mapping::ColIndexMapping;
         use risingwave_sqlparser::ast::Statement;
         use risingwave_sqlparser::parser::Parser;
@@ -98,13 +98,6 @@ pub async fn handle_drop_sink(
             table.clone()
         };
 
-        // TODO(yuhao): alter table with generated columns.
-        if original_catalog.has_generated_column() {
-            return Err(RwError::from(ErrorCode::BindError(
-                "Alter a table with generated column has not been implemented.".to_string(),
-            )));
-        }
-
         // Retrieve the original table definition and parse it to AST.
         let [mut definition]: [_; 1] = Parser::parse_sql(&original_catalog.definition)
             .context("unable to parse original table definition")?
@@ -131,7 +124,7 @@ pub async fn handle_drop_sink(
             panic!("unexpected statement type: {:?}", definition);
         };
 
-        let (graph, table, source, _) = generate_table(
+        let (graph, table, source) = generate_table(
             &session,
             table_name,
             &original_catalog,
@@ -142,7 +135,6 @@ pub async fn handle_drop_sink(
             constraints,
             source_watermarks,
             append_only,
-            0,
         )
         .await?;
 

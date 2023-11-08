@@ -457,7 +457,6 @@ impl PlanRoot {
         watermark_descs: Vec<WatermarkDesc>,
         version: Option<TableVersion>,
         with_external_source: bool,
-        with_external_sinks: i32,
     ) -> Result<StreamMaterialize> {
         let stream_plan = self.gen_optimized_stream_plan(false)?;
 
@@ -537,7 +536,7 @@ impl PlanRoot {
             .map(|c| c.column_desc.clone())
             .collect();
 
-        let mut union_inputs = if with_external_source {
+        let union_inputs = if with_external_source {
             let mut external_source_node = stream_plan;
             external_source_node =
                 inject_project_for_generated_column_if_needed(&columns, external_source_node)?;

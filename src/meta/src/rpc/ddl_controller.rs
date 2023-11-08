@@ -18,13 +18,11 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::source::{
@@ -42,7 +40,8 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    Dispatcher, DispatcherType, FragmentTypeFlag, FragmentTypeFlag, PbDispatcherType,
+    Dispatcher, DispatcherType, DispatcherType, FragmentTypeFlag, FragmentTypeFlag, MergeNode,
+    PbDispatcherType, StreamFragmentGraph as StreamFragmentGraphProto,
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use tokio::sync::Semaphore;
@@ -646,13 +645,7 @@ impl DdlController {
             .prepare_replace_table(table_stream_job, table_fragment_graph)
             .await?;
 
-        let sink_fragment = sink_table_fragments
-            .fragments()
-            .into_iter()
-            .filter(|fragment| (fragment.fragment_type_mask & FragmentTypeFlag::Sink as u32) != 0)
-            .exactly_one()
-            .cloned()
-            .map_err(|e| anyhow!("sink fragment not found: {}", e))?;
+        let sink_fragment = sink_table_fragments.sink_fragment().unwrap();
 
         let sink_actor_ids = sink_fragment
             .actors
@@ -677,86 +670,90 @@ impl DdlController {
                     visit_stream_node(node, |body| {
                         if let NodeBody::Merge(m) = body && m.upstream_actor_id.is_empty() {
                             target_fragment_id = Some(*fragment_id);
-                            fragment.fragment_type_mask &= !(FragmentTypeFlag::Source as u32);
                         };
                     })
                 };
             }
         }
 
-        let sink_actor_ids = sink_actor_ids.into_iter().sorted().collect_vec();
-
         let target_fragment_id =
             target_fragment_id.expect("fragment of placeholder merger not found");
 
-        let merge_actor_ids = replace_table_table_fragments
+        let table = table_stream_job.table().unwrap();
+
+        let union_fragment = replace_table_table_fragments
             .fragments
             .get(&target_fragment_id)
-            .unwrap()
+            .unwrap();
+
+        let downstream_actor_ids = union_fragment
             .actors
             .iter()
             .map(|actor| actor.actor_id)
-            .sorted()
             .collect_vec();
-
-        let sink_to_merge: HashMap<_, _> = sink_actor_ids
-            .iter()
-            .zip_eq_debug(merge_actor_ids.iter())
-            .collect();
-
-        let merge_to_sink: HashMap<_, _> = merge_actor_ids
-            .iter()
-            .zip_eq_debug(sink_actor_ids.iter())
-            .collect();
-
-        for fragment in replace_table_table_fragments.fragments.values_mut() {
-            for actor in &mut fragment.actors {
-                if let Some(node) = &mut actor.nodes {
-                    visit_stream_node(node, |body| {
-                        if let NodeBody::Merge(m) = body && m.upstream_actor_id.is_empty() {
-                            let upstream_actor_id = *merge_to_sink.get(&actor.actor_id).cloned().unwrap();
-                            m.upstream_actor_id = vec![upstream_actor_id];
-                            m.upstream_fragment_id = sink_fragment.fragment_id;
-                            m.upstream_dispatcher_type = PbDispatcherType::NoShuffle as _;
-
-                            actor.upstream_actor_id = vec![upstream_actor_id];
-                        }
-                    })
-                }
-            }
-        }
-
-        let table = table_stream_job.table().unwrap();
 
         let output_indices = table
             .columns
             .iter()
             .enumerate()
-            .filter(|(_, column)| {
-                column
-                    .get_column_desc()
-                    .unwrap()
-                    .generated_or_default_column
-                    .is_none()
-            })
-            .map(|(a, _)| a as u32)
+            .map(|(idx, _)| idx as _)
             .collect_vec();
 
-        for actor_id in &sink_actor_ids {
-            let downstream_actor_id = sink_to_merge.get(actor_id).unwrap();
+        let dist_key_indices = table.distribution_key.iter().map(|i| *i as _).collect_vec();
 
+        let mapping = downstream_actor_ids
+            .iter()
+            .map(|id| {
+                let actor_status = replace_table_table_fragments.actor_status.get(id).unwrap();
+                let parallel_unit_id = actor_status.parallel_unit.as_ref().unwrap().id;
+
+                (parallel_unit_id, *id)
+            })
+            .collect();
+
+        let actor_mapping =
+            ParallelUnitMapping::from_protobuf(union_fragment.vnode_mapping.as_ref().unwrap())
+                .to_actor(&mapping);
+
+        let upstream_actors = sink_fragment.get_actors();
+
+        for actor in upstream_actors {
             replace_table_ctx.dispatchers.insert(
-                *actor_id,
+                actor.actor_id,
                 vec![Dispatcher {
-                    r#type: DispatcherType::NoShuffle as _,
-                    dist_key_indices: vec![],
+                    r#type: DispatcherType::Hash as _,
+                    dist_key_indices: dist_key_indices.clone(),
                     output_indices: output_indices.clone(),
-                    hash_mapping: None,
-                    dispatcher_id: target_fragment_id as u64,
-                    downstream_actor_id: vec![**downstream_actor_id],
+                    hash_mapping: Some(actor_mapping.to_protobuf()),
+                    dispatcher_id: union_fragment.fragment_id as _,
+                    downstream_actor_id: downstream_actor_ids.clone(),
                     downstream_table_name: None,
                 }],
             );
+        }
+
+        let union_fragment = replace_table_table_fragments
+            .fragments
+            .get_mut(&target_fragment_id)
+            .unwrap();
+
+        let upstream_fragment_id = sink_fragment.fragment_id;
+
+        for actor in &mut union_fragment.actors {
+            if let Some(node) = &mut actor.nodes {
+                let fields = node.fields.clone();
+
+                visit_stream_node(node, |body| {
+                    if let NodeBody::Merge(merge_node) = body && merge_node.upstream_actor_id.is_empty() {
+                        *merge_node = MergeNode {
+                            upstream_actor_id: sink_actor_ids.clone(),
+                            upstream_fragment_id,
+                            upstream_dispatcher_type: DispatcherType::Hash as _,
+                            fields: fields.clone()
+                        };
+                    }
+                })
+            }
         }
 
         Ok(ReplaceTableJob {

@@ -24,7 +24,6 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
 use risingwave_connector::sink::{
@@ -33,7 +32,6 @@ use risingwave_connector::sink::{
 use risingwave_pb::ddl_service::ReplaceTablePlan;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::stream_node::NodeBody::Merge;
 use risingwave_pb::stream_plan::{DispatcherType, MergeNode, StreamNode};
 use risingwave_sqlparser::ast::{
     ConnectorSchema, CreateSink, CreateSinkStatement, EmitMode, Encode, Format, ObjectName, Query,
@@ -50,10 +48,7 @@ use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::handler::create_table::{generate_table, ColumnIdGenerator};
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::{
-    generic, Explain, LogicalSource, PlanTreeNodeUnary, StreamProject,
-};
-use crate::optimizer::property::{Order, RequiredDist};
+use crate::optimizer::plan_node::{generic, Explain, LogicalSource, StreamProject};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
@@ -233,8 +228,6 @@ pub async fn handle_create_sink(
     let target_table = stmt.into_table_name.clone();
 
     let mut affected_table_change = None;
-    let mut table_dist = None;
-
     if let Some(table_name) = target_table {
         let db_name = session.database();
         let (schema_name, real_table_name) =
@@ -293,7 +286,7 @@ pub async fn handle_create_sink(
             panic!("unexpected statement type: {:?}", definition);
         };
 
-        let (mut graph, table, source, dist) = generate_table(
+        let (mut graph, table, source) = generate_table(
             &session,
             table_name,
             &original_catalog,
@@ -304,64 +297,32 @@ pub async fn handle_create_sink(
             constraints,
             source_watermarks,
             append_only,
-            1,
         )
         .await?;
 
-        table_dist = Some(dist);
-
-        fn modify_source_to_merge(node: &mut StreamNode) {
-            let fields = node.fields.clone();
-
-            if let Some(NodeBody::Dml(_)) = &node.node_body {
-                return;
-            }
-
-            if let Some(NodeBody::Source(s)) = &mut node.node_body && s.source_inner.is_none() {
-                node.node_body = Some(Merge(MergeNode {
-                    upstream_dispatcher_type: DispatcherType::NoShuffle as _,
-                    fields: fields.clone(),
+        fn insert_merger_to_union(node: &mut StreamNode) {
+            if let Some(NodeBody::Union(_union_node)) = &mut node.node_body {
+                node.input.push(StreamNode {
+                    identity: "Merge (sink into table)".to_string(),
+                    fields: node.fields.clone(),
+                    node_body: Some(NodeBody::Merge(MergeNode {
+                        upstream_dispatcher_type: DispatcherType::Hash as _,
+                        ..Default::default()
+                    })),
                     ..Default::default()
-                }));
-                node.identity = "Merge (sink into table)".to_string();
-                return;
-            }
-
-            if let Some(NodeBody::Union(_u)) = &mut node.node_body {
-                for input in &mut node.input {
-                    // for project generated column
-                    if let Some(NodeBody::Project(_)) = &mut input.node_body {
-                        if let Ok(input) = input.input.iter_mut().exactly_one() {
-                            if let Some(NodeBody::Source(s)) = &mut input.node_body && s.source_inner.is_none() {
-                                node.node_body = Some(Merge(MergeNode {
-                                    upstream_dispatcher_type: DispatcherType::NoShuffle as _,
-                                    fields: fields.clone(),
-                                    ..Default::default()
-                                }));
-                                node.identity = "Merge (sink into table)".to_string();
-                            }
-                        }
-                    } else if let Some(NodeBody::Source(s)) = &mut input.node_body && s.source_inner.is_none() {
-                        node.node_body = Some(Merge(MergeNode {
-                            upstream_dispatcher_type: DispatcherType::NoShuffle as _,
-                            fields: fields.clone(),
-                            ..Default::default()
-                        }));
-                        node.identity = "Merge (sink into table)".to_string();
-                    };
-                }
+                });
 
                 return;
             }
 
             for input in &mut node.input {
-                modify_source_to_merge(input);
+                insert_merger_to_union(input);
             }
         }
 
         for fragment in graph.fragments.values_mut() {
             if let Some(node) = &mut fragment.node {
-                modify_source_to_merge(node);
+                insert_merger_to_union(node);
             }
         }
 
@@ -407,15 +368,13 @@ pub async fn handle_create_sink(
             let user_defined_primary_key_table = !(affected_table_catalog.append_only
                 || affected_table_catalog.row_id_index.is_some());
 
-            if !user_defined_primary_key_table {
-                if !(sink.sink_type == SinkType::AppendOnly
-                    || sink.sink_type == SinkType::ForceAppendOnly)
-                {
-                    return Err(RwError::from(ErrorCode::BindError(
-                        "Only append-only sinks can sink to a table without primary keys."
-                            .to_string(),
-                    )));
-                }
+            if !(user_defined_primary_key_table
+                || sink.sink_type == SinkType::AppendOnly
+                || sink.sink_type == SinkType::ForceAppendOnly)
+            {
+                return Err(RwError::from(ErrorCode::BindError(
+                    "Only append-only sinks can sink to a table without primary keys.".to_string(),
+                )));
             }
 
             let mut exprs = vec![];

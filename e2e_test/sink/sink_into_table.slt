@@ -36,7 +36,7 @@ statement ok
 insert into t_s1 values (1, 11), (2, 12), (3, 13);
 
 statement ok
-create table t_row_id_as_primary_key (v1 int, v2 int);
+create table t_row_id_as_primary_key (v1 int, v2 int, v3 int, v4 int as v1 + v2);
 
 statement error Only append-only sinks can sink to a table without primary keys.
 create sink s1 into t_row_id_as_primary_key as select v1, v2 from t_s1;
@@ -47,74 +47,74 @@ create sink s1 into t_row_id_as_primary_key as select v1, v2 from t_s1 with (typ
 statement ok
 flush;
 
-query II rowsort
+query IIII rowsort
 select * from t_row_id_as_primary_key;
 ----
-1 11
-2 12
-3 13
+1 11 NULL 12
+2 12 NULL 14
+3 13 NULL 16
 
 statement ok
 insert into t_s1 values (4, 14), (5, 15), (6, 16);
 
-query II rowsort
+query IIII rowsort
 select * from t_row_id_as_primary_key;
 ----
-1 11
-2 12
-3 13
-4 14
-5 15
-6 16
+1 11 NULL 12
+2 12 NULL 14
+3 13 NULL 16
+4 14 NULL 18
+5 15 NULL 20
+6 16 NULL 22
 
 statement ok
 insert into t_row_id_as_primary_key values (100, 100);
 
-query II
+query IIII
 select * from t_row_id_as_primary_key order by v1;
 ----
-1 11
-2 12
-3 13
-4 14
-5 15
-6 16
-100 100
+1 11 NULL 12
+2 12 NULL 14
+3 13 NULL 16
+4 14 NULL 18
+5 15 NULL 20
+6 16 NULL 22
+100 100 NULL 200
 
 # test append only
 statement ok
 update t_s1 set v2 = 10 where v1 > 3;
 
-query II
+query IIII
 select * from t_row_id_as_primary_key order by v1, v2;
 ----
-1 11
-2 12
-3 13
-4 10
-4 14
-5 10
-5 15
-6 10
-6 16
-100 100
+1 11 NULL 12
+2 12 NULL 14
+3 13 NULL 16
+4 10 NULL 14
+4 14 NULL 18
+5 10 NULL 15
+5 15 NULL 20
+6 10 NULL 16
+6 16 NULL 22
+100 100 NULL 200
 
 statement ok
 delete from t_s1;
 
-query II
+query IIII
 select * from t_row_id_as_primary_key order by v1,v2;
 ----
-1 11
-2 12
-3 13
-4 10
-4 14
-5 10
-5 15
-6 10
-6 16
-100 100
+1 11 NULL 12
+2 12 NULL 14
+3 13 NULL 16
+4 10 NULL 14
+4 14 NULL 18
+5 10 NULL 15
+5 15 NULL 20
+6 10 NULL 16
+6 16 NULL 22
+100 100 NULL 200
 
 statement ok
 drop sink s1;
@@ -135,7 +135,7 @@ statement ok
 insert into t_s2 values (1, 11), (2, 12), (3, 13);
 
 statement ok
-create table t_append_only (v1 int, v2 int) append only;
+create table t_append_only (v1 int, v2 int, v3 int, v4 int as v1 + v2) append only;
 
 statement error Only append-only sinks can sink to a table without primary keys.
 create sink s2 into t_append_only as select v1, v2 from t_s2;
@@ -146,74 +146,74 @@ create sink s2 into t_append_only as select v1, v2 from t_s2 with (type = 'appen
 statement ok
 flush;
 
-query II rowsort
+query IIII rowsort
 select * from t_append_only;
 ----
-1 11
-2 12
-3 13
+1 11 NULL 12
+2 12 NULL 14
+3 13 NULL 16
 
 statement ok
 insert into t_s2 values (4, 14), (5, 15), (6, 16);
 
-query II rowsort
+query IIII rowsort
 select * from t_append_only;
 ----
-1 11
-2 12
-3 13
-4 14
-5 15
-6 16
+1 11 NULL 12
+2 12 NULL 14
+3 13 NULL 16
+4 14 NULL 18
+5 15 NULL 20
+6 16 NULL 22
 
 statement ok
 insert into t_append_only values (100, 100);
 
-query II
+query IIII
 select * from t_append_only order by v1;
 ----
-1 11
-2 12
-3 13
-4 14
-5 15
-6 16
-100 100
+1 11 NULL 12
+2 12 NULL 14
+3 13 NULL 16
+4 14 NULL 18
+5 15 NULL 20
+6 16 NULL 22
+100 100 NULL 200
 
 # test append only
 statement ok
 update t_s2 set v2 = 10 where v1 > 3;
 
-query II
+query IIII
 select * from t_append_only order by v1, v2;
 ----
-1 11
-2 12
-3 13
-4 10
-4 14
-5 10
-5 15
-6 10
-6 16
-100 100
+1 11 NULL 12
+2 12 NULL 14
+3 13 NULL 16
+4 10 NULL 14
+4 14 NULL 18
+5 10 NULL 15
+5 15 NULL 20
+6 10 NULL 16
+6 16 NULL 22
+100 100 NULL 200
 
 statement ok
 delete from t_s2;
 
-query II
+query IIII
 select * from t_append_only order by v1,v2;
 ----
-1 11
-2 12
-3 13
-4 10
-4 14
-5 10
-5 15
-6 10
-6 16
-100 100
+1 11 NULL 12
+2 12 NULL 14
+3 13 NULL 16
+4 10 NULL 14
+4 14 NULL 18
+5 10 NULL 15
+5 15 NULL 20
+6 10 NULL 16
+6 16 NULL 22
+100 100 NULL 200
 
 statement ok
 drop sink s2;
@@ -234,7 +234,7 @@ statement ok
 insert into t_s3 values (1, 11), (2, 12), (3, 13);
 
 statement ok
-create table t_primary_key (v1 int primary key, v2 int);
+create table t_primary_key (v1 int primary key, v2 int, v3 int, v4 int as v1 + v2);
 
 statement ok
 create sink s3 into t_primary_key as select v1, v2 from t_s3;
@@ -242,25 +242,25 @@ create sink s3 into t_primary_key as select v1, v2 from t_s3;
 statement ok
 flush;
 
-query II rowsort
+query IIII rowsort
 select * from t_primary_key;
 ----
-1 11
-2 12
-3 13
+1 11 NULL 12
+2 12 NULL 14
+3 13 NULL 16
 
 statement ok
 insert into t_s3 values (4, 14), (5, 15), (6, 16);
 
-query II rowsort
+query IIII rowsort
 select * from t_primary_key;
 ----
-1 11
-2 12
-3 13
-4 14
-5 15
-6 16
+1 11 NULL 12
+2 12 NULL 14
+3 13 NULL 16
+4 14 NULL 18
+5 15 NULL 20
+6 16 NULL 22
 
 statement ok
 delete from t_s3 where v1 > 3;
@@ -268,9 +268,9 @@ delete from t_s3 where v1 > 3;
 query I rowsort
 select * from t_primary_key;
 ----
-1 11
-2 12
-3 13
+1 11 NULL 12
+2 12 NULL 14
+3 13 NULL 16
 
 statement ok
 update t_s3 set v2 = 111 where v1 = 1;
@@ -278,31 +278,31 @@ update t_s3 set v2 = 111 where v1 = 1;
 query I rowsort
 select * from t_primary_key;
 ----
-1 111
-2 12
-3 13
+1 111 NULL 112
+2 12 NULL 14
+3 13 NULL 16
 
 statement ok
 insert into t_primary_key values (100, 100);
 
-query II
+query IIII
 select * from t_primary_key order by v1;
 ----
-1 111
-2 12
-3 13
-100 100
+1 111 NULL 112
+2 12 NULL 14
+3 13 NULL 16
+100 100 NULL 200
 
 statement ok
 delete from t_s3 where v1 > 3;
 
-query II
+query IIII
 select * from t_primary_key order by v1;
 ----
-1 111
-2 12
-3 13
-100 100
+1 111 NULL 112
+2 12 NULL 14
+3 13 NULL 16
+100 100 NULL 200
 
 
 

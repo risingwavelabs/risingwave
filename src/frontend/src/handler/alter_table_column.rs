@@ -184,7 +184,7 @@ pub async fn handle_alter_table_column(
         panic!("unexpected statement type: {:?}", definition);
     };
 
-    let (graph, table, source, _) = generate_table(
+    let (graph, table, source) = generate_table(
         &session,
         table_name,
         &original_catalog,
@@ -195,7 +195,6 @@ pub async fn handle_alter_table_column(
         constraints,
         source_watermarks,
         append_only,
-        0,
     )
     .await?;
 
