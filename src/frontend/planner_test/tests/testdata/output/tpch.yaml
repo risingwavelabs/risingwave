@@ -175,7 +175,7 @@
     StreamProject { exprs: [lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_quantity, lineitem.l_extendedprice, $expr1, ($expr1 * (1:Decimal + lineitem.l_tax)) as $expr2, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber] }
     └── StreamProject { exprs: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr1, lineitem.l_orderkey, lineitem.l_linenumber] }
         └── StreamFilter { predicate: (lineitem.l_shipdate <= '1998-09-21 00:00:00':Timestamp) }
-            └── Chain { table: lineitem, columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 3 }
+            └── StreamTableScan { table: lineitem, columns: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_tax, lineitem.l_returnflag, lineitem.l_linestatus, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 3 }
                 ├── Upstream
                 └── BatchPlanNode
 
@@ -403,17 +403,17 @@
     Fragment 4
     StreamProject { exprs: [region.r_regionkey] }
     └── StreamFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
-        └── Chain { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) } { state table: 14 }
+        └── StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) } { state table: 14 }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 5
-    Chain { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 15 }
+    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 15 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 6
-    Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 16 }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 16 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -433,7 +433,7 @@
     └── StreamHashAgg { group_key: [part.p_partkey], aggs: [count] } { intermediate state table: 27, state tables: [], distinct tables: [] }
         └── StreamProject { exprs: [part.p_partkey] }
             └── StreamFilter { predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
-                └── Chain { table: part, columns: [part.p_partkey, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 28 }
+                └── StreamTableScan { table: part, columns: [part.p_partkey, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 28 }
                     ├── Upstream
                     └── BatchPlanNode
 
@@ -449,12 +449,12 @@
 
     Fragment 11
     StreamFilter { predicate: IsNotNull(partsupp.ps_partkey) }
-    └── Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) } { state table: 37 }
+    └── StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) } { state table: 37 }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 12
-    Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 38 }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 38 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -466,24 +466,24 @@
     Fragment 14
     StreamProject { exprs: [region.r_regionkey] }
     └── StreamFilter { predicate: (region.r_name = 'AFRICA':Varchar) }
-        └── Chain { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) } { state table: 43 }
+        └── StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) } { state table: 43 }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 15
-    Chain { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 44 }
+    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 44 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 16
     StreamProject { exprs: [part.p_partkey, part.p_mfgr] }
     └── StreamFilter { predicate: (part.p_size = 4:Int32) AND Like(part.p_type, '%TIN':Varchar) }
-        └── Chain { table: part, columns: [part.p_partkey, part.p_mfgr, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 49 }
+        └── StreamTableScan { table: part, columns: [part.p_partkey, part.p_mfgr, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 49 }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 17
-    Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) } { state table: 50 }
+    StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) } { state table: 50 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -717,33 +717,27 @@
     Fragment 4
     StreamProject { exprs: [customer.c_custkey] }
     └── StreamFilter { predicate: (customer.c_mktsegment = 'FURNITURE':Varchar) }
-        └── Chain { table: customer, columns: [customer.c_custkey, customer.c_mktsegment], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) } { state table: 11 }
+        └── StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_mktsegment], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) } { state table: 11 }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 5
     StreamFilter { predicate: (orders.o_orderdate < '1995-03-29':Date) }
-    └── Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate, orders.o_shippriority], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) } { state table: 12 }
+    └── StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate, orders.o_shippriority], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) } { state table: 12 }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 6
     StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber] }
     └── StreamFilter { predicate: (lineitem.l_shipdate > '1995-03-29':Date) }
-        └── Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+        └── StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             ├── state table: 13
             ├── Upstream
             └── BatchPlanNode
 
     Table 0 { columns: [ lineitem_l_orderkey, sum($expr1), orders_o_orderdate, orders_o_shippriority, $expr2 ], primary key: [ $1 DESC, $2 ASC, $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1
-    ├── columns: [ lineitem_l_orderkey, sum($expr1), orders_o_orderdate, orders_o_shippriority, $expr2 ]
-    ├── primary key: [ $4 ASC, $1 DESC, $2 ASC, $0 ASC, $3 ASC ]
-    ├── value indices: [ 0, 1, 2, 3, 4 ]
-    ├── distribution key: [ 0, 2, 3 ]
-    ├── read pk prefix len hint: 1
-    └── vnode column idx: 4
+    Table 1 { columns: [ lineitem_l_orderkey, sum($expr1), orders_o_orderdate, orders_o_shippriority, $expr2 ], primary key: [ $4 ASC, $1 DESC, $2 ASC, $0 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 2, 3 ], read pk prefix len hint: 1, vnode column idx: 4 }
 
     Table 2 { columns: [ lineitem_l_orderkey, orders_o_orderdate, orders_o_shippriority, sum($expr1), count ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3, 4 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
@@ -876,7 +870,7 @@
     Fragment 3
     StreamProject { exprs: [orders.o_orderkey, orders.o_orderpriority] }
     └── StreamFilter { predicate: (orders.o_orderdate >= '1997-07-01':Date) AND (orders.o_orderdate < '1997-10-01 00:00:00':Timestamp) }
-        └── Chain { table: orders, columns: [orders.o_orderkey, orders.o_orderpriority, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
+        └── StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderpriority, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
             ├── state table: 7
             ├── Upstream
             └── BatchPlanNode
@@ -884,7 +878,7 @@
     Fragment 4
     StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_linenumber] }
     └── StreamFilter { predicate: (lineitem.l_commitdate < lineitem.l_receiptdate) }
-        └── Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+        └── StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             ├── state table: 8
             ├── Upstream
             └── BatchPlanNode
@@ -1067,13 +1061,13 @@
     Fragment 4
     StreamProject { exprs: [region.r_regionkey] }
     └── StreamFilter { predicate: (region.r_name = 'MIDDLE EAST':Varchar) }
-        └── Chain { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) } { state table: 11 }
+        └── StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) } { state table: 11 }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 5
     StreamFilter { predicate: (nation.n_nationkey = nation.n_nationkey) }
-    └── Chain { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 12 }
+    └── StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 12 }
         ├── Upstream
         └── BatchPlanNode
 
@@ -1094,12 +1088,12 @@
     Fragment 8
     StreamProject { exprs: [orders.o_orderkey, orders.o_custkey] }
     └── StreamFilter { predicate: (orders.o_orderdate >= '1994-01-01':Date) AND (orders.o_orderdate < '1995-01-01 00:00:00':Timestamp) }
-        └── Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) } { state table: 21 }
+        └── StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) } { state table: 21 }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 9
-    Chain { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) } { state table: 22 }
+    StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) } { state table: 22 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -1109,12 +1103,12 @@
     └── StreamExchange Hash([0]) from 12
 
     Fragment 11
-    Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 27 }
+    StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 27 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 12
-    Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 28 }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 28 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -1237,7 +1231,7 @@
     StreamStatelessSimpleAgg { aggs: [sum($expr1)] }
     └── StreamProject { exprs: [(lineitem.l_extendedprice * lineitem.l_discount) as $expr1, lineitem.l_orderkey, lineitem.l_linenumber] }
         └── StreamFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Date) AND (lineitem.l_shipdate < '1995-01-01 00:00:00':Timestamp) AND (lineitem.l_discount >= 0.07:Decimal) AND (lineitem.l_discount <= 0.09:Decimal) AND (lineitem.l_quantity < 24:Decimal) }
-            └── Chain { table: lineitem, columns: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+            └── StreamTableScan { table: lineitem, columns: [lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_quantity, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
                 ├── state table: 1
                 ├── Upstream
                 └── BatchPlanNode
@@ -1418,18 +1412,18 @@
     └── StreamExchange Hash([1]) from 6
 
     Fragment 5
-    Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 15 }
+    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 15 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 6
-    Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 16 }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 16 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 7
     StreamFilter { predicate: (lineitem.l_shipdate >= '1983-01-01':Date) AND (lineitem.l_shipdate <= '2000-12-31':Date) }
-    └── Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+    └── StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_shipdate, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
         ├── state table: 17
         ├── Upstream
         └── BatchPlanNode
@@ -1445,17 +1439,17 @@
     └── StreamExchange Hash([1]) from 11
 
     Fragment 10
-    Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 26 }
+    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 26 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 11
-    Chain { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) } { state table: 27 }
+    StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) } { state table: 27 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 12
-    Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) } { state table: 28 }
+    StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) } { state table: 28 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -1723,17 +1717,17 @@
     Fragment 5
     StreamProject { exprs: [region.r_regionkey] }
     └── StreamFilter { predicate: (region.r_name = 'ASIA':Varchar) }
-        └── Chain { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) } { state table: 15 }
+        └── StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) } { state table: 15 }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 6
-    Chain { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 16 }
+    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 16 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 7
-    Chain { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) } { state table: 17 }
+    StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) } { state table: 17 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -1757,12 +1751,12 @@
     └── StreamExchange Hash([1]) from 12
 
     Fragment 11
-    Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 30 }
+    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 30 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 12
-    Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 31 }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 31 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -1774,18 +1768,18 @@
     Fragment 14
     StreamProject { exprs: [part.p_partkey] }
     └── StreamFilter { predicate: (part.p_type = 'PROMO ANODIZED STEEL':Varchar) }
-        └── Chain { table: part, columns: [part.p_partkey, part.p_type], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 36 }
+        └── StreamTableScan { table: part, columns: [part.p_partkey, part.p_type], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 36 }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 15
-    Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 37 }
+    StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 37 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 16
     StreamFilter { predicate: (orders.o_orderdate >= '1995-01-01':Date) AND (orders.o_orderdate <= '1996-12-31':Date) }
-    └── Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) } { state table: 38 }
+    └── StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) } { state table: 38 }
         ├── Upstream
         └── BatchPlanNode
 
@@ -2037,13 +2031,13 @@
     Fragment 4
     StreamProject { exprs: [part.p_partkey] }
     └── StreamFilter { predicate: Like(part.p_name, '%yellow%':Varchar) }
-        └── Chain { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 11 }
+        └── StreamTableScan { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 11 }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 5
     StreamFilter { predicate: (partsupp.ps_suppkey = partsupp.ps_suppkey) }
-    └── Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) } { state table: 12 }
+    └── StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) } { state table: 12 }
         ├── Upstream
         └── BatchPlanNode
 
@@ -2053,12 +2047,12 @@
     └── StreamExchange Hash([1]) from 8
 
     Fragment 7
-    Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 21 }
+    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 21 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 8
-    Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 22 }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 22 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -2068,13 +2062,13 @@
     └── StreamExchange Hash([0]) from 11
 
     Fragment 10
-    Chain { table: orders, columns: [orders.o_orderkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) } { state table: 27 }
+    StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) } { state table: 27 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 11
     StreamFilter { predicate: (lineitem.l_partkey = lineitem.l_partkey) }
-    └── Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 28 }
+    └── StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 28 }
         ├── Upstream
         └── BatchPlanNode
 
@@ -2275,12 +2269,12 @@
     └── StreamExchange Hash([3]) from 4
 
     Fragment 3
-    Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 11 }
+    StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 11 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 4
-    Chain { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_comment], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) } { state table: 12 }
+    StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_name, customer.c_address, customer.c_nationkey, customer.c_phone, customer.c_acctbal, customer.c_comment], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) } { state table: 12 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -2292,14 +2286,14 @@
     Fragment 6
     StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber] }
     └── StreamFilter { predicate: (lineitem.l_returnflag = 'R':Varchar) }
-        └── Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_returnflag], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 17 }
+        └── StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber, lineitem.l_returnflag], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 17 }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 7
     StreamProject { exprs: [orders.o_orderkey, orders.o_custkey] }
     └── StreamFilter { predicate: (orders.o_orderdate >= '1994-01-01':Date) AND (orders.o_orderdate < '1994-04-01 00:00:00':Timestamp) }
-        └── Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) } { state table: 18 }
+        └── StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) } { state table: 18 }
             ├── Upstream
             └── BatchPlanNode
 
@@ -2536,20 +2530,20 @@
     └── StreamExchange Hash([0]) from 6
 
     Fragment 5
-    Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+    StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
     ├── state table: 13
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 6
-    Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 14 }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 14 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 7
     StreamProject { exprs: [nation.n_nationkey] }
     └── StreamFilter { predicate: (nation.n_name = 'ARGENTINA':Varchar) }
-        └── Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 15 }
+        └── StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 15 }
             ├── Upstream
             └── BatchPlanNode
 
@@ -2708,14 +2702,14 @@
         └── StreamExchange Hash([0]) from 4
 
     Fragment 3
-    Chain { table: orders, columns: [orders.o_orderkey, orders.o_orderpriority], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) } { state table: 7 }
+    StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderpriority], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) } { state table: 7 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 4
     StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_shipmode, lineitem.l_linenumber] }
     └── StreamFilter { predicate: In(lineitem.l_shipmode, 'FOB':Varchar, 'SHIP':Varchar) AND (lineitem.l_commitdate < lineitem.l_receiptdate) AND (lineitem.l_shipdate < lineitem.l_commitdate) AND (lineitem.l_receiptdate >= '1994-01-01':Date) AND (lineitem.l_receiptdate < '1995-01-01 00:00:00':Timestamp) }
-        └── Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_shipmode, lineitem.l_linenumber, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 8 }
+        └── StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_shipmode, lineitem.l_linenumber, lineitem.l_shipdate, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 8 }
             ├── Upstream
             └── BatchPlanNode
 
@@ -2847,7 +2841,7 @@
             └── StreamExchange Hash([1]) from 4
 
     Fragment 3
-    Chain { table: customer, columns: [customer.c_custkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
+    StreamTableScan { table: customer, columns: [customer.c_custkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
     ├── state table: 8
     ├── Upstream
     └── BatchPlanNode
@@ -2855,7 +2849,7 @@
     Fragment 4
     StreamProject { exprs: [orders.o_orderkey, orders.o_custkey] }
     └── StreamFilter { predicate: Not(Like(orders.o_comment, '%:1%:2%':Varchar)) }
-        └── Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_comment], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
+        └── StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_comment], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
             ├── state table: 9
             ├── Upstream
             └── BatchPlanNode
@@ -2888,12 +2882,7 @@
 
     Table 5 { columns: [ customer_c_custkey, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 6
-    ├── columns: [ orders_o_orderkey, orders_o_custkey ]
-    ├── primary key: [ $1 ASC, $0 ASC ]
-    ├── value indices: [ 0, 1 ]
-    ├── distribution key: [ 1 ]
-    └── read pk prefix len hint: 1
+    Table 6 { columns: [ orders_o_orderkey, orders_o_custkey ], primary key: [ $1 ASC, $0 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 
     Table 7
     ├── columns: [ orders_o_custkey, orders_o_orderkey, _degree ]
@@ -3002,13 +2991,13 @@
     Fragment 2
     StreamProject { exprs: [lineitem.l_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber] }
     └── StreamFilter { predicate: (lineitem.l_shipdate >= '1995-09-01':Date) AND (lineitem.l_shipdate < '1995-10-01 00:00:00':Timestamp) }
-        └── Chain { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+        └── StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             ├── state table: 5
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 3
-    Chain { table: part, columns: [part.p_partkey, part.p_type], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 6 }
+    StreamTableScan { table: part, columns: [part.p_partkey, part.p_type], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 6 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -3159,7 +3148,7 @@
     └── StreamExchange NoShuffle from 4
 
     Fragment 3
-    Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_phone], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
     ├── state table: 10
     ├── Upstream
     └── BatchPlanNode
@@ -3172,7 +3161,7 @@
     Fragment 5
     StreamProject { exprs: [lineitem.l_suppkey, (lineitem.l_extendedprice * (1:Decimal - lineitem.l_discount)) as $expr1, lineitem.l_orderkey, lineitem.l_linenumber] }
     └── StreamFilter { predicate: (lineitem.l_shipdate >= '1993-01-01':Date) AND (lineitem.l_shipdate < '1993-04-01 00:00:00':Timestamp) }
-        └── Chain { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+        └── StreamTableScan { table: lineitem, columns: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             ├── state table: 12
             ├── Upstream
             └── BatchPlanNode
@@ -3351,21 +3340,21 @@
     └── StreamExchange Hash([0]) from 5
 
     Fragment 4
-    Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+    StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
     ├── state table: 12
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 5
     StreamFilter { predicate: (part.p_brand <> 'Brand#45':Varchar) AND Not(Like(part.p_type, 'SMALL PLATED%':Varchar)) AND In(part.p_size, 19:Int32, 17:Int32, 16:Int32, 23:Int32, 10:Int32, 4:Int32, 38:Int32, 11:Int32) }
-    └── Chain { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 13 }
+    └── StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_type, part.p_size], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 13 }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 6
     StreamProject { exprs: [supplier.s_suppkey] }
     └── StreamFilter { predicate: Like(supplier.s_comment, '%Customer%Complaints%':Varchar) }
-        └── Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 14 }
+        └── StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_comment], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 14 }
             ├── Upstream
             └── BatchPlanNode
 
@@ -3574,7 +3563,7 @@
     └── StreamExchange Hash([0]) from 4
 
     Fragment 3
-    Chain { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+    StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
     ├── state table: 9
     ├── Upstream
     └── BatchPlanNode
@@ -3582,7 +3571,7 @@
     Fragment 4
     StreamProject { exprs: [part.p_partkey] }
     └── StreamFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
-        └── Chain { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 10 }
+        └── StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 10 }
             ├── Upstream
             └── BatchPlanNode
 
@@ -3591,13 +3580,13 @@
     └── StreamHashAgg { group_key: [part.p_partkey], aggs: [count] } { intermediate state table: 16, state tables: [], distinct tables: [] }
         └── StreamProject { exprs: [part.p_partkey] }
             └── StreamFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
-                └── Chain { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 17 }
+                └── StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 17 }
                     ├── Upstream
                     └── BatchPlanNode
 
     Fragment 6
     StreamFilter { predicate: IsNotNull(lineitem.l_partkey) }
-    └── Chain { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 18 }
+    └── StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 18 }
         ├── Upstream
         └── BatchPlanNode
 
@@ -3798,22 +3787,22 @@
     └── StreamExchange Hash([1]) from 4
 
     Fragment 3
-    Chain { table: customer, columns: [customer.c_custkey, customer.c_name], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) } { state table: 15 }
+    StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_name], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) } { state table: 15 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 4
-    Chain { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_totalprice, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) } { state table: 16 }
+    StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_totalprice, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) } { state table: 16 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 5
-    Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 17 }
+    StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 17 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 6
-    Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 19 }
+    StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_quantity, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 19 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -3981,13 +3970,13 @@
     Fragment 2
     StreamProject { exprs: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber] }
     └── StreamFilter { predicate: In(lineitem.l_shipmode, 'AIR':Varchar, 'AIR REG':Varchar) AND (lineitem.l_shipinstruct = 'DELIVER IN PERSON':Varchar) }
-        └── Chain { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipinstruct, lineitem.l_shipmode], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 5 }
+        └── StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipinstruct, lineitem.l_shipmode], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 5 }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 3
     StreamFilter { predicate: (part.p_size >= 1:Int32) }
-    └── Chain { table: part, columns: [part.p_partkey, part.p_brand, part.p_size, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 6 }
+    └── StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_size, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 6 }
         ├── Upstream
         └── BatchPlanNode
 
@@ -4128,7 +4117,7 @@
     └── StreamExchange Hash([0]) from 4
 
     Fragment 3
-    Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
     ├── state table: 10
     ├── Upstream
     └── BatchPlanNode
@@ -4136,7 +4125,7 @@
     Fragment 4
     StreamProject { exprs: [nation.n_nationkey] }
     └── StreamFilter { predicate: (nation.n_name = 'KENYA':Varchar) }
-        └── Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 11 }
+        └── StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 11 }
             ├── Upstream
             └── BatchPlanNode
 
@@ -4167,7 +4156,7 @@
 
     Fragment 7
     StreamProject { exprs: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty::Decimal as $expr1] }
-    └── Chain { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
+    └── StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_availqty], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
         ├── state table: 20
         ├── Upstream
         └── BatchPlanNode
@@ -4175,7 +4164,7 @@
     Fragment 8
     StreamProject { exprs: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
     └── StreamFilter { predicate: (lineitem.l_shipdate >= '1994-01-01':Date) AND (lineitem.l_shipdate < '1995-01-01 00:00:00':Timestamp) }
-        └── Chain { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+        └── StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_shipdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             ├── state table: 22
             ├── Upstream
             └── BatchPlanNode
@@ -4183,7 +4172,7 @@
     Fragment 9
     StreamProject { exprs: [part.p_partkey] }
     └── StreamFilter { predicate: Like(part.p_name, 'forest%':Varchar) }
-        └── Chain { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 23 }
+        └── StreamTableScan { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) } { state table: 23 }
             ├── Upstream
             └── BatchPlanNode
 
@@ -4425,12 +4414,12 @@
     Fragment 5
     StreamProject { exprs: [nation.n_nationkey] }
     └── StreamFilter { predicate: (nation.n_name = 'GERMANY':Varchar) }
-        └── Chain { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 19 }
+        └── StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) } { state table: 19 }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 6
-    Chain { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 20 }
+    StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) } { state table: 20 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -4442,27 +4431,27 @@
     Fragment 8
     StreamProject { exprs: [orders.o_orderkey] }
     └── StreamFilter { predicate: (orders.o_orderstatus = 'F':Varchar) }
-        └── Chain { table: orders, columns: [orders.o_orderkey, orders.o_orderstatus], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) } { state table: 25 }
+        └── StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderstatus], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) } { state table: 25 }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 9
     StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber] }
     └── StreamFilter { predicate: (lineitem.l_receiptdate > lineitem.l_commitdate) }
-        └── Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+        └── StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             ├── state table: 26
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 10
-    Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 27 }
+    StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) } { state table: 27 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 11
     StreamProject { exprs: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber] }
     └── StreamFilter { predicate: (lineitem.l_receiptdate > lineitem.l_commitdate) }
-        └── Chain { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+        └── StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_linenumber, lineitem.l_commitdate, lineitem.l_receiptdate], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
             ├── state table: 28
             ├── Upstream
             └── BatchPlanNode

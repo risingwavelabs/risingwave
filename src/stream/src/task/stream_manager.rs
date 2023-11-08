@@ -520,7 +520,7 @@ impl LocalStreamManagerCore {
                     | NodeBody::HashJoin(_)
                     | NodeBody::DeltaIndexJoin(_)
                     | NodeBody::Lookup(_)
-                    | NodeBody::Chain(_)
+                    | NodeBody::StreamScan(_)
                     | NodeBody::DynamicFilter(_)
                     | NodeBody::GroupTopN(_)
                     | NodeBody::Now(_)
