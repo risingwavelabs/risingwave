@@ -27,3 +27,4 @@ updates:
     opentelemetry:
       patterns:
         - "opentelemetry*"
+        - "tracing-opentelemetry"
