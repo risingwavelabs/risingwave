@@ -110,6 +110,7 @@ enum FormatType {
   FORMAT_TYPE_CANAL = 5;
   FORMAT_TYPE_UPSERT = 6;
   FORMAT_TYPE_PLAIN = 7;
+  FORMAT_TYPE_COCKROACH = 8;
 }
 
 enum EncodeType {

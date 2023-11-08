@@ -243,6 +243,7 @@ pub enum Format {
     Canal,         // Keyword::CANAL
     Upsert,        // Keyword::UPSERT
     Plain,         // Keyword::PLAIN
+    Cockroach,     // Keyword::COCKROACH
 }
 
 // TODO: unify with `from_keyword`
@@ -259,6 +260,7 @@ impl fmt::Display for Format {
                 Format::Canal => "CANAL",
                 Format::Upsert => "UPSERT",
                 Format::Plain => "PLAIN",
+                Format::Cockroach => "COCKROACH",
             }
         )
     }
@@ -274,6 +276,7 @@ impl Format {
             "PLAIN" => Format::Plain,
             "UPSERT" => Format::Upsert,
             "NATIVE" => Format::Native, // used internally for schema change
+            "COCKROACH" => Format::Cockroach,
             _ => {
                 return Err(ParserError::ParserError(
                     "expected CANAL | PROTOBUF | DEBEZIUM | MAXWELL | PLAIN | NATIVE after FORMAT"

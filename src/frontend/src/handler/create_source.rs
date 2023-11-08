@@ -558,6 +558,20 @@ pub(crate) async fn bind_columns_from_source(
                 },
             )
         }
+
+        (Format::Cockroach, Encode::Json) => {
+            let schema_config = get_json_schema_location(&mut options)?;
+            (
+                extract_json_table_schema(&schema_config, with_properties).await?,
+                StreamSourceInfo {
+                    format: FormatType::Cockroach as i32,
+                    row_encode: EncodeType::Json as i32,
+                    use_schema_registry: false,
+                    ..Default::default()
+                },
+            )
+        }
+
         (format, encoding) => {
             return Err(RwError::from(ProtocolError(format!(
                 "Unknown combination {:?} {:?}",
@@ -789,6 +803,17 @@ pub(crate) async fn bind_source_pk(
             }
             sql_defined_pk_names
         }
+
+        (Format::Cockroach, Encode::Json) => {
+            if !sql_defined_pk {
+                return Err(RwError::from(ProtocolError(
+    "Primary key must be specified when creating source with FORMAT COCKROACH ENCODE JSON."
+    .to_string(),
+    )));
+            }
+            sql_defined_pk_names
+        }
+
         (format, encoding) => {
             return Err(RwError::from(ProtocolError(format!(
                 "Unknown combination {:?} {:?}",
@@ -883,6 +908,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Maxwell => vec![Encode::Json],
                     Format::Canal => vec![Encode::Json],
                     Format::DebeziumMongo => vec![Encode::Json],
+                    Format::Cockroach => vec![Encode::Json],
                 ),
                 PULSAR_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Json, Encode::Protobuf, Encode::Avro, Encode::Bytes],
