@@ -128,39 +128,66 @@ impl UserAuthenticator {
     }
 }
 
+/// A wrapper of either [`TcpListener`] or [`UnixListener`].
 enum Listener {
     Tcp(TcpListener),
     Unix(UnixListener),
 }
 
+/// A wrapper of either [`TcpStream`] or [`UnixStream`].
 #[auto_enums::enum_derive(tokio1::AsyncRead, tokio1::AsyncWrite)]
 enum Stream {
     Tcp(TcpStream),
     Unix(UnixStream),
 }
 
+/// A wrapper of either [`std::net::SocketAddr`] or [`tokio::net::unix::SocketAddr`].
+enum Address {
+    Tcp(std::net::SocketAddr),
+    Unix(tokio::net::unix::SocketAddr),
+}
+
+impl std::fmt::Display for Address {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Address::Tcp(addr) => addr.fmt(f),
+            Address::Unix(addr) => {
+                if let Some(path) = addr.as_pathname() {
+                    path.display().fmt(f)
+                } else {
+                    std::fmt::Debug::fmt(addr, f)
+                }
+            }
+        }
+    }
+}
+
 impl Listener {
+    /// Creates a new [`Listener`] bound to the specified address.
+    ///
+    /// If the address starts with `unix:`, it will create a [`UnixListener`].
+    /// Otherwise, it will create a [`TcpListener`].
     async fn bind(addr: &str) -> io::Result<Self> {
-        if addr.starts_with("unix:") {
-            let path = &addr[5..];
+        if let Some(path) = addr.strip_prefix("unix:") {
             UnixListener::bind(path).map(Self::Unix)
         } else {
             TcpListener::bind(addr).await.map(Self::Tcp)
         }
     }
 
-    async fn accept(&self) -> io::Result<(Stream, String)> {
+    /// Accepts a new incoming connection from this listener.
+    ///
+    /// Returns a tuple of the stream and the string representation of the peer address.
+    async fn accept(&self) -> io::Result<(Stream, Address)> {
         match self {
             Self::Tcp(listener) => {
                 let (stream, addr) = listener.accept().await?;
                 stream.set_nodelay(true)?;
-
-                Ok((Stream::Tcp(stream), format!("{addr}")))
+                Ok((Stream::Tcp(stream), Address::Tcp(addr)))
             }
             Self::Unix(listener) => {
                 let (stream, addr) = listener.accept().await?;
-
-                Ok((Stream::Unix(stream), format!("{addr:?}")))
+                Ok((Stream::Unix(stream), Address::Unix(addr)))
             }
         }
     }
@@ -179,7 +206,7 @@ pub async fn pg_serve(
         let conn_ret = listener.accept().await;
         match conn_ret {
             Ok((stream, peer_addr)) => {
-                tracing::info!(peer_addr, "accept connection");
+                tracing::info!(%peer_addr, "accept connection");
                 tokio::spawn(handle_connection(
                     stream,
                     session_mgr.clone(),
