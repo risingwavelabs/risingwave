@@ -1,19 +1,19 @@
 --
 -- VARCHAR
 --
-CREATE TABLE VARCHAR_TBL(f1 varchar);
-INSERT INTO VARCHAR_TBL (f1) VALUES ('a');
-INSERT INTO VARCHAR_TBL (f1) VALUES ('A');
+CREATE TABLE VARCHAR_TBL_TMP(f1 varchar);
+INSERT INTO VARCHAR_TBL_TMP (f1) VALUES ('a');
+INSERT INTO VARCHAR_TBL_TMP (f1) VALUES ('A');
 -- any of the following three input formats are acceptable
-INSERT INTO VARCHAR_TBL (f1) VALUES ('1');
-INSERT INTO VARCHAR_TBL (f1) VALUES (2);
-INSERT INTO VARCHAR_TBL (f1) VALUES ('3');
+INSERT INTO VARCHAR_TBL_TMP (f1) VALUES ('1');
+INSERT INTO VARCHAR_TBL_TMP (f1) VALUES (2);
+INSERT INTO VARCHAR_TBL_TMP (f1) VALUES ('3');
 -- zero-length char
-INSERT INTO VARCHAR_TBL (f1) VALUES ('');
+INSERT INTO VARCHAR_TBL_TMP (f1) VALUES ('');
 -- try varchar's of greater than 1 length
-INSERT INTO VARCHAR_TBL (f1) VALUES ('cd');
-INSERT INTO VARCHAR_TBL (f1) VALUES ('c     ');
-SELECT * FROM VARCHAR_TBL;
+INSERT INTO VARCHAR_TBL_TMP (f1) VALUES ('cd');
+INSERT INTO VARCHAR_TBL_TMP (f1) VALUES ('c     ');
+SELECT * FROM VARCHAR_TBL_TMP;
    f1   
 --------
  a
@@ -27,7 +27,7 @@ SELECT * FROM VARCHAR_TBL;
 (8 rows)
 
 SELECT c.*
-   FROM VARCHAR_TBL c
+   FROM VARCHAR_TBL_TMP c
    WHERE c.f1 <> 'a';
    f1   
 --------
@@ -41,7 +41,7 @@ SELECT c.*
 (7 rows)
 
 SELECT c.*
-   FROM VARCHAR_TBL c
+   FROM VARCHAR_TBL_TMP c
    WHERE c.f1 = 'a';
  f1 
 ----
@@ -49,7 +49,7 @@ SELECT c.*
 (1 row)
 
 SELECT c.*
-   FROM VARCHAR_TBL c
+   FROM VARCHAR_TBL_TMP c
    WHERE c.f1 < 'a';
  f1 
 ----
@@ -61,7 +61,7 @@ SELECT c.*
 (5 rows)
 
 SELECT c.*
-   FROM VARCHAR_TBL c
+   FROM VARCHAR_TBL_TMP c
    WHERE c.f1 <= 'a';
  f1 
 ----
@@ -74,7 +74,7 @@ SELECT c.*
 (6 rows)
 
 SELECT c.*
-   FROM VARCHAR_TBL c
+   FROM VARCHAR_TBL_TMP c
    WHERE c.f1 > 'a';
    f1   
 --------
@@ -83,7 +83,7 @@ SELECT c.*
 (2 rows)
 
 SELECT c.*
-   FROM VARCHAR_TBL c
+   FROM VARCHAR_TBL_TMP c
    WHERE c.f1 >= 'a';
    f1   
 --------
@@ -92,24 +92,18 @@ SELECT c.*
  c     
 (3 rows)
 
-DROP TABLE VARCHAR_TBL;
+DROP TABLE VARCHAR_TBL_TMP;
 --
 -- Now test longer arrays of char
 --
-CREATE TABLE VARCHAR_TBL(f1 varchar);
-INSERT INTO VARCHAR_TBL (f1) VALUES ('a');
-INSERT INTO VARCHAR_TBL (f1) VALUES ('ab');
-INSERT INTO VARCHAR_TBL (f1) VALUES ('abcd');
-INSERT INTO VARCHAR_TBL (f1) VALUES ('abcde');
-INSERT INTO VARCHAR_TBL (f1) VALUES ('abcd    ');
+-- This varchar_tbl was already created and filled in test_setup.sql.
+--
 SELECT * FROM VARCHAR_TBL;
     f1    
 ----------
  a
  ab
  abcd
- abcde
  abcd    
-(5 rows)
+(4 rows)
 
-DROP TABLE VARCHAR_TBL;

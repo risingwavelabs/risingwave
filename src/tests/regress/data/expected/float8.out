@@ -1,12 +1,15 @@
 --
 -- FLOAT8
 --
-CREATE TABLE FLOAT8_TBL(f1 float8);
-INSERT INTO FLOAT8_TBL(f1) VALUES ('    0.0   ');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('1004.30  ');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('   -34.84');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('1.2345678901234e+200');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('1.2345678901234e-200');
+--
+-- Build a tmp table for testing
+--
+CREATE TABLE FLOAT8_TBL_TMP(f1 float8);
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('    0.0   ');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('1004.30  ');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('   -34.84');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('1.2345678901234e+200');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('1.2345678901234e-200');
 -- test for underflow and overflow handling
 SELECT '10e400'::float8;
 ERROR:  "10e400" is out of range for type double precision
@@ -32,37 +35,37 @@ SELECT float8send('2.2250738585072014E-308'::float8);
 (1 row)
 
 -- bad input
-INSERT INTO FLOAT8_TBL(f1) VALUES ('');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('');
 ERROR:  invalid input syntax for type double precision: ""
-LINE 1: INSERT INTO FLOAT8_TBL(f1) VALUES ('');
+LINE 1: INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('');
                                            ^
-INSERT INTO FLOAT8_TBL(f1) VALUES ('     ');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('     ');
 ERROR:  invalid input syntax for type double precision: "     "
-LINE 1: INSERT INTO FLOAT8_TBL(f1) VALUES ('     ');
+LINE 1: INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('     ');
                                            ^
-INSERT INTO FLOAT8_TBL(f1) VALUES ('xyz');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('xyz');
 ERROR:  invalid input syntax for type double precision: "xyz"
-LINE 1: INSERT INTO FLOAT8_TBL(f1) VALUES ('xyz');
+LINE 1: INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('xyz');
                                            ^
-INSERT INTO FLOAT8_TBL(f1) VALUES ('5.0.0');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('5.0.0');
 ERROR:  invalid input syntax for type double precision: "5.0.0"
-LINE 1: INSERT INTO FLOAT8_TBL(f1) VALUES ('5.0.0');
+LINE 1: INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('5.0.0');
                                            ^
-INSERT INTO FLOAT8_TBL(f1) VALUES ('5 . 0');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('5 . 0');
 ERROR:  invalid input syntax for type double precision: "5 . 0"
-LINE 1: INSERT INTO FLOAT8_TBL(f1) VALUES ('5 . 0');
+LINE 1: INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('5 . 0');
                                            ^
-INSERT INTO FLOAT8_TBL(f1) VALUES ('5.   0');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('5.   0');
 ERROR:  invalid input syntax for type double precision: "5.   0"
-LINE 1: INSERT INTO FLOAT8_TBL(f1) VALUES ('5.   0');
+LINE 1: INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('5.   0');
                                            ^
-INSERT INTO FLOAT8_TBL(f1) VALUES ('    - 3');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('    - 3');
 ERROR:  invalid input syntax for type double precision: "    - 3"
-LINE 1: INSERT INTO FLOAT8_TBL(f1) VALUES ('    - 3');
+LINE 1: INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('    - 3');
                                            ^
-INSERT INTO FLOAT8_TBL(f1) VALUES ('123           5');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('123           5');
 ERROR:  invalid input syntax for type double precision: "123           5"
-LINE 1: INSERT INTO FLOAT8_TBL(f1) VALUES ('123           5');
+LINE 1: INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('123           5');
                                            ^
 -- special inputs
 SELECT 'NaN'::float8 AS float8;
@@ -144,7 +147,7 @@ SELECT 'nan'::numeric::float8 AS float8;
     NaN
 (1 row)
 
-SELECT * FROM FLOAT8_TBL;
+SELECT * FROM FLOAT8_TBL_TMP;
           f1          
 ----------------------
                     0
@@ -154,7 +157,7 @@ SELECT * FROM FLOAT8_TBL;
  1.2345678901234e-200
 (5 rows)
 
-SELECT f.* FROM FLOAT8_TBL f WHERE f.f1 <> '1004.3';
+SELECT f.* FROM FLOAT8_TBL_TMP f WHERE f.f1 <> '1004.3';
           f1          
 ----------------------
                     0
@@ -163,13 +166,13 @@ SELECT f.* FROM FLOAT8_TBL f WHERE f.f1 <> '1004.3';
  1.2345678901234e-200
 (4 rows)
 
-SELECT f.* FROM FLOAT8_TBL f WHERE f.f1 = '1004.3';
+SELECT f.* FROM FLOAT8_TBL_TMP f WHERE f.f1 = '1004.3';
    f1   
 --------
  1004.3
 (1 row)
 
-SELECT f.* FROM FLOAT8_TBL f WHERE '1004.3' > f.f1;
+SELECT f.* FROM FLOAT8_TBL_TMP f WHERE '1004.3' > f.f1;
           f1          
 ----------------------
                     0
@@ -177,7 +180,7 @@ SELECT f.* FROM FLOAT8_TBL f WHERE '1004.3' > f.f1;
  1.2345678901234e-200
 (3 rows)
 
-SELECT f.* FROM FLOAT8_TBL f WHERE  f.f1 < '1004.3';
+SELECT f.* FROM FLOAT8_TBL_TMP f WHERE  f.f1 < '1004.3';
           f1          
 ----------------------
                     0
@@ -185,7 +188,7 @@ SELECT f.* FROM FLOAT8_TBL f WHERE  f.f1 < '1004.3';
  1.2345678901234e-200
 (3 rows)
 
-SELECT f.* FROM FLOAT8_TBL f WHERE '1004.3' >= f.f1;
+SELECT f.* FROM FLOAT8_TBL_TMP f WHERE '1004.3' >= f.f1;
           f1          
 ----------------------
                     0
@@ -194,7 +197,7 @@ SELECT f.* FROM FLOAT8_TBL f WHERE '1004.3' >= f.f1;
  1.2345678901234e-200
 (4 rows)
 
-SELECT f.* FROM FLOAT8_TBL f WHERE  f.f1 <= '1004.3';
+SELECT f.* FROM FLOAT8_TBL_TMP f WHERE  f.f1 <= '1004.3';
           f1          
 ----------------------
                     0
@@ -204,7 +207,7 @@ SELECT f.* FROM FLOAT8_TBL f WHERE  f.f1 <= '1004.3';
 (4 rows)
 
 SELECT f.f1, f.f1 * '-10' AS x
-   FROM FLOAT8_TBL f
+   FROM FLOAT8_TBL_TMP f
    WHERE f.f1 > '0.0';
           f1          |           x           
 ----------------------+-----------------------
@@ -214,7 +217,7 @@ SELECT f.f1, f.f1 * '-10' AS x
 (3 rows)
 
 SELECT f.f1, f.f1 + '-10' AS x
-   FROM FLOAT8_TBL f
+   FROM FLOAT8_TBL_TMP f
    WHERE f.f1 > '0.0';
           f1          |          x           
 ----------------------+----------------------
@@ -224,7 +227,7 @@ SELECT f.f1, f.f1 + '-10' AS x
 (3 rows)
 
 SELECT f.f1, f.f1 / '-10' AS x
-   FROM FLOAT8_TBL f
+   FROM FLOAT8_TBL_TMP f
    WHERE f.f1 > '0.0';
           f1          |           x           
 ----------------------+-----------------------
@@ -234,7 +237,7 @@ SELECT f.f1, f.f1 / '-10' AS x
 (3 rows)
 
 SELECT f.f1, f.f1 - '-10' AS x
-   FROM FLOAT8_TBL f
+   FROM FLOAT8_TBL_TMP f
    WHERE f.f1 > '0.0';
           f1          |          x           
 ----------------------+----------------------
@@ -244,7 +247,7 @@ SELECT f.f1, f.f1 - '-10' AS x
 (3 rows)
 
 SELECT f.f1 ^ '2.0' AS square_f1
-   FROM FLOAT8_TBL f where f.f1 = '1004.3';
+   FROM FLOAT8_TBL_TMP f where f.f1 = '1004.3';
      square_f1      
 --------------------
  1008618.4899999999
@@ -252,7 +255,7 @@ SELECT f.f1 ^ '2.0' AS square_f1
 
 -- absolute value
 SELECT f.f1, @f.f1 AS abs_f1
-   FROM FLOAT8_TBL f;
+   FROM FLOAT8_TBL_TMP f;
           f1          |        abs_f1        
 ----------------------+----------------------
                     0 |                    0
@@ -264,7 +267,7 @@ SELECT f.f1, @f.f1 AS abs_f1
 
 -- truncate
 SELECT f.f1, trunc(f.f1) AS trunc_f1
-   FROM FLOAT8_TBL f;
+   FROM FLOAT8_TBL_TMP f;
           f1          |       trunc_f1       
 ----------------------+----------------------
                     0 |                    0
@@ -276,7 +279,7 @@ SELECT f.f1, trunc(f.f1) AS trunc_f1
 
 -- round
 SELECT f.f1, round(f.f1) AS round_f1
-   FROM FLOAT8_TBL f;
+   FROM FLOAT8_TBL_TMP f;
           f1          |       round_f1       
 ----------------------+----------------------
                     0 |                    0
@@ -287,7 +290,7 @@ SELECT f.f1, round(f.f1) AS round_f1
 (5 rows)
 
 -- ceil / ceiling
-select ceil(f1) as ceil_f1 from float8_tbl f;
+select ceil(f1) as ceil_f1 from float8_tbl_tmp f;
        ceil_f1        
 ----------------------
                     0
@@ -297,7 +300,7 @@ select ceil(f1) as ceil_f1 from float8_tbl f;
                     1
 (5 rows)
 
-select ceiling(f1) as ceiling_f1 from float8_tbl f;
+select ceiling(f1) as ceiling_f1 from float8_tbl_tmp f;
       ceiling_f1      
 ----------------------
                     0
@@ -308,7 +311,7 @@ select ceiling(f1) as ceiling_f1 from float8_tbl f;
 (5 rows)
 
 -- floor
-select floor(f1) as floor_f1 from float8_tbl f;
+select floor(f1) as floor_f1 from float8_tbl_tmp f;
        floor_f1       
 ----------------------
                     0
@@ -319,7 +322,7 @@ select floor(f1) as floor_f1 from float8_tbl f;
 (5 rows)
 
 -- sign
-select sign(f1) as sign_f1 from float8_tbl f;
+select sign(f1) as sign_f1 from float8_tbl_tmp f;
  sign_f1 
 ---------
        0
@@ -345,7 +348,7 @@ SELECT |/ double precision '64' AS eight;
 (1 row)
 
 SELECT f.f1, |/f.f1 AS sqrt_f1
-   FROM FLOAT8_TBL f
+   FROM FLOAT8_TBL_TMP f
    WHERE f.f1 > '0.0';
           f1          |        sqrt_f1        
 ----------------------+-----------------------
@@ -555,7 +558,7 @@ SELECT power(double precision '-inf', double precision '-inf');
 
 -- take exp of ln(f.f1)
 SELECT f.f1, exp(ln(f.f1)) AS exp_ln_f1
-   FROM FLOAT8_TBL f
+   FROM FLOAT8_TBL_TMP f
    WHERE f.f1 > '0.0';
           f1          |       exp_ln_f1       
 ----------------------+-----------------------
@@ -578,7 +581,7 @@ SELECT ||/ double precision '27' AS three;
      3
 (1 row)
 
-SELECT f.f1, ||/f.f1 AS cbrt_f1 FROM FLOAT8_TBL f;
+SELECT f.f1, ||/f.f1 AS cbrt_f1 FROM FLOAT8_TBL_TMP f;
           f1          |       cbrt_f1        
 ----------------------+----------------------
                     0 |                    0
@@ -588,7 +591,7 @@ SELECT f.f1, ||/f.f1 AS cbrt_f1 FROM FLOAT8_TBL f;
  1.2345678901234e-200 |  2.3112042409018e-67
 (5 rows)
 
-SELECT * FROM FLOAT8_TBL;
+SELECT * FROM FLOAT8_TBL_TMP;
           f1          
 ----------------------
                     0
@@ -598,12 +601,12 @@ SELECT * FROM FLOAT8_TBL;
  1.2345678901234e-200
 (5 rows)
 
-UPDATE FLOAT8_TBL
-   SET f1 = FLOAT8_TBL.f1 * '-1'
-   WHERE FLOAT8_TBL.f1 > '0.0';
-SELECT f.f1 * '1e200' from FLOAT8_TBL f;
+UPDATE FLOAT8_TBL_TMP
+   SET f1 = FLOAT8_TBL_TMP.f1 * '-1'
+   WHERE FLOAT8_TBL_TMP.f1 > '0.0';
+SELECT f.f1 * '1e200' from FLOAT8_TBL_TMP f;
 ERROR:  value out of range: overflow
-SELECT f.f1 ^ '1e200' from FLOAT8_TBL f;
+SELECT f.f1 ^ '1e200' from FLOAT8_TBL_TMP f;
 ERROR:  value out of range: overflow
 SELECT 0 ^ 0 + 0 ^ 1 + 0 ^ 0.0 + 0 ^ 0.5;
  ?column? 
@@ -611,11 +614,11 @@ SELECT 0 ^ 0 + 0 ^ 1 + 0 ^ 0.0 + 0 ^ 0.5;
         2
 (1 row)
 
-SELECT ln(f.f1) from FLOAT8_TBL f where f.f1 = '0.0' ;
+SELECT ln(f.f1) from FLOAT8_TBL_TMP f where f.f1 = '0.0' ;
 ERROR:  cannot take logarithm of zero
-SELECT ln(f.f1) from FLOAT8_TBL f where f.f1 < '0.0' ;
+SELECT ln(f.f1) from FLOAT8_TBL_TMP f where f.f1 < '0.0' ;
 ERROR:  cannot take logarithm of a negative number
-SELECT exp(f.f1) from FLOAT8_TBL f;
+SELECT exp(f.f1) from FLOAT8_TBL_TMP f;
           exp          
 -----------------------
                      1
@@ -625,9 +628,9 @@ SELECT exp(f.f1) from FLOAT8_TBL f;
                      1
 (5 rows)
 
-SELECT f.f1 / '0.0' from FLOAT8_TBL f;
+SELECT f.f1 / '0.0' from FLOAT8_TBL_TMP f;
 ERROR:  division by zero
-SELECT * FROM FLOAT8_TBL;
+SELECT * FROM FLOAT8_TBL_TMP;
           f1           
 -----------------------
                      0
@@ -771,30 +774,24 @@ SELECT atanh(double precision 'nan');
 
 RESET extra_float_digits;
 -- test for over- and underflow
-INSERT INTO FLOAT8_TBL(f1) VALUES ('10e400');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('10e400');
 ERROR:  "10e400" is out of range for type double precision
-LINE 1: INSERT INTO FLOAT8_TBL(f1) VALUES ('10e400');
+LINE 1: INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('10e400');
                                            ^
-INSERT INTO FLOAT8_TBL(f1) VALUES ('-10e400');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('-10e400');
 ERROR:  "-10e400" is out of range for type double precision
-LINE 1: INSERT INTO FLOAT8_TBL(f1) VALUES ('-10e400');
+LINE 1: INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('-10e400');
                                            ^
-INSERT INTO FLOAT8_TBL(f1) VALUES ('10e-400');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('10e-400');
 ERROR:  "10e-400" is out of range for type double precision
-LINE 1: INSERT INTO FLOAT8_TBL(f1) VALUES ('10e-400');
+LINE 1: INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('10e-400');
                                            ^
-INSERT INTO FLOAT8_TBL(f1) VALUES ('-10e-400');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('-10e-400');
 ERROR:  "-10e-400" is out of range for type double precision
-LINE 1: INSERT INTO FLOAT8_TBL(f1) VALUES ('-10e-400');
+LINE 1: INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('-10e-400');
                                            ^
--- maintain external table consistency across platforms
--- delete all values and reinsert well-behaved ones
-DELETE FROM FLOAT8_TBL;
-INSERT INTO FLOAT8_TBL(f1) VALUES ('0.0');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('-34.84');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('-1004.30');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('-1.2345678901234e+200');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('-1.2345678901234e-200');
+DROP TABLE FLOAT8_TBL_TMP;
+-- Check the float8 values exported for use by other tests
 SELECT * FROM FLOAT8_TBL;
           f1           
 -----------------------

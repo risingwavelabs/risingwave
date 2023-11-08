@@ -2,13 +2,17 @@
 -- FLOAT8
 --
 
-CREATE TABLE FLOAT8_TBL(f1 float8);
+--
+-- Build a tmp table for testing
+--
 
-INSERT INTO FLOAT8_TBL(f1) VALUES ('    0.0   ');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('1004.30  ');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('   -34.84');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('1.2345678901234e+200');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('1.2345678901234e-200');
+CREATE TABLE FLOAT8_TBL_TMP(f1 float8);
+
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('    0.0   ');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('1004.30  ');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('   -34.84');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('1.2345678901234e+200');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('1.2345678901234e-200');
 
 -- test for underflow and overflow handling
 --@ SELECT '10e400'::float8;
@@ -20,14 +24,14 @@ INSERT INTO FLOAT8_TBL(f1) VALUES ('1.2345678901234e-200');
 --@ SELECT float8send('2.2250738585072014E-308'::float8);
 
 -- bad input
-INSERT INTO FLOAT8_TBL(f1) VALUES ('');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('     ');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('xyz');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('5.0.0');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('5 . 0');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('5.   0');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('    - 3');
-INSERT INTO FLOAT8_TBL(f1) VALUES ('123           5');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('     ');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('xyz');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('5.0.0');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('5 . 0');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('5.   0');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('    - 3');
+INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('123           5');
 
 -- special inputs
 SELECT 'NaN'::float8 AS float8;
@@ -47,60 +51,60 @@ SELECT 'nan'::float8 / 'nan'::float8;
 SELECT 'nan'::float8 / '0'::float8;
 SELECT 'nan'::numeric::float8 AS float8;
 
-SELECT * FROM FLOAT8_TBL;
+SELECT * FROM FLOAT8_TBL_TMP;
 
-SELECT f.* FROM FLOAT8_TBL f WHERE f.f1 <> '1004.3';
+SELECT f.* FROM FLOAT8_TBL_TMP f WHERE f.f1 <> '1004.3';
 
-SELECT f.* FROM FLOAT8_TBL f WHERE f.f1 = '1004.3';
+SELECT f.* FROM FLOAT8_TBL_TMP f WHERE f.f1 = '1004.3';
 
-SELECT f.* FROM FLOAT8_TBL f WHERE '1004.3' > f.f1;
+SELECT f.* FROM FLOAT8_TBL_TMP f WHERE '1004.3' > f.f1;
 
-SELECT f.* FROM FLOAT8_TBL f WHERE  f.f1 < '1004.3';
+SELECT f.* FROM FLOAT8_TBL_TMP f WHERE  f.f1 < '1004.3';
 
-SELECT f.* FROM FLOAT8_TBL f WHERE '1004.3' >= f.f1;
+SELECT f.* FROM FLOAT8_TBL_TMP f WHERE '1004.3' >= f.f1;
 
-SELECT f.* FROM FLOAT8_TBL f WHERE  f.f1 <= '1004.3';
+SELECT f.* FROM FLOAT8_TBL_TMP f WHERE  f.f1 <= '1004.3';
 
 SELECT f.f1, f.f1 * '-10' AS x
-   FROM FLOAT8_TBL f
+   FROM FLOAT8_TBL_TMP f
    WHERE f.f1 > '0.0';
 
 SELECT f.f1, f.f1 + '-10' AS x
-   FROM FLOAT8_TBL f
+   FROM FLOAT8_TBL_TMP f
    WHERE f.f1 > '0.0';
 
 SELECT f.f1, f.f1 / '-10' AS x
-   FROM FLOAT8_TBL f
+   FROM FLOAT8_TBL_TMP f
    WHERE f.f1 > '0.0';
 
 SELECT f.f1, f.f1 - '-10' AS x
-   FROM FLOAT8_TBL f
+   FROM FLOAT8_TBL_TMP f
    WHERE f.f1 > '0.0';
 
 SELECT f.f1 ^ '2.0' AS square_f1
-   FROM FLOAT8_TBL f where f.f1 = '1004.3';
+   FROM FLOAT8_TBL_TMP f where f.f1 = '1004.3';
 
 -- absolute value
 SELECT f.f1, @f.f1 AS abs_f1
-   FROM FLOAT8_TBL f;
+   FROM FLOAT8_TBL_TMP f;
 
 -- truncate
 SELECT f.f1, trunc(f.f1) AS trunc_f1
-   FROM FLOAT8_TBL f;
+   FROM FLOAT8_TBL_TMP f;
 
 -- round
 SELECT f.f1, round(f.f1) AS round_f1
-   FROM FLOAT8_TBL f;
+   FROM FLOAT8_TBL_TMP f;
 
 -- ceil / ceiling
-select ceil(f1) as ceil_f1 from float8_tbl f;
-select ceiling(f1) as ceiling_f1 from float8_tbl f;
+select ceil(f1) as ceil_f1 from float8_tbl_tmp f;
+select ceiling(f1) as ceiling_f1 from float8_tbl_tmp f;
 
 -- floor
-select floor(f1) as floor_f1 from float8_tbl f;
+select floor(f1) as floor_f1 from float8_tbl_tmp f;
 
 -- sign
-select sign(f1) as sign_f1 from float8_tbl f;
+select sign(f1) as sign_f1 from float8_tbl_tmp f;
 
 -- avoid bit-exact output here because operations may not be bit-exact.
 SET extra_float_digits = 0;
@@ -111,7 +115,7 @@ SELECT sqrt(double precision '64') AS eight;
 SELECT |/ double precision '64' AS eight;
 
 --@ SELECT f.f1, |/f.f1 AS sqrt_f1
---@    FROM FLOAT8_TBL f
+--@    FROM FLOAT8_TBL_TMP f
 --@    WHERE f.f1 > '0.0';
 
 -- power
@@ -154,7 +158,7 @@ SELECT power(double precision '-inf', double precision '-inf');
 
 -- take exp of ln(f.f1)
 --@ SELECT f.f1, exp(ln(f.f1)) AS exp_ln_f1
---@    FROM FLOAT8_TBL f
+--@    FROM FLOAT8_TBL_TMP f
 --@    WHERE f.f1 > '0.0';
 
 -- check edge cases for exp
@@ -163,30 +167,30 @@ SELECT exp('inf'::float8), exp('-inf'::float8), exp('nan'::float8);
 -- cube root
 --@ SELECT ||/ double precision '27' AS three;
 
---@ SELECT f.f1, ||/f.f1 AS cbrt_f1 FROM FLOAT8_TBL f;
+--@ SELECT f.f1, ||/f.f1 AS cbrt_f1 FROM FLOAT8_TBL_TMP f;
 
 
-SELECT * FROM FLOAT8_TBL;
+SELECT * FROM FLOAT8_TBL_TMP;
 
-UPDATE FLOAT8_TBL
-   SET f1 = FLOAT8_TBL.f1 * '-1'
-   WHERE FLOAT8_TBL.f1 > '0.0';
+UPDATE FLOAT8_TBL_TMP
+   SET f1 = FLOAT8_TBL_TMP.f1 * '-1'
+   WHERE FLOAT8_TBL_TMP.f1 > '0.0';
 
---@ SELECT f.f1 * '1e200' from FLOAT8_TBL f;
+--@ SELECT f.f1 * '1e200' from FLOAT8_TBL_TMP f;
 
-SELECT f.f1 ^ '1e200' from FLOAT8_TBL f;
+SELECT f.f1 ^ '1e200' from FLOAT8_TBL_TMP f;
 
 SELECT 0 ^ 0 + 0 ^ 1 + 0 ^ 0.0 + 0 ^ 0.5;
 
-SELECT ln(f.f1) from FLOAT8_TBL f where f.f1 = '0.0' ;
+SELECT ln(f.f1) from FLOAT8_TBL_TMP f where f.f1 = '0.0' ;
 
-SELECT ln(f.f1) from FLOAT8_TBL f where f.f1 < '0.0' ;
+SELECT ln(f.f1) from FLOAT8_TBL_TMP f where f.f1 < '0.0' ;
 
---@ SELECT exp(f.f1) from FLOAT8_TBL f;
+--@ SELECT exp(f.f1) from FLOAT8_TBL_TMP f;
 
---@ SELECT f.f1 / '0.0' from FLOAT8_TBL f;
+--@ SELECT f.f1 / '0.0' from FLOAT8_TBL_TMP f;
 
-SELECT * FROM FLOAT8_TBL;
+SELECT * FROM FLOAT8_TBL_TMP;
 
 -- hyperbolic functions
 -- we run these with extra_float_digits = 0 too, since different platforms
@@ -221,29 +225,17 @@ SELECT asinh(double precision 'nan');
 --@ RESET extra_float_digits;
 
 -- test for over- and underflow
---@ INSERT INTO FLOAT8_TBL(f1) VALUES ('10e400');
+--@ INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('10e400');
 
---@ INSERT INTO FLOAT8_TBL(f1) VALUES ('-10e400');
+--@ INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('-10e400');
 
---@ INSERT INTO FLOAT8_TBL(f1) VALUES ('10e-400');
+--@ INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('10e-400');
 
---@ INSERT INTO FLOAT8_TBL(f1) VALUES ('-10e-400');
+--@ INSERT INTO FLOAT8_TBL_TMP(f1) VALUES ('-10e-400');
 
--- maintain external table consistency across platforms
--- delete all values and reinsert well-behaved ones
+DROP TABLE FLOAT8_TBL_TMP;
 
-DELETE FROM FLOAT8_TBL;
-
-INSERT INTO FLOAT8_TBL(f1) VALUES ('0.0');
-
-INSERT INTO FLOAT8_TBL(f1) VALUES ('-34.84');
-
-INSERT INTO FLOAT8_TBL(f1) VALUES ('-1004.30');
-
-INSERT INTO FLOAT8_TBL(f1) VALUES ('-1.2345678901234e+200');
-
-INSERT INTO FLOAT8_TBL(f1) VALUES ('-1.2345678901234e-200');
-
+-- Check the float8 values exported for use by other tests
 SELECT * FROM FLOAT8_TBL;
 
 -- test edge-case coercions to integer
@@ -498,5 +490,3 @@ FROM (VALUES (0), (45), (90), (135), (180),
 
 -- clean up, lest opr_sanity complain
 --@ drop type xfloat8 cascade;
-
-DROP TABLE FLOAT8_TBL;
