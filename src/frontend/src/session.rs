@@ -481,6 +481,7 @@ pub struct SessionImpl {
     /// local query.
     current_query_cancel_flag: Mutex<Option<ShutdownSender>>,
 
+    /// execution context represents the lifetime of a running SQL in the current session
     exec_context: Mutex<Option<Weak<ExecContext>>>,
 }
 
@@ -778,8 +779,7 @@ impl SessionImpl {
                         Ok(result) => break result,
                         Err(_) => tracing::warn!(
                             target: SLOW_QUERY_LOG,
-                            "{} {}",
-                            &sql,
+                            sql = sql.as_ref(),
                             "slow query has been running for another {SLOW_QUERY_LOG_PERIOD:?}"
                         ),
                     }
@@ -1116,15 +1116,14 @@ impl Session for SessionImpl {
         }
     }
 
-    /// Init and return an `Arc<ExecContext>` which could be used as a guard to represent the execution flow.
-    /// Once
+    /// Init and return an `ExecContextGuard` which could be used as a guard to represent the execution flow.
     fn init_exec_context(&self, sql: Arc<str>) -> ExecContextGuard {
         let exec_context = Arc::new(ExecContext {
             running_sql: sql,
             last_instant: Instant::now(),
         });
         *self.exec_context.lock() = Some(Arc::downgrade(&exec_context));
-        ExecContextGuard(exec_context)
+        ExecContextGuard::new(exec_context)
     }
 }
 

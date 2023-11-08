@@ -114,13 +114,23 @@ pub trait Session: Send + Sync {
     fn init_exec_context(&self, sql: Arc<str>) -> ExecContextGuard;
 }
 
+/// Each session could run different SQLs multiple times.
+/// `ExecContext` represents the lifetime of a running SQL in the current session.
 pub struct ExecContext {
     pub running_sql: Arc<str>,
     /// The instant of the running sql
     pub last_instant: Instant,
 }
 
-pub struct ExecContextGuard(pub Arc<ExecContext>);
+/// `ExecContextGuard` holds a `Arc` pointer. Once `ExecContextGuard` is dropped,
+/// the inner `Arc<ExecContext>` should not be referred anymore, so that its `Weak` reference (used in `SessionImpl`) will be the same lifecycle of the running sql execution context.
+pub struct ExecContextGuard(Arc<ExecContext>);
+
+impl ExecContextGuard {
+    pub fn new(exec_context: Arc<ExecContext>) -> Self {
+        Self(exec_context)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum UserAuthenticator {
@@ -351,7 +361,7 @@ mod tests {
                 running_sql: sql,
                 last_instant: Instant::now(),
             });
-            ExecContextGuard(exec_context)
+            ExecContextGuard::new(exec_context)
         }
     }
 
