@@ -82,13 +82,15 @@ sqllogictest -p 4566 -d dev './e2e_test/superset/*.slt' --junit "batch-${profile
 
 echo "--- e2e, $mode, python udf"
 python3 e2e_test/udf/test.py &
-sleep 2
+sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/udf/udf.slt'
 pkill python3
 
+sqllogictest -p 4566 -d dev './e2e_test/udf/graceful_shutdown_python.slt'
+
 echo "--- e2e, $mode, java udf"
 java -jar risingwave-udf-example.jar &
-sleep 2
+sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/udf/udf.slt'
 pkill java
 
