@@ -363,6 +363,23 @@ create table s27 with (
   scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON (schema.location = 'file:///risingwave/json-complex-schema')
 
+# currently _rw_key can be set as primary key
+statement ok
+create source s28 (id bytea, PRIMARY KEY(_rw_key)) with (
+  connector = 'kafka',
+  topic = 'kafka_source_format_bytes',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE BYTES
+
+statement ok
+create table s29 (v1 int, v2 varchar, PRIMARY(_rw_key)) with (
+  connector = 'kafka',
+  topic = 'kafka_4_partition_topic',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON
+
 statement ok
 CREATE TABLE mongo_customers (
 	_id BIGINT PRIMARY KEY,
@@ -829,6 +846,12 @@ drop source s24
 
 statement ok
 drop table s27
+
+statement ok
+drop table s28
+
+statement ok
+drop table s29
 
 statement ok
 DROP TABLE mongo_customers;

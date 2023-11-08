@@ -61,7 +61,7 @@ use crate::handler::create_table::{
     bind_pk_on_relation, bind_sql_column_constraints, bind_sql_columns, bind_sql_pk_names,
     ensure_table_constraints_supported, ColumnIdGenerator,
 };
-use crate::handler::util::{get_connector, is_cdc_connector, is_kafka_connector};
+use crate::handler::util::{get_connector, is_cdc_connector, is_kafka_connector, is_datagen_connector};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
@@ -707,7 +707,9 @@ pub(crate) async fn bind_source_pk(
     let res = match (&source_schema.format, &source_schema.row_encode) {
         (Format::Native, Encode::Native) => sql_defined_pk_names,
         (Format::Plain, _) => {
-            add_default_key_column(columns);
+            if !is_datagen_connector(with_properties) {
+                add_default_key_column(columns);
+            }
             sql_defined_pk_names
         }
         (Format::Upsert, Encode::Json) => {
