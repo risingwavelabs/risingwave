@@ -847,7 +847,7 @@
     BatchHopWindow { time_col: t1.ts, slide: 00:10:00, size: 00:30:00, output: all }
     └─BatchExchange { order: [], dist: Single }
       └─BatchFilter { predicate: IsNotNull(t1.ts) }
-        └─BatchLookupJoin { type: Inner, predicate: 1:Int32 = t1.k AND IsNotNull(t1.ts), output: all }
+        └─BatchLookupJoin { type: Inner, predicate: 1:Int32 = t1.k AND IsNotNull(t1.ts), output: all, lookup table: t1 }
           └─BatchExchange { order: [], dist: UpstreamHashShard(1:Int32) }
             └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
               └─BatchExchange { order: [], dist: HashShard(1:Int32) }

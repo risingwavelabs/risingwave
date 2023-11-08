@@ -174,7 +174,7 @@
         A.category = 10 and (P.state = 'or' OR P.state = 'id' OR P.state = 'ca');
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: auction.seller = person.id AND (((person.state = 'or':Varchar) OR (person.state = 'id':Varchar)) OR (person.state = 'ca':Varchar)), output: [person.name, person.city, person.state, auction.id] }
+    └─BatchLookupJoin { type: Inner, predicate: auction.seller = person.id AND (((person.state = 'or':Varchar) OR (person.state = 'id':Varchar)) OR (person.state = 'ca':Varchar)), output: [person.name, person.city, person.state, auction.id], lookup table: person }
       └─BatchExchange { order: [], dist: UpstreamHashShard(auction.seller) }
         └─BatchProject { exprs: [auction.id, auction.seller] }
           └─BatchFilter { predicate: (auction.category = 10:Int32) }
@@ -1798,7 +1798,7 @@
     WHERE A.category = 10;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: bid.auction = auction.id AND (auction.category = 10:Int32), output: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category] }
+    └─BatchLookupJoin { type: Inner, predicate: bid.auction = auction.id AND (auction.category = 10:Int32), output: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], lookup table: auction }
       └─BatchExchange { order: [], dist: UpstreamHashShard(bid.auction) }
         └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time], distribution: SomeShard }
   stream_plan: |-
