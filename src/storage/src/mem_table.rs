@@ -38,7 +38,6 @@ use crate::hummock::value::HummockValue;
 use crate::row_serde::value_serde::ValueRowSerde;
 use crate::storage_value::StorageValue;
 use crate::store::*;
-
 pub type ImmutableMemtable = SharedBufferBatch;
 
 pub type ImmId = SharedBufferBatchId;
@@ -613,6 +612,10 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
             next_epoch,
             prev_epoch
         );
+    }
+
+    async fn try_flush(&mut self) -> StorageResult<()> {
+        Ok(())
     }
 }
 

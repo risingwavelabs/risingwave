@@ -49,7 +49,7 @@ pub use delete_range_iterator::{
     DeleteRangeIterator, ForwardMergeRangeIterator, RangeIteratorTyped,
 };
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::monitor::StoreLocalStatistic;
 
@@ -331,12 +331,12 @@ pub struct FromRustIterator<'a, B: RustIteratorBuilder> {
         TableKey<&'a [u8]>,
         HummockValue<&'a [u8]>,
     )>,
-    epoch: HummockEpoch,
+    epoch: EpochWithGap,
     table_id: TableId,
 }
 
 impl<'a, B: RustIteratorBuilder> FromRustIterator<'a, B> {
-    pub fn new(inner: &'a B::Iterable, epoch: HummockEpoch, table_id: TableId) -> Self {
+    pub fn new(inner: &'a B::Iterable, epoch: EpochWithGap, table_id: TableId) -> Self {
         Self {
             inner,
             iter: None,
@@ -363,7 +363,7 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
     fn key(&self) -> FullKey<&[u8]> {
         let (_, key, _) = self.iter.as_ref().expect("should be valid");
         FullKey {
-            epoch: self.epoch,
+            epoch_with_gap: self.epoch,
             user_key: UserKey {
                 table_id: self.table_id,
                 table_key: *key,
@@ -400,7 +400,7 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
         match iter.next() {
             Some((first_key, first_value)) => {
                 let first_full_key = FullKey {
-                    epoch: self.epoch,
+                    epoch_with_gap: self.epoch,
                     user_key: UserKey {
                         table_id: self.table_id,
                         table_key: first_key,

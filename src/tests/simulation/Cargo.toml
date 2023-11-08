@@ -37,6 +37,7 @@ risingwave_ctl = { workspace = true }
 risingwave_e2e_extended_mode_test = { path = "../e2e_extended_mode" }
 risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
+risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
 risingwave_meta_node = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
@@ -45,7 +46,7 @@ risingwave_sqlsmith = { workspace = true }
 serde = "1.0.188"
 serde_derive = "1.0.188"
 serde_json = "1.0.107"
-sqllogictest = "0.17.0"
+sqllogictest = "0.17.2"
 tempfile = "3"
 tikv-jemallocator = { workspace = true }
 tokio = { version = "0.2.24", package = "madsim-tokio" }
