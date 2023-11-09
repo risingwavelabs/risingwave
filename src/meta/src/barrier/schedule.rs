@@ -19,10 +19,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::anyhow;
-use futures::channel::oneshot::Sender;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::PausedReason;
+use tokio::sync::oneshot::Sender;
 use tokio::sync::{oneshot, watch, RwLock};
 
 use super::notifier::{BarrierInfo, Notifier};
@@ -336,9 +336,10 @@ impl BarrierScheduler {
     pub async fn run_command_with_notify_on_collect(
         &self,
         command: Command,
-        sender: Sender<MetaResult<()>>,
+        sender: Option<Sender<MetaResult<()>>>,
     ) -> MetaResult<BarrierInfo> {
-        self.run_multiple_commands(vec![command], Some(VecDeque::from([sender])))
+        let senders = sender.map(|s| VecDeque::from([s]));
+        self.run_multiple_commands(vec![command], senders)
             .await
             .map(|i| i[0])
     }
