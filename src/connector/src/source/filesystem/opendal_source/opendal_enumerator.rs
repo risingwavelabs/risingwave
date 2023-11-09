@@ -20,7 +20,7 @@ use opendal::{Metakey, Operator};
 use risingwave_common::types::Timestamp;
 
 use super::GcsProperties;
-use crate::source::filesystem::{FsPageItem, OpendalSplit};
+use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 pub struct OpendalConnector {
     pub(crate) op: Operator,
@@ -36,7 +36,7 @@ pub enum EngineType {
 #[async_trait]
 impl SplitEnumerator for OpendalConnector {
     type Properties = GcsProperties;
-    type Split = OpendalSplit;
+    type Split = OpendalFsSplit;
 
     async fn new(
         properties: Self::Properties,
@@ -53,7 +53,7 @@ impl SplitEnumerator for OpendalConnector {
         OpendalConnector::new_gcs_source(properties)
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<OpendalSplit>> {
+    async fn list_splits(&mut self) -> anyhow::Result<Vec<OpendalFsSplit>> {
         todo!()
     }
 }
@@ -96,44 +96,5 @@ impl OpendalConnector {
 
         Ok(stream.boxed())
     }
-
-    // #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
-    // async fn into_chunk_stream(self) {
-    //     for split in self.splits {
-    //         let actor_id = self.source_ctx.source_info.actor_id.to_string();
-    //         let source_id = self.source_ctx.source_info.source_id.to_string();
-    //         let source_ctx = self.source_ctx.clone();
-
-    //         let split_id = split.id();
-
-    //         let data_stream = Self::stream_read_object(
-    //             self.s3_client.clone(),
-    //             self.bucket_name.clone(),
-    //             split,
-    //             self.source_ctx.clone(),
-    //         );
-
-    //         let parser =
-    //             ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx).await?;
-    //         let msg_stream = if matches!(
-    //             parser,
-    //             ByteStreamSourceParserImpl::Json(_) | ByteStreamSourceParserImpl::Csv(_)
-    //         ) {
-    //             parser.into_stream(nd_streaming::split_stream(data_stream))
-    //         } else {
-    //             parser.into_stream(data_stream)
-    //         };
-    //         #[for_await]
-    //         for msg in msg_stream {
-    //             let msg = msg?;
-    //             self.source_ctx
-    //                 .metrics
-    //                 .partition_input_count
-    //                 .with_label_values(&[&actor_id, &source_id, &split_id])
-    //                 .inc_by(msg.chunk.cardinality() as u64);
-    //             yield msg;
-    //         }
-    //     }
-    // }
 }
 pub type ObjectMetadataIter = BoxStream<'static, anyhow::Result<FsPageItem>>;

@@ -67,16 +67,16 @@ impl FsSplit {
     }
 }
 
-///  [`OpendalSplit`] Describes a file or a split of a file. A file is a generic concept,
+///  [`OpendalFsSplit`] Describes a file or a split of a file. A file is a generic concept,
 /// and can be a local file, a distributed file system, or am object in S3 bucket.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct OpendalSplit {
+pub struct OpendalFsSplit {
     pub name: String,
     pub offset: usize,
     pub size: usize,
 }
 
-impl From<&Object> for OpendalSplit {
+impl From<&Object> for OpendalFsSplit {
     fn from(value: &Object) -> Self {
         Self {
             name: value.key().unwrap().to_owned(),
@@ -86,7 +86,7 @@ impl From<&Object> for OpendalSplit {
     }
 }
 
-impl SplitMetaData for OpendalSplit {
+impl SplitMetaData for OpendalFsSplit {
     fn id(&self) -> SplitId {
         self.name.as_str().into()
     }
@@ -106,7 +106,7 @@ impl SplitMetaData for OpendalSplit {
     }
 }
 
-impl OpendalSplit {
+impl OpendalFsSplit {
     pub fn new(name: String, start: usize, size: usize) -> Self {
         Self {
             name,

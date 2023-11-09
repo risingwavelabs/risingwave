@@ -22,7 +22,7 @@ pub mod opendal_reader;
 
 use self::opendal_enumerator::OpendalConnector;
 use self::opendal_reader::OpendalReader;
-use super::OpendalSplit;
+use super::OpendalFsSplit;
 use crate::source::SourceProperties;
 
 pub const GCS_CONNECTOR: &str = "gcs";
@@ -34,7 +34,7 @@ pub struct GcsProperties {
 }
 
 impl SourceProperties for GcsProperties {
-    type Split = OpendalSplit;
+    type Split = OpendalFsSplit;
     type SplitEnumerator = OpendalConnector;
     type SplitReader = OpendalReader;
 
@@ -52,7 +52,7 @@ impl SourceProperties for GcsProperties {
 // impl SourceProperties for OpenDALProperties{
 
 //     const SOURCE_NAME: &'static str = GCS_CONNECTOR;
-//     type Split = OpendalSplit;
+//     type Split = OpendalFsSplit;
 
 //     type SplitEnumerator = OpendalConnector;
 //     type SplitReader = OpendalReader;

@@ -27,7 +27,7 @@ use tokio_util::io::{ReaderStream, StreamReader};
 use super::opendal_enumerator::OpendalConnector;
 use super::GcsProperties;
 use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
-use crate::source::filesystem::{nd_streaming, OpendalSplit};
+use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
     SplitReader, StreamChunkWithState,
@@ -37,18 +37,18 @@ const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
 pub struct OpendalReader {
     connector: OpendalConnector,
-    splits: Vec<OpendalSplit>,
+    splits: Vec<OpendalFsSplit>,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
 }
 #[async_trait]
 impl SplitReader for OpendalReader {
     type Properties = GcsProperties;
-    type Split = OpendalSplit;
+    type Split = OpendalFsSplit;
 
     async fn new(
         properties: GcsProperties,
-        splits: Vec<OpendalSplit>,
+        splits: Vec<OpendalFsSplit>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
@@ -115,7 +115,7 @@ impl OpendalReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn stream_read_object(
         op: Operator,
-        split: OpendalSplit,
+        split: OpendalFsSplit,
         source_ctx: SourceContextRef,
     ) {
         let actor_id = source_ctx.source_info.actor_id.to_string();
