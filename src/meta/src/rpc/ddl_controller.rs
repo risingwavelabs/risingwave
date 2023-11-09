@@ -495,6 +495,7 @@ impl DdlController {
             CreateType::Background => {
                 let ctrl = self.clone();
                 let stream_job_id = stream_job.id();
+                let (sender, receiver) = tokio::sync::oneshot::channel();
                 let fut = async move {
                     let result = ctrl
                         .create_streaming_job_inner(
@@ -514,6 +515,7 @@ impl DdlController {
                     }
                 };
                 tokio::spawn(fut);
+                receiver.await
                 Ok(IGNORED_NOTIFICATION_VERSION)
             }
         }

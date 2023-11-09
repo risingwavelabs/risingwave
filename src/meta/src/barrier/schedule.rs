@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::anyhow;
+use futures::channel::oneshot::Sender;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::PausedReason;
@@ -240,7 +241,11 @@ impl BarrierScheduler {
     /// Returns the barrier info of each command.
     ///
     /// TODO: atomicity of multiple commands is not guaranteed.
-    async fn run_multiple_commands(&self, commands: Vec<Command>) -> MetaResult<Vec<BarrierInfo>> {
+    async fn run_multiple_commands(
+        &self,
+        commands: Vec<Command>,
+        mut senders: Option<VecDeque<Sender<MetaResult<()>>>>,
+    ) -> MetaResult<Vec<BarrierInfo>> {
         let mut contexts = Vec::with_capacity(commands.len());
         let mut scheduleds = Vec::with_capacity(commands.len());
 
@@ -248,8 +253,8 @@ impl BarrierScheduler {
             let (injected_tx, injected_rx) = oneshot::channel();
             let (collect_tx, collect_rx) = oneshot::channel();
             let (finish_tx, finish_rx) = oneshot::channel();
-
             contexts.push((injected_rx, collect_rx, finish_rx));
+
             scheduleds.push(self.inner.new_scheduled(
                 command.need_checkpoint(),
                 command,
@@ -273,9 +278,19 @@ impl BarrierScheduler {
             infos.push(info);
 
             // Throw the error if it occurs when collecting this barrier.
-            collect_rx
+            let res = collect_rx
                 .await
-                .map_err(|e| anyhow!("failed to collect barrier: {}", e))??;
+                .map_err(|e| anyhow!("failed to collect barrier: {}", e))?;
+
+            if let Some(senders) = senders.as_mut() {
+                senders
+                    .pop_front()
+                    .unwrap()
+                    .send(res)
+                    .map_err(|e| anyhow!("failed to send result: {:?}", e))?;
+            } else {
+                res?;
+            }
 
             // Wait for this command to be finished.
             finish_rx
@@ -294,11 +309,14 @@ impl BarrierScheduler {
         &self,
         command: Command,
     ) -> MetaResult<BarrierInfo> {
-        self.run_multiple_commands(vec![
-            Command::pause(PausedReason::ConfigChange),
-            command,
-            Command::resume(PausedReason::ConfigChange),
-        ])
+        self.run_multiple_commands(
+            vec![
+                Command::pause(PausedReason::ConfigChange),
+                command,
+                Command::resume(PausedReason::ConfigChange),
+            ],
+            None,
+        )
         .await
         .map(|i| i[1])
     }
@@ -307,7 +325,20 @@ impl BarrierScheduler {
     ///
     /// Returns the barrier info of the actual command.
     pub async fn run_command(&self, command: Command) -> MetaResult<BarrierInfo> {
-        self.run_multiple_commands(vec![command])
+        self.run_multiple_commands(vec![command], None)
+            .await
+            .map(|i| i[0])
+    }
+
+    /// Run a command and return when it's completely finished.
+    ///
+    /// Returns the barrier info of the actual command.
+    pub async fn run_command_with_notify_on_collect(
+        &self,
+        command: Command,
+        sender: Sender<MetaResult<()>>,
+    ) -> MetaResult<BarrierInfo> {
+        self.run_multiple_commands(vec![command], Some(VecDeque::from([sender])))
             .await
             .map(|i| i[0])
     }
