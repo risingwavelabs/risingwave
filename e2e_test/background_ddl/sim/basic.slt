@@ -8,7 +8,7 @@ statement ok
 CREATE TABLE t (v1 int);
 
 statement ok
-INSERT INTO t select * from generate_series(1, 200000);
+INSERT INTO t select * from generate_series(1, 300000);
 
 statement ok
 FLUSH;
