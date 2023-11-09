@@ -132,7 +132,7 @@ mod tests {
         let client_status = tonic::Status::from_header_map(body.headers()).unwrap();
 
         let wrapper = TonicStatusWrapper::new(client_status);
-        assert_eq!(wrapper.to_string(), "gRPC error (Internal error): outer");
+        assert_eq!(wrapper.to_string(), "gRPC request failed: Internal error: outer");
 
         let source = wrapper.source().unwrap();
         assert!(source.is::<serde_error::Error>());
