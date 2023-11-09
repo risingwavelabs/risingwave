@@ -90,7 +90,12 @@ impl From<tonic::Status> for TonicStatusWrapper {
 
 impl std::fmt::Display for TonicStatusWrapper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "gRPC error ({}): {}", self.0.code(), self.0.message())
+        write!(
+            f,
+            "gRPC request failed: {}: {}",
+            self.0.code(),
+            self.0.message()
+        )
     }
 }
 

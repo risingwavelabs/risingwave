@@ -7642,6 +7642,7 @@ dependencies = [
  "bytes",
  "easy-ext",
  "madsim-tonic",
+ "serde",
  "serde-error",
  "thiserror",
  "thiserror-ext",
