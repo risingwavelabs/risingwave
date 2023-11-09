@@ -31,7 +31,6 @@ pub(crate) mod database_catalog;
 pub(crate) mod function_catalog;
 pub(crate) mod index_catalog;
 pub(crate) mod root_catalog;
-pub(crate) mod scan_table_catalog;
 pub(crate) mod schema_catalog;
 pub(crate) mod source_catalog;
 pub(crate) mod system_catalog;

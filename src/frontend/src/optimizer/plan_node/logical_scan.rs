@@ -615,7 +615,7 @@ impl ToStream for LogicalScan {
                 .config()
                 .get_streaming_enable_arrangement_backfill()
             {
-                Ok(StreamTableScan::new_with_chain_type(
+                Ok(StreamTableScan::new_with_stream_scan_type(
                     self.core.clone(),
                     StreamScanType::ArrangementBackfill,
                 )

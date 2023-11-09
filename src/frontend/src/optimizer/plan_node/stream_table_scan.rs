@@ -328,8 +328,8 @@ impl StreamTableScan {
             .get_upstream_state_table()
             .unwrap()
             .with_output_column_ids(&self.core.output_column_ids());
-        let output_indices = match self.chain_type {
-            ChainType::ArrangementBackfill => self
+        let output_indices = match self.stream_scan_type {
+            StreamScanType::ArrangementBackfill => self
                 .core
                 .output_column_ids()
                 .iter()
@@ -356,7 +356,7 @@ impl StreamTableScan {
                 .collect_vec(),
         };
 
-        let arrangement_table = if self.chain_type == ChainType::ArrangementBackfill {
+        let arrangement_table = if self.stream_scan_type == StreamScanType::ArrangementBackfill {
             Some(upstream_table_catalog.to_internal_table_prost())
         } else {
             None

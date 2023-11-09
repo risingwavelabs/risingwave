@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use anyhow::anyhow;
 
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
@@ -56,7 +57,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
             .map(|&i| i as usize)
             .collect_vec();
 
-        let schema = if node.chain_type() == StreamScanType::ArrangementBackfill {
+        let schema = if node.stream_scan_type() == StreamScanType::ArrangementBackfill {
             let upstream_schema_fields = &snapshot.schema().fields;
             let output_schema_fields = node
                 .get_output_indices()
@@ -66,7 +67,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
             Schema {
                 fields: output_schema_fields,
             }
-        } else if matches!(node.chain_type(), StreamScanType::Backfill) {
+        } else if matches!(node.stream_scan_type(), StreamScanType::Backfill) {
             Schema::new(
                 output_indices
                     .iter()
@@ -232,7 +233,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     None
                 };
 
-                if node.chain_type() == ChainType::Backfill {
+                if node.stream_scan_type() == StreamScanType::Backfill {
                     let upstream_table = StorageTable::new_partial(
                         state_store,
                         table_id,
