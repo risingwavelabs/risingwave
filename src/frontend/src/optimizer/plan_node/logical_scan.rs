@@ -607,7 +607,8 @@ impl ToStream for LogicalScan {
                 Ok(StreamTableScan::new_with_stream_scan_type(
                     self.core.clone(),
                     StreamScanType::CdcBackfill,
-                ).into())
+                )
+                .into())
             } else if self
                 .ctx()
                 .session_ctx()

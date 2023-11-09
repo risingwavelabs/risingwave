@@ -121,10 +121,7 @@ const STREAMING_RATE_LIMIT: usize = 34;
 const CDC_BACKFILL: usize = 35;
 const STREAMING_OVER_WINDOW_CACHE_POLICY: usize = 36;
 const BACKGROUND_DDL: usize = 37;
-
 const SERVER_ENCODING: usize = 38;
-const STREAMING_ENABLE_ARRANGEMENT_BACKFILL: usize = 39;
-
 const STREAMING_ENABLE_ARRANGEMENT_BACKFILL: usize = 39;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
@@ -331,8 +328,6 @@ type Timezone = ConfigString<TIMEZONE>;
 type StreamingParallelism = ConfigU64<STREAMING_PARALLELISM, 0>;
 type StreamingEnableDeltaJoin = ConfigBool<STREAMING_ENABLE_DELTA_JOIN, false>;
 type StreamingEnableBushyJoin = ConfigBool<STREAMING_ENABLE_BUSHY_JOIN, true>;
-// TODO: Revert to false before merging.
-type StreamingEnableArrangementBackfill = ConfigBool<STREAMING_ENABLE_ARRANGEMENT_BACKFILL, true>;
 type EnableTwoPhaseAgg = ConfigBool<ENABLE_TWO_PHASE_AGG, true>;
 type ForceTwoPhaseAgg = ConfigBool<FORCE_TWO_PHASE_AGG, false>;
 type EnableSharePlan = ConfigBool<RW_ENABLE_SHARE_PLAN, true>;
