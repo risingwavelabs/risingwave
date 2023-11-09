@@ -8,7 +8,7 @@ statement ok
 CREATE TABLE t (v1 int);
 
 statement ok
-INSERT INTO t select * from generate_series(1, 400000);
+INSERT INTO t select * from generate_series(1, 800000);
 
 statement ok
 FLUSH;
@@ -47,17 +47,17 @@ WAIT;
 query I
 select count(*) from m1;
 ----
-400000
+800000
 
 query I
 select count(*) from m2;
 ----
-400000
+800000
 
 query I
 select count(*) from m3;
 ----
-400000
+800000
 
 statement ok
 DROP MATERIALIZED VIEW m1;
