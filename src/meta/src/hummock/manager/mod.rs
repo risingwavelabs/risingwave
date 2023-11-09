@@ -2748,9 +2748,10 @@ impl HummockManager {
                                 // TODO: task cancellation can be batched
                                 for task in cancel_tasks {
                                     tracing::info!(
-                                        "Task with task_id {} with context_id {} has expired due to lack of visible progress",
+                                        "Task with group_id {} task_id {} with context_id {} has expired due to lack of visible progress",
+                                        task.compaction_group_id,
+                                        task.task_id,
                                         context_id,
-                                        task.task_id
                                     );
 
                                     if let Err(e) =
