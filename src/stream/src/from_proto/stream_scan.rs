@@ -75,15 +75,15 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     .create_table_reader(properties.clone(), params.info.schema.clone())?;
 
                 let table_schema = params.info.schema.clone();
-                let table_pk_indices = table_desc
-                    .pk
-                    .iter()
-                    .map(|k| k.column_index as usize)
-                    .collect_vec();
                 let table_pk_order_types = table_desc
                     .pk
                     .iter()
                     .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
+                    .collect_vec();
+                let table_pk_indices = table_desc
+                    .pk
+                    .iter()
+                    .map(|k| k.column_index as usize)
                     .collect_vec();
 
                 let schema_table_name = SchemaTableName::from_properties(&properties);
@@ -134,16 +134,16 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     .map(ColumnId::from)
                     .collect_vec();
 
+                let table_pk_order_types = table_desc
+                    .pk
+                    .iter()
+                    .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
+                    .collect_vec();
                 // Use indices based on full table instead of streaming executor output.
                 let table_pk_indices = table_desc
                     .pk
                     .iter()
                     .map(|k| k.column_index as usize)
-                    .collect_vec();
-                let table_pk_order_types = table_desc
-                    .pk
-                    .iter()
-                    .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
                     .collect_vec();
 
                 let dist_key_in_pk_indices = table_desc
