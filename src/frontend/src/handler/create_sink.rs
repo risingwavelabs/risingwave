@@ -14,15 +14,15 @@
 
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
-use either::Either;
 use anyhow::Context;
+use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, ConnectionId, DatabaseId, SchemaId, UserId};
+use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
@@ -42,9 +42,8 @@ use risingwave_sqlparser::parser::Parser;
 use super::create_mv::get_column_names;
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::table_catalog::TableType;
 use crate::expr::{ExprImpl, InputRef, Literal};
+use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_table::{generate_table, ColumnIdGenerator};
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
@@ -54,7 +53,7 @@ use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::resolve_privatelink_in_with_option;
-use crate::{Planner, WithOptions};
+use crate::{Planner, TableCatalog, WithOptions};
 
 pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
     let table_factor = TableFactor::Table {
@@ -82,11 +81,12 @@ pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
     })
 }
 
+#[allow(clippy::type_complexity)]
 pub fn gen_sink_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: CreateSinkStatement,
-) -> Result<(Box<Query>, PlanRef, SinkCatalog)> {
+) -> Result<(Box<Query>, PlanRef, SinkCatalog, Option<Arc<TableCatalog>>)> {
     let db_name = session.database();
     let (sink_schema_name, sink_table_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.sink_name.clone())?;
@@ -104,7 +104,7 @@ pub fn gen_sink_plan(
         }
     };
 
-    let sink_into_table_name = stmt.into_table_name.map(|name| name.real_value());
+    let sink_into_table_name = stmt.into_table_name.as_ref().map(|name| name.real_value());
 
     let (sink_database_id, sink_schema_id) =
         session.get_database_and_schema_id_for_create(sink_schema_name.clone())?;
@@ -188,7 +188,7 @@ pub fn gen_sink_plan(
     )?;
     let sink_desc = sink_plan.sink_desc().clone();
 
-    let sink_plan: PlanRef = sink_plan.into();
+    let mut sink_plan: PlanRef = sink_plan.into();
 
     let ctx = sink_plan.ctx();
     let explain_trace = ctx.is_explain_trace();
@@ -208,7 +208,49 @@ pub fn gen_sink_plan(
         dependent_relations.into_iter().collect_vec(),
     );
 
-    Ok((query, sink_plan, sink_catalog))
+    let target_table_catalog = stmt
+        .into_table_name
+        .as_ref()
+        .map(|table_name| fetch_table_catalog_for_alter(session, table_name))
+        .transpose()?;
+
+    if let Some(table_catalog) = &target_table_catalog {
+        for column in sink_catalog.full_columns() {
+            if column.is_generated() {
+                return Err(RwError::from(ErrorCode::BindError(
+                    "The sink to table feature for Sinks with generated columns has not been implemented yet."
+                        .to_string(),
+                )));
+            }
+        }
+
+        let user_defined_primary_key_table =
+            !(table_catalog.append_only || table_catalog.row_id_index.is_some());
+
+        if !(user_defined_primary_key_table
+            || sink_catalog.sink_type == SinkType::AppendOnly
+            || sink_catalog.sink_type == SinkType::ForceAppendOnly)
+        {
+            return Err(RwError::from(ErrorCode::BindError(
+                "Only append-only sinks can sink to a table without primary keys.".to_string(),
+            )));
+        }
+
+        let exprs = derive_default_column_project_for_sink(&sink_catalog, table_catalog)?;
+
+        let logical_project = generic::Project::new(exprs, sink_plan);
+
+        sink_plan = StreamProject::new(logical_project).into();
+
+        let exprs =
+            LogicalSource::derive_output_exprs_from_generated_columns(table_catalog.columns())?;
+        if let Some(exprs) = exprs {
+            let logical_project = generic::Project::new(exprs, sink_plan);
+            sink_plan = StreamProject::new(logical_project).into();
+        }
+    };
+
+    Ok((query, sink_plan, sink_catalog, target_table_catalog))
 }
 
 pub async fn handle_create_sink(
@@ -227,41 +269,40 @@ pub async fn handle_create_sink(
 
     let target_table = stmt.into_table_name.clone();
 
-    let mut affected_table_change = None;
-    if let Some(table_name) = target_table {
-        let db_name = session.database();
-        let (schema_name, real_table_name) =
-            Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
-        let search_path = session.config().get_search_path();
-        let user_name = &session.auth_context().user_name;
+    let (sink, graph, target_table_catalog) = {
+        let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
 
-        let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+        let (query, plan, sink, target_table_catalog) =
+            gen_sink_plan(&session, context.clone(), stmt)?;
 
-        let original_catalog = {
-            let reader = session.env().catalog_reader().read_guard();
-            let (table, schema_name) =
-                reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
+        let has_order_by = !query.order_by.is_empty();
+        if has_order_by {
+            context.warn_to_user(
+                r#"The ORDER BY clause in the CREATE SINK statement has no effect at all."#
+                    .to_string(),
+            );
+        }
 
-            match table.table_type() {
-                TableType::Table => {}
+        let mut graph = build_graph(plan);
 
-                _ => Err(ErrorCode::InvalidInputSyntax(format!(
-                    "\"{table_name}\" is not a table"
-                )))?,
-            }
+        graph.parallelism = session
+            .config()
+            .get_streaming_parallelism()
+            .map(|parallelism| Parallelism { parallelism });
 
-            session.check_privilege_for_drop_alter(schema_name, &**table)?;
-            table.clone()
-        };
+        (sink, graph, target_table_catalog)
+    };
 
-        if !original_catalog.incoming_sinks.is_empty() {
+    let mut target_table_replace_plan = None;
+    if let Some(table_catalog) = target_table_catalog {
+        if !table_catalog.incoming_sinks.is_empty() {
             return Err(RwError::from(ErrorCode::BindError(
                 "Create sink into table with incoming sinks has not been implemented.".to_string(),
             )));
         }
 
         // Retrieve the original table definition and parse it to AST.
-        let [mut definition]: [_; 1] = Parser::parse_sql(&original_catalog.definition)
+        let [mut definition]: [_; 1] = Parser::parse_sql(&table_catalog.definition)
             .context("unable to parse original table definition")?
             .try_into()
             .unwrap();
@@ -274,7 +315,7 @@ pub async fn handle_create_sink(
 
         // Create handler args as if we're creating a new table with the altered definition.
         let handler_args = HandlerArgs::new(session.clone(), &definition, "")?;
-        let col_id_gen = ColumnIdGenerator::new_alter(&original_catalog);
+        let col_id_gen = ColumnIdGenerator::new_alter(&table_catalog);
         let Statement::CreateTable {
             columns,
             constraints,
@@ -288,8 +329,8 @@ pub async fn handle_create_sink(
 
         let (mut graph, table, source) = generate_table(
             &session,
-            table_name,
-            &original_catalog,
+            target_table.unwrap(),
+            &table_catalog,
             source_schema,
             handler_args,
             col_id_gen,
@@ -328,7 +369,7 @@ pub async fn handle_create_sink(
 
         // Calculate the mapping from the original columns to the new columns.
         let col_index_mapping = ColIndexMapping::new(
-            original_catalog
+            table_catalog
                 .columns()
                 .iter()
                 .map(|old_c| {
@@ -340,7 +381,7 @@ pub async fn handle_create_sink(
             table.columns.len(),
         );
 
-        affected_table_change = Some(ReplaceTablePlan {
+        target_table_replace_plan = Some(ReplaceTablePlan {
             source,
             table: Some(table.clone()),
             fragment_graph: Some(graph),
@@ -445,7 +486,6 @@ pub async fn handle_create_sink(
 
         let mut graph = build_graph(plan);
 
-
         graph.parallelism =
             session
                 .config()
@@ -470,88 +510,57 @@ pub async fn handle_create_sink(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_sink(sink.to_proto(), graph, affected_table_change)
+        .create_sink(sink.to_proto(), graph, target_table_replace_plan)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn regenerate_table(
-    session: &Arc<SessionImpl>,
-    table_name: ObjectName,
-    original_catalog: &Arc<TableCatalog>,
-    source_schema: Option<ConnectorSchema>,
-    handler_args: HandlerArgs,
-    col_id_gen: ColumnIdGenerator,
-    columns: Vec<ColumnDef>,
-    constraints: Vec<TableConstraint>,
-    source_watermarks: Vec<SourceWatermark>,
-    append_only: bool,
-    with_external_sink: i32,
-) -> Result<(StreamFragmentGraph, Table, Option<PbSource>, Distribution)> {
-    use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+fn derive_default_column_project_for_sink(
+    sink: &SinkCatalog,
+    target_table_catalog: &Arc<TableCatalog>,
+) -> Result<Vec<ExprImpl>> {
+    let mut exprs = vec![];
 
-    use super::create_table::gen_create_table_plan;
-    use crate::handler::create_table::gen_create_table_plan_with_source;
+    let sink_visible_columns = sink
+        .full_columns()
+        .iter()
+        .enumerate()
+        .filter(|(_i, c)| !c.is_hidden())
+        .collect_vec();
 
-    let context = OptimizerContext::from_handler_args(handler_args);
-    let (plan, source, table) = match source_schema {
-        Some(source_schema) => {
-            gen_create_table_plan_with_source(
-                context,
-                table_name,
-                columns,
-                constraints,
-                source_schema,
-                source_watermarks,
-                col_id_gen,
-                append_only,
-                with_external_sink,
-            )
-            .await?
+    for (idx, table_column) in target_table_catalog.columns().iter().enumerate() {
+        if table_column.is_generated() {
+            continue;
         }
-        None => gen_create_table_plan(
-            context,
-            table_name,
-            columns,
-            constraints,
-            col_id_gen,
-            source_watermarks,
-            append_only,
-            with_external_sink,
-        )?,
-    };
 
-    let dist = plan.distribution().to_owned();
+        let data_type = table_column.data_type();
 
-    // TODO: avoid this backward conversion.
-    if TableCatalog::from(&table).pk_column_ids() != original_catalog.pk_column_ids() {
-        Err(ErrorCode::InvalidInputSyntax(
-            "alter primary key of table is not supported".to_owned(),
-        ))?
+        if idx < sink_visible_columns.len() {
+            let (sink_col_idx, sink_column) = sink_visible_columns[idx];
+
+            let sink_col_type = sink_column.data_type();
+
+            if data_type != sink_col_type {
+                bail!(
+                    "column type mismatch: {:?} vs {:?}",
+                    data_type,
+                    sink_col_type
+                );
+            } else {
+                exprs.push(ExprImpl::InputRef(Box::new(InputRef::new(
+                    sink_col_idx,
+                    data_type.clone(),
+                ))));
+            }
+        } else {
+            exprs.push(ExprImpl::Literal(Box::new(Literal::new(
+                None,
+                data_type.clone(),
+            ))));
+        };
     }
-
-    let graph = StreamFragmentGraph {
-        parallelism: session
-            .config()
-            .streaming_parallelism()
-            .map(|parallelism| Parallelism {
-                parallelism: parallelism.get(),
-            }),
-        ..build_graph(plan)
-    };
-
-    // Fill the original table ID.
-    let table = Table {
-        id: original_catalog.id().table_id(),
-        optional_associated_source_id: original_catalog
-            .associated_source_id()
-            .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
-        ..table
-    };
-
-    Ok((graph, table, source, dist))
+    Ok(exprs)
 }
 
 /// Transforms the (format, encode, options) from sqlparser AST into an internal struct `SinkFormatDesc`.

@@ -31,7 +31,8 @@ use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
-use crate::{Binder, WithOptions};
+use crate::session::SessionImpl;
+use crate::{Binder, TableCatalog, WithOptions};
 
 /// Handle `ALTER TABLE [ADD|DROP] COLUMN` statements. The `operation` must be either `AddColumn` or
 /// `DropColumn`.
@@ -41,31 +42,7 @@ pub async fn handle_alter_table_column(
     operation: AlterTableOperation,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let db_name = session.database();
-    let (schema_name, real_table_name) =
-        Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
-    let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
-
-    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
-
-    let original_catalog = {
-        let reader = session.env().catalog_reader().read_guard();
-        let (table, schema_name) =
-            reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
-
-        match table.table_type() {
-            TableType::Table => {}
-
-            _ => Err(ErrorCode::InvalidInputSyntax(format!(
-                "\"{table_name}\" is not a table or cannot be altered"
-            )))?,
-        }
-
-        session.check_privilege_for_drop_alter(schema_name, &**table)?;
-
-        table.clone()
-    };
+    let original_catalog = fetch_table_catalog_for_alter(session.as_ref(), &table_name)?;
 
     if !original_catalog.incoming_sinks.is_empty() {
         return Err(RwError::from(ErrorCode::BindError(
@@ -230,6 +207,39 @@ fn schema_has_schema_registry(schema: &ConnectorSchema) -> bool {
         }
         _ => false,
     }
+}
+
+pub fn fetch_table_catalog_for_alter(
+    session: &SessionImpl,
+    table_name: &ObjectName,
+) -> Result<Arc<TableCatalog>> {
+    let db_name = session.database();
+    let (schema_name, real_table_name) =
+        Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
+    let search_path = session.config().search_path();
+    let user_name = &session.auth_context().user_name;
+
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
+    let original_catalog = {
+        let reader = session.env().catalog_reader().read_guard();
+        let (table, schema_name) =
+            reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
+
+        match table.table_type() {
+            TableType::Table => {}
+
+            _ => Err(ErrorCode::InvalidInputSyntax(format!(
+                "\"{table_name}\" is not a table or cannot be altered"
+            )))?,
+        }
+
+        session.check_privilege_for_drop_alter(schema_name, &**table)?;
+
+        table.clone()
+    };
+
+    Ok(original_catalog)
 }
 
 #[cfg(test)]
