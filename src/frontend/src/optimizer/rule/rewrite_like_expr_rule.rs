@@ -19,6 +19,7 @@ use risingwave_common::types::ScalarImpl;
 use risingwave_connector::source::DataType;
 
 use super::{BoxedRule, Rule};
+use crate::expr::expr_visitor::default_visit_function_call;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, Literal};
 use crate::optimizer::plan_node::{ExprRewritable, LogicalFilter};
 use crate::optimizer::PlanRef;
@@ -62,12 +63,7 @@ impl ExprVisitor for HasLikeExprVisitor {
         {
             true
         } else {
-            func_call
-                .inputs()
-                .iter()
-                .map(|expr| self.visit_expr(expr))
-                .reduce(Self::merge)
-                .unwrap_or_default()
+            default_visit_function_call(self, func_call)
         }
     }
 }

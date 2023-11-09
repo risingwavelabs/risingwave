@@ -373,17 +373,29 @@ const COLUMN_GROUP_PREFIX: &str = "?column_group_id?";
 #[cfg(test)]
 pub mod test_utils {
     use risingwave_common::types::DataType;
+    use risingwave_sqlparser::parser::Parser;
+    use risingwave_sqlparser::tokenizer::Tokenizer;
 
     use super::Binder;
+    use crate::expr::ExprImpl;
     use crate::session::SessionImpl;
 
-    #[cfg(test)]
     pub fn mock_binder() -> Binder {
         Binder::new(&SessionImpl::mock())
     }
 
-    #[cfg(test)]
     pub fn mock_binder_with_param_types(param_types: Vec<Option<DataType>>) -> Binder {
         Binder::new_with_param_types(&SessionImpl::mock(), param_types)
+    }
+
+    /// An util function to create an [`ExprImpl`] from a literal SQL string quickly.
+    pub fn must_parse_and_bind_expr(s: &str) -> ExprImpl {
+        let tokens = Tokenizer::new(s).tokenize_with_location().unwrap();
+        let mut parser = Parser::new(tokens);
+        let expr: risingwave_sqlparser::ast::Expr = parser.parse_expr().unwrap();
+        // We don't know why their require the tokio runtime during binding. Just make them happy.
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _guard = rt.enter();
+        mock_binder().bind_expr(expr).unwrap()
     }
 }
