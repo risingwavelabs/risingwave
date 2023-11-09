@@ -200,7 +200,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                         ) && i != 0
                             && (e.to_string().contains("exists")
                                 && e.to_string().contains("Catalog error"))
-                            || (e.to_string().contains("table is in creating procedure")) =>
+                            || (e.to_string().contains("background table is in creating procedure")) =>
                     {
                         break
                     }
