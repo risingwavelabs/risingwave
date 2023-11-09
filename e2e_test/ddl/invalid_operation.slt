@@ -253,7 +253,6 @@ SELECT * from msrc limit 0;
 # FIXME: improve the error message
 query error not found
 SELECT * from sink limit 0;
-----
 
 query I
 SELECT * from v limit 0;
