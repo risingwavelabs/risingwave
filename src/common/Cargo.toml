@@ -123,6 +123,7 @@ mach2 = "0.4"
 
 [dev-dependencies]
 criterion = { workspace = true }
+expect-test = "1"
 more-asserts = "0.3"
 pretty_assertions = "1"
 rand = "0.8"
@@ -152,10 +153,6 @@ harness = false
 [[bench]]
 name = "bench_array"
 harness = false
-
-[[bin]]
-name = "example-config"
-path = "src/bin/default_config.rs"
 
 [lints]
 workspace = true
