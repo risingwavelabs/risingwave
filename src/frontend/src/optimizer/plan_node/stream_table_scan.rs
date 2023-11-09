@@ -344,7 +344,8 @@ impl StreamTableScan {
                 .build_cdc_backfill_state_catalog(state)
                 .to_internal_table_prost();
             PbNodeBody::StreamScan(StreamScanNode {
-                table_id: self.core.cdc_table_desc.table_id.table_id,
+                // The table id refers to the upstream source streaming job
+                table_id: self.core.cdc_table_desc.source_id.table_id,
                 stream_scan_type: self.stream_scan_type as i32,
                 // The column indices need to be forwarded to the downstream
                 output_indices,
