@@ -254,7 +254,7 @@ impl StreamTableScan {
             StreamScanType::Chain | StreamScanType::Rearrange | StreamScanType::UpstreamOnly => {
                 self.core.output_column_ids()
             }
-            StreamScanType::ChainUnspecified => unreachable!(),
+            StreamScanType::Unspecified => unreachable!(),
         }
         .iter()
         .map(ColumnId::get_id)
