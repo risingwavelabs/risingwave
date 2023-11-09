@@ -38,6 +38,13 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 2Gi
+        reservations:
+          memory: 1Gi
   compute-node-0:
     <<: *image
     command:
@@ -75,6 +82,13 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 26Gi
+        reservations:
+          memory: 26Gi
   etcd-0:
     image: "quay.io/coreos/etcd:v3.5.7"
     command:
@@ -123,6 +137,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
   frontend-node-0:
     <<: *image
     command:
@@ -157,6 +172,13 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 2Gi
+        reservations:
+          memory: 1Gi
   grafana-0:
     image: "grafana/grafana-oss:latest"
     command: []
@@ -180,6 +202,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
   meta-node-0:
     <<: *image
     command:
@@ -227,6 +250,13 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 2Gi
+        reservations:
+          memory: 1Gi
   minio-0:
     image: "quay.io/minio/minio:latest"
     command:
@@ -271,6 +301,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
   prometheus-0:
     image: "prom/prometheus:latest"
     command:
@@ -297,6 +328,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
   message_queue:
     image: "docker.vectorized.io/vectorized/redpanda:latest"
     command:
@@ -335,6 +367,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
 volumes:
   etcd-0:
     external: false
