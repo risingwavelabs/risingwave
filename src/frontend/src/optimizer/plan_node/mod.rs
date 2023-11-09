@@ -662,6 +662,9 @@ impl dyn PlanNode {
         if let Some(stream_table_scan) = self.as_stream_table_scan() {
             return stream_table_scan.adhoc_to_stream_prost(state);
         }
+        if let Some(stream_cdc_table_scan) = self.as_stream_cdc_table_scan() {
+            return stream_cdc_table_scan.adhoc_to_stream_prost(state);
+        }
         if let Some(stream_share) = self.as_stream_share() {
             return stream_share.adhoc_to_stream_prost(state);
         }
