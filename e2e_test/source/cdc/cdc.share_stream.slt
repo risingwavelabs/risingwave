@@ -51,10 +51,6 @@ create materialized view products_test_cnt as select count(*) as cnt from produc
 statement ok
 create materialized view orders_test_cnt as select count(*) as cnt from orders_test;
 
-# TODO: update some rows in upstream database
-
-
-
 sleep 5s
 
 # check ingestion results

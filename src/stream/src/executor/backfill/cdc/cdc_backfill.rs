@@ -201,8 +201,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         tracing::debug!(?upstream_table_id, ?shared_cdc_source, "start cdc backfill");
         state_impl.init_epoch(first_barrier.epoch);
 
-        // start from the beginning
-        // TODO(siyuan): restore backfill offset from state store
         let backfill_offset = None;
 
         current_pk_pos = backfill_offset;
@@ -234,7 +232,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         yield Message::Barrier(first_barrier);
 
         // Keep track of rows from the snapshot.
-        #[allow(unused_variables)]
         let mut total_snapshot_processed_rows: u64 = 0;
         let mut snapshot_read_epoch;
 
@@ -418,9 +415,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     // in the buffer. Here we choose to never mark the chunk.
                                     // Consume with the renaming stream buffer chunk without mark.
                                     for chunk in upstream_chunk_buffer.drain(..) {
-                                        // let chunk_cardinality = chunk.cardinality() as u64;
-                                        // cur_barrier_snapshot_processed_rows += chunk_cardinality;
-                                        // total_snapshot_processed_rows += chunk_cardinality;
                                         yield Message::Chunk(mapping_chunk(
                                             chunk,
                                             &self.output_indices,
