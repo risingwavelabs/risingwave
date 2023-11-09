@@ -7283,6 +7283,7 @@ dependencies = [
  "enum-as-inner",
  "enumflags2",
  "ethnum",
+ "expect-test",
  "fixedbitset",
  "fs-err",
  "futures",
