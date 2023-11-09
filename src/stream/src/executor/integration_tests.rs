@@ -155,13 +155,18 @@ async fn test_merger_sum_aggr() {
 
     let projection = ProjectExecutor::new(
         actor_ctx.clone(),
+        ExecutorInfo {
+            schema: Schema {
+                fields: vec![Field::unnamed(DataType::Int64)],
+            },
+            pk_indices: vec![],
+            identity: format!("ProjectExecutor {:X}", 3),
+        },
         aggregator,
-        vec![],
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
             NonStrictExpression::for_test(InputRefExpression::new(DataType::Int64, 1)),
         ],
-        3,
         MultiMap::new(),
         vec![],
         0.0,
