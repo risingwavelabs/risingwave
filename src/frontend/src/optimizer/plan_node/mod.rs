@@ -827,7 +827,6 @@ mod stream_watermark_filter;
 mod derive;
 mod stream_cdc_table_scan;
 mod stream_share;
-mod stream_sys_table_scan;
 mod stream_temporal_join;
 mod stream_union;
 pub mod utils;
@@ -908,7 +907,6 @@ pub use stream_sink::StreamSink;
 pub use stream_sort::StreamEowcSort;
 pub use stream_source::StreamSource;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
-pub use stream_sys_table_scan::StreamSysTableScan;
 pub use stream_table_scan::StreamTableScan;
 pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
@@ -992,7 +990,6 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Filter }
             , { Stream, TableScan }
             , { Stream, CdcTableScan }
-            , { Stream, SysTableScan }
             , { Stream, Sink }
             , { Stream, Source }
             , { Stream, HashJoin }
@@ -1104,7 +1101,6 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Exchange }
             , { Stream, TableScan }
             , { Stream, CdcTableScan }
-            , { Stream, SysTableScan }
             , { Stream, Sink }
             , { Stream, Source }
             , { Stream, HashAgg }
