@@ -35,7 +35,9 @@ use risingwave_pb::catalog::{
     PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
-use risingwave_pb::ddl_service::{create_connection_request, DdlProgress, PbTableJobType};
+use risingwave_pb::ddl_service::{
+    alter_set_schema_request, create_connection_request, DdlProgress, PbTableJobType,
+};
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactionGroupInfo, HummockSnapshot, HummockVersion, HummockVersionDelta,
@@ -515,6 +517,15 @@ impl CatalogWriter for MockCatalogWriter {
         }
 
         Err(ErrorCode::ItemNotFound(format!("object not found: {:?}", object)).into())
+    }
+
+    async fn alter_set_schema(
+        &self,
+        _object: alter_set_schema_request::Object,
+        _old_schema_id: u32,
+        _new_schema_id: u32,
+    ) -> Result<()> {
+        unreachable!()
     }
 
     async fn alter_view_name(&self, _view_id: u32, _view_name: &str) -> Result<()> {

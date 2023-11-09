@@ -37,7 +37,7 @@ use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink,
     Source, StreamJobStatus, Table, View,
 };
-use risingwave_pb::ddl_service::alter_owner_request;
+use risingwave_pb::ddl_service::{alter_owner_request, alter_set_schema_request};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -1855,6 +1855,34 @@ impl CatalogManager {
         let version = self.notify_frontend(Operation::Update, notify_info).await;
 
         Ok(version)
+    }
+
+    pub async fn alter_set_schema(
+        &self,
+        object: alter_set_schema_request::Object,
+        old_schema_id: SchemaId,
+        new_schema_id: SchemaId,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        let user_core = &mut core.user;
+
+        database_core.ensure_schema_id(new_schema_id)?;
+        let mut schemas = BTreeMapTransaction::new(&mut database_core.schemas);
+        let mut new_schema = schemas.get_mut(new_schema_id).unwrap();
+
+        match object {
+            alter_set_schema_request::Object::TableId(table_id) => todo!(),
+            alter_set_schema_request::Object::ViewId(view_id) => todo!(),
+            alter_set_schema_request::Object::SourceId(source_id) => todo!(),
+            alter_set_schema_request::Object::SinkId(sink_id) => todo!(),
+            alter_set_schema_request::Object::FunctionId(function_id) => todo!(),
+        }
+
+        todo!()
+
+        // let version = self.notify_frontend(Operation::Update, notify_info).await;
+        // Ok(version)
     }
 
     pub async fn alter_index_name(

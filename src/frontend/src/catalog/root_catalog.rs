@@ -681,6 +681,29 @@ impl Catalog {
         }
     }
 
+    pub fn check_function_name_duplicated(
+        &self,
+        db_name: &str,
+        schema_name: &str,
+        function_name: &str,
+        arg_types: &[DataType],
+    ) -> CatalogResult<()> {
+        let schema = self.get_schema_by_name(db_name, schema_name)?;
+
+        if schema
+            .get_function_by_name_args(function_name, arg_types)
+            .is_some()
+        {
+            let name = format!(
+                "{function_name}({})",
+                arg_types.iter().map(|t| t.to_string()).join(",")
+            );
+            Err(CatalogError::Duplicated("function", name))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Check if the name duplicates with existing connection.
     pub fn check_connection_name_duplicated(
         &self,

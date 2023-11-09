@@ -667,6 +667,29 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    async fn alter_set_schema(
+        &self,
+        request: Request<AlterSetSchemaRequest>,
+    ) -> Result<Response<AlterSetSchemaResponse>, Status> {
+        let AlterSetSchemaRequest {
+            object,
+            old_schema_id,
+            new_schema_id,
+        } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterSetSchema(
+                object.unwrap(),
+                old_schema_id,
+                new_schema_id,
+            ))
+            .await?;
+        Ok(Response::new(AlterSetSchemaResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn get_ddl_progress(
         &self,
         _request: Request<GetDdlProgressRequest>,

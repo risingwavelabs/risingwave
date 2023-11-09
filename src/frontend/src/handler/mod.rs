@@ -35,6 +35,7 @@ use crate::utils::WithOptions;
 
 mod alter_owner;
 mod alter_relation_rename;
+mod alter_set_schema;
 mod alter_source_column;
 mod alter_system;
 mod alter_table_column;
@@ -512,6 +513,19 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetSchema { new_schema_name },
+        } => {
+            alter_set_schema::handle_alter_set_schema(
+                handler_args,
+                name,
+                new_schema_name,
+                StatementType::ALTER_TABLE,
+                None,
+            )
+            .await
+        }
         Statement::AlterIndex {
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },
@@ -556,6 +570,31 @@ pub async fn handle(
                 .await
             }
         }
+        Statement::AlterView {
+            materialized,
+            name,
+            operation: AlterViewOperation::SetSchema { new_schema_name },
+        } => {
+            if materialized {
+                alter_set_schema::handle_alter_set_schema(
+                    handler_args,
+                    name,
+                    new_schema_name,
+                    StatementType::ALTER_MATERIALIZED_VIEW,
+                    None,
+                )
+                .await
+            } else {
+                alter_set_schema::handle_alter_set_schema(
+                    handler_args,
+                    name,
+                    new_schema_name,
+                    StatementType::ALTER_VIEW,
+                    None,
+                )
+                .await
+            }
+        }
         Statement::AlterSink {
             name,
             operation: AlterSinkOperation::RenameSink { sink_name },
@@ -569,6 +608,19 @@ pub async fn handle(
                 name,
                 new_owner_name,
                 StatementType::ALTER_SINK,
+            )
+            .await
+        }
+        Statement::AlterSink {
+            name,
+            operation: AlterSinkOperation::SetSchema { new_schema_name },
+        } => {
+            alter_set_schema::handle_alter_set_schema(
+                handler_args,
+                name,
+                new_schema_name,
+                StatementType::ALTER_SINK,
+                None,
             )
             .await
         }
@@ -589,6 +641,33 @@ pub async fn handle(
                 name,
                 new_owner_name,
                 StatementType::ALTER_SOURCE,
+            )
+            .await
+        }
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::SetSchema { new_schema_name },
+        } => {
+            alter_set_schema::handle_alter_set_schema(
+                handler_args,
+                name,
+                new_schema_name,
+                StatementType::ALTER_SOURCE,
+                None,
+            )
+            .await
+        }
+        Statement::AlterFunction {
+            name,
+            args,
+            operation: AlterFunctionOperation::SetSchema { new_schema_name },
+        } => {
+            alter_set_schema::handle_alter_set_schema(
+                handler_args,
+                name,
+                new_schema_name,
+                StatementType::ALTER_FUNCTION,
+                args,
             )
             .await
         }

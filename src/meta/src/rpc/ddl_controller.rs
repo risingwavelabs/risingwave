@@ -29,7 +29,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
-use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_pb::ddl_service::{alter_set_schema_request, DdlProgress};
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
@@ -104,6 +104,7 @@ pub enum DdlCommand {
     AlterRelationName(Relation, String),
     AlterSourceColumn(Source),
     AlterTableOwner(Object, UserId),
+    AlterSetSchema(alter_set_schema_request::Object, SchemaId, SchemaId),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
     CommentOn(Comment),
@@ -259,6 +260,10 @@ impl DdlController {
                 }
                 DdlCommand::AlterTableOwner(object, owner_id) => {
                     ctrl.alter_owner(object, owner_id).await
+                }
+                DdlCommand::AlterSetSchema(object, old_schema_id, new_schema_id) => {
+                    ctrl.alter_set_schema(object, old_schema_id, new_schema_id)
+                        .await
                 }
                 DdlCommand::CreateConnection(connection) => {
                     ctrl.create_connection(connection).await
@@ -1138,6 +1143,17 @@ impl DdlController {
         owner_id: UserId,
     ) -> MetaResult<NotificationVersion> {
         self.catalog_manager.alter_owner(object, owner_id).await
+    }
+
+    async fn alter_set_schema(
+        &self,
+        object: alter_set_schema_request::Object,
+        old_schema_id: SchemaId,
+        new_schema_id: SchemaId,
+    ) -> MetaResult<NotificationVersion> {
+        self.catalog_manager
+            .alter_set_schema(object, old_schema_id, new_schema_id)
+            .await
     }
 
     pub async fn wait(&self) -> MetaResult<()> {

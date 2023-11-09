@@ -26,7 +26,9 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
-use risingwave_pb::ddl_service::{create_connection_request, PbTableJobType};
+use risingwave_pb::ddl_service::{
+    alter_set_schema_request, create_connection_request, PbTableJobType,
+};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
@@ -158,6 +160,13 @@ pub trait CatalogWriter: Send + Sync {
     async fn alter_source_name(&self, source_id: u32, source_name: &str) -> Result<()>;
 
     async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()>;
+
+    async fn alter_set_schema(
+        &self,
+        object: alter_set_schema_request::Object,
+        old_schema_id: u32,
+        new_schema_id: u32,
+    ) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -419,6 +428,19 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()> {
         let version = self.meta_client.alter_owner(object, owner_id).await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_set_schema(
+        &self,
+        object: alter_set_schema_request::Object,
+        old_schema_id: u32,
+        new_schema_id: u32,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_set_schema(object, old_schema_id, new_schema_id)
+            .await?;
         self.wait_version(version).await
     }
 }

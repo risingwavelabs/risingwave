@@ -26,8 +26,8 @@ use itertools::Itertools;
 use tracing::{debug, instrument};
 
 use crate::ast::ddl::{
-    AlterDatabaseOperation, AlterIndexOperation, AlterSchemaOperation, AlterSinkOperation,
-    AlterViewOperation, SourceWatermark,
+    AlterDatabaseOperation, AlterFunctionOperation, AlterIndexOperation, AlterSchemaOperation,
+    AlterSinkOperation, AlterViewOperation, SourceWatermark,
 };
 use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};
@@ -2359,7 +2359,7 @@ impl Parser {
     /// ```
     fn parse_drop_function(&mut self) -> Result<Statement, ParserError> {
         let if_exists = self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]);
-        let func_desc = self.parse_comma_separated(Parser::parse_drop_function_desc)?;
+        let func_desc = self.parse_comma_separated(Parser::parse_function_desc)?;
         let option = match self.parse_one_of_keywords(&[Keyword::CASCADE, Keyword::RESTRICT]) {
             Some(Keyword::CASCADE) => Some(ReferentialAction::Cascade),
             Some(Keyword::RESTRICT) => Some(ReferentialAction::Restrict),
@@ -2372,7 +2372,7 @@ impl Parser {
         })
     }
 
-    fn parse_drop_function_desc(&mut self) -> Result<DropFunctionDesc, ParserError> {
+    fn parse_function_desc(&mut self) -> Result<FunctionDesc, ParserError> {
         let name = self.parse_object_name()?;
 
         let args = if self.consume_token(&Token::LParen) {
@@ -2387,7 +2387,7 @@ impl Parser {
             None
         };
 
-        Ok(DropFunctionDesc { name, args })
+        Ok(FunctionDesc { name, args })
     }
 
     pub fn parse_create_index(&mut self, unique: bool) -> Result<Statement, ParserError> {
@@ -2800,13 +2800,15 @@ impl Parser {
             self.parse_alter_sink()
         } else if self.parse_keyword(Keyword::SOURCE) {
             self.parse_alter_source()
+        } else if self.parse_keyword(Keyword::FUNCTION) {
+            self.parse_alter_function()
         } else if self.parse_keyword(Keyword::USER) {
             self.parse_alter_user()
         } else if self.parse_keyword(Keyword::SYSTEM) {
             self.parse_alter_system()
         } else {
             self.expected(
-                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SOURCE, USER or SYSTEM after ALTER",
+                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SOURCE, FUNCTION, USER or SYSTEM after ALTER",
                 self.peek_token(),
             )
         }
@@ -2887,6 +2889,15 @@ impl Parser {
             AlterTableOperation::ChangeOwner {
                 new_owner_name: owner_name,
             }
+        } else if self.parse_keyword(Keyword::SET) {
+            if self.parse_keyword(Keyword::SCHEMA) {
+                let schema_name = self.parse_object_name()?;
+                AlterTableOperation::SetSchema {
+                    new_schema_name: schema_name,
+                }
+            } else {
+                return self.expected("SCHEMA after SET", self.peek_token());
+            }
         } else if self.parse_keyword(Keyword::DROP) {
             let _ = self.parse_keyword(Keyword::COLUMN);
             let if_exists = self.parse_keywords(&[Keyword::IF, Keyword::EXISTS]);
@@ -2930,7 +2941,7 @@ impl Parser {
             AlterTableOperation::AlterColumn { column_name, op }
         } else {
             return self.expected(
-                "ADD, RENAME, OWNER TO or DROP after ALTER TABLE",
+                "ADD or RENAME or OWNER TO or SET or DROP after ALTER TABLE",
                 self.peek_token(),
             );
         };
@@ -2973,10 +2984,19 @@ impl Parser {
             AlterViewOperation::ChangeOwner {
                 new_owner_name: owner_name,
             }
+        } else if self.parse_keyword(Keyword::SET) {
+            if self.parse_keyword(Keyword::SCHEMA) {
+                let schema_name = self.parse_object_name()?;
+                AlterViewOperation::SetSchema {
+                    new_schema_name: schema_name,
+                }
+            } else {
+                return self.expected("SCHEMA after SET", self.peek_token());
+            }
         } else {
             return self.expected(
                 &format!(
-                    "RENAME or OWNER TO after ALTER {}VIEW",
+                    "RENAME or OWNER TO or SET after ALTER {}VIEW",
                     if materialized { "MATERIALIZED " } else { "" }
                 ),
                 self.peek_token(),
@@ -3004,8 +3024,20 @@ impl Parser {
             AlterSinkOperation::ChangeOwner {
                 new_owner_name: owner_name,
             }
+        } else if self.parse_keyword(Keyword::SET) {
+            if self.parse_keyword(Keyword::SCHEMA) {
+                let schema_name = self.parse_object_name()?;
+                AlterSinkOperation::SetSchema {
+                    new_schema_name: schema_name,
+                }
+            } else {
+                return self.expected("SCHEMA after SET", self.peek_token());
+            }
         } else {
-            return self.expected("RENAME or OWNER TO after ALTER SINK", self.peek_token());
+            return self.expected(
+                "RENAME or OWNER TO or SET after ALTER SINK",
+                self.peek_token(),
+            );
         };
 
         Ok(Statement::AlterSink {
@@ -3033,15 +3065,47 @@ impl Parser {
             AlterSourceOperation::ChangeOwner {
                 new_owner_name: owner_name,
             }
+        } else if self.parse_keyword(Keyword::SET) {
+            if self.parse_keyword(Keyword::SCHEMA) {
+                let schema_name = self.parse_object_name()?;
+                AlterSourceOperation::SetSchema {
+                    new_schema_name: schema_name,
+                }
+            } else {
+                return self.expected("SCHEMA after SET", self.peek_token());
+            }
         } else {
             return self.expected(
-                "RENAME, ADD COLUMN or OWNER TO after ALTER SOURCE",
+                "RENAME, ADD COLUMN or OWNER TO or SET after ALTER SOURCE",
                 self.peek_token(),
             );
         };
 
         Ok(Statement::AlterSource {
             name: source_name,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_function(&mut self) -> Result<Statement, ParserError> {
+        let FunctionDesc { name, args } = self.parse_function_desc()?;
+
+        let operation = if self.parse_keyword(Keyword::SET) {
+            if self.parse_keyword(Keyword::SCHEMA) {
+                let schema_name = self.parse_object_name()?;
+                AlterFunctionOperation::SetSchema {
+                    new_schema_name: schema_name,
+                }
+            } else {
+                return self.expected("SCHEMA after SET", self.peek_token());
+            }
+        } else {
+            return self.expected("SET after ALTER FUNCTION", self.peek_token());
+        };
+
+        Ok(Statement::AlterFunction {
+            name,
+            args,
             operation,
         })
     }
