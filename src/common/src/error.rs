@@ -132,8 +132,10 @@ pub enum ErrorCode {
         #[backtrace]
         BoxedError,
     ),
+    // TODO: use a new type for bind error
     #[error("Bind error: {0}")]
     BindError(String),
+    // TODO: only keep this one
     #[error("Failed to bind expression: {expr}: {error}")]
     BindErrorRoot {
         expr: String,
