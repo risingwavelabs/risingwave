@@ -204,15 +204,15 @@
   binder_error: |
     Failed to bind expression: ARRAY[2, 3] @> ARRAY['1']
 
-    Caused by:
-      Bind error: Cannot array_contains unnested type integer to unnested type character varying
+    Caused by this error:
+      1: Bind error: Cannot array_contains unnested type integer to unnested type character varying
 - name: array_contains(int[][], varchar[][]) -> bool
   sql: select array[array[1,2]] @> array[array['2','3']];
-  binder_error: |-
-    Bind error: failed to bind expression: ARRAY[ARRAY[1, 2]] @> ARRAY[ARRAY['2', '3']]
+  binder_error: |
+    Failed to bind expression: ARRAY[ARRAY[1, 2]] @> ARRAY[ARRAY['2', '3']]
 
-    Caused by:
-      Bind error: Cannot array_contains unnested type integer to unnested type character varying
+    Caused by this error:
+      1: Bind error: Cannot array_contains unnested type integer to unnested type character varying
 - name: any contains(null, null) -> bool
   sql: select '{}' @> '{}';
   binder_error: |
