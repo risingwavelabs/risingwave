@@ -26,9 +26,17 @@ use serde_json::Value;
 use crate::common::table::state_table::StateTable;
 use crate::executor::{SourceStateTableHandler, StreamExecutorResult};
 
-#[allow(dead_code)]
+/// Depending on how the table is created, we have two scenarios for CDC Backfill:
+/// 1. `CREATE TABLE xx WITH ("connector"= 'mysql-cdc', "database.name"='mydb', "table.name"='t1')`
+/// In this case, the cdc backfill executor will wraps the source executor, and maintain its state
+/// (a finish flag) in the source state table.
+///
+///
+/// 2. `CREATE TABLE xx FROM source TABLE 'mydb.t1'`
+/// In this case, we can have multiple Table jobs sharing a single cdc Source job.
+/// The cdc backfill executor will be an instance of the `StreamScan` operator and has its own state table
+/// schema: `table_id | backfill_finished | row_count | cdc_offset`
 pub enum CdcBackfillStateImpl<S: StateStore> {
-    Undefined,
     SingleTable(SingleBackfillState<S>),
     MultiTable(MultiBackfillState<S>),
 }
@@ -54,31 +62,30 @@ impl CdcStateItem {
 impl<S: StateStore> CdcBackfillStateImpl<S> {
     pub fn init_epoch(&mut self, epoch: EpochPair) {
         match self {
-            CdcBackfillStateImpl::Undefined => {}
             CdcBackfillStateImpl::SingleTable(state) => state.init_epoch(epoch),
             CdcBackfillStateImpl::MultiTable(state) => state.init_epoch(epoch),
         }
     }
 
+    /// Restore the state of the corresponding split
     pub async fn restore_state(&self) -> StreamExecutorResult<CdcStateItem> {
         match self {
-            CdcBackfillStateImpl::Undefined => Ok(CdcStateItem::default()),
             CdcBackfillStateImpl::SingleTable(state) => state.restore_state().await,
             CdcBackfillStateImpl::MultiTable(state) => state.restore_state().await,
         }
     }
 
+    /// Modify the state of the corresponding split (currently only supports single split)
     pub async fn mutate_state(&mut self, state_item: CdcStateItem) -> StreamExecutorResult<()> {
         match self {
-            CdcBackfillStateImpl::Undefined => Ok(()),
             CdcBackfillStateImpl::SingleTable(state) => state.mutate_state(state_item).await,
             CdcBackfillStateImpl::MultiTable(state) => state.mutate_state(state_item).await,
         }
     }
 
+    /// Persist the state to storage
     pub async fn commit_state(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
         match self {
-            CdcBackfillStateImpl::Undefined => Ok(()),
             CdcBackfillStateImpl::SingleTable(state) => state.commit_state(new_epoch).await,
             CdcBackfillStateImpl::MultiTable(state) => state.commit_state(new_epoch).await,
         }
@@ -128,7 +135,6 @@ impl<S: StateStore> MultiBackfillState<S> {
         }
     }
 
-    /// Mark the backfill has done and save the last cdc offset
     pub async fn mutate_state(&mut self, state_item: CdcStateItem) -> StreamExecutorResult<()> {
         let key = Some(self.split_id.clone());
         let row = [
@@ -205,16 +211,24 @@ impl<S: StateStore> SingleBackfillState<S> {
         })
     }
 
-    /// When snapshot read stream ends, we should persist two states:
-    /// 1) a backfill finish flag to denote the backfill has done
-    /// 2) a consumed binlog offset to denote the last binlog offset
-    /// which will be committed to the state store upon next barrier.
     pub async fn mutate_state(&mut self, state_item: CdcStateItem) -> StreamExecutorResult<()> {
+        // skip if unfinished for single backfill
+        if !state_item.is_finished {
+            return Ok(());
+        }
+
+        // When single backfill is finished, we should persist two states:
+        // 1) a finish flag to denote the backfill has done
+        // 2) a consumed binlog offset to denote the last binlog offset
+        // which will be committed to the state store upon next barrier.
         let mut key = self.split_id.to_string();
         key.push_str(BACKFILL_STATE_KEY_SUFFIX);
         // write backfill finished flag
         self.source_state_handler
-            .set(key.into(), JsonbVal::from(Value::Bool(true)))
+            .set(
+                key.into(),
+                JsonbVal::from(Value::Bool(state_item.is_finished)),
+            )
             .await?;
 
         if let SplitImpl::MysqlCdc(split) = &mut self.cdc_split

@@ -206,7 +206,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         current_pk_pos = backfill_offset;
 
         // restore backfill done flag from state store
-        // let is_finished =state_impl.check_finished().await?;
         let CdcStateItem { is_finished, .. } = state_impl.restore_state().await?;
 
         // If the snapshot is empty, we don't need to backfill.
@@ -344,8 +343,16 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         last_binlog_offset = consumed_binlog_offset.clone();
                                     }
 
-                                    // seal current epoch even though there is no data
+                                    // update and persist backfill state
+                                    state_impl
+                                        .mutate_state(CdcStateItem::new(
+                                            false,
+                                            last_binlog_offset.clone(),
+                                            total_snapshot_processed_rows as _,
+                                        ))
+                                        .await?;
                                     state_impl.commit_state(barrier.epoch).await?;
+
                                     snapshot_read_epoch = barrier.epoch.prev;
                                     if let Some(progress) = self.progress.as_mut() {
                                         progress.update(
