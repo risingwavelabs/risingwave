@@ -123,6 +123,7 @@ const STREAMING_OVER_WINDOW_CACHE_POLICY: usize = 36;
 const BACKGROUND_DDL: usize = 37;
 
 const SERVER_ENCODING: usize = 38;
+const STREAMING_ENABLE_ARRANGEMENT_BACKFILL: usize = 39;
 
 const STREAMING_ENABLE_ARRANGEMENT_BACKFILL: usize = 39;
 
@@ -352,6 +353,7 @@ type StreamingRateLimit = ConfigU64<STREAMING_RATE_LIMIT, 0>;
 type CdcBackfill = ConfigBool<CDC_BACKFILL, false>;
 type BackgroundDdl = ConfigBool<BACKGROUND_DDL, false>;
 type ServerEncoding = ConfigString<SERVER_ENCODING>;
+type StreamingEnableArrangementBackfill = ConfigBool<STREAMING_ENABLE_ARRANGEMENT_BACKFILL, false>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {

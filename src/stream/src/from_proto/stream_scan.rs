@@ -21,7 +21,7 @@ use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAw
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_connector::source::external::{CdcTableType, SchemaTableName};
 use risingwave_pb::plan_common::{ExternalTableDesc, StorageTableDesc};
-use risingwave_pb::stream_plan::{ChainNode, ChainType};
+use risingwave_pb::stream_plan::{StreamScanNode, StreamScanType};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
 
@@ -35,9 +35,8 @@ use crate::executor::{
 
 pub struct ChainExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for ChainExecutorBuilder {
-    type Node = ChainNode;
+    type Node = StreamScanNode;
 
     async fn new_boxed_executor(
         params: ExecutorParams,
@@ -57,7 +56,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
             .map(|&i| i as usize)
             .collect_vec();
 
-        let schema = if node.chain_type() == ChainType::ArrangementBackfill {
+        let schema = if node.chain_type() == StreamScanType::ArrangementBackfill {
             let upstream_schema_fields = &snapshot.schema().fields;
             let output_schema_fields = node
                 .get_output_indices()
@@ -67,14 +66,14 @@ impl ExecutorBuilder for ChainExecutorBuilder {
             Schema {
                 fields: output_schema_fields,
             }
-        } else if matches!(node.chain_type(), ChainType::Backfill) {
+        } else if matches!(node.chain_type(), StreamScanType::Backfill) {
             Schema::new(
                 output_indices
                     .iter()
                     .map(|i| snapshot.schema().fields()[*i].clone())
                     .collect_vec(),
             )
-        } else if matches!(node.chain_type(), ChainType::CdcBackfill) {
+        } else if matches!(node.stream_scan_type(), StreamScanType::CdcBackfill) {
             let table_desc: &ExternalTableDesc = node.get_cdc_table_desc()?;
             let schema = Schema::new(table_desc.columns.iter().map(Into::into).collect());
             assert_eq!(output_indices, (0..schema.len()).collect_vec());
@@ -87,9 +86,9 @@ impl ExecutorBuilder for ChainExecutorBuilder {
             snapshot.schema().clone()
         };
 
-        let executor = match node.chain_type() {
-            ChainType::Chain | ChainType::UpstreamOnly => {
-                let upstream_only = matches!(node.chain_type(), ChainType::UpstreamOnly);
+        let executor = match node.stream_scan_type() {
+            StreamScanType::Chain | StreamScanType::UpstreamOnly => {
+                let upstream_only = matches!(node.stream_scan_type(), StreamScanType::UpstreamOnly);
                 ChainExecutor::new(
                     snapshot,
                     upstream,
@@ -100,7 +99,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 )
                 .boxed()
             }
-            ChainType::Rearrange => RearrangedChainExecutor::new(
+            StreamScanType::Rearrange => RearrangedChainExecutor::new(
                 snapshot,
                 upstream,
                 progress,
@@ -108,7 +107,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 params.pk_indices,
             )
             .boxed(),
-            ChainType::CdcBackfill => {
+            StreamScanType::CdcBackfill => {
                 let table_desc: &ExternalTableDesc = node.get_cdc_table_desc()?;
                 let properties: HashMap<String, String> = table_desc
                     .connect_properties
@@ -161,8 +160,10 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     params.env.config().developer.chunk_size,
                 ).boxed()
             }
-            ChainType::Backfill | ChainType::ArrangementBackfill => {
-                let table_desc: &StorageTableDesc = node.get_table_desc()?;
+            StreamScanType::Backfill | StreamScanType::ArrangementBackfill => {
+                let table_desc: &StorageTableDesc = node
+                    .get_table_desc()
+                    .map_err(|err| anyhow!("chain: table_desc not found! {:?}", err))?;
                 let table_id = TableId {
                     table_id: table_desc.table_id,
                 };
@@ -294,7 +295,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     }
                 }
             }
-            ChainType::ChainUnspecified => unreachable!(),
+            StreamScanType::ChainUnspecified => unreachable!(),
         };
         let rate_limit = node.get_rate_limit().cloned().ok();
         Ok(FlowControlExecutor::new(executor, rate_limit).boxed())

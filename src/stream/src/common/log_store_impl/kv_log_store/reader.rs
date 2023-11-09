@@ -225,14 +225,14 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                 serde.serialize_log_store_pk(vnode, item_epoch, Some(end_seq_id));
                             let state_store = &state_store;
 
-                            // Use u64::MAX here because the epoch to consume may be below the safe
+                            // Use MAX_EPOCH here because the epoch to consume may be below the safe
                             // epoch
                             async move {
                                 Ok::<_, anyhow::Error>(Box::pin(
                                     state_store
                                         .iter(
                                             (Included(range_start), Included(range_end)),
-                                            u64::MAX,
+                                            MAX_EPOCH,
                                             ReadOptions {
                                                 prefetch_options:
                                                     PrefetchOptions::new_for_exhaust_iter(),

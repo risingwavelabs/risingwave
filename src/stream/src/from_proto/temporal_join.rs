@@ -30,7 +30,6 @@ use crate::task::AtomicU64Ref;
 
 pub struct TemporalJoinExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for TemporalJoinExecutorBuilder {
     type Node = TemporalJoinNode;
 

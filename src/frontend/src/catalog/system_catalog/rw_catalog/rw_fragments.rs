@@ -109,10 +109,10 @@ mod tests {
 
     #[test]
     fn test_extract_mask() {
-        let mask = (FragmentTypeFlag::Source as u32) | (FragmentTypeFlag::ChainNode as u32);
+        let mask = (FragmentTypeFlag::Source as u32) | (FragmentTypeFlag::StreamScan as u32);
         let result = SysCatalogReaderImpl::extract_fragment_type_flag(mask);
         assert_eq!(result.len(), 2);
         assert!(result.contains(&FragmentTypeFlag::Source));
-        assert!(result.contains(&FragmentTypeFlag::ChainNode))
+        assert!(result.contains(&FragmentTypeFlag::StreamScan))
     }
 }

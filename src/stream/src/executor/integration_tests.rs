@@ -31,7 +31,9 @@ use crate::executor::dispatch::*;
 use crate::executor::exchange::output::{BoxedOutput, LocalOutput};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::receiver::ReceiverExecutor;
-use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;
+use crate::executor::test_utils::agg_executor::{
+    generate_agg_schema, new_boxed_simple_agg_executor,
+};
 use crate::executor::{Executor, MergeExecutor, ProjectExecutor, StatelessSimpleAggExecutor};
 use crate::task::SharedContext;
 
@@ -47,16 +49,21 @@ async fn test_merger_sum_aggr() {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
         let input = ReceiverExecutor::for_test(input_rx);
+        let agg_calls = vec![
+            AggCall::from_pretty("(count:int8)"),
+            AggCall::from_pretty("(sum:int8 $0:int8)"),
+        ];
+        let schema = generate_agg_schema(&input, &agg_calls, None);
         // for the local aggregator, we need two states: row count and sum
         let aggregator = StatelessSimpleAggExecutor::new(
             actor_ctx.clone(),
             input.boxed(),
-            vec![
-                AggCall::from_pretty("(count:int8)"),
-                AggCall::from_pretty("(sum:int8 $0:int8)"),
-            ],
-            vec![],
-            1,
+            ExecutorInfo {
+                schema,
+                pk_indices: vec![],
+                identity: format!("StatelessSimpleAggExecutor {:X}", 1),
+            },
+            agg_calls,
         )
         .unwrap();
         let (tx, rx) = channel_for_test();

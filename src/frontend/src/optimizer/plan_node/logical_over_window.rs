@@ -522,6 +522,14 @@ impl LogicalOverWindow {
         &self.core.window_functions
     }
 
+    pub fn partition_key_indices(&self) -> Vec<usize> {
+        self.core.partition_key_indices()
+    }
+
+    pub fn order_key(&self) -> &[ColumnOrder] {
+        self.core.order_key()
+    }
+
     #[must_use]
     fn rewrite_with_input_and_window(
         &self,

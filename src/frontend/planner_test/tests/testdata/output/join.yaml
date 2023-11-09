@@ -154,7 +154,7 @@
     select i.x as ix, ii.x as iix from i join i as ii on i.x=ii.x;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: i.x = i.x, output: all }
+    └─BatchLookupJoin { type: Inner, predicate: i.x = i.x, output: all, lookup table: i }
       └─BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
   stream_plan: |-
     StreamMaterialize { columns: [ix, iix, i.t._row_id(hidden), i.t._row_id#1(hidden)], stream_key: [i.t._row_id, i.t._row_id#1, ix], pk_columns: [i.t._row_id, i.t._row_id#1, ix], pk_conflict: NoCheck }
@@ -171,7 +171,7 @@
     select i.x as ix, t.x as tx from i join t on i.x=t.x;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: i.x = i.x, output: all }
+    └─BatchLookupJoin { type: Inner, predicate: i.x = i.x, output: all, lookup table: i }
       └─BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
   stream_plan: |-
     StreamMaterialize { columns: [ix, tx, i.t._row_id(hidden), t._row_id(hidden)], stream_key: [i.t._row_id, t._row_id, ix], pk_columns: [i.t._row_id, t._row_id, ix], pk_conflict: NoCheck }
@@ -195,10 +195,10 @@
     └─BatchProject { exprs: [Coalesce(i.x, i.x) as $expr1] }
       └─BatchHashJoin { type: FullOuter, predicate: i.x = i.x, output: all }
         ├─BatchExchange { order: [], dist: HashShard(i.x) }
-        │ └─BatchLookupJoin { type: Inner, predicate: i.x = i.x, output: [i.x] }
+        │ └─BatchLookupJoin { type: Inner, predicate: i.x = i.x, output: [i.x], lookup table: i }
         │   └─BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
         └─BatchExchange { order: [], dist: HashShard(i.x) }
-          └─BatchLookupJoin { type: Inner, predicate: i.x = i.x, output: [i.x] }
+          └─BatchLookupJoin { type: Inner, predicate: i.x = i.x, output: [i.x], lookup table: i }
             └─BatchScan { table: i, columns: [i.x], distribution: UpstreamHashShard(i.x) }
   stream_plan: |-
     StreamMaterialize { columns: [x, i.t._row_id(hidden), i.t._row_id#1(hidden), i.x(hidden), i.t._row_id#2(hidden), i.t._row_id#3(hidden), i.x#1(hidden)], stream_key: [i.t._row_id, i.t._row_id#1, i.x, i.t._row_id#2, i.t._row_id#3, i.x#1], pk_columns: [i.t._row_id, i.t._row_id#1, i.x, i.t._row_id#2, i.t._row_id#3, i.x#1], pk_conflict: NoCheck }
@@ -225,7 +225,7 @@
     create materialized view t3 as select v1, count(v2) as v2 from t2 group by v1;
     select * from t1 cross join t3 where t1.v2 = t3.v1;
   batch_local_plan: |-
-    BatchLookupJoin { type: Inner, predicate: t1.v2 = t3.v1, output: all }
+    BatchLookupJoin { type: Inner, predicate: t1.v2 = t3.v1, output: all, lookup table: t3 }
     └─BatchExchange { order: [], dist: Single }
       └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
   with_config_map:
@@ -578,7 +578,7 @@
     ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2], predicate: (t1.v2 > 1:Int32) }
     └─LogicalScan { table: t3, columns: [t3.v1, t3.v2], predicate: (t3.v1 > 1:Int32) }
   batch_local_plan: |-
-    BatchLookupJoin { type: Inner, predicate: t1.v2 = t3.v1 AND (t3.v1 > 1:Int32), output: all }
+    BatchLookupJoin { type: Inner, predicate: t1.v2 = t3.v1 AND (t3.v1 > 1:Int32), output: all, lookup table: t3 }
     └─BatchExchange { order: [], dist: Single }
       └─BatchFilter { predicate: (t1.v2 > 1:Int32) }
         └─BatchScan { table: t1, columns: [t1.v1, t1.v2], distribution: SomeShard }
@@ -686,17 +686,17 @@
     └── StreamExchange Hash([0]) from 4
 
     Fragment 3
-    Chain { table: t, columns: [t.src, t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { state table: 8 }
+    StreamTableScan { table: t, columns: [t.src, t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { state table: 8 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 4
-    Chain { table: t, columns: [t.src, t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { state table: 9 }
+    StreamTableScan { table: t, columns: [t.src, t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { state table: 9 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 5
-    Chain { table: t, columns: [t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { state table: 10 }
+    StreamTableScan { table: t, columns: [t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) } { state table: 10 }
     ├── Upstream
     └── BatchPlanNode
 
