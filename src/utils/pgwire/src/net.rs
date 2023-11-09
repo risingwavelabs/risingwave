@@ -16,6 +16,7 @@ use std::io;
 use std::net::SocketAddr as IpSocketAddr;
 #[cfg(madsim)]
 use std::os::unix::net::SocketAddr as UnixSocketAddr;
+use std::sync::Arc;
 
 #[cfg(not(madsim))]
 use tokio::net::unix::SocketAddr as UnixSocketAddr;
@@ -35,10 +36,12 @@ pub(crate) enum Stream {
 }
 
 /// A wrapper of either [`std::net::SocketAddr`] or [`tokio::net::unix::SocketAddr`].
-pub(crate) enum Address {
+pub enum Address {
     Tcp(IpSocketAddr),
     Unix(UnixSocketAddr),
 }
+
+pub type AddressRef = Arc<Address>;
 
 impl std::fmt::Display for Address {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

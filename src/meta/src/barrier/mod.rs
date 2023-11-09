@@ -60,7 +60,7 @@ use crate::manager::{
 };
 use crate::model::{ActorId, BarrierManagerState, TableFragments};
 use crate::rpc::metrics::MetaMetrics;
-use crate::stream::SourceManagerRef;
+use crate::stream::{ScaleController, ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 mod command;
@@ -175,6 +175,8 @@ pub struct GlobalBarrierManager {
     hummock_manager: HummockManagerRef,
 
     source_manager: SourceManagerRef,
+
+    scale_controller: ScaleControllerRef,
 
     sink_manager: SinkCoordinatorManager,
 
@@ -529,6 +531,12 @@ impl GlobalBarrierManager {
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
 
         let tracker = CreateMviewProgressTracker::new();
+        let scale_controller = Arc::new(ScaleController::new(
+            fragment_manager.clone(),
+            cluster_manager.clone(),
+            source_manager.clone(),
+            env.clone(),
+        ));
         Self {
             enable_recovery,
             status: Mutex::new(BarrierManagerStatus::Starting),
@@ -539,6 +547,7 @@ impl GlobalBarrierManager {
             fragment_manager,
             hummock_manager,
             source_manager,
+            scale_controller,
             sink_manager,
             metrics,
             env,
@@ -733,6 +742,7 @@ impl GlobalBarrierManager {
             command,
             kind,
             self.source_manager.clone(),
+            self.scale_controller.clone(),
             span.clone(),
         ));
 

@@ -35,6 +35,7 @@ public class UdfExample {
     public static void main(String[] args) throws IOException {
         try (var server = new UdfServer("0.0.0.0", 8815)) {
             server.addFunction("int_42", new Int42());
+            server.addFunction("sleep", new Sleep());
             server.addFunction("gcd", new Gcd());
             server.addFunction("gcd3", new Gcd3());
             server.addFunction("extract_tcp_info", new ExtractTcpInfo());
@@ -59,6 +60,17 @@ public class UdfExample {
     public static class Int42 implements ScalarFunction {
         public int eval() {
             return 42;
+        }
+    }
+
+    public static class Sleep implements ScalarFunction {
+        public int eval(int x) {
+            try {
+                Thread.sleep(x * 1000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            return 0;
         }
     }
 

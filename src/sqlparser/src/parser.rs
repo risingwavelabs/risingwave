@@ -4090,6 +4090,12 @@ impl Parser {
                         filter: self.parse_show_statement_filter()?,
                     });
                 }
+                Keyword::PROCESSLIST => {
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::ProcessList,
+                        filter: self.parse_show_statement_filter()?,
+                    });
+                }
                 _ => {}
             }
         }

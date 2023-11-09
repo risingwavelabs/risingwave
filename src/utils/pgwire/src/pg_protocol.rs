@@ -35,6 +35,7 @@ use tokio_openssl::SslStream;
 use tracing::{error, warn, Instrument};
 
 use crate::error::{PsqlError, PsqlResult};
+use crate::net::AddressRef;
 use crate::pg_extended::ResultCache;
 use crate::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeBindMessage, FeCancelMessage,
@@ -90,6 +91,9 @@ where
     // Used in extended query protocol. When encounter error in extended query, we need to ignore
     // the following message util sync message.
     ignore_util_sync: bool,
+
+    // Client Address
+    peer_addr: AddressRef,
 }
 
 const PGWIRE_QUERY_LOG: &str = "pgwire_query_log";
@@ -154,7 +158,12 @@ where
     S: AsyncWrite + AsyncRead + Unpin,
     SM: SessionManager,
 {
-    pub fn new(stream: S, session_mgr: Arc<SM>, tls_config: Option<TlsConfig>) -> Self {
+    pub fn new(
+        stream: S,
+        session_mgr: Arc<SM>,
+        tls_config: Option<TlsConfig>,
+        peer_addr: AddressRef,
+    ) -> Self {
         Self {
             stream: Conn::Unencrypted(PgStream {
                 stream: Some(stream),
@@ -174,6 +183,7 @@ where
             portal_store: Default::default(),
             statement_portal_dependency: Default::default(),
             ignore_util_sync: false,
+            peer_addr,
         }
     }
 
@@ -366,7 +376,7 @@ where
 
         let session = self
             .session_mgr
-            .connect(&db_name, &user_name)
+            .connect(&db_name, &user_name, self.peer_addr.clone())
             .map_err(PsqlError::StartupError)?;
 
         let application_name = msg.config.get("application_name");
@@ -429,11 +439,15 @@ where
     }
 
     async fn process_query_msg(&mut self, query_string: io::Result<&str>) -> PsqlResult<()> {
-        let sql = query_string.map_err(|err| PsqlError::QueryError(Box::new(err)))?;
+        let sql: Arc<str> =
+            Arc::from(query_string.map_err(|err| PsqlError::QueryError(Box::new(err)))?);
         let start = Instant::now();
         let session = self.session.clone().unwrap();
         let session_id = session.id().0;
-        let result = self.inner_process_query_msg(sql, session).await;
+        let _exec_context_guard = session.init_exec_context(sql.clone());
+        let result = self
+            .inner_process_query_msg(sql.clone(), session.clone())
+            .await;
 
         let mills = start.elapsed().as_millis();
 
@@ -451,11 +465,11 @@ where
 
     async fn inner_process_query_msg(
         &mut self,
-        sql: &str,
+        sql: Arc<str>,
         session: Arc<SM::Session>,
     ) -> PsqlResult<()> {
         // Parse sql.
-        let stmts = Parser::parse_sql(sql)
+        let stmts = Parser::parse_sql(&sql)
             .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
             .map_err(|err| PsqlError::QueryError(err.into()))?;
         if stmts.is_empty() {
@@ -700,9 +714,10 @@ where
         } else {
             let start = Instant::now();
             let portal = self.get_portal(&portal_name)?;
-            let sql = format!("{}", portal);
+            let sql: Arc<str> = Arc::from(format!("{}", portal));
 
-            let result = session.execute(portal).await;
+            let _exec_context_guard = session.init_exec_context(sql.clone());
+            let result = session.clone().execute(portal).await;
 
             let mills = start.elapsed().as_millis();
 
@@ -1043,7 +1058,7 @@ fn build_ssl_ctx_from_config(tls_config: &TlsConfig) -> PsqlResult<SslContext> {
     Ok(acceptor.into_context())
 }
 
-mod truncated_fmt {
+pub mod truncated_fmt {
     use std::fmt::*;
 
     struct TruncatedFormatter<'a, 'b> {
