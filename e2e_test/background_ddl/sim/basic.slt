@@ -47,17 +47,17 @@ WAIT;
 query I
 select count(*) from m1;
 ----
-200000
+300000
 
 query I
 select count(*) from m2;
 ----
-200000
+300000
 
 query I
 select count(*) from m3;
 ----
-200000
+300000
 
 statement ok
 DROP MATERIALIZED VIEW m1;
