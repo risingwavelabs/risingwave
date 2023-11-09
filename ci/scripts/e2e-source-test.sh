@@ -79,6 +79,7 @@ echo "cluster killed "
 mysql --protocol=tcp -u root mytest -e "INSERT INTO products
        VALUES (default,'RisingWave','Next generation Streaming Database'),
               (default,'Materialize','The Streaming Database You Already Know How to Use');
+       UPDATE products SET name = 'RW' WHERE id <= 103;
        INSERT INTO orders VALUES (default, '2022-12-01 15:08:22', 'Sam', 1000.52, 110, false);"
 
 
