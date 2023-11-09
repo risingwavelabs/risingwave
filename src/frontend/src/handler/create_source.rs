@@ -350,9 +350,8 @@ pub(crate) async fn bind_columns_from_source(
                     use_schema_registry: protobuf_schema.use_schema_registry,
                     proto_message_name: protobuf_schema.message_name.0.clone(),
                     key_message_name: get_key_message_name(&mut options),
-                    name_strategy: name_strategy.unwrap_or(
-                        PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32,
-                    ),
+                    name_strategy: name_strategy
+                        .unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32),
                     ..Default::default()
                 },
             )
@@ -395,7 +394,7 @@ pub(crate) async fn bind_columns_from_source(
                 proto_message_name: message_name.unwrap_or(AstString("".into())).0,
                 key_message_name,
                 name_strategy: name_strategy
-                    .unwrap_or(PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32),
+                    .unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32),
                 ..Default::default()
             };
             (
@@ -459,7 +458,7 @@ pub(crate) async fn bind_columns_from_source(
 
             let name_strategy =
                 get_sr_name_strategy_check(&mut options, avro_schema.use_schema_registry)?
-                    .unwrap_or(PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32);
+                    .unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32);
             let key_message_name = get_key_message_name(&mut options);
             let message_name = try_consume_string_from_options(&mut options, MESSAGE_NAME_KEY);
 
@@ -511,7 +510,7 @@ pub(crate) async fn bind_columns_from_source(
                 use_schema_registry,
                 proto_message_name: message_name.unwrap_or(AstString("".into())).0,
                 name_strategy: name_strategy
-                    .unwrap_or(PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32),
+                    .unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32),
                 format: FormatType::Debezium as i32,
                 row_encode: EncodeType::Avro as i32,
                 row_schema_location: avro_schema.row_schema_location.0.clone(),
