@@ -107,7 +107,9 @@ public class DbzConnectorConfig {
 
         StringSubstitutor substitutor = new StringSubstitutor(userProps);
         var dbzProps = initiateDbConfig(DBZ_CONFIG_FILE, substitutor);
-        var isCdcBackfill = userProps.get(SNAPSHOT_MODE_KEY).equals(SNAPSHOT_MODE_BACKFILL);
+        var isCdcBackfill =
+                null != userProps.get(SNAPSHOT_MODE_KEY)
+                        && userProps.get(SNAPSHOT_MODE_KEY).equals(SNAPSHOT_MODE_BACKFILL);
 
         LOG.info(
                 "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}",
