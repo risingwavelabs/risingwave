@@ -44,8 +44,9 @@ pub enum PsqlError {
     #[error(transparent)]
     Internal(BoxedError),
 
-    #[error("Panicked when processing: {0}.\n
-This is a bug. We would appreciate a bug report at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Fbug&template=bug_report.yml.")]
+    #[error("Panicked when processing: {0}
+This is a bug. We would appreciate a bug report at:
+  https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Fbug&template=bug_report.yml")]
     Panic(String),
 
     #[error("Unable to set up an ssl connection")]

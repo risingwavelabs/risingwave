@@ -5978,6 +5978,7 @@ dependencies = [
  "risingwave_sqlparser",
  "tempfile",
  "thiserror",
+ "thiserror-ext",
  "tokio-openssl",
  "tokio-postgres",
  "tracing",
@@ -9503,9 +9504,9 @@ dependencies = [
 
 [[package]]
 name = "sqllogictest"
-version = "0.17.2"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78ea1056caa9180e7e5727eed1a377d96c9f4615303fa82d2f4c202c64736dee"
+checksum = "e67e8d8e7f43fc5d4c35be73549ea22ed1d712dcf39656a243144677297da5ec"
 dependencies = [
  "async-trait",
  "educe",
@@ -9999,9 +10000,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext"
-version = "0.0.1"
+version = "0.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f28a4a7351f496662affc257826b85dd2a613406ce3cc2f07b849685e166d8c"
+checksum = "764a8c5e60a634fe2173e20038dc4d11195559b4099c61fc60e489e813268a68"
 dependencies = [
  "thiserror",
  "thiserror-ext-derive",
@@ -10009,9 +10010,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext-derive"
-version = "0.0.1"
+version = "0.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67621f6d39449754da63668ddd2423ad0c81c27434c16090f8805ad1db59b621"
+checksum = "5741c7e65941d49975050cfc4d010e2786404a5e1cc130baa12132bfcf8efda4"
 dependencies = [
  "proc-macro2",
  "quote",
