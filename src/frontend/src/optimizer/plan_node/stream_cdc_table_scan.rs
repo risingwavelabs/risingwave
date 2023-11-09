@@ -44,9 +44,7 @@ pub struct StreamCdcTableScan {
 }
 
 impl StreamCdcTableScan {
-    pub fn new(
-        core: generic::Scan,
-    ) -> Self {
+    pub fn new(core: generic::Scan) -> Self {
         let batch_plan_id = core.ctx.next_plan_node_id();
         let distribution = Distribution::Single;
         let base = PlanBase::new_stream_with_core(
@@ -71,6 +69,7 @@ impl StreamCdcTableScan {
     pub fn core(&self) -> &generic::Scan {
         &self.core
     }
+
     pub fn stream_scan_type(&self) -> StreamScanType {
         self.stream_scan_type
     }
@@ -199,7 +198,8 @@ impl StreamCdcTableScan {
             .collect_vec();
 
         // The required columns from the table (both scan and upstream).
-        let upstream_column_ids = self.core
+        let upstream_column_ids = self
+            .core
             .output_and_pk_column_ids()
             .iter()
             .map(ColumnId::get_id)
