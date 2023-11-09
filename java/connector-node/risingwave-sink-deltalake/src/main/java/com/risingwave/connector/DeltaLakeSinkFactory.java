@@ -49,7 +49,8 @@ public class DeltaLakeSinkFactory implements SinkFactory {
     @Override
     public void validate(
             TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
-        if (sinkType != SinkType.APPEND_ONLY && sinkType != SinkType.FORCE_APPEND_ONLY) {
+        if (sinkType != SinkType.SINK_TYPE_APPEND_ONLY
+                && sinkType != SinkType.SINK_TYPE_FORCE_APPEND_ONLY) {
             throw Status.INVALID_ARGUMENT
                     .withDescription("only append-only delta lake sink is supported")
                     .asRuntimeException();
