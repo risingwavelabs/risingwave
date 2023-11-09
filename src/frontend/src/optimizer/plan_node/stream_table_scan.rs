@@ -192,7 +192,7 @@ impl StreamTableScan {
 
     /// Build catalog for cdc backfill state
     /// Right now we only persist whether the backfill is finished and the corresponding cdc offset
-    /// schema: | `table_id` | `backfill_finished` | `cdc_offset` |
+    /// schema: | `table_id` | `backfill_finished` | `row_count` | `cdc_offset` |
     pub fn build_cdc_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,
@@ -201,10 +201,17 @@ impl StreamTableScan {
         let mut catalog_builder = TableCatalogBuilder::new(properties);
 
         // use `table_id` as primary key in state table.
-        catalog_builder.add_column(&Field::with_name(DataType::Int64, "table_id"));
+        catalog_builder.add_column(&Field::with_name(DataType::Varchar, "split_id"));
         catalog_builder.add_order_column(0, OrderType::ascending());
 
-        catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
+        catalog_builder.add_column(&Field::with_name(
+            DataType::Boolean,
+            format!("{}_backfill_finished", self.table_name()),
+        ));
+
+        // `row_count` column, the number of rows read from snapshot
+        catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
+
         // The offset is only for observability, not for recovery right now
         catalog_builder.add_column(&Field::with_name(DataType::Jsonb, "cdc_offset"));
 

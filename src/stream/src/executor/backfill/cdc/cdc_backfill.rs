@@ -38,6 +38,7 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::cdc::state::{
     CdcBackfillStateImpl, MultiBackfillState, SingleBackfillState,
 };
+use crate::executor::backfill::cdc::CdcStateItem;
 use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::upstream_table::snapshot::{
     SnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
@@ -208,7 +209,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         // restore backfill done flag from state store
         // let is_finished =state_impl.check_finished().await?;
-        let is_finished = state_impl.restore_state().await?;
+        let CdcStateItem { is_finished, .. } = state_impl.restore_state().await?;
 
         // If the snapshot is empty, we don't need to backfill.
         let is_snapshot_empty: bool = {
@@ -417,16 +418,22 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     // in the buffer. Here we choose to never mark the chunk.
                                     // Consume with the renaming stream buffer chunk without mark.
                                     for chunk in upstream_chunk_buffer.drain(..) {
-                                        let chunk_cardinality = chunk.cardinality() as u64;
-                                        cur_barrier_snapshot_processed_rows += chunk_cardinality;
-                                        total_snapshot_processed_rows += chunk_cardinality;
+                                        // let chunk_cardinality = chunk.cardinality() as u64;
+                                        // cur_barrier_snapshot_processed_rows += chunk_cardinality;
+                                        // total_snapshot_processed_rows += chunk_cardinality;
                                         yield Message::Chunk(mapping_chunk(
                                             chunk,
                                             &self.output_indices,
                                         ));
                                     }
 
-                                    state_impl.mutate_state(last_binlog_offset.clone()).await?;
+                                    state_impl
+                                        .mutate_state(CdcStateItem::new(
+                                            true,
+                                            last_binlog_offset.clone(),
+                                            total_snapshot_processed_rows as _,
+                                        ))
+                                        .await?;
                                     break 'backfill_loop;
                                 }
                                 Some(chunk) => {
@@ -460,7 +467,13 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 "upstream snapshot is empty, mark backfill is done and persist current binlog offset");
 
             // The snapshot is empty, just set backfill to finished
-            state_impl.mutate_state(last_binlog_offset).await?;
+            state_impl
+                .mutate_state(CdcStateItem::new(
+                    true,
+                    last_binlog_offset,
+                    total_snapshot_processed_rows as _,
+                ))
+                .await?;
         }
 
         tracing::info!(

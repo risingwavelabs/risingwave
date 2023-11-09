@@ -33,6 +33,24 @@ pub enum CdcBackfillStateImpl<S: StateStore> {
     MultiTable(MultiBackfillState<S>),
 }
 
+#[derive(Debug, Default)]
+pub struct CdcStateItem {
+    pub is_finished: bool,
+    /// The last cdc offset that has been consumed by the cdc backfill executor
+    pub last_cdc_offset: Option<CdcOffset>,
+    pub row_count: i64,
+}
+
+impl CdcStateItem {
+    pub fn new(is_finished: bool, last_cdc_offset: Option<CdcOffset>, row_count: i64) -> Self {
+        Self {
+            is_finished,
+            last_cdc_offset,
+            row_count,
+        }
+    }
+}
+
 impl<S: StateStore> CdcBackfillStateImpl<S> {
     pub fn init_epoch(&mut self, epoch: EpochPair) {
         match self {
@@ -42,24 +60,19 @@ impl<S: StateStore> CdcBackfillStateImpl<S> {
         }
     }
 
-    pub async fn restore_state(&self) -> StreamExecutorResult<bool> {
+    pub async fn restore_state(&self) -> StreamExecutorResult<CdcStateItem> {
         match self {
-            CdcBackfillStateImpl::Undefined => Ok(false),
-            CdcBackfillStateImpl::SingleTable(state) => Ok(state.check_finished().await?),
+            CdcBackfillStateImpl::Undefined => Ok(CdcStateItem::default()),
+            CdcBackfillStateImpl::SingleTable(state) => state.restore_state().await,
             CdcBackfillStateImpl::MultiTable(state) => state.restore_state().await,
         }
     }
 
-    pub async fn mutate_state(
-        &mut self,
-        last_binlog_offset: Option<CdcOffset>,
-    ) -> StreamExecutorResult<()> {
+    pub async fn mutate_state(&mut self, state_item: CdcStateItem) -> StreamExecutorResult<()> {
         match self {
             CdcBackfillStateImpl::Undefined => Ok(()),
-            CdcBackfillStateImpl::SingleTable(state) => {
-                state.mutate_state(last_binlog_offset).await
-            }
-            CdcBackfillStateImpl::MultiTable(state) => state.mutate_state(last_binlog_offset).await,
+            CdcBackfillStateImpl::SingleTable(state) => state.mutate_state(state_item).await,
+            CdcBackfillStateImpl::MultiTable(state) => state.mutate_state(state_item).await,
         }
     }
 
@@ -76,14 +89,14 @@ pub const BACKFILL_STATE_KEY_SUFFIX: &str = "_backfill";
 
 pub struct MultiBackfillState<S: StateStore> {
     /// Id of the backfilling table, will be the key of the state
-    table_id: i64,
+    split_id: String,
     state_table: StateTable<S>,
 }
 
 impl<S: StateStore> MultiBackfillState<S> {
     pub fn new(table_id: u32, state_table: StateTable<S>) -> Self {
         Self {
-            table_id: table_id as _,
+            split_id: table_id.to_string(),
             state_table,
         }
     }
@@ -93,8 +106,8 @@ impl<S: StateStore> MultiBackfillState<S> {
     }
 
     /// Restore the backfill state from storage
-    pub async fn restore_state(&self) -> StreamExecutorResult<bool> {
-        let key = Some(self.table_id);
+    pub async fn restore_state(&self) -> StreamExecutorResult<CdcStateItem> {
+        let key = Some(self.split_id.clone());
         match self
             .state_table
             .get_row(row::once(key.map(ScalarImpl::from)))
@@ -106,22 +119,23 @@ impl<S: StateStore> MultiBackfillState<S> {
                     _ => return Err(anyhow!("invalid backfill state: backfill_finished").into()),
                 };
 
-                Ok(finished)
+                Ok(CdcStateItem {
+                    is_finished: finished,
+                    ..Default::default()
+                })
             }
-            None => Ok(false),
+            None => Ok(CdcStateItem::default()),
         }
     }
 
     /// Mark the backfill has done and save the last cdc offset
-    pub async fn mutate_state(
-        &mut self,
-        last_cdc_offset: Option<CdcOffset>,
-    ) -> StreamExecutorResult<()> {
-        let key = Some(self.table_id);
+    pub async fn mutate_state(&mut self, state_item: CdcStateItem) -> StreamExecutorResult<()> {
+        let key = Some(self.split_id.clone());
         let row = [
-            key.map(ScalarImpl::from),
+            key.clone().map(ScalarImpl::from),
             Some(ScalarImpl::from(true)),
-            last_cdc_offset.map(|cdc_offset| {
+            Some(ScalarImpl::from(state_item.row_count)),
+            state_item.last_cdc_offset.map(|cdc_offset| {
                 let json = serde_json::to_value(cdc_offset).unwrap();
                 ScalarImpl::Jsonb(JsonbVal::from(json))
             }),
@@ -175,26 +189,27 @@ impl<S: StateStore> SingleBackfillState<S> {
         self.source_state_handler.init_epoch(epoch)
     }
 
-    pub async fn check_finished(&self) -> StreamExecutorResult<bool> {
+    pub async fn restore_state(&self) -> StreamExecutorResult<CdcStateItem> {
         let mut key = self.split_id.to_string();
         key.push_str(BACKFILL_STATE_KEY_SUFFIX);
-        match self.source_state_handler.get(key.into()).await? {
+        let is_finished = match self.source_state_handler.get(key.into()).await? {
             Some(row) => match row.datum_at(1) {
-                Some(ScalarRefImpl::Jsonb(jsonb_ref)) => Ok(jsonb_ref.as_bool()?),
+                Some(ScalarRefImpl::Jsonb(jsonb_ref)) => jsonb_ref.as_bool()?,
                 _ => unreachable!("invalid backfill persistent state"),
             },
-            None => Ok(false),
-        }
+            None => false,
+        };
+        Ok(CdcStateItem {
+            is_finished,
+            ..Default::default()
+        })
     }
 
     /// When snapshot read stream ends, we should persist two states:
     /// 1) a backfill finish flag to denote the backfill has done
     /// 2) a consumed binlog offset to denote the last binlog offset
     /// which will be committed to the state store upon next barrier.
-    pub async fn mutate_state(
-        &mut self,
-        last_binlog_offset: Option<CdcOffset>,
-    ) -> StreamExecutorResult<()> {
+    pub async fn mutate_state(&mut self, state_item: CdcStateItem) -> StreamExecutorResult<()> {
         let mut key = self.split_id.to_string();
         key.push_str(BACKFILL_STATE_KEY_SUFFIX);
         // write backfill finished flag
@@ -205,7 +220,7 @@ impl<S: StateStore> SingleBackfillState<S> {
         if let SplitImpl::MysqlCdc(split) = &mut self.cdc_split
             && let Some(state) = split.mysql_split.as_mut() {
             let start_offset =
-                last_binlog_offset.as_ref().map(|cdc_offset| {
+                state_item.last_cdc_offset.as_ref().map(|cdc_offset| {
                     let source_offset =
                         if let CdcOffset::MySql(o) = cdc_offset
                         {
