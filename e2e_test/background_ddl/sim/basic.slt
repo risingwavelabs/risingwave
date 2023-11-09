@@ -8,25 +8,25 @@ statement ok
 CREATE TABLE t (v1 int);
 
 statement ok
-INSERT INTO t select * from generate_series(1, 800000);
+INSERT INTO t select * from generate_series(1, 200000);
 
 statement ok
 FLUSH;
 
 statement ok
-SET STREAMING_RATE_LIMIT=8000;
+SET STREAMING_RATE_LIMIT=2000;
 
 statement ok
 CREATE MATERIALIZED VIEW m1 as SELECT * FROM t;
 
 statement ok
-SET STREAMING_RATE_LIMIT=9000;
+SET STREAMING_RATE_LIMIT=2000;
 
 statement ok
 CREATE MATERIALIZED VIEW m2 as SELECT * FROM t;
 
 statement ok
-SET STREAMING_RATE_LIMIT=10000;
+SET STREAMING_RATE_LIMIT=2000;
 
 statement ok
 CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
@@ -47,17 +47,17 @@ WAIT;
 query I
 select count(*) from m1;
 ----
-800000
+200000
 
 query I
 select count(*) from m2;
 ----
-800000
+200000
 
 query I
 select count(*) from m3;
 ----
-800000
+200000
 
 statement ok
 DROP MATERIALIZED VIEW m1;
