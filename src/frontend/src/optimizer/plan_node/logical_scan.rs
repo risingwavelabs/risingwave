@@ -21,7 +21,7 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::stream_plan::StreamScanType;
+use crate::optimizer::plan_node::StreamCdcTableScan;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{childless_record, Distill};
@@ -566,9 +566,8 @@ impl ToStream for LogicalScan {
         }
         if self.predicate().always_true() {
             if self.is_cdc_table() {
-                Ok(StreamTableScan::new_with_stream_scan_type(
+                Ok(StreamCdcTableScan::new(
                     self.core.clone(),
-                    StreamScanType::CdcBackfill,
                 )
                 .into())
             } else {
