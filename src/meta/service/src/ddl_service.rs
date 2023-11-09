@@ -655,6 +655,21 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    async fn alter_owner(
+        &self,
+        request: Request<AlterOwnerRequest>,
+    ) -> Result<Response<AlterOwnerResponse>, Status> {
+        let AlterOwnerRequest { object, owner_id } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterTableOwner(object.unwrap(), owner_id))
+            .await?;
+        Ok(Response::new(AlterOwnerResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn get_ddl_progress(
         &self,
         _request: Request<GetDdlProgressRequest>,
@@ -889,8 +904,8 @@ fn fill_table_stream_graph_info(
             }
 
             // fill table id for cdc backfill
-            if let NodeBody::Chain(chain_node) = node_body && table_job_type == TableJobType::SharedCdcSource {
-                if let Some(table) = chain_node.cdc_table_desc.as_mut() {
+            if let NodeBody::StreamScan(node) = node_body && table_job_type == TableJobType::SharedCdcSource {
+                if let Some(table) = node.cdc_table_desc.as_mut() {
                     table.table_id = table_id;
                 }
             }

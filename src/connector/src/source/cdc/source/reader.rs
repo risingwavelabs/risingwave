@@ -18,11 +18,10 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use jni::objects::JValue;
 use prost::Message;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_jni_core::jvm_runtime::JVM;
-use risingwave_jni_core::{JniReceiverType, JniSenderType};
+use risingwave_jni_core::{call_static_method, JniReceiverType, JniSenderType};
 use risingwave_pb::connector_service::{GetEventStreamRequest, GetEventStreamResponse};
 use tokio::sync::mpsc;
 
@@ -120,14 +119,12 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                 }
             };
 
-            let result = env.call_static_method(
-                "com/risingwave/connector/source/core/JniDbzSourceHandler",
-                "runJniDbzSourceThread",
-                "([BJ)V",
-                &[
-                    JValue::Object(&get_event_stream_request_bytes),
-                    JValue::from(&mut tx as *mut JniSenderType<GetEventStreamResponse> as i64),
-                ],
+            let result = call_static_method!(
+                env,
+                {com.risingwave.connector.source.core.JniDbzSourceHandler},
+                {void runJniDbzSourceThread(byte[] getEventStreamRequestBytes, long channelPtr)},
+                &get_event_stream_request_bytes,
+                &mut tx as *mut JniSenderType<GetEventStreamResponse>
             );
 
             match result {

@@ -208,6 +208,10 @@ pub struct MetaConfig {
     #[serde(default)]
     pub disable_recovery: bool,
 
+    /// Whether to enable scale-in when recovery.
+    #[serde(default)]
+    pub enable_scale_in_when_recovery: bool,
+
     #[serde(default = "default::meta::meta_leader_lease_secs")]
     pub meta_leader_lease_secs: u64,
 
@@ -582,6 +586,10 @@ pub struct StorageConfig {
     pub enable_fast_compaction: bool,
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
+
+    /// The spill threshold for mem table.
+    #[serde(default = "default::storage::mem_table_spill_threshold")]
+    pub mem_table_spill_threshold: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
@@ -1089,6 +1097,10 @@ pub mod default {
 
         pub fn enable_fast_compaction() -> bool {
             true
+        }
+
+        pub fn mem_table_spill_threshold() -> usize {
+            4 << 20
         }
     }
 

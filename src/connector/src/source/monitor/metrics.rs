@@ -56,6 +56,9 @@ impl Default for EnumeratorMetrics {
 #[derive(Debug, Clone)]
 pub struct SourceMetrics {
     pub partition_input_count: GenericCounterVec<AtomicU64>,
+
+    // **Note**: for normal messages, the metric is the message's payload size.
+    // For messages from load generator, the metric is the size of stream chunk.
     pub partition_input_bytes: GenericCounterVec<AtomicU64>,
     /// Report latest message id
     pub latest_message_id: GenericGaugeVec<AtomicI64>,

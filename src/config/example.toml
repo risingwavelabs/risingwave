@@ -22,6 +22,7 @@ hummock_version_checkpoint_interval_sec = 30
 min_delta_log_num_for_hummock_version_checkpoint = 10
 max_heartbeat_interval_secs = 300
 disable_recovery = false
+enable_scale_in_when_recovery = false
 meta_leader_lease_secs = 30
 default_parallelism = "Full"
 enable_compaction_deterministic = false
@@ -110,7 +111,7 @@ compactor_max_sst_key_count = 2097152
 compact_iter_recreate_timeout_ms = 600000
 compactor_max_sst_size = 536870912
 enable_fast_compaction = true
-
+mem_table_spill_threshold = 4194304
 
 [storage.data_file_cache]
 dir = ""

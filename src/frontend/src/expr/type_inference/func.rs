@@ -533,6 +533,33 @@ fn infer_type_for_special(
             }
             Ok(Some(DataType::Varchar))
         }
+        ExprType::ArrayContains | ExprType::ArrayContained => {
+            ensure_arity!("array_contains/array_contained", | inputs | == 2);
+            let left_type = (!inputs[0].is_untyped()).then(|| inputs[0].return_type());
+            let right_type = (!inputs[1].is_untyped()).then(|| inputs[1].return_type());
+            match (left_type, right_type) {
+                (None, Some(DataType::List(_))) | (Some(DataType::List(_)), None) => {
+                    align_types(inputs.iter_mut())?;
+                    Ok(Some(DataType::Boolean))
+                }
+                (Some(DataType::List(left)), Some(DataType::List(right))) => {
+                    // cannot directly cast, find unnest type and judge if they are same type
+                    let left = left.unnest_list();
+                    let right = right.unnest_list();
+                    if left.equals_datatype(right) {
+                        Ok(Some(DataType::Boolean))
+                    } else {
+                        Err(ErrorCode::BindError(format!(
+                            "Cannot array_contains unnested type {} to unnested type {}",
+                            left, right
+                        ))
+                        .into())
+                    }
+                }
+                // any other condition cannot determine polymorphic type
+                _ => Ok(None),
+            }
+        }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);
             Ok(Some(DataType::Int16))

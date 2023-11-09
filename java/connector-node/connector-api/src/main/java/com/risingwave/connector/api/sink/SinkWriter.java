@@ -17,15 +17,34 @@
 package com.risingwave.connector.api.sink;
 
 import com.risingwave.proto.ConnectorServiceProto;
-import java.util.Iterator;
 import java.util.Optional;
 
 public interface SinkWriter {
+    /**
+     * Begin writing an epoch.
+     *
+     * @param epoch
+     */
     void beginEpoch(long epoch);
 
-    void write(Iterator<SinkRow> rows);
+    /**
+     * Write a series of rows to the external sink.
+     *
+     * @return Flag to indicate whether the rows are written and persisting in the external sink.
+     *     `true` means persisted.
+     */
+    boolean write(Iterable<SinkRow> rows);
 
+    /**
+     * Mark the end of the previous begun epoch.
+     *
+     * @param isCheckpoint `isCheckpoint` = `true` means that the RW kernel will do a checkpoint for
+     *     data before this barrier. External sink should have its data persisted before it returns.
+     * @return Optionally return the metadata of this checkpoint. Only return some metadata for
+     *     coordinated remote sink when `isCheckpoint` == `true`.
+     */
     Optional<ConnectorServiceProto.SinkMetadata> barrier(boolean isCheckpoint);
 
+    /** Clean up */
     void drop();
 }
