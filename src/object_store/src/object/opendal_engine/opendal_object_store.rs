@@ -72,7 +72,7 @@ impl ObjectStore for OpendalObjectStore {
 
     async fn streaming_upload(&self, path: &str) -> ObjectResult<BoxedStreamingUploader> {
         Ok(Box::new(
-            OpenDalStreamingUploader::new(self.op.clone(), path.to_string()).await?,
+            OpendalStreamingUploader::new(self.op.clone(), path.to_string()).await?,
         ))
     }
 
@@ -199,10 +199,10 @@ impl ObjectStore for OpendalObjectStore {
 }
 
 /// Store multiple parts in a map, and concatenate them on finish.
-pub struct OpenDalStreamingUploader {
+pub struct OpendalStreamingUploader {
     writer: Writer,
 }
-impl OpenDalStreamingUploader {
+impl OpendalStreamingUploader {
     pub async fn new(op: Operator, path: String) -> ObjectResult<Self> {
         let writer = op.writer_with(&path).buffer(OPENDAL_BUFFER_SIZE).await?;
         Ok(Self { writer })
@@ -212,7 +212,7 @@ impl OpenDalStreamingUploader {
 const OPENDAL_BUFFER_SIZE: usize = 16 * 1024 * 1024;
 
 #[async_trait::async_trait]
-impl StreamingUploader for OpenDalStreamingUploader {
+impl StreamingUploader for OpendalStreamingUploader {
     async fn write_bytes(&mut self, data: Bytes) -> ObjectResult<()> {
         self.writer.write(data).await?;
         Ok(())

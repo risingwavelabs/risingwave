@@ -12,22 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Result};
-use async_trait::async_trait;
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::Gcs;
 use opendal::Operator;
-use serde::Deserialize;
 
-use super::opendal_enumerator::{EngineType, OpenDALConnector};
-use super::GCSProperties;
-use crate::parser::ParserConfig;
-use crate::source::filesystem::GcsSplit;
-use crate::source::{Column, SourceContextRef, SplitReader};
+use super::opendal_enumerator::{EngineType, OpendalConnector};
+use super::GcsProperties;
 
-impl OpenDALConnector {
+impl OpendalConnector {
     /// create opendal gcs engine.
-    pub fn new_gcs_source(gcs_properties: GCSProperties) -> anyhow::Result<Self> {
+    pub fn new_gcs_source(gcs_properties: GcsProperties) -> anyhow::Result<Self> {
         // Create gcs backend builder.
         let mut builder = Gcs::default();
 

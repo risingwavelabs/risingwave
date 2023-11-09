@@ -16,13 +16,13 @@ use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use futures::stream::{self, BoxStream};
 use futures::StreamExt;
-use opendal::{Lister, Metakey, Operator};
+use opendal::{Metakey, Operator};
 use risingwave_common::types::Timestamp;
 
-use super::{GCSProperties, OpenDALProperties};
-use crate::source::filesystem::{FsPageItem, GcsSplit};
-use crate::source::{FsListInner, SourceEnumeratorContextRef, SplitEnumerator};
-pub struct OpenDALConnector {
+use super::GcsProperties;
+use crate::source::filesystem::{FsPageItem, OpendalSplit};
+use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
+pub struct OpendalConnector {
     pub(crate) op: Operator,
     pub(crate) engine_type: EngineType,
 }
@@ -34,31 +34,31 @@ pub enum EngineType {
 }
 
 #[async_trait]
-impl SplitEnumerator for OpenDALConnector {
-    type Properties = GCSProperties;
-    type Split = GcsSplit;
+impl SplitEnumerator for OpendalConnector {
+    type Properties = GcsProperties;
+    type Split = OpendalSplit;
 
     async fn new(
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<OpenDALConnector> {
+    ) -> anyhow::Result<OpendalConnector> {
         // match properties {
-        //     OpenDALProperties::GCSProperties(gcs_properties) => {
-        //         OpenDALConnector::new_gcs_source(gcs_properties)
+        //     OpenDALProperties::GcsProperties(gcs_properties) => {
+        //         OpendalConnector::new_gcs_source(gcs_properties)
         //     }
         //     OpenDALProperties::S3Properties(s3_properties) => {
-        //         OpenDALConnector::new_s3_source(s3_properties)
+        //         OpendalConnector::new_s3_source(s3_properties)
         //     }
         // }
-        OpenDALConnector::new_gcs_source(properties)
+        OpendalConnector::new_gcs_source(properties)
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<GcsSplit>> {
+    async fn list_splits(&mut self) -> anyhow::Result<Vec<OpendalSplit>> {
         todo!()
     }
 }
 
-impl OpenDALConnector {
+impl OpendalConnector {
     pub async fn list(&self, prefix: &str) -> anyhow::Result<ObjectMetadataIter> {
         let object_lister = self
             .op
@@ -77,15 +77,15 @@ impl OpenDALConnector {
                         Some(t) => t.naive_utc(),
                         None => {
                             let timestamp = 0;
-                            NaiveDateTime::from_timestamp(timestamp, 0)
+                            NaiveDateTime::from_timestamp_opt(timestamp, 0).unwrap()
                         }
                     };
                     let timestamp = Timestamp::new(t);
                     let size = om.content_length() as i64;
                     let metadata = FsPageItem {
                         name,
-                        timestamp,
                         size,
+                        timestamp,
                     };
                     Some((Ok(metadata), object_lister))
                 }

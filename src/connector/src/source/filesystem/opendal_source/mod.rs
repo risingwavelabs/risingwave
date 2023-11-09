@@ -20,41 +20,42 @@ use serde::Deserialize;
 pub mod opendal_enumerator;
 pub mod opendal_reader;
 
-use self::opendal_enumerator::OpenDALConnector;
-use super::{GcsSplit, S3Properties, S3_CONNECTOR};
-use crate::source::{SourceProperties, SplitImpl};
+use self::opendal_enumerator::OpendalConnector;
+use self::opendal_reader::OpendalReader;
+use super::OpendalSplit;
+use crate::source::SourceProperties;
 
 pub const GCS_CONNECTOR: &str = "gcs";
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct GCSProperties {
+pub struct GcsProperties {
     #[serde(rename = "gcs.bucket_name")]
     pub bucket_name: String,
 }
 
-impl SourceProperties for GCSProperties {
-    type Split = GcsSplit;
-    type SplitEnumerator = OpenDALConnector;
-    type SplitReader = OpenDALConnector;
+impl SourceProperties for GcsProperties {
+    type Split = OpendalSplit;
+    type SplitEnumerator = OpendalConnector;
+    type SplitReader = OpendalReader;
 
     const SOURCE_NAME: &'static str = GCS_CONNECTOR;
 
     fn init_from_pb_source(&mut self, _source: &risingwave_pb::catalog::PbSource) {}
 }
 
-#[derive(Clone, Debug, Deserialize)]
-pub enum OpenDALProperties {
-    GCSProperties(GCSProperties),
-    S3Properties(S3Properties),
-}
+// #[derive(Clone, Debug, Deserialize)]
+// pub enum OpenDALProperties {
+//     GcsProperties(GcsProperties),
+//     S3Properties(S3Properties),
+// }
 
 // impl SourceProperties for OpenDALProperties{
 
 //     const SOURCE_NAME: &'static str = GCS_CONNECTOR;
-//     type Split = GcsSplit;
+//     type Split = OpendalSplit;
 
-//     type SplitEnumerator = OpenDALConnector;
-//     type SplitReader = OpenDALConnector;
+//     type SplitEnumerator = OpendalConnector;
+//     type SplitReader = OpendalReader;
 
 //     fn init_from_pb_source(&mut self, _source: &risingwave_pb::catalog::PbSource) {}
 // }

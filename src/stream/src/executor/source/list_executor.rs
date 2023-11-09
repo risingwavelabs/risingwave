@@ -22,7 +22,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::Schema;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
-use risingwave_connector::source::filesystem::{FsPage, FsPageItem};
+use risingwave_connector::source::filesystem::FsPageItem;
 use risingwave_connector::source::{BoxTryStream, SourceCtrlOpts};
 use risingwave_connector::ConnectorParams;
 use risingwave_source::source_desc::{SourceDesc, SourceDescBuilder};
