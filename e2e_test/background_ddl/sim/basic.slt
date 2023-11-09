@@ -25,6 +25,11 @@ CREATE MATERIALIZED VIEW m2 as SELECT * FROM t;
 statement ok
 CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
 
+query I
+select count(*) from rw_ddl_progress;
+----
+3
+
 # Meta should always reject duplicate mview.
 statement error
 CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
