@@ -32,9 +32,9 @@ use crate::executor::{
     RearrangedChainExecutor, SourceStateTableHandler,
 };
 
-pub struct ChainExecutorBuilder;
+pub struct StreamScanExecutorBuilder;
 
-impl ExecutorBuilder for ChainExecutorBuilder {
+impl ExecutorBuilder for StreamScanExecutorBuilder {
     type Node = StreamScanNode;
 
     async fn new_boxed_executor(
