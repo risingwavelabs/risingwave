@@ -638,13 +638,13 @@ impl ListValue {
             /// Parse a datum.
             fn parse(&mut self) -> Result<Datum, String> {
                 self.skip_whitespace();
-                if self.try_parse_null() {
-                    return Ok(None);
-                }
                 if self.data_type.is_array() {
+                    if self.try_parse_null() {
+                        return Ok(None);
+                    }
                     Ok(Some(self.parse_array()?.into()))
                 } else {
-                    Ok(Some(self.parse_value()?))
+                    self.parse_value()
                 }
             }
 
@@ -685,9 +685,9 @@ impl ListValue {
             }
 
             /// Parse a non-array value.
-            fn parse_value(&mut self) -> Result<ScalarImpl, String> {
+            fn parse_value(&mut self) -> Result<Datum, String> {
                 if self.peek() == Some('"') {
-                    return self.parse_quoted();
+                    return Ok(Some(self.parse_quoted()?));
                 }
                 // peek until the next unescaped ',' or '}'
                 let mut chars = self.input.char_indices();
@@ -700,19 +700,20 @@ impl ListValue {
                         }
                         (i, c @ ',' | c @ '}') => {
                             let s = &self.input[..i];
+                            let trimmed = s.trim_end();
                             // consume the value and leave the ',' or '}' for parent
                             self.input = &self.input[i..];
-                            if s.trim_end().is_empty() {
+
+                            if trimmed.is_empty() {
                                 return Err(format!("Unexpected \"{c}\" character."));
                             }
+                            if trimmed.eq_ignore_ascii_case("null") {
+                                return Ok(None);
+                            }
                             break if has_escape {
-                                // trim whitespaces after unescaping
-                                // consider: "\  " -> " "
-                                let mut s = Self::unescape(s);
-                                s.truncate(s.trim_end().len());
-                                Cow::Owned(s)
+                                Cow::Owned(Self::unescape_trim_end(s))
                             } else {
-                                Cow::Borrowed(s.trim_end())
+                                Cow::Borrowed(trimmed)
                             };
                         }
                         (_, '{') => return Err("Unexpected \"{\" character.".to_string()),
@@ -720,7 +721,7 @@ impl ListValue {
                         _ => {}
                     }
                 };
-                ScalarImpl::from_literal(&s, self.data_type)
+                Ok(Some(ScalarImpl::from_literal(&s, self.data_type)?))
             }
 
             /// Parse a double quoted non-array value.
@@ -760,6 +761,27 @@ impl ListValue {
                     }
                     unescaped.push(c);
                 }
+                unescaped
+            }
+
+            /// Unescape a string and trim the trailing whitespaces.
+            ///
+            /// Example: `"\  " -> " "`
+            fn unescape_trim_end(s: &str) -> String {
+                let mut unescaped = String::with_capacity(s.len());
+                let mut chars = s.chars();
+                let mut len_after_last_escaped_char = 0;
+                while let Some(mut c) = chars.next() {
+                    if c == '\\' {
+                        c = chars.next().unwrap();
+                        unescaped.push(c);
+                        len_after_last_escaped_char = unescaped.len();
+                    } else {
+                        unescaped.push(c);
+                    }
+                }
+                let l = unescaped[len_after_last_escaped_char..].trim_end().len();
+                unescaped.truncate(len_after_last_escaped_char + l);
                 unescaped
             }
 
@@ -1268,17 +1290,14 @@ mod tests {
         test("varchar[]", r#"{"\""}"#, None);
         test("varchar[]", r#"{\   }"#, Some(r#"{" "}"#));
         test("varchar[]", r#"{\\  }"#, Some(r#"{"\\"}"#));
-        test("varchar[]", r#"{nulla}"#, None);
+        test("varchar[]", "{nulla}", None);
+        test("varchar[]", "{null a}", Some(r#"{"null a"}"#));
         test(
             "varchar[]",
             r#"{"null", "NULL", null, NuLL}"#,
             Some(r#"{"null","NULL",NULL,NULL}"#),
         );
-        test(
-            "varchar[][]",
-            "{{1, 2, 3}, {4, 5, 6}}",
-            Some("{{1,2,3},{4,5,6}}"),
-        );
+        test("varchar[][]", "{{1, 2, 3}, null }", Some("{{1,2,3},NULL}"));
         test(
             "varchar[][][]",
             "{{{1, 2, 3}}, {{4, 5, 6}}}",
