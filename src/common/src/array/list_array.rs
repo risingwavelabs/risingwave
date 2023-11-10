@@ -644,7 +644,7 @@ impl ListValue {
                 if self.data_type.is_array() {
                     Ok(Some(self.parse_array()?.into()))
                 } else {
-                    self.parse_value()
+                    Ok(Some(self.parse_value()?))
                 }
             }
 
@@ -684,8 +684,8 @@ impl ListValue {
                 Ok(ListValue::new(elems))
             }
 
-            /// Parse a scalar value.
-            fn parse_value(&mut self) -> Result<Datum, String> {
+            /// Parse a non-array value.
+            fn parse_value(&mut self) -> Result<ScalarImpl, String> {
                 if self.peek() == Some('"') {
                     return self.parse_quoted();
                 }
@@ -699,15 +699,20 @@ impl ListValue {
                             chars.next().ok_or_else(Self::eoi)?;
                         }
                         (i, c @ ',' | c @ '}') => {
-                            let s = self.input[..i].trim_end();
+                            let s = &self.input[..i];
+                            // comsume the value and leave the ',' or '}' for parent
                             self.input = &self.input[i..];
-                            if s.is_empty() {
+                            if s.trim_end().is_empty() {
                                 return Err(format!("Unexpected \"{c}\" character."));
                             }
                             break if has_escape {
-                                Cow::Owned(Self::unescape(s))
+                                // trim whitespaces after unescaping
+                                // consider: "\  " -> " "
+                                let mut s = Self::unescape(s);
+                                s.truncate(s.trim_end().len());
+                                Cow::Owned(s)
                             } else {
-                                Cow::Borrowed(s)
+                                Cow::Borrowed(s.trim_end())
                             };
                         }
                         (_, '{') => return Err("Unexpected \"{\" character.".to_string()),
@@ -715,11 +720,11 @@ impl ListValue {
                         _ => {}
                     }
                 };
-                Ok(Some(ScalarImpl::from_literal(&s, self.data_type)?))
+                Ok(ScalarImpl::from_literal(&s, self.data_type)?)
             }
 
-            /// Parse a double quoted scalar value.
-            fn parse_quoted(&mut self) -> Result<Datum, String> {
+            /// Parse a double quoted non-array value.
+            fn parse_quoted(&mut self) -> Result<ScalarImpl, String> {
                 assert!(self.try_consume('"'));
                 // peek until the next unescaped '"'
                 let mut chars = self.input.char_indices();
@@ -742,7 +747,7 @@ impl ListValue {
                         _ => {}
                     }
                 };
-                Ok(Some(ScalarImpl::from_literal(&s, self.data_type)?))
+                Ok(ScalarImpl::from_literal(&s, self.data_type)?)
             }
 
             /// Unescape a string.
@@ -761,6 +766,12 @@ impl ListValue {
             /// Consume the next 4 characters if it matches "null".
             fn try_parse_null(&mut self) -> bool {
                 if let Some(s) = self.input.get(..4) && s.eq_ignore_ascii_case("null") {
+                    let next_char = self.input[4..].chars().next();
+                    match next_char {
+                        None | Some(',' | '{' | '}' | '\t' | '\n' | '\r' | '\x0B' | '\x0C' | ' ') => {}
+                        // following normal characters
+                        _ => return false,
+                    }
                     self.input = &self.input[4..];
                     true
                 } else {
@@ -1255,6 +1266,9 @@ mod tests {
         test("varchar[]", r#"{"1,2"}"#, None);
         test("varchar[]", r#"{1, ""}"#, Some(r#"{1,""}"#));
         test("varchar[]", r#"{"\""}"#, None);
+        test("varchar[]", r#"{\   }"#, Some(r#"{" "}"#));
+        test("varchar[]", r#"{\\  }"#, Some(r#"{"\\"}"#));
+        test("varchar[]", r#"{nulla}"#, None);
         test(
             "varchar[]",
             r#"{"null", "NULL", null, NuLL}"#,
