@@ -14,6 +14,7 @@
 
 use risingwave_hummock_sdk::{HummockContextId, HummockSstableObjectId};
 use risingwave_object_store::object::ObjectError;
+use risingwave_rpc_client::error::ToTonicStatus;
 use thiserror::Error;
 
 use crate::model::MetadataModelError;
@@ -84,6 +85,6 @@ impl From<MetadataModelError> for Error {
 
 impl From<Error> for tonic::Status {
     fn from(err: Error) -> Self {
-        tonic::Status::new(tonic::Code::Internal, format!("{}", err))
+        err.to_status(tonic::Code::Internal, "hummock")
     }
 }
