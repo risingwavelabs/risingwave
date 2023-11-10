@@ -80,19 +80,15 @@ impl SstableIterator {
                     Unbounded => block_metas.len(),
                     Included(dest_key) => {
                         let dest_key = dest_key.as_ref();
-                        block_metas
-                            .partition_point(|block_meta| {
-                                FullKey::decode(&block_meta.smallest_key).user_key <= dest_key
-                            })
-                            .saturating_sub(1)
+                        block_metas.partition_point(|block_meta| {
+                            FullKey::decode(&block_meta.smallest_key).user_key <= dest_key
+                        })
                     }
                     Excluded(end_key) => {
                         let end_key = end_key.as_ref();
-                        block_metas
-                            .partition_point(|block_meta| {
-                                FullKey::decode(&block_meta.smallest_key).user_key < end_key
-                            })
-                            .saturating_sub(1)
+                        block_metas.partition_point(|block_meta| {
+                            FullKey::decode(&block_meta.smallest_key).user_key < end_key
+                        })
                     }
                 };
                 if start_idx + 1 < end_idx {
@@ -136,7 +132,7 @@ impl SstableIterator {
         }
         if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx
             && let Ok(preload_stream) = self.sstable_store
-                .preload_blocks(self.sst.value(), idx, end_idx)
+                .preload_blocks(self.sst.value(), idx, self.preload_end_block_idx)
                 .await
         {
             self.preload_stream = preload_stream;
