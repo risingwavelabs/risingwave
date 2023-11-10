@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::external::{CdcTableType, SchemaTableName};
 use risingwave_pb::plan_common::{ExternalTableDesc, StorageTableDesc};
@@ -65,16 +65,20 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
             }
             StreamScanType::CdcBackfill => {
                 let table_desc: &ExternalTableDesc = node.get_cdc_table_desc()?;
+
+                let table_schema: Schema = table_desc.columns.iter().map(Into::into).collect();
+                assert_eq!(output_indices, (0..table_schema.len()).collect_vec());
+                assert_eq!(table_schema.data_types(), params.info.schema.data_types());
+
                 let properties: HashMap<String, String> = table_desc
                     .connect_properties
                     .iter()
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect();
                 let table_type = CdcTableType::from_properties(&properties);
-                let table_reader = table_type
-                    .create_table_reader(properties.clone(), params.info.schema.clone())?;
+                let table_reader =
+                    table_type.create_table_reader(properties.clone(), table_schema.clone())?;
 
-                let table_schema = params.info.schema.clone();
                 let table_pk_order_types = table_desc
                     .pk
                     .iter()
@@ -94,7 +98,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     table_schema,
                     table_pk_order_types,
                     table_pk_indices,
-                    (0..table_desc.columns.len()).collect_vec(),
+                    output_indices.clone(),
                 );
 
                 let source_state_handler = SourceStateTableHandler::from_table_catalog(
@@ -107,13 +111,14 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     params.info,
                     external_table,
                     upstream,
-                    (0..table_desc.columns.len()).collect_vec(), /* eliminate the last column (_rw_offset) */
+                    output_indices,
                     Some(progress),
                     params.executor_stats,
                     source_state_handler,
                     true,
                     params.env.config().developer.chunk_size,
-                ).boxed()
+                )
+                .boxed()
             }
             StreamScanType::Backfill => {
                 let table_desc: &StorageTableDesc = node
