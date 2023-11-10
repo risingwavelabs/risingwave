@@ -670,21 +670,6 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_string()))
     }
 
-    pub fn get_sink_by_id<'a>(
-        &self,
-        db_name: &str,
-        schema_path: SchemaPath<'a>,
-        sink_id: SinkId
-    ) -> CatalogResult<(&Arc<SinkCatalog>, &'a str)> {
-        schema_path
-            .try_find(|schema_name| {
-                Ok(self
-                    .get_schema_by_name(db_name, schema_name)?
-                    .get_sink_by_id(&sink_id))
-            })?
-            .ok_or_else(|| CatalogError::NotFound("sink", sink_name.to_string()))
-    }
-
     pub fn get_index_by_name<'a>(
         &self,
         db_name: &str,

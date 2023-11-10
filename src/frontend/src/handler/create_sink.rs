@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::{Arc, LazyLock};
 
@@ -42,7 +42,7 @@ use risingwave_sqlparser::parser::Parser;
 use super::create_mv::get_column_names;
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::TableId;
+use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
@@ -256,62 +256,67 @@ pub fn gen_sink_plan(
     Ok((query, sink_plan, sink_catalog, target_table_catalog))
 }
 
+fn check_cycle_for_sink(
+    session: &SessionImpl,
+    sink_catalog: SinkCatalog,
+    table_id: catalog::TableId,
+) -> Result<bool> {
+    let reader = session.env().catalog_reader().read_guard();
 
-fn check_ring_for_sink(session: &SessionImpl, table_id: catalog::TableId) -> Result<()> {
+    let mut sinks = HashMap::new();
+    let db_name = session.database();
+    for schema in reader.iter_schemas(db_name)? {
+        for sink in schema.iter_sink() {
+            sinks.insert(sink.id.sink_id, sink.as_ref());
+        }
+    }
     fn visit_sink(
-        table_db: &HashMap<i32, Table>,
-        sink_db: &HashMap<i32, Sink>,
-        sink: &Sink,
-        visited_tables: &mut Vec<i32>,
-    ) -> bool {
-        for &table_id in &sink.dependent_tables {
-            if let Some(table) = get_table(table_db, table_id) {
-                if visit_table(table_db, sink_db, &table, visited_tables) {
-                    return true;
+        session: &SessionImpl,
+        reader: &CatalogReadGuard,
+        sink_index: &HashMap<u32, &SinkCatalog>,
+        sink: &SinkCatalog,
+        visited_tables: &mut HashSet<u32>,
+    ) -> Result<bool> {
+        for table_id in &sink.dependent_relations {
+            if let Ok(table) = reader.get_table_by_id(table_id) {
+                if visit_table(session, reader, sink_index, table.as_ref(), visited_tables)? {
+                    return Ok(true);
                 }
+            } else {
+                bail!("table not found: {:?}", table_id);
             }
         }
-        false
+        Ok(false)
     }
 
     fn visit_table(
-        table_db: &HashMap<i32, Table>,
-        sink_db: &HashMap<i32, Sink>,
-        table: &Table,
-        visited_tables: &mut Vec<i32>,
-    ) -> bool {
-        if visited_tables.contains(&table.id) {
-            true
+        session: &SessionImpl,
+        reader: &CatalogReadGuard,
+        sink_index: &HashMap<u32, &SinkCatalog>,
+        table: &TableCatalog,
+        visited_tables: &mut HashSet<u32>,
+    ) -> Result<bool> {
+        if visited_tables.contains(&table.id.table_id) {
+            Ok(true)
         } else {
-            visited_tables.push(table.id);
-            for &sink_id in &table.incoming_sinks {
-                if let Some(sink) = get_sink(sink_db, sink_id) {
-                    if visit_sink(table_db, sink_db, &sink, visited_tables) {
-                        return true;
+            let _ = visited_tables.insert(table.id.table_id);
+            for sink_id in &table.incoming_sinks {
+                if let Some(sink) = sink_index.get(sink_id) {
+                    if visit_sink(session, reader, sink_index, sink, visited_tables)? {
+                        return Ok(true);
                     }
+                } else {
+                    bail!("sink not found: {:?}", sink_id);
                 }
             }
-            false
+            Ok(false)
         }
     }
 
+    let mut visited_tables = HashSet::new();
+    visited_tables.insert(table_id.table_id);
 
-    let db_name = session.database();
-    let (schema_name, real_table_name) =
-        Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
-    let search_path = session.config().get_search_path();
-    let user_name = &session.auth_context().user_name;
-
-    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
-
-    let reader = session.env().catalog_reader().read_guard();
-    let table = reader.get_table_by_id(&table_id)?;
-
-    for sink in table.incoming_sinks {
-        reader.get_sink_by_name()
-    }
-
-    todo!()
+    visit_sink(session, &reader, &sinks, &sink_catalog, &mut visited_tables)
 }
 
 pub async fn handle_create_sink(
@@ -359,6 +364,12 @@ pub async fn handle_create_sink(
         if !table_catalog.incoming_sinks.is_empty() {
             return Err(RwError::from(ErrorCode::BindError(
                 "Create sink into table with incoming sinks has not been implemented.".to_string(),
+            )));
+        }
+
+        if check_cycle_for_sink(session.as_ref(), sink.clone(), table_catalog.id())? {
+            return Err(RwError::from(ErrorCode::BindError(
+                "Creating such a sink will result in circular dependency.".to_string(),
             )));
         }
 
