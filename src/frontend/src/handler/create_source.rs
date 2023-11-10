@@ -289,6 +289,7 @@ fn get_name_strategy_or_default(name_strategy: Option<AstString>) -> Result<Opti
 /// resolve the schema of the source from external schema file, return the relation's columns. see <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
 /// return `(columns, source info)`
 pub(crate) async fn bind_columns_from_source(
+    session: &SessionImpl,
     source_schema: &ConnectorSchema,
     with_properties: &HashMap<String, String>,
     create_cdc_source_job: bool,
@@ -566,8 +567,9 @@ pub(crate) async fn bind_columns_from_source(
         }
     };
     if !options.is_empty() {
-        return Err(RwError::from(ProtocolError(format!(
-            "Unknown options for {:?} {:?}: {}",
+        // todo: restore the check after fixing copies props
+        let err_string = format!(
+            "Get unknown options for {:?} {:?}: {} (the warning may be false alarm, we are fixing it)",
             source_schema.format,
             source_schema.row_encode,
             options
@@ -575,7 +577,8 @@ pub(crate) async fn bind_columns_from_source(
                 .map(|(k, v)| format!("{}:{}", k, v))
                 .collect::<Vec<String>>()
                 .join(","),
-        ))));
+        );
+        session.notice_to_user(err_string);
     }
     Ok(res)
 }
@@ -1126,8 +1129,13 @@ pub async fn handle_create_source(
     let create_cdc_source_job =
         is_cdc_connector(&with_properties) && session.config().get_cdc_backfill();
 
-    let (columns_from_resolve_source, source_info) =
-        bind_columns_from_source(&source_schema, &with_properties, create_cdc_source_job).await?;
+    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
+        &session,
+        &source_schema,
+        &with_properties,
+        create_cdc_source_job,
+    )
+    .await?;
     let columns_from_sql = bind_sql_columns(&stmt.columns)?;
 
     let mut columns = bind_all_columns(
