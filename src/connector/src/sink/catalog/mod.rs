@@ -424,7 +424,7 @@ impl From<PbSink> for SinkCatalog {
             initialized_at_epoch: pb.initialized_at_epoch.map(Epoch::from),
             db_name: pb.db_name,
             sink_from_name: pb.sink_from_name,
-            target_table: pb.target_table.map(|table_id| TableId::new(table_id)),
+            target_table: pb.target_table.map(TableId::new),
         }
     }
 }

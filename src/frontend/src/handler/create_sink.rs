@@ -21,10 +21,10 @@ use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::bail;
 use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
@@ -42,6 +42,7 @@ use risingwave_sqlparser::parser::Parser;
 use super::create_mv::get_column_names;
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::TableId;
 use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
@@ -253,6 +254,64 @@ pub fn gen_sink_plan(
     };
 
     Ok((query, sink_plan, sink_catalog, target_table_catalog))
+}
+
+
+fn check_ring_for_sink(session: &SessionImpl, table_id: catalog::TableId) -> Result<()> {
+    fn visit_sink(
+        table_db: &HashMap<i32, Table>,
+        sink_db: &HashMap<i32, Sink>,
+        sink: &Sink,
+        visited_tables: &mut Vec<i32>,
+    ) -> bool {
+        for &table_id in &sink.dependent_tables {
+            if let Some(table) = get_table(table_db, table_id) {
+                if visit_table(table_db, sink_db, &table, visited_tables) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn visit_table(
+        table_db: &HashMap<i32, Table>,
+        sink_db: &HashMap<i32, Sink>,
+        table: &Table,
+        visited_tables: &mut Vec<i32>,
+    ) -> bool {
+        if visited_tables.contains(&table.id) {
+            true
+        } else {
+            visited_tables.push(table.id);
+            for &sink_id in &table.incoming_sinks {
+                if let Some(sink) = get_sink(sink_db, sink_id) {
+                    if visit_sink(table_db, sink_db, &sink, visited_tables) {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+    }
+
+
+    let db_name = session.database();
+    let (schema_name, real_table_name) =
+        Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
+    let search_path = session.config().get_search_path();
+    let user_name = &session.auth_context().user_name;
+
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
+    let reader = session.env().catalog_reader().read_guard();
+    let table = reader.get_table_by_id(&table_id)?;
+
+    for sink in table.incoming_sinks {
+        reader.get_sink_by_name()
+    }
+
+    todo!()
 }
 
 pub async fn handle_create_sink(

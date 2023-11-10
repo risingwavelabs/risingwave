@@ -407,7 +407,7 @@ mod tests {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
-            sink_into_name: None,
+            target_table: None,
         };
 
         let epoch1 = 233;
@@ -578,7 +578,7 @@ mod tests {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
-            sink_into_name: None,
+            target_table: None,
         };
 
         let epoch1 = 233;
@@ -698,7 +698,7 @@ mod tests {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
-            sink_into_name: None,
+            target_table: None,
         };
 
         let (manager, (_join_handle, _stop_tx)) = SinkCoordinatorManager::start_worker();
@@ -738,7 +738,7 @@ mod tests {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
-            sink_into_name: None,
+            target_table: None,
         };
 
         let epoch = 233;
@@ -818,7 +818,7 @@ mod tests {
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
-            sink_into_name: None,
+            target_table: None,
         };
 
         let epoch = 233;

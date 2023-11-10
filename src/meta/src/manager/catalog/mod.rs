@@ -1104,6 +1104,13 @@ impl CatalogManager {
             RelationIdEnum::Table(table_id) => {
                 let table = tables.get(&table_id).cloned();
                 if let Some(table) = table {
+                    for incoming_sink in &table.incoming_sinks {
+                        let sink = sinks.get(incoming_sink).cloned();
+                        if let Some(sink) = sink {
+                            deque.push_back(RelationInfo::Sink(sink));
+                        }
+                    }
+
                     deque.push_back(RelationInfo::Table(table));
                 } else {
                     bail!("table doesn't exist");
@@ -2899,10 +2906,13 @@ impl CatalogManager {
 
         let mut table = table.clone();
         table.stream_job_status = PbStreamJobStatus::Created.into();
-        tables.insert(table.id, table.clone());
+
         if let Some(incoming_sink_id) = incoming_sink_id {
             table.incoming_sinks.push(incoming_sink_id);
         }
+
+        tables.insert(table.id, table.clone());
+
         commit_meta!(self, tables, indexes, sources)?;
 
         // Group notification
