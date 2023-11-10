@@ -117,5 +117,7 @@ func (g *userGen) Load(ctx context.Context, outCh chan<- sink.SinkRecord) {
 			case outCh <- record:
 			}
 		}
+		// TODO: be smarter about slowing down user event production
+		time.Sleep(1 * time.Second)
 	}
 }

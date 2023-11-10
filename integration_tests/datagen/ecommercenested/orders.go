@@ -92,7 +92,7 @@ type ecommerceGen struct {
 }
 
 func NewNestedEcommerceGen(maxId *atomic.Pointer[int64]) gen.LoadGenerator {
-	const numItems = 1000 // why do I do that? why should I not just tick every time interval?
+	const numItems = 1000
 	items := make([]float64, numItems)
 	for i := 0; i < numItems; i++ {
 		items[i] = gofakeit.Float64Range(0, 10000)

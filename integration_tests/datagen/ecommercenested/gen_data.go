@@ -16,7 +16,7 @@ func NewCdnMetricsGen(cfg gen.GeneratorConfig) gen.LoadGenerator {
 }
 
 func (g *cdnMetricsGen) KafkaTopics() []string {
-	return []string{"tcp_metrics", "nics_metrics"}
+	return []string{"users", "orders"}
 }
 
 func (g *cdnMetricsGen) Load(ctx context.Context, outCh chan<- sink.SinkRecord) {
