@@ -109,6 +109,16 @@ impl ArrowFlightUdfClient {
         }
     }
 
+    /// Call a function, retry up to 3 times if connection is broken.
+    pub async fn call_with_retry(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
+        tokio_retry::RetryIf::spawn(
+            tokio_retry::strategy::ExponentialBackoff::from_millis(100).take(3),
+            || self.call(id, input.clone()),
+            |err: &Error| err.is_connection_error(),
+        )
+        .await
+    }
+
     /// Call a function with streaming input and output.
     #[panic_return = "Result<stream::Empty<_>>"]
     pub async fn call_stream(
@@ -117,17 +127,14 @@ impl ArrowFlightUdfClient {
         inputs: impl Stream<Item = RecordBatch> + Send + 'static,
     ) -> Result<impl Stream<Item = Result<RecordBatch>> + Send + 'static> {
         let descriptor = FlightDescriptor::new_path(vec![id.into()]);
-        let flight_data_stream = FlightDataEncoderBuilder::new()
-            // XXX(wrj): unlimit the size of flight data to avoid splitting batch
-            //           there's a bug in arrow-flight when splitting batch with list type array
-            // FIXME: remove this when the bug is fixed in arrow-flight
-            .with_max_flight_data_size(usize::MAX)
-            .build(inputs.map(Ok))
-            .map(move |res| FlightData {
-                // TODO: fill descriptor only for the first message
-                flight_descriptor: Some(descriptor.clone()),
-                ..res.unwrap()
-            });
+        let flight_data_stream =
+            FlightDataEncoderBuilder::new()
+                .build(inputs.map(Ok))
+                .map(move |res| FlightData {
+                    // TODO: fill descriptor only for the first message
+                    flight_descriptor: Some(descriptor.clone()),
+                    ..res.unwrap()
+                });
 
         // call `do_exchange` on Flight server
         let response = self.client.clone().do_exchange(flight_data_stream).await?;
