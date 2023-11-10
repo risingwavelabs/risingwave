@@ -15,7 +15,10 @@
 use std::iter;
 use std::path::Path;
 
-use protobuf_native::compiler::{SourceTreeDescriptorDatabase, VirtualSourceTree};
+use itertools::Itertools;
+use protobuf_native::compiler::{
+    SimpleErrorCollector, SourceTreeDescriptorDatabase, VirtualSourceTree,
+};
 use protobuf_native::MessageLite;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
@@ -48,16 +51,20 @@ pub(super) async fn compile_file_descriptor_from_schema_registry(
             subject.schema.content.as_bytes().to_vec(),
         );
     }
-    let mut db = SourceTreeDescriptorDatabase::new(source_tree.as_mut());
-    let fds = db
-        .as_mut()
-        .build_file_descriptor_set(&[Path::new(&primary_subject.name)])
-        .map_err(|e| {
-            RwError::from(ProtocolError(format!(
-                "build_file_descriptor_set failed, {}",
-                e
-            )))
-        })?;
+    let mut error_collector = SimpleErrorCollector::new();
+    // `db` needs to be dropped before we can iterate on `error_collector`.
+    let fds = {
+        let mut db = SourceTreeDescriptorDatabase::new(source_tree.as_mut());
+        db.as_mut().record_errors_to(error_collector.as_mut());
+        db.as_mut()
+            .build_file_descriptor_set(&[Path::new(&primary_subject.name)])
+    }
+    .map_err(|_| {
+        RwError::from(ProtocolError(format!(
+            "build_file_descriptor_set failed. Errors:\n{}",
+            error_collector.as_mut().join("\n")
+        )))
+    })?;
     fds.serialize()
         .map_err(|_| RwError::from(InternalError("serialize descriptor set failed".to_owned())))
 }
