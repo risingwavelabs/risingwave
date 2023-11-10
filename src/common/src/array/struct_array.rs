@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::fmt;
-use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::fmt::{Debug, Write};
+use std::fmt::{self, Debug, Write};
 use std::hash::Hash;
 use std::sync::Arc;
 
@@ -467,39 +465,6 @@ fn quote_if_need(input: &str, writer: &mut impl Write) -> std::fmt::Result {
     writer.write_char('"')
 }
 
-/// Remove double quotes from a string.
-/// This is the reverse of [`quote_if_need`].
-#[allow(dead_code)]
-fn unquote_if_need(mut input: &str) -> Cow<'_, str> {
-    if input.starts_with('"') && input.ends_with('"') {
-        input = &input[1..input.len() - 1];
-    }
-    if !input.contains('\\') && !input.contains("\"\"") {
-        return input.into();
-    }
-
-    let mut output = String::with_capacity(input.len());
-    let mut chars = input.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        match ch {
-            '"' => {
-                if chars.peek() == Some(&'"') {
-                    chars.next();
-                    output.push('"');
-                }
-            }
-            '\\' => {
-                if let Some(next_char) = chars.next() {
-                    output.push(next_char);
-                }
-            }
-            _ => output.push(ch),
-        }
-    }
-    output.into()
-}
-
 #[cfg(test)]
 mod tests {
     use more_asserts::assert_gt;
@@ -785,7 +750,6 @@ mod tests {
             let mut actual = String::new();
             quote_if_need(input, &mut actual).unwrap();
             assert_eq!(quoted, actual);
-            assert_eq!(unquote_if_need(quoted), input);
         }
         test("abc", "abc");
         test("", r#""""#);
@@ -796,6 +760,5 @@ mod tests {
         test("{1}", "{1}");
         test("{1,2}", r#""{1,2}""#);
         test(r#"{"f": 1}"#, r#""{""f"": 1}""#);
-        assert_eq!(unquote_if_need(r#"  \,b"#), r#"  ,b"#);
     }
 }
