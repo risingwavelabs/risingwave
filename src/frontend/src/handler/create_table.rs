@@ -784,7 +784,7 @@ fn gen_table_plan_inner(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn gen_create_table_plan_for_cdc_source(
+pub(crate) fn gen_create_table_plan_for_cdc_source(
     context: OptimizerContextRef,
     source_name: ObjectName,
     table_name: ObjectName,
