@@ -31,7 +31,9 @@ use risingwave_connector::parser::{
     schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
     SpecificParserConfig,
 };
-use risingwave_connector::schema::schema_registry::name_strategy_from_str;
+use risingwave_connector::schema::schema_registry::{
+    name_strategy_from_str, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
+};
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CITUS_CDC_CONNECTOR,
     MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
@@ -566,15 +568,21 @@ pub(crate) async fn bind_columns_from_source(
             ))));
         }
     };
+
+    {
+        // fixme: remove this after correctly consuming the two options
+        options.remove(SCHEMA_REGISTRY_USERNAME);
+        options.remove(SCHEMA_REGISTRY_PASSWORD);
+    }
+
     if !options.is_empty() {
-        // todo: restore the check after fixing copies props
         let err_string = format!(
-            "Get unknown options for {:?} {:?}: {} (the warning may be false alarm, we are fixing it)",
+            "Get unknown options for {:?} {:?}: {}",
             source_schema.format,
             source_schema.row_encode,
             options
-                .iter()
-                .map(|(k, v)| format!("{}:{}", k, v))
+                .keys()
+                .map(|k| k.to_string())
                 .collect::<Vec<String>>()
                 .join(","),
         );
