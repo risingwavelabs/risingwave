@@ -1048,7 +1048,7 @@ mod tests {
         ]);
         let column_ids = vec![0.into(), 1.into()];
 
-        // test double insert one pk, the latter needs to override the former.
+        // test double insert one pk, the latter needs to be ignored.
         let chunk1 = StreamChunk::from_pretty(
             " i i
             + 1 3
@@ -1141,7 +1141,7 @@ mod tests {
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(OwnedRow::new(vec![Some(1_i32.into()), Some(4_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(1_i32.into()), Some(3_i32.into())]))
                 );
 
                 let row = table
@@ -1262,7 +1262,7 @@ mod tests {
                     .unwrap();
                 assert_eq!(
                     row,
-                    Some(OwnedRow::new(vec![Some(8_i32.into()), Some(3_i32.into())]))
+                    Some(OwnedRow::new(vec![Some(8_i32.into()), Some(2_i32.into())]))
                 );
             }
             _ => unreachable!(),
