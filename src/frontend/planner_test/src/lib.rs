@@ -254,12 +254,6 @@ pub struct TestCaseResult {
     pub with_config_map: Option<BTreeMap<String, String>>,
 }
 
-macro_rules! report {
-    ($error:expr) => {
-        format!("{:#}", $error.as_report())
-    };
-}
-
 impl TestCase {
     /// Run the test case, and return the expected output.
     pub async fn run(&self, do_check_result: bool) -> Result<TestCaseResult> {
@@ -585,7 +579,7 @@ impl TestCase {
             match binder.bind(stmt.clone()) {
                 Ok(bound) => bound,
                 Err(err) => {
-                    ret.binder_error = Some(report!(err));
+                    ret.binder_error = Some(err.to_report_string_pretty());
                     return Ok(ret);
                 }
             }
@@ -601,7 +595,7 @@ impl TestCase {
                 logical_plan
             }
             Err(err) => {
-                ret.planner_error = Some(report!(err));
+                ret.planner_error = Some(err.to_report_string_pretty());
                 return Ok(ret);
             }
         };
@@ -615,7 +609,7 @@ impl TestCase {
                 match logical_plan.gen_optimized_logical_plan_for_batch() {
                     Ok(optimized_logical_plan_for_batch) => optimized_logical_plan_for_batch,
                     Err(err) => {
-                        ret.optimizer_error = Some(report!(err));
+                        ret.optimizer_error = Some(err.to_report_string_pretty());
                         return Ok(ret);
                     }
                 };
@@ -639,7 +633,7 @@ impl TestCase {
                 match logical_plan.gen_optimized_logical_plan_for_stream() {
                     Ok(optimized_logical_plan_for_stream) => optimized_logical_plan_for_stream,
                     Err(err) => {
-                        ret.optimizer_error = Some(report!(err));
+                        ret.optimizer_error = Some(err.to_report_string_pretty());
                         return Ok(ret);
                     }
                 };
@@ -666,12 +660,12 @@ impl TestCase {
                     Ok(batch_plan) => match logical_plan.gen_batch_distributed_plan(batch_plan) {
                         Ok(batch_plan) => batch_plan,
                         Err(err) => {
-                            ret.batch_error = Some(report!(err));
+                            ret.batch_error = Some(err.to_report_string_pretty());
                             break 'batch;
                         }
                     },
                     Err(err) => {
-                        ret.batch_error = Some(report!(err));
+                        ret.batch_error = Some(err.to_report_string_pretty());
                         break 'batch;
                     }
                 };
@@ -698,12 +692,12 @@ impl TestCase {
                     Ok(batch_plan) => match logical_plan.gen_batch_local_plan(batch_plan) {
                         Ok(batch_plan) => batch_plan,
                         Err(err) => {
-                            ret.batch_error = Some(report!(err));
+                            ret.batch_error = Some(err.to_report_string_pretty());
                             break 'local_batch;
                         }
                     },
                     Err(err) => {
-                        ret.batch_error = Some(report!(err));
+                        ret.batch_error = Some(err.to_report_string_pretty());
                         break 'local_batch;
                     }
                 };
@@ -766,7 +760,7 @@ impl TestCase {
                 ) {
                     Ok((stream_plan, _)) => stream_plan,
                     Err(err) => {
-                        *ret_error_str = Some(report!(err));
+                        *ret_error_str = Some(err.to_report_string_pretty());
                         continue;
                     }
                 };
@@ -806,7 +800,7 @@ impl TestCase {
                         break 'sink;
                     }
                     Err(err) => {
-                        ret.sink_error = Some(report!(err));
+                        ret.sink_error = Some(err.to_report_string_pretty());
                         break 'sink;
                     }
                 }
