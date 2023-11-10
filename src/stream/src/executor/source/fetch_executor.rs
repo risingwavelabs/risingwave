@@ -106,7 +106,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
                 .iter_with_vnode(
                     vnode,
                     &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
-                    PrefetchOptions::new_for_exhaust_iter(),
+                    PrefetchOptions::default(),
                 )
                 .await?;
             pin_mut!(table_iter);

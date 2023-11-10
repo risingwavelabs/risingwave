@@ -402,7 +402,7 @@ impl<S: StateStore> LookupExecutor<S> {
                             &lookup_row,
                             ..,
                             false,
-                            PrefetchOptions::new_for_exhaust_iter(),
+                            PrefetchOptions::default(),
                         )
                         .await?
                 }
@@ -414,7 +414,7 @@ impl<S: StateStore> LookupExecutor<S> {
                             &lookup_row,
                             ..,
                             false,
-                            PrefetchOptions::new_for_exhaust_iter(),
+                            PrefetchOptions::default(),
                         )
                         .await?
                 }

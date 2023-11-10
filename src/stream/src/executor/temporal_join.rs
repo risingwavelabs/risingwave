@@ -181,7 +181,7 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
                     &pk_prefix,
                     ..,
                     false,
-                    PrefetchOptions::new_for_exhaust_iter(),
+                    PrefetchOptions::default(),
                 )
                 .await?;
 

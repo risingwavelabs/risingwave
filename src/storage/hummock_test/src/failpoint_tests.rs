@@ -249,7 +249,7 @@ async fn test_failpoints_state_store_read_upload() {
             ),
             5,
             ReadOptions {
-                prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                prefetch_options: PrefetchOptions::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
                 ..Default::default()
             },

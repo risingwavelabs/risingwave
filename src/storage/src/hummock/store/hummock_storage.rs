@@ -201,6 +201,7 @@ impl HummockStorage {
             hummock_version_reader: HummockVersionReader::new(
                 sstable_store,
                 state_store_metrics.clone(),
+                options.max_preload_io_retry_times,
             ),
             _shutdown_guard: Arc::new(HummockStorageShutdownGuard {
                 shutdown_sender: event_tx,

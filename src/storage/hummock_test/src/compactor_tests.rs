@@ -839,7 +839,7 @@ pub(crate) mod tests {
                 None,
                 ReadOptions {
                     table_id: TableId::from(existing_table_ids),
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
                 },
@@ -1035,7 +1035,7 @@ pub(crate) mod tests {
                 None,
                 ReadOptions {
                     table_id: TableId::from(existing_table_id),
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
                 },
@@ -1236,7 +1236,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     prefix_hint: Some(Bytes::from(bloom_filter_key)),
                     table_id: TableId::from(existing_table_id),
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
                 },
