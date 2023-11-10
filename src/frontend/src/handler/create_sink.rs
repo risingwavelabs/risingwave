@@ -399,7 +399,7 @@ pub async fn handle_create_sink(
             panic!("unexpected statement type: {:?}", definition);
         };
 
-        let (mut graph, table, source) = generate_stream_graph_for_table(
+        let (mut graph, mut table, source) = generate_stream_graph_for_table(
             &session,
             target_table.unwrap(),
             &table_catalog,
@@ -412,6 +412,8 @@ pub async fn handle_create_sink(
             append_only,
         )
         .await?;
+
+        table.incoming_sinks = table_catalog.incoming_sinks.clone();
 
         fn insert_merger_to_union(node: &mut StreamNode) {
             if let Some(NodeBody::Union(_union_node)) = &mut node.node_body {
@@ -455,7 +457,7 @@ pub async fn handle_create_sink(
 
         target_table_replace_plan = Some(ReplaceTablePlan {
             source,
-            table: Some(table.clone()),
+            table: Some(table),
             fragment_graph: Some(graph),
             table_col_index_mapping: Some(col_index_mapping.to_protobuf()),
         });

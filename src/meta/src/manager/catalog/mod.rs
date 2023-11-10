@@ -2905,11 +2905,12 @@ impl CatalogManager {
         database_core.in_progress_creation_tracker.remove(&key);
 
         let mut table = table.clone();
-        table.stream_job_status = PbStreamJobStatus::Created.into();
 
         if let Some(incoming_sink_id) = incoming_sink_id {
             table.incoming_sinks.push(incoming_sink_id);
         }
+
+        table.stream_job_status = PbStreamJobStatus::Created.into();
 
         tables.insert(table.id, table.clone());
 
