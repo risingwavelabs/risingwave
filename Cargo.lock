@@ -4695,8 +4695,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-aws-sdk-s3"
-version = "0.2.25+0.28"
-source = "git+https://github.com/mrcroxx/madsim.git?rev=8efd1d5#8efd1d52490ee6e0b4619642d6908e15fdcc4d7c"
+version = "0.3.0+0.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f484435d52fc8f9af55a687b7777fcdd8fd9acc01901526367137fc39473c56"
 dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http",
