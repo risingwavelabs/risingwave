@@ -115,6 +115,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         let shared_cdc_source = self.shared_cdc_source;
         let upstream_table_id = self.upstream_table.table_id().table_id;
+        let upstream_table_schema = self.upstream_table.schema().clone();
         let upstream_table_reader = UpstreamTableReader::new(self.upstream_table);
 
         let mut upstream = self.upstream.execute();
@@ -172,7 +173,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         };
 
         let mut upstream = if shared_cdc_source {
-            transform_upstream(upstream, &self.info.schema)
+            transform_upstream(upstream, &upstream_table_schema)
                 .boxed()
                 .peekable()
         } else {
