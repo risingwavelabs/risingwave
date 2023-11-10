@@ -8109,6 +8109,7 @@ dependencies = [
  "serde_with",
  "serde_yaml",
  "tempfile",
+ "thiserror-ext",
  "walkdir",
  "workspace-hack",
 ]
@@ -10028,9 +10029,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext"
-version = "0.0.5"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "764a8c5e60a634fe2173e20038dc4d11195559b4099c61fc60e489e813268a68"
+checksum = "b253f2e76cc35b73c1e1b9fd4e28d920f47e27b33b8b3e455bacc62cc0e40bf5"
 dependencies = [
  "thiserror",
  "thiserror-ext-derive",
@@ -10038,9 +10039,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext-derive"
-version = "0.0.5"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5741c7e65941d49975050cfc4d010e2786404a5e1cc130baa12132bfcf8efda4"
+checksum = "11737e1864ac6e6ec08409cdaba243912693de6b5c7fac56a6aeabb0d73a4ad3"
 dependencies = [
  "proc-macro2",
  "quote",

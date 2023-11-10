@@ -1067,8 +1067,8 @@
       SESSION_END(B.date_time, INTERVAL '10' SECOND) as endtime
     FROM bid B
     GROUP BY B.bidder, SESSION(B.date_time, INTERVAL '10' SECOND);
-  binder_error: |-
-    Bind error: failed to bind expression: SESSION_START(B.date_time, INTERVAL '10' SECOND)
+  binder_error: |
+    Failed to bind expression: SESSION_START(B.date_time, INTERVAL '10' SECOND)
 
     Caused by:
       Feature is not yet implemented: unsupported function: "session_start"

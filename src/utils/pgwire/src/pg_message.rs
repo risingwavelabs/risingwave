@@ -635,7 +635,7 @@ impl<'a> BeMessage<'a> {
                 // 'E' signalizes ErrorResponse messages
                 buf.put_u8(b'E');
                 // Format the error as a pretty report.
-                let msg = format!("{:#}", error.as_ref().as_report());
+                let msg = error.to_report_string_pretty();
                 write_err_or_notice(buf, &ErrorOrNoticeMessage::internal_error(&msg))?;
             }
 

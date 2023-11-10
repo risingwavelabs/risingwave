@@ -262,16 +262,16 @@
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select (v1).v2 from t;
-  binder_error: |-
-    Bind error: failed to bind expression: (v1).v2
+  binder_error: |
+    Failed to bind expression: (v1).v2
 
     Caused by:
       Bind error: column notation .v2 applied to type bigint, which is not a composite type
 - sql: |
     create materialized view t as select * from s;
     select (country + country) from t;
-  binder_error: |-
-    Bind error: failed to bind expression: (country + country)
+  binder_error: |
+    Failed to bind expression: (country + country)
 
     Caused by:
       Feature is not yet implemented: Add[Struct(StructType { field_names: ["address", "zipcode"], field_types: [Varchar, Varchar] }), Struct(StructType { field_names: ["address", "zipcode"], field_types: [Varchar, Varchar] })]
@@ -296,8 +296,8 @@
 - sql: |
     create materialized view t as select * from s;
     select avg(country) from t;
-  binder_error: |-
-    Bind error: failed to bind expression: avg(country)
+  binder_error: |
+    Failed to bind expression: avg(country)
 
     Caused by:
       Invalid input syntax: Invalid aggregation: avg(struct<address character varying,zipcode character varying>)
@@ -321,8 +321,8 @@
 - sql: |
     create materialized view t as select * from s;
     select (country).city from t;
-  binder_error: |-
-    Bind error: failed to bind expression: (country).city
+  binder_error: |
+    Failed to bind expression: (country).city
 
     Caused by:
       Bind error: column "city" not found in struct type
