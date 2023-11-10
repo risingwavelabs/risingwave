@@ -1163,7 +1163,7 @@ impl BatchBlockStream {
                 self.object_id,
                 (self.start_block_index + block_idx) as u64,
                 Box::new(block),
-                CachePriority::Low,
+                CachePriority::High,
             );
             self.blocks.push_back(next_holder);
             buff_offset = end;
