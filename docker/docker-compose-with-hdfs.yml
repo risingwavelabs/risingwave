@@ -34,6 +34,13 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 2Gi
+        reservations:
+          memory: 1Gi
   compute-node-0:
     image: "ghcr.io/risingwavelabs/risingwave:RW_1.1_HADOOP2-x86_64"
     command:
@@ -69,6 +76,13 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 26Gi
+        reservations:
+          memory: 26Gi
   etcd-0:
     image: "quay.io/coreos/etcd:v3.5.7"
     command:
@@ -118,6 +132,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
   frontend-node-0:
     image: "ghcr.io/risingwavelabs/risingwave:RW_1.1_HADOOP2-x86_64"
     command:
@@ -150,6 +165,13 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 2Gi
+        reservations:
+          memory: 1Gi
   grafana-0:
     image: "grafana/grafana-oss:latest"
     command: []
@@ -173,6 +195,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
   meta-node-0:
     image: "ghcr.io/risingwavelabs/risingwave:RW_1.1_HADOOP2-x86_64"
     command:
@@ -219,6 +242,13 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 2Gi
+        reservations:
+          memory: 1Gi
   prometheus-0:
     image: "prom/prometheus:latest"
     command:
@@ -245,6 +275,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
   connector-node:
     image: ghcr.io/risingwavelabs/risingwave:RW_1.1_HADOOP2-x86_64
     entrypoint: "/risingwave/bin/connector-node/start-service.sh"
@@ -290,6 +321,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
 volumes:
   etcd-0:
     external: false
