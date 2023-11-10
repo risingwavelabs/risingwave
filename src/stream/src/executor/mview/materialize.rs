@@ -175,7 +175,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 .zip_eq_debug(pks.into_iter())
                                 .zip_eq_debug(values.into_iter())
                                 .zip_eq_debug(vis.iter())
-                                .filter_map(|(((op, k), v), vis)| vis.then(|| (*op, k, v)))
+                                .filter_map(|(((op, k), v), vis)| vis.then_some((*op, k, v)))
                                 .collect_vec();
 
                             let fixed_changes = self
