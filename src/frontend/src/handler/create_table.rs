@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use anyhow::anyhow;
+use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -47,7 +48,7 @@ use crate::binder::{bind_data_type, bind_struct_field, Clause};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableVersion;
-use crate::catalog::{check_valid_column_name, CatalogError, ColumnId};
+use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
     bind_all_columns, bind_columns_from_source, bind_source_pk, bind_source_watermark,
@@ -57,7 +58,7 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
-use crate::session::{CheckRelationError, SessionImpl};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::resolve_privatelink_in_with_option;
 use crate::{Binder, TableCatalog, WithOptions};
@@ -170,11 +171,28 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
             .clone()
             .ok_or_else(|| ErrorCode::InvalidInputSyntax("data type is not specified".into()))?;
         if let Some(collation) = collation {
-            return Err(ErrorCode::NotImplemented(
-                format!("collation \"{}\"", collation),
-                None.into(),
-            )
-            .into());
+            // PostgreSQL will limit the datatypes that collate can work on.
+            // https://www.postgresql.org/docs/16/collation.html#COLLATION-CONCEPTS
+            //   > The built-in collatable data types are `text`, `varchar`, and `char`.
+            //
+            // But we don't support real collation, we simply ignore it here.
+            if !["C", "POSIX"].contains(&collation.real_value().as_str()) {
+                return Err(ErrorCode::NotImplemented(
+                    "Collate collation other than `C` or `POSIX` is not implemented".into(),
+                    None.into(),
+                )
+                .into());
+            }
+
+            match data_type {
+                AstDataType::Text | AstDataType::Varchar | AstDataType::Char(_) => {}
+                _ => {
+                    return Err(ErrorCode::NotSupported(
+                        format!("{} is not a collatable data type", data_type),
+                        "The only built-in collatable data types are `varchar`, please check your type".into()
+                    ).into());
+                }
+            }
         }
 
         check_valid_column_name(&name.real_value())?;
@@ -937,15 +955,13 @@ pub async fn handle_create_table(
         session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");
     }
 
-    match session.check_relation_name_duplicated(table_name.clone()) {
-        Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
-            return Ok(PgResponse::builder(StatementType::CREATE_TABLE)
-                .notice(format!("relation \"{}\" already exists, skipping", name))
-                .into());
-        }
-        Err(e) => return Err(e.into()),
-        Ok(_) => {}
-    };
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        table_name.clone(),
+        StatementType::CREATE_TABLE,
+        if_not_exists,
+    )? {
+        return Ok(resp);
+    }
 
     let (graph, source, table, job_type) = {
         let context = OptimizerContext::from_handler_args(handler_args);

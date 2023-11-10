@@ -164,12 +164,10 @@ impl<S: MetaStore> MetaSnapshotV1Builder<S> {
 
 #[cfg(test)]
 mod tests {
-
     use assert_matches::assert_matches;
     use itertools::Itertools;
     use risingwave_backup::error::BackupError;
     use risingwave_backup::meta_snapshot_v1::MetaSnapshotV1;
-    use risingwave_common::error::ToErrorStr;
     use risingwave_common::system_param::system_params_for_test;
     use risingwave_pb::hummock::{HummockVersion, HummockVersionStats};
 
@@ -201,7 +199,7 @@ mod tests {
         let err = assert_matches!(err, BackupError::Other(e) => e);
         assert_eq!(
             "hummock version stats not found in meta store",
-            err.to_error_str()
+            err.to_string()
         );
 
         let hummock_version_stats = HummockVersionStats {
@@ -214,7 +212,7 @@ mod tests {
             .await
             .unwrap_err();
         let err = assert_matches!(err, BackupError::Other(e) => e);
-        assert_eq!("system params not found in meta store", err.to_error_str());
+        assert_eq!("system params not found in meta store", err.to_string());
 
         system_params_for_test().insert(&meta_store).await.unwrap();
 
@@ -223,7 +221,7 @@ mod tests {
             .await
             .unwrap_err();
         let err = assert_matches!(err, BackupError::Other(e) => e);
-        assert_eq!("cluster id not found in meta store", err.to_error_str());
+        assert_eq!("cluster id not found in meta store", err.to_string());
 
         ClusterId::new()
             .put_at_meta_store(&meta_store)

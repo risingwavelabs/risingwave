@@ -170,7 +170,7 @@ fn bench_expr(c: &mut Criterion) {
             // 25: serial array
             SerialArray::from_iter((1..=CHUNK_SIZE).map(|i| Serial::from(i as i64))).into_ref(),
             // 26: jsonb array
-            JsonbArray::from_iter((1..=CHUNK_SIZE).map(|i| JsonbVal::from(i as i64))).into_ref(),
+            JsonbArray::from_iter((1..=CHUNK_SIZE).map(|i| JsonbVal::from(i as f64))).into_ref(),
             // 27: int256 array
             Int256Array::from_iter((1..=CHUNK_SIZE).map(|_| Int256::from(1))).into_ref(),
             // 28: extract field for interval

@@ -24,7 +24,6 @@ use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct NowExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for NowExecutorBuilder {
     type Node = NowNode;
 

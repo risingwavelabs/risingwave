@@ -25,7 +25,6 @@ use crate::executor::DynamicFilterExecutor;
 
 pub struct DynamicFilterExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for DynamicFilterExecutorBuilder {
     type Node = DynamicFilterNode;
 

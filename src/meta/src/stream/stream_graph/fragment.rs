@@ -170,9 +170,9 @@ impl BuildingFragment {
         let mut table_columns = HashMap::new();
 
         stream_graph_visitor::visit_fragment(fragment, |node_body| {
-            if let NodeBody::Chain(chain_node) = node_body {
-                let table_id = chain_node.table_id.into();
-                let column_ids = chain_node.upstream_column_ids.clone();
+            if let NodeBody::StreamScan(stream_scan) = node_body {
+                let table_id = stream_scan.table_id.into();
+                let column_ids = stream_scan.upstream_column_ids.clone();
                 table_columns
                     .try_insert(table_id, column_ids)
                     .expect("currently there should be no two same upstream tables in a fragment");
@@ -466,7 +466,7 @@ pub(super) enum EitherFragment {
 /// - if we're going to build a mview on an existing mview, the upstream fragment containing the
 ///   `Materialize` node will be included in this structure.
 /// - if we're going to replace the plan of a table with downstream mviews, the downstream fragments
-///   containing the `Chain` nodes will be included in this structure.
+///   containing the `StreamScan` nodes will be included in this structure.
 pub struct CompleteStreamFragmentGraph {
     /// The fragment graph of the streaming job being built.
     building_graph: StreamFragmentGraph,
@@ -523,7 +523,7 @@ impl CompleteStreamFragmentGraph {
     }
 
     /// Create a new [`CompleteStreamFragmentGraph`] for replacing an existing table, with the
-    /// downstream existing `Chain` fragments.
+    /// downstream existing `StreamScan` fragments.
     pub fn with_downstreams(
         graph: StreamFragmentGraph,
         original_table_fragment_id: FragmentId,
@@ -554,7 +554,7 @@ impl CompleteStreamFragmentGraph {
             upstream_root_fragments,
         }) = upstream_ctx
         {
-            // Build the extra edges between the upstream `Materialize` and the downstream `Chain`
+            // Build the extra edges between the upstream `Materialize` and the downstream `StreamScan`
             // of the new materialized view.
             for (&id, fragment) in &mut graph.fragments {
                 for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
@@ -563,8 +563,8 @@ impl CompleteStreamFragmentGraph {
                             // extract the upstream full_table_name from the source fragment
                             let mut full_table_name = None;
                             visit_fragment(&mut fragment.inner, |node_body| {
-                                if let NodeBody::Chain(chain_node) = node_body {
-                                    full_table_name = chain_node
+                                if let NodeBody::StreamScan(stream_scan) = node_body {
+                                    full_table_name = stream_scan
                                         .cdc_table_desc
                                         .as_ref()
                                         .map(|desc| desc.table_name.clone());
@@ -593,7 +593,7 @@ impl CompleteStreamFragmentGraph {
                                 ?source_job_id,
                                 ?rw_table_name_index,
                                 ?output_columns,
-                                "chain with upstream source fragment"
+                                "StreamScan with upstream source fragment"
                             );
                             let edge = StreamFragmentEdge {
                                 id: EdgeId::UpstreamExternal {
@@ -647,7 +647,7 @@ impl CompleteStreamFragmentGraph {
                                     downstream_fragment_id: id,
                                 },
                                 // We always use `NoShuffle` for the exchange between the upstream
-                                // `Materialize` and the downstream `Chain` of the
+                                // `Materialize` and the downstream `StreamScan` of the
                                 // new materialized view.
                                 dispatch_strategy: DispatchStrategy {
                                     r#type: DispatcherType::NoShuffle as _,
@@ -690,7 +690,7 @@ impl CompleteStreamFragmentGraph {
             let original_table_fragment_id = GlobalFragmentId::new(original_table_fragment_id);
             let table_fragment_id = GlobalFragmentId::new(graph.table_fragment_id());
 
-            // Build the extra edges between the `Materialize` and the downstream `Chain` of the
+            // Build the extra edges between the `Materialize` and the downstream `StreamScan` of the
             // existing materialized views.
             for (dispatch_strategy, fragment) in &downstream_fragments {
                 let id = GlobalFragmentId::new(fragment.fragment_id);

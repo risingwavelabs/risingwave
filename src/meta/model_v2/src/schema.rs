@@ -49,7 +49,7 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<PbSchema> for ActiveModel {
     fn from(schema: PbSchema) -> Self {
         Self {
-            schema_id: Set(schema.id),
+            schema_id: Set(schema.id as _),
             name: Set(schema.name),
         }
     }

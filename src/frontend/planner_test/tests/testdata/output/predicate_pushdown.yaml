@@ -280,7 +280,7 @@
     ├─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalProject { exprs: [t2.v2, t2.v3, ('2021-04-01 00:00:00+00:00':Timestamptz + t2.v3) as $expr1] }
       └─LogicalScan { table: t2, columns: [t2.v2, t2.v3] }
-  stream_error: 'internal error: Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column and contains no `now()`.'
+  stream_error: Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column and contains no `now()`.
 - name: now() in complex cmp expr pushed onto join ON clause results in dynamic filter
   sql: |
     create table t1(v1 timestamp with time zone);
@@ -291,7 +291,7 @@
     ├─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalProject { exprs: [t2.v2, t2.v3, ('2021-04-01 00:00:00+00:00':Timestamptz + t2.v3) as $expr1] }
       └─LogicalScan { table: t2, columns: [t2.v2, t2.v3] }
-  stream_error: 'internal error: Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column and contains no `now()`.'
+  stream_error: Conditions containing now must be of the form `input_expr cmp now() [+- const_expr]` or `now() [+- const_expr] cmp input_expr`, where `input_expr` references a column and contains no `now()`.
 - name: now() does not get pushed to scan, but others do
   sql: |
     create table t1(v1 timestamp with time zone, v2 int);

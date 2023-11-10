@@ -26,6 +26,7 @@ use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::Serialize;
 use serde_derive::Deserialize;
 use serde_with::serde_as;
+use with_options::WithOptions;
 
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::sink::catalog::desc::SinkDesc;
@@ -44,7 +45,7 @@ const QUERY_COLUMN: &str =
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
 const BUFFER_SIZE: usize = 1024;
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct ClickHouseCommon {
     #[serde(rename = "clickhouse.url")]
     pub url: String,
@@ -148,7 +149,7 @@ impl ClickHouseCommon {
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct ClickHouseConfig {
     #[serde(flatten)]
     pub common: ClickHouseCommon,

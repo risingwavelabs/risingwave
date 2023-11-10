@@ -77,7 +77,7 @@ class StreamNode extends Node {
       "hopWindow",
       "merge",
       "exchange",
-      "chain",
+      "streamScan",
       "batchPlan",
       "lookup",
       "arrange",
@@ -393,7 +393,7 @@ export default class StreamPlanParser {
       }
     }
 
-    if (newNode.type === "chain" && newNode.typeInfo.upstreamActorIds) {
+    if (newNode.type === "streamScan" && newNode.typeInfo.upstreamActorIds) {
       for (let upStreamActorId of newNode.typeInfo.upstreamActorIds) {
         if (!this.actorId2Proto.has(upStreamActorId)) {
           continue

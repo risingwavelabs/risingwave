@@ -20,6 +20,7 @@ use std::sync::{Arc, LazyLock};
 use bytes::Bytes;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 
@@ -198,6 +199,7 @@ pub mod sled {
         use bytes::Bytes;
         use risingwave_common::catalog::TableId;
         use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+        use risingwave_hummock_sdk::EpochWithGap;
 
         use crate::memory::sled::SledRangeKv;
         use crate::memory::RangeKv;
@@ -216,7 +218,7 @@ pub mod sled {
                     table_id,
                     table_key: TableKey(Bytes::from(table_key.to_vec())),
                 },
-                epoch,
+                epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
             };
 
             let left_full_key = to_full_key(&left_table_key[..]);
@@ -319,10 +321,10 @@ mod batched_iter {
                 .collect_vec();
 
             if let Some((last_key, _)) = batch.last() {
-                let full_key = FullKey::new(
+                let full_key = FullKey::new_with_gap_epoch(
                     last_key.user_key.table_id,
                     TableKey(last_key.user_key.table_key.0.clone()),
-                    last_key.epoch,
+                    last_key.epoch_with_gap,
                 );
                 self.range.0 = Bound::Excluded(full_key);
             }
@@ -448,7 +450,7 @@ where
         Included(k) => Included(FullKey::new(
             table_id,
             TableKey(Bytes::from(k.as_ref().to_vec())),
-            HummockEpoch::MAX,
+            MAX_EPOCH,
         )),
         Excluded(k) => Excluded(FullKey::new(
             table_id,
@@ -458,7 +460,7 @@ where
         Unbounded => Included(FullKey::new(
             table_id,
             TableKey(Bytes::from(b"".to_vec())),
-            HummockEpoch::MAX,
+            MAX_EPOCH,
         )),
     };
     let end = match table_key_range.end_bound() {
@@ -470,14 +472,14 @@ where
         Excluded(k) => Excluded(FullKey::new(
             table_id,
             TableKey(Bytes::from(k.as_ref().to_vec())),
-            HummockEpoch::MAX,
+            MAX_EPOCH,
         )),
         Unbounded => {
             if let Some(next_table_id) = table_id.table_id().checked_add(1) {
                 Excluded(FullKey::new(
                     next_table_id.into(),
                     TableKey(Bytes::from(b"".to_vec())),
-                    HummockEpoch::MAX,
+                    MAX_EPOCH,
                 ))
             } else {
                 Unbounded
@@ -515,7 +517,7 @@ impl<R: RangeKv> RangeKvStateStore<R> {
             .inner
             .range(to_full_key_range(table_id, key_range), None)?
         {
-            if key.epoch > epoch {
+            if key.epoch_with_gap.pure_epoch() > epoch {
                 continue;
             }
             if Some(&key.user_key) != last_user_key.as_ref() {
@@ -695,7 +697,7 @@ impl<R: RangeKv> StateStoreIter for RangeKvStateStoreIter<R> {
 impl<R: RangeKv> RangeKvStateStoreIter<R> {
     fn next_inner(&mut self) -> StorageResult<Option<StateStoreIterItem>> {
         while let Some((key, value)) = self.inner.next()? {
-            if key.epoch > self.epoch {
+            if key.epoch_with_gap.pure_epoch() > self.epoch {
                 continue;
             }
             if Some(key.user_key.as_ref()) != self.last_key.as_ref().map(|key| key.as_ref()) {

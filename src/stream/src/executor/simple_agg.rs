@@ -29,7 +29,7 @@ use super::monitor::StreamingMetrics;
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::aggregation::{generate_agg_schema, AggGroup};
+use crate::executor::aggregation::AggGroup;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message};
 use crate::task::AtomicU64Ref;
@@ -135,17 +135,12 @@ impl<S: StateStore> Executor for SimpleAggExecutor<S> {
 impl<S: StateStore> SimpleAggExecutor<S> {
     pub fn new(args: AggExecutorArgs<S, SimpleAggExecutorExtraArgs>) -> StreamResult<Self> {
         let input_info = args.input.info();
-        let schema = generate_agg_schema(args.input.as_ref(), &args.agg_calls, None);
         Ok(Self {
             input: args.input,
             inner: ExecutorInner {
                 version: args.version,
                 actor_ctx: args.actor_ctx,
-                info: ExecutorInfo {
-                    schema,
-                    pk_indices: args.pk_indices,
-                    identity: format!("SimpleAggExecutor-{:X}", args.executor_id),
-                },
+                info: args.info,
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 agg_funcs: args.agg_calls.iter().map(build_retractable).try_collect()?,
