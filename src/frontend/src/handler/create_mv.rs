@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
@@ -23,7 +24,7 @@ use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
-use crate::catalog::{check_valid_column_name, CatalogError};
+use crate::catalog::check_valid_column_name;
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -31,7 +32,7 @@ use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
-use crate::session::{CheckRelationError, SessionImpl};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
 pub(super) fn get_column_names(
@@ -154,15 +155,13 @@ pub async fn handle_create_mv(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
-    match session.check_relation_name_duplicated(name.clone()) {
-        Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
-            return Ok(PgResponse::builder(StatementType::CREATE_MATERIALIZED_VIEW)
-                .notice(format!("relation \"{}\" already exists, skipping", name))
-                .into());
-        }
-        Err(e) => return Err(e.into()),
-        Ok(_) => {}
-    };
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        name.clone(),
+        StatementType::CREATE_MATERIALIZED_VIEW,
+        if_not_exists,
+    )? {
+        return Ok(resp);
+    }
 
     let (mut table, graph) = {
         let context = OptimizerContext::from_handler_args(handler_args);
