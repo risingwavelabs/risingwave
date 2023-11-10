@@ -12,39 +12,85 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::error::Error;
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
 use tonic::metadata::{MetadataMap, MetadataValue};
 
 /// The key of the metadata field that contains the serialized error.
 const ERROR_KEY: &str = "risingwave-error-bin";
 
+/// The service name that the error is from. Used to provide better error message.
+type ServiceName = Cow<'static, str>;
+
+/// The error produced by the gRPC server and sent to the client on the wire.
+#[derive(Debug, Serialize, Deserialize)]
+struct ServerError {
+    error: serde_error::Error,
+    service_name: Option<ServiceName>,
+}
+
+impl std::fmt::Display for ServerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl std::error::Error for ServerError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        self.error.source()
+    }
+}
+
+fn to_status<T>(error: &T, code: tonic::Code, service_name: Option<ServiceName>) -> tonic::Status
+where
+    T: ?Sized + std::error::Error,
+{
+    // Embed the whole error (`self`) and its source chain into the details field.
+    // At the same time, set the message field to the error message of `self` (without source chain).
+    // The redundancy of the current error's message is intentional in case the client ignores the `details` field.
+    let source = ServerError {
+        error: serde_error::Error::new(error),
+        service_name,
+    };
+    let serialized = bincode::serialize(&source).unwrap();
+
+    let mut metadata = MetadataMap::new();
+    metadata.insert_bin(ERROR_KEY, MetadataValue::from_bytes(&serialized));
+
+    let mut status = tonic::Status::with_metadata(code, error.to_string(), metadata);
+    // Set the source of `tonic::Status`, though it's not likely to be used.
+    // This is only available before serializing to the wire. That's why we need to manually embed it
+    // into the `details` field.
+    status.set_source(Arc::new(source));
+    status
+}
+
+// TODO(error-handling): disallow constructing `tonic::Status` directly with `new` by clippy.
 #[easy_ext::ext(ToTonicStatus)]
 impl<T> T
 where
     T: ?Sized + std::error::Error,
 {
-    /// Convert the error to [`tonic::Status`] with the given [`tonic::Code`].
+    /// Convert the error to [`tonic::Status`] with the given [`tonic::Code`] and service name.
     ///
     /// The source chain is preserved by pairing with [`TonicStatusWrapper`].
-    // TODO(error-handling): disallow constructing `tonic::Status` directly with `new` by clippy.
-    pub fn to_status(&self, code: tonic::Code) -> tonic::Status {
-        // Embed the whole error (`self`) and its source chain into the details field.
-        // At the same time, set the message field to the error message of `self` (without source chain).
-        // The redundancy of the current error's message is intentional in case the client ignores the `details` field.
-        let source = serde_error::Error::new(self);
-        let serialized = bincode::serialize(&source).unwrap();
+    pub fn to_status(
+        &self,
+        code: tonic::Code,
+        service_name: impl Into<ServiceName>,
+    ) -> tonic::Status {
+        to_status(self, code, Some(service_name.into()))
+    }
 
-        let mut metadata = MetadataMap::new();
-        metadata.insert_bin(ERROR_KEY, MetadataValue::from_bytes(&serialized));
-
-        let mut status = tonic::Status::with_metadata(code, self.to_string(), metadata);
-        // Set the source of `tonic::Status`, though it's not likely to be used.
-        // This is only available before serializing to the wire. That's why we need to manually embed it
-        // into the `details` field.
-        status.set_source(Arc::new(source));
-        status
+    /// Convert the error to [`tonic::Status`] with the given [`tonic::Code`] without specifying
+    /// the service name. Prefer [`to_status`] if possible.
+    ///
+    /// The source chain is preserved by pairing with [`TonicStatusWrapper`].
+    pub fn to_status_unnamed(&self, code: tonic::Code) -> tonic::Status {
+        to_status(self, code, None)
     }
 }
 
@@ -60,7 +106,7 @@ impl TonicStatusWrapper {
         if status.source().is_none() {
             if let Some(value) = status.metadata().get_bin(ERROR_KEY) {
                 if let Some(e) = value.to_bytes().ok().and_then(|serialized| {
-                    bincode::deserialize::<serde_error::Error>(serialized.as_ref()).ok()
+                    bincode::deserialize::<ServerError>(serialized.as_ref()).ok()
                 }) {
                     status.set_source(Arc::new(e));
                 } else {
@@ -90,12 +136,15 @@ impl From<tonic::Status> for TonicStatusWrapper {
 
 impl std::fmt::Display for TonicStatusWrapper {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "gRPC request failed: {}: {}",
-            self.0.code(),
-            self.0.message()
-        )
+        write!(f, "gRPC request")?;
+        if let Some(service_name) = self
+            .source()
+            .and_then(|s| s.downcast_ref::<ServerError>())
+            .and_then(|s| s.service_name.as_ref())
+        {
+            write!(f, " to {} service", service_name)?;
+        }
+        write!(f, " failed: {}: {}", self.0.code(), self.0.message())
     }
 }
 
@@ -127,15 +176,18 @@ mod tests {
             })),
         };
 
-        let server_status = original.to_status(tonic::Code::Internal);
+        let server_status = original.to_status(tonic::Code::Internal, "test");
         let body = server_status.to_http();
         let client_status = tonic::Status::from_header_map(body.headers()).unwrap();
 
         let wrapper = TonicStatusWrapper::new(client_status);
-        assert_eq!(wrapper.to_string(), "gRPC request failed: Internal error: outer");
+        assert_eq!(
+            wrapper.to_string(),
+            "gRPC request to test service failed: Internal error: outer"
+        );
 
         let source = wrapper.source().unwrap();
-        assert!(source.is::<serde_error::Error>());
+        assert!(source.is::<ServerError>());
         assert_eq!(source.to_string(), "outer");
         assert_eq!(source.source().unwrap().to_string(), "inner");
     }

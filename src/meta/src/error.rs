@@ -245,7 +245,7 @@ impl From<MetaError> for tonic::Status {
             _ => Code::Internal,
         };
 
-        err.to_status(code)
+        err.to_status(code, "meta")
     }
 }
 

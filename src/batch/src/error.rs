@@ -80,6 +80,6 @@ impl From<RwError> for BatchError {
 
 impl<'a> From<&'a BatchError> for Status {
     fn from(err: &'a BatchError) -> Self {
-        err.to_status(tonic::Code::Internal)
+        err.to_status(tonic::Code::Internal, "batch")
     }
 }

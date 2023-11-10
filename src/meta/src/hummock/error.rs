@@ -85,6 +85,6 @@ impl From<MetadataModelError> for Error {
 
 impl From<Error> for tonic::Status {
     fn from(err: Error) -> Self {
-        err.to_status(tonic::Code::Internal)
+        err.to_status(tonic::Code::Internal, "hummock")
     }
 }

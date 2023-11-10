@@ -52,7 +52,7 @@ impl From<PbFieldNotFound> for MetadataModelError {
 
 impl From<MetadataModelError> for tonic::Status {
     fn from(e: MetadataModelError) -> Self {
-        e.to_status(tonic::Code::Internal)
+        e.to_status(tonic::Code::Internal, "meta")
     }
 }
 

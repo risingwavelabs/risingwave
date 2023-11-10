@@ -170,7 +170,7 @@ impl From<anyhow::Error> for StreamError {
 
 impl From<StreamError> for tonic::Status {
     fn from(error: StreamError) -> Self {
-        error.to_status(tonic::Code::Internal)
+        error.to_status(tonic::Code::Internal, "stream")
     }
 }
 

@@ -201,7 +201,7 @@ impl From<RwError> for tonic::Status {
             _ => Code::Internal,
         };
 
-        err.to_status(code)
+        err.to_status_unnamed(code)
     }
 }
 
