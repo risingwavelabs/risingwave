@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"sync/atomic"
 	"time"
 
 	"github.com/brianvoe/gofakeit/v6"
@@ -28,7 +29,7 @@ func getAddress(faker *gofakeit.Faker) address {
 
 type buyer struct {
 	Address address `json:"address"`
-	Age     uint    `json:"age"`
+	Id      uint    `json:"age"`
 }
 
 // The order details.
@@ -86,9 +87,11 @@ type ecommerceGen struct {
 
 	// Item ID -> Item Price
 	items []float64
+
+	maxUserID *atomic.Pointer[int64]
 }
 
-func NewNestedEcommerceGen() gen.LoadGenerator {
+func NewNestedEcommerceGen(maxId *atomic.Pointer[int64]) gen.LoadGenerator {
 	const numItems = 1000 // why do I do that? why should I not just tick every time interval?
 	items := make([]float64, numItems)
 	for i := 0; i < numItems; i++ {
@@ -99,6 +102,7 @@ func NewNestedEcommerceGen() gen.LoadGenerator {
 		seqOrderId: 0,
 		seqShipId:  0,
 		items:      items,
+		maxUserID:  maxId,
 	}
 }
 
@@ -107,6 +111,11 @@ func (g *ecommerceGen) KafkaTopics() []string {
 }
 
 func (g *ecommerceGen) generate() []sink.SinkRecord {
+
+	for *g.maxUserID.Load() < 5 {
+		time.Sleep(time.Second / 10)
+	}
+
 	ts := time.Now().Format(gen.RwTimestampNaiveLayout)
 
 	if g.faker.Bool() && g.seqShipId >= g.seqOrderId {
@@ -124,7 +133,7 @@ func (g *ecommerceGen) generate() []sink.SinkRecord {
 				EventTimestamp: ts,
 				User: buyer{
 					Address: getAddress(g.faker),
-					Age:     uint(g.faker.IntRange(18, 99)),
+					Id:      uint(g.faker.IntRange(0, int(*g.maxUserID.Load()))),
 				},
 			}
 		}

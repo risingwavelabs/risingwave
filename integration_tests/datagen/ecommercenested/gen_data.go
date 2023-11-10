@@ -4,6 +4,7 @@ import (
 	"context"
 	"datagen/gen"
 	"datagen/sink"
+	"sync/atomic"
 )
 
 type cdnMetricsGen struct {
@@ -19,12 +20,10 @@ func (g *cdnMetricsGen) KafkaTopics() []string {
 }
 
 func (g *cdnMetricsGen) Load(ctx context.Context, outCh chan<- sink.SinkRecord) {
-	go func() {
-		g := NewNestedEcommerceGen()
-		g.Load(ctx, outCh)
-	}()
-	go func() {
-		g := NewUserGen()
-		g.Load(ctx, outCh)
-	}()
+	maxUserId := atomic.Pointer[int64]{}
+	zero := int64(0)
+	maxUserId.Store(&zero)
+
+	go NewNestedEcommerceGen(&maxUserId).Load(ctx, outCh)
+	go NewUserGen(&maxUserId).Load(ctx, outCh)
 }
