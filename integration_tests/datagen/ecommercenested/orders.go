@@ -18,6 +18,14 @@ type address struct {
 	Country string `json:"country"`
 }
 
+func getAddress(faker *gofakeit.Faker) address {
+	return address{
+		Town:    faker.City(),
+		ZipCode: int64(faker.IntRange(10000, 99999)),
+		Country: faker.Country(),
+	}
+}
+
 type buyer struct {
 	Address address `json:"address"`
 	Age     uint    `json:"age"`
@@ -27,8 +35,7 @@ type buyer struct {
 type orderEvent struct {
 	sink.BaseSinkRecord
 
-	OrderId        int64 `json:"order_id"`
-	OrderStatus    string
+	OrderId        int64   `json:"order_id"`
 	ItemId         int64   `json:"item_id"`
 	ItemPrice      float64 `json:"item_price"`
 	EventTimestamp string  `json:"event_timestamp"`
@@ -82,7 +89,7 @@ type ecommerceGen struct {
 }
 
 func NewNestedEcommerceGen() gen.LoadGenerator {
-	const numItems = 1000
+	const numItems = 1000 // why do I do that? why should I not just tick every time interval?
 	items := make([]float64, numItems)
 	for i := 0; i < numItems; i++ {
 		items[i] = gofakeit.Float64Range(0, 10000)
@@ -115,14 +122,9 @@ func (g *ecommerceGen) generate() []sink.SinkRecord {
 				ItemId:         int64(itemId),
 				ItemPrice:      itemPrice,
 				EventTimestamp: ts,
-				OrderStatus:    getRandOrderStatus(),
 				User: buyer{
-					Address: address{
-						Town:    g.faker.City(),
-						ZipCode: int64(g.faker.IntRange(10000, 99999)),
-						Country: g.faker.Country(),
-					},
-					Age: uint(g.faker.IntRange(18, 99)),
+					Address: getAddress(g.faker),
+					Age:     uint(g.faker.IntRange(18, 99)),
 				},
 			}
 		}
@@ -131,16 +133,27 @@ func (g *ecommerceGen) generate() []sink.SinkRecord {
 		records = append(records, &parcelEvent{
 			OrderId:        g.seqOrderId,
 			EventTimestmap: ts,
-			EventType:      "order_created",
+			EventType:      getCreatedOrderType(),
 		})
 		return records
 	} else {
-		// Ship order.
 		g.seqShipId++
+		// abort order
+		if rand.Intn(100) < 10 {
+			return []sink.SinkRecord{
+				&parcelEvent{
+					OrderId:        g.seqShipId,
+					EventType:      getAbortedOrderType(),
+					EventTimestmap: ts,
+				},
+			}
+		}
+
+		// Ship order.
 		return []sink.SinkRecord{
 			&parcelEvent{
 				OrderId:        g.seqShipId,
-				EventType:      "parcel_shipped",
+				EventType:      getShippedOrderType(),
 				EventTimestmap: ts,
 			},
 		}
@@ -160,7 +173,16 @@ func (g *ecommerceGen) Load(ctx context.Context, outCh chan<- sink.SinkRecord) {
 	}
 }
 
-func getRandOrderStatus() string {
-	orderStatus := []string{"new", "shipped", "acknowledged", "cancelled", "rejected", "reverted", "closed", "confirmed"}
+func getShippedOrderType() string {
+	return "shipped"
+}
+
+func getCreatedOrderType() string {
+	orderStatus := []string{"new", "acknowledged", "confirmed"}
+	return orderStatus[rand.Intn(len(orderStatus))]
+}
+
+func getAbortedOrderType() string {
+	orderStatus := []string{"cancelled", "rejected", "reverted", "closed"}
 	return orderStatus[rand.Intn(len(orderStatus))]
 }
