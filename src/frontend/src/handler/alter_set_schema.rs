@@ -43,10 +43,10 @@ pub async fn handle_alter_set_schema(
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
     let new_schema_name = Binder::resolve_schema_name(new_schema_name)?;
-    let (object, old_schema_id) = {
+    let object = {
         let catalog_reader = session.env().catalog_reader().read_guard();
 
-        let (object, old_schema_name) = match stmt_type {
+        match stmt_type {
             StatementType::ALTER_TABLE | StatementType::ALTER_MATERIALIZED_VIEW => {
                 let (table, old_schema_name) =
                     catalog_reader.get_table_by_name(db_name, schema_path, &real_obj_name)?;
@@ -56,7 +56,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     table.name(),
                 )?;
-                (Object::TableId(table.id.table_id), old_schema_name)
+                Object::TableId(table.id.table_id)
             }
             StatementType::ALTER_VIEW => {
                 let (view, old_schema_name) =
@@ -67,7 +67,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     view.name(),
                 )?;
-                (Object::ViewId(view.id), old_schema_name)
+                Object::ViewId(view.id)
             }
             StatementType::ALTER_SOURCE => {
                 let (source, old_schema_name) =
@@ -78,7 +78,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     &source.name,
                 )?;
-                (Object::SourceId(source.id), old_schema_name)
+                Object::SourceId(source.id)
             }
             StatementType::ALTER_SINK => {
                 let (sink, old_schema_name) =
@@ -89,7 +89,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     &sink.name,
                 )?;
-                (Object::SinkId(sink.id), old_schema_name)
+                Object::SinkId(sink.id)
             }
             StatementType::ALTER_FUNCTION => {
                 let (function, old_schema_name) = if let Some(args) = func_args {
@@ -124,20 +124,10 @@ pub async fn handle_alter_set_schema(
                     &function.name,
                     &function.arg_types,
                 )?;
-                (
-                    Object::FunctionId(function.id.function_id()),
-                    old_schema_name,
-                )
+                Object::FunctionId(function.id.function_id())
             }
             _ => unreachable!(),
-        };
-
-        (
-            object,
-            catalog_reader
-                .get_schema_by_name(db_name, old_schema_name)
-                .map(|s| s.id())?,
-        )
+        }
     };
 
     let (_, new_schema_id) =
@@ -145,7 +135,7 @@ pub async fn handle_alter_set_schema(
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .alter_set_schema(object, old_schema_id, new_schema_id)
+        .alter_set_schema(object, new_schema_id)
         .await?;
 
     Ok(RwPgResponse::empty_result(stmt_type))

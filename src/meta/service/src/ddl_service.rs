@@ -673,16 +673,11 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<AlterSetSchemaResponse>, Status> {
         let AlterSetSchemaRequest {
             object,
-            old_schema_id,
             new_schema_id,
         } = request.into_inner();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterSetSchema(
-                object.unwrap(),
-                old_schema_id,
-                new_schema_id,
-            ))
+            .run_command(DdlCommand::AlterSetSchema(object.unwrap(), new_schema_id))
             .await?;
         Ok(Response::new(AlterSetSchemaResponse {
             status: None,

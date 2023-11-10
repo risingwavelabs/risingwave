@@ -164,7 +164,6 @@ pub trait CatalogWriter: Send + Sync {
     async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
-        old_schema_id: u32,
         new_schema_id: u32,
     ) -> Result<()>;
 }
@@ -434,12 +433,11 @@ impl CatalogWriter for CatalogWriterImpl {
     async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
-        old_schema_id: u32,
         new_schema_id: u32,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .alter_set_schema(object, old_schema_id, new_schema_id)
+            .alter_set_schema(object, new_schema_id)
             .await?;
         self.wait_version(version).await
     }

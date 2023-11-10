@@ -522,7 +522,6 @@ impl CatalogWriter for MockCatalogWriter {
     async fn alter_set_schema(
         &self,
         _object: alter_set_schema_request::Object,
-        _old_schema_id: u32,
         _new_schema_id: u32,
     ) -> Result<()> {
         unreachable!()

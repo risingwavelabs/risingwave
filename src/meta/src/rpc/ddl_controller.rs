@@ -104,7 +104,7 @@ pub enum DdlCommand {
     AlterRelationName(Relation, String),
     AlterSourceColumn(Source),
     AlterTableOwner(Object, UserId),
-    AlterSetSchema(alter_set_schema_request::Object, SchemaId, SchemaId),
+    AlterSetSchema(alter_set_schema_request::Object, SchemaId),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
     CommentOn(Comment),
@@ -261,9 +261,8 @@ impl DdlController {
                 DdlCommand::AlterTableOwner(object, owner_id) => {
                     ctrl.alter_owner(object, owner_id).await
                 }
-                DdlCommand::AlterSetSchema(object, old_schema_id, new_schema_id) => {
-                    ctrl.alter_set_schema(object, old_schema_id, new_schema_id)
-                        .await
+                DdlCommand::AlterSetSchema(object, new_schema_id) => {
+                    ctrl.alter_set_schema(object, new_schema_id).await
                 }
                 DdlCommand::CreateConnection(connection) => {
                     ctrl.create_connection(connection).await
@@ -1148,11 +1147,10 @@ impl DdlController {
     async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
-        old_schema_id: SchemaId,
         new_schema_id: SchemaId,
     ) -> MetaResult<NotificationVersion> {
         self.catalog_manager
-            .alter_set_schema(object, old_schema_id, new_schema_id)
+            .alter_set_schema(object, new_schema_id)
             .await
     }
 

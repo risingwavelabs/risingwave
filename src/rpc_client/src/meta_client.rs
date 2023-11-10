@@ -469,11 +469,9 @@ impl MetaClient {
     pub async fn alter_set_schema(
         &self,
         object: alter_set_schema_request::Object,
-        old_schema_id: u32,
         new_schema_id: u32,
     ) -> Result<CatalogVersion> {
         let request = AlterSetSchemaRequest {
-            old_schema_id,
             new_schema_id,
             object: Some(object),
         };
