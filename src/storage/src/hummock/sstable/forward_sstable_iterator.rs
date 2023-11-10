@@ -133,7 +133,15 @@ impl SstableIterator {
         if idx >= self.sst.value().block_count() {
             self.block_iter = None;
             return Ok(());
-        } else if self
+        }
+        if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx
+            && let Ok(preload_stream) = self.sstable_store
+                .preload_blocks(self.sst.value(), idx, end_idx)
+                .await
+        {
+            self.preload_stream = preload_stream;
+        }
+        if self
             .preload_stream
             .as_ref()
             .map(|preload_stream| preload_stream.next_block_index() <= idx)
