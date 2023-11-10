@@ -45,13 +45,14 @@ use crate::executor::backfill::utils::{
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, Mutation, PkIndices, PkIndicesRef, SourceStateTableHandler,
-    StreamExecutorError, StreamExecutorResult,
+    ExecutorInfo, Message, Mutation, PkIndicesRef, SourceStateTableHandler, StreamExecutorError,
+    StreamExecutorResult,
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
 pub struct CdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
+    info: ExecutorInfo,
 
     /// Upstream external table
     upstream_table: ExternalStorageTable,
@@ -64,8 +65,6 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     output_indices: Vec<usize>,
 
     actor_id: ActorId,
-
-    info: ExecutorInfo,
 
     /// State table of the Source executor
     source_state_handler: SourceStateTableHandler<S>,
@@ -83,33 +82,28 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
+        info: ExecutorInfo,
         upstream_table: ExternalStorageTable,
         upstream: BoxedExecutor,
         output_indices: Vec<usize>,
         progress: Option<CreateMviewProgress>,
-        schema: Schema,
-        pk_indices: PkIndices,
         metrics: Arc<StreamingMetrics>,
         source_state_handler: SourceStateTableHandler<S>,
         shared_cdc_source: bool,
         chunk_size: usize,
     ) -> Self {
         Self {
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "CdcBackfillExecutor".to_owned(),
-            },
+            actor_ctx,
+            info,
             upstream_table,
             upstream,
             output_indices,
             actor_id: 0,
-            metrics,
-            chunk_size,
-            actor_ctx,
             source_state_handler,
             shared_cdc_source,
             progress,
+            metrics,
+            chunk_size,
         }
     }
 
@@ -121,6 +115,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         let shared_cdc_source = self.shared_cdc_source;
         let upstream_table_id = self.upstream_table.table_id().table_id;
+        let upstream_table_schema = self.upstream_table.schema().clone();
         let upstream_table_reader = UpstreamTableReader::new(self.upstream_table);
 
         let mut upstream = self.upstream.execute();
@@ -178,7 +173,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         };
 
         let mut upstream = if shared_cdc_source {
-            transform_upstream(upstream, &self.info.schema)
+            transform_upstream(upstream, &upstream_table_schema)
                 .boxed()
                 .peekable()
         } else {
