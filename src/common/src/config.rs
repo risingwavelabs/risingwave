@@ -287,6 +287,18 @@ pub struct MetaConfig {
 
     #[serde(default)]
     pub compaction_config: CompactionConfig,
+
+    #[serde(default = "default::meta::event_log_enabled")]
+    pub event_log_enabled: bool,
+    /// The interval event logs are flushed to persistent storage.
+    #[serde(default = "default::meta::event_log_flush_interval_ms")]
+    pub event_log_flush_interval_ms: u64,
+    /// The minimum duration an event log will be retained in persistent storage.
+    #[serde(default = "default::meta::event_log_retention_sec")]
+    pub event_log_retention_sec: u64,
+    /// The maximum size of an event log in bytes.
+    #[serde(default = "default::meta::event_log_max_size_bytes")]
+    pub event_log_max_size_bytes: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -966,6 +978,22 @@ pub mod default {
 
         pub fn compaction_task_max_heartbeat_interval_secs() -> u64 {
             60 // 1min
+        }
+
+        pub fn event_log_enabled() -> bool {
+            true
+        }
+
+        pub fn event_log_flush_interval_ms() -> u64 {
+            1000
+        }
+
+        pub fn event_log_retention_sec() -> u64 {
+            24 * 3600
+        }
+
+        pub fn event_log_max_size_bytes() -> u64 {
+            100 * 1024
         }
     }
 

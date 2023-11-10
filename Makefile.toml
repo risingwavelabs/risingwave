@@ -965,6 +965,7 @@ set -e
 
 cargo nextest run \
   --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
+  --features fail/failpoints \
   -p risingwave_simulation \
   "$@"
 """

@@ -15,8 +15,8 @@
 use std::time::Duration;
 
 use etcd_client::{
-    DeleteOptions, DeleteResponse, Error, GetOptions, GetResponse, PutOptions, PutResponse, Txn,
-    TxnResponse,
+    DeleteOptions, DeleteResponse, Error, GetOptions, GetResponse, LeaseGrantOptions,
+    LeaseGrantResponse, PutOptions, PutResponse, Txn, TxnResponse,
 };
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
@@ -123,6 +123,23 @@ impl EtcdRetryClient {
             || async {
                 let client = &self.client;
                 client.txn(txn.clone()).await
+            },
+            Self::should_retry,
+        )
+        .await
+    }
+
+    #[inline]
+    pub async fn grant(
+        &self,
+        ttl: i64,
+        options: Option<LeaseGrantOptions>,
+    ) -> Result<LeaseGrantResponse> {
+        tokio_retry::RetryIf::spawn(
+            Self::get_retry_strategy(),
+            || async {
+                let client = &self.client;
+                client.grant(ttl, options.clone()).await
             },
             Self::should_retry,
         )

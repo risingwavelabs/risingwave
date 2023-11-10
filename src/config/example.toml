@@ -41,6 +41,10 @@ partition_vnode_count = 64
 table_write_throughput_threshold = 16777216
 min_table_split_write_throughput = 4194304
 compaction_task_max_heartbeat_interval_secs = 60
+event_log_enabled = true
+event_log_flush_interval_ms = 1000
+event_log_retention_sec = 86400
+event_log_max_size_bytes = 102400
 
 [meta.compaction_config]
 max_bytes_for_level_base = 536870912

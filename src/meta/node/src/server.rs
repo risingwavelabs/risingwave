@@ -25,6 +25,7 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
+use risingwave_meta::manager::event_log::new_event_log;
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
 use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_meta_model_migration::{Migrator, MigratorTrait};
@@ -100,7 +101,9 @@ pub struct MetaStoreSqlBackend {
 }
 
 use risingwave_meta::MetaStoreBackend;
+use risingwave_meta_service::event_log_service::EventLogServiceImpl;
 use risingwave_meta_service::AddressInfo;
+use risingwave_pb::meta::event_log_service_server::EventLogServiceServer;
 
 pub async fn rpc_serve(
     address_info: AddressInfo,
@@ -620,6 +623,7 @@ pub async fn start_service_as_election_leader(
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), fragment_manager.clone());
     let cloud_srv = CloudServiceImpl::new(catalog_manager.clone(), aws_cli);
+    let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(prometheus_addr.to_string())
@@ -707,6 +711,10 @@ pub async fn start_service_as_election_leader(
         tracing::info!("Telemetry didn't start due to meta backend or config");
     }
 
+    if let Some(pair) = env.event_log_manager_ref().take_join_handle() {
+        sub_tasks.push(pair);
+    }
+
     let shutdown_all = async move {
         let mut handles = Vec::with_capacity(sub_tasks.len());
 
@@ -744,6 +752,18 @@ pub async fn start_service_as_election_leader(
     tracing::info!("Assigned cluster id {:?}", *env.cluster_id());
     tracing::info!("Starting meta services");
 
+    let info = serde_json::json!({
+        "advertise_addr": address_info.advertise_addr,
+        "listen_addr": address_info.listen_addr.to_string(),
+        "opts": env.opts,
+    });
+    let _ = env
+        .event_log_manager_ref()
+        .add_event_logs(vec![new_event_log(
+            risingwave_pb::meta::event_log::EventType::MetaNodeStart,
+            info.to_string(),
+        )]);
+
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
         .layer(TracingExtractLayer::new())
@@ -765,6 +785,7 @@ pub async fn start_service_as_election_leader(
         .add_service(ServingServiceServer::new(serving_srv))
         .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
+        .add_service(EventLogServiceServer::new(event_log_srv))
         .monitored_serve_with_shutdown(
             address_info.listen_addr,
             "grpc-meta-leader-service",

@@ -547,3 +547,34 @@ message GetServingVnodeMappingsResponse {
 service ServingService {
   rpc GetServingVnodeMappings(GetServingVnodeMappingsRequest) returns (GetServingVnodeMappingsResponse);
 }
+
+message EventLog {
+  enum EventType {
+    UNSPECIFIED = 0;
+    META_NODE_START = 1;
+    CREATE_STREAM_JOB_FAIL = 2;
+  }
+  // Event logs identifier, which should be populated by event log service.
+  optional string unique_id = 1;
+  // Processing time, which should be populated by event log service.
+  optional uint64 timestamp = 2;
+  EventType event_type = 3;
+  string info = 4;
+}
+
+message AddEventLogRequest {
+  repeated EventLog event_logs = 1;
+}
+
+message AddEventLogResponse {}
+
+message ListEventLogRequest {}
+
+message ListEventLogResponse {
+  repeated EventLog event_logs = 1;
+}
+
+service EventLogService {
+  rpc AddEventLog(AddEventLogRequest) returns (AddEventLogResponse);
+  rpc ListEventLog(ListEventLogRequest) returns (ListEventLogResponse);
+}

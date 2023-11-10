@@ -142,4 +142,8 @@ impl MetaStore for MemStore {
         }
         Ok(())
     }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::any::Any;
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -63,6 +64,8 @@ pub trait MetaStore: Sync + Send + 'static {
     }
 
     fn meta_store_type(&self) -> MetaBackend;
+
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 #[derive(Clone)]
@@ -114,6 +117,10 @@ impl<S: MetaStore> MetaStore for BoxedSnapshotMetaStore<S> {
     fn meta_store_type(&self) -> MetaBackend {
         self.inner.meta_store_type()
     }
+
+    fn as_any(&self) -> &dyn Any {
+        self.inner.as_any()
+    }
 }
 
 #[async_trait]
@@ -146,6 +153,10 @@ impl MetaStore for MetaStoreRef {
 
     fn meta_store_type(&self) -> MetaBackend {
         self.0.deref().meta_store_type()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self.0.deref().as_any()
     }
 }
 

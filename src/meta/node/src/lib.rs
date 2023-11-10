@@ -300,6 +300,10 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .meta
                     .compaction_task_max_heartbeat_interval_secs,
                 compaction_config: Some(config.meta.compaction_config),
+                event_log_enabled: config.meta.event_log_enabled,
+                event_log_flush_interval_ms: config.meta.event_log_flush_interval_ms,
+                event_log_retention_sec: config.meta.event_log_retention_sec,
+                event_log_max_size_bytes: config.meta.event_log_max_size_bytes,
             },
             config.system.into_init_system_params(),
         )

@@ -37,6 +37,7 @@ use tracing::log::warn;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
+use crate::manager::event_log::new_event_log;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
     IdCategory, IndexId, LocalNotification, MetaSrvEnv, NotificationVersion, RelationIdEnum,
@@ -764,6 +765,16 @@ impl DdlController {
         stream_job: &StreamingJob,
         internal_tables: Vec<Table>,
     ) -> MetaResult<()> {
+        let info = serde_json::json!({"id": stream_job.id(), "name": stream_job.name(), "definition": stream_job.definition()}).to_string();
+        let event_log = new_event_log(
+            risingwave_pb::meta::event_log::EventType::CreateStreamJobFail,
+            info,
+        );
+        let _ = self
+            .env
+            .event_log_manager_ref()
+            .add_event_logs(vec![event_log]);
+
         let mut creating_internal_table_ids =
             internal_tables.into_iter().map(|t| t.id).collect_vec();
         // 1. cancel create procedure.
