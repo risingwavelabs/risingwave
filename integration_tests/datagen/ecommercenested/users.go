@@ -65,11 +65,11 @@ type userGen struct {
 }
 
 func NewUserGen(maxId *atomic.Pointer[int64]) *userGen {
-	// TODO: I may need to add number of items here?
 	return &userGen{
 		bankruptLikelihood: 10,
 		seqUserId:          0,
 		maxUserId:          maxId,
+		faker:              gofakeit.New(0),
 	}
 }
 

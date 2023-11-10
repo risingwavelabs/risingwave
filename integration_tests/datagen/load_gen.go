@@ -8,6 +8,7 @@ import (
 	"datagen/clickstream"
 	"datagen/delivery"
 	"datagen/ecommerce"
+	"datagen/ecommercenested"
 	"datagen/gen"
 	"datagen/livestream"
 	"datagen/nexmark"
@@ -46,7 +47,9 @@ func createSink(ctx context.Context, cfg gen.GeneratorConfig) (sink.Sink, error)
 
 // newgen creates a new generator based on the given config.
 func newGen(cfg gen.GeneratorConfig) (gen.LoadGenerator, error) {
-	if cfg.Mode == "ad-click" {
+	if cfg.Mode == "nested" {
+		return ecommercenested.Newgen(), nil
+	} else if cfg.Mode == "ad-click" {
 		return ad_click.NewAdClickGen(), nil
 	} else if cfg.Mode == "ad-ctr" {
 		return ad_ctr.NewAdCtrGen(), nil

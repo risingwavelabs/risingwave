@@ -2,24 +2,26 @@ package ecommercenested
 
 import (
 	"context"
-	"datagen/gen"
 	"datagen/sink"
 	"sync/atomic"
+	"time"
 )
 
-type cdnMetricsGen struct {
-	cfg gen.GeneratorConfig
+type nestedGen struct{}
+
+func Newgen() *nestedGen {
+	return &nestedGen{}
 }
 
-func NewCdnMetricsGen(cfg gen.GeneratorConfig) gen.LoadGenerator {
-	return &cdnMetricsGen{cfg: cfg}
-}
-
-func (g *cdnMetricsGen) KafkaTopics() []string {
+func (g *nestedGen) KafkaTopics() []string {
 	return []string{"users", "orders"}
 }
 
-func (g *cdnMetricsGen) Load(ctx context.Context, outCh chan<- sink.SinkRecord) {
+// TODO: how does it know to which topics to send?
+func (g *nestedGen) Load(ctx context.Context, outCh chan<- sink.SinkRecord) {
+
+	time.Sleep(10 * time.Second)
+
 	maxUserId := atomic.Pointer[int64]{}
 	zero := int64(0)
 	maxUserId.Store(&zero)

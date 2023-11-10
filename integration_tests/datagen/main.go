@@ -222,7 +222,7 @@ func main() {
 			},
 			cli.StringFlag{
 				Name:        "mode",
-				Usage:       "ad-click | ad-ctr | twitter | cdn-metrics | clickstream | ecommerce | delivery | livestream",
+				Usage:       "nested | ad-click | ad-ctr | twitter | cdn-metrics | clickstream | ecommerce | delivery | livestream",
 				Required:    true,
 				Destination: &cfg.Mode,
 			},

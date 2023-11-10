@@ -28,6 +28,10 @@ The workloads presented in the demos are produced by a golang program in `/datag
   ```sh
   cd datagen && go build
   ```
+- Build a docker container: 
+  ```sh 
+  cd datagen && make docker
+  ```
 
 To use this tool, you can run the following command:
 
