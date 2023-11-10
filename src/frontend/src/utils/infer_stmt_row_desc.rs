@@ -161,6 +161,38 @@ pub fn infer_show_object(objects: &ShowObject) -> Vec<PgFieldDescriptor> {
                 DataType::Varchar.type_len(),
             ),
         ],
+        ShowObject::ProcessList => vec![
+            PgFieldDescriptor::new(
+                "Id".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "User".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Host".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Database".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Time".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+            PgFieldDescriptor::new(
+                "Info".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            ),
+        ],
         _ => vec![PgFieldDescriptor::new(
             "Name".to_owned(),
             DataType::Varchar.to_oid(),

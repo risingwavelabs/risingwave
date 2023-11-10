@@ -472,17 +472,27 @@ pub async fn compact(
             object_id_getter.clone(),
             task_progress_guard.progress.clone(),
         );
-        match runner.run().await {
-            Ok((ssts, statistics)) => {
-                output_ssts.push((0, ssts, statistics));
-            }
-            Err(e) => {
-                task_status = TaskStatus::ExecuteFailed;
-                tracing::warn!(
-                    "Compaction task {} failed with error: {:#?}",
-                    compact_task.task_id,
-                    e
-                );
+
+        tokio::select! {
+            _ = &mut shutdown_rx => {
+                tracing::warn!("Compaction task cancelled externally:\n{}", compact_task_to_string(&compact_task));
+                task_status = TaskStatus::ManualCanceled;
+            },
+
+            ret = runner.run() => {
+                match ret {
+                    Ok((ssts, statistics)) => {
+                        output_ssts.push((0, ssts, statistics));
+                    }
+                    Err(e) => {
+                        task_status = TaskStatus::ExecuteFailed;
+                        tracing::warn!(
+                            "Compaction task {} failed with error: {:#?}",
+                            compact_task.task_id,
+                            e
+                        );
+                    }
+                }
             }
         }
 
@@ -492,7 +502,7 @@ pub async fn compact(
             compact_done(compact_task, context.clone(), output_ssts, task_status);
         let cost_time = timer.stop_and_record() * 1000.0;
         tracing::info!(
-            "Finished compaction task in {:?}ms: {}",
+            "Finished fast compaction task in {:?}ms: {}",
             cost_time,
             compact_task_to_string(&compact_task)
         );

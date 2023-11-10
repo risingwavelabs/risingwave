@@ -205,8 +205,8 @@ message SinkDesc {
 enum SinkLogStoreType {
   /// Default value is the normal in memory log store to be backward compatible with the previously unset value
   SINK_LOG_STORE_TYPE_UNSPECIFIED = 0;
-  KV_LOG_STORE = 1;
-  IN_MEMORY_LOG_STORE = 2;
+  SINK_LOG_STORE_TYPE_KV_LOG_STORE = 1;
+  SINK_LOG_STORE_TYPE_IN_MEMORY_LOG_STORE = 2;
 }
 
 message SinkNode {
@@ -449,22 +449,22 @@ message ExchangeNode {
 
 // Decides which kind of Executor will be used
 enum StreamScanType {
-  CHAIN_UNSPECIFIED = 0;
+  STREAM_SCAN_TYPE_UNSPECIFIED = 0;
 
   // ChainExecutor
-  CHAIN = 1;
+  STREAM_SCAN_TYPE_CHAIN = 1;
 
   // RearrangedChainExecutor
-  REARRANGE = 2;
+  STREAM_SCAN_TYPE_REARRANGE = 2;
 
   // BackfillExecutor
-  BACKFILL = 3;
+  STREAM_SCAN_TYPE_BACKFILL = 3;
 
   // ChainExecutor with upstream_only = true
-  UPSTREAM_ONLY = 4;
+  STREAM_SCAN_TYPE_UPSTREAM_ONLY = 4;
 
   // CdcBackfillExecutor
-  CDC_BACKFILL = 5;
+  STREAM_SCAN_TYPE_CDC_BACKFILL = 5;
 }
 
 // StreamScanNode reads data from upstream table first, and then pass all events to downstream.
@@ -713,25 +713,25 @@ message StreamNode {
 }
 
 enum DispatcherType {
-  UNSPECIFIED = 0;
+  DISPATCHER_TYPE_UNSPECIFIED = 0;
   // Dispatch by hash key, hashed by consistent hash.
-  HASH = 1;
+  DISPATCHER_TYPE_HASH = 1;
   // Broadcast to all downstreams.
   //
   // Note a broadcast cannot be represented as multiple simple dispatchers, since they are
   // different when we update dispatchers during scaling.
-  BROADCAST = 2;
+  DISPATCHER_TYPE_BROADCAST = 2;
   // Only one downstream.
-  SIMPLE = 3;
+  DISPATCHER_TYPE_SIMPLE = 3;
   // A special kind of exchange that doesn't involve shuffle. The upstream actor will be directly
   // piped into the downstream actor, if there are the same number of actors. If number of actors
   // are not the same, should use hash instead. Should be only used when distribution is the same.
-  NO_SHUFFLE = 4;
+  DISPATCHER_TYPE_NO_SHUFFLE = 4;
 
   // Dispatch by table name from upstream DB, used in CDC scenario which should has only one downstream actor.
   // From the optimizer's point of view, it can be treated as a specialized version of HASH distribution
   // that the hash key is the upstream table name.
-  CDC_TABLENAME = 5;
+  DISPATCHER_TYPE_CDC_TABLENAME = 5;
 }
 
 // The property of an edge in the fragment graph.

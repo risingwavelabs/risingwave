@@ -114,6 +114,27 @@ impl Configuration {
         }
     }
 
+    pub fn for_auto_scale() -> Self {
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+            file.write_all(include_bytes!("risingwave-auto-scale.toml"))
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 1,
+            compute_nodes: 3,
+            meta_nodes: 1,
+            compactor_nodes: 1,
+            compute_node_cores: 2,
+            etcd_timeout_rate: 0.0,
+            etcd_data_path: None,
+        }
+    }
+
     /// Returns the config for backfill test.
     pub fn for_backfill() -> Self {
         // Embed the config file and create a temporary file at runtime. The file will be deleted
@@ -579,6 +600,23 @@ impl Cluster {
                 t += Duration::from_secs(restart_delay_secs as u64);
             }
             tokio::time::sleep(t).await;
+            tracing::info!("restart {name}");
+            Handle::current().restart(name);
+        }))
+        .await;
+    }
+
+    #[cfg_or_panic(madsim)]
+    pub async fn kill_nodes_and_restart(
+        &self,
+        nodes: impl IntoIterator<Item = impl AsRef<str>>,
+        restart_delay_secs: u32,
+    ) {
+        join_all(nodes.into_iter().map(|name| async move {
+            let name = name.as_ref();
+            tracing::info!("kill {name}");
+            Handle::current().kill(name);
+            tokio::time::sleep(Duration::from_secs(restart_delay_secs as u64)).await;
             tracing::info!("restart {name}");
             Handle::current().restart(name);
         }))

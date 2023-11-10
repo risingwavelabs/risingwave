@@ -71,6 +71,13 @@ services:
         - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/5690; exit $$?;'
       interval: 1s
       timeout: 5s
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 28Gi
+        reservations:
+          memory: 28Gi
 
   etcd-0:
     image: "quay.io/coreos/etcd:v3.5.7"
@@ -120,6 +127,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
 
   grafana-0:
     image: "grafana/grafana-oss:latest"
@@ -144,6 +152,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
 
   minio-0:
     image: "quay.io/minio/minio:latest"
@@ -189,6 +198,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
 
   prometheus-0:
     image: "prom/prometheus:latest"
@@ -216,6 +226,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
 
   message_queue:
     image: "docker.vectorized.io/vectorized/redpanda:latest"
@@ -255,6 +266,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
 volumes:
   etcd-0:
     external: false

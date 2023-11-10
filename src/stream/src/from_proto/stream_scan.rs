@@ -244,7 +244,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 )
                 .boxed()
             }
-            StreamScanType::ChainUnspecified => unreachable!(),
+            StreamScanType::Unspecified => unreachable!(),
         };
         let rate_limit = node.get_rate_limit().cloned().ok();
         Ok(FlowControlExecutor::new(executor, rate_limit).boxed())
