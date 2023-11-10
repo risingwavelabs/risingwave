@@ -700,7 +700,7 @@ impl ListValue {
                         }
                         (i, c @ ',' | c @ '}') => {
                             let s = &self.input[..i];
-                            // comsume the value and leave the ',' or '}' for parent
+                            // consume the value and leave the ',' or '}' for parent
                             self.input = &self.input[i..];
                             if s.trim_end().is_empty() {
                                 return Err(format!("Unexpected \"{c}\" character."));
@@ -720,7 +720,7 @@ impl ListValue {
                         _ => {}
                     }
                 };
-                Ok(ScalarImpl::from_literal(&s, self.data_type)?)
+                ScalarImpl::from_literal(&s, self.data_type)
             }
 
             /// Parse a double quoted non-array value.
@@ -747,7 +747,7 @@ impl ListValue {
                         _ => {}
                     }
                 };
-                Ok(ScalarImpl::from_literal(&s, self.data_type)?)
+                ScalarImpl::from_literal(&s, self.data_type)
             }
 
             /// Unescape a string.
