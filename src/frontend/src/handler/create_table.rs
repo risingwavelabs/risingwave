@@ -1024,7 +1024,7 @@ pub fn check_create_table_with_source(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn generate_table(
+pub async fn generate_stream_graph_for_table(
     session: &Arc<SessionImpl>,
     table_name: ObjectName,
     original_catalog: &Arc<TableCatalog>,

@@ -45,9 +45,7 @@ pub use logical_optimization::*;
 pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
-use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema,
-};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -719,7 +717,7 @@ impl PlanRoot {
         db_name: String,
         sink_from_table_name: String,
         format_desc: Option<SinkFormatDesc>,
-        sink_into_table_name: Option<String>,
+        target_table: Option<TableId>,
     ) -> Result<StreamSink> {
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
@@ -728,7 +726,7 @@ impl PlanRoot {
             sink_name,
             db_name,
             sink_from_table_name,
-            sink_into_table_name,
+            target_table,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),

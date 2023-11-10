@@ -44,7 +44,7 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
-use crate::handler::create_table::{generate_table, ColumnIdGenerator};
+use crate::handler::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{generic, Explain, LogicalSource, StreamProject};
@@ -176,6 +176,14 @@ pub fn gen_sink_plan(
         plan_root.set_out_names(col_names)?;
     };
 
+    let target_table_catalog = stmt
+        .into_table_name
+        .as_ref()
+        .map(|table_name| fetch_table_catalog_for_alter(session, table_name))
+        .transpose()?;
+
+    let target_table = target_table_catalog.as_ref().map(|catalog| catalog.id());
+
     let sink_plan = plan_root.gen_sink_plan(
         sink_table_name,
         definition,
@@ -184,7 +192,7 @@ pub fn gen_sink_plan(
         db_name.to_owned(),
         sink_from_table_name,
         format_desc,
-        sink_into_table_name,
+        target_table,
     )?;
     let sink_desc = sink_plan.sink_desc().clone();
 
@@ -207,12 +215,6 @@ pub fn gen_sink_plan(
         connection_id,
         dependent_relations.into_iter().collect_vec(),
     );
-
-    let target_table_catalog = stmt
-        .into_table_name
-        .as_ref()
-        .map(|table_name| fetch_table_catalog_for_alter(session, table_name))
-        .transpose()?;
 
     if let Some(table_catalog) = &target_table_catalog {
         for column in sink_catalog.full_columns() {
@@ -327,7 +329,7 @@ pub async fn handle_create_sink(
             panic!("unexpected statement type: {:?}", definition);
         };
 
-        let (mut graph, table, source) = generate_table(
+        let (mut graph, table, source) = generate_stream_graph_for_table(
             &session,
             target_table.unwrap(),
             &table_catalog,

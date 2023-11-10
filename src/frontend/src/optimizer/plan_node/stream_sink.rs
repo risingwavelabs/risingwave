@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, Field};
+use risingwave_common::catalog::{ColumnCatalog, Field, TableId};
 use risingwave_common::constants::log_store::{
     EPOCH_COLUMN_INDEX, KV_LOG_STORE_PREDEFINED_COLUMNS, SEQ_ID_COLUMN_INDEX,
 };
@@ -82,7 +82,7 @@ impl StreamSink {
         name: String,
         db_name: String,
         sink_from_table_name: String,
-        sink_into_table_name: Option<String>,
+        target_table: Option<TableId>,
         user_distributed_by: RequiredDist,
         user_order_by: Order,
         user_cols: FixedBitSet,
@@ -98,7 +98,7 @@ impl StreamSink {
             name,
             db_name,
             sink_from_table_name,
-            sink_into_table_name,
+            target_table,
             user_order_by,
             columns,
             definition,
@@ -134,7 +134,7 @@ impl StreamSink {
         name: String,
         db_name: String,
         sink_from_name: String,
-        sink_into_name: Option<String>,
+        target_table: Option<TableId>,
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
         definition: String,
@@ -206,7 +206,7 @@ impl StreamSink {
             properties: properties.into_inner(),
             sink_type,
             format_desc,
-            sink_into_name,
+            target_table,
         };
         Ok((input, sink_desc))
     }

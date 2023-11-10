@@ -297,7 +297,7 @@ pub struct SinkCatalog {
     /// Name for the table info for Debezium sink
     pub sink_from_name: String,
 
-    pub sink_into_name: Option<String>,
+    pub target_table: Option<TableId>,
 }
 
 impl SinkCatalog {
@@ -335,7 +335,7 @@ impl SinkCatalog {
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
             stream_job_status: PbStreamJobStatus::Creating.into(),
-            sink_into_name: self.sink_into_name.clone(),
+            target_table: self.target_table.map(|table_id| table_id.table_id()),
         }
     }
 
@@ -424,7 +424,7 @@ impl From<PbSink> for SinkCatalog {
             initialized_at_epoch: pb.initialized_at_epoch.map(Epoch::from),
             db_name: pb.db_name,
             sink_from_name: pb.sink_from_name,
-            sink_into_name: pb.sink_into_name,
+            target_table: pb.target_table.map(|table_id| TableId::new(table_id)),
         }
     }
 }

@@ -43,7 +43,7 @@ use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
 use risingwave_common::error::{anyhow_error, ErrorCode, RwError};
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
@@ -146,7 +146,7 @@ pub struct SinkParam {
     pub format_desc: Option<SinkFormatDesc>,
     pub db_name: String,
     pub sink_from_name: String,
-    pub sink_into_name: Option<String>,
+    pub target_table: Option<TableId>,
 }
 
 impl SinkParam {
@@ -178,7 +178,7 @@ impl SinkParam {
             format_desc,
             db_name: pb_param.db_name,
             sink_from_name: pb_param.sink_from_name,
-            sink_into_name: pb_param.sink_into_name,
+            target_table: pb_param.target_table.map(TableId::new),
         }
     }
 
@@ -194,7 +194,7 @@ impl SinkParam {
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
-            sink_into_name: self.sink_into_name.clone(),
+            target_table: self.target_table.map(|table_id| table_id.table_id()),
         }
     }
 
@@ -220,7 +220,7 @@ impl From<SinkCatalog> for SinkParam {
             format_desc: sink_catalog.format_desc,
             db_name: sink_catalog.db_name,
             sink_from_name: sink_catalog.sink_from_name,
-            sink_into_name: sink_catalog.sink_into_name,
+            target_table: sink_catalog.target_table,
         }
     }
 }
@@ -331,7 +331,7 @@ impl SinkImpl {
         param.properties.remove(PRIVATE_LINK_TARGET_KEY);
         param.properties.remove(CONNECTION_NAME_KEY);
 
-        let sink_type = if param.sink_into_name.is_some() {
+        let sink_type = if param.target_table.is_some() {
             "table"
         } else {
             param.properties.get(CONNECTOR_TYPE_KEY).ok_or_else(|| {

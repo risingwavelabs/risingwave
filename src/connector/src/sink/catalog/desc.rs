@@ -65,8 +65,8 @@ pub struct SinkDesc {
     /// it is the name of table/mv. Otherwise, it is the name of the sink.
     pub sink_from_name: String,
 
-    /// Name of the target table for sink into table.
-    pub sink_into_name: Option<String>,
+    /// Id of the target table for sink into table.
+    pub target_table: Option<TableId>,
 }
 
 impl SinkDesc {
@@ -98,7 +98,7 @@ impl SinkDesc {
             initialized_at_epoch: None,
             db_name: self.db_name,
             sink_from_name: self.sink_from_name,
-            sink_into_name: self.sink_into_name,
+            target_table: self.target_table,
         }
     }
 
@@ -120,7 +120,7 @@ impl SinkDesc {
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
-            sink_into_name: self.sink_into_name.clone(),
+            target_table: self.target_table.map(|table_id| table_id.table_id()),
         }
     }
 }
