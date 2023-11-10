@@ -15,7 +15,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "idx0dev/resolved_schema", features = [
+apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "89c2c128de93586465a7ea85b0a1c1a53082bba2", features = [
     "snappy",
     "zstandard",
     "bzip",
@@ -70,10 +70,10 @@ jni = { version = "0.21.1", features = ["invocation"] }
 jst = { package = 'jsonschema-transpiler', git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
 maplit = "1.0.2"
 moka = { version = "0.12", features = ["future"] }
-mysql_async = { version = "0.32", default-features = false, features = [
+mysql_async = { version = "0.33", default-features = false, features = [
     "default",
 ] }
-mysql_common = { version = "0.30", default-features = false, features = [
+mysql_common = { version = "0.31", default-features = false, features = [
     "chrono",
 ] }
 nexmark = { version = "0.2", features = ["serde"] }

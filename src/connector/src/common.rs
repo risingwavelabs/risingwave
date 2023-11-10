@@ -404,7 +404,6 @@ impl KinesisCommon {
         Ok(KinesisClient::from_conf(builder.build()))
     }
 }
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpsertMessage<'a> {
     #[serde(borrow)]

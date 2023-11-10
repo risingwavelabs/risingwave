@@ -21,7 +21,7 @@ use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::CatalogError;
+use crate::catalog::{CatalogError, OwnedByUserCatalog};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
 

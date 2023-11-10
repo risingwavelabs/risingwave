@@ -148,7 +148,7 @@ whoami = { version = "1" }
 ahash = { version = "0.8" }
 allocator-api2 = { version = "0.2", default-features = false, features = ["alloc", "nightly"] }
 anyhow = { version = "1", features = ["backtrace"] }
-auto_enums = { version = "0.8", features = ["futures03"] }
+auto_enums = { version = "0.8", features = ["futures03", "tokio1"] }
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }

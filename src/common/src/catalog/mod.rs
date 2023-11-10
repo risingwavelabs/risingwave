@@ -483,9 +483,10 @@ impl ConflictBehavior {
             PbHandleConflictBehavior::Overwrite => ConflictBehavior::Overwrite,
             PbHandleConflictBehavior::Ignore => ConflictBehavior::IgnoreConflict,
             // This is for backward compatibility, in the previous version
-            // `ConflictBehaviorUnspecified' represented `NoCheck`, so just treat it as `NoCheck`.
-            PbHandleConflictBehavior::NoCheck
-            | PbHandleConflictBehavior::ConflictBehaviorUnspecified => ConflictBehavior::NoCheck,
+            // `HandleConflictBehavior::Unspecified` represented `NoCheck`, so just treat it as `NoCheck`.
+            PbHandleConflictBehavior::NoCheck | PbHandleConflictBehavior::Unspecified => {
+                ConflictBehavior::NoCheck
+            }
         }
     }
 

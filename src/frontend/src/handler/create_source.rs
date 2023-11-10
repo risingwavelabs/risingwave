@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
+use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -61,7 +62,9 @@ use crate::handler::create_table::{
     bind_pk_on_relation, bind_sql_column_constraints, bind_sql_columns, bind_sql_pk_names,
     ensure_table_constraints_supported, ColumnIdGenerator,
 };
-use crate::handler::util::{get_connector, is_cdc_connector, is_kafka_connector};
+use crate::handler::util::{
+    get_connector, is_cdc_connector, is_kafka_connector, is_key_mq_connector,
+};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
@@ -350,9 +353,8 @@ pub(crate) async fn bind_columns_from_source(
                     use_schema_registry: protobuf_schema.use_schema_registry,
                     proto_message_name: protobuf_schema.message_name.0.clone(),
                     key_message_name: get_key_message_name(&mut options),
-                    name_strategy: name_strategy.unwrap_or(
-                        PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32,
-                    ),
+                    name_strategy: name_strategy
+                        .unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32),
                     ..Default::default()
                 },
             )
@@ -395,7 +397,7 @@ pub(crate) async fn bind_columns_from_source(
                 proto_message_name: message_name.unwrap_or(AstString("".into())).0,
                 key_message_name,
                 name_strategy: name_strategy
-                    .unwrap_or(PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32),
+                    .unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32),
                 ..Default::default()
             };
             (
@@ -459,7 +461,7 @@ pub(crate) async fn bind_columns_from_source(
 
             let name_strategy =
                 get_sr_name_strategy_check(&mut options, avro_schema.use_schema_registry)?
-                    .unwrap_or(PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32);
+                    .unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32);
             let key_message_name = get_key_message_name(&mut options);
             let message_name = try_consume_string_from_options(&mut options, MESSAGE_NAME_KEY);
 
@@ -511,7 +513,7 @@ pub(crate) async fn bind_columns_from_source(
                 use_schema_registry,
                 proto_message_name: message_name.unwrap_or(AstString("".into())).0,
                 name_strategy: name_strategy
-                    .unwrap_or(PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32),
+                    .unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32),
                 format: FormatType::Debezium as i32,
                 row_encode: EncodeType::Avro as i32,
                 row_schema_location: avro_schema.row_schema_location.0.clone(),
@@ -577,6 +579,7 @@ pub(crate) async fn bind_columns_from_source(
                 .join(","),
         ))));
     }
+
     Ok(res)
 }
 
@@ -704,12 +707,18 @@ pub(crate) async fn bind_source_pk(
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
-        (Format::Native, Encode::Native) | (Format::Plain, _) => sql_defined_pk_names,
+        (Format::Native, Encode::Native) => sql_defined_pk_names,
+        (Format::Plain, _) => {
+            if is_key_mq_connector(with_properties) {
+                add_default_key_column(columns);
+            }
+            sql_defined_pk_names
+        }
         (Format::Upsert, Encode::Json) => {
             if sql_defined_pk {
                 sql_defined_pk_names
             } else {
-                add_upsert_default_key_column(columns);
+                add_default_key_column(columns);
                 vec![DEFAULT_KEY_COLUMN_NAME.into()]
             }
         }
@@ -727,7 +736,7 @@ pub(crate) async fn bind_source_pk(
                 extracted_pk_names
             } else {
                 // For upsert avro, if we can't extract pk from schema, use message key as primary key
-                add_upsert_default_key_column(columns);
+                add_default_key_column(columns);
                 vec![DEFAULT_KEY_COLUMN_NAME.into()]
             }
         }
@@ -822,7 +831,7 @@ fn check_and_add_timestamp_column(
     }
 }
 
-fn add_upsert_default_key_column(columns: &mut Vec<ColumnCatalog>) {
+fn add_default_key_column(columns: &mut Vec<ColumnCatalog>) {
     let column = ColumnCatalog {
         column_desc: ColumnDesc {
             data_type: DataType::Bytea,
@@ -1087,7 +1096,13 @@ pub async fn handle_create_source(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
-    session.check_relation_name_duplicated(stmt.source_name.clone())?;
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        stmt.source_name.clone(),
+        StatementType::CREATE_SOURCE,
+        stmt.if_not_exists,
+    )? {
+        return Ok(resp);
+    }
 
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
@@ -1250,7 +1265,7 @@ pub mod tests {
 
     use risingwave_common::catalog::{
         cdc_table_name_column_name, offset_column_name, row_id_column_name, DEFAULT_DATABASE_NAME,
-        DEFAULT_SCHEMA_NAME,
+        DEFAULT_KEY_COLUMN_NAME, DEFAULT_SCHEMA_NAME,
     };
     use risingwave_common::types::DataType;
 
@@ -1292,6 +1307,7 @@ pub mod tests {
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Serial,
+            DEFAULT_KEY_COLUMN_NAME => DataType::Bytea,
             "id" => DataType::Int32,
             "zipcode" => DataType::Int64,
             "rate" => DataType::Float32,

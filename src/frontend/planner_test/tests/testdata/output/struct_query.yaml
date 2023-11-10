@@ -396,7 +396,7 @@
   logical_plan: |-
     LogicalProject { exprs: [s.v1, s.v2, s.v3] }
     └─LogicalFilter { predicate: (s.v3 = Row(1:Int32, 2:Int32, Row(1:Int32, 2:Int32, 3:Int32))) }
-      └─LogicalScan { table: s, columns: [s.v1, s.v2, s.v3, s._row_id] }
+      └─LogicalScan { table: s, columns: [s.v1, s.v2, s.v3, s._rw_key, s._row_id] }
   create_table_with_connector:
     format: plain
     encode: protobuf

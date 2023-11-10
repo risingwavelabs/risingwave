@@ -27,3 +27,7 @@ workspace-hack = { path = "../../workspace-hack" }
 
 [lints]
 workspace = true
+
+[features]
+enable_test_epoch = []
+

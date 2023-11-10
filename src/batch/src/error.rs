@@ -17,6 +17,7 @@ use std::sync::Arc;
 pub use anyhow::anyhow;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_rpc_client::error::ToTonicStatus;
 use thiserror::Error;
 use tonic::Status;
 
@@ -79,6 +80,6 @@ impl From<RwError> for BatchError {
 
 impl<'a> From<&'a BatchError> for Status {
     fn from(err: &'a BatchError) -> Self {
-        Status::internal(err.to_string())
+        err.to_status(tonic::Code::Internal, "batch")
     }
 }

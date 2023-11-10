@@ -23,7 +23,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::VirtualNode;
 
-use crate::HummockEpoch;
+use crate::{EpochWithGap, HummockEpoch};
 
 pub const EPOCH_LEN: usize = std::mem::size_of::<HummockEpoch>();
 pub const TABLE_PREFIX_LEN: usize = std::mem::size_of::<u32>();
@@ -575,12 +575,18 @@ impl UserKey<Vec<u8>> {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct FullKey<T: AsRef<[u8]>> {
     pub user_key: UserKey<T>,
-    pub epoch: HummockEpoch,
+    pub epoch_with_gap: EpochWithGap,
 }
 
 impl<T: AsRef<[u8]>> Debug for FullKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "FullKey {{ {:?}, {} }}", self.user_key, self.epoch)
+        write!(
+            f,
+            "FullKey {{ {:?}, epoch: {}, epoch_with_gap: {}}}",
+            self.user_key,
+            self.epoch_with_gap.as_u64(),
+            self.epoch_with_gap.pure_epoch()
+        )
     }
 }
 
@@ -588,26 +594,40 @@ impl<T: AsRef<[u8]>> FullKey<T> {
     pub fn new(table_id: TableId, table_key: TableKey<T>, epoch: HummockEpoch) -> Self {
         Self {
             user_key: UserKey::new(table_id, table_key),
-            epoch,
+            epoch_with_gap: EpochWithGap::new(epoch, 0),
+        }
+    }
+
+    pub fn new_with_gap_epoch(
+        table_id: TableId,
+        table_key: TableKey<T>,
+        epoch_with_gap: EpochWithGap,
+    ) -> Self {
+        Self {
+            user_key: UserKey::new(table_id, table_key),
+            epoch_with_gap,
         }
     }
 
     pub fn from_user_key(user_key: UserKey<T>, epoch: HummockEpoch) -> Self {
-        Self { user_key, epoch }
+        Self {
+            user_key,
+            epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
+        }
     }
 
     /// Pass the inner type of `table_key` to make the code less verbose.
     pub fn for_test(table_id: TableId, table_key: T, epoch: HummockEpoch) -> Self {
         Self {
             user_key: UserKey::for_test(table_id, table_key),
-            epoch,
+            epoch_with_gap: EpochWithGap::new(epoch, 0),
         }
     }
 
     /// Encode in to a buffer.
     pub fn encode_into(&self, buf: &mut impl BufMut) {
         self.user_key.encode_into(buf);
-        buf.put_u64(self.epoch);
+        buf.put_u64(self.epoch_with_gap.as_u64());
     }
 
     pub fn encode(&self) -> Vec<u8> {
@@ -621,7 +641,7 @@ impl<T: AsRef<[u8]>> FullKey<T> {
     // Encode in to a buffer.
     pub fn encode_into_without_table_id(&self, buf: &mut impl BufMut) {
         self.user_key.encode_table_key_into(buf);
-        buf.put_u64(self.epoch);
+        buf.put_u64(self.epoch_with_gap.as_u64());
     }
 
     pub fn encode_reverse_epoch(&self) -> Vec<u8> {
@@ -629,7 +649,7 @@ impl<T: AsRef<[u8]>> FullKey<T> {
             TABLE_PREFIX_LEN + self.user_key.table_key.as_ref().len() + EPOCH_LEN,
         );
         self.user_key.encode_into(&mut buf);
-        buf.put_u64(u64::MAX - self.epoch);
+        buf.put_u64(u64::MAX - self.epoch_with_gap.as_u64());
         buf
     }
 
@@ -651,7 +671,7 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::decode(&slice[..epoch_pos]),
-            epoch,
+            epoch_with_gap: EpochWithGap::from_u64(epoch),
         }
     }
 
@@ -665,7 +685,7 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::new(table_id, TableKey(&slice_without_table_id[..epoch_pos])),
-            epoch,
+            epoch_with_gap: EpochWithGap::from_u64(epoch),
         }
     }
 
@@ -676,7 +696,7 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::decode(&slice[..epoch_pos]),
-            epoch: u64::MAX - epoch,
+            epoch_with_gap: EpochWithGap::from_u64(u64::MAX - epoch),
         }
     }
 
@@ -687,7 +707,7 @@ impl<'a> FullKey<&'a [u8]> {
     pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(self) -> FullKey<T> {
         FullKey {
             user_key: self.user_key.copy_into(),
-            epoch: self.epoch,
+            epoch_with_gap: self.epoch_with_gap,
         }
     }
 }
@@ -697,7 +717,7 @@ impl FullKey<Vec<u8>> {
     /// `Bytes`
     pub fn into_bytes(self) -> FullKey<Bytes> {
         FullKey {
-            epoch: self.epoch,
+            epoch_with_gap: self.epoch_with_gap,
             user_key: self.user_key.into_bytes(),
         }
     }
@@ -707,7 +727,7 @@ impl<T: AsRef<[u8]>> FullKey<T> {
     pub fn to_ref(&self) -> FullKey<&[u8]> {
         FullKey {
             user_key: self.user_key.as_ref(),
-            epoch: self.epoch,
+            epoch_with_gap: self.epoch_with_gap,
         }
     }
 }
@@ -717,7 +737,7 @@ impl FullKey<Vec<u8>> {
     /// table key without reallocating a new `FullKey` object.
     pub fn set(&mut self, other: FullKey<&[u8]>) {
         self.user_key.set(other.user_key);
-        self.epoch = other.epoch;
+        self.epoch_with_gap = other.epoch_with_gap;
     }
 }
 
@@ -726,7 +746,7 @@ impl<T: AsRef<[u8]> + Ord + Eq> Ord for FullKey<T> {
         // When `user_key` is the same, greater epoch comes first.
         self.user_key
             .cmp(&other.user_key)
-            .then_with(|| other.epoch.cmp(&self.epoch))
+            .then_with(|| other.epoch_with_gap.cmp(&self.epoch_with_gap))
     }
 }
 
