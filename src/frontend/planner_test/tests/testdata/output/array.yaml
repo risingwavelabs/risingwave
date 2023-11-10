@@ -27,8 +27,8 @@
   binder_error: |
     Failed to bind expression: ARRAY[]
 
-    Caused by this error:
-      1: Bind error: cannot determine type of empty array
+    Caused by:
+      Bind error: cannot determine type of empty array
     HINT:  Explicitly cast to the desired type, for example ARRAY[]::integer[].
 - sql: |
     select ARRAY[]::int[];
@@ -45,8 +45,8 @@
   binder_error: |
     Failed to bind expression: CAST(ARRAY[] AS INT)
 
-    Caused by this error:
-      1: Bind error: cannot determine type of empty array
+    Caused by:
+      Bind error: cannot determine type of empty array
     HINT:  Explicitly cast to the desired type, for example ARRAY[]::integer[].
 - sql: |
     select ARRAY[]::timestamptz[];
@@ -89,22 +89,22 @@
   binder_error: |
     Failed to bind expression: array_cat(ARRAY[233], ARRAY[ARRAY[ARRAY[66]]])
 
-    Caused by this error:
-      1: Bind error: Cannot concatenate integer[] and integer[][][]
+    Caused by:
+      Bind error: Cannot concatenate integer[] and integer[][][]
 - sql: |
     select array_cat(array[233], 123);
   binder_error: |
     Failed to bind expression: array_cat(ARRAY[233], 123)
 
-    Caused by this error:
-      1: Bind error: Cannot concatenate integer[] and integer
+    Caused by:
+      Bind error: Cannot concatenate integer[] and integer
 - sql: |
     select array_cat(123, array[233]);
   binder_error: |
     Failed to bind expression: array_cat(123, ARRAY[233])
 
-    Caused by this error:
-      1: Bind error: Cannot concatenate integer and integer[]
+    Caused by:
+      Bind error: Cannot concatenate integer and integer[]
 - name: array_cat(unknown as text[], unknown as text[]) -> text[]
   sql: |
     select array_cat(null, null);
@@ -127,8 +127,8 @@
   binder_error: |
     Failed to bind expression: array_cat('{1}', 2)
 
-    Caused by this error:
-      1: Bind error: Cannot concatenate character varying and integer
+    Caused by:
+      Bind error: Cannot concatenate character varying and integer
 - sql: |
     select array_append(array[66], 123);
   logical_plan: |-
@@ -140,8 +140,8 @@
   binder_error: |
     Failed to bind expression: array_append(123, 234)
 
-    Caused by this error:
-      1: Bind error: Cannot append integer to integer
+    Caused by:
+      Bind error: Cannot append integer to integer
 - sql: |
     /* Combining multidimensional arrays as such is supported beyond what PostgresSQL allows */
     select array_append(array[array[66]], array[233]);
@@ -175,8 +175,8 @@
   binder_error: |
     Failed to bind expression: array_prepend(123, 234)
 
-    Caused by this error:
-      1: Bind error: Cannot prepend integer to integer
+    Caused by:
+      Bind error: Cannot prepend integer to integer
 - sql: |
     select array_prepend(array[233], array[array[66]]);
   logical_plan: |-
@@ -197,29 +197,29 @@
   binder_error: |
     Failed to bind expression: ARRAY[1, 2] @> 2
 
-    Caused by this error:
-      1: Bind error: operator does not exist: integer[] @> integer
+    Caused by:
+      Bind error: operator does not exist: integer[] @> integer
 - name: array_contains(int[], varchar[]) -> bool
   sql: select array[2,3] @> array['1'];
   binder_error: |
     Failed to bind expression: ARRAY[2, 3] @> ARRAY['1']
 
-    Caused by this error:
-      1: Bind error: Cannot array_contains unnested type integer to unnested type character varying
+    Caused by:
+      Bind error: Cannot array_contains unnested type integer to unnested type character varying
 - name: array_contains(int[][], varchar[][]) -> bool
   sql: select array[array[1,2]] @> array[array['2','3']];
   binder_error: |
     Failed to bind expression: ARRAY[ARRAY[1, 2]] @> ARRAY[ARRAY['2', '3']]
 
-    Caused by this error:
-      1: Bind error: Cannot array_contains unnested type integer to unnested type character varying
+    Caused by:
+      Bind error: Cannot array_contains unnested type integer to unnested type character varying
 - name: any contains(null, null) -> bool
   sql: select '{}' @> '{}';
   binder_error: |
     Failed to bind expression: '{}' @> '{}'
 
-    Caused by this error:
-      1: Bind error: operator does not exist: unknown @> unknown
+    Caused by:
+      Bind error: operator does not exist: unknown @> unknown
 - name: string from/to varchar[] in implicit context
   sql: |
     values (array['a', 'b']), ('{c,' || 'd}');
@@ -295,5 +295,5 @@
   binder_error: |
     Failed to bind expression: ARRAY[1] = ARRAY[1.2]
 
-    Caused by this error:
-      1: Bind error: cannot compare integer[] and numeric[]
+    Caused by:
+      Bind error: cannot compare integer[] and numeric[]

@@ -25,8 +25,8 @@
   binder_error: |
     Failed to bind expression: (row_number(x) OVER ())
 
-    Caused by this error:
-      1: Invalid input syntax: window functions are not allowed in GROUP BY
+    Caused by:
+      Invalid input syntax: window functions are not allowed in GROUP BY
 - id: window function call in HAVING
   sql: |
     create table t(x int);
@@ -34,8 +34,8 @@
   binder_error: |
     Failed to bind expression: (row_number(x) OVER () > 1)
 
-    Caused by this error:
-      1: Invalid input syntax: window functions are not allowed in HAVING
+    Caused by:
+      Invalid input syntax: window functions are not allowed in HAVING
 - id: window function call in WHERE
   sql: |
     create table t(x int);
@@ -43,8 +43,8 @@
   binder_error: |
     Failed to bind expression: (row_number(x) OVER () > 1)
 
-    Caused by this error:
-      1: Invalid input syntax: window functions are not allowed in WHERE
+    Caused by:
+      Invalid input syntax: window functions are not allowed in WHERE
 - id: window function call in FILTER
   sql: |
     create table t(x int);
@@ -52,8 +52,8 @@
   binder_error: |
     Failed to bind expression: sum(x) FILTER(WHERE row_number() OVER () > 1)
 
-    Caused by this error:
-      1: Invalid input syntax: window functions are not allowed in FILTER
+    Caused by:
+      Invalid input syntax: window functions are not allowed in FILTER
 - id: lag without over clause
   sql: |
     create table t(x int);
@@ -61,8 +61,8 @@
   binder_error: |
     Failed to bind expression: lag(x)
 
-    Caused by this error:
-      1: Invalid input syntax: Window function `lag` must have OVER clause
+    Caused by:
+      Invalid input syntax: Window function `lag` must have OVER clause
 - id: lag with empty over clause
   sql: |
     create table t(x int);
@@ -100,8 +100,8 @@
   binder_error: |
     Failed to bind expression: lead(x, x + 1) OVER ()
 
-    Caused by this error:
-      1: Feature is not yet implemented: non-const `offset` of `lead` function is not supported yet
+    Caused by:
+      Feature is not yet implemented: non-const `offset` of `lead` function is not supported yet
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - id: lag with over clause
   sql: |
@@ -242,8 +242,8 @@
   binder_error: |
     Failed to bind expression: min(x) OVER (PARTITION BY y ROWS UNBOUNDED FOLLOWING)
 
-    Caused by this error:
-      1: Invalid input syntax: window frame bounds `ROWS BETWEEN UNBOUNDED FOLLOWING AND CURRENT ROW` is not valid
+    Caused by:
+      Invalid input syntax: window frame bounds `ROWS BETWEEN UNBOUNDED FOLLOWING AND CURRENT ROW` is not valid
 - id: aggregate with over clause, invalid frame definition case 2
   sql: |
     create table t(x int, y int);
@@ -251,8 +251,8 @@
   binder_error: |
     Failed to bind expression: min(x) OVER (PARTITION BY y ROWS BETWEEN 1 FOLLOWING AND 2 PRECEDING)
 
-    Caused by this error:
-      1: Invalid input syntax: window frame bounds `ROWS BETWEEN 1 FOLLOWING AND 2 PRECEDING` is not valid
+    Caused by:
+      Invalid input syntax: window frame bounds `ROWS BETWEEN 1 FOLLOWING AND 2 PRECEDING` is not valid
 - id: aggregate with over clause, range frame definition with implicit current row
   sql: |
     create table t(x int, y int);
@@ -260,8 +260,8 @@
   binder_error: |
     Failed to bind expression: max(x) OVER (PARTITION BY y ORDER BY x RANGE 100 PRECEDING)
 
-    Caused by this error:
-      1: Feature is not yet implemented: window frame in `RANGE` mode is not supported yet
+    Caused by:
+      Feature is not yet implemented: window frame in `RANGE` mode is not supported yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
 - id: aggregate with over clause, range frame definition with between
   sql: |
@@ -270,8 +270,8 @@
   binder_error: |
     Failed to bind expression: max(x) OVER (PARTITION BY y ORDER BY x RANGE BETWEEN 100 PRECEDING AND UNBOUNDED FOLLOWING)
 
-    Caused by this error:
-      1: Feature is not yet implemented: window frame in `RANGE` mode is not supported yet
+    Caused by:
+      Feature is not yet implemented: window frame in `RANGE` mode is not supported yet
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/9124
 - id: aggregate with over clause, unbounded range, with ORDER BY
   sql: |

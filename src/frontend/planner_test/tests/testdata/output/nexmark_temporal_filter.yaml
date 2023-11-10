@@ -912,8 +912,8 @@
   binder_error: |
     Failed to bind expression: SESSION_START(B.date_time, INTERVAL '10' SECOND)
 
-    Caused by this error:
-      1: Feature is not yet implemented: unsupported function: "session_start"
+    Caused by:
+      Feature is not yet implemented: unsupported function: "session_start"
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - id: nexmark_q12
   before:
@@ -929,8 +929,8 @@
   binder_error: |
     Failed to bind expression: PROCTIME()
 
-    Caused by this error:
-      1: Invalid input syntax: Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?
+    Caused by:
+      Invalid input syntax: Function `PROCTIME()` is only allowed in CREATE TABLE/SOURCE. Is `NOW()` what you want?
 - id: nexmark_q13
   before:
   - create_sources

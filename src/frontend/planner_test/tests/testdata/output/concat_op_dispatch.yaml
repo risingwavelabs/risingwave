@@ -29,8 +29,8 @@
   binder_error: |
     Failed to bind expression: ARRAY[1] || s
 
-    Caused by this error:
-      1: Bind error: Cannot append character varying to integer[]
+    Caused by:
+      Bind error: Cannot append character varying to integer[]
 - name: jsonb || jsonb -> jsonb
   sql: |
     select '1'::jsonb || '2'::jsonb;
@@ -53,8 +53,8 @@
   binder_error: |
     Failed to bind expression: 1 || 2
 
-    Caused by this error:
-      1: Bind error: operator does not exist: integer || integer
+    Caused by:
+      Bind error: operator does not exist: integer || integer
 - name: int || unknown (as text) -> text
   sql: |
     select 1 || '2';

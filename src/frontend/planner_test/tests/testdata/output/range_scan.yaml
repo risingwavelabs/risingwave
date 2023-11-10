@@ -35,8 +35,8 @@
   batch_error: |
     Expr error
 
-    Caused by this error:
-      1: Division by zero
+    Caused by:
+      Division by zero
 - before:
   - create_table_and_mv
   sql: |
@@ -44,8 +44,8 @@
   batch_error: |
     Expr error
 
-    Caused by this error:
-      1: Numeric out of range
+    Caused by:
+      Numeric out of range
 - before:
   - create_table_and_mv
   sql: |
@@ -53,8 +53,8 @@
   batch_error: |
     Expr error
 
-    Caused by this error:
-      1: Parse error: bigint invalid digit found in string
+    Caused by:
+      Parse error: bigint invalid digit found in string
 - before:
   - create_table_and_mv
   sql: |
@@ -62,8 +62,8 @@
   batch_error: |
     Expr error
 
-    Caused by this error:
-      1: Parse error: bigint invalid digit found in string
+    Caused by:
+      Parse error: bigint invalid digit found in string
 - before:
   - create_table_and_mv
   sql: |
@@ -148,8 +148,8 @@
   batch_error: |
     Expr error
 
-    Caused by this error:
-      1: Parse error: bigint invalid digit found in string
+    Caused by:
+      Parse error: bigint invalid digit found in string
 - before:
   - create_table_and_mv
   sql: |

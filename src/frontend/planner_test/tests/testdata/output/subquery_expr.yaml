@@ -115,8 +115,8 @@
   binder_error: |
     Failed to bind expression: (SELECT 1, 2)
 
-    Caused by this error:
-      1: Bind error: Subquery must return only one column
+    Caused by:
+      Bind error: Subquery must return only one column
 - sql: |
     create table t(x int);
     select 1 where exists (select * from t);

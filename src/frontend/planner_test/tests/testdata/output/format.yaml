@@ -21,26 +21,26 @@
   batch_error: |
     Expr error
 
-    Caused by this error:
-      1: too few arguments for format()
+    Caused by:
+      too few arguments for format()
 - sql: |
     SELECT format('Testing %s, %s, %s, %', 'one', 'two', 'three');
   batch_error: |
     Expr error
 
-    Caused by this error:
-      1: Parse error: unterminated format() type specifier
+    Caused by:
+      Parse error: unterminated format() type specifier
 - sql: |
     SELECT format('Testing %s, %f, %d, %', 'one', 'two', 'three');
   batch_error: |
     Expr error
 
-    Caused by this error:
-      1: Parse error: unrecognized format() type specifier "f"
+    Caused by:
+      Parse error: unrecognized format() type specifier "f"
 - sql: |
     SELECT format();
   binder_error: |
     Failed to bind expression: format()
 
-    Caused by this error:
-      1: Bind error: Function `format` takes at least 1 arguments (0 given)
+    Caused by:
+      Bind error: Function `format` takes at least 1 arguments (0 given)

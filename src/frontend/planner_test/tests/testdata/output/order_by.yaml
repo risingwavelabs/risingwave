@@ -73,8 +73,8 @@
   binder_error: |
     Failed to bind expression: v
 
-    Caused by this error:
-      1: Item not found: Invalid column: v
+    Caused by:
+      Item not found: Invalid column: v
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v1 desc limit 5;
@@ -161,8 +161,8 @@
   binder_error: |
     Failed to bind expression: sum + 1
 
-    Caused by this error:
-      1: Item not found: Invalid column: sum
+    Caused by:
+      Item not found: Invalid column: sum
 - name: select distinct with order by expressions not appear in select list
   sql: |
     create table t (x int, y int);

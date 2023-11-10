@@ -213,8 +213,8 @@
   binder_error: |
     Failed to bind expression: y IN (SELECT y, x FROM t2 WHERE t1.x > t2.x + 1000)
 
-    Caused by this error:
-      1: Bind error: Subquery must return only one column
+    Caused by:
+      Bind error: Subquery must return only one column
 - name: correlated outer subquery with an uncorrelated inner subquery
   sql: |
     create table t1(x int, y int);

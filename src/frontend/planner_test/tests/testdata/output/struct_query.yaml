@@ -265,16 +265,16 @@
   binder_error: |
     Failed to bind expression: (v1).v2
 
-    Caused by this error:
-      1: Bind error: column notation .v2 applied to type bigint, which is not a composite type
+    Caused by:
+      Bind error: column notation .v2 applied to type bigint, which is not a composite type
 - sql: |
     create materialized view t as select * from s;
     select (country + country) from t;
   binder_error: |
     Failed to bind expression: (country + country)
 
-    Caused by this error:
-      1: Feature is not yet implemented: Add[Struct(StructType { field_names: ["address", "zipcode"], field_types: [Varchar, Varchar] }), Struct(StructType { field_names: ["address", "zipcode"], field_types: [Varchar, Varchar] })]
+    Caused by:
+      Feature is not yet implemented: Add[Struct(StructType { field_names: ["address", "zipcode"], field_types: [Varchar, Varchar] }), Struct(StructType { field_names: ["address", "zipcode"], field_types: [Varchar, Varchar] })]
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
   create_source:
     format: plain
@@ -299,8 +299,8 @@
   binder_error: |
     Failed to bind expression: avg(country)
 
-    Caused by this error:
-      1: Invalid input syntax: Invalid aggregation: avg(struct<address character varying,zipcode character varying>)
+    Caused by:
+      Invalid input syntax: Invalid aggregation: avg(struct<address character varying,zipcode character varying>)
   create_source:
     format: plain
     encode: protobuf
@@ -324,8 +324,8 @@
   binder_error: |
     Failed to bind expression: (country).city
 
-    Caused by this error:
-      1: Bind error: column "city" not found in struct type
+    Caused by:
+      Bind error: column "city" not found in struct type
   create_source:
     format: plain
     encode: protobuf

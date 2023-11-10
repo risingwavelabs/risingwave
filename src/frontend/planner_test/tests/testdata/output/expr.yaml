@@ -16,8 +16,8 @@
   binder_error: |
     Failed to bind expression: must_be_unimplemented_func(1)
 
-    Caused by this error:
-      1: Feature is not yet implemented: unsupported function: "must_be_unimplemented_func"
+    Caused by:
+      Feature is not yet implemented: unsupported function: "must_be_unimplemented_func"
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - sql: |
     values(cast(1 as bigint));
@@ -76,8 +76,8 @@
   binder_error: |
     Failed to bind expression: true IN (3, 1.0, 2)
 
-    Caused by this error:
-      1: Bind error: types Boolean and Int32 cannot be matched
+    Caused by:
+      Bind error: types Boolean and Int32 cannot be matched
 - name: in-list with non-const - agg
   sql: |
     create table t (v1 int);
@@ -142,8 +142,8 @@
   binder_error: |
     Failed to bind expression: round(true)
 
-    Caused by this error:
-      1: Feature is not yet implemented: Round[Boolean]
+    Caused by:
+      Feature is not yet implemented: Round[Boolean]
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - sql: |
     -- Single quoted literal can be treated as number without error.
@@ -163,8 +163,8 @@
   binder_error: |
     Failed to bind expression: 1 NOT LIKE 1.23
 
-    Caused by this error:
-      1: Feature is not yet implemented: Like[Int32, Decimal]
+    Caused by:
+      Feature is not yet implemented: Like[Int32, Decimal]
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - sql: |
     select length(trim(trailing '1' from '12'))+length(trim(leading '2' from '23'))+length(trim(both '3' from '34'));
@@ -207,8 +207,8 @@
   binder_error: |
     Failed to bind expression: (CASE WHEN v1 = 1 THEN 1 WHEN v1 = 2 THEN 2 ELSE true END)
 
-    Caused by this error:
-      1: Bind error: types Int32 and Boolean cannot be matched
+    Caused by:
+      Bind error: types Int32 and Boolean cannot be matched
 - name: case misaligned value types
   sql: |
     create table t (v1 int);
@@ -216,8 +216,8 @@
   binder_error: |
     Failed to bind expression: (CASE v1 WHEN 1 THEN 1 WHEN true THEN 2 ELSE 0.0 END)
 
-    Caused by this error:
-      1: Feature is not yet implemented: Equal[Int32, Boolean]
+    Caused by:
+      Feature is not yet implemented: Equal[Int32, Boolean]
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - sql: |
     create table t (v1 int);
@@ -236,16 +236,16 @@
   binder_error: |
     Failed to bind expression: nullif(v1, 1, 2)
 
-    Caused by this error:
-      1: Bind error: Function `nullif` must contain 2 arguments
+    Caused by:
+      Bind error: Function `nullif` must contain 2 arguments
 - sql: |
     create table t (v1 int);
     select nullif(v1, true) from t;
   binder_error: |
     Failed to bind expression: nullif(v1, true)
 
-    Caused by this error:
-      1: Feature is not yet implemented: Equal[Int32, Boolean]
+    Caused by:
+      Feature is not yet implemented: Equal[Int32, Boolean]
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - sql: |
     create table t (v1 int);
@@ -271,16 +271,16 @@
   binder_error: |
     Failed to bind expression: coalesce()
 
-    Caused by this error:
-      1: Bind error: Function `coalesce` takes at least 1 arguments (0 given)
+    Caused by:
+      Bind error: Function `coalesce` takes at least 1 arguments (0 given)
 - sql: |
     create table t (v1 int);
     select coalesce(1,true) from t;
   binder_error: |
     Failed to bind expression: coalesce(1, true)
 
-    Caused by this error:
-      1: Bind error: types Int32 and Boolean cannot be matched
+    Caused by:
+      Bind error: types Int32 and Boolean cannot be matched
 - sql: |
     create table t (v1 varchar);
     select concat_ws(v1, 1) as expr from t;
@@ -305,16 +305,16 @@
   binder_error: |
     Failed to bind expression: concat_ws(v1, 1.2)
 
-    Caused by this error:
-      1: Bind error: cannot cast type "integer" to "character varying" in Implicit context
+    Caused by:
+      Bind error: cannot cast type "integer" to "character varying" in Implicit context
 - sql: |
     create table t (v1 int);
     select concat_ws() from t;
   binder_error: |
     Failed to bind expression: concat_ws()
 
-    Caused by this error:
-      1: Bind error: Function `concat_ws` takes at least 2 arguments (0 given)
+    Caused by:
+      Bind error: Function `concat_ws` takes at least 2 arguments (0 given)
 - sql: |
     create table t (v1 varchar, v2 int, v3 float);
     select concat(v1, v2, v3, 1) as expr from t;
@@ -339,8 +339,8 @@
   binder_error: |
     Failed to bind expression: concat()
 
-    Caused by this error:
-      1: Bind error: Function `concat` takes at least 1 arguments (0 given)
+    Caused by:
+      Bind error: Function `concat` takes at least 1 arguments (0 given)
 - sql: |
     select concat(':', true);
   batch_plan: 'BatchValues { rows: [['':t'':Varchar]] }'
@@ -373,8 +373,8 @@
   binder_error: |
     Failed to bind expression: 1 = SOME(1)
 
-    Caused by this error:
-      1: Bind error: op SOME/ANY/ALL (array) requires array on right side
+    Caused by:
+      Bind error: op SOME/ANY/ALL (array) requires array on right side
 - sql: |
     select 1 < SOME(null);
   logical_plan: |-
@@ -405,32 +405,32 @@
   binder_error: |
     Failed to bind expression: 1 < SOME(CAST(NULL AS CHARACTER VARYING[]))
 
-    Caused by this error:
-      1: Feature is not yet implemented: LessThan[Int32, Varchar]
+    Caused by:
+      Feature is not yet implemented: LessThan[Int32, Varchar]
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - sql: |
     select 1 < SOME(null::date);
   binder_error: |
     Failed to bind expression: 1 < SOME(CAST(NULL AS DATE))
 
-    Caused by this error:
-      1: Bind error: op SOME/ANY/ALL (array) requires array on right side
+    Caused by:
+      Bind error: op SOME/ANY/ALL (array) requires array on right side
 - name: array/struct on left not supported yet 5808
   sql: |
     select array[1] < SOME(null);
   binder_error: |
     Failed to bind expression: ARRAY[1] < SOME(NULL)
 
-    Caused by this error:
-      1: Bind error: array/struct on left are not supported yet
+    Caused by:
+      Bind error: array/struct on left are not supported yet
 - name: array of array/struct on right not supported yet 5808
   sql: |
     select null < SOME(array[array[1]]);
   binder_error: |
     Failed to bind expression: NULL < SOME(ARRAY[ARRAY[1]])
 
-    Caused by this error:
-      1: Bind error: array of array/struct on right are not supported yet
+    Caused by:
+      Bind error: array of array/struct on right are not supported yet
 - sql: |
     select 1 < SOME(array[null]::integer[]);
   logical_plan: |-
@@ -545,8 +545,8 @@
   stream_error: |
     Failed to bind expression: v1 >= now()
 
-    Caused by this error:
-      1: Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: Some(GroupBy). Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
+    Caused by:
+      Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: Some(GroupBy). Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
 - name: forbid now in select for stream
   sql: |
     create table t (v1 timestamp with time zone, v2 timestamp with time zone);
@@ -554,8 +554,8 @@
   stream_error: |
     Failed to bind expression: now()
 
-    Caused by this error:
-      1: Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: None. Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
+    Caused by:
+      Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: None. Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
 - name: forbid now in agg filter for stream
   sql: |
     create table t (v1 timestamp with time zone, v2 int);
@@ -563,16 +563,16 @@
   stream_error: |
     Failed to bind expression: sum(v2) FILTER(WHERE v1 >= now())
 
-    Caused by this error:
-      1: Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: Some(Filter). Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
+    Caused by:
+      Invalid input syntax: For streaming queries, `NOW()` function is only allowed in `WHERE`, `HAVING` and `ON`. Found in clause: Some(Filter). Please please refer to https://www.risingwave.dev/docs/current/sql-pattern-temporal-filters/ for more information
 - name: typo pg_teminate_backend
   sql: |
     select pg_teminate_backend(1);
   binder_error: |
     Failed to bind expression: pg_teminate_backend(1)
 
-    Caused by this error:
-      1: Feature is not yet implemented: unsupported function "pg_teminate_backend", do you mean "pg_terminate_backend"?
+    Caused by:
+      Feature is not yet implemented: unsupported function "pg_teminate_backend", do you mean "pg_terminate_backend"?
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - name: regression (#7571) - literal debug display for array with NULL values
   sql: |
@@ -597,8 +597,8 @@
   batch_error: |
     Expr error
 
-    Caused by this error:
-      1: Division by zero
+    Caused by:
+      Division by zero
 - sql: |
     select * from abs(-1);
   batch_plan: 'BatchValues { rows: [[1:Int32]] }'

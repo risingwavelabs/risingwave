@@ -292,8 +292,8 @@
   binder_error: |
     Failed to bind expression: a1 + b1 = c1
 
-    Caused by this error:
-      1: Item not found: Invalid column: a1
+    Caused by:
+      Item not found: Invalid column: a1
 - sql: |
     create table a(a1 int);
     create table b(b1 int);

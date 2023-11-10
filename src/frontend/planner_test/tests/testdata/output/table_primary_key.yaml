@@ -34,8 +34,8 @@
   binder_error: |
     Failed to bind expression: _row_id
 
-    Caused by this error:
-      1: Item not found: Invalid column: _row_id
+    Caused by:
+      Item not found: Invalid column: _row_id
 - name: selecting on pk should generate range scan
   before:
   - create_table_t2

@@ -66,8 +66,8 @@
   binder_error: |
     Failed to bind expression: v4
 
-    Caused by this error:
-      1: Item not found: Invalid column: v4
+    Caused by:
+      Item not found: Invalid column: v4
 - name: only allow using except with column name
   sql: |
     create table t (v1 int, v2 int, v3 int);
@@ -80,5 +80,5 @@
   binder_error: |
     Failed to bind expression: v1
 
-    Caused by this error:
-      1: internal error: Ambiguous column name: v1
+    Caused by:
+      internal error: Ambiguous column name: v1

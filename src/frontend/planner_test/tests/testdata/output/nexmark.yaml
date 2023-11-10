@@ -1070,8 +1070,8 @@
   binder_error: |
     Failed to bind expression: SESSION_START(B.date_time, INTERVAL '10' SECOND)
 
-    Caused by this error:
-      1: Feature is not yet implemented: unsupported function: "session_start"
+    Caused by:
+      Feature is not yet implemented: unsupported function: "session_start"
     Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
 - id: nexmark_q12
   before:

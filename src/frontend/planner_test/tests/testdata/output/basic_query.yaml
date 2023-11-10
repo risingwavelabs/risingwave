@@ -8,8 +8,8 @@
   binder_error: |
     Catalog error
 
-    Caused by this error:
-      1: table or source not found: t
+    Caused by:
+      table or source not found: t
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t;
@@ -155,8 +155,8 @@
   binder_error: |
     Failed to bind expression: EXISTS (SELECT * WHERE t1.x = 1)
 
-    Caused by this error:
-      1: Bind error: SELECT * with no tables specified is not valid
+    Caused by:
+      Bind error: SELECT * with no tables specified is not valid
 - sql: |
     select *;
   binder_error: 'Bind error: SELECT * with no tables specified is not valid'
@@ -182,8 +182,8 @@
   binder_error: |
     Failed to bind expression: EXISTS (VALUES (v1))
 
-    Caused by this error:
-      1: Feature is not yet implemented: CorrelatedInputRef in VALUES
+    Caused by:
+      Feature is not yet implemented: CorrelatedInputRef in VALUES
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     create table t (v1 bigint, v2 double precision);

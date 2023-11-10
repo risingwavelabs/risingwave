@@ -22,8 +22,8 @@
   binder_error: |
     Failed to bind expression: v1
 
-    Caused by this error:
-      1: Item not found: Invalid column: v1
+    Caused by:
+      Item not found: Invalid column: v1
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v3 from (select v2, v1 as v3 from t) where v2 > 1;
@@ -92,24 +92,24 @@
   binder_error: |
     Failed to bind expression: t.x
 
-    Caused by this error:
-      1: Item not found: Invalid column: x
+    Caused by:
+      Item not found: Invalid column: x
 - sql: |
     create table t(x int);
     select * from t, (select t.x) as t1;
   binder_error: |
     Failed to bind expression: t.x
 
-    Caused by this error:
-      1: Item not found: Invalid column: x
+    Caused by:
+      Item not found: Invalid column: x
 - sql: |
     create table t(x int);
     select * from t CROSS JOIN (select t.x) as t1;
   binder_error: |
     Failed to bind expression: t.x
 
-    Caused by this error:
-      1: Item not found: Invalid column: x
+    Caused by:
+      Item not found: Invalid column: x
 - sql: |
     create table ab (a int, b int);
     create table bc (b int, c int);
@@ -154,8 +154,8 @@
   binder_error: |
     Failed to bind expression: v1 = a
 
-    Caused by this error:
-      1: Item not found: Invalid column: a
+    Caused by:
+      Item not found: Invalid column: a
 - sql: |
     create table t1 (x int, y int);
     create table t2 (x int, y int);
