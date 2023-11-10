@@ -32,9 +32,8 @@ use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{Explain, TableCatalog};
 
-/// `StreamCdcTableScan` is a virtual plan node to represent a stream table scan. It will be converted
-/// to stream scan + merge node (for upstream materialize) + batch table scan when converting to `MView`
-/// creation request.
+/// `StreamCdcTableScan` is a virtual plan node to represent a stream cdc table scan.
+/// It will be converted to cdc backfill + merge node (for upstream source)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamCdcTableScan {
     pub base: PlanBase<Stream>,
@@ -71,7 +70,7 @@ impl StreamCdcTableScan {
     }
 
     pub fn stream_scan_type(&self) -> StreamScanType {
-        self.stream_scan_type
+        StreamScanType::CdcBackfill
     }
 
     /// Build catalog for backfill state
