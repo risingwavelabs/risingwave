@@ -33,7 +33,7 @@ pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 pub const MIN_SYSTEM_RESERVED_MEMORY_MB: usize = 512;
 pub const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.15;
 
-pub const STORAGE_MEMORY_PROPORTION: f64 = 0.35;
+pub const STORAGE_MEMORY_PROPORTION: f64 = 0.4;
 
 pub const COMPACTOR_MEMORY_PROPORTION: f64 = 0.1;
 
@@ -146,7 +146,7 @@ pub fn storage_memory_config(
         ));
     let large_query_memory_usage_mb = storage_config
         .large_query_memory_usage_mb
-        .unwrap_or((100 - high_priority_ratio_in_percent) * block_cache_capacity_mb / 100);
+        .unwrap_or(block_cache_capacity_mb);
     if meta_cache_capacity_mb == STORAGE_META_CACHE_MAX_MEMORY_MB {
         block_cache_capacity_mb += (default_meta_cache_capacity >> 20) - meta_cache_capacity_mb;
     }
@@ -218,9 +218,9 @@ mod tests {
         assert_eq!(non_reserved, 1536 << 20);
 
         // reserve based on proportion
-        let (reserved, non_reserved) = reserve_memory_bytes(10 << 30);
-        assert_eq!(reserved, 2 << 30);
-        assert_eq!(non_reserved, 8 << 30);
+        let (reserved, non_reserved) = reserve_memory_bytes(10_000_000_000);
+        assert_eq!(reserved, 1_500_000_000);
+        assert_eq!(non_reserved, 8_500_000_000);
     }
 
     #[test]
@@ -231,9 +231,9 @@ mod tests {
 
         let memory_config =
             storage_memory_config(total_non_reserved_memory_bytes, true, &storage_config);
-        assert_eq!(memory_config.block_cache_capacity_mb, 737);
-        assert_eq!(memory_config.meta_cache_capacity_mb, 860);
-        assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
+        assert_eq!(memory_config.block_cache_capacity_mb, 1146);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 983);
+        assert_eq!(memory_config.shared_buffer_capacity_mb, 983);
         assert_eq!(memory_config.data_file_cache_ring_buffer_capacity_mb, 0);
         assert_eq!(memory_config.meta_file_cache_ring_buffer_capacity_mb, 0);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
@@ -242,9 +242,9 @@ mod tests {
         storage_config.meta_file_cache.dir = "meta".to_string();
         let memory_config =
             storage_memory_config(total_non_reserved_memory_bytes, true, &storage_config);
-        assert_eq!(memory_config.block_cache_capacity_mb, 737);
-        assert_eq!(memory_config.meta_cache_capacity_mb, 860);
-        assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
+        assert_eq!(memory_config.block_cache_capacity_mb, 1146);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 983);
+        assert_eq!(memory_config.shared_buffer_capacity_mb, 983);
         assert_eq!(memory_config.data_file_cache_ring_buffer_capacity_mb, 256);
         assert_eq!(memory_config.meta_file_cache_ring_buffer_capacity_mb, 256);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
