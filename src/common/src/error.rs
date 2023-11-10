@@ -20,16 +20,13 @@ use std::io::Error as IoError;
 use std::time::{Duration, SystemTime};
 
 use memcomparable::Error as MemComparableError;
+use risingwave_error::tonic::{ToTonicStatus, TonicStatusWrapper};
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
 use tokio::task::JoinError;
-use tonic::Code;
 
 use crate::array::ArrayError;
 use crate::util::value_encoding::error::ValueEncodingError;
-
-/// Header used to store serialized [`RwError`] in grpc status.
-pub const RW_ERROR_GRPC_HEADER: &str = "risingwave-error-bin";
 
 const ERROR_SUPPRESSOR_RESET_DURATION: Duration = Duration::from_millis(60 * 60 * 1000); // 1h
 
@@ -126,10 +123,10 @@ pub enum ErrorCode {
         #[source]
         BoxedError,
     ),
-    #[error("RPC error: {0}")]
+    #[error(transparent)]
     RpcError(
-        #[source]
-        #[backtrace]
+        // #[backtrace] // TODO(error-handling): there's a limitation that `#[transparent]` can't be used with `#[backtrace]` if no `#[from]`
+        // `tonic::transport::Error`, `TonicStatusWrapper`, or `RpcError`
         BoxedError,
     ),
     #[error("Bind error: {0}")]
@@ -195,12 +192,41 @@ pub struct RwError {
 
 impl From<RwError> for tonic::Status {
     fn from(err: RwError) -> Self {
-        match &*err.inner {
-            ErrorCode::ExprError(e) => tonic::Status::invalid_argument(e.to_string()),
-            ErrorCode::PermissionDenied(e) => tonic::Status::permission_denied(e),
-            ErrorCode::InternalError(e) => tonic::Status::internal(e),
-            _ => tonic::Status::internal(err.to_string()),
+        use tonic::Code;
+
+        let code = match &*err.inner {
+            ErrorCode::ExprError(_) => Code::InvalidArgument,
+            ErrorCode::PermissionDenied(_) => Code::PermissionDenied,
+            ErrorCode::InternalError(_) => Code::Internal,
+            _ => Code::Internal,
+        };
+
+        err.to_status_unnamed(code)
+    }
+}
+
+impl From<TonicStatusWrapper> for RwError {
+    fn from(status: TonicStatusWrapper) -> Self {
+        use tonic::Code;
+
+        let message = status.inner().message();
+
+        // TODO(error-handling): `message` loses the source chain.
+        match status.inner().code() {
+            Code::InvalidArgument => ErrorCode::InvalidParameterValue(message.to_string()),
+            Code::NotFound | Code::AlreadyExists => ErrorCode::CatalogError(status.into()),
+            Code::PermissionDenied => ErrorCode::PermissionDenied(message.to_string()),
+            Code::Cancelled => ErrorCode::SchedulerError(status.into()),
+            _ => ErrorCode::RpcError(status.into()),
         }
+        .into()
+    }
+}
+
+impl From<tonic::Status> for RwError {
+    fn from(status: tonic::Status) -> Self {
+        // Always wrap the status.
+        Self::from(TonicStatusWrapper::new(status))
     }
 }
 
@@ -289,22 +315,6 @@ impl From<PbFieldNotFound> for RwError {
             err.0
         ))
         .into()
-    }
-}
-
-impl From<tonic::Status> for RwError {
-    fn from(err: tonic::Status) -> Self {
-        match err.code() {
-            Code::InvalidArgument => {
-                ErrorCode::InvalidParameterValue(err.message().to_string()).into()
-            }
-            Code::NotFound | Code::AlreadyExists => {
-                ErrorCode::CatalogError(err.message().to_string().into()).into()
-            }
-            Code::PermissionDenied => ErrorCode::PermissionDenied(err.message().to_string()).into(),
-            Code::Cancelled => ErrorCode::SchedulerError(err.message().to_string().into()).into(),
-            _ => ErrorCode::InternalError(err.message().to_string()).into(),
-        }
     }
 }
 

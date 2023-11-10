@@ -15,8 +15,9 @@ alter system set not_exist_key to value;
 ----
 db error: ERROR: QueryError
 
-Caused by this error:
-  1: internal error: SystemParams error: unrecognized system param "not_exist_key"
+Caused by these errors (recent errors listed first):
+  1: gRPC request to meta service failed: Internal error
+  2: SystemParams error: unrecognized system param "not_exist_key"
 
 
 query error
