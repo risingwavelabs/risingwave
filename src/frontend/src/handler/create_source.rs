@@ -62,7 +62,9 @@ use crate::handler::create_table::{
     bind_pk_on_relation, bind_sql_column_constraints, bind_sql_columns, bind_sql_pk_names,
     ensure_table_constraints_supported, ColumnIdGenerator,
 };
-use crate::handler::util::{get_connector, is_cdc_connector, is_kafka_connector};
+use crate::handler::util::{
+    get_connector, is_cdc_connector, is_kafka_connector, is_key_mq_connector,
+};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
@@ -577,6 +579,7 @@ pub(crate) async fn bind_columns_from_source(
                 .join(","),
         ))));
     }
+
     Ok(res)
 }
 
@@ -704,12 +707,18 @@ pub(crate) async fn bind_source_pk(
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
-        (Format::Native, Encode::Native) | (Format::Plain, _) => sql_defined_pk_names,
+        (Format::Native, Encode::Native) => sql_defined_pk_names,
+        (Format::Plain, _) => {
+            if is_key_mq_connector(with_properties) {
+                add_default_key_column(columns);
+            }
+            sql_defined_pk_names
+        }
         (Format::Upsert, Encode::Json) => {
             if sql_defined_pk {
                 sql_defined_pk_names
             } else {
-                add_upsert_default_key_column(columns);
+                add_default_key_column(columns);
                 vec![DEFAULT_KEY_COLUMN_NAME.into()]
             }
         }
@@ -727,7 +736,7 @@ pub(crate) async fn bind_source_pk(
                 extracted_pk_names
             } else {
                 // For upsert avro, if we can't extract pk from schema, use message key as primary key
-                add_upsert_default_key_column(columns);
+                add_default_key_column(columns);
                 vec![DEFAULT_KEY_COLUMN_NAME.into()]
             }
         }
@@ -822,7 +831,7 @@ fn check_and_add_timestamp_column(
     }
 }
 
-fn add_upsert_default_key_column(columns: &mut Vec<ColumnCatalog>) {
+fn add_default_key_column(columns: &mut Vec<ColumnCatalog>) {
     let column = ColumnCatalog {
         column_desc: ColumnDesc {
             data_type: DataType::Bytea,
@@ -1256,7 +1265,7 @@ pub mod tests {
 
     use risingwave_common::catalog::{
         cdc_table_name_column_name, offset_column_name, row_id_column_name, DEFAULT_DATABASE_NAME,
-        DEFAULT_SCHEMA_NAME,
+        DEFAULT_KEY_COLUMN_NAME, DEFAULT_SCHEMA_NAME,
     };
     use risingwave_common::types::DataType;
 
@@ -1298,6 +1307,7 @@ pub mod tests {
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Serial,
+            DEFAULT_KEY_COLUMN_NAME => DataType::Bytea,
             "id" => DataType::Int32,
             "zipcode" => DataType::Int64,
             "rate" => DataType::Float32,
