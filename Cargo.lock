@@ -7546,6 +7546,7 @@ dependencies = [
  "prost-reflect",
  "prost-types 0.12.1",
  "protobuf-native",
+ "protobuf-src",
  "pulsar",
  "quote",
  "rand",
