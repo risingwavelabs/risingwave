@@ -32,30 +32,4 @@ fn main() {
         "cargo:rustc-env=PROTO_INCLUDE={}",
         proto_include_path.to_str().unwrap()
     );
-
-    let paths: Vec<_> = glob::glob(proto_include_path.join("**/*.proto").to_str().unwrap())
-        .unwrap()
-        // Shall errors here be fatal or ignored?
-        .filter_map(|p| {
-            Some(
-                p.ok()?
-                    .strip_prefix(proto_include_path.join("google/protobuf"))
-                    .ok()?
-                    .to_owned(),
-            )
-        })
-        .collect();
-    let out_dir = std::env::var_os("OUT_DIR").unwrap();
-    let dest_path = std::path::Path::new(&out_dir).join("for_all_wkts.rs");
-    std::fs::write(
-        dest_path,
-        format!(
-            r#"macro_rules! for_all_wkts {{
-                ($macro:ident) => {{
-                    $macro! {paths:?}
-                }};
-            }}"#
-        ),
-    )
-    .unwrap();
 }

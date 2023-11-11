@@ -34,7 +34,6 @@ pub(super) async fn load_file_descriptor_from_http(location: &Url) -> Result<Vec
     Ok(schema_bytes.to_vec())
 }
 
-include!(concat!(env!("OUT_DIR"), "/for_all_wkts.rs"));
 macro_rules! embed_wkts {
     [$( $path:literal ),+ $(,)?] => {
         &[$(
@@ -45,7 +44,20 @@ macro_rules! embed_wkts {
         ),+]
     };
 }
-const WELL_KNOWN_TYPES: &[(&str, &[u8])] = for_all_wkts! { embed_wkts };
+const WELL_KNOWN_TYPES: &[(&str, &[u8])] = embed_wkts![
+    "any.proto",
+    "api.proto",
+    "compiler/plugin.proto",
+    "descriptor.proto",
+    "duration.proto",
+    "empty.proto",
+    "field_mask.proto",
+    "source_context.proto",
+    "struct.proto",
+    "timestamp.proto",
+    "type.proto",
+    "wrappers.proto",
+];
 
 // Pull protobuf schema and all it's deps from the confluent schema registry,
 // and compile then into one file descriptor

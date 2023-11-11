@@ -153,7 +153,6 @@ tracing-test = "0.2"
 walkdir = "2"
 
 [build-dependencies]
-glob = "0.3"
 prost-build = "0.12"
 protobuf-src = "1"
 
