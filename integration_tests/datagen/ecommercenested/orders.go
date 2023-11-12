@@ -29,7 +29,7 @@ func getAddress(faker *gofakeit.Faker) address {
 
 type buyer struct {
 	Address address `json:"address"`
-	Id      uint    `json:"age"`
+	Id      uint    `json:"id"`
 }
 
 // TODO: Do I need to_json for buyer and address?
@@ -74,6 +74,10 @@ type parcelEvent struct {
 	EventTimestmap string `json:"event_timestamp"`
 	EventType      string `json:"event_type"`
 }
+
+// TODO: parcel events are way to fast
+// how do we limit the number of parcel events?
+// How does qps work?
 
 func (r *parcelEvent) ToPostgresSql() string {
 	return fmt.Sprintf(`INSERT INTO %s
