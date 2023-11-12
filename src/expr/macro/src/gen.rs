@@ -14,6 +14,8 @@
 
 //! Generate code for the functions.
 
+use std::stringify;
+
 use itertools::Itertools;
 use proc_macro2::{Ident, Span};
 use quote::{format_ident, quote};
@@ -501,6 +503,9 @@ impl FunctionAttr {
                         )*
                         #eval_row_variadic
                         Ok(#row_output)
+                    }
+                    fn name(&self) -> &str {
+                        stringify!(#fn_name)
                     }
                 }
 

@@ -94,6 +94,14 @@ impl Expression for BinaryShortCircuitExpression {
             _ => unimplemented!(),
         }
     }
+
+    fn name(&self) -> &str {
+        match self.expr_type {
+            Type::Or => "or",
+            Type::And => "and",
+            _ => unimplemented!(),
+        }
+    }
 }
 
 #[build_function("and(boolean, boolean) -> boolean")]

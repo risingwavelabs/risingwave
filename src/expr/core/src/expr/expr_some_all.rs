@@ -200,6 +200,14 @@ impl Expression for SomeAllExpression {
             Ok(None)
         }
     }
+
+    fn name(&self) -> &str {
+        match self.expr_type {
+            Type::Some => "some",
+            Type::All => "all",
+            _ => unreachable!(),
+        }
+    }
 }
 
 impl Build for SomeAllExpression {

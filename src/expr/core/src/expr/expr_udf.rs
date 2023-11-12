@@ -70,6 +70,10 @@ impl Expression for UdfExpression {
         let output_array = self.eval_inner(arg_columns, chunk.visibility()).await?;
         Ok(output_array.to_datum())
     }
+
+    fn name(&self) -> &str {
+        &self.identifier
+    }
 }
 
 impl UdfExpression {

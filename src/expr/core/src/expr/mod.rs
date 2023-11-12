@@ -102,6 +102,8 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     fn eval_const(&self) -> Result<Datum> {
         Err(ExprError::NotConstant)
     }
+
+    fn name(&self) -> &str;
 }
 
 /// An owned dynamically typed [`Expression`].

@@ -93,6 +93,10 @@ impl Expression for InExpression {
         let ret = self.exists(&data);
         Ok(ret.map(|b| b.to_scalar_value()))
     }
+
+    fn name(&self) -> &str {
+        "in"
+    }
 }
 
 impl Build for InExpression {

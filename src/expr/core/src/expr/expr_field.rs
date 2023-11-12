@@ -57,6 +57,10 @@ impl Expression for FieldExpression {
             .transpose()
             .map(|x| x.flatten())
     }
+
+    fn name(&self) -> &str {
+        "field"
+    }
 }
 
 impl FieldExpression {

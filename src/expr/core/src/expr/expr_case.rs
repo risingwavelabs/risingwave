@@ -106,6 +106,10 @@ impl Expression for CaseExpression {
             Ok(None)
         }
     }
+
+    fn name(&self) -> &str {
+        "case"
+    }
 }
 
 impl Build for CaseExpression {

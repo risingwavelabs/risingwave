@@ -76,6 +76,10 @@ impl Expression for CoalesceExpression {
         }
         Ok(None)
     }
+
+    fn name(&self) -> &str {
+        "coalesce"
+    }
 }
 
 impl CoalesceExpression {

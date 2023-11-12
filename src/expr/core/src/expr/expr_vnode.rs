@@ -81,6 +81,10 @@ impl Expression for VnodeExpression {
                 .into(),
         ))
     }
+
+    fn name(&self) -> &str {
+        "vnode"
+    }
 }
 
 #[cfg(test)]

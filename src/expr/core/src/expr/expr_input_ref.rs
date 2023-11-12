@@ -44,6 +44,10 @@ impl Expression for InputRefExpression {
         let cell = input.index(self.idx).as_ref().cloned();
         Ok(cell)
     }
+
+    fn name(&self) -> &str {
+        "input_ref"
+    }
 }
 
 impl InputRefExpression {

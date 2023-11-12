@@ -140,4 +140,8 @@ where
     fn eval_const(&self) -> Result<Datum> {
         self.inner.eval_const() // do not handle error
     }
+
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
 }

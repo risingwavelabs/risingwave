@@ -49,6 +49,10 @@ impl Expression for LiteralExpression {
     fn eval_const(&self) -> Result<Datum> {
         Ok(self.literal.clone())
     }
+
+    fn name(&self) -> &str {
+        "literal"
+    }
 }
 
 impl LiteralExpression {

@@ -601,7 +601,7 @@ impl Explain for PlanRef {
     fn explain<'a>(&self) -> Pretty<'a> {
         let mut node = self.distill();
         let inputs = self.inputs();
-        for input in inputs.iter().peekable() {
+        for input in inputs.iter() {
             node.children.push(input.explain());
         }
         Pretty::Record(node)

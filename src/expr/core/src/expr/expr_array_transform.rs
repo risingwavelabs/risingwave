@@ -63,4 +63,8 @@ impl Expression for ArrayTransformExpression {
             Ok(None)
         }
     }
+
+    fn name(&self) -> &str {
+        "array_transform"
+    }
 }

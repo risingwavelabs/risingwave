@@ -50,4 +50,8 @@ impl<E: Expression> Expression for Checked<E> {
     fn eval_const(&self) -> Result<Datum> {
         self.0.eval_const()
     }
+
+    fn name(&self) -> &str {
+        self.0.name()
+    }
 }
