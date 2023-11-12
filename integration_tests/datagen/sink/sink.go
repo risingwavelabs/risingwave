@@ -31,27 +31,27 @@ type BaseSinkRecord struct {
 }
 
 func (r BaseSinkRecord) Topic() string {
-	panic("not implemented")
+	panic("Topic not implemented")
 }
 
 func (r BaseSinkRecord) Key() string {
-	panic("not implemented")
+	panic("Key not implemented")
 }
 
 func (r BaseSinkRecord) ToPostgresSql() string {
-	panic("not implemented")
+	panic("ToPostgresSql not implemented")
 }
 
 func (r BaseSinkRecord) ToJson() []byte {
-	panic("not implemented")
+	panic("ToJson not implemented")
 }
 
 func (r BaseSinkRecord) ToProtobuf() []byte {
-	panic("not implemented")
+	panic("ToProtobuf not implemented")
 }
 
 func (r BaseSinkRecord) ToAvro() []byte {
-	panic("not implemented")
+	panic("ToAvro not implemented")
 }
 
 // Convert the event to a message in the given format.

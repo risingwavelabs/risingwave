@@ -4,6 +4,7 @@ import (
 	"context"
 	"datagen/gen"
 	"datagen/sink"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"sync/atomic"
@@ -35,6 +36,15 @@ type userEvent struct {
 
 func (r userEvent) Key() string {
 	return fmt.Sprint(r.Id)
+}
+
+func (r userEvent) ToJson() []byte {
+	data, _ := json.Marshal(r)
+	return data
+}
+
+func (r userEvent) Topic() string {
+	return "user_events"
 }
 
 func getRandRole() string {

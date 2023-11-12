@@ -32,6 +32,8 @@ type buyer struct {
 	Id      uint    `json:"age"`
 }
 
+// TODO: Do I need to_json for buyer and address?
+
 // The order details.
 type orderEvent struct {
 	sink.BaseSinkRecord
@@ -55,6 +57,14 @@ func (r *orderEvent) ToJson() []byte {
 	return data
 }
 
+func (r *orderEvent) Topic() string {
+	return "order_events"
+}
+
+func (r *orderEvent) Key() string {
+	return fmt.Sprintf("%v", r.OrderId)
+}
+
 // Each order/trade will be composed of two events:
 // An 'order_created' event and a 'parcel_shipped' event.
 type parcelEvent struct {
@@ -75,6 +85,14 @@ values ('%d', '%s', '%s')`,
 func (r *parcelEvent) ToJson() []byte {
 	data, _ := json.Marshal(r)
 	return data
+}
+
+func (r *parcelEvent) Topic() string {
+	return "parcel_events"
+}
+
+func (r *parcelEvent) Key() string {
+	return fmt.Sprintf("%v", r.OrderId)
 }
 
 type ecommerceGen struct {

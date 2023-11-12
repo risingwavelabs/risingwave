@@ -14,13 +14,16 @@ func Newgen() *nestedGen {
 }
 
 func (g *nestedGen) KafkaTopics() []string {
-	return []string{"users", "orders"}
+	pe := parcelEvent{}
+	oe := orderEvent{}
+	ue := userEvent{}
+	return []string{pe.Topic(), oe.Topic(), ue.Topic()}
 }
 
 // TODO: how does it know to which topics to send?
 func (g *nestedGen) Load(ctx context.Context, outCh chan<- sink.SinkRecord) {
 
-	time.Sleep(10 * time.Second)
+	time.Sleep(10 * time.Second) // TODO: remove.
 
 	maxUserId := atomic.Pointer[int64]{}
 	zero := int64(0)
