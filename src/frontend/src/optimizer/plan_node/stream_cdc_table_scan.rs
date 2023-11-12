@@ -74,17 +74,25 @@ impl StreamCdcTableScan {
 
     /// Build catalog for cdc backfill state
     /// Right now we only persist whether the backfill is finished and the corresponding cdc offset
-    /// schema: | `table_id` | `backfill_finished` | `row_count` | `cdc_offset` |
+    /// schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset` |
     pub fn build_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,
     ) -> TableCatalog {
         let properties = self.ctx().with_options().internal_table_subset();
         let mut catalog_builder = TableCatalogBuilder::new(properties);
+        let upstream_schema = &self.core.get_table_columns();
 
-        // use `table_id` as primary key in state table.
+        // Use `split_id` as primary key in state table.
+        // Currently we only support single split for cdc backfill.
         catalog_builder.add_column(&Field::with_name(DataType::Varchar, "split_id"));
         catalog_builder.add_order_column(0, OrderType::ascending());
+
+        // pk columns
+        for col_order in self.core.primary_key() {
+            let col = &upstream_schema[col_order.column_index];
+            catalog_builder.add_column(&Field::from(col));
+        }
 
         catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
 
@@ -203,9 +211,10 @@ impl StreamCdcTableScan {
             .build_backfill_state_catalog(state)
             .to_internal_table_prost();
 
+        // We need to pass the id of upstream source job here
+        let upstream_source_id = self.core.cdc_table_desc.source_id.table_id;
         let node_body = PbNodeBody::StreamScan(StreamScanNode {
-            // We need to pass the table id of upstream source job here
-            table_id: self.core.cdc_table_desc.source_id.table_id,
+            table_id: upstream_source_id,
             stream_scan_type: self.stream_scan_type as i32,
             // The column indices need to be forwarded to the downstream
             output_indices,

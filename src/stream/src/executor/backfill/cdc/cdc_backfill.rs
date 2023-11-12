@@ -38,7 +38,6 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::cdc::state::{
     CdcBackfillStateImpl, MultiBackfillState, SingleBackfillState,
 };
-use crate::executor::backfill::cdc::CdcStateItem;
 use crate::executor::backfill::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::upstream_table::snapshot::{
     SnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
@@ -53,6 +52,9 @@ use crate::executor::{
     StreamExecutorResult,
 };
 use crate::task::CreateMviewProgress;
+
+/// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
+const METADATA_STATE_LEN: usize = 4;
 
 pub struct CdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -140,7 +142,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // if not, we should bypass the backfill directly.
         let mut state_impl = if shared_cdc_source {
             assert!(self.state_table.is_some(), "expect state table for shared cdc source");
-            CdcBackfillStateImpl::MultiTable(MultiBackfillState::new(upstream_table_id, self.state_table.unwrap()))
+            CdcBackfillStateImpl::MultiTable(MultiBackfillState::new(upstream_table_id, self.state_table.unwrap(), pk_in_output_indices.len() + METADATA_STATE_LEN))
         } else if let Some(mutation) = first_barrier.mutation.as_ref() &&
             let Mutation::Add{splits, ..} = mutation.as_ref()
         {
@@ -193,16 +195,13 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         tracing::debug!(?upstream_table_id, ?shared_cdc_source, "start cdc backfill");
         state_impl.init_epoch(first_barrier.epoch);
 
-        let backfill_offset = None;
-
-        current_pk_pos = backfill_offset;
-
-        // restore backfill done flag from state store
-        let CdcStateItem { is_finished, .. } = state_impl.restore_state().await?;
+        // restore backfill state
+        let state = state_impl.restore_state().await?;
+        current_pk_pos = state.current_pk_pos.clone();
 
         // If the snapshot is empty, we don't need to backfill.
         let is_snapshot_empty: bool = {
-            if is_finished {
+            if state.is_finished {
                 // It is finished, so just assign a value to avoid accessing storage table again.
                 false
             } else {
@@ -217,17 +216,19 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // | t                    | t/f            | f                |
         // | f                    | t              | f                |
         // | f                    | f              | t                |
-        let to_backfill = !is_finished && !is_snapshot_empty;
+        let to_backfill = !state.is_finished && !is_snapshot_empty;
 
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
 
         // Keep track of rows from the snapshot.
-        let mut total_snapshot_processed_rows: u64 = 0;
+        let mut total_snapshot_row_count: u64 = 0;
         let mut snapshot_read_epoch;
 
-        let mut last_binlog_offset: Option<CdcOffset> =
-            upstream_table_reader.current_binlog_offset().await?;
+        let mut last_binlog_offset: Option<CdcOffset> = state.last_cdc_offset.map_or(
+            upstream_table_reader.current_binlog_offset().await?,
+            |cdc_offset| Some(cdc_offset),
+        );
 
         let mut consumed_binlog_offset: Option<CdcOffset> = None;
 
@@ -337,11 +338,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                                     // update and persist backfill state
                                     state_impl
-                                        .mutate_state(CdcStateItem::new(
-                                            false,
+                                        .mutate_state(
+                                            current_pk_pos.clone(),
                                             last_binlog_offset.clone(),
-                                            total_snapshot_processed_rows as _,
-                                        ))
+                                            total_snapshot_row_count,
+                                            false,
+                                        )
                                         .await?;
                                     state_impl.commit_state(barrier.epoch).await?;
 
@@ -350,7 +352,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         progress.update(
                                             barrier.epoch.curr,
                                             snapshot_read_epoch,
-                                            total_snapshot_processed_rows,
+                                            total_snapshot_row_count,
                                         );
                                     }
 
@@ -421,11 +423,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     }
 
                                     state_impl
-                                        .mutate_state(CdcStateItem::new(
-                                            true,
+                                        .mutate_state(
+                                            current_pk_pos,
                                             last_binlog_offset.clone(),
-                                            total_snapshot_processed_rows as _,
-                                        ))
+                                            total_snapshot_row_count,
+                                            true,
+                                        )
                                         .await?;
                                     break 'backfill_loop;
                                 }
@@ -442,7 +445,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     );
                                     let chunk_cardinality = chunk.cardinality() as u64;
                                     cur_barrier_snapshot_processed_rows += chunk_cardinality;
-                                    total_snapshot_processed_rows += chunk_cardinality;
+                                    total_snapshot_row_count += chunk_cardinality;
                                     yield Message::Chunk(mapping_chunk(
                                         chunk,
                                         &self.output_indices,
@@ -461,11 +464,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
             // The snapshot is empty, just set backfill to finished
             state_impl
-                .mutate_state(CdcStateItem::new(
-                    true,
+                .mutate_state(
+                    current_pk_pos,
                     last_binlog_offset,
-                    total_snapshot_processed_rows as _,
-                ))
+                    total_snapshot_row_count,
+                    true,
+                )
                 .await?;
         }
 
@@ -484,7 +488,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                     // mark progress as finished
                     if let Some(progress) = self.progress.as_mut() {
-                        progress.finish(barrier.epoch.curr, total_snapshot_processed_rows);
+                        progress.finish(barrier.epoch.curr, total_snapshot_row_count);
                     }
                     yield msg;
                     // break after the state have been saved

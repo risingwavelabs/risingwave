@@ -15,4 +15,4 @@
 pub mod cdc_backfill;
 mod state;
 
-pub use state::{CdcStateItem, BACKFILL_STATE_KEY_SUFFIX};
+pub use state::{CdcStateRecord, BACKFILL_STATE_KEY_SUFFIX};

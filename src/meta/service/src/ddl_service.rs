@@ -459,8 +459,9 @@ impl DdlService for DdlServiceImpl {
         let mut fragment_graph = request.fragment_graph.unwrap();
         let table_id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
 
-        // Generate source id.
+        // If we're creating a table with connector, we should additionally fill its ID first.
         let source_id = if source.is_some() {
+            // Generate source id.
             self.gen_unique_id::<{ IdCategory::Table }>().await? // TODO: Use source category
         } else {
             TableId::placeholder().into()
@@ -869,7 +870,6 @@ fn fill_table_stream_graph_info(
             if let NodeBody::Source(source_node) = node_body {
                 // If we're creating a table with connector, we should additionally fill its ID first.
                 if let Some(&mut (ref mut source, source_id)) = source_info.as_mut() {
-                    // If we're creating a table with connector, we should additionally fill its ID first.
                     source.id = source_id;
                     let mut source_count = 0;
 
