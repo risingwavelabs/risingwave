@@ -738,14 +738,6 @@ impl S3ObjectStore {
                     }
                 }
 
-                if let Some(status) = rule.status() {
-                    match status {
-                        ExpirationStatus::Disabled => todo!(),
-                        ExpirationStatus::Enabled => todo!(),
-                        ExpirationStatus::Unknown(_) => todo!(),
-                        _ => todo!(),
-                    }
-                };
                 if matches!(rule.status().unwrap(), ExpirationStatus::Enabled)
                     && rule.abort_incomplete_multipart_upload().is_some()
                 {
