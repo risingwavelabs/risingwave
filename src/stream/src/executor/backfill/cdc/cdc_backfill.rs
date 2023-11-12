@@ -49,13 +49,14 @@ use crate::executor::backfill::utils::{
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, Mutation, PkIndices, PkIndicesRef, SourceStateTableHandler,
-    StreamExecutorError, StreamExecutorResult,
+    ExecutorInfo, Message, Mutation, PkIndicesRef, SourceStateTableHandler, StreamExecutorError,
+    StreamExecutorResult,
 };
-use crate::task::{ActorId, CreateMviewProgress};
+use crate::task::CreateMviewProgress;
 
 pub struct CdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
+    info: ExecutorInfo,
 
     /// The external table to be backfilled
     external_table: ExternalStorageTable,
@@ -66,10 +67,6 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     /// User may select a subset of columns from the upstream table.
     output_indices: Vec<usize>,
-
-    actor_id: ActorId,
-
-    info: ExecutorInfo,
 
     /// State table of the Source executor
     source_state_handler: Option<SourceStateTableHandler<S>>,
@@ -90,12 +87,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
+        info: ExecutorInfo,
         external_table: ExternalStorageTable,
         upstream: BoxedExecutor,
         output_indices: Vec<usize>,
         progress: Option<CreateMviewProgress>,
-        schema: Schema,
-        pk_indices: PkIndices,
         metrics: Arc<StreamingMetrics>,
         state_table: Option<StateTable<S>>,
         source_state_handler: Option<SourceStateTableHandler<S>>,
@@ -103,22 +99,17 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         chunk_size: usize,
     ) -> Self {
         Self {
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: "CdcBackfillExecutor".to_owned(),
-            },
+            actor_ctx,
+            info,
             external_table,
             upstream,
             output_indices,
-            actor_id: 0,
-            metrics,
-            chunk_size,
-            actor_ctx,
             source_state_handler,
             shared_cdc_source,
             state_table,
             progress,
+            metrics,
+            chunk_size,
         }
     }
 
@@ -130,6 +121,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
         let shared_cdc_source = self.shared_cdc_source;
         let upstream_table_id = self.external_table.table_id().table_id;
+        let upstream_table_schema = self.external_table.schema().clone();
         let upstream_table_reader = UpstreamTableReader::new(self.external_table);
 
         let mut upstream = self.upstream.execute();
@@ -191,7 +183,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         };
 
         let mut upstream = if shared_cdc_source {
-            transform_upstream(upstream, &self.info.schema)
+            transform_upstream(upstream, &upstream_table_schema)
                 .boxed()
                 .peekable()
         } else {
@@ -326,7 +318,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         .backfill_snapshot_read_row_count
                                         .with_label_values(&[
                                             upstream_table_id.to_string().as_str(),
-                                            self.actor_id.to_string().as_str(),
+                                            self.actor_ctx.id.to_string().as_str(),
                                         ])
                                         .inc_by(cur_barrier_snapshot_processed_rows);
 
@@ -334,7 +326,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         .backfill_upstream_output_row_count
                                         .with_label_values(&[
                                             upstream_table_id.to_string().as_str(),
-                                            self.actor_id.to_string().as_str(),
+                                            self.actor_ctx.id.to_string().as_str(),
                                         ])
                                         .inc_by(cur_barrier_upstream_processed_rows);
 

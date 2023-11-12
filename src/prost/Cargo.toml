@@ -14,6 +14,7 @@ prost = { workspace = true }
 prost-helpers = { path = "helpers" }
 serde = { version = "1", features = ["derive"] }
 strum = "0.25"
+thiserror = "1"
 tonic = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]

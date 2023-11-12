@@ -195,12 +195,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         // use schema from table_desc
                         let cdc_backfill = CdcBackfillExecutor::new(
                             params.actor_context.clone(),
+                            params.info.clone(),
                             external_table,
                             Box::new(source_exec),
                             (0..table_schema.len()).collect_vec(),
                             None,
-                            table_schema,
-                            params.pk_indices,
                             params.executor_stats,
                             None,
                             Some(source_state_handler),
