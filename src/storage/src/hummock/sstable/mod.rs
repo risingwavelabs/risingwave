@@ -34,6 +34,7 @@ pub mod builder;
 pub use builder::*;
 pub mod writer;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::MAX_EPOCH;
 pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
@@ -149,7 +150,7 @@ impl DeleteRangeTombstone {
 /// thus the `new epoch` is epoch2. epoch2 will be used from the event key wmk1 (5) and till the
 /// next event key wmk2 (7) (not inclusive).
 /// If there is no range deletes between current event key and next event key, `new_epoch` will be
-/// `HummockEpoch::MAX`.
+/// `MAX_EPOCH`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MonotonicDeleteEvent {
     pub event_key: PointRange<Vec<u8>>,
@@ -208,7 +209,7 @@ pub(crate) fn create_monotonic_events_from_compaction_delete_events(
         apply_event(&mut epochs, &event);
         monotonic_tombstone_events.push(MonotonicDeleteEvent {
             event_key: event.0,
-            new_epoch: epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch),
+            new_epoch: epochs.first().map_or(MAX_EPOCH, |epoch| *epoch),
         });
     }
     monotonic_tombstone_events.dedup_by(|a, b| {
@@ -406,7 +407,7 @@ pub struct SstableMeta {
     /// epoch1 to epoch2, thus the `new epoch` is epoch2. epoch2 will be used from the event
     /// key wmk1 (5) and till the next event key wmk2 (7) (not inclusive).
     /// If there is no range deletes between current event key and next event key, `new_epoch` will
-    /// be `HummockEpoch::MAX`.
+    /// be `MAX_EPOCH`.
     pub monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
     /// Format version, for further compatibility.
     pub version: u32,

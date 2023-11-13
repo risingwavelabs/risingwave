@@ -22,6 +22,7 @@ mod test {
     use futures::{pin_mut, FutureExt};
     use risingwave_common::cache::CachePriority;
     use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+    use risingwave_hummock_sdk::EpochWithGap;
 
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
@@ -349,7 +350,7 @@ mod test {
                     table_id: Default::default(),
                     table_key: TableKey(&b"test_key"[..]),
                 },
-                epoch: 0,
+                epoch_with_gap: EpochWithGap::new_from_epoch(0),
             }
         }
 

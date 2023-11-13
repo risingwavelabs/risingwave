@@ -24,3 +24,7 @@ updates:
       patterns:
         - "tonic*"
         - "prost*"
+    mysql:
+      patterns:
+        - "mysql_common"
+        - "mysql_async"

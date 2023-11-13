@@ -383,6 +383,7 @@ define_keywords!(
     PRIMARY,
     PRIVILEGES,
     PROCEDURE,
+    PROCESSLIST,
     PURGE,
     RANGE,
     RANK,

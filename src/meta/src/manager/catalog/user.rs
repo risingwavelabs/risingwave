@@ -111,7 +111,11 @@ impl UserManager {
     pub fn decrease_ref_count(&mut self, user_id: UserId, count: usize) {
         match self.catalog_create_ref_count.entry(user_id) {
             Entry::Occupied(mut o) => {
-                assert!(*o.get_mut() >= count);
+                assert!(
+                    *o.get() >= count,
+                    "Attempted to decrease ref_count by {} but current ref_count is only {}. UserId: {:?}",
+                    count, *o.get(), user_id
+                );
                 *o.get_mut() -= count;
                 if *o.get() == 0 {
                     o.remove_entry();
