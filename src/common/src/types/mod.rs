@@ -921,7 +921,7 @@ impl ScalarImpl {
             DataType::Jsonb => Self::Jsonb(JsonbVal::from_str(str).map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?),
-            DataType::List(datatype) => {
+            DataType::List(elem_type) => {
                 // TODO: support nested list
                 if !(str.starts_with('{') && str.ends_with('}')) {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -929,9 +929,9 @@ impl ScalarImpl {
                     ))
                     .into());
                 }
-                let mut builder = data_type.create_array_builder(0);
+                let mut builder = elem_type.create_array_builder(0);
                 for s in str[1..str.len() - 1].split(',') {
-                    builder.append(Some(Self::from_text(s.trim().as_bytes(), datatype)?));
+                    builder.append(Some(Self::from_text(s.trim().as_bytes(), elem_type)?));
                 }
                 Self::List(ListValue::new(builder.finish()))
             }

@@ -46,7 +46,7 @@ impl ArrayBuilder for ListArrayBuilder {
 
     #[cfg(not(test))]
     fn new(_capacity: usize) -> Self {
-        panic!("Must use with_type.")
+        panic!("please use `ListArrayBuilder::with_type` instead");
     }
 
     #[cfg(test)]
@@ -278,7 +278,10 @@ where
 {
     fn from_iter<I: IntoIterator<Item = Option<L>>>(iter: I) -> Self {
         let iter = iter.into_iter();
-        let mut builder = ListArrayBuilder::new(iter.size_hint().0);
+        let mut builder = ListArrayBuilder::with_type(
+            iter.size_hint().0,
+            DataType::List(Box::new(T::DATA_TYPE.clone())),
+        );
         for v in iter {
             match v {
                 None => builder.append(None),
@@ -293,8 +296,13 @@ where
 
 impl FromIterator<ListValue> for ListArray {
     fn from_iter<I: IntoIterator<Item = ListValue>>(iter: I) -> Self {
-        let iter = iter.into_iter();
-        let mut builder = ListArrayBuilder::new(iter.size_hint().0);
+        let mut iter = iter.into_iter();
+        let first = iter.next().expect("empty iterator");
+        let mut builder = ListArrayBuilder::with_type(
+            iter.size_hint().0,
+            DataType::List(Box::new(first.data_type())),
+        );
+        builder.append(Some(first.as_scalar_ref()));
         for v in iter {
             builder.append(Some(v.as_scalar_ref()));
         }
@@ -324,6 +332,10 @@ impl ListValue {
         Self {
             values: Box::new(values),
         }
+    }
+
+    pub fn into_array(self) -> ArrayImpl {
+        *self.values
     }
 
     pub fn empty(datatype: &DataType) -> Self {
@@ -664,8 +676,7 @@ mod tests {
     fn test_list_create_builder() {
         use crate::array::*;
         let arr = ListArray::from_iter([Some([F32::from(2.0), F32::from(42.0), F32::from(1.0)])]);
-        let builder = arr.create_builder(0);
-        let arr2 = builder.finish();
+        let arr2 = arr.create_builder(0).finish();
         assert_eq!(arr.data_type(), arr2.data_type());
     }
 
@@ -687,13 +698,13 @@ mod tests {
         {
             let data_type = DataType::List(Box::new(DataType::List(Box::new(DataType::Int32))));
             let mut builder = ListArrayBuilder::with_type(2, data_type);
-            let val1 = ListValue::from_iter([1i32, 2, 3]);
-            let val2 = ListValue::from_iter([1i32, 2, 3]);
+            let val1 = ListValue::from_iter([1, 2, 3]);
+            let val2 = ListValue::from_iter([1, 2, 3]);
             let list1 = ListValue::from_iter([val1, val2]);
             builder.append(Some(list1.as_scalar_ref()));
 
-            let val3 = ListValue::from_iter([1i32, 2, 3]);
-            let val4 = ListValue::from_iter([1i32, 2, 3]);
+            let val3 = ListValue::from_iter([1, 2, 3]);
+            let val4 = ListValue::from_iter([1, 2, 3]);
             let list2 = ListValue::from_iter([val3, val4]);
 
             builder.append(Some(list2.as_scalar_ref()));
