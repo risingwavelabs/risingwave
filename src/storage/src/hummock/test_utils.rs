@@ -39,7 +39,7 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{
     create_monotonic_events, BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator,
     DeleteRangeTombstone, FilterBuilder, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
-    SstableStoreRef, SstableWriter, Xor16FilterBuilder,
+    SstableStoreRef, SstableWriter, TableHolder, Xor16FilterBuilder,
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;

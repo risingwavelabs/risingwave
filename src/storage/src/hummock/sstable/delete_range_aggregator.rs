@@ -314,8 +314,8 @@ mod tests {
         gen_iterator_test_sstable_with_range_tombstones, iterator_test_user_key_of,
         mock_sstable_store,
     };
-    use crate::monitor::StoreLocalStatistic;
     use crate::hummock::test_utils::{test_user_key, CompactionDeleteRangesBuilder};
+    use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
     pub async fn test_compaction_delete_range_iterator() {
