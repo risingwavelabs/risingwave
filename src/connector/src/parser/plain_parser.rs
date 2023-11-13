@@ -18,6 +18,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::bytes_parser::BytesAccessBuilder;
 use super::unified::util::apply_key_val_accessor_on_stream_chunk_writer;
+use super::unified::Access;
 use super::{
     AccessBuilderImpl, ByteStreamSourceParser, BytesProperties, EncodingProperties, EncodingType,
     SourceStreamChunkRowWriter, SpecificParserConfig,
@@ -70,24 +71,39 @@ impl PlainParser {
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<()> {
-        // if key is empty, set it as vec![]su
-        let key_data = key.unwrap_or_default();
         // if payload is empty, report error
         let payload_data = payload.ok_or_else(|| {
             RwError::from(ErrorCode::InternalError(
                 "Empty payload with nonempty key".into(),
             ))
         })?;
+        let payload_accessor: super::unified::AccessImpl<'_, '_> =
+            self.payload_builder.generate_accessor(payload_data).await?;
 
-        let key_accessor = self.key_builder.generate_accessor(key_data).await?;
-        let payload_accessor = self.payload_builder.generate_accessor(payload_data).await?;
-        apply_key_val_accessor_on_stream_chunk_writer(
-            DEFAULT_KEY_COLUMN_NAME,
-            key_accessor,
-            payload_accessor,
-            &mut writer,
-        )
-        .map_err(Into::into)
+        match key {
+            Some(key_data) => {
+                let key_accessor = self.key_builder.generate_accessor(key_data).await?;
+
+                writer
+                    .insert(|column: &SourceColumnDesc| {
+                        if column.name == DEFAULT_KEY_COLUMN_NAME {
+                            key_accessor.access(&[&column.name], Some(&column.data_type))
+                        } else {
+                            payload_accessor.access(&[&column.name], Some(&column.data_type))
+                        }
+                    })
+                    .map_err(Into::into)
+            }
+            None => writer
+                .insert(|column: &SourceColumnDesc| {
+                    if column.name == DEFAULT_KEY_COLUMN_NAME {
+                        Ok(None)
+                    } else {
+                        payload_accessor.access(&[&column.name], Some(&column.data_type))
+                    }
+                })
+                .map_err(Into::into),
+        }
     }
 }
 
