@@ -1538,11 +1538,6 @@ impl ScaleController {
             .post_apply_reschedules(reschedules.clone())
             .await?;
 
-        // self.env
-        //     .notification_manager()
-        //     .notify_frontend_without_version(Operation::Update, Info::ServingParallelUnitMappings(FragmentParallelUnitMappings{ mappings: fragment_mapping_to_notify.clone() }));
-        //
-
         // Update serving fragment info after rescheduling in meta store.
         if !reschedules.is_empty() {
             let workers = self
