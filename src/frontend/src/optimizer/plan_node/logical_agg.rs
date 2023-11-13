@@ -22,7 +22,7 @@ use risingwave_expr::aggregate::{agg_kinds, AggKind};
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamProject, StreamSimpleAgg,
     StreamStatelessSimpleAgg, ToBatch, ToStream,
 };
@@ -31,7 +31,6 @@ use crate::expr::{
     WindowFunction,
 };
 use crate::optimizer::plan_node::generic::GenericPlanNode;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalDedup, LogicalProject,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -49,7 +48,7 @@ use crate::utils::{
 /// The output schema will first include the group key and then the aggregation calls.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LogicalAgg {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: Agg<PlanRef>,
 }
 
@@ -58,9 +57,9 @@ impl LogicalAgg {
     /// Should only be used iff input is distributed. Input must be converted to stream form.
     fn gen_stateless_two_phase_streaming_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         debug_assert!(self.group_key().is_empty());
-        let mut logical = self.core.clone();
-        logical.input = stream_input;
-        let local_agg = StreamStatelessSimpleAgg::new(logical);
+        let mut core = self.core.clone();
+        core.input = stream_input;
+        let local_agg = StreamStatelessSimpleAgg::new(core);
         let exchange =
             RequiredDist::single().enforce_if_not_satisfies(local_agg.into(), &Order::any())?;
         let global_agg = new_stream_simple_agg(Agg::new(
@@ -166,23 +165,25 @@ impl LogicalAgg {
     }
 
     fn gen_single_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
-        let mut logical = self.core.clone();
+        let mut core = self.core.clone();
         let input = RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?;
-        logical.input = input;
-        Ok(new_stream_simple_agg(logical).into())
+        core.input = input;
+        Ok(new_stream_simple_agg(core).into())
     }
 
     fn gen_shuffle_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
         let input =
             RequiredDist::shard_by_key(stream_input.schema().len(), &self.group_key().to_vec())
                 .enforce_if_not_satisfies(stream_input, &Order::any())?;
-        let mut logical = self.core.clone();
-        logical.input = input;
-        Ok(new_stream_hash_agg(logical, None).into())
+        let mut core = self.core.clone();
+        core.input = input;
+        Ok(new_stream_hash_agg(core, None).into())
     }
 
     /// Generates distributed stream plan.
     fn gen_dist_stream_agg_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         let input_dist = stream_input.distribution();
         debug_assert!(*input_dist != Distribution::Broadcast);
 
@@ -1126,18 +1127,20 @@ fn find_or_append_row_count(mut logical: Agg<PlanRef>) -> (Agg<PlanRef>, usize) 
     (logical, row_count_idx)
 }
 
-fn new_stream_simple_agg(logical: Agg<PlanRef>) -> StreamSimpleAgg {
-    let (logical, row_count_idx) = find_or_append_row_count(logical);
+fn new_stream_simple_agg(core: Agg<PlanRef>) -> StreamSimpleAgg {
+    let (logical, row_count_idx) = find_or_append_row_count(core);
     StreamSimpleAgg::new(logical, row_count_idx)
 }
 
-fn new_stream_hash_agg(logical: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> StreamHashAgg {
-    let (logical, row_count_idx) = find_or_append_row_count(logical);
+fn new_stream_hash_agg(core: Agg<PlanRef>, vnode_col_idx: Option<usize>) -> StreamHashAgg {
+    let (logical, row_count_idx) = find_or_append_row_count(core);
     StreamHashAgg::new(logical, vnode_col_idx, row_count_idx)
 }
 
 impl ToStream for LogicalAgg {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         for agg_call in self.agg_calls() {
             if matches!(agg_call.agg_kind, agg_kinds::unimplemented_in_stream!()) {
                 return Err(ErrorCode::NotImplemented(
@@ -1211,7 +1214,7 @@ impl ToStream for LogicalAgg {
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);
         let (map, _) = out_col_change.into_parts();
-        let out_col_change = ColIndexMapping::with_target_size(map, agg.schema().len());
+        let out_col_change = ColIndexMapping::new(map, agg.schema().len());
         Ok((agg.into(), out_col_change))
     }
 }

@@ -2,7 +2,7 @@
 
 This guide is intended to be used by contributors to learn about how to develop RisingWave. The instructions about how to submit code changes are included in [contributing guidelines](../CONTRIBUTING.md).
 
-If you have questions, you can search for existing discussions or start a new discussion in the [Discussions forum of RisingWave](https://github.com/risingwavelabs/risingwave/discussions), or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join the channel.
+If you have questions, you can search for existing discussions or start a new discussion in the [Discussions forum of RisingWave](https://github.com/risingwavelabs/risingwave/discussions), or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://risingwave.com/slack) to join the channel.
 
 To report bugs, create a [GitHub issue](https://github.com/risingwavelabs/risingwave/issues/new/choose).
 
@@ -47,6 +47,7 @@ http://ecotrust-canada.github.io/markdown-toc/
 - [Submit PRs](#submit-prs)
 - [Profiling](#benchmarking-and-profiling)
 - [Understanding RisingWave Macros](#understanding-risingwave-macros)
+- [CI Labels Guide](#ci-labels-guide)
 
 ## Read the design docs
 
@@ -523,3 +524,18 @@ Instructions about submitting PRs are included in the [contribution guidelines](
 - [CPU Profiling Guide](./cpu-profiling.md)
 - [Memory (Heap) Profiling Guide](./memory-profiling.md)
 - [Microbench Guide](./microbenchmarks.md)
+
+## CI Labels Guide
+
+- `ci/skip-ci` + `[ci/run-xxx ...]` : Run specific steps indicated by `ci/run-xxx` in your **DRAFT PR.**
+- `ci/run-main-cron`: Run full `main-cron`.
+- `ci/run-main-cron` + `ci/main-cron/skip-ci` + `[ci/run-xxx …]` : Run specific steps indicated by `ci/run-xxx`
+  from the `main-cron` workflow, in your PR. Can use to verify some `main-cron` fix works as expected.
+- **Be sure to add all the dependencies.**
+
+  For example to run `e2e-test` for `main-cron` in your pull request:
+  1. Add `ci/run-build`, `ci/run-build-other`, `ci/run-docslt` .
+     These correspond to its `depends` field in `pull-request.yml` and `main-cron.yml` .
+  2. Add `ci/run-e2e-test` to run the step as well.
+  3. Add `ci/run-main-cron` to run `main-cron` workflow in your pull request,
+  4. Add `ci/main-cron/skip-ci` to skip all other steps which were not selected with `ci/run-xxx`.

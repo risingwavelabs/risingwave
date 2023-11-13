@@ -17,9 +17,10 @@
 #![feature(lint_reasons)]
 #![feature(iterator_try_collect)]
 #![feature(lazy_cell)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(arc_unwrap_or_clone)]
 #![feature(never_type)]
+#![feature(error_generic_member_access)]
 
 extern crate self as risingwave_expr;
 
@@ -33,6 +34,6 @@ pub mod sig;
 pub mod table_function;
 pub mod window_function;
 
-pub use error::{ExprError, Result};
+pub use error::{ContextUnavailable, ExprError, Result};
 pub use risingwave_common::{bail, ensure};
 pub use risingwave_expr_macro::*;

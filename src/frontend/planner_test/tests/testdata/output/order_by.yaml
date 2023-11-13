@@ -70,8 +70,8 @@
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v;
-  binder_error: |-
-    Bind error: failed to bind expression: v
+  binder_error: |
+    Failed to bind expression: v
 
     Caused by:
       Item not found: Invalid column: v
@@ -153,13 +153,13 @@
   sql: |
     create table t (x int, y int);
     select x from t order by 2;
-  binder_error: 'Invalid input syntax: Invalid value in ORDER BY: 2'
+  binder_error: 'Invalid input syntax: Invalid ordinal number in ORDER BY: 2'
 - name: an output column name cannot be used in an expression
   sql: |
     create table t (x int, y int);
     select x + y as sum from t order by sum + 1;
-  binder_error: |-
-    Bind error: failed to bind expression: sum + 1
+  binder_error: |
+    Failed to bind expression: sum + 1
 
     Caused by:
       Item not found: Invalid column: sum

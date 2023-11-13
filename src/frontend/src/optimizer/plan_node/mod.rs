@@ -46,16 +46,100 @@ use serde::Serialize;
 use smallvec::SmallVec;
 
 use self::batch::BatchPlanRef;
-use self::generic::GenericPlanRef;
+use self::generic::{GenericPlanRef, PhysicalPlanRef};
 use self::stream::StreamPlanRef;
 use self::utils::Distill;
 use super::property::{Distribution, FunctionalDependencySet, Order};
 
-pub trait PlanNodeMeta {
-    fn node_type(&self) -> PlanNodeType;
-    fn plan_base(&self) -> &PlanBase;
-    fn convention(&self) -> Convention;
+/// A marker trait for different conventions, used for enforcing type safety.
+///
+/// Implementors are [`Logical`], [`Batch`], and [`Stream`].
+pub trait ConventionMarker: 'static + Sized {
+    /// The extra fields in the [`PlanBase`] of this convention.
+    type Extra: 'static + Eq + Hash + Clone + Debug;
+
+    /// Get the [`Convention`] enum value.
+    fn value() -> Convention;
 }
+
+/// The marker for logical convention.
+pub struct Logical;
+impl ConventionMarker for Logical {
+    type Extra = plan_base::NoExtra;
+
+    fn value() -> Convention {
+        Convention::Logical
+    }
+}
+
+/// The marker for batch convention.
+pub struct Batch;
+impl ConventionMarker for Batch {
+    type Extra = plan_base::BatchExtra;
+
+    fn value() -> Convention {
+        Convention::Batch
+    }
+}
+
+/// The marker for stream convention.
+pub struct Stream;
+impl ConventionMarker for Stream {
+    type Extra = plan_base::StreamExtra;
+
+    fn value() -> Convention {
+        Convention::Stream
+    }
+}
+
+/// The trait for accessing the meta data and [`PlanBase`] for plan nodes.
+pub trait PlanNodeMeta {
+    type Convention: ConventionMarker;
+
+    const NODE_TYPE: PlanNodeType;
+
+    /// Get the reference to the [`PlanBase`] with corresponding convention.
+    fn plan_base(&self) -> &PlanBase<Self::Convention>;
+
+    /// Get the reference to the [`PlanBase`] with erased convention.
+    ///
+    /// This is mainly used for implementing [`AnyPlanNodeMeta`]. Callers should prefer
+    /// [`PlanNodeMeta::plan_base`] instead as it is more type-safe.
+    fn plan_base_ref(&self) -> PlanBaseRef<'_>;
+}
+
+// Intentionally made private.
+mod plan_node_meta {
+    use super::*;
+
+    /// The object-safe version of [`PlanNodeMeta`], used as a super trait of [`PlanNode`].
+    ///
+    /// Check [`PlanNodeMeta`] for more details.
+    pub trait AnyPlanNodeMeta {
+        fn node_type(&self) -> PlanNodeType;
+        fn plan_base(&self) -> PlanBaseRef<'_>;
+        fn convention(&self) -> Convention;
+    }
+
+    /// Implement [`AnyPlanNodeMeta`] for all [`PlanNodeMeta`].
+    impl<P> AnyPlanNodeMeta for P
+    where
+        P: PlanNodeMeta,
+    {
+        fn node_type(&self) -> PlanNodeType {
+            P::NODE_TYPE
+        }
+
+        fn plan_base(&self) -> PlanBaseRef<'_> {
+            PlanNodeMeta::plan_base_ref(self)
+        }
+
+        fn convention(&self) -> Convention {
+            P::Convention::value()
+        }
+    }
+}
+use plan_node_meta::AnyPlanNodeMeta;
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treat all node as
 /// `dyn PlanNode`
@@ -77,7 +161,7 @@ pub trait PlanNode:
     + ToPb
     + ToLocalBatch
     + PredicatePushdown
-    + PlanNodeMeta
+    + AnyPlanNodeMeta
 {
 }
 
@@ -194,7 +278,7 @@ pub trait VisitPlan: Visit<PlanRef> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Convention {
     Logical,
     Batch,
@@ -221,7 +305,7 @@ impl PlanRef {
     pub fn expect_stream_key(&self) -> &[usize] {
         self.stream_key().unwrap_or_else(|| {
             panic!(
-                "a stream key is expected but not exist, plan: {}",
+                "a stream key is expected but not exist, plan:\n{}",
                 self.explain_to_string()
             )
         })
@@ -419,29 +503,30 @@ impl PlanTreeNode for PlanRef {
     }
 }
 
-impl StreamPlanRef for PlanRef {
-    fn distribution(&self) -> &Distribution {
-        &self.plan_base().dist
+/// Implement again for the `dyn` newtype wrapper.
+impl AnyPlanNodeMeta for PlanRef {
+    fn node_type(&self) -> PlanNodeType {
+        self.0.node_type()
     }
 
-    fn append_only(&self) -> bool {
-        self.plan_base().append_only
+    fn plan_base(&self) -> PlanBaseRef<'_> {
+        self.0.plan_base()
     }
 
-    fn emit_on_window_close(&self) -> bool {
-        self.plan_base().emit_on_window_close
-    }
-}
-
-impl BatchPlanRef for PlanRef {
-    fn order(&self) -> &Order {
-        &self.plan_base().order
+    fn convention(&self) -> Convention {
+        self.0.convention()
     }
 }
 
+/// Allow access to all fields defined in [`GenericPlanRef`] for the type-erased plan node.
+// TODO: may also implement on `dyn PlanNode` directly.
 impl GenericPlanRef for PlanRef {
+    fn id(&self) -> PlanNodeId {
+        self.plan_base().id()
+    }
+
     fn schema(&self) -> &Schema {
-        &self.plan_base().schema
+        self.plan_base().schema()
     }
 
     fn stream_key(&self) -> Option<&[usize]> {
@@ -454,6 +539,38 @@ impl GenericPlanRef for PlanRef {
 
     fn functional_dependency(&self) -> &FunctionalDependencySet {
         self.plan_base().functional_dependency()
+    }
+}
+
+/// Allow access to all fields defined in [`PhysicalPlanRef`] for the type-erased plan node.
+// TODO: may also implement on `dyn PlanNode` directly.
+impl PhysicalPlanRef for PlanRef {
+    fn distribution(&self) -> &Distribution {
+        self.plan_base().distribution()
+    }
+}
+
+/// Allow access to all fields defined in [`StreamPlanRef`] for the type-erased plan node.
+// TODO: may also implement on `dyn PlanNode` directly.
+impl StreamPlanRef for PlanRef {
+    fn append_only(&self) -> bool {
+        self.plan_base().append_only()
+    }
+
+    fn emit_on_window_close(&self) -> bool {
+        self.plan_base().emit_on_window_close()
+    }
+
+    fn watermark_columns(&self) -> &FixedBitSet {
+        self.plan_base().watermark_columns()
+    }
+}
+
+/// Allow access to all fields defined in [`BatchPlanRef`] for the type-erased plan node.
+// TODO: may also implement on `dyn PlanNode` directly.
+impl BatchPlanRef for PlanRef {
+    fn order(&self) -> &Order {
+        self.plan_base().order()
     }
 }
 
@@ -510,54 +627,43 @@ pub(crate) fn pretty_config() -> PrettyConfig {
     }
 }
 
+/// Directly implement methods for [`PlanNode`] to access the fields defined in [`GenericPlanRef`].
+// TODO: always require `GenericPlanRef` to make it more consistent.
 impl dyn PlanNode {
     pub fn id(&self) -> PlanNodeId {
-        self.plan_base().id
+        self.plan_base().id()
     }
 
     pub fn ctx(&self) -> OptimizerContextRef {
-        self.plan_base().ctx.clone()
+        self.plan_base().ctx().clone()
     }
 
     pub fn schema(&self) -> &Schema {
-        &self.plan_base().schema
+        self.plan_base().schema()
     }
 
     pub fn stream_key(&self) -> Option<&[usize]> {
         self.plan_base().stream_key()
     }
 
-    pub fn order(&self) -> &Order {
-        &self.plan_base().order
-    }
-
-    pub fn distribution(&self) -> &Distribution {
-        &self.plan_base().dist
-    }
-
-    pub fn append_only(&self) -> bool {
-        self.plan_base().append_only
-    }
-
-    pub fn emit_on_window_close(&self) -> bool {
-        self.plan_base().emit_on_window_close
-    }
-
     pub fn functional_dependency(&self) -> &FunctionalDependencySet {
-        &self.plan_base().functional_dependency
+        self.plan_base().functional_dependency()
     }
+}
 
-    pub fn watermark_columns(&self) -> &FixedBitSet {
-        &self.plan_base().watermark_columns
-    }
-
+impl dyn PlanNode {
     /// Serialize the plan node and its children to a stream plan proto.
     ///
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
     pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanPb {
+        use stream::prelude::*;
+
         if let Some(stream_table_scan) = self.as_stream_table_scan() {
             return stream_table_scan.adhoc_to_stream_prost(state);
+        }
+        if let Some(stream_cdc_table_scan) = self.as_stream_cdc_table_scan() {
+            return stream_cdc_table_scan.adhoc_to_stream_prost(state);
         }
         if let Some(stream_share) = self.as_stream_share() {
             return stream_share.adhoc_to_stream_prost(state);
@@ -582,7 +688,7 @@ impl dyn PlanNode {
                 .map(|x| *x as u32)
                 .collect(),
             fields: self.schema().to_prost(),
-            append_only: self.append_only(),
+            append_only: self.plan_base().append_only(),
         }
     }
 
@@ -617,8 +723,6 @@ impl dyn PlanNode {
 }
 
 mod plan_base;
-#[macro_use]
-mod plan_tree_node_v2;
 pub use plan_base::*;
 #[macro_use]
 mod plan_tree_node;
@@ -641,7 +745,6 @@ pub use merge_eq_nodes::*;
 pub mod batch;
 pub mod generic;
 pub mod stream;
-pub mod stream_derive;
 
 pub use generic::{PlanAggCall, PlanAggCallDisplay};
 
@@ -725,6 +828,7 @@ mod stream_values;
 mod stream_watermark_filter;
 
 mod derive;
+mod stream_cdc_table_scan;
 mod stream_share;
 mod stream_temporal_join;
 mod stream_union;
@@ -780,6 +884,7 @@ pub use logical_topn::LogicalTopN;
 pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
+pub use stream_cdc_table_scan::StreamCdcTableScan;
 pub use stream_dedup::StreamDedup;
 pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_dml::StreamDml;
@@ -887,6 +992,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
+            , { Stream, CdcTableScan }
             , { Stream, Sink }
             , { Stream, Source }
             , { Stream, HashJoin }
@@ -997,6 +1103,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, HashJoin }
             , { Stream, Exchange }
             , { Stream, TableScan }
+            , { Stream, CdcTableScan }
             , { Stream, Sink }
             , { Stream, Source }
             , { Stream, HashAgg }
@@ -1038,14 +1145,23 @@ macro_rules! impl_plan_node_meta {
             }
 
             $(impl PlanNodeMeta for [<$convention $name>] {
-                fn node_type(&self) -> PlanNodeType{
-                    PlanNodeType::[<$convention $name>]
-                }
-                fn plan_base(&self) -> &PlanBase {
+                type Convention = $convention;
+                const NODE_TYPE: PlanNodeType = PlanNodeType::[<$convention $name>];
+
+                fn plan_base(&self) -> &PlanBase<$convention> {
                     &self.base
                 }
-                fn convention(&self) -> Convention {
-                    Convention::$convention
+
+                fn plan_base_ref(&self) -> PlanBaseRef<'_> {
+                    PlanBaseRef::$convention(&self.base)
+                }
+            }
+
+            impl Deref for [<$convention $name>] {
+                type Target = PlanBase<$convention>;
+
+                fn deref(&self) -> &Self::Target {
+                    &self.base
                 }
             })*
         }

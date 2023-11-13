@@ -23,10 +23,11 @@ use itertools::Itertools;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
 use tracing::error;
 
@@ -192,7 +193,7 @@ async fn compact_shared_buffer(
                     key_split_append(
                         &FullKey {
                             user_key,
-                            epoch: HummockEpoch::MAX,
+                            epoch_with_gap: EpochWithGap::new_max_epoch(),
                         }
                         .encode()
                         .into(),
@@ -391,16 +392,17 @@ pub async fn merge_imms_in_memory(
         });
     }
 
-    let mut versions: Vec<(HummockEpoch, HummockValue<Bytes>)> = Vec::new();
+    let mut versions: Vec<(EpochWithGap, HummockValue<Bytes>)> = Vec::new();
 
-    let mut pivot_last_delete_epoch = HummockEpoch::MAX;
+
+    let mut pivot_last_delete_epoch = MAX_EPOCH;
 
     for ((key, value), epoch) in items {
         assert!(key >= pivot, "key should be in ascending order");
         if key != pivot {
             merged_payload.push((pivot, versions));
             pivot = key;
-            pivot_last_delete_epoch = HummockEpoch::MAX;
+            pivot_last_delete_epoch = MAX_EPOCH;
             versions = vec![];
             let target_extended_user_key =
                 PointRange::from_user_key(UserKey::new(table_id, TableKey(pivot.as_ref())), false);
@@ -413,12 +415,12 @@ pub async fn merge_imms_in_memory(
                 });
             }
         }
-        let earliest_range_delete_which_can_see_key = del_iter.earliest_delete_since(epoch);
+        let earliest_range_delete_which_can_see_key = del_iter.earliest_delete_since(epoch.pure_epoch());
         if value.is_delete() {
-            pivot_last_delete_epoch = epoch;
+            pivot_last_delete_epoch = epoch.pure_epoch();
         } else if earliest_range_delete_which_can_see_key < pivot_last_delete_epoch {
             debug_assert!(
-                epoch < earliest_range_delete_which_can_see_key
+                epoch.pure_epoch() < earliest_range_delete_which_can_see_key
                     && earliest_range_delete_which_can_see_key < pivot_last_delete_epoch
             );
             pivot_last_delete_epoch = earliest_range_delete_which_can_see_key;
@@ -428,7 +430,7 @@ pub async fn merge_imms_in_memory(
             // a delete range in the merged imm which it belongs to. Therefore we need
             // to construct a corresponding delete key to represent this.
             versions.push((
-                earliest_range_delete_which_can_see_key,
+                EpochWithGap::new_from_epoch(earliest_range_delete_which_can_see_key),
                 HummockValue::Delete,
             ));
         }

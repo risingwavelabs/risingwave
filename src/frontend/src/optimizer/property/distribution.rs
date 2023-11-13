@@ -47,6 +47,7 @@ use std::fmt;
 use std::fmt::Debug;
 
 use fixedbitset::FixedBitSet;
+use generic::PhysicalPlanRef;
 use itertools::Itertools;
 use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
 use risingwave_common::error::Result;
@@ -59,7 +60,6 @@ use risingwave_pb::batch_plan::ExchangeInfo;
 use super::super::plan_node::*;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::FragmentId;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
@@ -296,10 +296,12 @@ impl RequiredDist {
 
     pub fn enforce_if_not_satisfies(
         &self,
-        plan: PlanRef,
+        mut plan: PlanRef,
         required_order: &Order,
     ) -> Result<PlanRef> {
-        let plan = required_order.enforce_if_not_satisfies(plan)?;
+        if let Convention::Batch = plan.convention() {
+            plan = required_order.enforce_if_not_satisfies(plan)?;
+        }
         if !plan.distribution().satisfies(self) {
             Ok(self.enforce(plan, required_order))
         } else {
@@ -311,23 +313,6 @@ impl RequiredDist {
         match plan.convention() {
             Convention::Stream => StreamExchange::new_no_shuffle(plan).into(),
             Convention::Logical | Convention::Batch => unreachable!(),
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn enforce_stream_if_not_satisfies(
-        &self,
-        plan: stream::PlanRef,
-    ) -> Result<stream::PlanRef> {
-        if !plan.distribution().satisfies(self) {
-            // FIXME(st1page);
-            Ok(stream::Exchange {
-                dist: self.to_dist(),
-                input: plan,
-            }
-            .into())
-        } else {
-            Ok(plan)
         }
     }
 
@@ -347,7 +332,7 @@ impl RequiredDist {
         }
     }
 
-    fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
+    pub fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
         let dist = self.to_dist();
         match plan.convention() {
             Convention::Batch => BatchExchange::new(plan, required_order.clone(), dist).into(),

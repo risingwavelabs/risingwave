@@ -20,7 +20,9 @@ use serde_json::{json, Map, Value};
 use tracing::warn;
 
 use super::{Result, SinkFormatter, StreamChunk};
-use crate::sink::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
+use crate::sink::encoder::{
+    JsonEncoder, RowEncoder, TimestampHandlingMode, TimestamptzHandlingMode,
+};
 use crate::tri;
 
 const DEBEZIUM_NAME_FIELD_PREFIX: &str = "RisingWave";
@@ -63,8 +65,14 @@ impl DebeziumJsonFormatter {
             schema.clone(),
             Some(pk_indices.clone()),
             TimestampHandlingMode::Milli,
+            TimestamptzHandlingMode::UtcString,
         );
-        let val_encoder = JsonEncoder::new(schema.clone(), None, TimestampHandlingMode::Milli);
+        let val_encoder = JsonEncoder::new(
+            schema.clone(),
+            None,
+            TimestampHandlingMode::Milli,
+            TimestamptzHandlingMode::UtcString,
+        );
         Self {
             schema,
             pk_indices,
@@ -85,7 +93,7 @@ impl SinkFormatter for DebeziumJsonFormatter {
         &self,
         chunk: &StreamChunk,
     ) -> impl Iterator<Item = Result<(Option<Value>, Option<Value>)>> {
-        std::iter::from_generator(|| {
+        std::iter::from_coroutine(|| {
             let DebeziumJsonFormatter {
                 schema,
                 pk_indices,
@@ -360,7 +368,12 @@ mod tests {
             },
         ]);
 
-        let encoder = JsonEncoder::new(schema.clone(), None, TimestampHandlingMode::Milli);
+        let encoder = JsonEncoder::new(
+            schema.clone(),
+            None,
+            TimestampHandlingMode::Milli,
+            TimestamptzHandlingMode::UtcString,
+        );
         let json_chunk = chunk_to_json(chunk, &encoder).unwrap();
         let schema_json = schema_to_json(&schema, "test_db", "test_table");
         assert_eq!(

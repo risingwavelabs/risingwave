@@ -25,7 +25,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::info_in_release;
 use risingwave_hummock_sdk::key::{get_table_id, TABLE_PREFIX_LEN};
 use risingwave_pb::catalog::Table;
-use risingwave_rpc_client::error::{anyhow, Result as RpcResult, RpcError};
+use risingwave_rpc_client::error::{Result as RpcResult, RpcError};
 use risingwave_rpc_client::MetaClient;
 
 use crate::hummock::{HummockError, HummockResult};
@@ -253,7 +253,7 @@ impl StateTableAccessor for RemoteTableAccessor {
 #[async_trait::async_trait]
 impl StateTableAccessor for FakeRemoteTableAccessor {
     async fn get_tables(&self, _table_ids: &[u32]) -> RpcResult<HashMap<u32, Table>> {
-        Err(RpcError::Internal(anyhow!(
+        Err(RpcError::Internal(anyhow::anyhow!(
             "fake accessor does not support fetch remote table"
         )))
     }
@@ -551,6 +551,7 @@ mod tests {
             cleaned_by_watermark: false,
             stream_job_status: PbStreamJobStatus::Created.into(),
             create_type: PbCreateType::Foreground.into(),
+            description: None,
         }
     }
 

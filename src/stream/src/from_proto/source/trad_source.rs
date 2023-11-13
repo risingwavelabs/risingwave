@@ -15,7 +15,7 @@
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_connector::source::external::{ExternalTableType, SchemaTableName};
+use risingwave_connector::source::external::{CdcTableType, SchemaTableName};
 use risingwave_connector::source::{ConnectorProperties, SourceCtrlOpts};
 use risingwave_pb::stream_plan::SourceNode;
 use risingwave_source::source_desc::SourceDescBuilder;
@@ -32,7 +32,6 @@ use crate::executor::{CdcBackfillExecutor, FlowControlExecutor, FsSourceExecutor
 const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for SourceExecutorBuilder {
     type Node = SourceNode;
 
@@ -159,30 +158,33 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         params.env.connector_params(),
                     );
 
-                    let table_type = ExternalTableType::from_properties(&source.properties);
-                    if table_type.can_backfill() && let Some(table_desc) = source_info.upstream_table.clone() {
+                    let table_type = CdcTableType::from_properties(&source.properties);
+                    if table_type.can_backfill()
+                        && let Some(table_desc) = source_info.external_table.clone()
+                    {
+                        let table_schema = Schema::new(table_desc.columns.iter().map(Into::into).collect());
                         let upstream_table_name = SchemaTableName::from_properties(&source.properties);
-                        let pk_indices = table_desc
+                        let table_pk_indices = table_desc
                             .pk
                             .iter()
                             .map(|k| k.column_index as usize)
                             .collect_vec();
-
-                        let order_types = table_desc
+                        let table_pk_order_types = table_desc
                             .pk
                             .iter()
                             .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
                             .collect_vec();
 
-                        let table_reader = table_type.create_table_reader(source.properties.clone(), schema.clone())?;
+                        let table_reader = table_type
+                            .create_table_reader(source.properties.clone(), table_schema.clone())?;
                         let external_table = ExternalStorageTable::new(
                             TableId::new(source.source_id),
                             upstream_table_name,
                             table_reader,
-                            schema.clone(),
-                            order_types,
-                            pk_indices.clone(),
-                            (0..table_desc.columns.len()).collect_vec(),
+                            table_schema.clone(),
+                            table_pk_order_types,
+                            table_pk_indices,
+                            (0..table_schema.len()).collect_vec(),
                         );
 
                         // use the state table from source to store the backfill state (may refactor in future)
@@ -190,17 +192,18 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             source.state_table.as_ref().unwrap(),
                             store.clone(),
                         ).await;
+                        // use schema from table_desc
                         let cdc_backfill = CdcBackfillExecutor::new(
                             params.actor_context.clone(),
+                            params.info.clone(),
                             external_table,
                             Box::new(source_exec),
-                            (0..source.columns.len()).collect_vec(),    // eliminate the last column (_rw_offset)
+                            (0..table_schema.len()).collect_vec(),
                             None,
-                            schema.clone(),
-                            pk_indices,
                             params.executor_stats,
                             source_state_handler,
-                            source_ctrl_opts.chunk_size
+                            false,
+                            source_ctrl_opts.chunk_size,
                         );
                         cdc_backfill.boxed()
                     } else {
@@ -208,11 +211,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     }
                 }
             };
-            if let Ok(rate_limit) = source.get_rate_limit() {
-                Ok(FlowControlExecutor::new(executor, *rate_limit).boxed())
-            } else {
-                Ok(executor)
-            }
+            let rate_limit = source.get_rate_limit().cloned().ok();
+            Ok(FlowControlExecutor::new(executor, rate_limit).boxed())
         } else {
             // If there is no external stream source, then no data should be persisted. We pass a
             // `PanicStateStore` type here for indication.

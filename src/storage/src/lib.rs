@@ -14,12 +14,11 @@
 
 #![feature(allocator_api)]
 #![feature(arc_unwrap_or_clone)]
-#![feature(binary_heap_drain_sorted)]
 #![feature(bound_as_ref)]
 #![feature(bound_map)]
 #![feature(custom_test_frameworks)]
 #![feature(extract_if)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(hash_extract_if)]
 #![feature(lint_reasons)]
 #![feature(proc_macro_hygiene)]
@@ -36,15 +35,13 @@
 #![feature(btree_extract_if)]
 #![feature(exact_size_is_empty)]
 #![feature(lazy_cell)]
-#![cfg_attr(coverage, feature(no_coverage))]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 #![recursion_limit = "256"]
 #![feature(error_generic_member_access)]
 #![feature(let_chains)]
 #![feature(associated_type_bounds)]
 #![feature(exclusive_range_pattern)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(async_fn_in_trait)]
-#![feature(return_position_impl_trait_in_trait)]
 
 pub mod hummock;
 pub mod memory;

@@ -29,6 +29,8 @@ use risingwave_stream::executor::test_utils::*;
 use risingwave_stream::executor::{BoxedExecutor, PkIndices};
 use tokio::runtime::Runtime;
 
+risingwave_expr_impl::enable!();
+
 fn bench_hash_agg(c: &mut Criterion) {
     let mut group = c.benchmark_group("Q17");
     group.sample_size(10);

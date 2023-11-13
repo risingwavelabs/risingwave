@@ -182,6 +182,8 @@ pub enum Operation {
 
     LocalStorageIsDirty,
 
+    TryFlush,
+
     Flush(Vec<(Bound<TracedBytes>, Bound<TracedBytes>)>),
     /// Finish operation of Hummock.
     Finish,
@@ -287,6 +289,7 @@ pub enum OperationResult {
     Get(TraceResult<Option<TracedBytes>>),
     Insert(TraceResult<()>),
     Delete(TraceResult<()>),
+    TryFlush(TraceResult<()>),
     Flush(TraceResult<usize>),
     Iter(TraceResult<()>),
     IterNext(TraceResult<Option<(TracedBytes, TracedBytes)>>),

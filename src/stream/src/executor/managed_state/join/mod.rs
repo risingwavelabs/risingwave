@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod join_entry_state;
+mod join_row_set;
 
 use std::alloc::Global;
 use std::ops::{Bound, Deref, DerefMut};
@@ -475,6 +476,12 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         self.metrics.flush();
         self.state.table.commit(epoch).await?;
         self.degree_state.table.commit(epoch).await?;
+        Ok(())
+    }
+
+    pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
+        self.state.table.try_flush().await?;
+        self.degree_state.table.try_flush().await?;
         Ok(())
     }
 

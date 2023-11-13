@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use core::fmt;
-use std::collections::BTreeMap;
 use std::fmt::Write;
 
 use itertools::Itertools;
@@ -105,7 +104,7 @@ pub enum SourceSchema {
 }
 
 impl SourceSchema {
-    pub fn into_source_schema_v2(self) -> SourceSchemaV2 {
+    pub fn into_source_schema_v2(self) -> ConnectorSchema {
         let (format, row_encode) = match self {
             SourceSchema::Protobuf(_) => (Format::Plain, Encode::Protobuf),
             SourceSchema::Json => (Format::Plain, Encode::Json),
@@ -205,7 +204,7 @@ impl SourceSchema {
             _ => vec![],
         };
 
-        SourceSchemaV2 {
+        ConnectorSchema {
             format,
             row_encode,
             row_options,
@@ -294,6 +293,7 @@ pub enum Encode {
     Json,     // Keyword::JSON
     Bytes,    // Keyword::BYTES
     Native,
+    Template,
 }
 
 // TODO: unify with `from_keyword`
@@ -309,6 +309,7 @@ impl fmt::Display for Encode {
                 Encode::Json => "JSON",
                 Encode::Bytes => "BYTES",
                 Encode::Native => "NATIVE",
+                Encode::Template => "TEMPLATE",
             }
         )
     }
@@ -322,20 +323,19 @@ impl Encode {
             "CSV" => Encode::Csv,
             "PROTOBUF" => Encode::Protobuf,
             "JSON" => Encode::Json,
+            "TEMPLATE" => Encode::Template,
             "NATIVE" => Encode::Native, // used internally for schema change
-            _ => {
-                return Err(ParserError::ParserError(
-                    "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE after Encode"
-                        .to_string(),
-                ))
-            }
+            _ => return Err(ParserError::ParserError(
+                "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE after Encode"
+                    .to_string(),
+            )),
         })
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct SourceSchemaV2 {
+pub struct ConnectorSchema {
     pub format: Format,
     pub row_encode: Encode,
     pub row_options: Vec<SqlOption>,
@@ -345,7 +345,7 @@ pub struct SourceSchemaV2 {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CompatibleSourceSchema {
     RowFormat(SourceSchema),
-    V2(SourceSchemaV2),
+    V2(ConnectorSchema),
 }
 
 impl fmt::Display for CompatibleSourceSchema {
@@ -362,7 +362,7 @@ impl fmt::Display for CompatibleSourceSchema {
 }
 
 impl CompatibleSourceSchema {
-    pub fn into_source_schema_v2(self) -> (SourceSchemaV2, Option<String>) {
+    pub fn into_source_schema_v2(self) -> (ConnectorSchema, Option<String>) {
         match self {
             CompatibleSourceSchema::RowFormat(inner) => (
                 inner.into_source_schema_v2(),
@@ -372,29 +372,15 @@ impl CompatibleSourceSchema {
     }
 }
 
-impl From<SourceSchemaV2> for CompatibleSourceSchema {
-    fn from(value: SourceSchemaV2) -> Self {
+impl From<ConnectorSchema> for CompatibleSourceSchema {
+    fn from(value: ConnectorSchema) -> Self {
         Self::V2(value)
     }
 }
 
 fn parse_source_schema(p: &mut Parser) -> Result<CompatibleSourceSchema, ParserError> {
-    if p.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
-        p.expect_keyword(Keyword::FORMAT)?;
-        let id = p.parse_identifier()?;
-        let s = id.value.to_ascii_uppercase();
-        let format = Format::from_keyword(&s)?;
-        p.expect_keyword(Keyword::ENCODE)?;
-        let id = p.parse_identifier()?;
-        let s = id.value.to_ascii_uppercase();
-        let row_encode = Encode::from_keyword(&s)?;
-        let row_options = p.parse_options()?;
-
-        Ok(CompatibleSourceSchema::V2(SourceSchemaV2 {
-            format,
-            row_encode,
-            row_options,
-        }))
+    if let Some(schema_v2) = p.parse_schema()? {
+        Ok(CompatibleSourceSchema::V2(schema_v2))
     } else if p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
         && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
     {
@@ -459,12 +445,17 @@ impl Parser {
     pub fn parse_source_schema_with_connector(
         &mut self,
         connector: &str,
+        cdc_source_job: bool,
     ) -> Result<CompatibleSourceSchema, ParserError> {
         // row format for cdc source must be debezium json
         // row format for nexmark source must be native
         // default row format for datagen source is native
         if connector.contains("-cdc") {
-            let expected = SourceSchemaV2::debezium_json();
+            let expected = if cdc_source_job {
+                ConnectorSchema::plain_json()
+            } else {
+                ConnectorSchema::debezium_json()
+            };
             if self.peek_source_schema_format() {
                 let schema = parse_source_schema(self)?.into_source_schema_v2().0;
                 if schema != expected {
@@ -476,7 +467,7 @@ impl Parser {
             }
             Ok(expected.into())
         } else if connector.contains("nexmark") {
-            let expected = SourceSchemaV2::native();
+            let expected = ConnectorSchema::native();
             if self.peek_source_schema_format() {
                 let schema = parse_source_schema(self)?.into_source_schema_v2().0;
                 if schema != expected {
@@ -491,17 +482,15 @@ impl Parser {
             Ok(if self.peek_source_schema_format() {
                 parse_source_schema(self)?
             } else {
-                SourceSchemaV2::native().into()
+                ConnectorSchema::native().into()
             })
         } else {
             Ok(parse_source_schema(self)?)
         }
     }
 
-    /// Parse `FORMAT ... ENCODE ... (...)` in `CREATE SINK`.
-    ///
-    /// TODO: After [`SourceSchemaV2`] and [`SinkSchema`] merge, call this in [`parse_source_schema`].
-    pub fn parse_schema(&mut self) -> Result<Option<SinkSchema>, ParserError> {
+    /// Parse `FORMAT ... ENCODE ... (...)` in `CREATE SOURCE` and `CREATE SINK`.
+    pub fn parse_schema(&mut self) -> Result<Option<ConnectorSchema>, ParserError> {
         if !self.parse_keyword(Keyword::FORMAT) {
             return Ok(None);
         }
@@ -515,7 +504,7 @@ impl Parser {
         let row_encode = Encode::from_keyword(&s)?;
         let row_options = self.parse_options()?;
 
-        Ok(Some(SinkSchema {
+        Ok(Some(ConnectorSchema {
             format,
             row_encode,
             row_options,
@@ -523,10 +512,18 @@ impl Parser {
     }
 }
 
-impl SourceSchemaV2 {
+impl ConnectorSchema {
+    pub const fn plain_json() -> Self {
+        ConnectorSchema {
+            format: Format::Plain,
+            row_encode: Encode::Json,
+            row_options: Vec::new(),
+        }
+    }
+
     /// Create a new source schema with `Debezium` format and `Json` encoding.
     pub const fn debezium_json() -> Self {
-        SourceSchemaV2 {
+        ConnectorSchema {
             format: Format::Debezium,
             row_encode: Encode::Json,
             row_options: Vec::new(),
@@ -535,27 +532,11 @@ impl SourceSchemaV2 {
 
     /// Create a new source schema with `Native` format and encoding.
     pub const fn native() -> Self {
-        SourceSchemaV2 {
+        ConnectorSchema {
             format: Format::Native,
             row_encode: Encode::Native,
             row_options: Vec::new(),
         }
-    }
-
-    pub fn gen_options(&self) -> Result<BTreeMap<String, String>, ParserError> {
-        self.row_options
-            .iter()
-            .cloned()
-            .map(|x| match x.value {
-                Value::CstyleEscapedString(s) => Ok((x.name.real_value(), s.value)),
-                Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
-                Value::Number(n) => Ok((x.name.real_value(), n)),
-                Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
-                _ => Err(ParserError::ParserError(
-                    "`row format options` only support single quoted string value and C style escaped string".to_owned(),
-                )),
-            })
-            .try_collect()
     }
 
     pub fn row_options(&self) -> &[SqlOption] {
@@ -563,7 +544,7 @@ impl SourceSchemaV2 {
     }
 }
 
-impl fmt::Display for SourceSchemaV2 {
+impl fmt::Display for ConnectorSchema {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "FORMAT {} ENCODE {}", self.format, self.row_encode)?;
 
@@ -751,10 +732,12 @@ impl ParseTo for CreateSourceStatement {
             .iter()
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
         let connector: String = option.map(|opt| opt.value.to_string()).unwrap_or_default();
-        // row format for cdc source must be debezium json
+        // The format of cdc source job is fixed to `FORMAT PLAIN ENCODE JSON`
+        let cdc_source_job =
+            connector.contains("-cdc") && columns.is_empty() && constraints.is_empty();
         // row format for nexmark source must be native
         // default row format for datagen source is native
-        let source_schema = p.parse_source_schema_with_connector(&connector)?;
+        let source_schema = p.parse_source_schema_with_connector(&connector, cdc_source_job)?;
 
         Ok(Self {
             if_not_exists,
@@ -822,27 +805,6 @@ impl fmt::Display for CreateSink {
     }
 }
 
-/// Same as [`SourceSchemaV2`]. Will be merged in a dedicated rename PR.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct SinkSchema {
-    pub format: Format,
-    pub row_encode: Encode,
-    pub row_options: Vec<SqlOption>,
-}
-
-impl fmt::Display for SinkSchema {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "FORMAT {} ENCODE {}", self.format, self.row_encode)?;
-
-        if !self.row_options.is_empty() {
-            write!(f, " ({})", display_comma_separated(&self.row_options))
-        } else {
-            Ok(())
-        }
-    }
-}
-
 // sql_grammar!(CreateSinkStatement {
 //     if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],
 //     sink_name: Ident,
@@ -859,7 +821,7 @@ pub struct CreateSinkStatement {
     pub sink_from: CreateSink,
     pub columns: Vec<Ident>,
     pub emit_mode: Option<EmitMode>,
-    pub sink_schema: Option<SinkSchema>,
+    pub sink_schema: Option<ConnectorSchema>,
 }
 
 impl ParseTo for CreateSinkStatement {

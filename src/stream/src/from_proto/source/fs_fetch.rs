@@ -23,14 +23,14 @@ use risingwave_storage::StateStore;
 
 use crate::error::StreamResult;
 use crate::executor::{
-    BoxedExecutor, Executor, FsFetchExecutor, SourceStateTableHandler, StreamSourceCore,
+    BoxedExecutor, Executor, FlowControlExecutor, FsFetchExecutor, SourceStateTableHandler,
+    StreamSourceCore,
 };
 use crate::from_proto::ExecutorBuilder;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct FsFetchExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for FsFetchExecutorBuilder {
     type Node = StreamFsFetchNode;
 
@@ -99,7 +99,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             state_table_handler,
         );
 
-        Ok(FsFetchExecutor::new(
+        let executor = FsFetchExecutor::new(
             params.actor_context,
             schema,
             params.pk_indices,
@@ -109,6 +109,9 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             source_ctrl_opts,
             params.env.connector_params(),
         )
-        .boxed())
+        .boxed();
+
+        let rate_limit = source.get_rate_limit().cloned().ok();
+        Ok(FlowControlExecutor::new(executor, rate_limit).boxed())
     }
 }

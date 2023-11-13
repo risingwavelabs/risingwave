@@ -29,6 +29,9 @@ pub static RW_COLUMNS: LazyLock<BuiltinTable> = LazyLock::new(|| BuiltinTable {
         (DataType::Int32, "relation_id"), // belonged relation id
         (DataType::Varchar, "name"),      // column name
         (DataType::Int32, "position"),    // 1-indexed position
+        (DataType::Boolean, "is_hidden"),
+        (DataType::Boolean, "is_primary_key"),
+        (DataType::Boolean, "is_distribution_key"),
         (DataType::Varchar, "data_type"),
         (DataType::Int32, "type_oid"),
         (DataType::Int16, "type_len"),
@@ -50,6 +53,9 @@ impl SysCatalogReaderImpl {
                             Some(ScalarImpl::Int32(view.id as i32)),
                             Some(ScalarImpl::Utf8(column.name.clone().into())),
                             Some(ScalarImpl::Int32(index as i32 + 1)),
+                            Some(ScalarImpl::Bool(false)),
+                            Some(ScalarImpl::Bool(false)),
+                            Some(ScalarImpl::Bool(false)),
                             Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
                             Some(ScalarImpl::Int32(column.data_type().to_oid())),
                             Some(ScalarImpl::Int16(column.data_type().type_len())),
@@ -58,24 +64,21 @@ impl SysCatalogReaderImpl {
                     })
                 });
 
-                schema
-                    .iter_valid_table()
-                    .map(|table| (table.id.table_id(), table.columns()))
-                    .chain(
-                        schema
-                            .iter_system_tables()
-                            .map(|table| (table.id.table_id(), table.columns())),
-                    )
-                    .flat_map(|(id, columns)| {
-                        columns
+                let rows = schema
+                    .iter_system_tables()
+                    .flat_map(|table| {
+                        table
+                            .columns
                             .iter()
                             .enumerate()
-                            .filter(|(_, column)| !column.is_hidden())
                             .map(move |(index, column)| {
                                 OwnedRow::new(vec![
-                                    Some(ScalarImpl::Int32(id as i32)),
+                                    Some(ScalarImpl::Int32(table.id.table_id as i32)),
                                     Some(ScalarImpl::Utf8(column.name().into())),
                                     Some(ScalarImpl::Int32(index as i32 + 1)),
+                                    Some(ScalarImpl::Bool(column.is_hidden)),
+                                    Some(ScalarImpl::Bool(table.pk.contains(&index))),
+                                    Some(ScalarImpl::Bool(false)),
                                     Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
                                     Some(ScalarImpl::Int32(column.data_type().to_oid())),
                                     Some(ScalarImpl::Int16(column.data_type().type_len())),
@@ -83,7 +86,35 @@ impl SysCatalogReaderImpl {
                                 ])
                             })
                     })
-                    .chain(view_rows)
+                    .chain(view_rows);
+
+                schema
+                    .iter_valid_table()
+                    .flat_map(|table| {
+                        table
+                            .columns
+                            .iter()
+                            .enumerate()
+                            .map(move |(index, column)| {
+                                OwnedRow::new(vec![
+                                    Some(ScalarImpl::Int32(table.id.table_id as i32)),
+                                    Some(ScalarImpl::Utf8(column.name().into())),
+                                    Some(ScalarImpl::Int32(index as i32 + 1)),
+                                    Some(ScalarImpl::Bool(column.is_hidden)),
+                                    Some(ScalarImpl::Bool(
+                                        table.pk().iter().any(|idx| idx.column_index == index),
+                                    )),
+                                    Some(ScalarImpl::Bool(
+                                        table.distribution_key().contains(&index),
+                                    )),
+                                    Some(ScalarImpl::Utf8(column.data_type().to_string().into())),
+                                    Some(ScalarImpl::Int32(column.data_type().to_oid())),
+                                    Some(ScalarImpl::Int16(column.data_type().type_len())),
+                                    Some(ScalarImpl::Utf8(column.data_type().pg_name().into())),
+                                ])
+                            })
+                    })
+                    .chain(rows)
             })
             .collect_vec())
     }

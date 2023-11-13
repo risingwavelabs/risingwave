@@ -18,7 +18,7 @@ use std::sync::Arc;
 use futures::future::{join_all, try_join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_pb::catalog::Table;
+use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_service::{
@@ -29,11 +29,13 @@ use tokio::sync::{oneshot, Mutex, RwLock};
 use tracing::Instrument;
 use uuid::Uuid;
 
-use super::Locations;
+use super::{
+    Locations, ParallelUnitReschedule, RescheduleOptions, ScaleController, ScaleControllerRef,
+};
 use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{ClusterManagerRef, FragmentManagerRef, MetaSrvEnv};
-use crate::model::{ActorId, TableFragments};
+use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
@@ -67,6 +69,8 @@ pub struct CreateStreamingJobContext {
     pub definition: String,
 
     pub mv_table_id: Option<u32>,
+
+    pub create_type: CreateType,
 }
 
 impl CreateStreamingJobContext {
@@ -112,22 +116,36 @@ impl CreatingStreamingJobInfo {
         jobs.remove(&job_id);
     }
 
-    async fn cancel_jobs(&self, job_ids: Vec<TableId>) -> HashMap<TableId, oneshot::Receiver<()>> {
+    async fn cancel_jobs(
+        &self,
+        job_ids: Vec<TableId>,
+    ) -> (HashMap<TableId, oneshot::Receiver<()>>, Vec<TableId>) {
         let mut jobs = self.streaming_jobs.lock().await;
         let mut receivers = HashMap::new();
+        let mut recovered_job_ids = vec![];
         for job_id in job_ids {
             if let Some(job) = jobs.get_mut(&job_id)
                 && let Some(shutdown_tx) = job.shutdown_tx.take()
             {
                 let (tx, rx) = oneshot::channel();
-                if shutdown_tx.send(CreatingState::Canceling{finish_tx: tx}).await.is_ok() {
+                if shutdown_tx
+                    .send(CreatingState::Canceling { finish_tx: tx })
+                    .await
+                    .is_ok()
+                {
                     receivers.insert(job_id, rx);
                 } else {
-                    tracing::warn!("failed to send canceling state");
+                    tracing::warn!(id=?job_id, "failed to send canceling state");
                 }
+            } else {
+                // If these job ids do not exist in streaming_jobs,
+                // we can infer they either:
+                // 1. are entirely non-existent,
+                // 2. OR they are recovered streaming jobs, and managed by BarrierManager.
+                recovered_job_ids.push(job_id);
             }
         }
-        receivers
+        (receivers, recovered_job_ids)
     }
 }
 
@@ -159,26 +177,28 @@ pub struct ReplaceTableContext {
 
 /// `GlobalStreamManager` manages all the streams in the system.
 pub struct GlobalStreamManager {
-    pub(crate) env: MetaSrvEnv,
+    pub env: MetaSrvEnv,
 
     /// Manages definition and status of fragments and actors
     pub(super) fragment_manager: FragmentManagerRef,
 
     /// Broadcasts and collect barriers
-    pub(crate) barrier_scheduler: BarrierScheduler,
+    pub barrier_scheduler: BarrierScheduler,
 
     /// Maintains information of the cluster
-    pub(crate) cluster_manager: ClusterManagerRef,
+    pub cluster_manager: ClusterManagerRef,
 
     /// Maintains streaming sources from external system like kafka
-    pub(crate) source_manager: SourceManagerRef,
+    pub source_manager: SourceManagerRef,
 
     /// Creating streaming job info.
     creating_job_info: CreatingStreamingJobInfoRef,
 
     hummock_manager: HummockManagerRef,
 
-    pub(crate) reschedule_lock: RwLock<()>,
+    pub reschedule_lock: RwLock<()>,
+
+    pub(crate) scale_controller: ScaleControllerRef,
 }
 
 impl GlobalStreamManager {
@@ -190,6 +210,12 @@ impl GlobalStreamManager {
         source_manager: SourceManagerRef,
         hummock_manager: HummockManagerRef,
     ) -> MetaResult<Self> {
+        let scale_controller = Arc::new(ScaleController::new(
+            fragment_manager.clone(),
+            cluster_manager.clone(),
+            source_manager.clone(),
+            env.clone(),
+        ));
         Ok(Self {
             env,
             fragment_manager,
@@ -199,6 +225,7 @@ impl GlobalStreamManager {
             hummock_manager,
             creating_job_info: Arc::new(CreatingStreamingJobInfo::default()),
             reschedule_lock: RwLock::new(()),
+            scale_controller,
         })
     }
 
@@ -255,9 +282,12 @@ impl GlobalStreamManager {
             while let Some(state) = receiver.recv().await {
                 match state {
                     CreatingState::Failed { reason } => {
+                        tracing::debug!(id=?table_id, "stream job failed");
+                        self.creating_job_info.delete_job(table_id).await;
                         return Err(reason);
                     }
                     CreatingState::Canceling { finish_tx } => {
+                        tracing::debug!(id=?table_id, "cancelling streaming job");
                         if let Ok(table_fragments) = self
                             .fragment_manager
                             .select_table_fragments_by_table_id(&table_id)
@@ -315,10 +345,14 @@ impl GlobalStreamManager {
                             let _ = finish_tx.send(()).inspect_err(|_| {
                                 tracing::warn!("failed to notify cancelled: {table_id}")
                             });
+                            self.creating_job_info.delete_job(table_id).await;
                             return Err(MetaError::cancelled("create".into()));
                         }
                     }
-                    CreatingState::Created => return Ok(()),
+                    CreatingState::Created => {
+                        self.creating_job_info.delete_job(table_id).await;
+                        return Ok(());
+                    }
                 }
             }
         };
@@ -407,7 +441,7 @@ impl GlobalStreamManager {
             definition,
             mv_table_id,
             internal_tables,
-            ..
+            create_type,
         }: CreateStreamingJobContext,
     ) -> MetaResult<()> {
         // Register to compaction group beforehand.
@@ -424,8 +458,10 @@ impl GlobalStreamManager {
             table_fragments.internal_table_ids().len() + mv_table_id.map_or(0, |_| 1)
         );
         revert_funcs.push(Box::pin(async move {
-            if let Err(e) = hummock_manager_ref.unregister_table_ids(&registered_table_ids).await {
-                tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", registered_table_ids, e);
+            if create_type == CreateType::Foreground {
+                if let Err(e) = hummock_manager_ref.unregister_table_ids(&registered_table_ids).await {
+                    tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", registered_table_ids, e);
+                }
             }
         }));
 
@@ -452,9 +488,11 @@ impl GlobalStreamManager {
             })
             .await
         {
-            self.fragment_manager
-                .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(table_id)))
-                .await?;
+            if create_type == CreateType::Foreground {
+                self.fragment_manager
+                    .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(table_id)))
+                    .await?;
+            }
             return Err(err);
         }
 
@@ -553,13 +591,18 @@ impl GlobalStreamManager {
     }
 
     /// Cancel streaming jobs and return the canceled table ids.
+    /// 1. Send cancel message to stream jobs (via `cancel_jobs`).
+    /// 2. Send cancel message to recovered stream jobs (via `barrier_scheduler`).
+    ///
+    /// Cleanup of their state will be cleaned up after the `CancelStreamJob` command succeeds,
+    /// by the barrier manager for both of them.
     pub async fn cancel_streaming_jobs(&self, table_ids: Vec<TableId>) -> Vec<TableId> {
         if table_ids.is_empty() {
             return vec![];
         }
 
         let _reschedule_job_lock = self.reschedule_lock.read().await;
-        let receivers = self.creating_job_info.cancel_jobs(table_ids).await;
+        let (receivers, recovered_job_ids) = self.creating_job_info.cancel_jobs(table_ids).await;
 
         let futures = receivers.into_iter().map(|(id, receiver)| async move {
             if receiver.await.is_ok() {
@@ -570,7 +613,97 @@ impl GlobalStreamManager {
                 None
             }
         });
-        join_all(futures).await.into_iter().flatten().collect_vec()
+        let mut cancelled_ids = join_all(futures).await.into_iter().flatten().collect_vec();
+
+        // NOTE(kwannoel): For recovered stream jobs, we can directly cancel them by running the barrier command,
+        // since Barrier manager manages the recovered stream jobs.
+        let futures = recovered_job_ids.into_iter().map(|id| async move {
+            tracing::debug!(?id, "cancelling recovered streaming job");
+            let result: MetaResult<()> = try {
+                let fragment = self
+                    .fragment_manager
+                    .select_table_fragments_by_table_id(&id)
+                    .await?;
+                if fragment.is_created() {
+                    Err(MetaError::invalid_parameter(format!(
+                        "streaming job {} is already created",
+                        id
+                    )))?;
+                }
+                self.barrier_scheduler
+                    .run_command(Command::CancelStreamingJob(fragment))
+                    .await?;
+            };
+            match result {
+                Ok(_) => {
+                    tracing::info!(?id, "cancelled recovered streaming job");
+                    Some(id)
+                },
+                Err(_) => {
+                    tracing::error!(?id, "failed to cancel recovered streaming job, does it correspond to any jobs in `SHOW JOBS`?");
+                    None
+                },
+            }
+        });
+        let cancelled_recovered_ids = join_all(futures).await.into_iter().flatten().collect_vec();
+
+        cancelled_ids.extend(cancelled_recovered_ids);
+        cancelled_ids
+    }
+}
+
+impl GlobalStreamManager {
+    pub async fn reschedule_actors(
+        &self,
+        reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
+        options: RescheduleOptions,
+    ) -> MetaResult<()> {
+        let mut revert_funcs = vec![];
+        if let Err(e) = self
+            .reschedule_actors_impl(&mut revert_funcs, reschedules, options)
+            .await
+        {
+            for revert_func in revert_funcs.into_iter().rev() {
+                revert_func.await;
+            }
+            return Err(e);
+        }
+
+        Ok(())
+    }
+
+    async fn reschedule_actors_impl(
+        &self,
+        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
+        reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
+        options: RescheduleOptions,
+    ) -> MetaResult<()> {
+        let (reschedule_fragment, applied_reschedules) = self
+            .scale_controller
+            .prepare_reschedule_command(reschedules, options)
+            .await?;
+
+        tracing::debug!("reschedule plan: {:#?}", reschedule_fragment);
+
+        let command = Command::RescheduleFragment {
+            reschedules: reschedule_fragment,
+        };
+
+        let fragment_manager_ref = self.fragment_manager.clone();
+
+        revert_funcs.push(Box::pin(async move {
+            fragment_manager_ref
+                .cancel_apply_reschedules(applied_reschedules)
+                .await;
+        }));
+
+        let _source_pause_guard = self.source_manager.paused.lock().await;
+
+        self.barrier_scheduler
+            .run_config_change_command_with_pause(command)
+            .await?;
+
+        Ok(())
     }
 }
 
@@ -896,7 +1029,7 @@ mod tests {
             };
 
             self.catalog_manager
-                .start_create_table_procedure(&table)
+                .start_create_table_procedure(&table, vec![])
                 .await?;
             self.global_stream_manager
                 .create_streaming_job(table_fragments, ctx)

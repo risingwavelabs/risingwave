@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -42,6 +43,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn get_snapshot(&self) -> Result<HummockSnapshot>;
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot>;
+
+    async fn wait(&self) -> Result<()>;
 
     async fn cancel_creating_jobs(&self, jobs: PbJobs) -> Result<Vec<u32>>;
 
@@ -109,6 +112,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot> {
         self.0.flush(checkpoint).await
+    }
+
+    async fn wait(&self) -> Result<()> {
+        self.0.wait().await
     }
 
     async fn cancel_creating_jobs(&self, infos: PbJobs) -> Result<Vec<u32>> {
@@ -213,7 +220,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
     async fn list_version_deltas(&self) -> Result<Vec<HummockVersionDelta>> {
         // FIXME #8612: there can be lots of version deltas, so better to fetch them by pages and refactor `SysRowSeqScanExecutor` to yield multiple chunks.
         self.0
-            .list_version_deltas(0, u32::MAX, u64::MAX)
+            .list_version_deltas(0, u32::MAX, MAX_EPOCH)
             .await
             .map(|v| v.version_deltas)
     }

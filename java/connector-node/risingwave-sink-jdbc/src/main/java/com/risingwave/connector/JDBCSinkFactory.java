@@ -19,7 +19,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkFactory;
 import com.risingwave.connector.api.sink.SinkWriter;
-import com.risingwave.connector.api.sink.SinkWriterV1;
 import com.risingwave.proto.Catalog.SinkType;
 import io.grpc.Status;
 import java.sql.*;
@@ -40,7 +39,7 @@ public class JDBCSinkFactory implements SinkFactory {
     public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
         ObjectMapper mapper = new ObjectMapper();
         JDBCSinkConfig config = mapper.convertValue(tableProperties, JDBCSinkConfig.class);
-        return new SinkWriterV1.Adapter(new JDBCSink(config, tableSchema));
+        return new JDBCSink(config, tableSchema);
     }
 
     @Override
@@ -97,7 +96,7 @@ public class JDBCSinkFactory implements SinkFactory {
             }
         }
 
-        if (sinkType == SinkType.UPSERT) {
+        if (sinkType == SinkType.SINK_TYPE_UPSERT) {
             // For upsert JDBC sink, the primary key defined on the table must match the one in
             // config and cannot be empty
             var pkInWith = new HashSet<>(tableSchema.getPrimaryKeys());

@@ -23,7 +23,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::AggKind;
 use risingwave_sqlparser::ast::{
     BinaryOperator, DataType as AstDataType, Distinct, Expr, Ident, Join, JoinConstraint,
-    JoinOperator, ObjectName, Select, SelectItem, TableFactor, TableWithJoins,
+    JoinOperator, ObjectName, Select, SelectItem, TableFactor, TableWithJoins, Value,
 };
 
 use super::bind_context::{Clause, ColumnBinding};
@@ -207,9 +207,10 @@ impl Binder {
 
         // Bind SELECT clause.
         let (select_items, aliases) = self.bind_select_list(select.projection)?;
+        let out_name_to_index = Self::build_name_to_index(aliases.iter().filter_map(Clone::clone));
 
         // Bind DISTINCT ON.
-        let distinct = self.bind_distinct_on(select.distinct)?;
+        let distinct = self.bind_distinct_on(select.distinct, &out_name_to_index, &select_items)?;
 
         // Bind WHERE clause.
         self.context.clause = Some(Clause::Where);
@@ -223,25 +224,53 @@ impl Binder {
         self.context.clause = None;
 
         // Bind GROUP BY clause.
-        let out_name_to_index = Self::build_name_to_index(aliases.iter().filter_map(Clone::clone));
         self.context.clause = Some(Clause::GroupBy);
 
         // Only support one grouping item in group by clause
-        let group_by = if select.group_by.len() == 1 && let Expr::GroupingSets(grouping_sets) = &select.group_by[0] {
-            GroupBy::GroupingSets(self.bind_grouping_items_expr_in_select(grouping_sets.clone(), &out_name_to_index, &select_items)?)
-        } else if select.group_by.len() == 1 && let Expr::Rollup(rollup) = &select.group_by[0] {
-            GroupBy::Rollup(self.bind_grouping_items_expr_in_select(rollup.clone(), &out_name_to_index, &select_items)?)
-        } else if select.group_by.len() == 1 && let Expr::Cube(cube) = &select.group_by[0] {
-            GroupBy::Cube(self.bind_grouping_items_expr_in_select(cube.clone(), &out_name_to_index, &select_items)?)
+        let group_by = if select.group_by.len() == 1
+            && let Expr::GroupingSets(grouping_sets) = &select.group_by[0]
+        {
+            GroupBy::GroupingSets(self.bind_grouping_items_expr_in_select(
+                grouping_sets.clone(),
+                &out_name_to_index,
+                &select_items,
+            )?)
+        } else if select.group_by.len() == 1
+            && let Expr::Rollup(rollup) = &select.group_by[0]
+        {
+            GroupBy::Rollup(self.bind_grouping_items_expr_in_select(
+                rollup.clone(),
+                &out_name_to_index,
+                &select_items,
+            )?)
+        } else if select.group_by.len() == 1
+            && let Expr::Cube(cube) = &select.group_by[0]
+        {
+            GroupBy::Cube(self.bind_grouping_items_expr_in_select(
+                cube.clone(),
+                &out_name_to_index,
+                &select_items,
+            )?)
         } else {
-            if select.group_by.iter().any(|expr| matches!(expr, Expr::GroupingSets(_)) || matches!(expr, Expr::Rollup(_)) || matches!(expr, Expr::Cube(_))) {
-                return Err(ErrorCode::BindError("Only support one grouping item in group by clause".to_string()).into());
+            if select.group_by.iter().any(|expr| {
+                matches!(expr, Expr::GroupingSets(_))
+                    || matches!(expr, Expr::Rollup(_))
+                    || matches!(expr, Expr::Cube(_))
+            }) {
+                return Err(ErrorCode::BindError(
+                    "Only support one grouping item in group by clause".to_string(),
+                )
+                .into());
             }
-            GroupBy::GroupKey(select
-                .group_by
-                .into_iter()
-                .map(|expr| self.bind_group_by_expr_in_select(expr, &out_name_to_index, &select_items))
-                .try_collect()?)
+            GroupBy::GroupKey(
+                select
+                    .group_by
+                    .into_iter()
+                    .map(|expr| {
+                        self.bind_group_by_expr_in_select(expr, &out_name_to_index, &select_items)
+                    })
+                    .try_collect()?,
+            )
         };
         self.context.clause = None;
 
@@ -360,6 +389,7 @@ impl Binder {
                 }
             }
         }
+        assert_eq!(select_list.len(), aliases.len());
         Ok((select_list, aliases))
     }
 
@@ -709,9 +739,7 @@ impl Binder {
                     .expect("ExprImpl value is a Literal but cannot get ref to data")
                     .as_utf8();
                 self.bind_cast(
-                    Expr::Value(risingwave_sqlparser::ast::Value::SingleQuotedString(
-                        table_name.to_string(),
-                    )),
+                    Expr::Value(Value::SingleQuotedString(table_name.to_string())),
                     AstDataType::Regclass,
                 )
             }
@@ -769,14 +797,66 @@ impl Binder {
             .unzip()
     }
 
-    fn bind_distinct_on(&mut self, distinct: Distinct) -> Result<BoundDistinct> {
+    /// Bind `DISTINCT` clause in a [`Select`].
+    /// Note that for `DISTINCT ON`, each expression is interpreted in the same way as `ORDER BY`
+    /// expression, which means it will be bound in the following order:
+    ///
+    /// * as an output-column name (can use aliases)
+    /// * as an index (from 1) of an output column
+    /// * as an arbitrary expression (cannot use aliases)
+    ///
+    /// See also the `bind_order_by_expr_in_query` method.
+    ///
+    /// # Arguments
+    ///
+    /// * `name_to_index` - output column name -> index. Ambiguous (duplicate) output names are
+    ///   marked with `usize::MAX`.
+    fn bind_distinct_on(
+        &mut self,
+        distinct: Distinct,
+        name_to_index: &HashMap<String, usize>,
+        select_items: &[ExprImpl],
+    ) -> Result<BoundDistinct> {
         Ok(match distinct {
             Distinct::All => BoundDistinct::All,
             Distinct::Distinct => BoundDistinct::Distinct,
             Distinct::DistinctOn(exprs) => {
                 let mut bound_exprs = vec![];
                 for expr in exprs {
-                    bound_exprs.push(self.bind_expr(expr)?);
+                    let expr_impl = match expr {
+                        Expr::Identifier(name)
+                            if let Some(index) = name_to_index.get(&name.real_value()) =>
+                        {
+                            match *index {
+                                usize::MAX => {
+                                    return Err(ErrorCode::BindError(format!(
+                                        "DISTINCT ON \"{}\" is ambiguous",
+                                        name.real_value()
+                                    ))
+                                    .into())
+                                }
+                                _ => {
+                                    InputRef::new(*index, select_items[*index].return_type()).into()
+                                }
+                            }
+                        }
+                        Expr::Value(Value::Number(number)) => match number.parse::<usize>() {
+                            Ok(index) if 1 <= index && index <= select_items.len() => {
+                                let idx_from_0 = index - 1;
+                                InputRef::new(idx_from_0, select_items[idx_from_0].return_type())
+                                    .into()
+                            }
+                            _ => {
+                                return Err(ErrorCode::InvalidInputSyntax(format!(
+                                    "Invalid ordinal number in DISTINCT ON: {}",
+                                    number
+                                ))
+                                .into())
+                            }
+                        },
+                        expr => self.bind_expr(expr)?,
+                    };
+                    bound_exprs.push(expr_impl);
                 }
                 BoundDistinct::DistinctOn(bound_exprs)
             }
@@ -822,9 +902,7 @@ fn derive_alias(expr: &Expr) -> Option<String> {
             derive_alias(&expr).or_else(|| data_type_to_alias(&data_type))
         }
         Expr::TypedString { data_type, .. } => data_type_to_alias(&data_type),
-        Expr::Value(risingwave_sqlparser::ast::Value::Interval { .. }) => {
-            Some("interval".to_string())
-        }
+        Expr::Value(Value::Interval { .. }) => Some("interval".to_string()),
         Expr::Row(_) => Some("row".to_string()),
         Expr::Array(_) => Some("array".to_string()),
         Expr::ArrayIndex { obj, index: _ } => derive_alias(&obj),
@@ -855,6 +933,7 @@ fn data_type_to_alias(data_type: &AstDataType) -> Option<String> {
         AstDataType::Regproc => "regproc".to_string(),
         AstDataType::Text => "text".to_string(),
         AstDataType::Bytea => "bytea".to_string(),
+        AstDataType::Jsonb => "jsonb".to_string(),
         AstDataType::Array(ty) => return data_type_to_alias(ty),
         AstDataType::Custom(ty) => format!("{}", ty),
         AstDataType::Struct(_) => {

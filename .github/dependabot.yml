@@ -16,6 +16,7 @@ updates:
     arrow:
       patterns:
         - "arrow*"
+        - "parquet"
     aws:
       patterns:
         - "aws*"
@@ -23,3 +24,7 @@ updates:
       patterns:
         - "tonic*"
         - "prost*"
+    mysql:
+      patterns:
+        - "mysql_common"
+        - "mysql_async"

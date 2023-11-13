@@ -261,7 +261,7 @@ impl ClusterManager {
                             .unwrap()
                             .is_unschedulable = target;
 
-                        var_txn.apply_to_txn(&mut txn)?;
+                        var_txn.apply_to_txn(&mut txn).await?;
                         var_txns.push(var_txn);
                     }
                 }
@@ -557,7 +557,7 @@ impl ClusterManagerCore {
                     worker_id
                 );
 
-                var_txn.apply_to_txn(&mut txn)?;
+                var_txn.apply_to_txn(&mut txn).await?;
                 var_txns.push(var_txn);
             }
         }
@@ -697,10 +697,11 @@ impl ClusterManagerCore {
     }
 
     fn count_worker_node(&self) -> HashMap<WorkerType, u64> {
-        const MONITORED_WORKER_TYPES: [WorkerType; 3] = [
+        const MONITORED_WORKER_TYPES: [WorkerType; 4] = [
             WorkerType::Compactor,
             WorkerType::ComputeNode,
             WorkerType::Frontend,
+            WorkerType::Meta,
         ];
         let mut ret = HashMap::new();
         self.workers

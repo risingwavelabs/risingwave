@@ -47,7 +47,7 @@ pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
 
 pub struct SourceManager {
-    pub(crate) paused: Mutex<()>,
+    pub paused: Mutex<()>,
     env: MetaSrvEnv,
     barrier_scheduler: BarrierScheduler,
     core: Mutex<SourceManagerCore>,

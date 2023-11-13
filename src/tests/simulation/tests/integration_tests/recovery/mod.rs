@@ -13,5 +13,7 @@
 // limitations under the License.
 
 mod backfill;
+mod background_ddl;
 mod nexmark_recovery;
 mod pause_on_bootstrap;
+mod scale_in_when_recovery;

@@ -38,7 +38,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 38] = [
+const CONFIG_KEYS: [&str; 40] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -77,6 +77,8 @@ const CONFIG_KEYS: [&str; 38] = [
     "CDC_BACKFILL",
     "RW_STREAMING_OVER_WINDOW_CACHE_POLICY",
     "BACKGROUND_DDL",
+    "SERVER_ENCODING",
+    "STREAMING_ENABLE_ARRANGEMENT_BACKFILL",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -119,6 +121,8 @@ const STREAMING_RATE_LIMIT: usize = 34;
 const CDC_BACKFILL: usize = 35;
 const STREAMING_OVER_WINDOW_CACHE_POLICY: usize = 36;
 const BACKGROUND_DDL: usize = 37;
+const SERVER_ENCODING: usize = 38;
+const STREAMING_ENABLE_ARRANGEMENT_BACKFILL: usize = 39;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -343,6 +347,8 @@ type StandardConformingStrings = ConfigString<STANDARD_CONFORMING_STRINGS>;
 type StreamingRateLimit = ConfigU64<STREAMING_RATE_LIMIT, 0>;
 type CdcBackfill = ConfigBool<CDC_BACKFILL, false>;
 type BackgroundDdl = ConfigBool<BACKGROUND_DDL, false>;
+type ServerEncoding = ConfigString<SERVER_ENCODING>;
+type StreamingEnableArrangementBackfill = ConfigBool<STREAMING_ENABLE_ARRANGEMENT_BACKFILL, false>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {
@@ -415,6 +421,9 @@ pub struct ConfigMap {
 
     /// Enable bushy join for streaming queries. Defaults to true.
     streaming_enable_bushy_join: StreamingEnableBushyJoin,
+
+    /// Enable arrangement backfill for streaming queries. Defaults to false.
+    streaming_enable_arrangement_backfill: StreamingEnableArrangementBackfill,
 
     /// Enable join ordering for streaming and batch queries. Defaults to true.
     enable_join_ordering: EnableJoinOrdering,
@@ -492,6 +501,10 @@ pub struct ConfigMap {
     streaming_over_window_cache_policy: OverWindowCachePolicy,
 
     background_ddl: BackgroundDdl,
+
+    /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
+    #[educe(Default(expression = "ConfigString::<SERVER_ENCODING>(String::from(\"UTF8\"))"))]
+    server_encoding: ServerEncoding,
 }
 
 impl ConfigMap {
@@ -545,6 +558,8 @@ impl ConfigMap {
             self.streaming_enable_delta_join = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
             self.streaming_enable_bushy_join = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(StreamingEnableArrangementBackfill::entry_name()) {
+            self.streaming_enable_arrangement_backfill = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(EnableJoinOrdering::entry_name()) {
             self.enable_join_ordering = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
@@ -611,6 +626,20 @@ impl ConfigMap {
             self.streaming_over_window_cache_policy = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(BackgroundDdl::entry_name()) {
             self.background_ddl = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(ServerEncoding::entry_name()) {
+            let enc: ServerEncoding = val.as_slice().try_into()?;
+            // https://github.com/postgres/postgres/blob/REL_15_3/src/common/encnames.c#L525
+            let clean = enc
+                .as_str()
+                .replace(|c: char| !c.is_ascii_alphanumeric(), "");
+            if !clean.eq_ignore_ascii_case("UTF8") {
+                return Err(ErrorCode::InvalidConfigValue {
+                    config_entry: ServerEncoding::entry_name().into(),
+                    config_value: enc.0,
+                }
+                .into());
+            }
+            // No actual assignment because we only support UTF8.
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -653,6 +682,8 @@ impl ConfigMap {
             Ok(self.streaming_enable_delta_join.to_string())
         } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
             Ok(self.streaming_enable_bushy_join.to_string())
+        } else if key.eq_ignore_ascii_case(StreamingEnableArrangementBackfill::entry_name()) {
+            Ok(self.streaming_enable_arrangement_backfill.to_string())
         } else if key.eq_ignore_ascii_case(EnableJoinOrdering::entry_name()) {
             Ok(self.enable_join_ordering.to_string())
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
@@ -700,6 +731,8 @@ impl ConfigMap {
             Ok(self.streaming_over_window_cache_policy.to_string())
         } else if key.eq_ignore_ascii_case(BackgroundDdl::entry_name()) {
             Ok(self.background_ddl.to_string())
+        } else if key.eq_ignore_ascii_case(ServerEncoding::entry_name()) {
+            Ok(self.server_encoding.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -786,6 +819,11 @@ impl ConfigMap {
                 name : StreamingEnableBushyJoin::entry_name().to_lowercase(),
                 setting : self.streaming_enable_bushy_join.to_string(),
                 description: String::from("Enable bushy join in streaming queries.")
+            },
+            VariableInfo{
+                name : StreamingEnableArrangementBackfill::entry_name().to_lowercase(),
+                setting : self.streaming_enable_arrangement_backfill.to_string(),
+                description: String::from("Enable arrangement backfill in streaming queries.")
             },
             VariableInfo{
                 name : EnableJoinOrdering::entry_name().to_lowercase(),
@@ -897,6 +935,11 @@ impl ConfigMap {
                 setting: self.background_ddl.to_string(),
                 description: String::from("Run DDL statements in background"),
             },
+            VariableInfo{
+                name : ServerEncoding::entry_name().to_lowercase(),
+                setting : self.server_encoding.to_string(),
+                description : String::from("Sets the server character set encoding.")
+            },
         ]
     }
 
@@ -974,6 +1017,10 @@ impl ConfigMap {
         *self.streaming_enable_bushy_join
     }
 
+    pub fn get_streaming_enable_arrangement_backfill(&self) -> bool {
+        *self.streaming_enable_arrangement_backfill
+    }
+
     pub fn get_enable_join_ordering(&self) -> bool {
         *self.enable_join_ordering
     }
@@ -1038,5 +1085,9 @@ impl ConfigMap {
 
     pub fn get_background_ddl(&self) -> bool {
         self.background_ddl.0
+    }
+
+    pub fn get_server_encoding(&self) -> &str {
+        &self.server_encoding
     }
 }

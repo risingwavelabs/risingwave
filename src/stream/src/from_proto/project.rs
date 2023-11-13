@@ -23,7 +23,6 @@ use crate::executor::ProjectExecutor;
 
 pub struct ProjectExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for ProjectExecutorBuilder {
     type Node = ProjectNode;
 
@@ -64,10 +63,9 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
         let materialize_selectivity_threshold = if extremely_light { 0.0 } else { 0.5 };
         Ok(ProjectExecutor::new(
             params.actor_context,
+            params.info,
             input,
-            params.pk_indices,
             project_exprs,
-            params.executor_id,
             watermark_derivations,
             nondecreasing_expr_indices,
             materialize_selectivity_threshold,

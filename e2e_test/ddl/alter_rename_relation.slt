@@ -128,6 +128,11 @@ public.mv_on_v1 CREATE MATERIALIZED VIEW mv_on_v1 AS SELECT * FROM v5 AS v1
 statement ok
 ALTER INDEX idx RENAME TO idx1;
 
+query TT
+SHOW CREATE INDEX idx1;
+----
+public.idx1 CREATE INDEX idx1 ON t2(v1)
+
 statement ok
 INSERT INTO t2 VALUES(1,(1,(1,2)));
 

@@ -430,6 +430,13 @@ pub mod verify {
             self.actual.flush(delete_ranges).await
         }
 
+        async fn try_flush(&mut self) -> StorageResult<()> {
+            if let Some(expected) = &mut self.expected {
+                expected.try_flush().await?;
+            }
+            self.actual.try_flush().await
+        }
+
         async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
             self.actual.init(options.clone()).await?;
             if let Some(expected) = &mut self.expected {
@@ -537,7 +544,6 @@ impl StateStoreImpl {
                 dir: PathBuf::from(opts.data_file_cache_dir.clone()),
                 capacity: opts.data_file_cache_capacity_mb * MB,
                 file_capacity: opts.data_file_cache_file_capacity_mb * MB,
-                buffer_pool_size: opts.data_file_cache_buffer_pool_size_mb * MB,
                 device_align: opts.data_file_cache_device_align,
                 device_io_size: opts.data_file_cache_device_io_size,
                 lfu_window_to_cache_size_ratio: opts.data_file_cache_lfu_window_to_cache_size_ratio,
@@ -545,15 +551,19 @@ impl StateStoreImpl {
                 insert_rate_limit: opts.data_file_cache_insert_rate_limit_mb * MB,
                 flushers: opts.data_file_cache_flushers,
                 reclaimers: opts.data_file_cache_reclaimers,
-                flush_rate_limit: opts.data_file_cache_flush_rate_limit_mb * MB,
                 reclaim_rate_limit: opts.data_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.data_file_cache_recover_concurrency,
-                allocator_bits: opts.data_file_cache_allocation_bits,
-                allocation_timeout: Duration::from_millis(
-                    opts.data_file_cache_allocation_timeout_ms as u64,
-                ),
+                ring_buffer_capacity: opts.data_file_cache_ring_buffer_capacity_mb * MB,
+                catalog_bits: opts.data_file_cache_catalog_bits,
                 admissions: vec![],
                 reinsertions: vec![],
+                compression: match opts.data_file_cache_compression.as_str() {
+                    "none" => foyer::storage::compress::Compression::None,
+                    _ => panic!(
+                        "data file cache compression type not support: {}",
+                        opts.data_file_cache_compression
+                    ),
+                },
             };
             let cache = FileCache::open(config)
                 .await
@@ -575,7 +585,6 @@ impl StateStoreImpl {
                 dir: PathBuf::from(opts.meta_file_cache_dir.clone()),
                 capacity: opts.meta_file_cache_capacity_mb * MB,
                 file_capacity: opts.meta_file_cache_file_capacity_mb * MB,
-                buffer_pool_size: opts.meta_file_cache_buffer_pool_size_mb * MB,
                 device_align: opts.meta_file_cache_device_align,
                 device_io_size: opts.meta_file_cache_device_io_size,
                 lfu_window_to_cache_size_ratio: opts.meta_file_cache_lfu_window_to_cache_size_ratio,
@@ -583,15 +592,19 @@ impl StateStoreImpl {
                 insert_rate_limit: opts.meta_file_cache_insert_rate_limit_mb * MB,
                 flushers: opts.meta_file_cache_flushers,
                 reclaimers: opts.meta_file_cache_reclaimers,
-                flush_rate_limit: opts.meta_file_cache_flush_rate_limit_mb * MB,
                 reclaim_rate_limit: opts.meta_file_cache_reclaim_rate_limit_mb * MB,
                 recover_concurrency: opts.meta_file_cache_recover_concurrency,
-                allocator_bits: opts.meta_file_cache_allocation_bits,
-                allocation_timeout: Duration::from_millis(
-                    opts.meta_file_cache_allocation_timeout_ms as u64,
-                ),
+                ring_buffer_capacity: opts.meta_file_cache_ring_buffer_capacity_mb * MB,
+                catalog_bits: opts.meta_file_cache_catalog_bits,
                 admissions: vec![],
                 reinsertions: vec![],
+                compression: match opts.meta_file_cache_compression.as_str() {
+                    "none" => foyer::storage::compress::Compression::None,
+                    _ => panic!(
+                        "meta file cache compression type not support: {}",
+                        opts.meta_file_cache_compression
+                    ),
+                },
             };
             FileCache::open(config)
                 .await
@@ -778,6 +791,8 @@ pub mod boxed_state_store {
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         ) -> StorageResult<usize>;
 
+        async fn try_flush(&mut self) -> StorageResult<()>;
+
         fn epoch(&self) -> u64;
 
         fn is_dirty(&self) -> bool;
@@ -831,6 +846,10 @@ pub mod boxed_state_store {
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         ) -> StorageResult<usize> {
             self.flush(delete_ranges).await
+        }
+
+        async fn try_flush(&mut self) -> StorageResult<()> {
+            self.try_flush().await
         }
 
         fn epoch(&self) -> u64 {
@@ -897,6 +916,10 @@ pub mod boxed_state_store {
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         ) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
             self.deref_mut().flush(delete_ranges)
+        }
+
+        fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+            self.deref_mut().try_flush()
         }
 
         fn epoch(&self) -> u64 {

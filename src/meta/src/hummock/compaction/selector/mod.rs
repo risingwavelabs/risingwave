@@ -18,7 +18,7 @@
 // (found in the LICENSE.Apache file in the root directory).
 
 mod emergency_selector;
-mod level_selector;
+pub(crate) mod level_selector;
 mod manual_selector;
 mod space_reclaim_selector;
 mod tombstone_compaction_selector;
@@ -335,10 +335,7 @@ pub mod tests {
         l0
     }
 
-    pub(crate) fn assert_compaction_task(
-        compact_task: &CompactionTask,
-        level_handlers: &[LevelHandler],
-    ) {
+    pub fn assert_compaction_task(compact_task: &CompactionTask, level_handlers: &[LevelHandler]) {
         for i in &compact_task.input.input_levels {
             for t in &i.table_infos {
                 assert!(level_handlers[i.level_idx as usize].is_pending_compact(&t.sst_id));

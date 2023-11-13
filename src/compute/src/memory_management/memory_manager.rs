@@ -79,6 +79,8 @@ impl GlobalMemoryManager {
         let mut memory_control_stats = MemoryControlStats {
             jemalloc_allocated_bytes: 0,
             jemalloc_active_bytes: 0,
+            jvm_allocated_bytes: 0,
+            jvm_active_bytes: 0,
             lru_watermark_step: 0,
             lru_watermark_time_ms: Epoch::physical_now(),
             lru_physical_now_ms: Epoch::physical_now(),
@@ -122,6 +124,12 @@ impl GlobalMemoryManager {
                     self.metrics
                         .jemalloc_active_bytes
                         .set(memory_control_stats.jemalloc_active_bytes as i64);
+                    self.metrics
+                        .jvm_allocated_bytes
+                        .set(memory_control_stats.jvm_allocated_bytes as i64);
+                    self.metrics
+                        .jvm_active_bytes
+                        .set(memory_control_stats.jvm_active_bytes as i64);
                 }
             }
         }

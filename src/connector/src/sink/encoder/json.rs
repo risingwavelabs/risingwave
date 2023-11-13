@@ -13,11 +13,13 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use base64::engine::general_purpose;
 use base64::Engine as _;
 use chrono::{Datelike, Timelike};
 use indexmap::IndexMap;
+use itertools::Itertools;
 use risingwave_common::array::{ArrayError, ArrayResult};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
@@ -25,14 +27,19 @@ use risingwave_common::types::{DataType, DatumRef, Decimal, ScalarRefImpl, ToTex
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_json::{json, Map, Value};
 
-use super::{CustomJsonType, Result, RowEncoder, SerTo, TimestampHandlingMode};
+use super::{
+    CustomJsonType, KafkaConnectParams, KafkaConnectParamsRef, Result, RowEncoder, SerTo,
+    TimestampHandlingMode, TimestamptzHandlingMode,
+};
 use crate::sink::SinkError;
 
 pub struct JsonEncoder {
     schema: Schema,
     col_indices: Option<Vec<usize>>,
     timestamp_handling_mode: TimestampHandlingMode,
+    timestamptz_handling_mode: TimestamptzHandlingMode,
     custom_json_type: CustomJsonType,
+    kafka_connect: Option<KafkaConnectParamsRef>,
 }
 
 impl JsonEncoder {
@@ -40,12 +47,15 @@ impl JsonEncoder {
         schema: Schema,
         col_indices: Option<Vec<usize>>,
         timestamp_handling_mode: TimestampHandlingMode,
+        timestamptz_handling_mode: TimestamptzHandlingMode,
     ) -> Self {
         Self {
             schema,
             col_indices,
             timestamp_handling_mode,
+            timestamptz_handling_mode,
             custom_json_type: CustomJsonType::None,
+            kafka_connect: None,
         }
     }
 
@@ -59,7 +69,31 @@ impl JsonEncoder {
             schema,
             col_indices,
             timestamp_handling_mode,
+            timestamptz_handling_mode: TimestamptzHandlingMode::UtcWithoutSuffix,
             custom_json_type: CustomJsonType::Doris(map),
+            kafka_connect: None,
+        }
+    }
+
+    pub fn with_kafka_connect(self, kafka_connect: KafkaConnectParams) -> Self {
+        Self {
+            kafka_connect: Some(Arc::new(kafka_connect)),
+            ..self
+        }
+    }
+
+    pub fn new_with_big_query(
+        schema: Schema,
+        col_indices: Option<Vec<usize>>,
+        timestamp_handling_mode: TimestampHandlingMode,
+    ) -> Self {
+        Self {
+            schema,
+            col_indices,
+            timestamp_handling_mode,
+            timestamptz_handling_mode: TimestamptzHandlingMode::UtcString,
+            custom_json_type: CustomJsonType::Bigquery,
+            kafka_connect: None,
         }
     }
 }
@@ -81,19 +115,30 @@ impl RowEncoder for JsonEncoder {
         col_indices: impl Iterator<Item = usize>,
     ) -> Result<Self::Output> {
         let mut mappings = Map::with_capacity(self.schema.len());
-        for idx in col_indices {
-            let field = &self.schema[idx];
+        let col_indices = col_indices.collect_vec();
+        for idx in &col_indices {
+            let field = &self.schema[*idx];
             let key = field.name.clone();
             let value = datum_to_json_object(
                 field,
-                row.datum_at(idx),
+                row.datum_at(*idx),
                 self.timestamp_handling_mode,
+                self.timestamptz_handling_mode,
                 &self.custom_json_type,
             )
-            .map_err(|e| SinkError::JsonParse(e.to_string()))?;
+            .map_err(|e| SinkError::Encode(e.to_string()))?;
             mappings.insert(key, value);
         }
-        Ok(mappings)
+
+        Ok(if let Some(param) = &self.kafka_connect {
+            json_converter_with_schema(
+                Value::Object(mappings),
+                param.schema_name.to_owned(),
+                col_indices.into_iter().map(|i| &self.schema[i]),
+            )
+        } else {
+            mappings
+        })
     }
 }
 
@@ -113,6 +158,7 @@ fn datum_to_json_object(
     field: &Field,
     datum: DatumRef<'_>,
     timestamp_handling_mode: TimestampHandlingMode,
+    timestamptz_handling_mode: TimestamptzHandlingMode,
     custom_json_type: &CustomJsonType,
 ) -> ArrayResult<Value> {
     let scalar_ref = match datum {
@@ -150,36 +196,44 @@ fn datum_to_json_object(
             CustomJsonType::Doris(map) => {
                 if !matches!(v, Decimal::Normalized(_)) {
                     return Err(ArrayError::internal(
-                        "doris can't support decimal Inf, -Inf, Nan".to_string(),
+                        "doris/starrocks can't support decimal Inf, -Inf, Nan".to_string(),
                     ));
                 }
                 let (p, s) = map.get(&field.name).unwrap();
                 v.rescale(*s as u32);
                 let v_string = v.to_text();
-                if v_string.len() > *p as usize {
+                let len = v_string.clone().replace(['.', '-'], "").len();
+                if len > *p as usize {
                     return Err(ArrayError::internal(
-                        format!("rw Decimal's precision is large than doris max decimal len is {:?}, doris max is {:?}",v_string.len(),p)));
+                        format!("rw Decimal's precision is large than doris/starrocks max decimal len is {:?}, doris max is {:?}",v_string.len(),p)));
                 }
                 json!(v_string)
             }
-            CustomJsonType::None => {
+            CustomJsonType::None | CustomJsonType::Bigquery => {
                 json!(v.to_text())
             }
         },
-        (DataType::Timestamptz, ScalarRefImpl::Timestamptz(v)) => {
-            // risingwave's timestamp with timezone is stored in UTC and does not maintain the
-            // timezone info and the time is in microsecond.
-            let parsed = v.to_datetime_utc().naive_utc();
-            let v = parsed.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
-            json!(v)
-        }
+        (DataType::Timestamptz, ScalarRefImpl::Timestamptz(v)) => match timestamptz_handling_mode {
+            TimestamptzHandlingMode::UtcString => {
+                let parsed = v.to_datetime_utc();
+                let v = parsed.to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
+                json!(v)
+            }
+            TimestamptzHandlingMode::UtcWithoutSuffix => {
+                let parsed = v.to_datetime_utc().naive_utc();
+                let v = parsed.format("%Y-%m-%d %H:%M:%S%.6f").to_string();
+                json!(v)
+            }
+            TimestamptzHandlingMode::Micro => json!(v.timestamp_micros()),
+            TimestamptzHandlingMode::Milli => json!(v.timestamp_millis()),
+        },
         (DataType::Time, ScalarRefImpl::Time(v)) => {
             // todo: just ignore the nanos part to avoid leap second complex
             json!(v.0.num_seconds_from_midnight() as i64 * 1000)
         }
         (DataType::Date, ScalarRefImpl::Date(v)) => match custom_json_type {
             CustomJsonType::None => json!(v.0.num_days_from_ce()),
-            CustomJsonType::Doris(_) => {
+            CustomJsonType::Bigquery | CustomJsonType::Doris(_) => {
                 let a = v.0.format("%Y-%m-%d").to_string();
                 json!(a)
             }
@@ -207,6 +261,7 @@ fn datum_to_json_object(
                     &inner_field,
                     sub_datum_ref,
                     timestamp_handling_mode,
+                    timestamptz_handling_mode,
                     custom_json_type,
                 )?;
                 vec.push(value);
@@ -226,6 +281,7 @@ fn datum_to_json_object(
                             &sub_field,
                             sub_datum_ref,
                             timestamp_handling_mode,
+                            timestamptz_handling_mode,
                             custom_json_type,
                         )?;
                         map.insert(sub_field.name.clone(), value);
@@ -234,7 +290,7 @@ fn datum_to_json_object(
                         ArrayError::internal(format!("Json to string err{:?}", err))
                     })?)
                 }
-                CustomJsonType::None => {
+                CustomJsonType::None | CustomJsonType::Bigquery => {
                     let mut map = Map::with_capacity(st.len());
                     for (sub_datum_ref, sub_field) in struct_ref.iter_fields_ref().zip_eq_debug(
                         st.iter()
@@ -244,6 +300,7 @@ fn datum_to_json_object(
                             &sub_field,
                             sub_datum_ref,
                             timestamp_handling_mode,
+                            timestamptz_handling_mode,
                             custom_json_type,
                         )?;
                         map.insert(sub_field.name.clone(), value);
@@ -260,6 +317,79 @@ fn datum_to_json_object(
     };
 
     Ok(value)
+}
+
+fn json_converter_with_schema<'a>(
+    object: Value,
+    name: String,
+    fields: impl Iterator<Item = &'a Field>,
+) -> Map<String, Value> {
+    let mut mapping = Map::with_capacity(2);
+    mapping.insert(
+        "schema".to_string(),
+        json!({
+            "type": "struct",
+            "fields": fields.map(|field| {
+                let mut mapping = type_as_json_schema(&field.data_type);
+                mapping.insert("field".to_string(), json!(field.name));
+                mapping
+            }).collect_vec(),
+            "optional": false,
+            "name": name,
+        }),
+    );
+    mapping.insert("payload".to_string(), object);
+    mapping
+}
+
+// reference: https://github.com/apache/kafka/blob/80982c4ae3fe6be127b48ec09caff11ab5f87c69/connect/json/src/main/java/org/apache/kafka/connect/json/JsonSchema.java#L39
+pub(crate) fn schema_type_mapping(rw_type: &DataType) -> &'static str {
+    match rw_type {
+        DataType::Boolean => "boolean",
+        DataType::Int16 => "int16",
+        DataType::Int32 => "int32",
+        DataType::Int64 => "int64",
+        DataType::Float32 => "float",
+        DataType::Float64 => "double",
+        DataType::Decimal => "string",
+        DataType::Date => "int32",
+        DataType::Varchar => "string",
+        DataType::Time => "int64",
+        DataType::Timestamp => "int64",
+        DataType::Timestamptz => "string",
+        DataType::Interval => "string",
+        DataType::Struct(_) => "struct",
+        DataType::List(_) => "array",
+        DataType::Bytea => "bytes",
+        DataType::Jsonb => "string",
+        DataType::Serial => "int32",
+        DataType::Int256 => "string",
+    }
+}
+
+fn type_as_json_schema(rw_type: &DataType) -> Map<String, Value> {
+    let mut mapping = Map::with_capacity(4); // type + optional + fields/items + field
+    mapping.insert("type".to_string(), json!(schema_type_mapping(rw_type)));
+    mapping.insert("optional".to_string(), json!(true));
+    match rw_type {
+        DataType::Struct(struct_type) => {
+            let sub_fields = struct_type
+                .iter()
+                .map(|(sub_name, sub_type)| {
+                    let mut sub_mapping = type_as_json_schema(sub_type);
+                    sub_mapping.insert("field".to_string(), json!(sub_name));
+                    sub_mapping
+                })
+                .collect_vec();
+            mapping.insert("fields".to_string(), json!(sub_fields));
+        }
+        DataType::List(sub_type) => {
+            mapping.insert("items".to_string(), json!(type_as_json_schema(sub_type)));
+        }
+        _ => {}
+    }
+
+    mapping
 }
 
 #[cfg(test)]
@@ -287,6 +417,7 @@ mod tests {
             },
             Some(ScalarImpl::Bool(false).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
+            TimestamptzHandlingMode::UtcString,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -299,6 +430,7 @@ mod tests {
             },
             Some(ScalarImpl::Int16(16).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
+            TimestamptzHandlingMode::UtcString,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -311,6 +443,7 @@ mod tests {
             },
             Some(ScalarImpl::Int64(std::i64::MAX).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
+            TimestamptzHandlingMode::UtcString,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -328,6 +461,21 @@ mod tests {
             },
             Some(ScalarImpl::Timestamptz(tstz_inner).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
+            TimestamptzHandlingMode::UtcString,
+            &CustomJsonType::None,
+        )
+        .unwrap();
+        assert_eq!(tstz_value, "2018-01-26T18:30:09.453000Z");
+
+        let tstz_inner = "2018-01-26T18:30:09.453Z".parse().unwrap();
+        let tstz_value = datum_to_json_object(
+            &Field {
+                data_type: DataType::Timestamptz,
+                ..mock_field.clone()
+            },
+            Some(ScalarImpl::Timestamptz(tstz_inner).as_scalar_ref_impl()),
+            TimestampHandlingMode::String,
+            TimestamptzHandlingMode::UtcWithoutSuffix,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -343,6 +491,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::Milli,
+            TimestamptzHandlingMode::UtcString,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -358,6 +507,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::String,
+            TimestamptzHandlingMode::UtcString,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -374,6 +524,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::String,
+            TimestamptzHandlingMode::UtcString,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -389,6 +540,7 @@ mod tests {
                     .as_scalar_ref_impl(),
             ),
             TimestampHandlingMode::String,
+            TimestamptzHandlingMode::UtcString,
             &CustomJsonType::None,
         )
         .unwrap();
@@ -404,6 +556,7 @@ mod tests {
             },
             Some(ScalarImpl::Decimal(Decimal::try_from(1.1111111).unwrap()).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
+            TimestamptzHandlingMode::UtcString,
             &CustomJsonType::Doris(map),
         )
         .unwrap();
@@ -416,6 +569,7 @@ mod tests {
             },
             Some(ScalarImpl::Date(Date::from_ymd_uncheck(2010, 10, 10)).as_scalar_ref_impl()),
             TimestampHandlingMode::String,
+            TimestamptzHandlingMode::UtcString,
             &CustomJsonType::Doris(HashMap::default()),
         )
         .unwrap();
@@ -438,9 +592,141 @@ mod tests {
             },
             Some(ScalarRefImpl::Struct(StructRef::ValueRef { val: &value })),
             TimestampHandlingMode::String,
+            TimestamptzHandlingMode::UtcString,
             &CustomJsonType::Doris(HashMap::default()),
         )
         .unwrap();
         assert_eq!(interval_value, json!("{\"v3\":3,\"v2\":2,\"v1\":1}"));
+    }
+
+    #[test]
+    fn test_generate_json_converter_schema() {
+        let mock_field = Field {
+            data_type: DataType::Boolean,
+            name: Default::default(),
+            sub_fields: Default::default(),
+            type_name: Default::default(),
+        };
+        let fields = vec![
+            Field {
+                data_type: DataType::Boolean,
+                name: "v1".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Int16,
+                name: "v2".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Int32,
+                name: "v3".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Float32,
+                name: "v4".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Decimal,
+                name: "v5".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Date,
+                name: "v6".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Varchar,
+                name: "v7".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Time,
+                name: "v8".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Interval,
+                name: "v9".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Struct(StructType::new(vec![
+                    ("a", DataType::Timestamp),
+                    ("b", DataType::Timestamptz),
+                    (
+                        "c",
+                        DataType::Struct(StructType::new(vec![
+                            ("aa", DataType::Int64),
+                            ("bb", DataType::Float64),
+                        ])),
+                    ),
+                ])),
+                name: "v10".into(),
+                sub_fields: vec![
+                    Field {
+                        data_type: DataType::Timestamp,
+                        name: "a".into(),
+                        ..mock_field.clone()
+                    },
+                    Field {
+                        data_type: DataType::Timestamptz,
+                        name: "b".into(),
+                        ..mock_field.clone()
+                    },
+                    Field {
+                        data_type: DataType::Struct(StructType::new(vec![
+                            ("aa", DataType::Int64),
+                            ("bb", DataType::Float64),
+                        ])),
+                        name: "c".into(),
+                        sub_fields: vec![
+                            Field {
+                                data_type: DataType::Int64,
+                                name: "aa".into(),
+                                ..mock_field.clone()
+                            },
+                            Field {
+                                data_type: DataType::Float64,
+                                name: "bb".into(),
+                                ..mock_field.clone()
+                            },
+                        ],
+                        ..mock_field.clone()
+                    },
+                ],
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::List(Box::new(DataType::List(Box::new(DataType::Struct(
+                    StructType::new(vec![("aa", DataType::Int64), ("bb", DataType::Float64)]),
+                ))))),
+                name: "v11".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Jsonb,
+                name: "12".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Serial,
+                name: "13".into(),
+                ..mock_field.clone()
+            },
+            Field {
+                data_type: DataType::Int256,
+                name: "14".into(),
+                ..mock_field.clone()
+            },
+        ];
+        let schema = json_converter_with_schema(json!({}), "test".to_owned(), fields.iter())
+            ["schema"]
+            .to_string();
+        let ans = r#"{"fields":[{"field":"v1","optional":true,"type":"boolean"},{"field":"v2","optional":true,"type":"int16"},{"field":"v3","optional":true,"type":"int32"},{"field":"v4","optional":true,"type":"float"},{"field":"v5","optional":true,"type":"string"},{"field":"v6","optional":true,"type":"int32"},{"field":"v7","optional":true,"type":"string"},{"field":"v8","optional":true,"type":"int64"},{"field":"v9","optional":true,"type":"string"},{"field":"v10","fields":[{"field":"a","optional":true,"type":"int64"},{"field":"b","optional":true,"type":"string"},{"field":"c","fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"}],"optional":true,"type":"struct"},{"field":"v11","items":{"items":{"fields":[{"field":"aa","optional":true,"type":"int64"},{"field":"bb","optional":true,"type":"double"}],"optional":true,"type":"struct"},"optional":true,"type":"array"},"optional":true,"type":"array"},{"field":"12","optional":true,"type":"string"},{"field":"13","optional":true,"type":"int32"},{"field":"14","optional":true,"type":"string"}],"name":"test","optional":false,"type":"struct"}"#;
+        assert_eq!(schema, ans);
     }
 }

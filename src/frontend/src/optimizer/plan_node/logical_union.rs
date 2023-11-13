@@ -21,7 +21,9 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Scalar};
 
 use super::utils::impl_distill_by_unit;
-use super::{ColPrunable, ExprRewritable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
+use super::{
+    ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream,
+};
 use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::stream_union::StreamUnion;
@@ -37,7 +39,7 @@ use crate::Explain;
 /// If `all` is false, it needs to eliminate duplicates.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalUnion {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Union<PlanRef>,
 }
 
@@ -130,7 +132,7 @@ impl ToBatch for LogicalUnion {
         if !self.all() {
             let batch_union = BatchUnion::new(new_logical).into();
             Ok(BatchHashAgg::new(
-                generic::Agg::new(vec![], (0..self.base.schema.len()).collect(), batch_union)
+                generic::Agg::new(vec![], (0..self.base.schema().len()).collect(), batch_union)
                     .with_enable_two_phase(false),
             )
             .into())
@@ -170,7 +172,7 @@ impl ToStream for LogicalUnion {
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        let original_schema = self.base.schema.clone();
+        let original_schema = self.base.schema().clone();
         let original_schema_len = original_schema.len();
         let mut rewrites = vec![];
         for input in &self.core.inputs {
@@ -353,7 +355,7 @@ mod tests {
 
         // Check the result
         let union = plan.as_logical_union().unwrap();
-        assert_eq!(union.base.schema.len(), 2);
+        assert_eq!(union.base.schema().len(), 2);
     }
 
     #[tokio::test]

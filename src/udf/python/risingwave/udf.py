@@ -21,6 +21,7 @@ import traceback
 import json
 from concurrent.futures import ThreadPoolExecutor
 import concurrent
+import signal
 
 
 class UserDefinedFunction:
@@ -392,11 +393,16 @@ class UdfServer(pa.flight.FlightServerBase):
             raise e
 
     def serve(self):
-        """Start the server."""
+        """
+        Block until the server shuts down.
+
+        This method only returns if shutdown() is called or a signal (SIGINT, SIGTERM) received.
+        """
         print(
             "Note: You can use arbitrary function names and struct field names in CREATE FUNCTION statements."
             f"\n\nlistening on {self._location}"
         )
+        signal.signal(signal.SIGTERM, lambda s, f: self.shutdown())
         super(UdfServer, self).serve()
 
 

@@ -41,7 +41,7 @@ public class SourceTestClient {
     static final Logger LOG = LoggerFactory.getLogger(SourceTestClient.class.getName());
 
     // default port for connector service
-    static final int DEFAULT_PORT = 50051;
+    static final int DEFAULT_PORT = 60051;
     private final ConnectorServiceGrpc.ConnectorServiceBlockingStub blockingStub;
 
     public Properties sqlStmts = new Properties();

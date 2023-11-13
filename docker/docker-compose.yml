@@ -1,8 +1,10 @@
 ---
 version: "3"
+x-image: &image
+  image: ${RW_IMAGE:-risingwavelabs/risingwave:v1.3.0}
 services:
   compactor-0:
-    image: "ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.2.0}"
+    <<: *image
     command:
       - compactor-node
       - "--listen-addr"
@@ -36,8 +38,15 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 2Gi
+        reservations:
+          memory: 1Gi
   compute-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.2.0}"
+    <<: *image
     command:
       - compute-node
       - "--listen-addr"
@@ -48,8 +57,6 @@ services:
       - "0.0.0.0:1222"
       - "--meta-address"
       - "http://meta-node-0:5690"
-      - "--connector-rpc-endpoint"
-      - "connector-node:50051"
       - "--config-path"
       - /risingwave.toml
     expose:
@@ -73,6 +80,13 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 26Gi
+        reservations:
+          memory: 26Gi
   etcd-0:
     image: "quay.io/coreos/etcd:v3.5.7"
     command:
@@ -121,8 +135,9 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
   frontend-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.2.0}"
+    <<: *image
     command:
       - frontend-node
       - "--listen-addr"
@@ -155,6 +170,13 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 2Gi
+        reservations:
+          memory: 1Gi
   grafana-0:
     image: "grafana/grafana-oss:latest"
     command: []
@@ -178,8 +200,9 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
   meta-node-0:
-    image: "ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.2.0}"
+    <<: *image
     command:
       - meta-node
       - "--listen-addr"
@@ -194,8 +217,6 @@ services:
       - etcd
       - "--etcd-endpoints"
       - "etcd-0:2388"
-      - "--connector-rpc-endpoint"
-      - "connector-node:50051"
       - "--state-store"
       - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
       - "--data-directory"
@@ -225,6 +246,13 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 2Gi
+        reservations:
+          memory: 1Gi
   minio-0:
     image: "quay.io/minio/minio:latest"
     command:
@@ -260,6 +288,7 @@ services:
       MINIO_PROMETHEUS_URL: "http://prometheus-0:9500"
       MINIO_ROOT_PASSWORD: hummockadmin
       MINIO_ROOT_USER: hummockadmin
+      MINIO_DOMAIN: "minio-0"
     container_name: minio-0
     healthcheck:
       test:
@@ -268,6 +297,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
   prometheus-0:
     image: "prom/prometheus:latest"
     command:
@@ -294,13 +324,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
-  connector-node:
-    image: ghcr.io/risingwavelabs/risingwave:${RW_IMAGE_VERSION:-v1.2.0}
-    entrypoint: "/risingwave/bin/connector-node/start-service.sh"
-    ports:
-      - 50051
-      - 50052
-    container_name: connector-node
+    restart: always
   message_queue:
     image: "docker.vectorized.io/vectorized/redpanda:latest"
     command:
@@ -339,6 +363,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
 volumes:
   etcd-0:
     external: false

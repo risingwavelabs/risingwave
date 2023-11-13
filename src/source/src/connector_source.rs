@@ -155,23 +155,14 @@ impl ConnectorSource {
                 let to_reader_splits = splits.into_iter().map(|split| vec![split]);
 
                 try_join_all(to_reader_splits.into_iter().map(|splits| {
-                    tracing::debug!("spawning connector split reader for split {:?}", splits);
+                    tracing::debug!(?splits, ?prop, "spawning connector split reader");
                     let props = prop.clone();
                     let data_gen_columns = data_gen_columns.clone();
                     let parser_config = parser_config.clone();
                     // TODO: is this reader split across multiple threads...? Realistically, we want
                     // source_ctx to live in a single actor.
                     let source_ctx = source_ctx.clone();
-                    async move {
-                        create_split_reader(
-                            *props,
-                            splits,
-                            parser_config,
-                            source_ctx,
-                            data_gen_columns,
-                        )
-                        .await
-                    }
+                    create_split_reader(*props, splits, parser_config, source_ctx, data_gen_columns)
                 }))
                 .await?
             };

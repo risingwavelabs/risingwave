@@ -16,6 +16,8 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::future::Future;
 
+use itertools::Itertools;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::key::{PointRange, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 
@@ -80,7 +82,7 @@ pub(crate) type CompactionDeleteRangeEvent = (
 /// `<1, +epoch1> <3, +epoch2> <5, -epoch1> <7, -epoch2> <10, +epoch3> <12, -epoch3>`
 /// We rely on the fact that keys met in compaction are in order.
 /// When user key 0 comes, no events have happened yet so no range delete epoch. (will be
-/// represented as range delete epoch `HummockEpoch::MAX`)
+/// represented as range delete epoch `MAX_EPOCH`)
 /// When user key 1 comes, event `<1, +epoch1>` happens so there is currently one range delete
 /// epoch: epoch1.
 /// When user key 2 comes, no more events happen so the set remains `{epoch1}`.
@@ -137,7 +139,7 @@ impl CompactionDeleteRangeIterator {
                 if !monotonic_events.is_empty() {
                     monotonic_events.push(MonotonicDeleteEvent {
                         event_key: extended_largest_user_key.to_vec(),
-                        new_epoch: HummockEpoch::MAX,
+                        new_epoch: MAX_EPOCH,
                     });
                 }
                 break;
@@ -157,14 +159,8 @@ impl CompactionDeleteRangeIterator {
                 && a.new_epoch == b.new_epoch
         });
         if !monotonic_events.is_empty() {
-            assert_ne!(
-                monotonic_events.first().unwrap().new_epoch,
-                HummockEpoch::MAX
-            );
-            assert_eq!(
-                monotonic_events.last().unwrap().new_epoch,
-                HummockEpoch::MAX
-            );
+            assert_ne!(monotonic_events.first().unwrap().new_epoch, MAX_EPOCH);
+            assert_eq!(monotonic_events.last().unwrap().new_epoch, MAX_EPOCH);
         }
         Ok(monotonic_events)
     }
@@ -254,7 +250,7 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
         if self.next_idx > 0 {
             self.table.value().meta.monotonic_tombstone_events[self.next_idx - 1].new_epoch
         } else {
-            HummockEpoch::MAX
+            MAX_EPOCH
         }
     }
 
@@ -301,7 +297,7 @@ pub fn get_min_delete_range_epoch_from_sstable(
         |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(&query_extended_user_key),
     );
     if idx == 0 {
-        HummockEpoch::MAX
+        MAX_EPOCH
     } else {
         table.meta.monotonic_tombstone_events[idx - 1].new_epoch
     }
@@ -382,7 +378,7 @@ mod tests {
             iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 13)
                 .await
                 .unwrap(),
-            HummockEpoch::MAX
+            MAX_EPOCH
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 11)
@@ -560,6 +556,6 @@ mod tests {
             &sstable,
             iterator_test_user_key_of(8).as_ref(),
         );
-        assert_eq!(ret, HummockEpoch::MAX);
+        assert_eq!(ret, MAX_EPOCH);
     }
 }

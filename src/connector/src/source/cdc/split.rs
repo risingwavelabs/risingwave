@@ -74,12 +74,17 @@ impl MySqlCdcSplit {
                     self.inner.split_id
                 )
             })?;
-            snapshot_done = match dbz_offset.source_offset.snapshot {
-                Some(val) => !val,
-                None => true,
-            };
+
+            // heartbeat event should not update the `snapshot_done` flag
+            if !dbz_offset.is_heartbeat {
+                snapshot_done = match dbz_offset.source_offset.snapshot {
+                    Some(val) => !val,
+                    None => true,
+                };
+            }
         }
         self.inner.start_offset = Some(start_offset);
+        // if snapshot_done is already true, it won't be updated
         self.inner.snapshot_done = snapshot_done;
         Ok(())
     }
@@ -109,10 +114,14 @@ impl PostgresCdcSplit {
                     self.inner.split_id
                 )
             })?;
-            snapshot_done = dbz_offset
-                .source_offset
-                .last_snapshot_record
-                .unwrap_or(false);
+
+            // heartbeat event should not update the `snapshot_done` flag
+            if !dbz_offset.is_heartbeat {
+                snapshot_done = dbz_offset
+                    .source_offset
+                    .last_snapshot_record
+                    .unwrap_or(false);
+            }
         }
         self.inner.start_offset = Some(start_offset);
         // if snapshot_done is already true, it won't be updated
@@ -202,10 +211,11 @@ impl<T: CdcSourceTypeTrait> DebeziumCdcSplit<T> {
         unreachable!("invalid debezium split")
     }
 
-    pub fn server_addr(&self) -> &Option<String> {
+    pub fn server_addr(&self) -> Option<String> {
         if let Some(split) = &self.pg_split {
-            return &split.server_addr;
+            split.server_addr.clone()
+        } else {
+            None
         }
-        unreachable!("invalid debezium split")
     }
 }

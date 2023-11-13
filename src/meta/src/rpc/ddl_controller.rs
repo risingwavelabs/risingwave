@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
@@ -23,12 +25,14 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
 use risingwave_pb::catalog::{
-    connection, Connection, CreateType, Database, Function, Schema, Source, Table, View,
+    connection, Comment, Connection, CreateType, Database, Function, Schema, Source, Table, View,
 };
+use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use tokio::sync::Semaphore;
+use tokio::time::sleep;
 use tracing::log::warn;
 use tracing::Instrument;
 
@@ -36,7 +40,7 @@ use crate::barrier::BarrierManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
     IdCategory, IndexId, LocalNotification, MetaSrvEnv, NotificationVersion, RelationIdEnum,
-    SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, ViewId,
+    SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, UserId, ViewId,
     IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{StreamEnvironment, TableFragments};
@@ -48,6 +52,7 @@ use crate::stream::{
 };
 use crate::{MetaError, MetaResult};
 
+#[derive(PartialEq)]
 pub enum DropMode {
     Restrict,
     Cascade,
@@ -98,8 +103,10 @@ pub enum DdlCommand {
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterRelationName(Relation, String),
     AlterSourceColumn(Source),
+    AlterTableOwner(Object, UserId),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
+    CommentOn(Comment),
 }
 
 #[derive(Clone)]
@@ -178,7 +185,7 @@ impl CreatingStreamingJobPermit {
 }
 
 impl DdlController {
-    pub(crate) async fn new(
+    pub async fn new(
         env: MetaSrvEnv,
         catalog_manager: CatalogManagerRef,
         stream_manager: GlobalStreamManagerRef,
@@ -217,7 +224,7 @@ impl DdlController {
     /// has been interrupted during executing, the request will be cancelled by tonic. Since we have
     /// a lot of logic for revert, status management, notification and so on, ensuring consistency
     /// would be a huge hassle and pain if we don't spawn here.
-    pub(crate) async fn run_command(&self, command: DdlCommand) -> MetaResult<NotificationVersion> {
+    pub async fn run_command(&self, command: DdlCommand) -> MetaResult<NotificationVersion> {
         self.check_barrier_manager_status().await?;
         let ctrl = self.clone();
         let fut = async move {
@@ -250,6 +257,9 @@ impl DdlController {
                 DdlCommand::AlterRelationName(relation, name) => {
                     ctrl.alter_relation_name(relation, &name).await
                 }
+                DdlCommand::AlterTableOwner(object, owner_id) => {
+                    ctrl.alter_owner(object, owner_id).await
+                }
                 DdlCommand::CreateConnection(connection) => {
                     ctrl.create_connection(connection).await
                 }
@@ -257,13 +267,14 @@ impl DdlController {
                     ctrl.drop_connection(connection_id).await
                 }
                 DdlCommand::AlterSourceColumn(source) => ctrl.alter_source_column(source).await,
+                DdlCommand::CommentOn(comment) => ctrl.comment_on(comment).await,
             }
         }
         .in_current_span();
         tokio::spawn(fut).await.unwrap()
     }
 
-    pub(crate) async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
+    pub async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
         self.barrier_manager.get_ddl_progress().await
     }
 
@@ -313,7 +324,7 @@ impl DdlController {
         }
 
         self.catalog_manager
-            .finish_create_source_procedure(source)
+            .finish_create_source_procedure(source, vec![])
             .await
     }
 
@@ -397,11 +408,15 @@ impl DdlController {
     async fn delete_vpc_endpoint(&self, connection: &Connection) -> MetaResult<()> {
         // delete AWS vpc endpoint
         if let Some(connection::Info::PrivateLinkService(svc)) = &connection.info
-            && svc.get_provider()? == PbPrivateLinkProvider::Aws {
+            && svc.get_provider()? == PbPrivateLinkProvider::Aws
+        {
             if let Some(aws_cli) = self.aws_client.as_ref() {
                 aws_cli.delete_vpc_endpoint(&svc.endpoint_id).await?;
             } else {
-                warn!("AWS client is not initialized, skip deleting vpc endpoint {}", svc.endpoint_id);
+                warn!(
+                    "AWS client is not initialized, skip deleting vpc endpoint {}",
+                    svc.endpoint_id
+                );
             }
         }
         Ok(())
@@ -413,6 +428,11 @@ impl DdlController {
         fragment_graph: StreamFragmentGraphProto,
         create_type: CreateType,
     ) -> MetaResult<NotificationVersion> {
+        tracing::debug!(
+            id = stream_job.id(),
+            definition = stream_job.definition(),
+            "starting stream job",
+        );
         let _permit = self
             .creating_streaming_job_permits
             .semaphore
@@ -422,6 +442,9 @@ impl DdlController {
         let _reschedule_job_lock = self.stream_manager.reschedule_lock.read().await;
 
         let env = StreamEnvironment::from_protobuf(fragment_graph.get_env().unwrap());
+
+        // Persist tables
+        tracing::debug!(id = stream_job.id(), "preparing stream job");
         let fragment_graph = self
             .prepare_stream_job(&mut stream_job, fragment_graph)
             .await?;
@@ -431,6 +454,7 @@ impl DdlController {
 
         let mut internal_tables = vec![];
         let result = try {
+            tracing::debug!(id = stream_job.id(), "building stream job");
             let (ctx, table_fragments) = self
                 .build_stream_job(env, &stream_job, fragment_graph)
                 .await?;
@@ -438,13 +462,17 @@ impl DdlController {
             internal_tables = ctx.internal_tables();
 
             match stream_job {
-                StreamingJob::Table(Some(ref source), _) => {
+                StreamingJob::Table(Some(ref source), ..) => {
                     // Register the source on the connector node.
                     self.source_manager.register_source(source).await?;
                 }
                 StreamingJob::Sink(ref sink) => {
                     // Validate the sink on the connector node.
                     validate_sink(sink).await?;
+                }
+                StreamingJob::Source(ref source) => {
+                    // Register the source on the connector node.
+                    self.source_manager.register_source(source).await?;
                 }
                 _ => {}
             }
@@ -454,7 +482,7 @@ impl DdlController {
         let (ctx, table_fragments) = match result {
             Ok(r) => r,
             Err(e) => {
-                self.cancel_stream_job(&stream_job, internal_tables).await;
+                self.cancel_stream_job(&stream_job, internal_tables).await?;
                 return Err(e);
             }
         };
@@ -466,7 +494,7 @@ impl DdlController {
             }
             CreateType::Background => {
                 let ctrl = self.clone();
-                let definition = stream_job.definition();
+                let stream_job_id = stream_job.id();
                 let fut = async move {
                     let result = ctrl
                         .create_streaming_job_inner(
@@ -477,9 +505,11 @@ impl DdlController {
                         )
                         .await;
                     match result {
-                        Err(e) => tracing::error!(definition, error = ?e, "stream_job_error"),
+                        Err(e) => {
+                            tracing::error!(id=stream_job_id, error = ?e, "finish stream job failed")
+                        }
                         Ok(_) => {
-                            tracing::info!(definition, "stream_job_ok")
+                            tracing::info!(id = stream_job_id, "finish stream job succeeded")
                         }
                     }
                 };
@@ -489,6 +519,7 @@ impl DdlController {
         }
     }
 
+    // We persist table fragments at this step.
     async fn create_streaming_job_inner(
         &self,
         stream_job: StreamingJob,
@@ -496,15 +527,29 @@ impl DdlController {
         ctx: CreateStreamingJobContext,
         internal_tables: Vec<Table>,
     ) -> MetaResult<NotificationVersion> {
+        let job_id = stream_job.id();
+        tracing::debug!(id = job_id, "creating stream job");
         let result = self
             .stream_manager
             .create_streaming_job(table_fragments, ctx)
             .await;
         if let Err(e) = result {
-            self.cancel_stream_job(&stream_job, internal_tables).await;
+            match stream_job.create_type() {
+                // NOTE: This assumes that we will trigger recovery,
+                // and recover stream job progress.
+                CreateType::Background => {
+                    tracing::error!(id = stream_job.id(), error = ?e, "finish stream job failed")
+                }
+                _ => {
+                    self.cancel_stream_job(&stream_job, internal_tables).await?;
+                }
+            }
             return Err(e);
         };
-        self.finish_stream_job(stream_job, internal_tables).await
+        tracing::debug!(id = job_id, "finishing stream job");
+        let version = self.finish_stream_job(stream_job, internal_tables).await?;
+        tracing::debug!(id = job_id, "finished stream job");
+        Ok(version)
     }
 
     async fn drop_streaming_job(
@@ -569,6 +614,8 @@ impl DdlController {
             StreamFragmentGraph::new(fragment_graph, self.env.id_gen_manager_ref(), stream_job)
                 .await?;
 
+        let internal_tables = fragment_graph.internal_tables().into_values().collect_vec();
+
         // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
         stream_job.set_dml_fragment_id(fragment_graph.dml_fragment_id());
@@ -576,7 +623,7 @@ impl DdlController {
 
         // 3. Mark current relation as "creating" and add reference count to dependent relations.
         self.catalog_manager
-            .start_create_stream_job_procedure(stream_job)
+            .start_create_stream_job_procedure(stream_job, internal_tables)
             .await?;
 
         Ok(fragment_graph)
@@ -634,11 +681,16 @@ impl DdlController {
 
         // 1. Resolve the upstream fragments, extend the fragment graph to a complete graph that
         // contains all information needed for building the actor graph.
-        let upstream_mview_fragments = self
+
+        let upstream_root_fragments = self
             .fragment_manager
-            .get_upstream_mview_fragments(fragment_graph.dependent_table_ids())
+            .get_upstream_root_fragments(
+                fragment_graph.dependent_table_ids(),
+                stream_job.table_job_type(),
+            )
             .await?;
-        let upstream_mview_actors = upstream_mview_fragments
+
+        let upstream_actors: HashMap<_, _> = upstream_root_fragments
             .iter()
             .map(|(&table_id, fragment)| {
                 (
@@ -648,8 +700,11 @@ impl DdlController {
             })
             .collect();
 
-        let complete_graph =
-            CompleteStreamFragmentGraph::with_upstreams(fragment_graph, upstream_mview_fragments)?;
+        let complete_graph = CompleteStreamFragmentGraph::with_upstreams(
+            fragment_graph,
+            upstream_root_fragments,
+            stream_job.table_job_type(),
+        )?;
 
         // 2. Build the actor graph.
         let cluster_info = self.cluster_manager.get_streaming_cluster_info().await;
@@ -678,13 +733,14 @@ impl DdlController {
 
         let ctx = CreateStreamingJobContext {
             dispatchers,
-            upstream_mview_actors,
+            upstream_mview_actors: upstream_actors,
             internal_tables,
             building_locations,
             existing_locations,
             table_properties: stream_job.properties(),
             definition: stream_job.definition(),
             mv_table_id: stream_job.mv_table(),
+            create_type: stream_job.create_type(),
         };
 
         // 4. Mark creating tables, including internal tables and the table of the stream job.
@@ -701,34 +757,51 @@ impl DdlController {
         Ok((ctx, table_fragments))
     }
 
-    /// `cancel_stream_job` cancels a stream job and clean some states.
-    async fn cancel_stream_job(&self, stream_job: &StreamingJob, internal_tables: Vec<Table>) {
+    /// This is NOT used by `CANCEL JOBS`.
+    /// It is used internally by `DdlController` to cancel and cleanup stream job.
+    async fn cancel_stream_job(
+        &self,
+        stream_job: &StreamingJob,
+        internal_tables: Vec<Table>,
+    ) -> MetaResult<()> {
         let mut creating_internal_table_ids =
             internal_tables.into_iter().map(|t| t.id).collect_vec();
         // 1. cancel create procedure.
         match stream_job {
             StreamingJob::MaterializedView(table) => {
-                creating_internal_table_ids.push(table.id);
-                self.catalog_manager
-                    .cancel_create_table_procedure(table)
+                // barrier manager will do the cleanup.
+                let result = self
+                    .catalog_manager
+                    .cancel_create_table_procedure(table.id, creating_internal_table_ids.clone())
                     .await;
+                creating_internal_table_ids.push(table.id);
+                if let Err(e) = result {
+                    tracing::warn!("Failed to cancel create table procedure, perhaps barrier manager has already cleaned it. Reason: {e:#?}");
+                }
             }
             StreamingJob::Sink(sink) => {
                 self.catalog_manager
                     .cancel_create_sink_procedure(sink)
                     .await;
             }
-            StreamingJob::Table(source, table) => {
-                creating_internal_table_ids.push(table.id);
+            StreamingJob::Table(source, table, ..) => {
                 if let Some(source) = source {
                     self.catalog_manager
                         .cancel_create_table_procedure_with_source(source, table)
                         .await;
                 } else {
-                    self.catalog_manager
-                        .cancel_create_table_procedure(table)
+                    let result = self
+                        .catalog_manager
+                        .cancel_create_table_procedure(
+                            table.id,
+                            creating_internal_table_ids.clone(),
+                        )
                         .await;
+                    if let Err(e) = result {
+                        tracing::warn!("Failed to cancel create table procedure, perhaps barrier manager has already cleaned it. Reason: {e:#?}");
+                    }
                 }
+                creating_internal_table_ids.push(table.id);
             }
             StreamingJob::Index(index, table) => {
                 creating_internal_table_ids.push(table.id);
@@ -736,11 +809,17 @@ impl DdlController {
                     .cancel_create_index_procedure(index, table)
                     .await;
             }
+            StreamingJob::Source(source) => {
+                self.catalog_manager
+                    .cancel_create_source_procedure(source)
+                    .await?;
+            }
         }
         // 2. unmark creating tables.
         self.catalog_manager
             .unmark_creating_tables(&creating_internal_table_ids, true)
             .await;
+        Ok(())
     }
 
     /// `finish_stream_job` finishes a stream job and clean some states.
@@ -767,7 +846,7 @@ impl DdlController {
                     .finish_create_sink_procedure(internal_tables, sink)
                     .await?
             }
-            StreamingJob::Table(source, table) => {
+            StreamingJob::Table(source, table, ..) => {
                 creating_internal_table_ids.push(table.id);
                 if let Some(source) = source {
                     self.catalog_manager
@@ -783,6 +862,11 @@ impl DdlController {
                 creating_internal_table_ids.push(table.id);
                 self.catalog_manager
                     .finish_create_index_procedure(internal_tables, index, table)
+                    .await?
+            }
+            StreamingJob::Source(source) => {
+                self.catalog_manager
+                    .finish_create_source_procedure(source, internal_tables)
                     .await?
             }
         };
@@ -925,7 +1009,7 @@ impl DdlController {
         // Map the column indices in the dispatchers with the given mapping.
         let downstream_fragments = self
             .fragment_manager
-            .get_downstream_chain_fragments(id.into())
+            .get_downstream_fragments(id.into())
             .await?
             .into_iter()
             .map(|(d, f)| Some((table_col_index_mapping.rewrite_dispatch_strategy(&d)?, f)))
@@ -999,7 +1083,7 @@ impl DdlController {
         stream_job: &StreamingJob,
         table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<NotificationVersion> {
-        let StreamingJob::Table(source, table) = stream_job else {
+        let StreamingJob::Table(source, table, ..) = stream_job else {
             unreachable!("unexpected job: {stream_job:?}")
         };
 
@@ -1046,5 +1130,35 @@ impl DdlController {
                     .await
             }
         }
+    }
+
+    async fn alter_owner(
+        &self,
+        object: Object,
+        owner_id: UserId,
+    ) -> MetaResult<NotificationVersion> {
+        self.catalog_manager.alter_owner(object, owner_id).await
+    }
+
+    pub async fn wait(&self) -> MetaResult<()> {
+        let timeout_secs = 30 * 60;
+        for _ in 0..timeout_secs {
+            if self
+                .catalog_manager
+                .list_creating_background_mvs()
+                .await
+                .is_empty()
+            {
+                return Ok(());
+            }
+            sleep(Duration::from_secs(1)).await;
+        }
+        Err(MetaError::cancelled(format!(
+            "timeout after {timeout_secs}s"
+        )))
+    }
+
+    async fn comment_on(&self, comment: Comment) -> MetaResult<NotificationVersion> {
+        self.catalog_manager.comment_on(comment).await
     }
 }

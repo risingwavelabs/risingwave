@@ -28,7 +28,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::HashKey;
@@ -62,16 +61,14 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
     pub fn new(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
         order_by: Vec<ColumnOrder>,
-        executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
-        pk_indices: PkIndices,
     ) -> StreamResult<Self> {
-        let info = input.info();
         Ok(TopNExecutorWrapper {
             input,
             ctx: ctx.clone(),
@@ -80,12 +77,10 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
                 storage_key,
                 offset_and_limit,
                 order_by,
-                executor_id,
                 group_by,
                 state_table,
                 watermark_epoch,
                 ctx,
-                pk_indices,
             )?,
         })
     }
@@ -122,22 +117,15 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        input_info: ExecutorInfo,
+        info: ExecutorInfo,
         storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
         order_by: Vec<ColumnOrder>,
-        executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
         ctx: ActorContextRef,
-        pk_indices: PkIndices,
     ) -> StreamResult<Self> {
-        let ExecutorInfo {
-            schema: input_schema,
-            ..
-        } = input_info;
-
         let metrics_info = MetricsInfo::new(
             ctx.streaming_metrics.clone(),
             state_table.table_id(),
@@ -146,15 +134,11 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
         );
 
         let cache_key_serde =
-            create_cache_key_serde(&storage_key, &input_schema, &order_by, &group_by);
+            create_cache_key_serde(&storage_key, &info.schema, &order_by, &group_by);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
 
         Ok(Self {
-            info: ExecutorInfo {
-                schema: input_schema,
-                pk_indices,
-                identity: format!("AppendOnlyGroupTopNExecutor {:X}", executor_id),
-            },
+            info,
             offset: offset_and_limit.0,
             limit: offset_and_limit.1,
             managed_state,
@@ -166,7 +150,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
         })
     }
 }
-#[async_trait]
+
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool> TopNExecutorBase
     for InnerAppendOnlyGroupTopNExecutor<K, S, WITH_TIES>
 where

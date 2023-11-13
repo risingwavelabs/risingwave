@@ -21,6 +21,20 @@ use thiserror::Error;
 /// A specialized Result type for expression operations.
 pub type Result<T> = std::result::Result<T, ExprError>;
 
+pub struct ContextUnavailable(&'static str);
+
+impl ContextUnavailable {
+    pub fn new(field: &'static str) -> Self {
+        Self(field)
+    }
+}
+
+impl From<ContextUnavailable> for ExprError {
+    fn from(e: ContextUnavailable) -> Self {
+        ExprError::Context(e.0)
+    }
+}
+
 /// The error type for expression operations.
 #[derive(Error, Debug)]
 pub enum ExprError {
@@ -57,22 +71,34 @@ pub enum ExprError {
     },
 
     #[error("Array error: {0}")]
-    Array(#[from] ArrayError),
+    Array(
+        #[from]
+        #[backtrace]
+        ArrayError,
+    ),
 
     #[error("More than one row returned by {0} used as an expression")]
     MaxOneRow(&'static str),
 
     #[error(transparent)]
-    Internal(#[from] anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 
     #[error("UDF error: {0}")]
-    Udf(#[from] risingwave_udf::Error),
+    Udf(
+        #[from]
+        #[backtrace]
+        risingwave_udf::Error,
+    ),
 
     #[error("not a constant")]
     NotConstant,
 
-    #[error("Context not found")]
-    Context,
+    #[error("Context {0} not found")]
+    Context(&'static str),
 
     #[error("field name must not be null")]
     FieldNameNull,

@@ -42,6 +42,13 @@ def run_demo(demo: str, format: str, wait_time = 40):
         run_sql_file(sql_file, demo_dir)
         sleep(10)
 
+def iceberg_cdc_demo():
+    demo = "iceberg-cdc"
+    file_dir = dirname(abspath(__file__))
+    project_dir = dirname(file_dir)
+    demo_dir = os.path.join(project_dir, demo)
+    print("Running demo: iceberg-cdc")
+    subprocess.run(["bash","./run_test.sh"], cwd=demo_dir, check=True)
 
 def run_iceberg_demo():
     demo = "iceberg-sink"
@@ -149,5 +156,7 @@ if args.case == "iceberg-sink":
         run_iceberg_demo()
 elif args.case == "clickhouse-sink":
     run_clickhouse_demo()
+elif args.case == "iceberg-cdc":
+    iceberg_cdc_demo()
 else:
     run_demo(args.case, args.format)

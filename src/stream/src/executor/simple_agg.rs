@@ -18,6 +18,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
+use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
@@ -28,7 +29,7 @@ use super::monitor::StreamingMetrics;
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::aggregation::{generate_agg_schema, AggGroup};
+use crate::executor::aggregation::AggGroup;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message};
 use crate::task::AtomicU64Ref;
@@ -52,6 +53,9 @@ pub struct SimpleAggExecutor<S: StateStore> {
 }
 
 struct ExecutorInner<S: StateStore> {
+    /// Version of aggregation executors.
+    version: PbAggNodeVersion,
+
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
 
@@ -131,16 +135,12 @@ impl<S: StateStore> Executor for SimpleAggExecutor<S> {
 impl<S: StateStore> SimpleAggExecutor<S> {
     pub fn new(args: AggExecutorArgs<S, SimpleAggExecutorExtraArgs>) -> StreamResult<Self> {
         let input_info = args.input.info();
-        let schema = generate_agg_schema(args.input.as_ref(), &args.agg_calls, None);
         Ok(Self {
             input: args.input,
             inner: ExecutorInner {
+                version: args.version,
                 actor_ctx: args.actor_ctx,
-                info: ExecutorInfo {
-                    schema,
-                    pk_indices: args.pk_indices,
-                    identity: format!("SimpleAggExecutor-{:X}", args.executor_id),
-                },
+                info: args.info,
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 agg_funcs: args.agg_calls.iter().map(build_retractable).try_collect()?,
@@ -257,9 +257,23 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             table.init_epoch(barrier.epoch);
         });
 
+        let mut distinct_dedup = DistinctDeduplicater::new(
+            &this.agg_calls,
+            &this.watermark_epoch,
+            &this.distinct_dedup_tables,
+            this.actor_ctx.id,
+            this.metrics.clone(),
+        );
+        distinct_dedup.dedup_caches_mut().for_each(|cache| {
+            cache.update_epoch(barrier.epoch.curr);
+        });
+
+        yield Message::Barrier(barrier);
+
         let mut vars = ExecutionVars {
             // This will fetch previous agg states from the intermediate state table.
             agg_group: AggGroup::create(
+                this.version,
                 None,
                 &this.agg_calls,
                 &this.agg_funcs,
@@ -271,21 +285,9 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 &this.input_schema,
             )
             .await?,
-            distinct_dedup: DistinctDeduplicater::new(
-                &this.agg_calls,
-                &this.watermark_epoch,
-                &this.distinct_dedup_tables,
-                this.actor_ctx.id,
-                this.metrics.clone(),
-            ),
+            distinct_dedup,
             state_changed: false,
         };
-
-        vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
-            cache.update_epoch(barrier.epoch.curr);
-        });
-
-        yield Message::Barrier(barrier);
 
         #[for_await]
         for msg in input {
