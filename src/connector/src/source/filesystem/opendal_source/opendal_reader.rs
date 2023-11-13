@@ -25,7 +25,7 @@ use tokio::io::{AsyncReadExt, BufReader};
 use tokio_util::io::{ReaderStream, StreamReader};
 
 use super::opendal_enumerator::OpendalEnumerator;
-use super::OpenDALProperties;
+use super::OpenDalProperties;
 use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
@@ -36,7 +36,7 @@ use crate::source::{
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
 #[derive(Debug, Clone)]
-pub struct OpendalReader<C: OpenDALProperties> {
+pub struct OpendalReader<C: OpenDalProperties> {
     connector: OpendalEnumerator<C>,
     splits: Vec<OpendalFsSplit<C>>,
     parser_config: ParserConfig,
@@ -44,7 +44,7 @@ pub struct OpendalReader<C: OpenDALProperties> {
     // marker: PhantomData<C>,
 }
 #[async_trait]
-impl<C: OpenDALProperties> SplitReader for OpendalReader<C>
+impl<C: OpenDalProperties> SplitReader for OpendalReader<C>
 where
     C: Send + Clone + PartialEq + 'static + Sync,
 {
@@ -75,7 +75,7 @@ where
     }
 }
 
-impl<C: OpenDALProperties> OpendalReader<C>
+impl<C: OpenDalProperties> OpendalReader<C>
 where
     C: Send + Clone + Sized + PartialEq + 'static,
 {

@@ -91,7 +91,8 @@ impl<S: StateStore> FsListExecutor<S> {
         }
     }
 
-    async fn build_chunked_paginate_stream(
+    #[allow(clippy::disallowed_types)]
+    fn build_chunked_paginate_stream(
         &self,
         source_desc: &SourceDesc,
     ) -> StreamExecutorResult<BoxTryStream<StreamChunk>> {
@@ -100,7 +101,6 @@ impl<S: StateStore> FsListExecutor<S> {
         > = source_desc
             .source
             .get_opendal_source_list()
-            .await
             .map_err(StreamExecutorError::connector_error)?;
         let chunked_stream = stream
             .chunks(1024) // Group FsPageItems into chunks of size 1024
@@ -156,7 +156,7 @@ impl<S: StateStore> FsListExecutor<S> {
         // Return the ownership of `stream_source_core` to the source executor.
         self.stream_source_core = Some(core);
 
-        let chunked_paginate_stream = self.build_chunked_paginate_stream(&source_desc).await?;
+        let chunked_paginate_stream = self.build_chunked_paginate_stream(&source_desc)?;
 
         let barrier_stream = barrier_to_message_stream(barrier_receiver).boxed();
         let mut stream =

@@ -44,11 +44,11 @@ impl SourceProperties for GcsProperties {
     fn init_from_pb_source(&mut self, _source: &risingwave_pb::catalog::PbSource) {}
 }
 
-pub trait OpenDALProperties: Sized + Send + Clone + PartialEq + 'static + Sync {
+pub trait OpenDalProperties: Sized + Send + Clone + PartialEq + 'static + Sync {
     fn new_enumerator(properties: Self) -> anyhow::Result<OpendalEnumerator<Self>>;
 }
 
-impl OpenDALProperties for GcsProperties {
+impl OpenDalProperties for GcsProperties {
     fn new_enumerator(properties: Self) -> anyhow::Result<OpendalEnumerator<Self>> {
         OpendalEnumerator::new_gcs_source(properties)
     }

@@ -19,10 +19,10 @@ use opendal::services::S3;
 use opendal::Operator;
 
 use super::opendal_enumerator::{EngineType, OpendalEnumerator};
-use super::OpenDALProperties;
+use super::OpenDalProperties;
 use crate::source::filesystem::S3Properties;
 
-impl<C: OpenDALProperties> OpendalEnumerator<C>
+impl<C: OpenDalProperties> OpendalEnumerator<C>
 where
     C: Sized + Send + Clone + PartialEq + 'static + Sync,
 {

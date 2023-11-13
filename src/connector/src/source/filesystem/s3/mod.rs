@@ -19,7 +19,7 @@ use serde::Deserialize;
 pub use source::S3FileReader;
 
 use super::opendal_source::opendal_enumerator::OpendalEnumerator;
-use super::opendal_source::OpenDALProperties;
+use super::opendal_source::OpenDalProperties;
 use crate::aws_auth::AwsAuthProps;
 use crate::source::filesystem::FsSplit;
 use crate::source::SourceProperties;
@@ -50,7 +50,7 @@ impl SourceProperties for S3Properties {
     const SOURCE_NAME: &'static str = S3_CONNECTOR;
 }
 
-impl OpenDALProperties for S3Properties {
+impl OpenDalProperties for S3Properties {
     fn new_enumerator(properties: Self) -> anyhow::Result<OpendalEnumerator<Self>> {
         OpendalEnumerator::new_s3_source(properties)
     }

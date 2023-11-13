@@ -19,9 +19,9 @@ use opendal::services::Gcs;
 use opendal::Operator;
 
 use super::opendal_enumerator::{EngineType, OpendalEnumerator};
-use super::{GcsProperties, OpenDALProperties};
+use super::{GcsProperties, OpenDalProperties};
 
-impl<C: OpenDALProperties> OpendalEnumerator<C>
+impl<C: OpenDalProperties> OpendalEnumerator<C>
 where
     C: Send + Clone + PartialEq + 'static + Sync,
 {

@@ -27,7 +27,7 @@ use risingwave_common::util::select_all;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
-use risingwave_connector::source::filesystem::opendal_source::OpenDALProperties;
+use risingwave_connector::source::filesystem::opendal_source::OpenDalProperties;
 use risingwave_connector::source::filesystem::{FsPageItem, GcsProperties, S3Properties};
 use risingwave_connector::source::{
     create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties,
@@ -89,36 +89,36 @@ impl ConnectorSource {
             .collect::<Result<Vec<SourceColumnDesc>>>()
     }
 
-    pub async fn get_opendal_source_list(&self) -> Result<BoxTryStream<FsPageItem>> {
+    pub fn get_opendal_source_list(&self) -> Result<BoxTryStream<FsPageItem>> {
         let config = self.config.clone();
 
         match config {
             ConnectorProperties::Gcs(prop) => {
                 let lister: OpendalEnumerator<GcsProperties> =
                     OpendalEnumerator::new_gcs_source(*prop)?;
-                return Ok(build_opendal_fs_list_stream(
+                Ok(build_opendal_fs_list_stream(
                     FsListCtrlContext {
                         interval: Duration::from_secs(60),
                         last_tick: None,
                         filter_ctx: FsFilterCtrlCtx,
                     },
                     lister,
-                ));
+                ))
             }
             ConnectorProperties::S3(prop) => {
                 let lister: OpendalEnumerator<S3Properties> =
                     OpendalEnumerator::new_s3_source(*prop)?;
-                return Ok(build_opendal_fs_list_stream(
+                Ok(build_opendal_fs_list_stream(
                     FsListCtrlContext {
                         interval: Duration::from_secs(60),
                         last_tick: None,
                         filter_ctx: FsFilterCtrlCtx,
                     },
                     lister,
-                ));
+                ))
             }
-            other => return Err(internal_error(format!("Unsupported source: {:?}", other))),
-        };
+            other => Err(internal_error(format!("Unsupported source: {:?}", other))),
+        }
     }
 
     pub async fn stream_reader(
@@ -196,7 +196,7 @@ impl ConnectorSource {
 }
 
 #[try_stream(boxed, ok = FsPageItem, error = RwError)]
-async fn build_opendal_fs_list_stream<C: OpenDALProperties>(
+async fn build_opendal_fs_list_stream<C: OpenDalProperties>(
     ctrl_ctx: FsListCtrlContext,
     lister: OpendalEnumerator<C>,
 ) {
