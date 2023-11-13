@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -121,7 +121,7 @@ pub struct TaskConfig {
     pub is_target_l0_or_lbase: bool,
     pub use_block_based_filter: bool,
 
-    pub table_vnode_partition: HashMap<u32, u32>,
+    pub table_vnode_partition: BTreeMap<u32, u32>,
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {

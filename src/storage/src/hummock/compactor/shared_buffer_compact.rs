@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Bound;
 use std::sync::Arc;
 
@@ -236,7 +236,7 @@ async fn compact_shared_buffer(
             .into_iter()
             .collect()
     } else {
-        HashMap::default()
+        BTreeMap::default()
     };
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
@@ -488,7 +488,7 @@ impl SharedBufferCompactRunner {
         key_range: KeyRange,
         context: CompactorContext,
         sub_compaction_sstable_size: usize,
-        table_vnode_partition: HashMap<u32, u32>,
+        table_vnode_partition: BTreeMap<u32, u32>,
         use_block_based_filter: bool,
         object_id_getter: Box<dyn GetObjectId>,
     ) -> Self {

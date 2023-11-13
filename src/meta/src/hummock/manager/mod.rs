@@ -147,7 +147,7 @@ pub struct HummockManager {
     pub compaction_state: CompactionState,
 
     group_to_table_vnode_partition:
-        parking_lot::RwLock<HashMap<CompactionGroupId, HashMap<TableId, u32>>>,
+        parking_lot::RwLock<HashMap<CompactionGroupId, BTreeMap<TableId, u32>>>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -824,7 +824,7 @@ impl HummockManager {
             .get(&compaction_group_id)
         {
             Some(table_to_vnode_partition) => table_to_vnode_partition.clone(),
-            None => HashMap::default(),
+            None => BTreeMap::default(),
         };
 
         let mut compaction_guard = write_lock!(self, compaction).await;
@@ -2191,9 +2191,6 @@ impl HummockManager {
                 split_group_trigger_interval
                     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
-                // TEST
-                // split_group_trigger_interval.reset(); 
-
                 let split_group_trigger = IntervalStream::new(split_group_trigger_interval)
                     .map(|_| HummockTimerEvent::GroupSplit);
                 triggers.push(Box::pin(split_group_trigger));
@@ -2518,7 +2515,7 @@ impl HummockManager {
         for group in &group_infos {
             let table_vnode_partition_mapping = group_to_table_vnode_partition
                 .entry(group.group_id)
-                .or_insert(HashMap::default());
+                .or_insert(BTreeMap::default());
 
             if group.table_statistic.len() == 1 {
                 // no need to handle the dedication compaciton group
@@ -2528,25 +2525,34 @@ impl HummockManager {
             for (table_id, table_size) in &group.table_statistic {
                 let mut is_high_write_throughput = false;
                 let mut is_low_write_throughput = true;
+                let is_creating_table = !created_tables.contains(table_id);
                 if let Some(history) = table_write_throughput.get(table_id) {
-                    if history.len() >= window_size {
-                        is_high_write_throughput = history.iter().all(|throughput| {
-                            *throughput / checkpoint_secs
-                                > self.env.opts.table_write_throughput_threshold
-                        });
-                        is_low_write_throughput = history.iter().any(|throughput| {
-                            *throughput / checkpoint_secs
-                                < self.env.opts.min_table_split_write_throughput
-                        });
+                    if !is_creating_table {
+                        if history.len() >= window_size {
+                            is_high_write_throughput = history.iter().all(|throughput| {
+                                *throughput / checkpoint_secs
+                                    > self.env.opts.table_write_throughput_threshold
+                            });
+                            is_low_write_throughput = history.iter().any(|throughput| {
+                                *throughput / checkpoint_secs
+                                    < self.env.opts.min_table_split_write_throughput
+                            });
+                        }
+                    } else {
+                        let sum = history.iter().sum::<u64>();
+                        is_low_write_throughput = sum
+                            < self.env.opts.min_table_split_write_throughput
+                                * history.len() as u64
+                                * checkpoint_secs;
                     }
                 }
                 let state_table_size = *table_size;
 
                 {
-                    if is_high_write_throughput {
-                        table_vnode_partition_mapping.insert(*table_id, 8_u32);
-                    } else if state_table_size > self.env.opts.cut_table_size_limit {
+                    if !is_low_write_throughput {
                         table_vnode_partition_mapping.insert(*table_id, 4_u32);
+                    } else if state_table_size > self.env.opts.cut_table_size_limit {
+                        table_vnode_partition_mapping.insert(*table_id, 1_u32);
                     } else {
                         table_vnode_partition_mapping.remove(table_id);
                     }

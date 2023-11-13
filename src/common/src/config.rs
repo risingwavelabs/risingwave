@@ -940,7 +940,7 @@ pub mod default {
         }
 
         pub fn periodic_split_compact_group_interval_sec() -> u64 {
-            180 // 3mi
+            10 // 10s
         }
 
         pub fn periodic_tombstone_reclaim_compaction_interval_sec() -> u64 {
