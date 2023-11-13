@@ -124,7 +124,7 @@ impl VirtualNode {
                     extract_vnode_id_from_row_id(serial.as_row_id())
                 } else {
                     let (row, _) = data_chunk.row_at(idx);
-                    row.hash(Crc32FastBuilder).into()
+                    Self::compute_row(row, keys)
                 }
             } ).collect();
         }
@@ -142,10 +142,6 @@ impl VirtualNode {
         let project = row.project(indices);
         if let Ok(Some(ScalarRefImpl::Serial(s))) = project.iter().exactly_one().as_ref() {
             return extract_vnode_id_from_row_id(s.as_row_id());
-        }
-
-        if project.is_empty() {
-            return project.row().hash(Crc32FastBuilder).into();
         }
 
         project.hash(Crc32FastBuilder).into()
