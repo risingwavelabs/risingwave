@@ -628,6 +628,8 @@ impl PartialEq for ArrayImpl {
     }
 }
 
+impl Eq for ArrayImpl {}
+
 #[cfg(test)]
 mod tests {
 

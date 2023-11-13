@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::list_array::display_for_explain;
 use risingwave_common::types::{literal_type_match, DataType, Datum, ToText};
 use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
 use risingwave_pb::expr::expr_node::RexNode;
@@ -60,7 +59,7 @@ impl std::fmt::Debug for Literal {
                         "'{}'",
                         v.as_scalar_ref_impl().to_text_with_type(&data_type)
                     ),
-                    DataType::List { .. } => write!(f, "{}", display_for_explain(v.as_list())),
+                    DataType::List { .. } => write!(f, "{}", v.as_list().display_for_explain()),
                 },
             }?;
             write!(f, ":{:?}", data_type)

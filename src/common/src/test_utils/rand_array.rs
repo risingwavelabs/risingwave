@@ -146,8 +146,8 @@ impl RandValue for StructValue {
 }
 
 impl RandValue for ListValue {
-    fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
-        ListValue::new(vec![])
+    fn rand_value<R: rand::Rng>(rand: &mut R) -> Self {
+        ListValue::from_iter([rand.gen::<i32>()])
     }
 }
 

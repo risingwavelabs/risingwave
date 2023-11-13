@@ -423,7 +423,7 @@ impl DataType {
                     .map(|data_type| Some(data_type.min_value()))
                     .collect_vec(),
             )),
-            DataType::List { .. } => ScalarImpl::List(ListValue::new(vec![])),
+            DataType::List(data_type) => ScalarImpl::List(ListValue::empty(data_type)),
         }
     }
 
@@ -929,11 +929,11 @@ impl ScalarImpl {
                     ))
                     .into());
                 }
-                let mut values = vec![];
+                let mut builder = data_type.create_array_builder(0);
                 for s in str[1..str.len() - 1].split(',') {
-                    values.push(Some(Self::from_text(s.trim().as_bytes(), datatype)?));
+                    builder.append(Some(Self::from_text(s.trim().as_bytes(), datatype)?));
                 }
-                Self::List(ListValue::new(values))
+                Self::List(ListValue::new(builder.finish()))
             }
             DataType::Struct(s) => {
                 if !(str.starts_with('{') && str.ends_with('}')) {
@@ -1198,7 +1198,7 @@ mod tests {
         }
 
         assert_item_size_eq!(StructArray, 16); // Box<[Datum]>
-        assert_item_size_eq!(ListArray, 16); // Box<[Datum]>
+        assert_item_size_eq!(ListArray, 8); // Box<ArrayImpl>
         assert_item_size_eq!(Utf8Array, 16); // Box<str>
         assert_item_size_eq!(IntervalArray, 16);
         assert_item_size_eq!(TimestampArray, 12);
@@ -1207,6 +1207,7 @@ mod tests {
         assert_item_size_eq!(DecimalArray, 20);
 
         const_assert_eq!(std::mem::size_of::<ScalarImpl>(), 24);
+        const_assert_eq!(std::mem::size_of::<ScalarRefImpl<'_>>(), 24);
         const_assert_eq!(std::mem::size_of::<Datum>(), 24);
         const_assert_eq!(std::mem::size_of::<StructType>(), 8);
         const_assert_eq!(std::mem::size_of::<DataType>(), 16);
@@ -1315,10 +1316,7 @@ mod tests {
                     ])),
                 ),
                 DataTypeName::List => (
-                    ScalarImpl::List(ListValue::new(vec![
-                        ScalarImpl::Int64(233).into(),
-                        ScalarImpl::Int64(2333).into(),
-                    ])),
+                    ScalarImpl::List(ListValue::from_iter([233i64, 2333])),
                     DataType::List(Box::new(DataType::Int64)),
                 ),
             };
