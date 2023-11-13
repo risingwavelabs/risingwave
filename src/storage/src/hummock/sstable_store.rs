@@ -107,7 +107,7 @@ impl LruCacheEventListener for BlockCacheEventListener {
             block_idx: key.1,
         };
         self.data_file_cache
-            .insert_async(key, CachedBlock::Loaded { block: value });
+            .insert_if_not_exists_async(key, CachedBlock::Loaded { block: value });
     }
 }
 
@@ -118,7 +118,7 @@ impl LruCacheEventListener for MetaCacheEventListener {
     type T = Box<Sstable>;
 
     fn on_release(&self, key: Self::K, value: Self::T) {
-        self.0.insert_async(key, value);
+        self.0.insert_if_not_exists_async(key, value);
     }
 }
 
