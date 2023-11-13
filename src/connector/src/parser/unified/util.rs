@@ -14,7 +14,7 @@
 
 use risingwave_common::error::{ErrorCode, RwError};
 
-use super::{Access, AccessError, AccessImpl, AccessResult, ChangeEvent};
+use super::{Access, AccessError, AccessResult, ChangeEvent};
 use crate::parser::unified::ChangeEventOperation;
 use crate::parser::SourceStreamChunkRowWriter;
 use crate::source::SourceColumnDesc;

@@ -17,7 +17,6 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::bytes_parser::BytesAccessBuilder;
-use super::unified::util::apply_key_val_accessor_on_stream_chunk_writer;
 use super::unified::Access;
 use super::{
     AccessBuilderImpl, ByteStreamSourceParser, BytesProperties, EncodingProperties, EncodingType,
