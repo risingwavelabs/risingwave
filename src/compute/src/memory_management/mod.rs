@@ -218,9 +218,9 @@ mod tests {
         assert_eq!(non_reserved, 1536 << 20);
 
         // reserve based on proportion
-        let (reserved, non_reserved) = reserve_memory_bytes(10_000_000_000);
-        assert_eq!(reserved, 1_500_000_000);
-        assert_eq!(non_reserved, 8_500_000_000);
+        let (reserved, non_reserved) = reserve_memory_bytes(10 << 30);
+        assert_eq!(reserved, 2 << 30);
+        assert_eq!(non_reserved, 8 << 30);
     }
 
     #[test]
@@ -231,9 +231,9 @@ mod tests {
 
         let memory_config =
             storage_memory_config(total_non_reserved_memory_bytes, true, &storage_config);
-        assert_eq!(memory_config.block_cache_capacity_mb, 1146);
-        assert_eq!(memory_config.meta_cache_capacity_mb, 983);
-        assert_eq!(memory_config.shared_buffer_capacity_mb, 983);
+        assert_eq!(memory_config.block_cache_capacity_mb, 737);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 860);
+        assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
         assert_eq!(memory_config.data_file_cache_ring_buffer_capacity_mb, 0);
         assert_eq!(memory_config.meta_file_cache_ring_buffer_capacity_mb, 0);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);
@@ -242,9 +242,9 @@ mod tests {
         storage_config.meta_file_cache.dir = "meta".to_string();
         let memory_config =
             storage_memory_config(total_non_reserved_memory_bytes, true, &storage_config);
-        assert_eq!(memory_config.block_cache_capacity_mb, 1146);
-        assert_eq!(memory_config.meta_cache_capacity_mb, 983);
-        assert_eq!(memory_config.shared_buffer_capacity_mb, 983);
+        assert_eq!(memory_config.block_cache_capacity_mb, 737);
+        assert_eq!(memory_config.meta_cache_capacity_mb, 860);
+        assert_eq!(memory_config.shared_buffer_capacity_mb, 737);
         assert_eq!(memory_config.data_file_cache_ring_buffer_capacity_mb, 256);
         assert_eq!(memory_config.meta_file_cache_ring_buffer_capacity_mb, 256);
         assert_eq!(memory_config.compactor_memory_limit_mb, 819);

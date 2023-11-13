@@ -71,7 +71,7 @@ impl SstableIterator {
         }
     }
 
-    async fn init_block_fetcher(&mut self, start_idx: usize) -> HummockResult<()> {
+    fn init_block_prefetch_range(&mut self, start_idx: usize) {
         if let Some(bound) = self.options.must_iterated_end_user_key.as_ref() {
             let block_metas = &self.sst.value().meta.block_metas;
             let next_to_start_idx = start_idx + 1;
@@ -92,15 +92,10 @@ impl SstableIterator {
                     }
                 };
                 if start_idx + 1 < end_idx {
-                    self.preload_stream = self
-                        .sstable_store
-                        .preload_blocks(self.sst.value(), start_idx, end_idx)
-                        .await?;
                     self.preload_end_block_idx = end_idx;
                 }
             }
         }
-        Ok(())
     }
 
     pub(crate) fn sst(&self) -> &TableHolder {
@@ -130,6 +125,7 @@ impl SstableIterator {
             self.block_iter = None;
             return Ok(());
         }
+        // Maybe the previous preload stream breaks on some cached block, so here we can try to preload some data again
         if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx
             && let Ok(preload_stream) = self.sstable_store
                 .preload_blocks(self.sst.value(), idx, self.preload_end_block_idx)
@@ -252,7 +248,7 @@ impl HummockIterator for SstableIterator {
 
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
         async move {
-            self.init_block_fetcher(0).await?;
+            self.init_block_prefetch_range(0);
             self.seek_idx(0, None).await?;
             Ok(())
         }
@@ -273,7 +269,7 @@ impl HummockIterator for SstableIterator {
                     ord == Less || ord == Equal
                 })
                 .saturating_sub(1); // considering the boundary of 0
-            self.init_block_fetcher(block_idx).await?;
+            self.init_block_prefetch_range(block_idx);
 
             self.seek_idx(block_idx, Some(key)).await?;
             if !self.is_valid() {

@@ -263,16 +263,11 @@ impl SstableStore {
     pub async fn preload_blocks(
         &self,
         sst: &Sstable,
-        mut start_index: usize,
+        start_index: usize,
         mut end_index: usize,
     ) -> HummockResult<Option<BatchBlockStream>> {
         let object_id = sst.id;
-        while start_index < end_index
-            && self.block_cache.exists_block(object_id, start_index as u64)
-        {
-            start_index += 1;
-        }
-        if start_index >= end_index {
+        if self.block_cache.exists_block(object_id, start_index as u64) {
             return Ok(None);
         }
         let start_offset = sst.meta.block_metas[start_index].offset as usize;
