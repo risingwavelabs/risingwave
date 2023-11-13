@@ -59,16 +59,10 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for GroupTopNExecutorBuilder<APPEN
             .map(ColumnOrder::from_protobuf)
             .collect();
 
-        let info = ExecutorInfo {
-            schema: params.schema,
-            pk_indices: params.pk_indices,
-            identity: params.identity,
-        };
-
         let args = GroupTopNExecutorDispatcherArgs {
             input,
             ctx: params.actor_context,
-            info,
+            info: params.info,
             storage_key,
             offset_and_limit: (node.offset as usize, node.limit as usize),
             order_by,
