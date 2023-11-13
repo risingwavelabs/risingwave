@@ -341,8 +341,14 @@ impl ListValue {
         Self::new(datatype.create_array_builder(0).finish())
     }
 
+    /// Returns the length of the list.
     pub fn len(&self) -> usize {
         self.values.len()
+    }
+
+    /// Returns `true` if the list has a length of 0.
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
     }
 
     /// Iterates over the elements of the list.

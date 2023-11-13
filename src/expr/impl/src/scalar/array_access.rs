@@ -64,7 +64,7 @@ mod tests {
         ]);
         assert_eq!(
             array_access(v.as_scalar_ref(), 1),
-            Some(ListRef::from(&ListValue::from_iter(["foo", "bar"]).into()).into())
+            Some(ListValue::from_iter(["foo", "bar"]).as_scalar_ref().into())
         );
     }
 }

@@ -497,7 +497,7 @@ impl JsonParseOptions {
                     let value = self.parse(v, Some(item_type))?;
                     builder.append(value);
                 }
-                builder.finish().into()
+                builder.finish()
             })
             .into(),
 

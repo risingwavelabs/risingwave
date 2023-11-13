@@ -115,9 +115,9 @@ impl<T: Bits> BitOrUpdatable<T> {
 
     fn accumulate(&self, mut state: ListValue, input: T) -> ListValue {
         let counts = state.as_i64_mut_slice().expect("invalid state");
-        for i in 0..T::BITS {
+        for (i, count) in counts.iter_mut().enumerate() {
             if input.get_bit(i) {
-                counts[i] += 1;
+                *count += 1;
             }
         }
         state
@@ -125,9 +125,9 @@ impl<T: Bits> BitOrUpdatable<T> {
 
     fn retract(&self, mut state: ListValue, input: T) -> ListValue {
         let counts = state.as_i64_mut_slice().expect("invalid state");
-        for i in 0..T::BITS {
+        for (i, count) in counts.iter_mut().enumerate() {
             if input.get_bit(i) {
-                counts[i] -= 1;
+                *count -= 1;
             }
         }
         state
@@ -136,8 +136,8 @@ impl<T: Bits> BitOrUpdatable<T> {
     fn finalize(&self, state: ListRef<'_>) -> T {
         let counts = state.as_i64_slice().expect("invalid state");
         let mut result = T::default();
-        for i in 0..T::BITS {
-            if counts[i] != 0 {
+        for (i, count) in counts.iter().enumerate() {
+            if *count != 0 {
                 result.set_bit(i);
             }
         }

@@ -41,10 +41,10 @@ impl AggStateDyn for ArrayAggState {}
 /// Finishes aggregation and returns the result.
 impl From<&ArrayAggState> for Datum {
     fn from(state: &ArrayAggState) -> Self {
-        match &state.0 {
-            Some(b) => Some(ListValue::new(b.clone().finish()).into()),
-            None => None,
-        }
+        state
+            .0
+            .as_ref()
+            .map(|b| ListValue::new(b.clone().finish()).into())
     }
 }
 
