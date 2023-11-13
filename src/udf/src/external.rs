@@ -38,7 +38,12 @@ pub struct ArrowFlightUdfClient {
 impl ArrowFlightUdfClient {
     /// Connect to a UDF service.
     pub async fn connect(addr: &str) -> Result<Self> {
-        let client = FlightServiceClient::connect(addr.to_string()).await?;
+        let conn = tonic::transport::Endpoint::new(addr.to_string())?
+            .timeout(Duration::from_secs(5))
+            .connect_timeout(Duration::from_secs(5))
+            .connect()
+            .await?;
+        let client = FlightServiceClient::new(conn);
         Ok(Self { client })
     }
 
