@@ -20,7 +20,7 @@ use prost_reflect::{
     Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor,
     ReflectMessage, Value,
 };
-use risingwave_common::array::StructValue;
+use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
@@ -485,6 +485,14 @@ pub fn from_protobuf_value(
                 }
                 ScalarImpl::Struct(StructValue::new(rw_values))
             }
+        }
+        Value::List(values) => {
+            let data_type = protobuf_type_mapping(field_desc, &mut vec![])?;
+            let mut builder = data_type.as_list().create_array_builder(values.len());
+            for value in values {
+                builder.append(from_protobuf_value(field_desc, value, descriptor_pool)?);
+            }
+            ScalarImpl::List(ListValue::new(builder.finish()))
         }
         Value::Bytes(value) => ScalarImpl::Bytea(value.to_vec().into_boxed_slice()),
         _ => {
