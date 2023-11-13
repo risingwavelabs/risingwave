@@ -3125,7 +3125,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=9232b3a#9232b3aa468460b60c44c26eac62dadf3594a383"
+source = "git+https://github.com/MrCroxx/foyer?rev=ce2e222#ce2e22292e39746a6792e74c09718855d06dd0a4"
 dependencies = [
  "foyer-common",
  "foyer-intrusive",
@@ -3136,8 +3136,9 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=9232b3a#9232b3aa468460b60c44c26eac62dadf3594a383"
+source = "git+https://github.com/MrCroxx/foyer?rev=ce2e222#ce2e22292e39746a6792e74c09718855d06dd0a4"
 dependencies = [
+ "anyhow",
  "bytes",
  "foyer-workspace-hack",
  "itertools 0.11.0",
@@ -3151,7 +3152,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=9232b3a#9232b3aa468460b60c44c26eac62dadf3594a383"
+source = "git+https://github.com/MrCroxx/foyer?rev=ce2e222#ce2e22292e39746a6792e74c09718855d06dd0a4"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -3168,7 +3169,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=9232b3a#9232b3aa468460b60c44c26eac62dadf3594a383"
+source = "git+https://github.com/MrCroxx/foyer?rev=ce2e222#ce2e22292e39746a6792e74c09718855d06dd0a4"
 dependencies = [
  "anyhow",
  "bitflags 2.4.0",
@@ -3181,6 +3182,7 @@ dependencies = [
  "futures",
  "itertools 0.11.0",
  "libc",
+ "lz4",
  "madsim-tokio",
  "memoffset",
  "nix 0.27.1",
@@ -3197,7 +3199,7 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=9232b3a#9232b3aa468460b60c44c26eac62dadf3594a383"
+source = "git+https://github.com/MrCroxx/foyer?rev=ce2e222#ce2e22292e39746a6792e74c09718855d06dd0a4"
 dependencies = [
  "cc",
  "crossbeam-utils",
@@ -3216,9 +3218,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rand",
- "regex",
- "regex-automata 0.4.1",
- "regex-syntax 0.8.0",
  "syn 2.0.37",
  "tokio",
  "tracing",
