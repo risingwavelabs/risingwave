@@ -87,6 +87,7 @@ sqllogictest -p 4566 -d dev './e2e_test/udf/udf.slt'
 pkill python3
 
 sqllogictest -p 4566 -d dev './e2e_test/udf/graceful_shutdown_python.slt'
+sqllogictest -p 4566 -d dev './e2e_test/udf/retry_python.slt'
 
 echo "--- e2e, $mode, java udf"
 java -jar risingwave-udf-example.jar &
