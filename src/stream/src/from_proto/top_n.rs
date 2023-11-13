@@ -48,18 +48,12 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for TopNExecutorBuilder<APPEND_ONL
             .map(ColumnOrder::from_protobuf)
             .collect();
 
-        let info = ExecutorInfo {
-            schema: params.schema,
-            pk_indices: params.pk_indices,
-            identity: params.identity,
-        };
-
         macro_rules! build {
             ($excutor:ident, $with_ties:literal) => {
                 Ok($excutor::<_, $with_ties>::new(
                     input,
                     params.actor_context,
-                    info,
+                    params.info,
                     storage_key,
                     (node.offset as usize, node.limit as usize),
                     order_by,

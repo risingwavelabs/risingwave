@@ -39,10 +39,10 @@ select count(*) from sr_pb_test;
 ----
 20
 
-query II
-select min(id), max(id) from sr_pb_test;
+query IIT
+select min(id), max(id), max((sc).file_name) from sr_pb_test;
 ----
-0 19
+0 19 source/context_019.proto
 
 
 statement ok

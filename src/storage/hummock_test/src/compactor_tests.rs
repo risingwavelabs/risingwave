@@ -62,10 +62,9 @@ pub(crate) mod tests {
     use risingwave_storage::hummock::test_utils::gen_test_sstable_info;
     use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{
-        CachePolicy, CompactionDeleteRanges, CompressionAlgorithm,
-        HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
-        SharedComapctorObjectIdManager, Sstable, SstableBuilderOptions, SstableIteratorReadOptions,
-        SstableObjectIdManager,
+        CachePolicy, CompressionAlgorithm, HummockStorage as GlobalHummockStorage, HummockStorage,
+        MemoryLimiter, SharedComapctorObjectIdManager, Sstable, SstableBuilderOptions,
+        SstableIteratorReadOptions, SstableObjectIdManager,
     };
     use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
     use risingwave_storage::opts::StorageOpts;
@@ -1421,7 +1420,6 @@ pub(crate) mod tests {
             gc_delete_keys: true,
             ..Default::default()
         };
-        let deg = Arc::new(CompactionDeleteRanges::default());
         let multi_filter_key_extractor =
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor));
         let compaction_filter = DummyCompactionFilter {};
@@ -1446,7 +1444,6 @@ pub(crate) mod tests {
             .run(
                 compaction_filter,
                 multi_filter_key_extractor,
-                deg,
                 Arc::new(TaskProgress::default()),
             )
             .await

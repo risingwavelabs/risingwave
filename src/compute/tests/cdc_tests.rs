@@ -45,8 +45,8 @@ use risingwave_stream::executor::test_utils::MockSource;
 use risingwave_stream::executor::{
     default_source_internal_table, expect_first_barrier, ActorContext, Barrier,
     BoxedExecutor as StreamBoxedExecutor, BoxedMessageStream, CdcBackfillExecutor, Executor,
-    MaterializeExecutor, Message, Mutation, PkIndices, PkIndicesRef, SourceStateTableHandler,
-    StreamExecutorError,
+    ExecutorInfo, MaterializeExecutor, Message, Mutation, PkIndices, PkIndicesRef,
+    SourceStateTableHandler, StreamExecutorError,
 };
 
 // mock upstream binlog offset starting from "1.binlog, pos=0"
@@ -203,14 +203,18 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     .await;
 
     let actor_id = 0x1a;
+    let info = ExecutorInfo {
+        schema: schema.clone(),
+        pk_indices: vec![0],
+        identity: "CdcBackfillExecutor".to_string(),
+    };
     let cdc_backfill = CdcBackfillExecutor::new(
         ActorContext::create(actor_id),
+        info,
         external_table,
         Box::new(mock_offset_executor),
         vec![0, 1, 2],
         None,
-        schema.clone(),
-        vec![0],
         Arc::new(StreamingMetrics::unused()),
         source_state_handler,
         false,

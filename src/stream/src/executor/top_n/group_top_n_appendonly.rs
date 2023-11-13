@@ -161,7 +161,7 @@ where
         let mut res_rows = Vec::with_capacity(self.limit);
         let keys = K::build(&self.group_by, chunk.data_chunk())?;
 
-        let data_types = self.schema().data_types();
+        let data_types = self.info().schema.data_types();
         let row_deserializer = RowDeserializer::new(data_types.clone());
         let table_id_str = self.managed_state.state_table.table_id().to_string();
         let actor_id_str = self.ctx.id.to_string();
@@ -211,7 +211,7 @@ where
             .group_top_n_appendonly_cached_entry_count
             .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(self.caches.len() as i64);
-        generate_output(res_rows, res_ops, self.schema())
+        generate_output(res_rows, res_ops, &self.info().schema)
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {

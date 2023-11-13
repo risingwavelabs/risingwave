@@ -311,13 +311,17 @@ impl CreateMviewProgressTracker {
         }
     }
 
-    pub fn gen_ddl_progress(&self) -> Vec<DdlProgress> {
+    pub fn gen_ddl_progress(&self) -> HashMap<u32, DdlProgress> {
         self.progress_map
             .iter()
-            .map(|(table_id, (x, _))| DdlProgress {
-                id: table_id.table_id as u64,
-                statement: x.definition.clone(),
-                progress: format!("{:.2}%", x.calculate_progress() * 100.0),
+            .map(|(table_id, (x, _))| {
+                let table_id = table_id.table_id;
+                let ddl_progress = DdlProgress {
+                    id: table_id as u64,
+                    statement: x.definition.clone(),
+                    progress: format!("{:.2}%", x.calculate_progress() * 100.0),
+                };
+                (table_id, ddl_progress)
             })
             .collect()
     }
