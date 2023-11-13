@@ -554,7 +554,7 @@ impl CatalogController {
         Ok(count > 0)
     }
 
-    pub async fn table_fragments(&self) -> MetaResult<BTreeMap<ObjectId, PbTableFragments>> {
+    pub fn table_fragments(&self) -> MetaResult<BTreeMap<ObjectId, PbTableFragments>> {
         unimplemented!(
             "This function is too heavy, we should avoid using it and implement others on demand."
         )
