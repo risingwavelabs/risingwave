@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::marker::PhantomData;
 use std::pin::pin;
 
 use anyhow::{Ok, Result};
@@ -25,10 +24,9 @@ use risingwave_common::error::RwError;
 use tokio::io::{AsyncReadExt, BufReader};
 use tokio_util::io::{ReaderStream, StreamReader};
 
-use super::opendal_enumerator::OpendalConnector;
-use super::GcsProperties;
+use super::opendal_enumerator::OpendalEnumerator;
+use super::OpenDALProperties;
 use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
-use crate::source::filesystem::file_common::OpenDALConnectorTypeMarker;
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
@@ -37,46 +35,37 @@ use crate::source::{
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
-pub struct OpendalReader<C: OpenDALConnectorTypeMarker>
-where
-    C: OpenDALConnectorTypeMarker + std::marker::Send,
-{
-    connector: OpendalConnector,
+#[derive(Debug, Clone)]
+pub struct OpendalReader<C: OpenDALProperties> {
+    connector: OpendalEnumerator<C>,
     splits: Vec<OpendalFsSplit<C>>,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
-    marker: PhantomData<C>,
+    // marker: PhantomData<C>,
 }
 #[async_trait]
-impl<C: OpenDALConnectorTypeMarker> SplitReader for OpendalReader<C>
+impl<C: OpenDALProperties> SplitReader for OpendalReader<C>
 where
-    C: OpenDALConnectorTypeMarker + std::marker::Send,
+    C: Send + Clone + PartialEq + 'static + Sync,
 {
-    type Properties = GcsProperties;
+    type Properties = C;
     type Split = OpendalFsSplit<C>;
 
     async fn new(
-        properties: GcsProperties,
+        properties: C,
         splits: Vec<OpendalFsSplit<C>>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
-        // match properties {
-        //     OpenDALProperties::GcsProperties(gcs_properties) => {
-        //         OpendalConnector::new_gcs_source(gcs_properties)
-        //     }
-        //     OpenDALProperties::S3Properties(s3_properties) => {
-        //         OpendalConnector::new_s3_source(s3_properties)
-        //     }
-        // }
-        let connector = OpendalConnector::new_gcs_source(properties)?;
+        let connector = Self::Properties::new_enumerator(properties)?;
+        // let connector = OpendalConnector::new_gcs_source(properties)?;
         let opendal_reader = OpendalReader {
             connector,
             splits,
             parser_config,
             source_ctx,
-            marker: PhantomData,
+            // marker: PhantomData,
         };
         Ok(opendal_reader)
     }
@@ -86,9 +75,9 @@ where
     }
 }
 
-impl<C: OpenDALConnectorTypeMarker> OpendalReader<C>
+impl<C: OpenDALProperties> OpendalReader<C>
 where
-    C: OpenDALConnectorTypeMarker + std::marker::Send,
+    C: Send + Clone + Sized + PartialEq + 'static,
 {
     #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
     async fn into_chunk_stream(self) {

@@ -12,14 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
+
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::S3;
 use opendal::Operator;
 
-use super::opendal_enumerator::{EngineType, OpendalConnector};
+use super::opendal_enumerator::{EngineType, OpendalEnumerator};
+use super::OpenDALProperties;
 use crate::source::filesystem::S3Properties;
 
-impl OpendalConnector {
+impl<C: OpenDALProperties> OpendalEnumerator<C>
+where
+    C: Sized + Send + Clone + PartialEq + 'static + Sync,
+{
     /// create opendal gcs engine.
     pub fn new_s3_source(s3_properties: S3Properties) -> anyhow::Result<Self> {
         // Create gcs backend builder.
@@ -48,6 +54,7 @@ impl OpendalConnector {
         Ok(Self {
             op,
             engine_type: EngineType::S3,
+            marker: PhantomData,
         })
     }
 }

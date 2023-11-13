@@ -12,14 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
+
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::Gcs;
 use opendal::Operator;
 
-use super::opendal_enumerator::{EngineType, OpendalConnector};
-use super::GcsProperties;
+use super::opendal_enumerator::{EngineType, OpendalEnumerator};
+use super::{GcsProperties, OpenDALProperties};
 
-impl OpendalConnector {
+impl<C: OpenDALProperties> OpendalEnumerator<C>
+where
+    C: Send + Clone + PartialEq + 'static + Sync,
+{
     /// create opendal gcs engine.
     pub fn new_gcs_source(gcs_properties: GcsProperties) -> anyhow::Result<Self> {
         // Create gcs backend builder.
@@ -39,6 +44,7 @@ impl OpendalConnector {
         Ok(Self {
             op,
             engine_type: EngineType::Gcs,
+            marker: PhantomData,
         })
     }
 }

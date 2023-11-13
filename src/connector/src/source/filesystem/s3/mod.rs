@@ -18,13 +18,15 @@ mod source;
 use serde::Deserialize;
 pub use source::S3FileReader;
 
+use super::opendal_source::opendal_enumerator::OpendalEnumerator;
+use super::opendal_source::OpenDALProperties;
 use crate::aws_auth::AwsAuthProps;
 use crate::source::filesystem::FsSplit;
 use crate::source::SourceProperties;
 
 pub const S3_CONNECTOR: &str = "s3";
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct S3Properties {
     #[serde(rename = "s3.region_name")]
     pub region_name: String,
@@ -46,6 +48,12 @@ impl SourceProperties for S3Properties {
     type SplitReader = S3FileReader;
 
     const SOURCE_NAME: &'static str = S3_CONNECTOR;
+}
+
+impl OpenDALProperties for S3Properties {
+    fn new_enumerator(properties: Self) -> anyhow::Result<OpendalEnumerator<Self>> {
+        OpendalEnumerator::new_s3_source(properties)
+    }
 }
 
 impl From<&S3Properties> for AwsAuthProps {

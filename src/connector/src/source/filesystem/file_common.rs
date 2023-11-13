@@ -74,9 +74,9 @@ impl FsSplit {
 ///  [`OpendalFsSplit`] Describes a file or a split of a file. A file is a generic concept,
 /// and can be a local file, a distributed file system, or am object in S3 bucket.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct OpendalFsSplit<C: OpenDALConnectorTypeMarker>
+pub struct OpendalFsSplit<C>
 where
-    C: OpenDALConnectorTypeMarker + std::marker::Send,
+    C: Send + Clone + 'static,
 {
     pub name: String,
     pub offset: usize,
@@ -84,9 +84,9 @@ where
     marker: PhantomData<C>,
 }
 
-impl<C: OpenDALConnectorTypeMarker> From<&Object> for OpendalFsSplit<C>
+impl<C> From<&Object> for OpendalFsSplit<C>
 where
-    C: OpenDALConnectorTypeMarker + std::marker::Send,
+    C: Send + Clone + 'static,
 {
     fn from(value: &Object) -> Self {
         Self {
@@ -99,47 +99,14 @@ where
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum OpenDALConnectorType {
+pub enum OpendalEnumeratorType {
     OpenDalS3,
     Gcs,
 }
 
-/// A marker trait for different conventions, used for enforcing type safety.
-///
-/// Implementors are [`S3`], [`Gcs`].
-pub trait OpenDALConnectorTypeMarker: 'static + Sized {
-    /// The extra fields in the [`PlanBase`] of this convention.
-    // type Extra: 'static + Eq + Hash + Clone + Debug;
-
-    /// Get the [`OpenDALConnectorType`] enum value.
-    fn value() -> OpenDALConnectorType;
-}
-
-/// The marker for batch convention.
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct Gcs;
-impl OpenDALConnectorTypeMarker for Gcs {
-    // type Extra = Gcs;
-
-    fn value() -> OpenDALConnectorType {
-        OpenDALConnectorType::Gcs
-    }
-}
-
-/// The marker for batch convention.
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct OpenDalS3;
-impl OpenDALConnectorTypeMarker for OpenDalS3 {
-    // type Extra = OpenDalS3;
-
-    fn value() -> OpenDALConnectorType {
-        OpenDALConnectorType::OpenDalS3
-    }
-}
-
-impl<C: OpenDALConnectorTypeMarker> SplitMetaData for OpendalFsSplit<C>
+impl<C> SplitMetaData for OpendalFsSplit<C>
 where
-    C: OpenDALConnectorTypeMarker + std::marker::Send,
+    C: Sized + Send + Clone + 'static,
 {
     fn id(&self) -> SplitId {
         self.name.as_str().into()
@@ -160,9 +127,9 @@ where
     }
 }
 
-impl<C: OpenDALConnectorTypeMarker> OpendalFsSplit<C>
+impl<C> OpendalFsSplit<C>
 where
-    C: OpenDALConnectorTypeMarker + std::marker::Send,
+    C: Send + Clone + 'static,
 {
     pub fn new(name: String, start: usize, size: usize) -> Self {
         Self {

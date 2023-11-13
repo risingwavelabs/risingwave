@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
+
 use async_trait::async_trait;
 use chrono::NaiveDateTime;
 use futures::stream::{self, BoxStream};
@@ -19,47 +21,50 @@ use futures::StreamExt;
 use opendal::{Metakey, Operator};
 use risingwave_common::types::Timestamp;
 
-use super::GcsProperties;
-use crate::source::filesystem::file_common::Gcs;
+use super::OpenDALProperties;
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
-pub struct OpendalConnector {
+
+#[derive(Debug, Clone)]
+pub struct OpendalEnumerator<C: OpenDALProperties>
+where
+    C: Send + Clone + Sized + PartialEq + 'static + Sync,
+{
     pub(crate) op: Operator,
     pub(crate) engine_type: EngineType,
+    pub(crate) marker: PhantomData<C>,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub enum EngineType {
     Gcs,
     S3,
 }
 
 #[async_trait]
-impl SplitEnumerator for OpendalConnector {
-    type Properties = GcsProperties;
-    type Split = OpendalFsSplit<Gcs>;
+impl<C: OpenDALProperties> SplitEnumerator for OpendalEnumerator<C>
+where
+    C: Sized + Send + Clone + PartialEq + 'static + Sync,
+{
+    type Properties = C;
+    type Split = OpendalFsSplit<C>;
 
     async fn new(
         properties: Self::Properties,
         _context: SourceEnumeratorContextRef,
-    ) -> anyhow::Result<OpendalConnector> {
-        // match properties {
-        //     OpenDALProperties::GcsProperties(gcs_properties) => {
-        //         OpendalConnector::new_gcs_source(gcs_properties)
-        //     }
-        //     OpenDALProperties::S3Properties(s3_properties) => {
-        //         OpendalConnector::new_s3_source(s3_properties)
-        //     }
-        // }
-        OpendalConnector::new_gcs_source(properties)
+    ) -> anyhow::Result<OpendalEnumerator<C>> {
+        Self::Properties::new_enumerator(properties)
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<OpendalFsSplit<Gcs>>> {
+    async fn list_splits(&mut self) -> anyhow::Result<Vec<OpendalFsSplit<C>>> {
         todo!()
     }
 }
 
-impl OpendalConnector {
+impl<C: OpenDALProperties> OpendalEnumerator<C>
+where
+    C: Send + Clone + Sized + PartialEq + 'static + Sync,
+{
     pub async fn list(&self, prefix: &str) -> anyhow::Result<ObjectMetadataIter> {
         let object_lister = self
             .op

@@ -26,8 +26,9 @@ use risingwave_common::error::{internal_error, Result, RwError};
 use risingwave_common::util::select_all;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
-use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalConnector;
-use risingwave_connector::source::filesystem::FsPageItem;
+use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
+use risingwave_connector::source::filesystem::opendal_source::OpenDALProperties;
+use risingwave_connector::source::filesystem::{FsPageItem, GcsProperties, S3Properties};
 use risingwave_connector::source::{
     create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties,
     ConnectorState, FsFilterCtrlCtx, SourceColumnDesc, SourceContext, SplitReader,
@@ -93,7 +94,8 @@ impl ConnectorSource {
 
         match config {
             ConnectorProperties::Gcs(prop) => {
-                let lister = OpendalConnector::new_gcs_source(*prop)?;
+                let lister: OpendalEnumerator<GcsProperties> =
+                    OpendalEnumerator::new_gcs_source(*prop)?;
                 return Ok(build_opendal_fs_list_stream(
                     FsListCtrlContext {
                         interval: Duration::from_secs(60),
@@ -104,7 +106,8 @@ impl ConnectorSource {
                 ));
             }
             ConnectorProperties::S3(prop) => {
-                let lister = OpendalConnector::new_s3_source(*prop)?;
+                let lister: OpendalEnumerator<S3Properties> =
+                    OpendalEnumerator::new_s3_source(*prop)?;
                 return Ok(build_opendal_fs_list_stream(
                     FsListCtrlContext {
                         interval: Duration::from_secs(60),
@@ -193,7 +196,10 @@ impl ConnectorSource {
 }
 
 #[try_stream(boxed, ok = FsPageItem, error = RwError)]
-async fn build_opendal_fs_list_stream(ctrl_ctx: FsListCtrlContext, lister: OpendalConnector) {
+async fn build_opendal_fs_list_stream<C: OpenDALProperties>(
+    ctrl_ctx: FsListCtrlContext,
+    lister: OpendalEnumerator<C>,
+) {
     let mut interval = time::interval(ctrl_ctx.interval);
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 

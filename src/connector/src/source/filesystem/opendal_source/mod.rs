@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod gcs_source;
+
 pub use gcs_source::*;
 pub mod s3_source;
 pub use s3_source::*;
@@ -20,43 +21,35 @@ use serde::Deserialize;
 pub mod opendal_enumerator;
 pub mod opendal_reader;
 
-use self::opendal_enumerator::OpendalConnector;
+use self::opendal_enumerator::OpendalEnumerator;
 use self::opendal_reader::OpendalReader;
-use super::file_common::Gcs;
-use super::{OpendalFsSplit, S3Properties};
+use super::OpendalFsSplit;
 use crate::source::SourceProperties;
 
 pub const GCS_CONNECTOR: &str = "gcs";
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct GcsProperties {
     #[serde(rename = "gcs.bucket_name")]
     pub bucket_name: String,
 }
 
 impl SourceProperties for GcsProperties {
-    type Split = OpendalFsSplit<Gcs>;
-    type SplitEnumerator = OpendalConnector;
-    type SplitReader = OpendalReader<Gcs>;
+    type Split = OpendalFsSplit<GcsProperties>;
+    type SplitEnumerator = OpendalEnumerator<GcsProperties>;
+    type SplitReader = OpendalReader<GcsProperties>;
 
     const SOURCE_NAME: &'static str = GCS_CONNECTOR;
 
     fn init_from_pb_source(&mut self, _source: &risingwave_pb::catalog::PbSource) {}
 }
 
-// #[derive(Clone, Debug, Deserialize)]
-// pub enum OpenDALProperties {
-//     GcsProperties(GcsProperties),
-//     S3Properties(S3Properties),
-// }
+pub trait OpenDALProperties: Sized + Send + Clone + PartialEq + 'static + Sync {
+    fn new_enumerator(properties: Self) -> anyhow::Result<OpendalEnumerator<Self>>;
+}
 
-// impl SourceProperties for OpenDALProperties{
-
-//     const SOURCE_NAME: &'static str = GCS_CONNECTOR;
-//     type Split = OpendalFsSplit;
-
-//     type SplitEnumerator = OpendalConnector;
-//     type SplitReader = OpendalReader;
-
-//     fn init_from_pb_source(&mut self, _source: &risingwave_pb::catalog::PbSource) {}
-// }
+impl OpenDALProperties for GcsProperties {
+    fn new_enumerator(properties: Self) -> anyhow::Result<OpendalEnumerator<Self>> {
+        OpendalEnumerator::new_gcs_source(properties)
+    }
+}
