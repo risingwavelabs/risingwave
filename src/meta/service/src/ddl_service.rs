@@ -886,6 +886,9 @@ fn fill_table_stream_graph_info(
                         props
                             .entry("server.id".to_string())
                             .or_insert(rand_server_id.to_string());
+
+                        // make these two `Source` consistent
+                        props.clone_into(&mut source.properties);
                     }
 
                     assert_eq!(

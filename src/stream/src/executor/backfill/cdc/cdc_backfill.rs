@@ -225,10 +225,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         let mut total_snapshot_row_count: u64 = 0;
         let mut snapshot_read_epoch;
 
-        let mut last_binlog_offset: Option<CdcOffset> = state.last_cdc_offset.map_or(
-            upstream_table_reader.current_binlog_offset().await?,
-            |cdc_offset| Some(cdc_offset),
-        );
+        let mut last_binlog_offset: Option<CdcOffset> = state
+            .last_cdc_offset
+            .map_or(upstream_table_reader.current_binlog_offset().await?, Some);
 
         let mut consumed_binlog_offset: Option<CdcOffset> = None;
 
