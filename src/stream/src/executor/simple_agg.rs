@@ -59,9 +59,6 @@ struct ExecutorInner<S: StateStore> {
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
 
-    /// Pk indices from input.
-    input_pk_indices: Vec<usize>,
-
     /// Schema from input.
     input_schema: Schema,
 
@@ -141,7 +138,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 version: args.version,
                 actor_ctx: args.actor_ctx,
                 info: args.info,
-                input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 agg_funcs: args.agg_calls.iter().map(build_retractable).try_collect()?,
                 agg_calls: args.agg_calls,
@@ -188,7 +184,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
         // Materialize input chunk if needed and possible.
         for (storage, visibility) in this.storages.iter_mut().zip_eq_fast(visibilities.iter()) {
-            if let AggStateStorage::MaterializedInput { table, mapping } = storage {
+            if let AggStateStorage::MaterializedInput { table, mapping, .. } = storage {
                 let chunk = chunk.project_with_vis(mapping.upstream_columns(), visibility.clone());
                 table.write_chunk(chunk);
             }
@@ -279,7 +275,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 &this.agg_funcs,
                 &this.storages,
                 &this.intermediate_state_table,
-                &this.input_pk_indices,
                 this.row_count_index,
                 this.extreme_cache_size,
                 &this.input_schema,
