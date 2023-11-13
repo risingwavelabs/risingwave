@@ -386,7 +386,7 @@ pub async fn handle_create_sink(
             .map(|source_schema| source_schema.into_source_schema_v2().0);
 
         // Create handler args as if we're creating a new table with the altered definition.
-        let handler_args = HandlerArgs::new(session.clone(), &definition, "")?;
+        let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
         let col_id_gen = ColumnIdGenerator::new_alter(&table_catalog);
         let Statement::CreateTable {
             columns,

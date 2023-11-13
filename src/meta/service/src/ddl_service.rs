@@ -277,11 +277,15 @@ impl DdlService for DdlServiceImpl {
                 {
                     let source = source.as_mut().unwrap();
                     let table_id = table.id;
-                    fill_table_source(source, source_id, &mut table, table_id, &mut fragment_graph);
+                    fill_table_stream_graph_info(
+                        Some((source, source_id)),
+                        (&mut table, table_id),
+                        TableJobType::General,
+                        &mut fragment_graph,
+                    );
                 }
                 let table_col_index_mapping =
                     ColIndexMapping::from_protobuf(&change.table_col_index_mapping.unwrap());
-
                 let stream_job = StreamingJob::Table(source, table, TableJobType::General);
 
                 ReplaceTableInfo {
@@ -327,9 +331,13 @@ impl DdlService for DdlServiceImpl {
                 {
                     let source = source.as_mut().unwrap();
                     let table_id = table.id;
-                    fill_table_source(source, source_id, &mut table, table_id, &mut fragment_graph);
+                    fill_table_stream_graph_info(
+                        Some((source, source_id)),
+                        (&mut table, table_id),
+                        TableJobType::General,
+                        &mut fragment_graph,
+                    );
                 }
-
                 let table_col_index_mapping =
                     ColIndexMapping::from_protobuf(&change.table_col_index_mapping.unwrap());
                 let stream_job = StreamingJob::Table(source, table, TableJobType::General);
