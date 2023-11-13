@@ -69,8 +69,7 @@ pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, Tas
 pub use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{
-    CompactionDeleteRanges, GetObjectId, HummockResult, SstableBuilderOptions,
-    SstableObjectIdManager, Xor16FilterBuilder,
+    GetObjectId, HummockResult, SstableBuilderOptions, SstableObjectIdManager, Xor16FilterBuilder,
 };
 use crate::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, StaticFilterKeyExtractorManager,
@@ -80,9 +79,9 @@ use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::SplitTableOutput;
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, BatchSstableWriterFactory, BlockedXor16FilterBuilder, FilterBuilder,
-    HummockError, SharedComapctorObjectIdManager, SstableWriterFactory,
-    StreamingSstableWriterFactory,
+    validate_ssts, BatchSstableWriterFactory, BlockedXor16FilterBuilder,
+    CompactionDeleteRangeIterator, FilterBuilder, HummockError, SharedComapctorObjectIdManager,
+    SstableWriterFactory, StreamingSstableWriterFactory,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -123,7 +122,7 @@ impl Compactor {
         &self,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
-        del_agg: Arc<CompactionDeleteRanges>,
+        del_iter: CompactionDeleteRangeIterator,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
         task_id: Option<HummockCompactionTaskId>,
@@ -154,7 +153,7 @@ impl Compactor {
                     factory,
                     iter,
                     compaction_filter,
-                    del_agg,
+                    del_iter,
                     filter_key_extractor,
                     task_progress.clone(),
                     self.object_id_getter.clone(),
@@ -166,7 +165,7 @@ impl Compactor {
                     factory,
                     iter,
                     compaction_filter,
-                    del_agg,
+                    del_iter,
                     filter_key_extractor,
                     task_progress.clone(),
                     self.object_id_getter.clone(),
@@ -181,7 +180,7 @@ impl Compactor {
                     factory,
                     iter,
                     compaction_filter,
-                    del_agg,
+                    del_iter,
                     filter_key_extractor,
                     task_progress.clone(),
                     self.object_id_getter.clone(),
@@ -193,7 +192,7 @@ impl Compactor {
                     factory,
                     iter,
                     compaction_filter,
-                    del_agg,
+                    del_iter,
                     filter_key_extractor,
                     task_progress.clone(),
                     self.object_id_getter.clone(),
@@ -278,7 +277,7 @@ impl Compactor {
         writer_factory: F,
         iter: impl HummockIterator<Direction = Forward>,
         compaction_filter: impl CompactionFilter,
-        del_agg: Arc<CompactionDeleteRanges>,
+        del_iter: CompactionDeleteRangeIterator,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
         object_id_getter: Box<dyn GetObjectId>,
@@ -304,7 +303,7 @@ impl Compactor {
         );
         let compaction_statistics = compact_and_build_sst(
             &mut sst_builder,
-            del_agg,
+            del_iter,
             &self.task_config,
             self.context.compactor_metrics.clone(),
             iter,
