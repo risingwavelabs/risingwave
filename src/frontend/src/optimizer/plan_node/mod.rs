@@ -662,6 +662,9 @@ impl dyn PlanNode {
         if let Some(stream_table_scan) = self.as_stream_table_scan() {
             return stream_table_scan.adhoc_to_stream_prost(state);
         }
+        if let Some(stream_cdc_table_scan) = self.as_stream_cdc_table_scan() {
+            return stream_cdc_table_scan.adhoc_to_stream_prost(state);
+        }
         if let Some(stream_share) = self.as_stream_share() {
             return stream_share.adhoc_to_stream_prost(state);
         }
@@ -825,6 +828,7 @@ mod stream_values;
 mod stream_watermark_filter;
 
 mod derive;
+mod stream_cdc_table_scan;
 mod stream_share;
 mod stream_temporal_join;
 mod stream_union;
@@ -880,6 +884,7 @@ pub use logical_topn::LogicalTopN;
 pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
+pub use stream_cdc_table_scan::StreamCdcTableScan;
 pub use stream_dedup::StreamDedup;
 pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_dml::StreamDml;
@@ -987,6 +992,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
+            , { Stream, CdcTableScan }
             , { Stream, Sink }
             , { Stream, Source }
             , { Stream, HashJoin }
@@ -1097,6 +1103,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, HashJoin }
             , { Stream, Exchange }
             , { Stream, TableScan }
+            , { Stream, CdcTableScan }
             , { Stream, Sink }
             , { Stream, Source }
             , { Stream, HashAgg }

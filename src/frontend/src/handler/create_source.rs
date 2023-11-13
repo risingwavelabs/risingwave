@@ -31,7 +31,9 @@ use risingwave_connector::parser::{
     schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
     SpecificParserConfig,
 };
-use risingwave_connector::schema::schema_registry::name_strategy_from_str;
+use risingwave_connector::schema::schema_registry::{
+    name_strategy_from_str, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
+};
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CITUS_CDC_CONNECTOR,
     MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
@@ -62,7 +64,9 @@ use crate::handler::create_table::{
     bind_pk_on_relation, bind_sql_column_constraints, bind_sql_columns, bind_sql_pk_names,
     ensure_table_constraints_supported, ColumnIdGenerator,
 };
-use crate::handler::util::{get_connector, is_cdc_connector, is_kafka_connector};
+use crate::handler::util::{
+    get_connector, is_cdc_connector, is_kafka_connector, is_key_mq_connector,
+};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
@@ -289,6 +293,7 @@ fn get_name_strategy_or_default(name_strategy: Option<AstString>) -> Result<Opti
 /// resolve the schema of the source from external schema file, return the relation's columns. see <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
 /// return `(columns, source info)`
 pub(crate) async fn bind_columns_from_source(
+    session: &SessionImpl,
     source_schema: &ConnectorSchema,
     with_properties: &HashMap<String, String>,
     create_cdc_source_job: bool,
@@ -565,18 +570,27 @@ pub(crate) async fn bind_columns_from_source(
             ))));
         }
     };
+
+    {
+        // fixme: remove this after correctly consuming the two options
+        options.remove(SCHEMA_REGISTRY_USERNAME);
+        options.remove(SCHEMA_REGISTRY_PASSWORD);
+    }
+
     if !options.is_empty() {
-        return Err(RwError::from(ProtocolError(format!(
-            "Unknown options for {:?} {:?}: {}",
+        let err_string = format!(
+            "Get unknown options for {:?} {:?}: {}",
             source_schema.format,
             source_schema.row_encode,
             options
-                .iter()
-                .map(|(k, v)| format!("{}:{}", k, v))
+                .keys()
+                .map(|k| k.to_string())
                 .collect::<Vec<String>>()
                 .join(","),
-        ))));
+        );
+        session.notice_to_user(err_string);
     }
+
     Ok(res)
 }
 
@@ -704,12 +718,18 @@ pub(crate) async fn bind_source_pk(
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
-        (Format::Native, Encode::Native) | (Format::Plain, _) => sql_defined_pk_names,
+        (Format::Native, Encode::Native) => sql_defined_pk_names,
+        (Format::Plain, _) => {
+            if is_key_mq_connector(with_properties) {
+                add_default_key_column(columns);
+            }
+            sql_defined_pk_names
+        }
         (Format::Upsert, Encode::Json) => {
             if sql_defined_pk {
                 sql_defined_pk_names
             } else {
-                add_upsert_default_key_column(columns);
+                add_default_key_column(columns);
                 vec![DEFAULT_KEY_COLUMN_NAME.into()]
             }
         }
@@ -727,7 +747,7 @@ pub(crate) async fn bind_source_pk(
                 extracted_pk_names
             } else {
                 // For upsert avro, if we can't extract pk from schema, use message key as primary key
-                add_upsert_default_key_column(columns);
+                add_default_key_column(columns);
                 vec![DEFAULT_KEY_COLUMN_NAME.into()]
             }
         }
@@ -822,7 +842,7 @@ fn check_and_add_timestamp_column(
     }
 }
 
-fn add_upsert_default_key_column(columns: &mut Vec<ColumnCatalog>) {
+fn add_default_key_column(columns: &mut Vec<ColumnCatalog>) {
     let column = ColumnCatalog {
         column_desc: ColumnDesc {
             data_type: DataType::Bytea,
@@ -1126,8 +1146,13 @@ pub async fn handle_create_source(
     let create_cdc_source_job =
         is_cdc_connector(&with_properties) && session.config().get_cdc_backfill();
 
-    let (columns_from_resolve_source, source_info) =
-        bind_columns_from_source(&source_schema, &with_properties, create_cdc_source_job).await?;
+    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
+        &session,
+        &source_schema,
+        &with_properties,
+        create_cdc_source_job,
+    )
+    .await?;
     let columns_from_sql = bind_sql_columns(&stmt.columns)?;
 
     let mut columns = bind_all_columns(
@@ -1256,7 +1281,7 @@ pub mod tests {
 
     use risingwave_common::catalog::{
         cdc_table_name_column_name, offset_column_name, row_id_column_name, DEFAULT_DATABASE_NAME,
-        DEFAULT_SCHEMA_NAME,
+        DEFAULT_KEY_COLUMN_NAME, DEFAULT_SCHEMA_NAME,
     };
     use risingwave_common::types::DataType;
 
@@ -1298,6 +1323,7 @@ pub mod tests {
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Serial,
+            DEFAULT_KEY_COLUMN_NAME => DataType::Bytea,
             "id" => DataType::Int32,
             "zipcode" => DataType::Int64,
             "rate" => DataType::Float32,

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::mem::take;
 use std::ops::Deref;
@@ -28,6 +29,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
+use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -1146,7 +1148,22 @@ impl GlobalBarrierManager {
     }
 
     pub async fn get_ddl_progress(&self) -> Vec<DdlProgress> {
-        self.tracker.lock().await.gen_ddl_progress()
+        let mut ddl_progress = self.tracker.lock().await.gen_ddl_progress();
+        // If not in tracker, means the first barrier not collected yet.
+        // In that case just return progress 0.
+        for table in self.catalog_manager.list_persisted_creating_tables().await {
+            if table.table_type != TableType::MaterializedView as i32 {
+                continue;
+            }
+            if let Entry::Vacant(e) = ddl_progress.entry(table.id) {
+                e.insert(DdlProgress {
+                    id: table.id as u64,
+                    statement: table.definition,
+                    progress: "0.0%".into(),
+                });
+            }
+        }
+        ddl_progress.into_values().collect()
     }
 }
 

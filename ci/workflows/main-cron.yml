@@ -63,6 +63,7 @@ steps:
     if: (!build.pull_request.labels includes "ci/main-cron/skip-ci" || build.pull_request.labels includes "ci/run-e2e-test")
     depends_on:
       - "build"
+      - "build-other"
       - "docslt"
     plugins:
       - docker-compose#v4.9.0:

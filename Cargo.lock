@@ -7322,6 +7322,7 @@ dependencies = [
  "regex",
  "reqwest",
  "risingwave_common_proc_macro",
+ "risingwave_error",
  "risingwave_pb",
  "rust_decimal",
  "rusty-fork",
@@ -7545,6 +7546,7 @@ dependencies = [
  "prost-reflect",
  "prost-types 0.12.1",
  "protobuf-native",
+ "protobuf-src",
  "pulsar",
  "quote",
  "rand",
@@ -7631,6 +7633,21 @@ dependencies = [
  "tokio-postgres",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "risingwave_error"
+version = "1.3.0-alpha"
+dependencies = [
+ "bincode 1.3.3",
+ "bytes",
+ "easy-ext",
+ "madsim-tonic",
+ "serde",
+ "serde-error",
+ "thiserror",
+ "thiserror-ext",
+ "tracing",
 ]
 
 [[package]]
@@ -8071,6 +8088,7 @@ dependencies = [
  "prost-helpers",
  "serde",
  "strum 0.25.0",
+ "thiserror",
  "walkdir",
  "workspace-hack",
 ]
@@ -8092,6 +8110,7 @@ dependencies = [
  "serde_with",
  "serde_yaml",
  "tempfile",
+ "thiserror-ext",
  "walkdir",
  "workspace-hack",
 ]
@@ -8127,6 +8146,7 @@ dependencies = [
  "moka",
  "rand",
  "risingwave_common",
+ "risingwave_error",
  "risingwave_hummock_sdk",
  "risingwave_pb",
  "static_assertions",
@@ -8314,6 +8334,7 @@ dependencies = [
 name = "risingwave_storage"
 version = "1.3.0-alpha"
 dependencies = [
+ "anyhow",
  "arc-swap",
  "async-trait",
  "auto_enums",
@@ -8990,9 +9011,9 @@ dependencies = [
 
 [[package]]
 name = "self_cell"
-version = "1.0.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c309e515543e67811222dbc9e3dd7e1056279b782e1dacffe4242b718734fb6"
+checksum = "e388332cd64eb80cd595a00941baf513caffae8dce9cfd0467fc9c66397dade6"
 
 [[package]]
 name = "semver"
@@ -9016,6 +9037,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf9e0fcba69a370eed61bcf2b728575f726b50b55cba78064753d708ddc7549e"
 dependencies = [
  "serde_derive",
+]
+
+[[package]]
+name = "serde-error"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e988182713aeed6a619a88bca186f6d6407483485ffe44c869ee264f8eabd13f"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -10000,9 +10030,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext"
-version = "0.0.5"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "764a8c5e60a634fe2173e20038dc4d11195559b4099c61fc60e489e813268a68"
+checksum = "b253f2e76cc35b73c1e1b9fd4e28d920f47e27b33b8b3e455bacc62cc0e40bf5"
 dependencies = [
  "thiserror",
  "thiserror-ext-derive",
@@ -10010,9 +10040,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext-derive"
-version = "0.0.5"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5741c7e65941d49975050cfc4d010e2786404a5e1cc130baa12132bfcf8efda4"
+checksum = "11737e1864ac6e6ec08409cdaba243912693de6b5c7fac56a6aeabb0d73a4ad3"
 dependencies = [
  "proc-macro2",
  "quote",

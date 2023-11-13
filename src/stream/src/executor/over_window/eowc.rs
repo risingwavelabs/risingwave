@@ -20,7 +20,7 @@ use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayRef, Op, StreamChunk};
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::collections::VecDeque;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
@@ -40,7 +40,7 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndices, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
+    ExecutorInfo, Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::AtomicU64Ref;
 
@@ -136,11 +136,10 @@ impl<S: StateStore> Executor for EowcOverWindowExecutor<S> {
 }
 
 pub struct EowcOverWindowExecutorArgs<S: StateStore> {
-    pub input: BoxedExecutor,
-
     pub actor_ctx: ActorContextRef,
-    pub pk_indices: PkIndices,
-    pub executor_id: u64,
+    pub info: ExecutorInfo,
+
+    pub input: BoxedExecutor,
 
     pub calls: Vec<WindowFuncCall>,
     pub partition_key_indices: Vec<usize>,
@@ -153,23 +152,11 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
     pub fn new(args: EowcOverWindowExecutorArgs<S>) -> Self {
         let input_info = args.input.info();
 
-        let schema = {
-            let mut schema = input_info.schema.clone();
-            args.calls.iter().for_each(|call| {
-                schema.fields.push(Field::unnamed(call.return_type.clone()));
-            });
-            schema
-        };
-
         Self {
             input: args.input,
             inner: ExecutorInner {
                 actor_ctx: args.actor_ctx,
-                info: ExecutorInfo {
-                    schema,
-                    pk_indices: args.pk_indices,
-                    identity: format!("EowcOverWindowExecutor {:X}", args.executor_id),
-                },
+                info: args.info,
                 calls: args.calls,
                 input_pk_indices: input_info.pk_indices,
                 partition_key_indices: args.partition_key_indices,
