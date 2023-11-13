@@ -20,11 +20,11 @@
       scan.startup.mode = 'earliest'
     ) FORMAT PLAIN ENCODE CSV (delimiter = ',', without_header = true);
   explain_output: |
-    StreamMaterialize { columns: [v1, v2, _rw_key(hidden), _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
+    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
     └─StreamExchange { dist: HashShard(_row_id) }
-      └─StreamRowIdGen { row_id_index: 3 }
-        └─StreamDml { columns: [v1, v2, _rw_key, _row_id] }
-          └─StreamSource { source: s0, columns: [v1, v2, _rw_key, _row_id] }
+      └─StreamRowIdGen { row_id_index: 2 }
+        └─StreamDml { columns: [v1, v2, _row_id] }
+          └─StreamSource { source: s0, columns: [v1, v2, _row_id] }
 - id: csv_delimiter_tab
   sql: |
     explain create table s0 (v1 int, v2 varchar) with (
@@ -34,11 +34,11 @@
       scan.startup.mode = 'earliest'
     ) FORMAT PLAIN ENCODE CSV (delimiter = E'\t', without_header = true);
   explain_output: |
-    StreamMaterialize { columns: [v1, v2, _rw_key(hidden), _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
+    StreamMaterialize { columns: [v1, v2, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
     └─StreamExchange { dist: HashShard(_row_id) }
-      └─StreamRowIdGen { row_id_index: 3 }
-        └─StreamDml { columns: [v1, v2, _rw_key, _row_id] }
-          └─StreamSource { source: s0, columns: [v1, v2, _rw_key, _row_id] }
+      └─StreamRowIdGen { row_id_index: 2 }
+        └─StreamDml { columns: [v1, v2, _row_id] }
+          └─StreamSource { source: s0, columns: [v1, v2, _row_id] }
 - id: create_source_with_cdc_backfill
   sql: |
     create source mysql_mydb with (
