@@ -560,7 +560,7 @@ impl PlanRoot {
         let dists = union_inputs
             .iter()
             .map(|input| input.distribution())
-            .dedup()
+            .unique()
             .collect_vec();
 
         let dist = match &dists[..] {
