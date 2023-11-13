@@ -515,6 +515,7 @@ mod tests {
         assert_eq!(row, expected.into());
     }
 
+    #[cfg(not(madsim))] // Traced test does not work with madsim
     #[tokio::test]
     #[tracing_test::traced_test]
     async fn test_json_parse_struct_missing_field_warning() {
