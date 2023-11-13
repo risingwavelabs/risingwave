@@ -71,7 +71,7 @@ type parcelEvent struct {
 	sink.BaseSinkRecord
 
 	OrderId        int64  `json:"order_id"`
-	EventTimestmap string `json:"event_timestamp"`
+	EventTimestamp string `json:"event_timestamp"`
 	EventType      string `json:"event_type"`
 }
 
@@ -83,7 +83,7 @@ func (r *parcelEvent) ToPostgresSql() string {
 	return fmt.Sprintf(`INSERT INTO %s
 (order_id, event_timestamp, event_type)
 values ('%d', '%s', '%s')`,
-		"parcel_events", r.OrderId, r.EventTimestmap, r.EventType)
+		"parcel_events", r.OrderId, r.EventTimestamp, r.EventType)
 }
 
 func (r *parcelEvent) ToJson() []byte {
@@ -163,7 +163,7 @@ func (g *ecommerceGen) generate() []sink.SinkRecord {
 		records = append(records, orders...)
 		records = append(records, &parcelEvent{
 			OrderId:        g.seqOrderId,
-			EventTimestmap: ts,
+			EventTimestamp: ts,
 			EventType:      getCreatedOrderType(),
 		})
 		return records
@@ -175,7 +175,7 @@ func (g *ecommerceGen) generate() []sink.SinkRecord {
 				&parcelEvent{
 					OrderId:        g.seqShipId,
 					EventType:      getAbortedOrderType(),
-					EventTimestmap: ts,
+					EventTimestamp: ts,
 				},
 			}
 		}
@@ -185,7 +185,7 @@ func (g *ecommerceGen) generate() []sink.SinkRecord {
 			&parcelEvent{
 				OrderId:        g.seqShipId,
 				EventType:      getShippedOrderType(),
-				EventTimestmap: ts,
+				EventTimestamp: ts,
 			},
 		}
 	}

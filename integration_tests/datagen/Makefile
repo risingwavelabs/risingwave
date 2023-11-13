@@ -21,14 +21,15 @@ build-bin: ## Build the executable
 run-bin: build-bin ## Run the executable
 	./datagen --mode nested --qps 1000 kafka --brokers localhost:9092
 
-run-all: ## Run executable, risingwave, and kafka container
+run-all: ## Run executable, and kafka container
 	docker kill local_kafka || exit 0
-	docker kill rw || exit 0
 	rm -rf /tmp/redpanda
 	mkdir /tmp/redpanda
 	docker run --rm -d --name local_kafka -v /tmp/redpanda:/var/lib/redpanda/data -p 8081:8081 -p 8082:8082 -p 9092:9092 -p 9644:9644  docker.vectorized.io/vectorized/redpanda:latest redpanda start --smp 1 --reserve-memory 0M --memory 4G --overprovisioned --node-id 0 --check=false
-	docker run --rm -d --name rw -p 4566:4566 -p 5691:5691 risingwavelabs/risingwave:v1.4.0 playground
+	make run-bin
+# If datagen crashes, then restart
+
+start-rw: 
+	/Users/janmensch/Downloads/risingwave-1.4.0/target/debug/risingwave playground
 	@echo "connect via psql \"port=4566 host=localhost user=postgres dbname=dev sslmode=disable\""
-	make run-bin 
-
-
+	

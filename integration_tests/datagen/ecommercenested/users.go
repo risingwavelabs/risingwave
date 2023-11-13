@@ -24,10 +24,15 @@ type organizationUserRelation struct {
 	Role string
 }
 
+type user struct {
+	Id       int64  `json:"user_id"`
+	UserName string `json:"user_name"`
+}
+
 type userEvent struct {
 	sink.BaseSinkRecord
 	Id             int64                    `json:"user_event_id"`
-	UserName       string                   `json:"user_name"`
+	User           user                     `json:"user"`
 	EventTimestamp string                   `json:"event_timestamp"`
 	Org            organization             `json:"organization"`
 	OrgRelation    organizationUserRelation `json:"organization_user_relation"`
@@ -72,39 +77,54 @@ type userGen struct {
 	seqUserId          int64
 	faker              *gofakeit.Faker
 	maxUserId          *atomic.Pointer[int64]
+	users              []user
+	orgs               []organization
 }
 
 func NewUserGen(maxId *atomic.Pointer[int64]) *userGen {
-	return &userGen{
+	ug := &userGen{
 		bankruptLikelihood: 10,
 		seqUserId:          0,
 		maxUserId:          maxId,
 		faker:              gofakeit.New(0),
+		users:              []user{},
+		orgs:               []organization{},
 	}
+	for i := 0; i < 1000; i++ {
+		ug.users = append(ug.users, ug.getUser())
+		ug.orgs = append(ug.orgs, organization{
+			Name:            ug.faker.Company(),
+			Address:         getAddress(ug.faker),
+			Industry:        getRandIndustry(),
+			IsOutOfBusiness: getRandIsOutOfBusiness(uint(ug.bankruptLikelihood)),
+		})
+	}
+
+	return ug
 }
 
-func (g *userGen) getUserEvent() userEvent {
+func (g *userGen) getUser() user {
 	g.seqUserId++
 	g.maxUserId.Store(&g.seqUserId)
 	// TODO: seqUserId and maxUserId should be the same
 	// Need custom atomic Inc function for that
-
-	orgName := g.faker.Company()
-	org := organization{
-		Name:            orgName,
-		Address:         getAddress(g.faker),
-		Industry:        getRandIndustry(),
-		IsOutOfBusiness: getRandIsOutOfBusiness(uint(g.bankruptLikelihood)),
+	return user{
+		Id:       g.seqUserId,
+		UserName: g.faker.Username(),
 	}
+}
 
-	name := g.faker.Username()
+func (g *userGen) getUserEvent() userEvent {
+	r := rand.Intn(len(g.users))
+	user := g.users[r]
+	org := g.orgs[r]
 	return userEvent{
 		Id:             g.seqUserId,
-		UserName:       name,
+		User:           user,
 		EventTimestamp: time.Now().Format(gen.RwTimestampNaiveLayout),
 		Org:            org,
 		OrgRelation:    organizationUserRelation{Role: getRandRole()},
-		Email:          fmt.Sprintf("%s@%s.com", name, orgName),
+		Email:          fmt.Sprintf("%s@%s.com", user.UserName, org.Name),
 	}
 }
 
