@@ -20,7 +20,7 @@ use prost_reflect::{
     Cardinality, DescriptorPool, DynamicMessage, FieldDescriptor, Kind, MessageDescriptor,
     ReflectMessage, Value,
 };
-use risingwave_common::array::{ListValue, StructValue};
+use risingwave_common::array::StructValue;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
@@ -486,13 +486,6 @@ pub fn from_protobuf_value(
                 ScalarImpl::Struct(StructValue::new(rw_values))
             }
         }
-        Value::List(values) => {
-            let rw_values = values
-                .iter()
-                .map(|value| from_protobuf_value(field_desc, value, descriptor_pool))
-                .collect::<Result<Vec<_>>>()?;
-            ScalarImpl::List(ListValue::new(rw_values))
-        }
         Value::Bytes(value) => ScalarImpl::Bytea(value.to_vec().into_boxed_slice()),
         _ => {
             let err_msg = format!(
@@ -580,7 +573,7 @@ mod test {
     use std::path::PathBuf;
 
     use prost::Message;
-    use risingwave_common::types::{DataType, StructType};
+    use risingwave_common::types::{DataType, ListValue, StructType};
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::data::data_type::PbTypeName;
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
@@ -857,12 +850,7 @@ mod test {
         pb_eq(
             a,
             "repeated_int_field",
-            S::List(ListValue::new(
-                m.repeated_int_field
-                    .iter()
-                    .map(|&x| Some(x.into()))
-                    .collect(),
-            )),
+            S::List(ListValue::from_iter(m.repeated_int_field.clone())),
         );
         pb_eq(
             a,
