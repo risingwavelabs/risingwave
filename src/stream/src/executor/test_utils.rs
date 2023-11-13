@@ -70,6 +70,10 @@ impl MessageSender {
         self.0.send(Message::Barrier(barrier)).unwrap();
     }
 
+    pub fn send_barrier(&self, barrier: Barrier) {
+        self.0.send(Message::Barrier(barrier)).unwrap();
+    }
+
     #[allow(dead_code)]
     pub fn push_barrier_with_prev_epoch_for_test(
         &mut self,
@@ -275,7 +279,7 @@ pub mod agg_executor {
     use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
 
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::hash::SerializedKey;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
@@ -291,9 +295,33 @@ pub mod agg_executor {
     use crate::executor::aggregation::AggStateStorage;
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::{
-        ActorContext, ActorContextRef, BoxedExecutor, Executor, HashAggExecutor, PkIndices,
-        SimpleAggExecutor,
+        ActorContext, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, HashAggExecutor,
+        PkIndices, SimpleAggExecutor,
     };
+
+    /// Generate agg executor's schema from `input`, `agg_calls` and `group_key_indices`.
+    /// For [`crate::executor::HashAggExecutor`], the group key indices should be provided.
+    pub fn generate_agg_schema(
+        input: &dyn Executor,
+        agg_calls: &[AggCall],
+        group_key_indices: Option<&[usize]>,
+    ) -> Schema {
+        let aggs = agg_calls
+            .iter()
+            .map(|agg| Field::unnamed(agg.return_type.clone()));
+
+        let fields = if let Some(key_indices) = group_key_indices {
+            let keys = key_indices
+                .iter()
+                .map(|idx| input.schema().fields[*idx].clone());
+
+            keys.chain(aggs).collect()
+        } else {
+            aggs.collect()
+        };
+
+        Schema { fields }
+    }
 
     /// Create state storage for the given agg call.
     /// Should infer the schema in the same way as `LogicalAgg::infer_stream_agg_state`.
@@ -444,13 +472,19 @@ pub mod agg_executor {
         )
         .await;
 
+        let schema = generate_agg_schema(input.as_ref(), &agg_calls, Some(&group_key_indices));
+        let info = ExecutorInfo {
+            schema,
+            pk_indices,
+            identity: format!("HashAggExecutor {:X}", executor_id),
+        };
+
         HashAggExecutor::<SerializedKey, S>::new(AggExecutorArgs {
             version: PbAggNodeVersion::Max,
 
             input,
             actor_ctx: ActorContext::create(123),
-            pk_indices,
-            executor_id,
+            info,
 
             extreme_cache_size,
 
@@ -509,13 +543,19 @@ pub mod agg_executor {
         )
         .await;
 
+        let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
+        let info = ExecutorInfo {
+            schema,
+            pk_indices,
+            identity: format!("SimpleAggExecutor {:X}", executor_id),
+        };
+
         SimpleAggExecutor::new(AggExecutorArgs {
             version: PbAggNodeVersion::Max,
 
             input,
             actor_ctx,
-            pk_indices,
-            executor_id,
+            info,
 
             extreme_cache_size: 1024,
 

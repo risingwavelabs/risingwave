@@ -95,7 +95,7 @@ SELECT '{
 
 -- to_jsonb, timestamps
 
---@ select to_jsonb(timestamp '2014-05-28 12:22:35.614298');
+select to_jsonb(timestamp '2014-05-28 12:22:35.614298');
 --@ 
 --@ BEGIN;
 --@ SET LOCAL TIME ZONE 10.5;
@@ -104,7 +104,7 @@ SELECT '{
 --@ select to_jsonb(timestamptz '2014-05-28 12:22:35.614298-04');
 --@ COMMIT;
 --@ 
---@ select to_jsonb(date '2014-05-28');
+select to_jsonb(date '2014-05-28');
 --@ 
 --@ select to_jsonb(date 'Infinity');
 --@ select to_jsonb(date '-Infinity');
@@ -335,8 +335,8 @@ SELECT jsonb_typeof('"1.0"') AS string;
 
 -- jsonb_build_array, jsonb_build_object, jsonb_object_agg
 
---@ SELECT jsonb_build_array('a',1,'b',1.2,'c',true,'d',null,'e',json '{"x": 3, "y": [1,2,3]}');
---@ SELECT jsonb_build_array('a', NULL); -- ok
+--@ SELECT jsonb_build_array('a',1,'b',1.2,'c',true,'d',null,'e',jsonb '{"x": 3, "y": [1,2,3]}');
+SELECT jsonb_build_array('a', NULL); -- ok
 --@ SELECT jsonb_build_array(VARIADIC NULL::text[]); -- ok
 --@ SELECT jsonb_build_array(VARIADIC '{}'::text[]); -- ok
 --@ SELECT jsonb_build_array(VARIADIC '{a,b,c}'::text[]); -- ok
@@ -345,17 +345,17 @@ SELECT jsonb_typeof('"1.0"') AS string;
 --@ SELECT jsonb_build_array(VARIADIC '{1,2,3,4}'::int[]); -- ok
 --@ SELECT jsonb_build_array(VARIADIC '{{1,4},{2,5},{3,6}}'::int[][]); -- ok
 --@ 
---@ SELECT jsonb_build_object('a',1,'b',1.2,'c',true,'d',null,'e',json '{"x": 3, "y": [1,2,3]}');
+--@ SELECT jsonb_build_object('a',1,'b',1.2,'c',true,'d',null,'e',jsonb '{"x": 3, "y": [1,2,3]}');
 --@ 
 --@ SELECT jsonb_build_object(
 --@        'a', jsonb_build_object('b',false,'c',99),
 --@        'd', jsonb_build_object('e',array[9,8,7]::int[],
 --@            'f', (select row_to_json(r) from ( select relkind, oid::regclass as name from pg_class where relname = 'pg_class') r)));
---@ SELECT jsonb_build_object('{a,b,c}'::text[]); -- error
---@ SELECT jsonb_build_object('{a,b,c}'::text[], '{d,e,f}'::text[]); -- error, key cannot be array
---@ SELECT jsonb_build_object('a', 'b', 'c'); -- error
---@ SELECT jsonb_build_object(NULL, 'a'); -- error, key cannot be NULL
---@ SELECT jsonb_build_object('a', NULL); -- ok
+SELECT jsonb_build_object('{a,b,c}'::text[]); -- error
+SELECT jsonb_build_object('{a,b,c}'::text[], '{d,e,f}'::text[]); -- error, key cannot be array
+SELECT jsonb_build_object('a', 'b', 'c'); -- error
+SELECT jsonb_build_object(NULL, 'a'); -- error, key cannot be NULL
+SELECT jsonb_build_object('a', NULL); -- ok
 --@ SELECT jsonb_build_object(VARIADIC NULL::text[]); -- ok
 --@ SELECT jsonb_build_object(VARIADIC '{}'::text[]); -- ok
 --@ SELECT jsonb_build_object(VARIADIC '{a,b,c}'::text[]); -- error
@@ -364,24 +364,24 @@ SELECT jsonb_typeof('"1.0"') AS string;
 --@ SELECT jsonb_build_object(VARIADIC '{1,2,3,4}'::text[]); -- ok
 --@ SELECT jsonb_build_object(VARIADIC '{1,2,3,4}'::int[]); -- ok
 --@ SELECT jsonb_build_object(VARIADIC '{{1,4},{2,5},{3,6}}'::int[][]); -- ok
---@ 
---@ -- empty objects/arrays
---@ SELECT jsonb_build_array();
---@ 
---@ SELECT jsonb_build_object();
---@ 
---@ -- make sure keys are quoted
---@ SELECT jsonb_build_object(1,2);
---@ 
---@ -- keys must be scalar and not null
---@ SELECT jsonb_build_object(null,2);
---@ 
---@ SELECT jsonb_build_object(r,2) FROM (SELECT 1 AS a, 2 AS b) r;
---@ 
---@ SELECT jsonb_build_object(json '{"a":1,"b":2}', 3);
---@ 
---@ SELECT jsonb_build_object('{1,2,3}'::int[], 3);
---@ 
+
+-- empty objects/arrays
+SELECT jsonb_build_array();
+
+SELECT jsonb_build_object();
+
+-- make sure keys are quoted
+SELECT jsonb_build_object(1,2);
+
+-- keys must be scalar and not null
+SELECT jsonb_build_object(null,2);
+
+SELECT jsonb_build_object(r,2) FROM (SELECT 1 AS a, 2 AS b) r;
+
+SELECT jsonb_build_object(jsonb '{"a":1,"b":2}', 3);
+
+SELECT jsonb_build_object('{1,2,3}'::int[], 3);
+
 --@ -- handling of NULL values
 --@ SELECT jsonb_object_agg(1, NULL::jsonb);
 --@ SELECT jsonb_object_agg(NULL, '{"a":1}');
@@ -449,20 +449,20 @@ SELECT jsonb_typeof('"1.0"') AS string;
 
 
 -- extract_path, extract_path_as_text
---@ SELECT jsonb_extract_path('{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}','f4','f6');
---@ SELECT jsonb_extract_path('{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}','f2');
---@ SELECT jsonb_extract_path('{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}','f2',0::text);
---@ SELECT jsonb_extract_path('{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}','f2',1::text);
---@ SELECT jsonb_extract_path_text('{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}','f4','f6');
---@ SELECT jsonb_extract_path_text('{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}','f2');
---@ SELECT jsonb_extract_path_text('{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}','f2',0::text);
---@ SELECT jsonb_extract_path_text('{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}','f2',1::text);
+SELECT jsonb_extract_path('{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}','f4','f6');
+SELECT jsonb_extract_path('{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}','f2');
+SELECT jsonb_extract_path('{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}','f2',0::text);
+SELECT jsonb_extract_path('{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}','f2',1::text);
+SELECT jsonb_extract_path_text('{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}','f4','f6');
+SELECT jsonb_extract_path_text('{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}','f2');
+SELECT jsonb_extract_path_text('{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}','f2',0::text);
+SELECT jsonb_extract_path_text('{"f2":["f3",1],"f4":{"f5":99,"f6":"stringy"}}','f2',1::text);
 
 -- extract_path nulls
---@ SELECT jsonb_extract_path('{"f2":{"f3":1},"f4":{"f5":null,"f6":"stringy"}}','f4','f5') IS NULL AS expect_false;
---@ SELECT jsonb_extract_path_text('{"f2":{"f3":1},"f4":{"f5":null,"f6":"stringy"}}','f4','f5') IS NULL AS expect_true;
---@ SELECT jsonb_extract_path('{"f2":{"f3":1},"f4":[0,1,2,null]}','f4','3') IS NULL AS expect_false;
---@ SELECT jsonb_extract_path_text('{"f2":{"f3":1},"f4":[0,1,2,null]}','f4','3') IS NULL AS expect_true;
+SELECT jsonb_extract_path('{"f2":{"f3":1},"f4":{"f5":null,"f6":"stringy"}}','f4','f5') IS NULL AS expect_false;
+SELECT jsonb_extract_path_text('{"f2":{"f3":1},"f4":{"f5":null,"f6":"stringy"}}','f4','f5') IS NULL AS expect_true;
+SELECT jsonb_extract_path('{"f2":{"f3":1},"f4":[0,1,2,null]}','f4','3') IS NULL AS expect_false;
+SELECT jsonb_extract_path_text('{"f2":{"f3":1},"f4":[0,1,2,null]}','f4','3') IS NULL AS expect_true;
 
 -- extract_path operators
 SELECT '{"f2":{"f3":1},"f4":{"f5":99,"f6":"stringy"}}'::jsonb#>array['f4','f6'];

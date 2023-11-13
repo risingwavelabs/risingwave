@@ -21,22 +21,24 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::must_match;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
+use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
-    create_monotonic_events, HummockResult, InMemWriter, SstableMeta, SstableWriterOptions,
-    DEFAULT_RESTART_INTERVAL,
+    HummockResult, InMemWriter, SstableMeta, SstableWriterOptions, DEFAULT_RESTART_INTERVAL,
 };
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
+use crate::hummock::iterator::ForwardMergeRangeIterator;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BlockedXor16FilterBuilder, CachePolicy, DeleteRangeTombstone, FilterBuilder, LruCache, Sstable,
-    SstableBuilder, SstableBuilderOptions, SstableStoreRef, SstableWriter, Xor16FilterBuilder,
+    create_monotonic_events, BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator,
+    DeleteRangeTombstone, FilterBuilder, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
+    SstableStoreRef, SstableWriter, Xor16FilterBuilder,
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
@@ -223,17 +225,17 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
     );
 
     let mut last_key = FullKey::<B>::default();
-    let mut user_key_last_delete = HummockEpoch::MAX;
+    let mut user_key_last_delete = MAX_EPOCH;
     for (mut key, value) in kv_iter {
         let is_new_user_key =
             last_key.is_empty() || key.user_key.as_ref() != last_key.user_key.as_ref();
-        let epoch = key.epoch;
+        let epoch = key.epoch_with_gap.pure_epoch();
         if is_new_user_key {
             last_key = key.clone();
-            user_key_last_delete = HummockEpoch::MAX;
+            user_key_last_delete = MAX_EPOCH;
         }
 
-        let mut earliest_delete_epoch = HummockEpoch::MAX;
+        let mut earliest_delete_epoch = MAX_EPOCH;
         let extended_user_key = PointRange::from_user_key(key.user_key.as_ref(), false);
         for range_tombstone in &range_tombstones {
             if range_tombstone
@@ -241,7 +243,7 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
                 .as_ref()
                 .le(&extended_user_key)
                 && range_tombstone.end_user_key.as_ref().gt(&extended_user_key)
-                && range_tombstone.sequence >= key.epoch
+                && range_tombstone.sequence >= key.epoch_with_gap.pure_epoch()
                 && range_tombstone.sequence < earliest_delete_epoch
             {
                 earliest_delete_epoch = range_tombstone.sequence;
@@ -253,9 +255,9 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
         } else if earliest_delete_epoch < user_key_last_delete {
             user_key_last_delete = earliest_delete_epoch;
 
-            key.epoch = earliest_delete_epoch;
+            key.epoch_with_gap = EpochWithGap::new_from_epoch(earliest_delete_epoch);
             b.add(key.to_ref(), HummockValue::Delete).await.unwrap();
-            key.epoch = epoch;
+            key.epoch_with_gap = EpochWithGap::new_from_epoch(epoch);
         }
 
         b.add(key.to_ref(), value.as_slice()).await.unwrap();
@@ -347,7 +349,7 @@ pub fn test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
 pub fn test_key_of(idx: usize) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: test_user_key_of(idx),
-        epoch: 233,
+        epoch_with_gap: EpochWithGap::new_from_epoch(233),
     }
 }
 
@@ -390,4 +392,35 @@ pub async fn count_stream<T>(s: impl Stream<Item = StorageResult<T>> + Send) -> 
 
 pub fn create_small_table_cache() -> Arc<LruCache<HummockSstableObjectId, Box<Sstable>>> {
     Arc::new(LruCache::new(1, 4, 0))
+}
+
+#[derive(Default)]
+pub struct CompactionDeleteRangesBuilder {
+    iter: ForwardMergeRangeIterator,
+}
+
+impl CompactionDeleteRangesBuilder {
+    pub fn add_delete_events(
+        &mut self,
+        epoch: HummockEpoch,
+        table_id: TableId,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+    ) {
+        let size = SharedBufferBatch::measure_delete_range_size(&delete_ranges);
+        let batch = SharedBufferBatch::build_shared_buffer_batch(
+            epoch,
+            0,
+            vec![],
+            size,
+            delete_ranges,
+            table_id,
+            None,
+            None,
+        );
+        self.iter.add_batch_iter(batch.delete_range_iter());
+    }
+
+    pub fn build_for_compaction(self) -> CompactionDeleteRangeIterator {
+        CompactionDeleteRangeIterator::new(self.iter)
+    }
 }

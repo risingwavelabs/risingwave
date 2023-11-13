@@ -15,8 +15,9 @@
 use std::ops::Bound::*;
 
 use bytes::Bytes;
+use risingwave_common::util::epoch::{MAX_EPOCH, MAX_SPILL_TIMES};
 use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch};
 
 use super::DeleteRangeIterator;
 use crate::hummock::iterator::{Forward, ForwardMergeRangeIterator, HummockIterator};
@@ -83,7 +84,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
     /// Create [`UserIterator`] with maximum epoch.
     pub fn for_test(iterator: I, key_range: UserKeyRange) -> Self {
-        let read_epoch = HummockEpoch::MAX;
+        let read_epoch = MAX_EPOCH;
         Self::new(
             iterator,
             key_range,
@@ -103,7 +104,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     pub async fn next(&mut self) -> HummockResult<()> {
         while self.iterator.is_valid() {
             let full_key = self.iterator.key();
-            let epoch = full_key.epoch;
+            let epoch = full_key.epoch_with_gap.pure_epoch();
 
             // handle multi-version
             if epoch < self.min_epoch || epoch > self.read_epoch {
@@ -183,7 +184,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             Included(begin_key) => {
                 let full_key = FullKey {
                     user_key: begin_key.clone(),
-                    epoch: self.read_epoch,
+                    epoch_with_gap: EpochWithGap::new(self.read_epoch, MAX_SPILL_TIMES),
                 };
                 self.iterator.seek(full_key.to_ref()).await?;
                 if !self.iterator.is_valid() {
@@ -235,7 +236,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 
         let full_key = FullKey {
             user_key,
-            epoch: self.read_epoch,
+            epoch_with_gap: EpochWithGap::new(self.read_epoch, MAX_SPILL_TIMES),
         };
         self.iterator.seek(full_key).await?;
         if !self.iterator.is_valid() {
@@ -930,7 +931,7 @@ mod tests {
         let mut i = 0;
         while ui.is_valid() {
             let key = ui.key();
-            let key_epoch = key.epoch;
+            let key_epoch = key.epoch_with_gap.pure_epoch();
             assert!(key_epoch >= min_epoch);
 
             i += 1;

@@ -16,7 +16,7 @@ package com.risingwave.connector.source.core;
 
 import com.risingwave.connector.api.source.*;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
-import com.risingwave.proto.ConnectorServiceProto;
+import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
 import io.grpc.stub.StreamObserver;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -40,8 +40,7 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
     }
 
     public static CdcEngineRunner newCdcEngineRunner(
-            DbzConnectorConfig config,
-            StreamObserver<ConnectorServiceProto.GetEventStreamResponse> responseObserver) {
+            DbzConnectorConfig config, StreamObserver<GetEventStreamResponse> responseObserver) {
         DbzCdcEngineRunner runner = null;
         try {
             var sourceId = config.getSourceId();
@@ -98,12 +97,21 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
     }
 
     /** Start to run the cdc engine */
-    public void start() {
+    public void start() throws InterruptedException {
         if (isRunning()) {
             LOG.info("engine#{} already started", engine.getId());
             return;
         }
 
+        // put a handshake message to notify the Source executor
+        var controlInfo =
+                GetEventStreamResponse.ControlInfo.newBuilder().setHandshakeOk(true).build();
+        engine.getOutputChannel()
+                .put(
+                        GetEventStreamResponse.newBuilder()
+                                .setSourceId(engine.getId())
+                                .setControl(controlInfo)
+                                .build());
         executor.execute(engine);
         running.set(true);
         LOG.info("engine#{} started", engine.getId());

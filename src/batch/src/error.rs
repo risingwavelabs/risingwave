@@ -17,6 +17,7 @@ use std::sync::Arc;
 pub use anyhow::anyhow;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_rpc_client::error::ToTonicStatus;
 use thiserror::Error;
 use tonic::Status;
 
@@ -37,13 +38,21 @@ pub enum BatchError {
     Cast(&'static str, &'static str),
 
     #[error("Array error: {0}")]
-    Array(#[from] ArrayError),
+    Array(
+        #[from]
+        #[backtrace]
+        ArrayError,
+    ),
 
     #[error("Failed to send result to channel")]
     SenderError,
 
     #[error(transparent)]
-    Internal(#[from] anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 
     #[error("Prometheus error: {0}")]
     Prometheus(#[from] prometheus::Error),
@@ -71,6 +80,6 @@ impl From<RwError> for BatchError {
 
 impl<'a> From<&'a BatchError> for Status {
     fn from(err: &'a BatchError) -> Self {
-        Status::internal(err.to_string())
+        err.to_status(tonic::Code::Internal, "batch")
     }
 }

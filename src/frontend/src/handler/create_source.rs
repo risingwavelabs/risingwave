@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::rc::Rc;
 use std::sync::LazyLock;
 
+use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -29,9 +31,12 @@ use risingwave_connector::parser::{
     schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
     SpecificParserConfig,
 };
-use risingwave_connector::schema::schema_registry::name_strategy_from_str;
+use risingwave_connector::schema::schema_registry::{
+    name_strategy_from_str, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
+};
 use risingwave_connector::source::cdc::{
-    CITUS_CDC_CONNECTOR, MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
+    CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CITUS_CDC_CONNECTOR,
+    MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
 };
 use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{get_event_data_types_with_names, EventType};
@@ -44,6 +49,7 @@ use risingwave_pb::catalog::{
     PbSchemaRegistryNameStrategy, PbSource, StreamSourceInfo, WatermarkDesc,
 };
 use risingwave_pb::plan_common::{EncodeType, FormatType};
+use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     get_delimiter, AstString, AvroSchema, ColumnDef, ConnectorSchema, CreateSourceStatement,
     DebeziumAvroSchema, Encode, Format, ProtobufSchema, SourceWatermark,
@@ -51,17 +57,21 @@ use risingwave_sqlparser::ast::{
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
 use crate::expr::Expr;
 use crate::handler::create_table::{
     bind_pk_on_relation, bind_sql_column_constraints, bind_sql_columns, bind_sql_pk_names,
     ensure_table_constraints_supported, ColumnIdGenerator,
 };
-use crate::handler::util::{get_connector, is_kafka_connector};
+use crate::handler::util::{
+    get_connector, is_cdc_connector, is_kafka_connector, is_key_mq_connector,
+};
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
 use crate::utils::resolve_privatelink_in_with_option;
-use crate::{bind_data_type, WithOptions};
+use crate::{bind_data_type, build_graph, OptimizerContext, WithOptions};
 
 pub(crate) const UPSTREAM_SOURCE_KEY: &str = "connector";
 pub(crate) const CONNECTION_NAME_KEY: &str = "connection.name";
@@ -84,6 +94,26 @@ async fn extract_json_table_schema(
                 .collect_vec(),
         )),
     }
+}
+
+pub fn debezium_cdc_source_schema() -> Vec<ColumnCatalog> {
+    let columns = vec![
+        ColumnCatalog {
+            column_desc: ColumnDesc {
+                data_type: DataType::Jsonb,
+                column_id: ColumnId::placeholder(),
+                name: "payload".to_string(),
+                field_descs: vec![],
+                type_name: "".to_string(),
+                generated_or_default_column: None,
+                description: None,
+            },
+            is_hidden: false,
+        },
+        ColumnCatalog::offset_column(),
+        ColumnCatalog::cdc_table_name_column(),
+    ];
+    columns
 }
 
 fn json_schema_infer_use_schema_registry(schema_config: &Option<(AstString, bool)>) -> bool {
@@ -263,8 +293,10 @@ fn get_name_strategy_or_default(name_strategy: Option<AstString>) -> Result<Opti
 /// resolve the schema of the source from external schema file, return the relation's columns. see <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
 /// return `(columns, source info)`
 pub(crate) async fn bind_columns_from_source(
+    session: &SessionImpl,
     source_schema: &ConnectorSchema,
     with_properties: &HashMap<String, String>,
+    create_cdc_source_job: bool,
 ) -> Result<(Option<Vec<ColumnCatalog>>, StreamSourceInfo)> {
     const MESSAGE_NAME_KEY: &str = "message";
     const KEY_MESSAGE_NAME_KEY: &str = "key.message";
@@ -324,21 +356,27 @@ pub(crate) async fn bind_columns_from_source(
                     use_schema_registry: protobuf_schema.use_schema_registry,
                     proto_message_name: protobuf_schema.message_name.0.clone(),
                     key_message_name: get_key_message_name(&mut options),
-                    name_strategy: name_strategy.unwrap_or(
-                        PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32,
-                    ),
+                    name_strategy: name_strategy
+                        .unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32),
                     ..Default::default()
                 },
             )
         }
         (Format::Plain, Encode::Json) => {
             let schema_config = get_json_schema_location(&mut options)?;
+            let columns = if create_cdc_source_job {
+                Some(debezium_cdc_source_schema())
+            } else {
+                extract_json_table_schema(&schema_config, with_properties).await?
+            };
+
             (
-                extract_json_table_schema(&schema_config, with_properties).await?,
+                columns,
                 StreamSourceInfo {
                     format: FormatType::Plain as i32,
                     row_encode: EncodeType::Json as i32,
                     use_schema_registry: json_schema_infer_use_schema_registry(&schema_config),
+                    cdc_source_job: create_cdc_source_job,
                     ..Default::default()
                 },
             )
@@ -362,7 +400,7 @@ pub(crate) async fn bind_columns_from_source(
                 proto_message_name: message_name.unwrap_or(AstString("".into())).0,
                 key_message_name,
                 name_strategy: name_strategy
-                    .unwrap_or(PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32),
+                    .unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32),
                 ..Default::default()
             };
             (
@@ -426,7 +464,7 @@ pub(crate) async fn bind_columns_from_source(
 
             let name_strategy =
                 get_sr_name_strategy_check(&mut options, avro_schema.use_schema_registry)?
-                    .unwrap_or(PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32);
+                    .unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32);
             let key_message_name = get_key_message_name(&mut options);
             let message_name = try_consume_string_from_options(&mut options, MESSAGE_NAME_KEY);
 
@@ -478,7 +516,7 @@ pub(crate) async fn bind_columns_from_source(
                 use_schema_registry,
                 proto_message_name: message_name.unwrap_or(AstString("".into())).0,
                 name_strategy: name_strategy
-                    .unwrap_or(PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified as i32),
+                    .unwrap_or(PbSchemaRegistryNameStrategy::Unspecified as i32),
                 format: FormatType::Debezium as i32,
                 row_encode: EncodeType::Avro as i32,
                 row_schema_location: avro_schema.row_schema_location.0.clone(),
@@ -532,18 +570,27 @@ pub(crate) async fn bind_columns_from_source(
             ))));
         }
     };
+
+    {
+        // fixme: remove this after correctly consuming the two options
+        options.remove(SCHEMA_REGISTRY_USERNAME);
+        options.remove(SCHEMA_REGISTRY_PASSWORD);
+    }
+
     if !options.is_empty() {
-        return Err(RwError::from(ProtocolError(format!(
-            "Unknown options for {:?} {:?}: {}",
+        let err_string = format!(
+            "Get unknown options for {:?} {:?}: {}",
             source_schema.format,
             source_schema.row_encode,
             options
-                .iter()
-                .map(|(k, v)| format!("{}:{}", k, v))
+                .keys()
+                .map(|k| k.to_string())
                 .collect::<Vec<String>>()
                 .join(","),
-        ))));
+        );
+        session.notice_to_user(err_string);
     }
+
     Ok(res)
 }
 
@@ -671,12 +718,18 @@ pub(crate) async fn bind_source_pk(
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
-        (Format::Native, Encode::Native) | (Format::Plain, _) => sql_defined_pk_names,
+        (Format::Native, Encode::Native) => sql_defined_pk_names,
+        (Format::Plain, _) => {
+            if is_key_mq_connector(with_properties) {
+                add_default_key_column(columns);
+            }
+            sql_defined_pk_names
+        }
         (Format::Upsert, Encode::Json) => {
             if sql_defined_pk {
                 sql_defined_pk_names
             } else {
-                add_upsert_default_key_column(columns);
+                add_default_key_column(columns);
                 vec![DEFAULT_KEY_COLUMN_NAME.into()]
             }
         }
@@ -694,7 +747,7 @@ pub(crate) async fn bind_source_pk(
                 extracted_pk_names
             } else {
                 // For upsert avro, if we can't extract pk from schema, use message key as primary key
-                add_upsert_default_key_column(columns);
+                add_default_key_column(columns);
                 vec![DEFAULT_KEY_COLUMN_NAME.into()]
             }
         }
@@ -789,7 +842,7 @@ fn check_and_add_timestamp_column(
     }
 }
 
-fn add_upsert_default_key_column(columns: &mut Vec<ColumnCatalog>) {
+fn add_default_key_column(columns: &mut Vec<ColumnCatalog>) {
     let column = ColumnCatalog {
         column_desc: ColumnDesc {
             data_type: DataType::Bytea,
@@ -888,6 +941,8 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                 MYSQL_CDC_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Bytes],
                     Format::Debezium => vec![Encode::Json],
+                    // support source stream job
+                    Format::Plain => vec![Encode::Json],
                 ),
                 POSTGRES_CDC_CONNECTOR => hashmap!(
                     Format::Plain => vec![Encode::Bytes],
@@ -1052,7 +1107,13 @@ pub async fn handle_create_source(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
-    session.check_relation_name_duplicated(stmt.source_name.clone())?;
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        stmt.source_name.clone(),
+        StatementType::CREATE_SOURCE,
+        stmt.if_not_exists,
+    )? {
+        return Ok(resp);
+    }
 
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
@@ -1070,14 +1131,28 @@ pub async fn handle_create_source(
         session.notice_to_user(notice)
     };
 
-    let mut with_properties = handler_args.with_options.into_inner().into_iter().collect();
+    let mut with_properties = handler_args
+        .with_options
+        .clone()
+        .into_inner()
+        .into_iter()
+        .collect();
     validate_compatibility(&source_schema, &mut with_properties)?;
 
     ensure_table_constraints_supported(&stmt.constraints)?;
     let sql_pk_names = bind_sql_pk_names(&stmt.columns, &stmt.constraints)?;
 
-    let (columns_from_resolve_source, source_info) =
-        bind_columns_from_source(&source_schema, &with_properties).await?;
+    // gated the feature with a session variable
+    let create_cdc_source_job =
+        is_cdc_connector(&with_properties) && session.config().get_cdc_backfill();
+
+    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
+        &session,
+        &source_schema,
+        &with_properties,
+        create_cdc_source_job,
+    )
+    .await?;
     let columns_from_sql = bind_sql_columns(&stmt.columns)?;
 
     let mut columns = bind_all_columns(
@@ -1094,6 +1169,13 @@ pub async fn handle_create_source(
         &with_properties,
     )
     .await?;
+
+    if create_cdc_source_job {
+        // set connector to backfill mode
+        with_properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
+        // enable cdc sharing mode, which will capture all tables in the given `database.name`
+        with_properties.insert(CDC_SHARING_MODE_KEY.into(), "true".into());
+    }
 
     check_and_add_timestamp_column(&with_properties, &mut columns);
 
@@ -1129,24 +1211,21 @@ pub async fn handle_create_source(
 
     check_source_schema(&with_properties, row_id_index, &columns)?;
 
-    let row_id_index = row_id_index.map(|index| index as _);
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
-
-    let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
     let mut with_options = WithOptions::new(with_properties);
     // resolve privatelink connection for Kafka source
     let connection_id =
         resolve_privatelink_in_with_option(&mut with_options, &schema_name, &session)?;
-    let definition = handler_args.normalized_sql;
+    let definition = handler_args.normalized_sql.clone();
 
     let source = PbSource {
         id: TableId::placeholder().table_id,
         schema_id,
         database_id,
         name,
-        row_id_index,
-        columns,
+        row_id_index: row_id_index.map(|idx| idx as u32),
+        columns: columns.iter().map(|c| c.to_protobuf()).collect_vec(),
         pk_column_ids,
         properties: with_options.into_inner().into_iter().collect(),
         info: Some(source_info),
@@ -1161,7 +1240,37 @@ pub async fn handle_create_source(
     };
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.create_source(source).await?;
+
+    if create_cdc_source_job {
+        // create a streaming job for the cdc source, which will mark as *singleton* in the Fragmenter
+        let graph = {
+            let context = OptimizerContext::from_handler_args(handler_args);
+            // cdc source is an append-only source in plain json format
+            let source_node = LogicalSource::new(
+                Some(Rc::new(SourceCatalog::from(&source))),
+                columns.clone(),
+                row_id_index,
+                false,
+                false,
+                context.into(),
+            )?;
+
+            // generate stream graph for cdc source job
+            let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
+            let mut graph = build_graph(stream_plan);
+            graph.parallelism = session
+                .config()
+                .get_streaming_parallelism()
+                .map(|parallelism| Parallelism { parallelism });
+            graph
+        };
+        catalog_writer
+            .create_source_with_graph(source, graph)
+            .await?;
+    } else {
+        // For other sources we don't create a streaming job
+        catalog_writer.create_source(source).await?;
+    }
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE))
 }
@@ -1171,7 +1280,8 @@ pub mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{
-        row_id_column_name, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
+        cdc_table_name_column_name, offset_column_name, row_id_column_name, DEFAULT_DATABASE_NAME,
+        DEFAULT_KEY_COLUMN_NAME, DEFAULT_SCHEMA_NAME,
     };
     use risingwave_common::types::DataType;
 
@@ -1213,6 +1323,7 @@ pub mod tests {
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Serial,
+            DEFAULT_KEY_COLUMN_NAME => DataType::Bytea,
             "id" => DataType::Int32,
             "zipcode" => DataType::Int64,
             "rate" => DataType::Float32,
@@ -1220,6 +1331,47 @@ pub mod tests {
                 vec![DataType::Varchar,city_type,DataType::Varchar],
                 vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],
             ),
+        };
+        assert_eq!(columns, expected_columns);
+    }
+
+    #[tokio::test]
+    async fn test_multi_table_cdc_create_source_handler() {
+        let sql =
+            "CREATE SOURCE t2 WITH (connector = 'mysql-cdc') FORMAT PLAIN ENCODE JSON".to_string();
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let session = frontend.session_ref();
+        session
+            .set_config("cdc_backfill", vec!["true".to_string()])
+            .unwrap();
+
+        frontend
+            .run_sql_with_session(session.clone(), sql)
+            .await
+            .unwrap();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
+
+        // Check source exists.
+        let (source, _) = catalog_reader
+            .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "t2")
+            .unwrap();
+        assert_eq!(source.name, "t2");
+
+        let columns = source
+            .columns
+            .iter()
+            .map(|col| (col.name(), col.data_type().clone()))
+            .collect::<HashMap<&str, DataType>>();
+
+        let row_id_col_name = row_id_column_name();
+        let offset_col_name = offset_column_name();
+        let table_name_col_name = cdc_table_name_column_name();
+        let expected_columns = maplit::hashmap! {
+            row_id_col_name.as_str() => DataType::Serial,
+            "payload" => DataType::Jsonb,
+            offset_col_name.as_str() => DataType::Varchar,
+            table_name_col_name.as_str() => DataType::Varchar,
         };
         assert_eq!(columns, expected_columns);
     }

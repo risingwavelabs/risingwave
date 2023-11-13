@@ -18,8 +18,10 @@ use itertools::Itertools;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_pb::catalog::{PbDatabase, PbSchema};
 
+use super::OwnedByUserCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{DatabaseId, SchemaId, TableId};
+use crate::user::UserId;
 
 #[derive(Clone, Debug)]
 pub struct DatabaseCatalog {
@@ -93,6 +95,12 @@ impl DatabaseCatalog {
             .find(|schema| schema.get_table_by_id(table_id).is_some())
     }
 
+    pub fn update_self(&mut self, prost: &PbDatabase) {
+        self.id = prost.id;
+        self.name = prost.name.clone();
+        self.owner = prost.owner;
+    }
+
     pub fn is_empty(&self) -> bool {
         self.schema_by_name.len() == 1 && self.schema_by_name.contains_key(PG_CATALOG_SCHEMA_NAME)
     }
@@ -104,11 +112,14 @@ impl DatabaseCatalog {
     pub fn name(&self) -> &str {
         &self.name
     }
+}
 
-    pub fn owner(&self) -> u32 {
+impl OwnedByUserCatalog for DatabaseCatalog {
+    fn owner(&self) -> UserId {
         self.owner
     }
 }
+
 impl From<&PbDatabase> for DatabaseCatalog {
     fn from(db: &PbDatabase) -> Self {
         Self {

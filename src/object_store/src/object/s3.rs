@@ -705,7 +705,7 @@ impl S3ObjectStore {
     ///   - <https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpu-abort-incomplete-mpu-lifecycle-config.html>
     /// - MinIO
     ///   - <https://github.com/minio/minio/issues/15681#issuecomment-1245126561>
-    pub async fn configure_bucket_lifecycle(&self) -> bool {
+    pub async fn configure_bucket_lifecycle(&self, data_directory: &str) -> bool {
         // Check if lifecycle is already configured to avoid overriding existing configuration.
         let bucket = self.bucket.as_str();
         let mut configured_rules = vec![];
@@ -716,11 +716,28 @@ impl S3ObjectStore {
             .send()
             .await;
         let mut is_expiration_configured = false;
+
         if let Ok(config) = &get_config_result {
             for rule in config.rules().unwrap_or_default() {
-                if rule.expiration().is_some() {
-                    is_expiration_configured = true;
+                // Check if the filter is not set or the prifix in the filter is data directory in RisingWave,
+                // and if the expiration status of the rule is "Enabled".
+                // If both conditions are met, it is considered that there is a risk of data deletion.
+                match rule.filter().as_ref() {
+                    Some(&LifecycleRuleFilter::Prefix(prefix)) => {
+                        if let Some(ExpirationStatus::Enabled) = rule.status && data_directory.starts_with(prefix){
+                            is_expiration_configured = true;
+                        }
+                    }
+                    None => {
+                        if let Some(ExpirationStatus::Enabled) = rule.status {
+                            is_expiration_configured = true;
+                        }
+                    }
+                    _ => {
+
+                    }
                 }
+
                 if matches!(rule.status().unwrap(), ExpirationStatus::Enabled)
                     && rule.abort_incomplete_multipart_upload().is_some()
                 {

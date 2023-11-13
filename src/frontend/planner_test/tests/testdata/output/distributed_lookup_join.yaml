@@ -7,7 +7,7 @@
     select * from t1 natural join t2;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: t1.a = idx.a AND t1.b = idx.b AND t1.c = idx.c, output: [t1.c, t1.b, t1.a] }
+    └─BatchLookupJoin { type: Inner, predicate: t1.a = idx.a AND t1.b = idx.b AND t1.c = idx.c, output: [t1.c, t1.b, t1.a], lookup table: idx }
       └─BatchExchange { order: [], dist: UpstreamHashShard(t1.a) }
         └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: SomeShard }
 - id: fix https://github.com/risingwavelabs/risingwave/issues/10721
@@ -18,7 +18,7 @@
     select * from t1 natural join t2;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: t1.b = idx.b AND t1.a = idx.a AND t1.c = idx.c, output: [t1.c, t1.b, t1.a] }
+    └─BatchLookupJoin { type: Inner, predicate: t1.b = idx.b AND t1.a = idx.a AND t1.c = idx.c, output: [t1.c, t1.b, t1.a], lookup table: idx }
       └─BatchExchange { order: [], dist: UpstreamHashShard(t1.b) }
         └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: SomeShard }
 - id: fix https://github.com/risingwavelabs/risingwave/issues/10721
@@ -29,7 +29,7 @@
     select * from t1 natural join t2;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: t1.c = idx.c AND t1.b = idx.b AND t1.a = idx.a, output: [t1.c, t1.b, t1.a] }
+    └─BatchLookupJoin { type: Inner, predicate: t1.c = idx.c AND t1.b = idx.b AND t1.a = idx.a, output: [t1.c, t1.b, t1.a], lookup table: idx }
       └─BatchExchange { order: [], dist: UpstreamHashShard(t1.c, t1.b) }
         └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: SomeShard }
 - id: fix https://github.com/risingwavelabs/risingwave/issues/10721
@@ -40,6 +40,6 @@
     select * from t1 natural join t2;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: t1.c = idx.c AND t1.b = idx.b AND t1.a = idx.a, output: [t1.c, t1.b, t1.a] }
+    └─BatchLookupJoin { type: Inner, predicate: t1.c = idx.c AND t1.b = idx.b AND t1.a = idx.a, output: [t1.c, t1.b, t1.a], lookup table: idx }
       └─BatchExchange { order: [], dist: UpstreamHashShard(t1.c, t1.b, t1.a) }
         └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], distribution: SomeShard }

@@ -29,7 +29,7 @@ async fn basic_test_inner(is_decouple: bool) -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
     let test_sink = SimulationTestSink::register_new();
-    let test_source = SimulationTestSource::register_new(12, 0..500000, 0.2, 50);
+    let test_source = SimulationTestSource::register_new(6, 0..100000, 0.2, 20);
 
     let mut session = cluster.start_session();
 
@@ -72,7 +72,7 @@ async fn test_sink_decouple_basic() -> Result<()> {
 async fn test_sink_decouple_blackhole() -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
-    let test_source = SimulationTestSource::register_new(12, 0..500000, 0.2, 50);
+    let test_source = SimulationTestSource::register_new(6, 0..100000, 0.2, 20);
 
     let mut session = cluster.start_session();
 

@@ -92,6 +92,7 @@ workspace-hack = { path = "../workspace-hack" }
 assert_matches = "1"
 maplit = "1.0.2"
 rand = "0.8"
+risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
 risingwave_test_runner = { workspace = true }
 
 [features]

@@ -262,6 +262,18 @@ impl Catalog {
         self.table_by_id.insert(proto.id.into(), table);
     }
 
+    pub fn update_database(&mut self, proto: &PbDatabase) {
+        self.get_database_mut(proto.id).unwrap().update_self(proto);
+    }
+
+    pub fn update_schema(&mut self, proto: &PbSchema) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.id)
+            .unwrap()
+            .update_self(proto);
+    }
+
     pub fn update_index(&mut self, proto: &PbIndex) {
         self.get_database_mut(proto.database_id)
             .unwrap()

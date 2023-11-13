@@ -568,7 +568,7 @@ impl HummockVersionReader {
                 &read_options,
                 local_stats,
             ) {
-                return Ok(if data_epoch < min_epoch {
+                return Ok(if data_epoch.pure_epoch() < min_epoch {
                     None
                 } else {
                     data.into_user_value()
@@ -594,7 +594,7 @@ impl HummockVersionReader {
             )
             .await?
             {
-                return Ok(if data_epoch < min_epoch {
+                return Ok(if data_epoch.pure_epoch() < min_epoch {
                     None
                 } else {
                     data.into_user_value()
@@ -631,7 +631,7 @@ impl HummockVersionReader {
                         )
                         .await?
                         {
-                            return Ok(if data_epoch < min_epoch {
+                            return Ok(if data_epoch.pure_epoch() < min_epoch {
                                 None
                             } else {
                                 data.into_user_value()
@@ -668,7 +668,7 @@ impl HummockVersionReader {
                     )
                     .await?
                     {
-                        return Ok(if data_epoch < min_epoch {
+                        return Ok(if data_epoch.pure_epoch() < min_epoch {
                             None
                         } else {
                             data.into_user_value()

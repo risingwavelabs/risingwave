@@ -151,7 +151,7 @@ async fn test_resolve_no_shuffle_upstream() -> Result<()> {
         .await?;
 
     let fragment = cluster
-        .locate_one_fragment([identity_contains("chain")])
+        .locate_one_fragment([identity_contains("StreamTableScan")])
         .await?;
 
     let result = cluster.reschedule(fragment.reschedule([0], [])).await;

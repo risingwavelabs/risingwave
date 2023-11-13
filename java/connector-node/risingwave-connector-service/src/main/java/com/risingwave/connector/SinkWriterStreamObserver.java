@@ -21,7 +21,7 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.*;
 import com.risingwave.connector.deserializer.StreamChunkDeserializer;
 import com.risingwave.metrics.ConnectorNodeMetrics;
-import com.risingwave.metrics.MonitoredRowIterator;
+import com.risingwave.metrics.MonitoredRowIterable;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.grpc.stub.StreamObserver;
 import java.util.Optional;
@@ -125,13 +125,29 @@ public class SinkWriterStreamObserver
                             .asRuntimeException();
                 }
 
-                try (CloseableIterator<SinkRow> rowIter = deserializer.deserialize(batch)) {
-                    sink.write(
-                            new MonitoredRowIterator(
-                                    rowIter, connectorName, String.valueOf(sinkId)));
+                boolean batchWritten;
+
+                try (CloseableIterable<SinkRow> rowIter = deserializer.deserialize(batch)) {
+                    batchWritten =
+                            sink.write(
+                                    new MonitoredRowIterable(
+                                            rowIter, connectorName, String.valueOf(sinkId)));
                 }
 
                 currentBatchId = batch.getBatchId();
+
+                if (batchWritten) {
+                    responseObserver.onNext(
+                            ConnectorServiceProto.SinkWriterStreamResponse.newBuilder()
+                                    .setBatch(
+                                            ConnectorServiceProto.SinkWriterStreamResponse
+                                                    .BatchWrittenResponse.newBuilder()
+                                                    .setEpoch(currentEpoch)
+                                                    .setBatchId(currentBatchId)
+                                                    .build())
+                                    .build());
+                }
+
                 LOG.debug("Batch {} written to epoch {}", currentBatchId, batch.getEpoch());
             } else if (sinkTask.hasBarrier()) {
                 if (!isInitialized()) {
@@ -156,15 +172,14 @@ public class SinkWriterStreamObserver
                 boolean isCheckpoint = sinkTask.getBarrier().getIsCheckpoint();
                 Optional<ConnectorServiceProto.SinkMetadata> metadata = sink.barrier(isCheckpoint);
                 currentEpoch = sinkTask.getBarrier().getEpoch();
+                currentBatchId = null;
                 LOG.debug("Epoch {} barrier {}", currentEpoch, isCheckpoint);
                 if (isCheckpoint) {
                     ConnectorServiceProto.SinkWriterStreamResponse.CommitResponse.Builder builder =
                             ConnectorServiceProto.SinkWriterStreamResponse.CommitResponse
                                     .newBuilder()
                                     .setEpoch(currentEpoch);
-                    if (metadata.isPresent()) {
-                        builder.setMetadata(metadata.get());
-                    }
+                    metadata.ifPresent(builder::setMetadata);
                     responseObserver.onNext(
                             ConnectorServiceProto.SinkWriterStreamResponse.newBuilder()
                                     .setCommit(builder)
@@ -173,7 +188,7 @@ public class SinkWriterStreamObserver
             } else {
                 throw INVALID_ARGUMENT.withDescription("invalid sink task").asRuntimeException();
             }
-        } catch (Exception e) {
+        } catch (Throwable e) {
             LOG.error("sink writer error: ", e);
             cleanup();
             responseObserver.onError(e);
