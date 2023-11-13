@@ -409,6 +409,7 @@ impl CompactionDeleteRangesBuilder {
         let size = SharedBufferBatch::measure_delete_range_size(&delete_ranges);
         let batch = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
+            0,
             vec![],
             size,
             delete_ranges,

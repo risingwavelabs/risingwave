@@ -16,7 +16,6 @@ use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::future::Future;
 
-use itertools::Itertools;
 use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::key::{PointRange, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
@@ -127,7 +126,7 @@ impl CompactionDeleteRangeIterator {
         let extended_smallest_user_key = PointRange::from_user_key(smallest_user_key, false);
         let extended_largest_user_key = PointRange::from_user_key(largest_user_key, false);
         let mut monotonic_events = vec![];
-        if iter.earliest_epoch() != HummockEpoch::MAX {
+        if iter.earliest_epoch() < MAX_EPOCH {
             monotonic_events.push(MonotonicDeleteEvent {
                 event_key: extended_smallest_user_key.to_vec(),
                 new_epoch: iter.earliest_epoch(),
@@ -378,7 +377,7 @@ mod tests {
             iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 13)
                 .await
                 .unwrap(),
-            MAX_EPOCH
+            MAX_EPOCH,
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key(test_user_key(b"bbb").as_ref(), 11)
@@ -409,20 +408,20 @@ mod tests {
             iter.earliest_delete_which_can_see_key(test_user_key(b"bbbddd").as_ref(), 8)
                 .await
                 .unwrap(),
-            HummockEpoch::MAX
+            MAX_EPOCH,
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key(test_user_key(b"bbbeee").as_ref(), 8)
                 .await
                 .unwrap(),
-            HummockEpoch::MAX
+            MAX_EPOCH,
         );
 
         assert_eq!(
             iter.earliest_delete_which_can_see_key(test_user_key(b"bbbeef").as_ref(), 10)
                 .await
                 .unwrap(),
-            HummockEpoch::MAX
+            MAX_EPOCH,
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key(test_user_key(b"eeeeee").as_ref(), 8)
@@ -440,7 +439,7 @@ mod tests {
             iter.earliest_delete_which_can_see_key(test_user_key(b"hhhhhh").as_ref(), 6)
                 .await
                 .unwrap(),
-            HummockEpoch::MAX
+            MAX_EPOCH,
         );
         assert_eq!(
             iter.earliest_delete_which_can_see_key(test_user_key(b"iiiiii").as_ref(), 6)

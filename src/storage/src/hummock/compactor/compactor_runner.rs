@@ -157,7 +157,7 @@ impl CompactorRunner {
             .context
             .storage_opts
             .compact_iter_recreate_timeout_ms;
-        let mut del_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
+        let mut del_iter = ForwardMergeRangeIterator::new(MAX_EPOCH);
 
         for level in &self.compact_task.input_ssts {
             if level.table_infos.is_empty() {
@@ -961,7 +961,7 @@ mod tests {
             .cloned()
             .collect_vec();
 
-        let mut iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
+        let mut iter = ForwardMergeRangeIterator::new(MAX_EPOCH);
         iter.add_concat_iter(sstable_infos, sstable_store);
 
         let ret = CompactionDeleteRangeIterator::new(iter)

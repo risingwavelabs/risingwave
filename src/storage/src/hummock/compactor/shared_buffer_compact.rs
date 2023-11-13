@@ -27,7 +27,7 @@ use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, LocalSstableInfo};
+use risingwave_hummock_sdk::{CompactionGroupId, EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::compact_task;
 use tracing::error;
 
@@ -394,7 +394,6 @@ pub async fn merge_imms_in_memory(
 
     let mut versions: Vec<(EpochWithGap, HummockValue<Bytes>)> = Vec::new();
 
-
     let mut pivot_last_delete_epoch = MAX_EPOCH;
 
     for ((key, value), epoch) in items {
@@ -415,7 +414,8 @@ pub async fn merge_imms_in_memory(
                 });
             }
         }
-        let earliest_range_delete_which_can_see_key = del_iter.earliest_delete_since(epoch.pure_epoch());
+        let earliest_range_delete_which_can_see_key =
+            del_iter.earliest_delete_since(epoch.pure_epoch());
         if value.is_delete() {
             pivot_last_delete_epoch = epoch.pure_epoch();
         } else if earliest_range_delete_which_can_see_key < pivot_last_delete_epoch {

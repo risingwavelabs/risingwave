@@ -233,7 +233,7 @@ pub struct ForwardMergeRangeIterator {
 
 impl Default for ForwardMergeRangeIterator {
     fn default() -> Self {
-        ForwardMergeRangeIterator::new(HummockEpoch::MAX)
+        ForwardMergeRangeIterator::new(MAX_EPOCH)
     }
 }
 
@@ -281,13 +281,13 @@ impl ForwardMergeRangeIterator {
         self.current_epochs
             .range(epoch..)
             .next()
-            .map_or(HummockEpoch::MAX, |ret| *ret)
+            .map_or(MAX_EPOCH, |ret| *ret)
     }
 
     pub fn earliest_epoch(&self) -> HummockEpoch {
         self.current_epochs
             .first()
-            .map_or(HummockEpoch::MAX, |epoch| *epoch)
+            .map_or(MAX_EPOCH, |epoch| *epoch)
     }
 }
 
