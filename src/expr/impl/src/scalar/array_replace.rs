@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::{ListRef, ListValue};
-use risingwave_common::types::{ScalarRefImpl, ToOwnedDatum};
+use risingwave_common::types::ScalarRefImpl;
 use risingwave_expr::function;
 
 /// Replaces each array element equal to the second argument with the third argument.
@@ -60,13 +60,13 @@ fn array_replace(
     elem_from: Option<ScalarRefImpl<'_>>,
     elem_to: Option<ScalarRefImpl<'_>>,
 ) -> Option<ListValue> {
-    Some(ListValue::new(
-        array?
-            .iter()
-            .map(|x| match x == elem_from {
-                true => elem_to.to_owned_datum(),
-                false => x.to_owned_datum(),
-            })
-            .collect(),
-    ))
+    let array = array?;
+    let mut builder = array.data_type().create_array_builder(array.len());
+    for val in array.iter() {
+        builder.append(match val == elem_from {
+            true => elem_to,
+            false => val,
+        });
+    }
+    Some(ListValue::new(builder.finish()))
 }

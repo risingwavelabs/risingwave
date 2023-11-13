@@ -15,7 +15,8 @@
 use std::marker::PhantomData;
 use std::ops::BitAnd;
 
-use risingwave_common::types::{ListRef, ListValue, ScalarImpl};
+use risingwave_common::array::I64Array;
+use risingwave_common::types::{ListRef, ListValue};
 use risingwave_expr::aggregate;
 
 /// Computes the bitwise AND of all non-null input values.
@@ -109,38 +110,34 @@ impl<T: Bits> BitAndUpdatable<T> {
     // state is the number of 0s for each bit.
 
     fn create_state(&self) -> ListValue {
-        ListValue::new(vec![Some(ScalarImpl::Int64(0)); T::BITS])
+        ListValue::new(I64Array::from_iter(std::iter::repeat(0).take(T::BITS)).into())
     }
 
     fn accumulate(&self, mut state: ListValue, input: T) -> ListValue {
+        let counts = state.as_i64_mut_slice().expect("invalid state");
         for i in 0..T::BITS {
             if !input.get_bit(i) {
-                let Some(ScalarImpl::Int64(count)) = &mut state[i] else {
-                    panic!("invalid state");
-                };
-                *count += 1;
+                counts[i] += 1;
             }
         }
         state
     }
 
     fn retract(&self, mut state: ListValue, input: T) -> ListValue {
+        let counts = state.as_i64_mut_slice().expect("invalid state");
         for i in 0..T::BITS {
             if !input.get_bit(i) {
-                let Some(ScalarImpl::Int64(count)) = &mut state[i] else {
-                    panic!("invalid state");
-                };
-                *count -= 1;
+                counts[i] -= 1;
             }
         }
         state
     }
 
     fn finalize(&self, state: ListRef<'_>) -> T {
+        let counts = state.as_i64_slice().expect("invalid state");
         let mut result = T::default();
         for i in 0..T::BITS {
-            let count = state.get(i).unwrap().unwrap().into_int64();
-            if count == 0 {
+            if counts[i] == 0 {
                 result.set_bit(i);
             }
         }

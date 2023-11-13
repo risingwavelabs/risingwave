@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_common::array::{ListRef, ListValue};
-use risingwave_common::types::ToOwnedDatum;
 use risingwave_expr::{function, ExprError, Result};
 
 /// Trims an array by removing the last n elements. If the array is multidimensional, only the first
@@ -85,10 +84,9 @@ fn trim_array(array: ListRef<'_>, n: i32) -> Result<ListValue> {
                 name: "n",
                 reason: "more than array length".into(),
             })?;
-    Ok(ListValue::new(
-        values
-            .take(len_to_retain)
-            .map(|x| x.to_owned_datum())
-            .collect(),
-    ))
+    let mut builder = array.data_type().create_array_builder(len_to_retain);
+    for val in values.take(len_to_retain) {
+        builder.append(val);
+    }
+    Ok(ListValue::new(builder.finish()))
 }

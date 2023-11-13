@@ -15,11 +15,16 @@
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::row::Row;
 use risingwave_common::types::ToOwnedDatum;
+use risingwave_expr::expr::Context;
 use risingwave_expr::function;
 
 #[function("array(...) -> anyarray", type_infer = "panic")]
-fn array(row: impl Row) -> ListValue {
-    ListValue::new(row.iter().map(|d| d.to_owned_datum()).collect())
+fn array(row: impl Row, ctx: &Context) -> ListValue {
+    let mut builder = ctx.return_type.as_list().create_array_builder(row.len());
+    for datum in row.iter() {
+        builder.append(datum);
+    }
+    ListValue::new(builder.finish())
 }
 
 #[function("row(...) -> struct", type_infer = "panic")]
