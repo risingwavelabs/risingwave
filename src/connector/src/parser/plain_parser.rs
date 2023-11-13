@@ -76,8 +76,7 @@ impl PlainParser {
                 "Empty payload with nonempty key".into(),
             ))
         })?;
-        let payload_accessor: super::unified::AccessImpl<'_, '_> =
-            self.payload_builder.generate_accessor(payload_data).await?;
+        let payload_accessor = self.payload_builder.generate_accessor(payload_data).await?;
 
         match key {
             Some(key_data) => {
