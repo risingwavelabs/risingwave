@@ -724,7 +724,7 @@ impl S3ObjectStore {
                 // If both conditions are met, it is considered that there is a risk of data deletion.
                 match rule.filter().as_ref() {
                     Some(&LifecycleRuleFilter::Prefix(prefix)) => {
-                        if let Some(ExpirationStatus::Enabled) = rule.status && data_directory.contains(prefix){
+                        if let Some(ExpirationStatus::Enabled) = rule.status && data_directory.starts_with(prefix){
                             is_expiration_configured = true;
                         }
                     }
