@@ -33,7 +33,7 @@ use crate::types::{hash_datum, DataType, DatumRef, DefaultOrd, Scalar, ScalarRef
 use crate::util::memcmp_encoding;
 use crate::util::value_encoding::estimate_serialize_datum_size;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, EstimateSize)]
 pub struct ListArrayBuilder {
     bitmap: BitmapBuilder,
     offsets: Vec<u32>,
@@ -339,6 +339,15 @@ impl ListValue {
         self.values.iter()
     }
 
+    /// Get the element at the given index. Returns `None` if the index is out of bounds.
+    pub fn get(&self, index: usize) -> Option<DatumRef<'_>> {
+        if index < self.len() {
+            Some(self.values.value_at(index))
+        } else {
+            None
+        }
+    }
+
     /// Returns the data type of the elements in the list.
     pub fn data_type(&self) -> DataType {
         self.values.data_type()
@@ -374,6 +383,14 @@ impl ListValue {
                 })
                 .format(", ")
         )
+    }
+
+    /// Returns a mutable slice if the list is of type `int64[]`.
+    pub fn as_i64_mut_slice(&mut self) -> Option<&mut [i64]> {
+        match self.values.as_mut() {
+            ArrayImpl::Int64(array) => Some(array.as_mut_slice()),
+            _ => None,
+        }
     }
 }
 
@@ -506,6 +523,16 @@ impl<'a> ListRef<'a> {
             builder.append(datum_ref);
         }
         ListValue::new(builder.finish())
+    }
+
+    /// Returns a slice if the list is of type `int64[]`.
+    pub fn as_i64_slice(&self) -> Option<&[i64]> {
+        match &self.array {
+            ArrayImpl::Int64(array) => {
+                Some(&array.as_slice()[self.start as usize..self.end as usize])
+            }
+            _ => None,
+        }
     }
 }
 

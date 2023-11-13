@@ -325,7 +325,7 @@ impl<A: Array> CompactableArray for A {
 macro_rules! array_impl_enum {
     ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         /// `ArrayImpl` embeds all possible array in `array` module.
-        #[derive(Debug, Clone)]
+        #[derive(Debug, Clone, EstimateSize)]
         pub enum ArrayImpl {
             $( $variant_name($array) ),*
         }
@@ -442,7 +442,7 @@ for_all_array_variants! { impl_convert }
 macro_rules! array_builder_impl_enum {
     ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
         /// `ArrayBuilderImpl` embeds all possible array in `array` module.
-        #[derive(Debug)]
+        #[derive(Debug, Clone, EstimateSize)]
         pub enum ArrayBuilderImpl {
             $( $variant_name($builder) ),*
         }
@@ -611,12 +611,6 @@ impl ArrayImpl {
 
     pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> + ExactSizeIterator {
         (0..self.len()).map(|i| self.value_at(i))
-    }
-}
-
-impl EstimateSize for ArrayImpl {
-    fn estimated_heap_size(&self) -> usize {
-        dispatch_array_variants!(self, inner, { inner.estimated_heap_size() })
     }
 }
 

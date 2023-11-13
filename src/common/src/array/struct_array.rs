@@ -53,7 +53,7 @@ macro_rules! iter_fields_ref {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StructArrayBuilder {
     bitmap: BitmapBuilder,
     pub(super) children_array: Vec<ArrayBuilderImpl>,
@@ -142,6 +142,17 @@ impl ArrayBuilder for StructArrayBuilder {
             .map(|b| Arc::new(b.finish()))
             .collect::<Vec<ArrayRef>>();
         StructArray::new(self.type_, children, self.bitmap.finish())
+    }
+}
+
+impl EstimateSize for StructArrayBuilder {
+    fn estimated_heap_size(&self) -> usize {
+        self.bitmap.estimated_heap_size()
+            + self
+                .children_array
+                .iter()
+                .map(|a| a.estimated_heap_size())
+                .sum::<usize>()
     }
 }
 

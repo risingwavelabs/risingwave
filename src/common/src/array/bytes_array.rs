@@ -146,7 +146,7 @@ impl<'a> FromIterator<&'a [u8]> for BytesArray {
 }
 
 /// `BytesArrayBuilder` use `&[u8]` to build an `BytesArray`.
-#[derive(Debug)]
+#[derive(Debug, Clone, EstimateSize)]
 pub struct BytesArrayBuilder {
     offset: Vec<u32>,
     bitmap: BitmapBuilder,
