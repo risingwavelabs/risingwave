@@ -8476,7 +8476,7 @@ dependencies = [
  "static_assertions",
  "thiserror",
  "thiserror-ext",
- "tokio-retry",
+ "tracing",
 ]
 
 [[package]]
