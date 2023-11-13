@@ -981,6 +981,7 @@ set -e
 
 cargo nextest archive \
   --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
+  --features fail/failpoints
   -p risingwave_simulation \
   --archive-file simulation-it-test.tar.zst \
   "$@"
