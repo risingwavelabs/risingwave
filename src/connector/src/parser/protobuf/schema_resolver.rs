@@ -34,6 +34,31 @@ pub(super) async fn load_file_descriptor_from_http(location: &Url) -> Result<Vec
     Ok(schema_bytes.to_vec())
 }
 
+macro_rules! embed_wkts {
+    [$( $path:literal ),+ $(,)?] => {
+        &[$(
+            (
+                concat!("google/protobuf/", $path),
+                include_bytes!(concat!(env!("PROTO_INCLUDE"), "/google/protobuf/", $path)).as_slice(),
+            )
+        ),+]
+    };
+}
+const WELL_KNOWN_TYPES: &[(&str, &[u8])] = embed_wkts![
+    "any.proto",
+    "api.proto",
+    "compiler/plugin.proto",
+    "descriptor.proto",
+    "duration.proto",
+    "empty.proto",
+    "field_mask.proto",
+    "source_context.proto",
+    "struct.proto",
+    "timestamp.proto",
+    "type.proto",
+    "wrappers.proto",
+];
+
 // Pull protobuf schema and all it's deps from the confluent schema registry,
 // and compile then into one file descriptor
 pub(super) async fn compile_file_descriptor_from_schema_registry(
@@ -51,6 +76,12 @@ pub(super) async fn compile_file_descriptor_from_schema_registry(
             subject.schema.content.as_bytes().to_vec(),
         );
     }
+    for (path, bytes) in WELL_KNOWN_TYPES {
+        source_tree
+            .as_mut()
+            .add_file(Path::new(path), bytes.to_vec());
+    }
+
     let mut error_collector = SimpleErrorCollector::new();
     // `db` needs to be dropped before we can iterate on `error_collector`.
     let fds = {
