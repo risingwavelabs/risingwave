@@ -9,7 +9,7 @@ CREATE FUNCTION sleep(INT) RETURNS INT AS 'sleep' USING LINK 'http://localhost:8
 
 # restart the server
 system ok
-pkill -9 Python && python3 e2e_test/udf/test.py &
+pkill -9 python && python3 e2e_test/udf/test.py &
 
 # query should not be affected
 query I
@@ -19,7 +19,7 @@ select sleep(0);
 
 # restart the server after 1s
 system ok
-sleep 1 && pkill -9 Python && python3 e2e_test/udf/test.py &
+sleep 1 && pkill -9 python && python3 e2e_test/udf/test.py &
 
 # query should not be affected
 query I
@@ -29,7 +29,7 @@ select sleep(2);
 
 # close the server
 system ok
-pkill Python
+pkill python
 
 statement ok
 DROP FUNCTION sleep;
