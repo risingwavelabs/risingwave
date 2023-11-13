@@ -67,7 +67,6 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::plan_visitor::TemporalJoinValidator;
 use crate::optimizer::property::Distribution;
-use crate::optimizer::property::Distribution::HashShard;
 use crate::utils::ColIndexMappingRewriteExt;
 use crate::WithOptions;
 
@@ -512,7 +511,7 @@ impl PlanRoot {
             .map(|c| c.column_desc.clone())
             .collect();
 
-        let mut stream_plan = if with_external_source {
+        let union_inputs = if with_external_source {
             let mut external_source_node = stream_plan;
             external_source_node = inject_project_if_needed(&columns, external_source_node)?;
             external_source_node = match kind {
@@ -544,12 +543,7 @@ impl PlanRoot {
                 column_descs,
             )?;
 
-            StreamUnion::new(Union {
-                all: true,
-                inputs: vec![external_source_node, dml_node],
-                source_col: None,
-            })
-            .into()
+            vec![external_source_node, dml_node]
         } else {
             let dml_node = inject_dml_node(
                 &columns,
@@ -560,13 +554,35 @@ impl PlanRoot {
                 column_descs,
             )?;
 
-            StreamUnion::new(Union {
-                all: true,
-                inputs: vec![dml_node],
-                source_col: None,
-            })
-            .into()
+            vec![dml_node]
         };
+
+        let dists = union_inputs
+            .iter()
+            .map(|input| input.distribution())
+            .dedup()
+            .collect_vec();
+
+        let dist = match &dists[..] {
+            &[Distribution::SomeShard, Distribution::HashShard(_)]
+            | &[Distribution::HashShard(_), Distribution::SomeShard] => Distribution::SomeShard,
+            &[dist @ Distribution::SomeShard] | &[dist @ Distribution::HashShard(_)] => {
+                dist.clone()
+            }
+            _ => {
+                unreachable!()
+            }
+        };
+
+        let mut stream_plan = StreamUnion::new_with_dist(
+            Union {
+                all: true,
+                inputs: union_inputs,
+                source_col: None,
+            },
+            dist.clone(),
+        )
+        .into();
 
         // Add WatermarkFilter node.
         if !watermark_descs.is_empty() {
@@ -583,7 +599,7 @@ impl PlanRoot {
                     stream_plan = StreamRowIdGen::new_with_dist(
                         stream_plan,
                         row_id_index,
-                        HashShard(vec![row_id_index]),
+                        Distribution::HashShard(vec![row_id_index]),
                     )
                     .into();
                 }
