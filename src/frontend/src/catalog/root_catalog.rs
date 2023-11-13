@@ -253,12 +253,24 @@ impl Catalog {
     }
 
     pub fn update_table(&mut self, proto: &PbTable) {
-        let table = self
-            .get_database_mut(proto.database_id)
-            .unwrap()
-            .get_schema_mut(proto.schema_id)
-            .unwrap()
-            .update_table(proto);
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        let table = if schema.get_table_by_id(&proto.id.into()).is_some() {
+            schema.update_table(proto)
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            let new_table = schema.create_table(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id
+                        && schema.get_table_by_id(&proto.id.into()).is_some()
+                })
+                .unwrap()
+                .drop_table(proto.id.into());
+            new_table
+        };
+
         self.table_by_id.insert(proto.id.into(), table);
     }
 
@@ -275,11 +287,22 @@ impl Catalog {
     }
 
     pub fn update_index(&mut self, proto: &PbIndex) {
-        self.get_database_mut(proto.database_id)
-            .unwrap()
-            .get_schema_mut(proto.schema_id)
-            .unwrap()
-            .update_index(proto);
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        if schema.get_index_by_id(&proto.id.into()).is_some() {
+            schema.update_index(proto);
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            schema.create_index(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id
+                        && schema.get_index_by_id(&proto.id.into()).is_some()
+                })
+                .unwrap()
+                .drop_index(proto.id.into());
+        }
     }
 
     pub fn drop_source(&mut self, db_id: DatabaseId, schema_id: SchemaId, source_id: SourceId) {
@@ -291,11 +314,21 @@ impl Catalog {
     }
 
     pub fn update_source(&mut self, proto: &PbSource) {
-        self.get_database_mut(proto.database_id)
-            .unwrap()
-            .get_schema_mut(proto.schema_id)
-            .unwrap()
-            .update_source(proto);
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        if schema.get_source_by_id(&proto.id).is_some() {
+            schema.update_source(proto);
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            schema.create_source(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id && schema.get_source_by_id(&proto.id).is_some()
+                })
+                .unwrap()
+                .drop_source(proto.id);
+        }
     }
 
     pub fn drop_sink(&mut self, db_id: DatabaseId, schema_id: SchemaId, sink_id: SinkId) {
@@ -307,11 +340,21 @@ impl Catalog {
     }
 
     pub fn update_sink(&mut self, proto: &PbSink) {
-        self.get_database_mut(proto.database_id)
-            .unwrap()
-            .get_schema_mut(proto.schema_id)
-            .unwrap()
-            .update_sink(proto);
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        if schema.get_sink_by_id(&proto.id).is_some() {
+            schema.update_sink(proto);
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            schema.create_sink(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id && schema.get_sink_by_id(&proto.id).is_some()
+                })
+                .unwrap()
+                .drop_sink(proto.id);
+        }
     }
 
     pub fn drop_index(&mut self, db_id: DatabaseId, schema_id: SchemaId, index_id: IndexId) {
@@ -331,11 +374,21 @@ impl Catalog {
     }
 
     pub fn update_view(&mut self, proto: &PbView) {
-        self.get_database_mut(proto.database_id)
-            .unwrap()
-            .get_schema_mut(proto.schema_id)
-            .unwrap()
-            .update_view(proto);
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        if schema.get_view_by_id(&proto.id).is_some() {
+            schema.update_view(proto);
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            schema.create_view(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id && schema.get_view_by_id(&proto.id).is_some()
+                })
+                .unwrap()
+                .drop_view(proto.id);
+        }
     }
 
     pub fn drop_function(
