@@ -504,8 +504,8 @@ impl FunctionAttr {
                         #eval_row_variadic
                         Ok(#row_output)
                     }
-                    fn name(&self) -> &str {
-                        stringify!(#fn_name)
+                    fn name(&self) -> std::borrow::Cow<'static, str> {
+                        stringify!(#fn_name).into()
                     }
                 }
 

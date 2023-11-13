@@ -49,6 +49,8 @@ mod build;
 pub mod test_utils;
 mod value;
 
+use std::borrow::Cow;
+
 use futures_util::TryFutureExt;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
@@ -60,6 +62,7 @@ pub use self::expr_literal::LiteralExpression;
 pub use self::value::{ValueImpl, ValueRef};
 pub use self::wrapper::*;
 pub use super::{ExprError, Result};
+use crate::error::{ExprError2, Result2};
 
 /// Interface of an expression.
 ///
@@ -75,7 +78,7 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     /// Evaluate the expression in vectorized execution. Returns an array.
     ///
     /// The default implementation calls `eval_v2` and always converts the result to an array.
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+    async fn eval(&self, input: &DataChunk) -> Result2<ArrayRef> {
         let value = self.eval_v2(input).await?;
         Ok(match value {
             ValueImpl::Array(array) => array,
@@ -91,19 +94,19 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     /// array, or a scalar if all values in the array are the same.
     ///
     /// The default implementation calls `eval` and puts the result into the `Array` variant.
-    async fn eval_v2(&self, input: &DataChunk) -> Result<ValueImpl> {
+    async fn eval_v2(&self, input: &DataChunk) -> Result2<ValueImpl> {
         self.eval(input).map_ok(ValueImpl::Array).await
     }
 
     /// Evaluate the expression in row-based execution. Returns a nullable scalar.
-    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum>;
+    async fn eval_row(&self, input: &OwnedRow) -> Result2<Datum>;
 
     /// Evaluate if the expression is constant.
-    fn eval_const(&self) -> Result<Datum> {
-        Err(ExprError::NotConstant)
+    fn eval_const(&self) -> Result2<Datum> {
+        Err(ExprError2::new(ExprError::NotConstant, self.name()))
     }
 
-    fn name(&self) -> &str;
+    fn name(&self) -> Cow<'static, str>;
 }
 
 /// An owned dynamically typed [`Expression`].

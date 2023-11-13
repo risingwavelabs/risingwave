@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::{Arc, LazyLock, Mutex, Weak};
@@ -71,8 +72,8 @@ impl Expression for UdfExpression {
         Ok(output_array.to_datum())
     }
 
-    fn name(&self) -> &str {
-        &self.identifier
+    fn name(&self) -> Cow<'static, str> {
+        self.identifier.clone().into()
     }
 }
 

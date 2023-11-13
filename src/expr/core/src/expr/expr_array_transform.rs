@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -64,7 +65,7 @@ impl Expression for ArrayTransformExpression {
         }
     }
 
-    fn name(&self) -> &str {
-        "array_transform"
+    fn name(&self) -> Cow<'static, str> {
+        "array_transform".into()
     }
 }

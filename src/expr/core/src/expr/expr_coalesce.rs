@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::ops::BitAnd;
 use std::sync::Arc;
 
@@ -77,8 +78,8 @@ impl Expression for CoalesceExpression {
         Ok(None)
     }
 
-    fn name(&self) -> &str {
-        "coalesce"
+    fn name(&self) -> Cow<'static, str> {
+        "coalesce".into()
     }
 }
 

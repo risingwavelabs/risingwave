@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -94,8 +95,8 @@ impl Expression for InExpression {
         Ok(ret.map(|b| b.to_scalar_value()))
     }
 
-    fn name(&self) -> &str {
-        "in"
+    fn name(&self) -> Cow<'static, str> {
+        "in".into()
     }
 }
 

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
@@ -20,6 +22,8 @@ use thiserror::Error;
 
 /// A specialized Result type for expression operations.
 pub type Result<T> = std::result::Result<T, ExprError>;
+
+pub type Result2<T> = std::result::Result<T, ExprError2>;
 
 pub struct ContextUnavailable(&'static str);
 
@@ -32,6 +36,23 @@ impl ContextUnavailable {
 impl From<ContextUnavailable> for ExprError {
     fn from(e: ContextUnavailable) -> Self {
         ExprError::Context(e.0)
+    }
+}
+
+#[derive(Error, Debug)]
+#[error("Eval {fn_name} failed: {inner}")]
+pub struct ExprError2 {
+    #[source]
+    inner: ExprError,
+    fn_name: Cow<'static, str>,
+}
+
+impl ExprError2 {
+    pub fn new(inner: ExprError, fn_name: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            inner,
+            fn_name: fn_name.into(),
+        }
     }
 }
 

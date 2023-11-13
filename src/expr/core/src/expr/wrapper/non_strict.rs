@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+
 use async_trait::async_trait;
 use auto_impl::auto_impl;
 use risingwave_common::array::{ArrayRef, DataChunk};
@@ -141,7 +143,7 @@ where
         self.inner.eval_const() // do not handle error
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> Cow<'static, str> {
         self.inner.name()
     }
 }
