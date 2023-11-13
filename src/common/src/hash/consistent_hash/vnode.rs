@@ -124,7 +124,7 @@ impl VirtualNode {
                     extract_vnode_id_from_row_id(serial.as_row_id())
                 } else {
                     let (row, _) = data_chunk.row_at(idx);
-                    Self::compute_row(row, keys)
+                    row.hash(Crc32FastBuilder).into()
                 }
             } ).collect();
         }
