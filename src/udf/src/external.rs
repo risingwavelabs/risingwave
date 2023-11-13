@@ -119,8 +119,8 @@ impl ArrowFlightUdfClient {
         let mut backoff = Duration::from_millis(100);
         for i in 0..5 {
             match self.call(id, input.clone()).await {
-                Err(e) if e.is_connection_error() && i != 4 => {
-                    tracing::error!(?e, "UDF connection error. retry...");
+                Err(err) if err.is_connection_error() && i != 4 => {
+                    tracing::error!(%err, "UDF connection error. retry...");
                 }
                 ret => return ret,
             }
