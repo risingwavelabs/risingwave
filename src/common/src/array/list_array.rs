@@ -219,19 +219,18 @@ impl Array for ListArray {
 }
 
 impl ListArray {
-    /// Returns the total number of elements in the flattened array.
-    pub fn flatten_len(&self) -> usize {
-        self.value.len()
-    }
-
     /// Flatten the list array into a single array.
     ///
     /// # Example
     /// ```text
     /// [[1,2,3],NULL,[4,5]] => [1,2,3,4,5]
+    /// [[[1],[2]],[[3],[4]]] => [1,2,3,4]
     /// ```
     pub fn flatten(&self) -> ArrayImpl {
-        (*self.value).clone()
+        match &*self.value {
+            ArrayImpl::List(inner) => inner.flatten(),
+            a => a.clone(),
+        }
     }
 
     pub fn from_protobuf(array: &PbArray) -> ArrayResult<ArrayImpl> {
@@ -484,13 +483,16 @@ impl<'a> ListRef<'a> {
     }
 
     /// Returns the elements in the flattened list.
-    pub fn flatten(self) -> Vec<DatumRef<'a>> {
-        todo!()
-    }
-
-    /// Returns the total number of elements in the flattened list.
-    pub fn flatten_len(self) -> usize {
-        todo!()
+    pub fn flatten(self) -> ListRef<'a> {
+        match self.array {
+            ArrayImpl::List(inner) => ListRef {
+                array: &inner.value,
+                start: inner.offsets[self.start as usize],
+                end: inner.offsets[self.end as usize],
+            }
+            .flatten(),
+            _ => self,
+        }
     }
 
     /// Iterates over the elements of the list.
