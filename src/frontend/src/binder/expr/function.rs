@@ -999,12 +999,12 @@ impl Binder {
                             .get_schema_by_name(&binder.db_name, schema_name)
                             .is_ok()
                         {
-                            schema_names.push(Some(schema_name.into()));
+                            schema_names.push(schema_name.as_str());
                         }
                     }
 
                     Ok(ExprImpl::literal_list(
-                        ListValue::new(schema_names),
+                        ListValue::from_iter(schema_names),
                         DataType::Varchar,
                     ))
                 })),

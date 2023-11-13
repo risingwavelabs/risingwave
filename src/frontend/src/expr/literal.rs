@@ -173,11 +173,7 @@ mod tests {
 
     #[test]
     fn test_list_to_value_encoding() {
-        let value = ListValue::new(vec![
-            Some(ScalarImpl::Utf8("1".into())),
-            Some(ScalarImpl::Utf8("2".into())),
-            Some(ScalarImpl::Utf8("".into())),
-        ]);
+        let value = ListValue::from_iter(["1", "2", ""]);
         let data = Some(ScalarImpl::List(value.clone()));
         let node = literal_to_value_encoding(&data);
         if let RexNode::Constant(prost) = node {
