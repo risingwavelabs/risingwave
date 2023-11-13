@@ -241,7 +241,7 @@ async fn compact_shared_buffer(
             Box::new(sstable_object_id_manager.clone()),
         );
         let mut forward_iters = Vec::with_capacity(payload.len());
-        let mut del_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
+        let mut del_iter = ForwardMergeRangeIterator::new(MAX_EPOCH);
         for imm in &payload {
             forward_iters.push(imm.clone().into_forward_iter());
             del_iter.add_batch_iter(imm.delete_range_iter());
@@ -322,7 +322,7 @@ pub async fn merge_imms_in_memory(
     let mut largest_table_key = Bound::Included(Bytes::new());
 
     let mut imm_iters = Vec::with_capacity(imms.len());
-    let mut del_iter = ForwardMergeRangeIterator::new(HummockEpoch::MAX);
+    let mut del_iter = ForwardMergeRangeIterator::new(MAX_EPOCH);
     for imm in imms {
         assert!(
             imm.kv_count() > 0 || imm.has_range_tombstone(),
