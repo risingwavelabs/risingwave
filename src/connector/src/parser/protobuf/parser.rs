@@ -494,12 +494,16 @@ pub fn from_protobuf_value(
             ScalarImpl::List(ListValue::new(rw_values))
         }
         Value::Bytes(value) => ScalarImpl::Bytea(value.to_vec().into_boxed_slice()),
-        _ => {
-            let err_msg = format!(
-                "protobuf parse error.unsupported type {:?}, value {:?}",
-                field_desc, value
-            );
-            return Err(RwError::from(InternalError(err_msg)));
+        Value::Map(map) => {
+            let mut rw_values = Vec::with_capacity(map.len());
+            for (k, v) in map {
+                let k: Value = k.to_owned().into();
+                rw_values.push(Some(ScalarImpl::Struct(StructValue::new(vec![
+                    from_protobuf_value(field_desc, &k, descriptor_pool)?,
+                    from_protobuf_value(field_desc, v, descriptor_pool)?,
+                ]))));
+            }
+            ScalarImpl::List(ListValue::new(rw_values))
         }
     };
     Ok(Some(v))
@@ -524,6 +528,15 @@ fn protobuf_type_mapping(
         Kind::Uint64 | Kind::Fixed64 => DataType::Decimal,
         Kind::String => DataType::Varchar,
         Kind::Message(m) => {
+            // Note: `map<KeyType, ValueType>` will be handled like this:
+            //
+            // message MapFieldEntry {
+            //     option map_entry = true;
+            //     optional KeyType key = 1;
+            //     optional ValueType value = 2;
+            // }
+            // repeated MapFieldEntry map_field = 1;
+
             let fields = m
                 .fields()
                 .map(|f| protobuf_type_mapping(&f, parse_trace))
@@ -545,12 +558,6 @@ fn protobuf_type_mapping(
         Kind::Enum(_) => DataType::Varchar,
         Kind::Bytes => DataType::Bytea,
     };
-    if field_descriptor.is_map() {
-        return Err(RwError::from(ProtocolError(format!(
-            "map type is unsupported (field: '{}')",
-            field_descriptor.full_name()
-        ))));
-    }
     if field_descriptor.cardinality() == Cardinality::Repeated {
         t = DataType::List(Box::new(t))
     }
@@ -579,6 +586,7 @@ mod test {
     use std::collections::HashMap;
     use std::path::PathBuf;
 
+    use maplit::{convert_args, hashmap};
     use prost::Message;
     use risingwave_common::types::{DataType, StructType};
     use risingwave_pb::catalog::StreamSourceInfo;
@@ -765,33 +773,43 @@ mod test {
             .into_iter()
             .map(|c| DataType::from(&c.column_type.unwrap()))
             .collect_vec();
+
+        let nested_type = DataType::Struct(StructType::new(vec![
+            ("id", DataType::Int32),
+            ("name", DataType::Varchar),
+        ]));
+
         assert_eq!(
             columns,
             vec![
-                DataType::Float64, // double_field
-                DataType::Float32, // float_field
-                DataType::Int32,   // int32_field
-                DataType::Int64,   // int64_field
-                DataType::Int64,   // uint32_field
-                DataType::Decimal, // uint64_field
-                DataType::Int32,   // sint32_field
-                DataType::Int64,   // sint64_field
-                DataType::Int64,   // fixed32_field
-                DataType::Decimal, // fixed64_field
-                DataType::Int32,   // sfixed32_field
-                DataType::Int64,   // sfixed64_field
-                DataType::Boolean, // bool_field
-                DataType::Varchar, // string_field
-                DataType::Bytea,   // bytes_field
-                DataType::Varchar, // enum_field
-                DataType::Struct(StructType::new(vec![
-                    ("id", DataType::Int32),
-                    ("name", DataType::Varchar)
-                ])), // nested_message_field
+                DataType::Float64,                      // double_field
+                DataType::Float32,                      // float_field
+                DataType::Int32,                        // int32_field
+                DataType::Int64,                        // int64_field
+                DataType::Int64,                        // uint32_field
+                DataType::Decimal,                      // uint64_field
+                DataType::Int32,                        // sint32_field
+                DataType::Int64,                        // sint64_field
+                DataType::Int64,                        // fixed32_field
+                DataType::Decimal,                      // fixed64_field
+                DataType::Int32,                        // sfixed32_field
+                DataType::Int64,                        // sfixed64_field
+                DataType::Boolean,                      // bool_field
+                DataType::Varchar,                      // string_field
+                DataType::Bytea,                        // bytes_field
+                DataType::Varchar,                      // enum_field
+                nested_type.clone(),                    // nested_message_field
                 DataType::List(DataType::Int32.into()), // repeated_int_field
-                DataType::Varchar, // oneof_string
-                DataType::Int32,   // oneof_int32
-                DataType::Varchar, // oneof_enum
+                DataType::Varchar,                      // oneof_string
+                DataType::Int32,                        // oneof_int32
+                DataType::Varchar,                      // oneof_enum
+                DataType::List(
+                    DataType::Struct(StructType::new(vec![
+                        ("key", DataType::Int32),
+                        ("value", nested_type)
+                    ]))
+                    .into()
+                ), // map_field
                 DataType::Struct(StructType::new(vec![
                     ("seconds", DataType::Int64),
                     ("nanos", DataType::Int32)
@@ -800,7 +818,7 @@ mod test {
                     ("seconds", DataType::Int64),
                     ("nanos", DataType::Int32)
                 ])), // duration_field
-                DataType::Jsonb,   // any_field
+                DataType::Jsonb,                        // any_field
                 DataType::Struct(StructType::new(vec![("value", DataType::Int32)])), /* int32_value_field */
                 DataType::Struct(StructType::new(vec![("value", DataType::Varchar)])), /* string_value_field */
             ]
@@ -866,6 +884,19 @@ mod test {
         );
         pb_eq(
             a,
+            "map_field",
+            S::List(ListValue::new(vec![Some(ScalarImpl::Struct(
+                StructValue::new(vec![
+                    Some(ScalarImpl::Int32(1)),
+                    Some(ScalarImpl::Struct(StructValue::new(vec![
+                        Some(ScalarImpl::Int32(100)),
+                        Some(ScalarImpl::Utf8("Nested".into())),
+                    ]))),
+                ]),
+            ))])),
+        );
+        pb_eq(
+            a,
             "timestamp_field",
             S::Struct(StructValue::new(vec![
                 Some(ScalarImpl::Int64(1630927032)),
@@ -925,6 +956,12 @@ mod test {
                 name: "Nested".to_string(),
             }),
             repeated_int_field: vec![1, 2, 3, 4, 5],
+            map_field: convert_args!(hashmap!(
+                1 => NestedMessage {
+                    id: 100,
+                    name: "Nested".to_string(),
+                },
+            )),
             timestamp_field: Some(::prost_types::Timestamp {
                 seconds: 1630927032,
                 nanos: 500000000,
