@@ -49,7 +49,11 @@ impl ActiveModelBehavior for ActiveModel {}
 
 impl From<PbUserInfo> for ActiveModel {
     fn from(user: PbUserInfo) -> Self {
-        let user_id = if user.id == 0 { NotSet } else { Set(user.id) };
+        let user_id = if user.id == 0 {
+            NotSet
+        } else {
+            Set(user.id as _)
+        };
         Self {
             user_id,
             name: Set(user.name),
@@ -65,7 +69,7 @@ impl From<PbUserInfo> for ActiveModel {
 impl From<Model> for PbUserInfo {
     fn from(val: Model) -> Self {
         PbUserInfo {
-            id: val.user_id,
+            id: val.user_id as _,
             name: val.name,
             is_super: val.is_super,
             can_create_db: val.can_create_db,

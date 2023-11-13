@@ -17,6 +17,7 @@ pub mod source;
 pub mod split;
 
 use serde::Deserialize;
+use with_options::WithOptions;
 
 use crate::common::NatsCommon;
 use crate::source::nats::enumerator::NatsSplitEnumerator;
@@ -25,7 +26,7 @@ use crate::source::SourceProperties;
 
 pub const NATS_CONNECTOR: &str = "nats";
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct NatsProperties {
     #[serde(flatten)]
     pub common: NatsCommon,
@@ -39,8 +40,6 @@ pub struct NatsProperties {
     #[serde(rename = "stream")]
     pub stream: String,
 }
-
-impl NatsProperties {}
 
 impl SourceProperties for NatsProperties {
     type Split = NatsSplit;

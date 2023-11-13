@@ -19,7 +19,7 @@ use std::ops::{Deref, DerefMut};
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::hummock::iterator::{DirectionEnum, Forward, HummockIterator, HummockIteratorDirection};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
@@ -137,14 +137,14 @@ impl<I: HummockIterator> OrderedMergeIteratorInner<I> {
 
 impl OrderedMergeIteratorInner<SharedBufferBatchIterator<Forward>> {
     /// Used in `merge_imms_in_memory` to merge immutable memtables.
-    pub fn current_item(&self) -> (TableKey<Bytes>, (HummockEpoch, HummockValue<Bytes>)) {
+    pub fn current_item(&self) -> (TableKey<Bytes>, (EpochWithGap, HummockValue<Bytes>)) {
         let item = self
             .heap
             .peek()
             .expect("no inner iter for imm merge")
             .iter
             .current_item();
-        (item.0.clone(), item.1.clone())
+        (item.0.clone(), (item.1 .0, item.1 .1.clone()))
     }
 }
 
@@ -300,7 +300,7 @@ impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
                         table_id: top_key.user_key.table_id,
                         table_key: TableKey(self.last_table_key.as_slice()),
                     },
-                    epoch: top_key.epoch,
+                    epoch_with_gap: top_key.epoch_with_gap,
                 }
             };
             loop {

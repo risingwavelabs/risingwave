@@ -352,7 +352,7 @@ impl HummockManager {
             if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref()
                 && !env.opts.do_not_config_object_storage_lifecycle
             {
-                let is_bucket_expiration_configured = s3.inner().configure_bucket_lifecycle().await;
+                let is_bucket_expiration_configured = s3.inner().configure_bucket_lifecycle(state_store_dir).await;
                 if is_bucket_expiration_configured {
                     return Err(ObjectError::internal("Cluster cannot start with object expiration configured for bucket because RisingWave data will be lost when object expiration kicks in.
                     Please disable object expiration and restart the cluster.")
@@ -2748,9 +2748,10 @@ impl HummockManager {
                                 // TODO: task cancellation can be batched
                                 for task in cancel_tasks {
                                     tracing::info!(
-                                        "Task with task_id {} with context_id {} has expired due to lack of visible progress",
+                                        "Task with group_id {} task_id {} with context_id {} has expired due to lack of visible progress",
+                                        task.compaction_group_id,
+                                        task.task_id,
                                         context_id,
-                                        task.task_id
                                     );
 
                                     if let Err(e) =

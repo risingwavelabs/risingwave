@@ -316,6 +316,10 @@ impl TraceSpan {
         Self::new_global_op(Operation::Flush(delete_range), storage_type)
     }
 
+    pub fn new_try_flush_span(storage_type: StorageType) -> MayTraceSpan {
+        Self::new_global_op(Operation::TryFlush, storage_type)
+    }
+
     pub fn new_meta_message_span(resp: SubscribeResponse) -> MayTraceSpan {
         Self::new_global_op(
             Operation::MetaMessage(Box::new(TracedSubResp::from(resp))),

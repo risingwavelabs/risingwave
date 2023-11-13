@@ -1,7 +1,7 @@
 ---
 version: "3"
 x-image: &image
-  image: ${RW_IMAGE:-risingwavelabs/risingwave:v1.3.0}
+  image: ${RW_IMAGE:-risingwavelabs/risingwave:v1.4.0}
 services:
   risingwave-standalone:
     <<: *image
@@ -15,8 +15,7 @@ services:
                     --etcd-endpoints etcd-0:2388 \
                     --state-store hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001 \
                     --data-directory hummock_001 \
-                    --config-path /risingwave.toml \
-                    --dashboard-ui-path ${RW_PREFIX}/ui\" \
+                    --config-path /risingwave.toml\" \
                  --compute-opts=\" \
                     --config-path /risingwave.toml \
                     --listen-addr 0.0.0.0:5688 \
@@ -72,6 +71,13 @@ services:
         - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/5690; exit $$?;'
       interval: 1s
       timeout: 5s
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 28G
+        reservations:
+          memory: 28G
 
   etcd-0:
     image: "quay.io/coreos/etcd:v3.5.7"
@@ -121,6 +127,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
 
   grafana-0:
     image: "grafana/grafana-oss:latest"
@@ -145,6 +152,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
 
   minio-0:
     image: "quay.io/minio/minio:latest"
@@ -190,6 +198,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
 
   prometheus-0:
     image: "prom/prometheus:latest"
@@ -217,6 +226,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
 
   message_queue:
     image: "docker.vectorized.io/vectorized/redpanda:latest"
@@ -256,6 +266,7 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
+    restart: always
 volumes:
   etcd-0:
     external: false

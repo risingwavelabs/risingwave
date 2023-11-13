@@ -16,13 +16,11 @@
 
 package com.risingwave.java.binding;
 
-import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 import org.openjdk.jmh.annotations.*;
 
-@Warmup(iterations = 2, time = 1, timeUnit = TimeUnit.MILLISECONDS, batchSize = 10)
-@Measurement(iterations = 5, time = 1, timeUnit = TimeUnit.MILLISECONDS, batchSize = 10)
+@Warmup(iterations = 5, time = 1, timeUnit = TimeUnit.MILLISECONDS, batchSize = 10)
+@Measurement(iterations = 20, time = 1, timeUnit = TimeUnit.MILLISECONDS, batchSize = 10)
 @Fork(value = 1)
 @BenchmarkMode(org.openjdk.jmh.annotations.Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MILLISECONDS)
@@ -31,22 +29,17 @@ public class StreamchunkBenchmark {
     @Param({"100", "1000", "10000"})
     int loopTime;
 
-    Iterator<StreamChunkIterator> iterOfIter;
+    StreamChunk chunk;
 
     @Setup(Level.Iteration)
     public void setup() {
-        var iterList = new ArrayList<StreamChunkIterator>();
-        for (int iterI = 0; iterI < 10; iterI++) {
-            String str = "i i I f F B i";
-            for (int i = 0; i < loopTime; i++) {
-                String b = i % 2 == 0 ? "f" : "t";
-                String n = i % 2 == 0 ? "." : "1";
-                str += String.format("\n + %d %d %d %d.0 %d.0 %s %s", i, i, i, i, i, b, n);
-            }
-            var iter = new StreamChunkIterator(str);
-            iterList.add(iter);
+        String str = "i i I f F B i";
+        for (int i = 0; i < loopTime; i++) {
+            String b = i % 2 == 0 ? "f" : "t";
+            String n = i % 2 == 0 ? "." : "1";
+            str += String.format("\n + %d %d %d %d.0 %d.0 %s %s", i, i, i, i, i, b, n);
         }
-        iterOfIter = iterList.iterator();
+        chunk = StreamChunk.fromPretty(str);
     }
 
     public void getValue(StreamChunkRow row) {
@@ -61,10 +54,7 @@ public class StreamchunkBenchmark {
 
     @Benchmark
     public void streamchunkTest() {
-        if (!iterOfIter.hasNext()) {
-            throw new RuntimeException("too few prepared iter");
-        }
-        var iter = iterOfIter.next();
+        var iter = new StreamChunkIterator(chunk);
         int count = 0;
         while (true) {
             StreamChunkRow row = iter.next();

@@ -23,6 +23,20 @@ use serde::{Deserialize, Serialize};
 use crate::ast::{display_comma_separated, display_separated, DataType, Expr, Ident, ObjectName};
 use crate::tokenizer::Token;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterDatabaseOperation {
+    ChangeOwner { new_owner_name: Ident },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterSchemaOperation {
+    ChangeOwner { new_owner_name: Ident },
+}
+
 /// An `ALTER TABLE` (`Statement::AlterTable`) operation
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -89,6 +103,7 @@ pub enum AlterIndexOperation {
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterViewOperation {
     RenameView { view_name: ObjectName },
+    ChangeOwner { new_owner_name: Ident },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -96,6 +111,7 @@ pub enum AlterViewOperation {
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
 pub enum AlterSinkOperation {
     RenameSink { sink_name: ObjectName },
+    ChangeOwner { new_owner_name: Ident },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -104,6 +120,27 @@ pub enum AlterSinkOperation {
 pub enum AlterSourceOperation {
     RenameSource { source_name: ObjectName },
     AddColumn { column_def: ColumnDef },
+    ChangeOwner { new_owner_name: Ident },
+}
+
+impl fmt::Display for AlterDatabaseOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterDatabaseOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {}", new_owner_name)
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterSchemaOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterSchemaOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {}", new_owner_name)
+            }
+        }
+    }
 }
 
 impl fmt::Display for AlterTableOperation {
@@ -178,6 +215,9 @@ impl fmt::Display for AlterViewOperation {
             AlterViewOperation::RenameView { view_name } => {
                 write!(f, "RENAME TO {view_name}")
             }
+            AlterViewOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {}", new_owner_name)
+            }
         }
     }
 }
@@ -187,6 +227,9 @@ impl fmt::Display for AlterSinkOperation {
         match self {
             AlterSinkOperation::RenameSink { sink_name } => {
                 write!(f, "RENAME TO {sink_name}")
+            }
+            AlterSinkOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {}", new_owner_name)
             }
         }
     }
@@ -200,6 +243,9 @@ impl fmt::Display for AlterSourceOperation {
             }
             AlterSourceOperation::AddColumn { column_def } => {
                 write!(f, "ADD COLUMN {column_def}")
+            }
+            AlterSourceOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {}", new_owner_name)
             }
         }
     }

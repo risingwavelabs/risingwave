@@ -47,6 +47,7 @@ use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
+use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
@@ -453,6 +454,15 @@ impl MetaClient {
             source: Some(source),
         };
         let resp = self.inner.alter_source(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<CatalogVersion> {
+        let request = AlterOwnerRequest {
+            object: Some(object),
+            owner_id,
+        };
+        let resp = self.inner.alter_owner(request).await?;
         Ok(resp.version)
     }
 
@@ -1727,6 +1737,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_actor_states, ListActorStatesRequest, ListActorStatesResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_relation_name, AlterRelationNameRequest, AlterRelationNameResponse }
+            ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
