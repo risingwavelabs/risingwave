@@ -32,7 +32,8 @@ macro_rules! for_all_classified_sources {
                 { GooglePubsub, $crate::source::google_pubsub::PubsubProperties, $crate::source::google_pubsub::PubsubSplit },
                 { Nats, $crate::source::nats::NatsProperties, $crate::source::nats::split::NatsSplit },
                 { S3, $crate::source::filesystem::S3Properties, $crate::source::filesystem::FsSplit },
-                { Gcs, $crate::source::filesystem::GcsProperties, $crate::source::filesystem::OpendalFsSplit },
+                { Gcs, $crate::source::filesystem::GcsProperties, $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::file_common::Gcs> },
+                // { OpenDalS3, $crate::source::filesystem::GcsProperties, $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::file_common::OpenDalS3> },
                 { Test, $crate::source::test_source::TestSourceProperties, $crate::source::test_source::TestSourceSplit}
             }
             $(

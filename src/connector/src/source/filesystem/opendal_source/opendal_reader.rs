@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::marker::PhantomData;
 use std::pin::pin;
 
 use anyhow::{Ok, Result};
@@ -27,6 +28,7 @@ use tokio_util::io::{ReaderStream, StreamReader};
 use super::opendal_enumerator::OpendalConnector;
 use super::GcsProperties;
 use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
+use crate::source::filesystem::file_common::OpenDALConnectorTypeMarker;
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
@@ -35,20 +37,27 @@ use crate::source::{
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
-pub struct OpendalReader {
+pub struct OpendalReader<C: OpenDALConnectorTypeMarker>
+where
+    C: OpenDALConnectorTypeMarker + std::marker::Send,
+{
     connector: OpendalConnector,
-    splits: Vec<OpendalFsSplit>,
+    splits: Vec<OpendalFsSplit<C>>,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
+    marker: PhantomData<C>,
 }
 #[async_trait]
-impl SplitReader for OpendalReader {
+impl<C: OpenDALConnectorTypeMarker> SplitReader for OpendalReader<C>
+where
+    C: OpenDALConnectorTypeMarker + std::marker::Send,
+{
     type Properties = GcsProperties;
-    type Split = OpendalFsSplit;
+    type Split = OpendalFsSplit<C>;
 
     async fn new(
         properties: GcsProperties,
-        splits: Vec<OpendalFsSplit>,
+        splits: Vec<OpendalFsSplit<C>>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
@@ -67,6 +76,7 @@ impl SplitReader for OpendalReader {
             splits,
             parser_config,
             source_ctx,
+            marker: PhantomData,
         };
         Ok(opendal_reader)
     }
@@ -76,7 +86,10 @@ impl SplitReader for OpendalReader {
     }
 }
 
-impl OpendalReader {
+impl<C: OpenDALConnectorTypeMarker> OpendalReader<C>
+where
+    C: OpenDALConnectorTypeMarker + std::marker::Send,
+{
     #[try_stream(boxed, ok = StreamChunkWithState, error = RwError)]
     async fn into_chunk_stream(self) {
         for split in self.splits {
@@ -115,7 +128,7 @@ impl OpendalReader {
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
     pub async fn stream_read_object(
         op: Operator,
-        split: OpendalFsSplit,
+        split: OpendalFsSplit<C>,
         source_ctx: SourceContextRef,
     ) {
         let actor_id = source_ctx.source_info.actor_id.to_string();

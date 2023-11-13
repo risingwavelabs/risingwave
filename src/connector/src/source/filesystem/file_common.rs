@@ -11,6 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::fmt::Debug;
+use std::hash::Hash;
+use std::marker::PhantomData;
+
 use anyhow::anyhow;
 use aws_sdk_s3::types::Object;
 use risingwave_common::types::{JsonbVal, Timestamp};
@@ -70,23 +74,73 @@ impl FsSplit {
 ///  [`OpendalFsSplit`] Describes a file or a split of a file. A file is a generic concept,
 /// and can be a local file, a distributed file system, or am object in S3 bucket.
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct OpendalFsSplit {
+pub struct OpendalFsSplit<C: OpenDALConnectorTypeMarker>
+where
+    C: OpenDALConnectorTypeMarker + std::marker::Send,
+{
     pub name: String,
     pub offset: usize,
     pub size: usize,
+    marker: PhantomData<C>,
 }
 
-impl From<&Object> for OpendalFsSplit {
+impl<C: OpenDALConnectorTypeMarker> From<&Object> for OpendalFsSplit<C>
+where
+    C: OpenDALConnectorTypeMarker + std::marker::Send,
+{
     fn from(value: &Object) -> Self {
         Self {
             name: value.key().unwrap().to_owned(),
             offset: 0,
             size: value.size() as usize,
+            marker: PhantomData,
         }
     }
 }
 
-impl SplitMetaData for OpendalFsSplit {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum OpenDALConnectorType {
+    OpenDalS3,
+    Gcs,
+}
+
+/// A marker trait for different conventions, used for enforcing type safety.
+///
+/// Implementors are [`S3`], [`Gcs`].
+pub trait OpenDALConnectorTypeMarker: 'static + Sized {
+    /// The extra fields in the [`PlanBase`] of this convention.
+    // type Extra: 'static + Eq + Hash + Clone + Debug;
+
+    /// Get the [`OpenDALConnectorType`] enum value.
+    fn value() -> OpenDALConnectorType;
+}
+
+/// The marker for batch convention.
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct Gcs;
+impl OpenDALConnectorTypeMarker for Gcs {
+    // type Extra = Gcs;
+
+    fn value() -> OpenDALConnectorType {
+        OpenDALConnectorType::Gcs
+    }
+}
+
+/// The marker for batch convention.
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
+pub struct OpenDalS3;
+impl OpenDALConnectorTypeMarker for OpenDalS3 {
+    // type Extra = OpenDalS3;
+
+    fn value() -> OpenDALConnectorType {
+        OpenDALConnectorType::OpenDalS3
+    }
+}
+
+impl<C: OpenDALConnectorTypeMarker> SplitMetaData for OpendalFsSplit<C>
+where
+    C: OpenDALConnectorTypeMarker + std::marker::Send,
+{
     fn id(&self) -> SplitId {
         self.name.as_str().into()
     }
@@ -106,12 +160,16 @@ impl SplitMetaData for OpendalFsSplit {
     }
 }
 
-impl OpendalFsSplit {
+impl<C: OpenDALConnectorTypeMarker> OpendalFsSplit<C>
+where
+    C: OpenDALConnectorTypeMarker + std::marker::Send,
+{
     pub fn new(name: String, start: usize, size: usize) -> Self {
         Self {
             name,
             offset: start,
             size,
+            marker: PhantomData,
         }
     }
 }

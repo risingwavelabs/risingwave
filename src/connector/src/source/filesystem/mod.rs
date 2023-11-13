@@ -14,7 +14,7 @@
 
 pub use opendal_source::GcsProperties;
 pub use s3::{S3FileReader, S3Properties, S3SplitEnumerator, S3_CONNECTOR};
-mod file_common;
+pub mod file_common;
 pub mod nd_streaming;
 pub use file_common::{FsPage, FsPageItem, FsSplit, OpendalFsSplit};
 pub mod opendal_source;

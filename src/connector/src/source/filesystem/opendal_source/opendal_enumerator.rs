@@ -20,6 +20,7 @@ use opendal::{Metakey, Operator};
 use risingwave_common::types::Timestamp;
 
 use super::GcsProperties;
+use crate::source::filesystem::file_common::Gcs;
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 pub struct OpendalConnector {
@@ -36,7 +37,7 @@ pub enum EngineType {
 #[async_trait]
 impl SplitEnumerator for OpendalConnector {
     type Properties = GcsProperties;
-    type Split = OpendalFsSplit;
+    type Split = OpendalFsSplit<Gcs>;
 
     async fn new(
         properties: Self::Properties,
@@ -53,7 +54,7 @@ impl SplitEnumerator for OpendalConnector {
         OpendalConnector::new_gcs_source(properties)
     }
 
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<OpendalFsSplit>> {
+    async fn list_splits(&mut self) -> anyhow::Result<Vec<OpendalFsSplit<Gcs>>> {
         todo!()
     }
 }
