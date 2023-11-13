@@ -231,6 +231,12 @@ pub struct ForwardMergeRangeIterator {
     current_epochs: BTreeSet<HummockEpoch>,
 }
 
+impl Default for ForwardMergeRangeIterator {
+    fn default() -> Self {
+        ForwardMergeRangeIterator::new(MAX_EPOCH)
+    }
+}
+
 impl ForwardMergeRangeIterator {
     pub fn new(read_epoch: HummockEpoch) -> Self {
         Self {
@@ -269,6 +275,19 @@ impl ForwardMergeRangeIterator {
             self.next().await?;
         }
         Ok(())
+    }
+
+    pub fn earliest_delete_since(&self, epoch: HummockEpoch) -> HummockEpoch {
+        self.current_epochs
+            .range(epoch..)
+            .next()
+            .map_or(MAX_EPOCH, |ret| *ret)
+    }
+
+    pub fn earliest_epoch(&self) -> HummockEpoch {
+        self.current_epochs
+            .first()
+            .map_or(MAX_EPOCH, |epoch| *epoch)
     }
 }
 

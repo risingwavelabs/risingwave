@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
-use std::rc::Rc;
-
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{Field, TableDesc};
+use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
@@ -28,48 +25,27 @@ use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
-use crate::expr::{ExprRewriter, FunctionCall};
+use crate::expr::ExprRewriter;
+use crate::handler::create_source::debezium_cdc_source_schema;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{Explain, TableCatalog};
 
-/// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
-/// to stream scan + merge node (for upstream materialize) + batch table scan when converting to `MView`
-/// creation request.
+/// `StreamCdcTableScan` is a virtual plan node to represent a stream cdc table scan.
+/// It will be converted to cdc backfill + merge node (for upstream source)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StreamTableScan {
+pub struct StreamCdcTableScan {
     pub base: PlanBase<Stream>,
     core: generic::Scan,
     batch_plan_id: PlanNodeId,
     stream_scan_type: StreamScanType,
 }
 
-impl StreamTableScan {
+impl StreamCdcTableScan {
     pub fn new(core: generic::Scan) -> Self {
-        Self::new_with_stream_scan_type(core, StreamScanType::Backfill)
-    }
-
-    pub fn new_with_stream_scan_type(
-        core: generic::Scan,
-        stream_scan_type: StreamScanType,
-    ) -> Self {
         let batch_plan_id = core.ctx.next_plan_node_id();
-
-        let distribution = {
-            match core.distribution_key() {
-                Some(distribution_key) => {
-                    if distribution_key.is_empty() {
-                        Distribution::Single
-                    } else {
-                        // See also `BatchSeqScan::clone_with_dist`.
-                        Distribution::UpstreamHashShard(distribution_key, core.table_desc.table_id)
-                    }
-                }
-                None => Distribution::SomeShard,
-            }
-        };
-
+        let distribution = Distribution::Single;
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
@@ -81,7 +57,7 @@ impl StreamTableScan {
             base,
             core,
             batch_plan_id,
-            stream_scan_type,
+            stream_scan_type: StreamScanType::CdcBackfill,
         }
     }
 
@@ -93,28 +69,8 @@ impl StreamTableScan {
         &self.core
     }
 
-    pub fn to_index_scan(
-        &self,
-        index_name: &str,
-        index_table_desc: Rc<TableDesc>,
-        primary_to_secondary_mapping: &BTreeMap<usize, usize>,
-        function_mapping: &HashMap<FunctionCall, usize>,
-        stream_scan_type: StreamScanType,
-    ) -> StreamTableScan {
-        let logical_index_scan = self.core.to_index_scan(
-            index_name,
-            index_table_desc,
-            primary_to_secondary_mapping,
-            function_mapping,
-        );
-        logical_index_scan
-            .distribution_key()
-            .expect("distribution key of stream chain must exist in output columns");
-        StreamTableScan::new_with_stream_scan_type(logical_index_scan, stream_scan_type)
-    }
-
     pub fn stream_scan_type(&self) -> StreamScanType {
-        self.stream_scan_type
+        StreamScanType::CdcBackfill
     }
 
     /// Build catalog for backfill state
@@ -192,9 +148,9 @@ impl StreamTableScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! { StreamTableScan }
+impl_plan_tree_node_for_leaf! { StreamCdcTableScan }
 
-impl Distill for StreamTableScan {
+impl Distill for StreamCdcTableScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(4);
@@ -214,17 +170,17 @@ impl Distill for StreamTableScan {
             vec.push(("dist", dist));
         }
 
-        childless_record("StreamTableScan", vec)
+        childless_record("StreamCdcTableScan", vec)
     }
 }
 
-impl StreamNode for StreamTableScan {
+impl StreamNode for StreamCdcTableScan {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         unreachable!("stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
     }
 }
 
-impl StreamTableScan {
+impl StreamCdcTableScan {
     pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> PbStreamNode {
         use risingwave_pb::stream_plan::*;
 
@@ -241,19 +197,12 @@ impl StreamTableScan {
             .collect_vec();
 
         // The required columns from the table (both scan and upstream).
-        let upstream_column_ids = match self.stream_scan_type {
-            // For backfill, we additionally need the primary key columns.
-            StreamScanType::Backfill | StreamScanType::CdcBackfill => {
-                self.core.output_and_pk_column_ids()
-            }
-            StreamScanType::Chain | StreamScanType::Rearrange | StreamScanType::UpstreamOnly => {
-                self.core.output_column_ids()
-            }
-            StreamScanType::Unspecified => unreachable!(),
-        }
-        .iter()
-        .map(ColumnId::get_id)
-        .collect_vec();
+        let upstream_column_ids = self
+            .core
+            .output_and_pk_column_ids()
+            .iter()
+            .map(ColumnId::get_id)
+            .collect_vec();
 
         // The schema of the snapshot read stream
         let snapshot_schema = upstream_column_ids
@@ -269,7 +218,16 @@ impl StreamTableScan {
             })
             .collect_vec();
 
-        let upstream_schema = snapshot_schema.clone();
+        // The schema of the shared cdc source upstream is different from snapshot,
+        // refer to `debezium_cdc_source_schema()` for details.
+        let upstream_schema = {
+            let mut columns = debezium_cdc_source_schema();
+            columns.push(ColumnCatalog::row_id_column());
+            columns
+                .into_iter()
+                .map(|c| Field::from(c.column_desc).to_prost())
+                .collect_vec()
+        };
 
         let output_indices = self
             .core
@@ -284,7 +242,7 @@ impl StreamTableScan {
             .collect_vec();
 
         let batch_plan_node = BatchPlanNode {
-            table_desc: Some(self.core.table_desc.to_protobuf()),
+            table_desc: None,
             column_ids: upstream_column_ids.clone(),
         };
 
@@ -292,23 +250,20 @@ impl StreamTableScan {
             .build_backfill_state_catalog(state)
             .to_internal_table_prost();
 
-        let node_body = PbNodeBody::StreamScan(StreamScanNode {
-            table_id: self.core.table_desc.table_id.table_id,
-            stream_scan_type: self.stream_scan_type as i32,
-            // The column indices need to be forwarded to the downstream
-            output_indices,
-            upstream_column_ids,
-            // The table desc used by backfill executor
-            table_desc: Some(self.core.table_desc.to_protobuf()),
-            state_table: Some(catalog),
-            rate_limit: self
-                .base
-                .ctx()
-                .session_ctx()
-                .config()
-                .get_streaming_rate_limit(),
-            ..Default::default()
-        });
+        let node_body =
+            // don't need batch plan for cdc source
+            PbNodeBody::StreamScan(StreamScanNode {
+                table_id: self.core.cdc_table_desc.table_id.table_id,
+                stream_scan_type: self.stream_scan_type as i32,
+                // The column indices need to be forwarded to the downstream
+                output_indices,
+                upstream_column_ids,
+                // The table desc used by backfill executor
+                state_table: Some(catalog),
+                rate_limit: None,
+                cdc_table_desc: Some(self.core.cdc_table_desc.to_protobuf()),
+                ..Default::default()
+            });
 
         PbStreamNode {
             fields: self.schema().to_prost(),
@@ -341,7 +296,7 @@ impl StreamTableScan {
     }
 }
 
-impl ExprRewritable for StreamTableScan {
+impl ExprRewritable for StreamCdcTableScan {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -349,6 +304,6 @@ impl ExprRewritable for StreamTableScan {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new_with_stream_scan_type(core, self.stream_scan_type).into()
+        Self::new(core).into()
     }
 }

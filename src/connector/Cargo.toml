@@ -154,6 +154,7 @@ walkdir = "2"
 
 [build-dependencies]
 prost-build = "0.12"
+protobuf-src = "1"
 
 [[bench]]
 name = "parser"

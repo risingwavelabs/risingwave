@@ -181,42 +181,40 @@ impl DeleteRangeIterator for ConcatDeleteRangeIterator {
 }
 #[cfg(test)]
 mod tests {
+    use std::ops::Bound;
+
+    use bytes::Bytes;
     use risingwave_common::catalog::TableId;
     use risingwave_common::util::epoch::MAX_EPOCH;
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::test_utils::test_user_key;
-    use crate::hummock::{
-        create_monotonic_events, CompactionDeleteRangesBuilder, DeleteRangeTombstone,
-        SstableBuilder, SstableBuilderOptions, SstableWriterOptions,
-    };
+    use crate::hummock::test_utils::{test_user_key, CompactionDeleteRangesBuilder};
+    use crate::hummock::{SstableBuilder, SstableBuilderOptions, SstableWriterOptions};
 
     #[tokio::test]
     async fn test_concat_iterator() {
-        let mut builder = CompactionDeleteRangesBuilder::default();
         let sstable_store = mock_sstable_store();
         let table_id = TableId::new(0);
-        let data = vec![
-            DeleteRangeTombstone::new_for_test(table_id, b"aaaa".to_vec(), b"dddd".to_vec(), 10),
-            DeleteRangeTombstone::new(
-                table_id,
-                b"bbbb".to_vec(),
-                true,
-                b"eeee".to_vec(),
-                false,
-                12,
-            ),
-        ];
-        for range in data {
-            builder.add_delete_events(create_monotonic_events(vec![range]));
-        }
-
-        let compaction_delete_range = builder.build_for_compaction();
-        let ranges1 = compaction_delete_range.get_tombstone_between(
-            test_user_key(b"aaaa").as_ref(),
-            test_user_key(b"bbbb").as_ref(),
+        let tombstone1 = (
+            Bound::Included(Bytes::copy_from_slice(b"aaaa")),
+            Bound::Excluded(Bytes::copy_from_slice(b"dddd")),
         );
+        let tombstone2 = (
+            Bound::Excluded(Bytes::copy_from_slice(b"bbbb")),
+            Bound::Excluded(Bytes::copy_from_slice(b"eeee")),
+        );
+        let mut range_builder = CompactionDeleteRangesBuilder::default();
+        range_builder.add_delete_events(10, table_id, vec![tombstone1.clone()]);
+        range_builder.add_delete_events(12, table_id, vec![tombstone2.clone()]);
+        let compaction_delete_range = range_builder.build_for_compaction();
+        let ranges1 = compaction_delete_range
+            .get_tombstone_between(
+                test_user_key(b"aaaa").as_ref(),
+                test_user_key(b"bbbb").as_ref(),
+            )
+            .await
+            .unwrap();
         assert_eq!(ranges1.len(), 2);
         let opts = SstableBuilderOptions::default();
         let mut builder = SstableBuilder::for_test(
@@ -236,8 +234,14 @@ mod tests {
                 .create_sst_writer(2, SstableWriterOptions::default()),
             opts.clone(),
         );
+        let mut range_builder = CompactionDeleteRangesBuilder::default();
+        range_builder.add_delete_events(10, table_id, vec![tombstone1.clone()]);
+        range_builder.add_delete_events(12, table_id, vec![tombstone2.clone()]);
+        let compaction_delete_range = range_builder.build_for_compaction();
         let ranges2 = compaction_delete_range
-            .get_tombstone_between(test_user_key(b"bbbb").as_ref(), test_user_key(b"").as_ref());
+            .get_tombstone_between(test_user_key(b"bbbb").as_ref(), test_user_key(b"").as_ref())
+            .await
+            .unwrap();
         assert_eq!(ranges2.len(), 3);
         builder.add_monotonic_deletes(ranges2);
         let output2 = builder.finish().await.unwrap();
