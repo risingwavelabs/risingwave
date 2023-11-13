@@ -1877,8 +1877,8 @@ impl CatalogManager {
             .unwrap()
             .get_database_id();
 
+        let mut relation_infos = Vec::new();
         let mut objects_to_alter = vec![object];
-
         while let Some(object) = objects_to_alter.pop() {
             match object {
                 alter_set_schema_request::Object::TableId(table_id) => {
@@ -1916,6 +1916,7 @@ impl CatalogManager {
                     let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
                     let mut table = tables.get_mut(table_id).unwrap();
                     table.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Table(table.clone())));
                     commit_meta!(self, tables)?;
                 }
                 alter_set_schema_request::Object::ViewId(view_id) => {
@@ -1929,6 +1930,7 @@ impl CatalogManager {
                     let mut views = BTreeMapTransaction::new(&mut database_core.views);
                     let mut view = views.get_mut(view_id).unwrap();
                     view.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::View(view.clone())));
                     commit_meta!(self, views)?;
                 }
                 alter_set_schema_request::Object::SourceId(source_id) => {
@@ -1942,6 +1944,7 @@ impl CatalogManager {
                     let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
                     let mut source = sources.get_mut(source_id).unwrap();
                     source.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Source(source.clone())));
                     commit_meta!(self, sources)?;
                 }
                 alter_set_schema_request::Object::SinkId(sink_id) => {
@@ -1955,6 +1958,7 @@ impl CatalogManager {
                     let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
                     let mut sink = sinks.get_mut(sink_id).unwrap();
                     sink.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Sink(sink.clone())));
                     commit_meta!(self, sinks)?;
                 }
                 alter_set_schema_request::Object::FunctionId(function_id) => {
@@ -1971,7 +1975,10 @@ impl CatalogManager {
                     let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
                     let mut function = functions.get_mut(function_id).unwrap();
                     function.schema_id = new_schema_id;
+                    let notify_info = Info::Function(function.clone());
                     commit_meta!(self, functions)?;
+                    let version = self.notify_frontend(Operation::Update, notify_info).await;
+                    return Ok(version);
                 }
                 alter_set_schema_request::Object::IndexId(index_id) => {
                     database_core.ensure_index_id(index_id)?;
@@ -1984,12 +1991,25 @@ impl CatalogManager {
                     let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
                     let mut index = indexes.get_mut(index_id).unwrap();
                     index.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Index(index.clone())));
                     commit_meta!(self, indexes)?;
                 }
             }
         }
 
-        let version = self.notify_frontend(Operation::Update, notify_info).await;
+        tracing::info!("relations!! {:#?}", relation_infos);
+
+        let version = self
+            .notify_frontend(
+                Operation::Update,
+                Info::RelationGroup(RelationGroup {
+                    relations: relation_infos
+                        .into_iter()
+                        .map(|relation_info| Relation { relation_info })
+                        .collect_vec(),
+                }),
+            )
+            .await;
         Ok(version)
     }
 

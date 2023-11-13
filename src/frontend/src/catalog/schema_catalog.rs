@@ -356,6 +356,32 @@ impl SchemaCatalog {
             .expect("function not found by argument types");
     }
 
+    pub fn update_function(&mut self, prost: &PbFunction) {
+        let name = prost.name.clone();
+        let id = prost.id.into();
+        let function = FunctionCatalog::from(prost);
+        let function_ref = Arc::new(function);
+
+        let old_function_by_id = self.function_by_id.get(&id).unwrap();
+        let old_function_by_name = self
+            .function_by_name
+            .get_mut(&old_function_by_id.name)
+            .unwrap();
+        // check if function name get updated.
+        if old_function_by_id.name != name {
+            old_function_by_name.remove(&old_function_by_id.arg_types);
+            if old_function_by_name.is_empty() {
+                self.function_by_name.remove(&old_function_by_id.name);
+            }
+        }
+
+        self.function_by_name
+            .entry(name)
+            .or_default()
+            .insert(old_function_by_id.arg_types.clone(), function_ref.clone());
+        self.function_by_id.insert(id, function_ref);
+    }
+
     pub fn create_connection(&mut self, prost: &PbConnection) {
         let name = prost.name.clone();
         let id = prost.id;

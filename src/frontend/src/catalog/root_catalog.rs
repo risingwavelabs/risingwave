@@ -351,6 +351,14 @@ impl Catalog {
             .drop_function(function_id);
     }
 
+    pub fn update_function(&mut self, proto: &PbFunction) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_function(proto);
+    }
+
     pub fn get_database_by_name(&self, db_name: &str) -> CatalogResult<&DatabaseCatalog> {
         self.database_by_name
             .get(db_name)
