@@ -106,6 +106,9 @@ impl LruCacheEventListener for BlockCacheEventListener {
             sst_id: key.0,
             block_idx: key.1,
         };
+        // temporarily avoid spawn task while task drop with madsim
+        // FYI: https://github.com/madsim-rs/madsim/issues/182
+        #[cfg(not(madsim))]
         self.data_file_cache
             .insert_if_not_exists_async(key, CachedBlock::Loaded { block: value });
     }
@@ -118,6 +121,9 @@ impl LruCacheEventListener for MetaCacheEventListener {
     type T = Box<Sstable>;
 
     fn on_release(&self, key: Self::K, value: Self::T) {
+        // temporarily avoid spawn task while task drop with madsim
+        // FYI: https://github.com/madsim-rs/madsim/issues/182
+        #[cfg(not(madsim))]
         self.0.insert_if_not_exists_async(key, value);
     }
 }
