@@ -3,7 +3,22 @@ use std::fmt::Write;
 
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{Dispatcher, StreamNode};
+use risingwave_pb::stream_plan::StreamNode;
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Id {
+    Normal(usize),
+    Merge(u32, u32),
+}
+
+impl std::fmt::Display for Id {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Id::Normal(id) => write!(f, "o{}", id),
+            Id::Merge(up_frag_id, down_frag_id) => write!(f, "m{}-{}", up_frag_id, down_frag_id),
+        }
+    }
+}
 
 #[derive(Default)]
 struct IdGen {
@@ -11,24 +26,24 @@ struct IdGen {
 }
 
 impl Iterator for IdGen {
-    type Item = usize;
+    type Item = Id;
 
     fn next(&mut self) -> Option<Self::Item> {
         let id = self.next;
         self.next += 1;
-        Some(id)
+        Some(Id::Normal(id))
     }
 }
 
 struct Builder {
     _frag_id: u32,
 
-    nodes: BTreeMap<usize, String>,
-    edges: Vec<(usize, usize)>,
+    nodes: BTreeMap<Id, String>,
+    edges: Vec<(Id, Id)>,
 
-    root_id: Option<usize>,
+    root_id: Option<Id>,
     upstream_frags: Vec<u32>,
-    merges: BTreeMap<u32, usize>,
+    merges: BTreeMap<u32, Id>,
 }
 
 impl Builder {
@@ -43,11 +58,15 @@ impl Builder {
         }
     }
 
-    fn add_node(&mut self, id: usize, body: &NodeBody) -> usize {
-        if let NodeBody::Merge(m) = body {
+    fn add_node(&mut self, id_gen: &mut IdGen, body: &NodeBody) -> Id {
+        let id = if let NodeBody::Merge(m) = body {
+            let id = Id::Merge(m.upstream_fragment_id, self._frag_id);
             self.upstream_frags.push(m.upstream_fragment_id);
             self.merges.insert(m.upstream_fragment_id, id);
-        }
+            id
+        } else {
+            id_gen.next().unwrap()
+        };
 
         let name = body.to_string();
         if self.root_id.is_none() {
@@ -57,7 +76,7 @@ impl Builder {
         id
     }
 
-    fn add_edge(&mut self, from: usize, to: usize) {
+    fn add_edge(&mut self, from: Id, to: Id) {
         self.edges.push((from, to));
     }
 }
@@ -71,13 +90,8 @@ pub fn generate(fragments: HashMap<u32, Fragment>) -> String {
 
         let mut builder = Builder::new(frag_id);
 
-        fn visit(
-            node: &StreamNode,
-            id_gen: &mut IdGen,
-            builder: &mut Builder,
-            parent: Option<usize>,
-        ) {
-            let this = builder.add_node(id_gen.next().unwrap(), &node.node_body.as_ref().unwrap());
+        fn visit(node: &StreamNode, id_gen: &mut IdGen, builder: &mut Builder, parent: Option<Id>) {
+            let this = builder.add_node(id_gen, &node.node_body.as_ref().unwrap());
             if let Some(parent) = parent {
                 builder.add_edge(this, parent);
             }
@@ -113,19 +127,19 @@ pub fn generate(fragments: HashMap<u32, Fragment>) -> String {
     writeln!(f, "flowchart LR").unwrap();
 
     for (frag_id, builder) in builders {
-        writeln!(f, "subgraph Fragment {frag_id}").unwrap();
-        writeln!(f, "direction LR").unwrap();
+        writeln!(f, "  subgraph Fragment {frag_id}").unwrap();
+        writeln!(f, "    direction LR").unwrap();
         for (id, name) in builder.nodes {
-            writeln!(f, "o_{id}[{name}]").unwrap();
+            writeln!(f, "    {id}[{name}]").unwrap();
         }
         for (from, to) in builder.edges {
-            writeln!(f, "o_{from} --> o_{to}").unwrap();
+            writeln!(f, "    {from} --> {to}").unwrap();
         }
-        writeln!(f, "end\n").unwrap();
+        writeln!(f, "  end\n").unwrap();
     }
 
     for (from, to) in inter_edges {
-        writeln!(f, "o_{from} --> o_{to}").unwrap();
+        writeln!(f, "  {from} --> {to}").unwrap();
     }
 
     f
