@@ -14,11 +14,13 @@
 
 use std::collections::HashMap;
 use std::io::Write;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use futures_async_stream::for_await;
 use parking_lot::RwLock;
+use pgwire::net::{Address, AddressRef};
 use pgwire::pg_response::StatementType;
 use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Row;
@@ -78,6 +80,7 @@ impl SessionManager for LocalFrontend {
         &self,
         _database: &str,
         _user_name: &str,
+        _peer_addr: AddressRef,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         Ok(self.session_ref())
     }
@@ -106,8 +109,8 @@ impl LocalFrontend {
         &self,
         sql: impl Into<String>,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
-        let sql = sql.into();
-        self.session_ref().run_statement(sql.as_str(), vec![]).await
+        let sql: Arc<str> = Arc::from(sql.into());
+        self.session_ref().run_statement(sql, vec![]).await
     }
 
     pub async fn run_sql_with_session(
@@ -115,8 +118,8 @@ impl LocalFrontend {
         session_ref: Arc<SessionImpl>,
         sql: impl Into<String>,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
-        let sql = sql.into();
-        session_ref.run_statement(sql.as_str(), vec![]).await
+        let sql: Arc<str> = Arc::from(sql.into());
+        session_ref.run_statement(sql, vec![]).await
     }
 
     pub async fn run_user_sql(
@@ -126,9 +129,9 @@ impl LocalFrontend {
         user_name: String,
         user_id: UserId,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
-        let sql = sql.into();
+        let sql: Arc<str> = Arc::from(sql.into());
         self.session_user_ref(database, user_name, user_id)
-            .run_statement(sql.as_str(), vec![])
+            .run_statement(sql, vec![])
             .await
     }
 
@@ -180,6 +183,11 @@ impl LocalFrontend {
             UserAuthenticator::None,
             // Local Frontend use a non-sense id.
             (0, 0),
+            Address::Tcp(SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                6666,
+            ))
+            .into(),
         ))
     }
 }

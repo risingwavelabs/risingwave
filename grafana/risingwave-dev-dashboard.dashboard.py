@@ -2346,6 +2346,16 @@ def section_hummock_write(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Mem Table Spill Count",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(irate({table_metric('state_store_mem_table_spill_counts')}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)",
+                            "mem table spill table id - {{table_id}} @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
                 panels.timeseries_bytes(
                     "Checkpoint Sync Size",
                     "",

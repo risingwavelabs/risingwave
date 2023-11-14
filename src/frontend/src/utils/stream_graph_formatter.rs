@@ -263,7 +263,7 @@ impl StreamGraphFormatter {
                     self.pretty_add_table(node.get_state_table().unwrap()),
                 ));
             }
-            stream_node::NodeBody::Chain(node) => fields.push((
+            stream_node::NodeBody::StreamScan(node) => fields.push((
                 "state table",
                 self.pretty_add_table(node.get_state_table().unwrap()),
             )),

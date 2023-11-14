@@ -29,6 +29,7 @@ use super::create_table::{
 };
 use super::query::gen_batch_plan_by_statement;
 use super::RwPgResponse;
+use crate::handler::create_table::gen_create_table_plan_for_cdc_source;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Convention, Explain};
@@ -61,6 +62,7 @@ async fn do_handle_explain(
                 source_schema,
                 source_watermarks,
                 append_only,
+                cdc_table_info,
                 ..
             } => {
                 // TODO(st1page): refacor it
@@ -72,8 +74,9 @@ async fn do_handle_explain(
                     None => (None, None),
                 };
                 let with_options = context.with_options();
-                let plan = match check_create_table_with_source(with_options, source_schema)? {
-                    Some(s) => {
+                let source_schema = check_create_table_with_source(with_options, source_schema)?;
+                let plan = match (source_schema, cdc_table_info) {
+                    (Some(s), None) => {
                         gen_create_table_plan_with_source(
                             context,
                             name,
@@ -87,7 +90,7 @@ async fn do_handle_explain(
                         .await?
                         .0
                     }
-                    None => {
+                    (None, None) => {
                         gen_create_table_plan(
                             context,
                             name,
@@ -99,6 +102,25 @@ async fn do_handle_explain(
                         )?
                         .0
                     }
+
+
+                    (None, Some(cdc_table)) => {
+                        gen_create_table_plan_for_cdc_source(
+                            context.into(),
+                            cdc_table.source_name.clone(),
+                            name.clone(),
+                            cdc_table.external_table_name.clone(),
+                            columns,
+                            constraints,
+                            ColumnIdGenerator::new_initial(),
+                        )?.0
+                    }
+                    (Some(_), Some(_)) => return Err(ErrorCode::NotSupported(
+                        "Data format and encoding format doesn't apply to table created from a CDC source"
+                            .into(),
+                        "Remove the FORMAT and ENCODE specification".into(),
+                    )
+                        .into()),
                 };
                 let context = plan.ctx();
                 if let Some(notice) = notice {

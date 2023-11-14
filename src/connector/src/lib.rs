@@ -131,7 +131,6 @@ mod tests {
         let expected = expect_file!("../with_options.yaml");
         let actual = update_with_options_yaml();
 
-        // Compare the `Value` representation instead of string for normalization.
         expected.assert_eq(&actual);
     }
 }

@@ -859,6 +859,7 @@ pub enum ShowObject {
     Indexes { table: ObjectName },
     Cluster,
     Jobs,
+    ProcessList,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -900,6 +901,7 @@ impl fmt::Display for ShowObject {
                 write!(f, "CLUSTER")
             }
             ShowObject::Jobs => write!(f, "JOBS"),
+            ShowObject::ProcessList => write!(f, "PROCESSLIST"),
         }
     }
 }
@@ -1579,7 +1581,7 @@ impl fmt::Display for Statement {
                 }
                 if let Some(info) = cdc_table_info {
                     write!(f, " FROM {}", info.source_name)?;
-                    write!(f, " TABLE {}", info.external_table_name)?;
+                    write!(f, " TABLE '{}'", info.external_table_name)?;
                 }
                 Ok(())
             }
