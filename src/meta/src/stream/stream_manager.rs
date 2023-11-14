@@ -716,10 +716,10 @@ impl GlobalStreamManager {
 
         let fragment_worker_changes = {
             let guard = self.fragment_manager.get_fragment_read_guard().await;
-            let mut policy = HashMap::new();
+            let mut fragment_worker_changes = HashMap::new();
             for table_fragments in guard.table_fragments().values() {
                 for fragment_id in table_fragments.fragment_ids() {
-                    policy.insert(
+                    fragment_worker_changes.insert(
                         fragment_id,
                         PbWorkerChanges {
                             include_worker_ids: workers.clone(),
@@ -728,7 +728,7 @@ impl GlobalStreamManager {
                     );
                 }
             }
-            policy
+            fragment_worker_changes
         };
 
         let reschedules = self
