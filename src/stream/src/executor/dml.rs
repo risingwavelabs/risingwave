@@ -25,21 +25,17 @@ use risingwave_source::dml_manager::DmlManagerRef;
 
 use super::error::StreamExecutorError;
 use super::{
-    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, Message, Mutation,
-    PkIndices, PkIndicesRef,
+    expect_first_barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
+    Mutation, PkIndicesRef,
 };
 use crate::executor::stream_reader::StreamReaderWithPause;
 
 /// [`DmlExecutor`] accepts both stream data and batch data for data manipulation on a specific
 /// table. The two streams will be merged into one and then sent to downstream.
 pub struct DmlExecutor {
+    info: ExecutorInfo,
+
     upstream: BoxedExecutor,
-
-    schema: Schema,
-
-    pk_indices: PkIndices,
-
-    identity: String,
 
     /// Stores the information of batch data channels.
     dml_manager: DmlManagerRef,
@@ -73,20 +69,16 @@ struct TxnBuffer {
 impl DmlExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        info: ExecutorInfo,
         upstream: BoxedExecutor,
-        schema: Schema,
-        pk_indices: PkIndices,
-        executor_id: u64,
         dml_manager: DmlManagerRef,
         table_id: TableId,
         table_version_id: TableVersionId,
         column_descs: Vec<ColumnDesc>,
     ) -> Self {
         Self {
+            info,
             upstream,
-            schema,
-            pk_indices,
-            identity: format!("DmlExecutor {:X}", executor_id),
             dml_manager,
             table_id,
             table_version_id,
@@ -205,15 +197,15 @@ impl Executor for DmlExecutor {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        &self.identity
+        &self.info.identity
     }
 }
 
@@ -248,12 +240,15 @@ mod tests {
         let dml_manager = Arc::new(DmlManager::for_test());
 
         let (mut tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
-
-        let dml_executor = Box::new(DmlExecutor::new(
-            Box::new(source),
+        let info = ExecutorInfo {
             schema,
             pk_indices,
-            1,
+            identity: "DmlExecutor".to_string(),
+        };
+
+        let dml_executor = Box::new(DmlExecutor::new(
+            info,
+            Box::new(source),
             dml_manager.clone(),
             table_id,
             INITIAL_TABLE_VERSION_ID,
