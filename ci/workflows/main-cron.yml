@@ -8,7 +8,7 @@ steps:
   - label: "test notification"
     command: "echo test && exit 1"
     notify:
-      - slack: "risingwave-labs@noelkwan"
+      - slack: "risingwave-labs#notification-buildkite@noelkwan"
         if: build.pull_request.labels includes "ci/main-cron/test-notify"
 
   - label: "build"
