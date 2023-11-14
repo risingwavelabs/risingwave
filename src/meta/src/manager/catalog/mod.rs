@@ -121,6 +121,7 @@ use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::meta::{Relation, RelationGroup};
 pub(crate) use {commit_meta, commit_meta_with_trx};
 
+use super::IGNORED_NOTIFICATION_VERSION;
 use crate::manager::catalog::utils::{
     alter_relation_rename, alter_relation_rename_refs, refcnt_dec_connection,
     refcnt_inc_connection, ReplaceTableExprRewriter,
@@ -1881,7 +1882,13 @@ impl CatalogManager {
         match object {
             alter_set_schema_request::Object::TableId(table_id) => {
                 database_core.ensure_table_id(table_id)?;
-                let Table { name, .. } = database_core.tables.get(&table_id).unwrap();
+                let Table {
+                    name, schema_id, ..
+                } = database_core.tables.get(&table_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
                 database_core.check_relation_name_duplicated(&(
                     database_id,
                     new_schema_id,
@@ -1915,7 +1922,13 @@ impl CatalogManager {
             }
             alter_set_schema_request::Object::ViewId(view_id) => {
                 database_core.ensure_view_id(view_id)?;
-                let View { name, .. } = database_core.views.get(&view_id).unwrap();
+                let View {
+                    name, schema_id, ..
+                } = database_core.views.get(&view_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
                 database_core.check_relation_name_duplicated(&(
                     database_id,
                     new_schema_id,
@@ -1929,7 +1942,13 @@ impl CatalogManager {
             }
             alter_set_schema_request::Object::SourceId(source_id) => {
                 database_core.ensure_source_id(source_id)?;
-                let Source { name, .. } = database_core.sources.get(&source_id).unwrap();
+                let Source {
+                    name, schema_id, ..
+                } = database_core.sources.get(&source_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
                 database_core.check_relation_name_duplicated(&(
                     database_id,
                     new_schema_id,
@@ -1943,7 +1962,13 @@ impl CatalogManager {
             }
             alter_set_schema_request::Object::SinkId(sink_id) => {
                 database_core.ensure_sink_id(sink_id)?;
-                let Sink { name, .. } = database_core.sinks.get(&sink_id).unwrap();
+                let Sink {
+                    name, schema_id, ..
+                } = database_core.sinks.get(&sink_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
                 database_core.check_relation_name_duplicated(&(
                     database_id,
                     new_schema_id,
@@ -1958,8 +1983,15 @@ impl CatalogManager {
             alter_set_schema_request::Object::FunctionId(function_id) => {
                 database_core.ensure_function_id(function_id)?;
                 let Function {
-                    name, arg_types, ..
+                    name,
+                    arg_types,
+                    schema_id,
+                    ..
                 } = database_core.functions.get(&function_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
                 database_core.check_function_duplicated(&(
                     database_id,
                     new_schema_id,
@@ -1973,20 +2005,6 @@ impl CatalogManager {
                 commit_meta!(self, functions)?;
                 let version = self.notify_frontend(Operation::Update, notify_info).await;
                 return Ok(version);
-            }
-            alter_set_schema_request::Object::IndexId(index_id) => {
-                database_core.ensure_index_id(index_id)?;
-                let Index { name, .. } = database_core.indexes.get(&index_id).unwrap();
-                database_core.check_relation_name_duplicated(&(
-                    database_id,
-                    new_schema_id,
-                    name.to_owned(),
-                ))?;
-                let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
-                let mut index = indexes.get_mut(index_id).unwrap();
-                index.schema_id = new_schema_id;
-                relation_infos.push(Some(RelationInfo::Index(index.clone())));
-                commit_meta!(self, indexes)?;
             }
         }
 
