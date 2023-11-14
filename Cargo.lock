@@ -3081,6 +3081,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "flowchart"
+version = "1.3.0-alpha"
+dependencies = [
+ "risingwave_pb",
+]
+
+[[package]]
 name = "flume"
 version = "0.10.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7597,6 +7604,7 @@ dependencies = [
  "chrono",
  "clap",
  "comfy-table",
+ "flowchart",
  "futures",
  "inquire",
  "itertools 0.11.0",
@@ -7928,6 +7936,7 @@ dependencies = [
  "either",
  "enum-as-inner",
  "fail",
+ "flowchart",
  "function_name",
  "futures",
  "hex",

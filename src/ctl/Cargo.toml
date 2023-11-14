@@ -20,6 +20,7 @@ chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 comfy-table = "7"
 etcd-client = { workspace = true }
+flowchart = { path = "../utils/flowchart" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 inquire = "0.6.2"
 itertools = "0.11"

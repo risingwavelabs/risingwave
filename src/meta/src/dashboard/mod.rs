@@ -197,6 +197,21 @@ pub(super) mod handlers {
         Ok(Json(table_fragments))
     }
 
+    pub async fn get_table_flowchart(
+        Path(table_id): Path<u32>,
+        Extension(srv): Extension<Service>,
+    ) -> Result<String> {
+        let tf = srv
+            .fragment_manager
+            .select_table_fragments_by_table_id(&table_id.into())
+            .await
+            .map_err(err)?;
+        let fragments = tf.fragments.into_iter().collect();
+
+        let chart = flowchart::generate(fragments);
+        Ok(chart)
+    }
+
     async fn dump_await_tree_inner(
         worker_nodes: impl IntoIterator<Item = &WorkerNode>,
         compute_clients: &ComputeClientPool,
@@ -341,6 +356,7 @@ impl DashboardService {
             .route("/clusters/:ty", get(list_clusters))
             .route("/actors", get(list_actors))
             .route("/fragments2", get(list_fragments))
+            .route("/flowchart/table/:table_id", get(get_table_flowchart))
             .route("/materialized_views", get(list_materialized_views))
             .route("/tables", get(list_tables))
             .route("/indexes", get(list_indexes))

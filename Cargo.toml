@@ -47,6 +47,7 @@ members = [
   "src/tests/sqlsmith",
   "src/tests/state_cleaning_test",
   "src/udf",
+  "src/utils/flowchart",
   "src/utils/local_stats_alloc",
   "src/utils/pgwire",
   "src/utils/runtime",

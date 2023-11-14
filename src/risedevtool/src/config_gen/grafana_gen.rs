@@ -39,6 +39,9 @@ enable = traceToMetrics
 [auth.anonymous]
 enabled = true
 org_role = Admin
+
+[plugins]
+allow_loading_unsigned_plugins = jdbranham-diagram-panel
     "#
         )
     }

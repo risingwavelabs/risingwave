@@ -389,6 +389,7 @@ enum MetaCommands {
     Pause,
     /// resume the stream graph
     Resume,
+    FlowChart,
     /// get cluster info
     ClusterInfo,
     /// get source split info
@@ -635,6 +636,7 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::Pause) => cmd_impl::meta::pause(context).await?,
         Commands::Meta(MetaCommands::Resume) => cmd_impl::meta::resume(context).await?,
         Commands::Meta(MetaCommands::ClusterInfo) => cmd_impl::meta::cluster_info(context).await?,
+        Commands::Meta(MetaCommands::FlowChart) => cmd_impl::meta::flowchart(context).await?,
         Commands::Meta(MetaCommands::SourceSplitInfo) => {
             cmd_impl::meta::source_split_info(context).await?
         }

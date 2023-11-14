@@ -179,3 +179,21 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
 
     Ok(())
 }
+
+pub async fn flowchart(context: &CtlContext) -> anyhow::Result<()> {
+    let GetClusterInfoResponse {
+        worker_nodes: _,
+        table_fragments,
+        actor_splits: _,
+        source_infos: _,
+        revision: _,
+    } = get_cluster_info(context).await?;
+
+    for tf in table_fragments {
+        let id = tf.table_id;
+        let chart = flowchart::generate(tf.fragments);
+        println!("{id}\n\n{chart}\n");
+    }
+
+    Ok(())
+}

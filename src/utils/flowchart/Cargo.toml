@@ -1,0 +1,16 @@
+[package]
+name = "flowchart"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+risingwave_pb = { workspace = true }
+
+[lints]
+workspace = true

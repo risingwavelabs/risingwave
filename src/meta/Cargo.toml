@@ -29,6 +29,7 @@ either = "1"
 enum-as-inner = "0.6"
 etcd-client = { workspace = true }
 fail = "0.5"
+flowchart = { path = "../utils/flowchart" }
 function_name = "0.3.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
