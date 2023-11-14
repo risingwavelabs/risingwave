@@ -1945,7 +1945,7 @@ impl CatalogManager {
     pub async fn finish_create_source_procedure(
         &self,
         mut source: Source,
-        internal_tables: Vec<Table>,
+        mut internal_tables: Vec<Table>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -1961,7 +1961,8 @@ impl CatalogManager {
 
         source.created_at_epoch = Some(Epoch::now().0);
         sources.insert(source.id, source.clone());
-        for table in &internal_tables {
+        for table in &mut internal_tables {
+            table.stream_job_status = PbStreamJobStatus::Created.into();
             tables.insert(table.id, table.clone());
         }
         commit_meta!(self, sources, tables)?;

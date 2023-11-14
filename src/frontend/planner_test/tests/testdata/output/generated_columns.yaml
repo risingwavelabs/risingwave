@@ -16,7 +16,7 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [(v2 + 1:Int32) as $expr1] }
-      └─BatchSource { source: s1, columns: [v2, _rw_key, _row_id], filter: (None, None) }
+      └─BatchSource { source: s1, columns: [v2, _row_id], filter: (None, None) }
 - name: select proctime()
   sql: |
     select proctime();

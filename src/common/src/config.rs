@@ -556,6 +556,9 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::max_preload_wait_time_mill")]
     pub max_preload_wait_time_mill: u64,
 
+    #[serde(default = "default::storage::max_version_pinning_duration_sec")]
+    pub max_version_pinning_duration_sec: u64,
+
     #[serde(default = "default::storage::object_store_streaming_read_timeout_ms")]
     pub object_store_streaming_read_timeout_ms: u64,
     #[serde(default = "default::storage::object_store_streaming_upload_timeout_ms")]
@@ -1071,6 +1074,10 @@ pub mod default {
 
         pub fn max_preload_wait_time_mill() -> u64 {
             0
+        }
+
+        pub fn max_version_pinning_duration_sec() -> u64 {
+            3 * 3600
         }
 
         pub fn object_store_streaming_read_timeout_ms() -> u64 {
