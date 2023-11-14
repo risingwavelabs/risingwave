@@ -467,7 +467,7 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "encode map_field error: field not in proto"
+            "encode map_field error: proto map or group not supported yet"
         );
     }
 }
