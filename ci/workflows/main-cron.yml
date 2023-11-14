@@ -21,13 +21,13 @@ steps:
       if [[ $$OUTCOME == "hard_failed" || $$OUTCOME == "soft_failed" ]]; then
         cat <<- YAML | buildkite-agent pipeline upload 
         steps:
-          - label: "Notify slack about soft failed step"
-            command: echo "Notifying slack about the soft_failed step"
+          - label: "notify test inner"
+            command: echo "notify test"
             notify:
               - slack:
                   channels:
                     - "#notification-buildkite"
-                  message: "@U03EA02K5L5 test"
+                  message: "<@Noel Kwan> <@U03EA02K5L5> test"
       YAML
       fi
       
