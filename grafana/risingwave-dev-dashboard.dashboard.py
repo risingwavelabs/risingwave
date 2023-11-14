@@ -22,7 +22,7 @@ panels = Panels(datasource)
 logging.basicConfig(level=logging.WARN)
 
 
-def section_actor_info(outer_panels):
+def section_actor_info(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     excluded_cols = ["Time", "Value", "__name__", f"{COMPONENT_LABEL}", f"{NODE_LABEL}"]
     return [
@@ -46,7 +46,7 @@ def section_actor_info(outer_panels):
     ]
 
 
-def section_cluster_node(outer_panels):
+def section_cluster_node(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -106,7 +106,7 @@ def section_cluster_node(outer_panels):
     ]
 
 
-def section_recovery_node(outer_panels):
+def section_recovery_node(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -158,7 +158,7 @@ def section_recovery_node(outer_panels):
     ]
 
 
-def section_compaction(outer_panels):
+def section_compaction(outer_panels: Panels):
     successful_compaction_fiiler = "result='SUCCESS'"
     failed_compaction_filter = "result!='SUCCESS'"
     panels = outer_panels.sub_panel()
@@ -519,7 +519,7 @@ def section_compaction(outer_panels):
     ]
 
 
-def section_object_storage(outer_panels):
+def section_object_storage(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     operation_rate_blacklist = (
         "type!~'streaming_upload_write_bytes|streaming_read_read_bytes|streaming_read'"
@@ -667,7 +667,7 @@ def section_object_storage(outer_panels):
     ]
 
 
-def section_streaming(outer_panels):
+def section_streaming(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -944,7 +944,7 @@ def section_streaming(outer_panels):
     ]
 
 
-def section_streaming_actors(outer_panels):
+def section_streaming_actors(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -1373,7 +1373,7 @@ def section_streaming_actors(outer_panels):
     ]
 
 
-def section_streaming_actors_tokio(outer_panels):
+def section_streaming_actors_tokio(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -1544,7 +1544,7 @@ def section_streaming_actors_tokio(outer_panels):
     ]
 
 
-def section_streaming_exchange(outer_panels):
+def section_streaming_exchange(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -1575,7 +1575,7 @@ def section_streaming_exchange(outer_panels):
     ]
 
 
-def section_streaming_errors(outer_panels):
+def section_streaming_errors(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -1638,7 +1638,7 @@ def section_streaming_errors(outer_panels):
     ]
 
 
-def section_batch(outer_panels):
+def section_batch(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -1740,7 +1740,7 @@ def section_batch(outer_panels):
     ]
 
 
-def section_frontend(outer_panels):
+def section_frontend(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -1850,7 +1850,7 @@ def section_frontend(outer_panels):
     ]
 
 
-def section_hummock_read(outer_panels):
+def section_hummock_read(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     meta_miss_filter = "type='meta_miss'"
     meta_total_filter = "type='meta_total'"
@@ -1999,7 +1999,7 @@ def section_hummock_read(outer_panels):
                     [
                         panels.target(
                             f"sum(irate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (table_id,type)",
-                            "bloom filter false positive count  - {{table_id}} - {{type}}",
+                            "bloom filter False positive count  - {{table_id}} - {{type}}",
                         ),
                         panels.target(
                             f"sum(irate({table_metric('state_store_read_req_bloom_filter_positive_counts')}[$__rate_interval])) by (table_id,type)",
@@ -2027,7 +2027,7 @@ def section_hummock_read(outer_panels):
                     [
                         panels.target(
                             f"(((sum(rate({table_metric('state_store_read_req_positive_but_non_exist_counts')}[$__rate_interval])) by (table_id,type))) / (sum(rate({table_metric('state_store_read_req_check_bloom_filter_counts')}[$__rate_interval])) by (table_id,type)))",
-                            "read req bloom filter false positive rate - {{table_id}} - {{type}}",
+                            "read req bloom filter False positive rate - {{table_id}} - {{type}}",
                         ),
                     ],
                 ),
@@ -2172,7 +2172,7 @@ def section_hummock_read(outer_panels):
     ]
 
 
-def section_hummock_write(outer_panels):
+def section_hummock_write(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -2352,7 +2352,8 @@ def section_hummock_write(outer_panels):
                     [
                         panels.target(
                             f"sum(irate({table_metric('state_store_mem_table_spill_counts')}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)",
-                            "mem table spill table id - {{table_id}} @ {{%s}}" % NODE_LABEL,
+                            "mem table spill table id - {{table_id}} @ {{%s}}"
+                            % NODE_LABEL,
                         ),
                     ],
                 ),
@@ -2379,7 +2380,7 @@ def section_hummock_write(outer_panels):
     ]
 
 
-def section_hummock_tiered_cache(outer_panels):
+def section_hummock_tiered_cache(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     file_cache_hit_filter = 'op="lookup",extra="hit"'
     file_cache_miss_filter = 'op="lookup",extra="miss"'
@@ -2488,7 +2489,7 @@ def section_hummock_tiered_cache(outer_panels):
     ]
 
 
-def section_hummock_manager(outer_panels):
+def section_hummock_manager(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     total_key_size_filter = "metric='total_key_size'"
     total_value_size_filter = "metric='total_value_size'"
@@ -2785,7 +2786,7 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
     ]
 
 
-def section_backup_manager(outer_panels):
+def section_backup_manager(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -2844,7 +2845,7 @@ def grpc_metrics_target(panels, name, filter):
     )
 
 
-def section_grpc_meta_catalog_service(outer_panels):
+def section_grpc_meta_catalog_service(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -2862,7 +2863,7 @@ def section_grpc_meta_catalog_service(outer_panels):
     ]
 
 
-def section_grpc_meta_cluster_service(outer_panels):
+def section_grpc_meta_cluster_service(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -2879,7 +2880,7 @@ def section_grpc_meta_cluster_service(outer_panels):
     ]
 
 
-def section_grpc_meta_stream_manager(outer_panels):
+def section_grpc_meta_stream_manager(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -2903,7 +2904,7 @@ def section_grpc_meta_stream_manager(outer_panels):
     ]
 
 
-def section_grpc_meta_hummock_manager(outer_panels):
+def section_grpc_meta_hummock_manager(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -2934,7 +2935,7 @@ def section_grpc_meta_hummock_manager(outer_panels):
     ]
 
 
-def section_grpc_hummock_meta_client(outer_panels):
+def section_grpc_hummock_meta_client(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -3083,7 +3084,7 @@ def section_grpc_hummock_meta_client(outer_panels):
     ]
 
 
-def section_kafka_native_metrics(outer_panels):
+def section_kafka_native_metrics(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -3353,7 +3354,8 @@ def section_kafka_native_metrics(outer_panels):
         )
     ]
 
-def section_iceberg_metrics(outer_panels):
+
+def section_iceberg_metrics(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -3365,9 +3367,9 @@ def section_iceberg_metrics(outer_panels):
                     [
                         panels.target(
                             f"{metric('iceberg_file_appender_write_qps')}",
-                           "{{executor_id}} @ {{sink_id}}",
+                            "{{executor_id}} @ {{sink_id}}",
                         ),
-                    ]
+                    ],
                 ),
                 panels.timeseries_latency(
                     "Write latency Of Iceberg File Appender",
@@ -3386,12 +3388,12 @@ def section_iceberg_metrics(outer_panels):
                         ),
                     ],
                 ),
-            ]
+            ],
         )
     ]
 
 
-def section_memory_manager(outer_panels):
+def section_memory_manager(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -3482,7 +3484,7 @@ def section_memory_manager(outer_panels):
     ]
 
 
-def section_connector_node(outer_panels):
+def section_connector_node(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -3513,7 +3515,7 @@ def section_connector_node(outer_panels):
     ]
 
 
-def section_sink_metrics(outer_panels):
+def section_sink_metrics(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
@@ -3659,7 +3661,7 @@ def section_sink_metrics(outer_panels):
     ]
 
 
-def section_network_connection(outer_panels):
+def section_network_connection(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     s3_filter = 'connection_type="S3"'
     grpc_filter = 'connection_type=~"grpc.*"'
@@ -3919,6 +3921,60 @@ table_id_json = {
     "type": "query",
 }
 
+stream_graph_extra_json = {
+    "options": {
+        "useBackground": True,
+        "nodeSize": {"minWidth": 30, "minHeight": 30},
+        "legend": {
+            "show": False,
+            "stats": ["mean", "last", "min", "max", "sum"],
+        },
+        "contentUrl": "http://localhost:5691/api/flowchart/table/${table}",
+    },
+    "fieldConfig": {
+        "defaults": {
+            "custom": {"valueName": "last"},
+            "mappings": [],
+            "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                    {
+                        "color": "super-light-green",
+                        "value": None,
+                    },
+                    {"color": "yellow", "value": 0.4},
+                    {"color": "super-light-red", "value": 0.8},
+                ],
+            },
+            "unit": "percentunit",
+            "decimals": 2,
+        },
+        "overrides": [],
+    },
+    "pluginVersion": "1.7.4",
+}
+
+
+def section_stream_graph(outer_panels: Panels):
+    return outer_panels.any_panel(
+        type="jdbranham-diagram-panel",
+        title="Stream Graph & Back-pressure",
+        desciption="desc",
+        targets=[
+            {
+                "datasource": datasource,
+                "refId": "A",
+                "expr": f"avg(rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, downstream_fragment_id) / 1000000000",
+                "range": True,
+                "instant": False,
+                "editorMode": "code",
+                "legendFormat": "m{{fragment_id}}-{{downstream_fragment_id}}",
+            }
+        ],
+        extraJson=stream_graph_extra_json,
+    )
+
+
 if dynamic_source_enabled:
     node_json = merge(node_json, {"datasource": datasource})
     job_json = merge(job_json, {"datasource": datasource})
@@ -3942,6 +3998,7 @@ dashboard = Dashboard(
     templating=templating,
     version=dashboard_version,
     panels=[
+        section_stream_graph(panels),
         *section_actor_info(panels),
         *section_cluster_node(panels),
         *section_recovery_node(panels),
@@ -3969,6 +4026,6 @@ dashboard = Dashboard(
         *section_sink_metrics(panels),
         *section_kafka_native_metrics(panels),
         *section_network_connection(panels),
-        *section_iceberg_metrics(panels)
+        *section_iceberg_metrics(panels),
     ],
 ).auto_panel_ids()

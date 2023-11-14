@@ -87,6 +87,14 @@ class Layout:
         (x, y) = (self.x, self.y)
         return GridPos(h=1, w=24, x=x, y=y)
 
+    def next_full_width_graph(self):
+        self.y += self.h
+        self.x = 0
+        self.w = 24
+        self.h = 8
+        (x, y) = (self.x, self.y)
+        return GridPos(h=8, w=24, x=x, y=y)
+
     def next_half_width_graph(self):
         if self.x + self.w > 24 - 12:
             self.y += self.h
@@ -140,10 +148,9 @@ class Panels:
         )
 
     def target_hidden(self, expr, legendFormat):
-        return Target(expr=expr,
-                      legendFormat=legendFormat,
-                      datasource=self.datasource,
-                      hide=True)
+        return Target(
+            expr=expr, legendFormat=legendFormat, datasource=self.datasource, hide=True
+        )
 
     def table_target(self, expr, hide=False):
         return Target(
@@ -482,6 +489,29 @@ class Panels:
             showHeader=True,
             filterable=True,
             transformations=transformations,
+        )
+
+    def any_panel(self, type, title, desciption, targets, extraJson):
+        gridPos = self.layout.next_full_width_graph()
+
+        @attr.s
+        class AnyPanel(Panel):
+            type = attr.ib(default="", validator=instance_of(str))
+
+            def to_json_data(self):
+                graph_object = {
+                    "type": self.type,
+                }
+                return self.panel_json(graph_object)
+
+        return AnyPanel(
+            type=type,
+            title=title,
+            dataSource=self.datasource,
+            description=desciption,
+            targets=targets,
+            gridPos=gridPos,
+            extraJson=extraJson,
         )
 
     def sub_panel(self):
