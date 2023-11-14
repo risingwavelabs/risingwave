@@ -62,6 +62,18 @@ impl TruncateOffset {
         }
     }
 
+    pub fn check_next_offset(&self, next_offset: TruncateOffset) -> anyhow::Result<()> {
+        if *self >= next_offset {
+            Err(anyhow!(
+                "next offset {:?} should be later than current offset {:?}",
+                next_offset,
+                self
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn check_next_item_epoch(&self, epoch: u64) -> LogStoreResult<()> {
         match self {
             TruncateOffset::Chunk {

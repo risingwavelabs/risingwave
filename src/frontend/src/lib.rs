@@ -33,6 +33,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(result_flattening)]
+#![feature(error_generic_member_access)]
 #![recursion_limit = "256"]
 
 #[cfg(test)]

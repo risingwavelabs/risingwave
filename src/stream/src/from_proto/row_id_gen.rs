@@ -23,7 +23,6 @@ use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct RowIdGenExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for RowIdGenExecutorBuilder {
     type Node = RowIdGenNode;
 

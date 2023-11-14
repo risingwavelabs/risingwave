@@ -14,7 +14,7 @@
 
 use risingwave_pb::catalog::PbSchema;
 use sea_orm::entity::prelude::*;
-use sea_orm::ActiveValue;
+use sea_orm::ActiveValue::Set;
 
 use crate::SchemaId;
 
@@ -49,8 +49,8 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<PbSchema> for ActiveModel {
     fn from(schema: PbSchema) -> Self {
         Self {
-            schema_id: ActiveValue::Set(schema.id),
-            name: ActiveValue::Set(schema.name),
+            schema_id: Set(schema.id as _),
+            name: Set(schema.name),
         }
     }
 }

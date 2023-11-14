@@ -20,7 +20,6 @@ use crate::executor::FilterExecutor;
 
 pub struct FilterExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for FilterExecutorBuilder {
     type Node = FilterNode;
 

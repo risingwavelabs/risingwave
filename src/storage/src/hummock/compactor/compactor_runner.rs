@@ -19,13 +19,14 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
 use risingwave_hummock_sdk::key::{FullKey, PointRange};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
-use risingwave_hummock_sdk::{can_concat, HummockEpoch};
+use risingwave_hummock_sdk::{can_concat, EpochWithGap};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType, SstableInfo};
 use tokio::sync::oneshot::Receiver;
@@ -158,7 +159,7 @@ impl CompactorRunner {
                         tombstone.event_key.left_user_key.as_ref(),
                         tombstone.new_epoch,
                     )) {
-                        tombstone.new_epoch = HummockEpoch::MAX;
+                        tombstone.new_epoch = MAX_EPOCH;
                     }
                 });
                 builder.add_delete_events(range_tombstone_list);
@@ -471,17 +472,27 @@ pub async fn compact(
             object_id_getter.clone(),
             task_progress_guard.progress.clone(),
         );
-        match runner.run().await {
-            Ok((ssts, statistics)) => {
-                output_ssts.push((0, ssts, statistics));
-            }
-            Err(e) => {
-                task_status = TaskStatus::ExecuteFailed;
-                tracing::warn!(
-                    "Compaction task {} failed with error: {:#?}",
-                    compact_task.task_id,
-                    e
-                );
+
+        tokio::select! {
+            _ = &mut shutdown_rx => {
+                tracing::warn!("Compaction task cancelled externally:\n{}", compact_task_to_string(&compact_task));
+                task_status = TaskStatus::ManualCanceled;
+            },
+
+            ret = runner.run() => {
+                match ret {
+                    Ok((ssts, statistics)) => {
+                        output_ssts.push((0, ssts, statistics));
+                    }
+                    Err(e) => {
+                        task_status = TaskStatus::ExecuteFailed;
+                        tracing::warn!(
+                            "Compaction task {} failed with error: {:#?}",
+                            compact_task.task_id,
+                            e
+                        );
+                    }
+                }
             }
         }
 
@@ -491,7 +502,7 @@ pub async fn compact(
             compact_done(compact_task, context.clone(), output_ssts, task_status);
         let cost_time = timer.stop_and_record() * 1000.0;
         tracing::info!(
-            "Finished compaction task in {:?}ms: {}",
+            "Finished fast compaction task in {:?}ms: {}",
             cost_time,
             compact_task_to_string(&compact_task)
         );
@@ -665,7 +676,7 @@ where
         del_iter.seek(full_key.user_key);
         if !task_config.gc_delete_keys
             && del_iter.is_valid()
-            && del_iter.earliest_epoch() != HummockEpoch::MAX
+            && del_iter.earliest_epoch() != MAX_EPOCH
         {
             sst_builder
                 .add_monotonic_delete(MonotonicDeleteEvent {
@@ -688,7 +699,7 @@ where
 
     let mut last_key = FullKey::default();
     let mut watermark_can_see_last_key = false;
-    let mut user_key_last_delete_epoch = HummockEpoch::MAX;
+    let mut user_key_last_delete_epoch = MAX_EPOCH;
     let mut local_stats = StoreLocalStatistic::default();
 
     // Keep table stats changes due to dropping KV.
@@ -715,7 +726,8 @@ where
             last_key.is_empty() || iter_key.user_key != last_key.user_key.as_ref();
 
         let mut drop = false;
-        let epoch = iter_key.epoch;
+
+        let epoch = iter_key.epoch_with_gap.pure_epoch();
         let value = iter.value();
         if is_new_user_key {
             if !max_key.is_empty() && iter_key >= max_key {
@@ -723,7 +735,7 @@ where
             }
             last_key.set(iter_key);
             watermark_can_see_last_key = false;
-            user_key_last_delete_epoch = HummockEpoch::MAX;
+            user_key_last_delete_epoch = MAX_EPOCH;
             if value.is_delete() {
                 local_stats.skip_delete_key_count += 1;
             }
@@ -808,7 +820,7 @@ where
             user_key_last_delete_epoch = epoch;
         } else if earliest_range_delete_which_can_see_iter_key < user_key_last_delete_epoch {
             debug_assert!(
-                iter_key.epoch < earliest_range_delete_which_can_see_iter_key
+                iter_key.epoch_with_gap.pure_epoch() < earliest_range_delete_which_can_see_iter_key
                     && earliest_range_delete_which_can_see_iter_key < user_key_last_delete_epoch
             );
             user_key_last_delete_epoch = earliest_range_delete_which_can_see_iter_key;
@@ -818,7 +830,8 @@ where
             // information about whether a key is deleted by a delete range in
             // the same SST. Therefore we need to construct a corresponding
             // delete key to represent this.
-            iter_key.epoch = earliest_range_delete_which_can_see_iter_key;
+            iter_key.epoch_with_gap =
+                EpochWithGap::new_from_epoch(earliest_range_delete_which_can_see_iter_key);
             sst_builder
                 .add_full_key(iter_key, HummockValue::Delete, is_new_user_key)
                 .verbose_instrument_await("add_full_key_delete")
@@ -826,7 +839,7 @@ where
             last_table_stats.total_key_count += 1;
             last_table_stats.total_key_size += iter_key.encoded_len() as i64;
             last_table_stats.total_value_size += 1;
-            iter_key.epoch = epoch;
+            iter_key.epoch_with_gap = EpochWithGap::new_from_epoch(epoch);
             is_new_user_key = false;
         }
 
@@ -848,7 +861,7 @@ where
                 sst_builder
                     .add_monotonic_delete(MonotonicDeleteEvent {
                         event_key: extended_largest_user_key,
-                        new_epoch: HummockEpoch::MAX,
+                        new_epoch: MAX_EPOCH,
                     })
                     .await?;
                 break;

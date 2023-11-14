@@ -32,7 +32,6 @@ use crate::executor::{CdcBackfillExecutor, FlowControlExecutor, FsSourceExecutor
 const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for SourceExecutorBuilder {
     type Node = SourceNode;
 
@@ -196,12 +195,11 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         // use schema from table_desc
                         let cdc_backfill = CdcBackfillExecutor::new(
                             params.actor_context.clone(),
+                            params.info.clone(),
                             external_table,
                             Box::new(source_exec),
                             (0..table_schema.len()).collect_vec(),
                             None,
-                            table_schema,
-                            params.pk_indices,
                             params.executor_stats,
                             source_state_handler,
                             false,

@@ -41,7 +41,7 @@ use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::stream::{
-    build_actor_connector_splits, SourceManagerRef, SplitAssignment, ThrottleConfig,
+    build_actor_connector_splits, ScaleControllerRef, SourceManagerRef, SplitAssignment,
 };
 use crate::MetaResult;
 
@@ -246,6 +246,8 @@ pub struct CommandContext {
 
     source_manager: SourceManagerRef,
 
+    scale_controller: ScaleControllerRef,
+
     /// The tracing span of this command.
     ///
     /// Differs from [`TracedEpoch`], this span focuses on the lifetime of the corresponding
@@ -268,6 +270,7 @@ impl CommandContext {
         command: Command,
         kind: BarrierKind,
         source_manager: SourceManagerRef,
+        scale_controller: ScaleControllerRef,
         span: tracing::Span,
     ) -> Self {
         Self {
@@ -282,6 +285,7 @@ impl CommandContext {
             command,
             kind,
             source_manager,
+            scale_controller,
             span,
         }
     }
@@ -573,7 +577,7 @@ impl CommandContext {
         }
     }
 
-    /// For `CreateStreamingJob`, returns the actors of the `Chain` nodes. For other commands,
+    /// For `CreateStreamingJob`, returns the actors of the `StreamScan` nodes. For other commands,
     /// returns an empty set.
     pub fn actors_to_track(&self) -> HashSet<ActorId> {
         match &self.command {
@@ -591,11 +595,11 @@ impl CommandContext {
         }
     }
 
-    /// For `CancelStreamingJob`, returns the actors of the `Chain` nodes. For other commands,
+    /// For `CancelStreamingJob`, returns the actors of the `StreamScan` nodes. For other commands,
     /// returns an empty set.
     pub fn actors_to_cancel(&self) -> HashSet<ActorId> {
         match &self.command {
-            Command::CancelStreamingJob(table_fragments) => table_fragments.chain_actor_ids(),
+            Command::CancelStreamingJob(table_fragments) => table_fragments.backfill_actor_ids(),
             _ => Default::default(),
         }
     }
@@ -679,8 +683,6 @@ impl CommandContext {
                     .apply_source_change(None, Some(split_assignment.clone()), None)
                     .await;
             }
-
-            Command::Throttle(_) => {}
 
             Command::DropStreamingJobs(table_ids) => {
                 // Tell compute nodes to drop actors.
@@ -785,60 +787,11 @@ impl CommandContext {
             }
 
             Command::RescheduleFragment { reschedules } => {
-                let mut node_dropped_actors = HashMap::new();
-                for table_fragments in self
-                    .fragment_manager
-                    .get_fragment_read_guard()
-                    .await
-                    .table_fragments()
-                    .values()
-                {
-                    for fragment_id in table_fragments.fragments.keys() {
-                        if let Some(reschedule) = reschedules.get(fragment_id) {
-                            for actor_id in &reschedule.removed_actors {
-                                let node_id = table_fragments
-                                    .actor_status
-                                    .get(actor_id)
-                                    .unwrap()
-                                    .parallel_unit
-                                    .as_ref()
-                                    .unwrap()
-                                    .worker_node_id;
-                                node_dropped_actors
-                                    .entry(node_id as WorkerId)
-                                    .or_insert(vec![])
-                                    .push(*actor_id as ActorId);
-                            }
-                        }
-                    }
-                }
-                self.clean_up(node_dropped_actors).await?;
-
-                // Update fragment info after rescheduling in meta store.
-                self.fragment_manager
-                    .post_apply_reschedules(reschedules.clone())
+                let node_dropped_actors = self
+                    .scale_controller
+                    .post_apply_reschedule(reschedules)
                     .await?;
-
-                let mut stream_source_actor_splits = HashMap::new();
-                let mut stream_source_dropped_actors = HashSet::new();
-
-                for (fragment_id, reschedule) in reschedules {
-                    if !reschedule.actor_splits.is_empty() {
-                        stream_source_actor_splits
-                            .insert(*fragment_id as FragmentId, reschedule.actor_splits.clone());
-                        stream_source_dropped_actors.extend(reschedule.removed_actors.clone());
-                    }
-                }
-
-                if !stream_source_actor_splits.is_empty() {
-                    self.source_manager
-                        .apply_source_change(
-                            None,
-                            Some(stream_source_actor_splits),
-                            Some(stream_source_dropped_actors),
-                        )
-                        .await;
-                }
+                self.clean_up(node_dropped_actors).await?;
             }
 
             Command::ReplaceTable {

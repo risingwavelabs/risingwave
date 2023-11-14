@@ -39,7 +39,7 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
     let fragment = cluster
         .locate_one_fragment([
             identity_contains("materialize"),
-            no_identity_contains("chain"),
+            no_identity_contains("StreamTableScan"),
             no_identity_contains("topn"),
             no_identity_contains("hashjoin"),
         ])
@@ -54,7 +54,7 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
     assert_eq!(fragment.inner.actors.len(), 1);
 
     let chain_fragment = cluster
-        .locate_one_fragment([identity_contains("chain")])
+        .locate_one_fragment([identity_contains("StreamTableScan")])
         .await?;
 
     assert_eq!(
@@ -84,7 +84,7 @@ async fn test_simple_cascade_materialized_view() -> Result<()> {
     assert_eq!(fragment.inner.actors.len(), 6);
 
     let chain_fragment = cluster
-        .locate_one_fragment([identity_contains("chain")])
+        .locate_one_fragment([identity_contains("StreamTableScan")])
         .await?;
 
     assert_eq!(
@@ -129,7 +129,7 @@ async fn test_diamond_cascade_materialized_view() -> Result<()> {
     let fragment = cluster
         .locate_one_fragment([
             identity_contains("materialize"),
-            no_identity_contains("chain"),
+            no_identity_contains("StreamTableScan"),
             no_identity_contains("topn"),
             no_identity_contains("hashjoin"),
         ])

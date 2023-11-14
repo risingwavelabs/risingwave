@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -34,13 +34,18 @@ use crate::executor::{
     ExecutorInfo, Message, PkIndicesRef, Watermark,
 };
 
-#[async_trait]
 pub trait TopNExecutorBase: Send + 'static {
     /// Apply the chunk to the dirty state and get the diffs.
-    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk>;
+    fn apply_chunk(
+        &mut self,
+        chunk: StreamChunk,
+    ) -> impl Future<Output = StreamExecutorResult<StreamChunk>> + Send;
 
     /// Flush the buffered chunk to the storage backend.
-    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
+    fn flush_data(
+        &mut self,
+        epoch: EpochPair,
+    ) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 
     fn info(&self) -> &ExecutorInfo;
 
@@ -68,10 +73,13 @@ pub trait TopNExecutorBase: Send + 'static {
     fn evict(&mut self) {}
     fn update_epoch(&mut self, _epoch: u64) {}
 
-    async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
+    fn init(&mut self, epoch: EpochPair) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 
     /// Handle incoming watermarks
-    async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark>;
+    fn handle_watermark(
+        &mut self,
+        watermark: Watermark,
+    ) -> impl Future<Output = Option<Watermark>> + Send;
 }
 
 /// The struct wraps a [`TopNExecutorBase`]

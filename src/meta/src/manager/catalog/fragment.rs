@@ -586,7 +586,7 @@ impl FragmentManager {
         let mut table_fragments = BTreeMapTransaction::new(map);
         for table_fragment in &to_delete_table_fragments {
             table_fragments.remove(table_fragment.table_id());
-            let chain_actor_ids = table_fragment.chain_actor_ids();
+            let backfill_actor_ids = table_fragment.backfill_actor_ids();
             let dependent_table_ids = table_fragment.dependent_table_ids();
             for (dependent_table_id, _) in dependent_table_ids {
                 if table_ids.contains(&dependent_table_id) {
@@ -609,7 +609,7 @@ impl FragmentManager {
                     .for_each(|a| {
                         a.dispatcher.retain_mut(|d| {
                             d.downstream_actor_id
-                                .retain(|x| !chain_actor_ids.contains(x));
+                                .retain(|x| !backfill_actor_ids.contains(x));
                             !d.downstream_actor_id.is_empty()
                         })
                     });
@@ -1136,7 +1136,7 @@ impl FragmentManager {
                 for (upstream_fragment_id, dispatcher_id) in upstream_fragment_dispatcher_ids {
                     // here we assume the upstream fragment is in the same streaming job as this
                     // fragment. Cross-table references only occur in the case
-                    // of Chain fragment, and the scale of Chain fragment does not introduce updates
+                    // of StreamScan fragment, and the scale of StreamScan fragment does not introduce updates
                     // to the upstream Fragment (because of NoShuffle)
                     let upstream_fragment = table_fragment
                         .fragments
@@ -1301,8 +1301,8 @@ impl FragmentManager {
         Ok(fragments)
     }
 
-    /// Get the downstream `Chain` fragments of the specified table.
-    pub async fn get_downstream_chain_fragments(
+    /// Get the downstream `StreamTableScan` fragments of the specified MV.
+    pub async fn get_downstream_fragments(
         &self,
         table_id: TableId,
     ) -> MetaResult<Vec<(DispatchStrategy, Fragment)>> {
@@ -1341,7 +1341,7 @@ impl FragmentManager {
                             .map(|d| (d.clone(), fragment.clone()))
                     })
                     .inspect(|(_, f)| {
-                        assert!((f.fragment_type_mask & FragmentTypeFlag::ChainNode as u32) != 0)
+                        assert!((f.fragment_type_mask & FragmentTypeFlag::StreamScan as u32) != 0)
                     })
             })
             .collect_vec();

@@ -556,7 +556,7 @@ impl HummockManager {
         versioning_guard.write_limit =
             calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
         trigger_write_stop_stats(&self.metrics, &versioning_guard.write_limit);
-        tracing::info!("Hummock stopped write: {:#?}", versioning_guard.write_limit);
+        tracing::debug!("Hummock stopped write: {:#?}", versioning_guard.write_limit);
 
         Ok(())
     }
@@ -2748,9 +2748,10 @@ impl HummockManager {
                                 // TODO: task cancellation can be batched
                                 for task in cancel_tasks {
                                     tracing::info!(
-                                        "Task with task_id {} with context_id {} has expired due to lack of visible progress",
+                                        "Task with group_id {} task_id {} with context_id {} has expired due to lack of visible progress",
+                                        task.compaction_group_id,
+                                        task.task_id,
                                         context_id,
-                                        task.task_id
                                     );
 
                                     if let Err(e) =

@@ -24,6 +24,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
+use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam, SinkWriterParam};
@@ -83,7 +84,7 @@ async fn build_pulsar_producer(
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct PulsarPropertiesProducer {
     #[serde(rename = "properties.batch.size", default = "_default_batch_size")]
     #[serde_as(as = "DisplayFromStr")]
@@ -98,7 +99,7 @@ pub struct PulsarPropertiesProducer {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct PulsarConfig {
     #[serde(rename = "properties.retry.max", default = "_default_max_retries")]
     #[serde_as(as = "DisplayFromStr")]

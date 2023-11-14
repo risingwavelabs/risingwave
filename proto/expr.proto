@@ -207,6 +207,8 @@ message ExprNode {
     ARRAY_MAX = 547;
     ARRAY_SUM = 548;
     ARRAY_SORT = 549;
+    ARRAY_CONTAINS = 550;
+    ARRAY_CONTAINED = 551;
 
     // Int256 functions
     HEX_TO_INT256 = 560;
@@ -245,6 +247,9 @@ message ExprNode {
     // jsonb #- text[] -> jsonb
     JSONB_DELETE_PATH = 615;
     JSONB_STRIP_NULLS = 616;
+    TO_JSONB = 617;
+    JSONB_BUILD_ARRAY = 618;
+    JSONB_BUILD_OBJECT = 619;
 
     // Non-pure functions below (> 1000)
     // ------------------------

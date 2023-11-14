@@ -98,5 +98,9 @@ pub enum AccessError {
     #[error("Unsupported data type `{ty}`")]
     UnsupportedType { ty: String },
     #[error(transparent)]
-    Other(#[from] anyhow::Error),
+    Other(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }

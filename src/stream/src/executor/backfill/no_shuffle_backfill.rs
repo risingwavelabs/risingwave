@@ -41,7 +41,7 @@ use crate::executor::backfill::utils::{
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, Barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo,
-    Message, PkIndices, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
+    Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
@@ -80,6 +80,8 @@ pub struct BackfillState {
 /// in the same worker, so that we can read uncommitted data from the upstream table without
 /// waiting.
 pub struct BackfillExecutor<S: StateStore> {
+    info: ExecutorInfo,
+
     /// Upstream table
     upstream_table: StorageTable<S>,
     /// Upstream with the same schema with the upstream table.
@@ -96,8 +98,6 @@ pub struct BackfillExecutor<S: StateStore> {
 
     actor_id: ActorId,
 
-    info: ExecutorInfo,
-
     metrics: Arc<StreamingMetrics>,
 
     chunk_size: usize,
@@ -109,29 +109,24 @@ where
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        info: ExecutorInfo,
         upstream_table: StorageTable<S>,
         upstream: BoxedExecutor,
         state_table: Option<StateTable<S>>,
         output_indices: Vec<usize>,
         progress: CreateMviewProgress,
-        schema: Schema,
-        pk_indices: PkIndices,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
-        executor_id: u64,
     ) -> Self {
+        let actor_id = progress.actor_id();
         Self {
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: format!("BackfillExecutor {:X}", executor_id),
-            },
+            info,
             upstream_table,
             upstream,
             state_table,
             output_indices,
-            actor_id: progress.actor_id(),
             progress,
+            actor_id,
             metrics,
             chunk_size,
         }
@@ -145,14 +140,6 @@ where
         let state_len = pk_in_output_indices.len() + METADATA_STATE_LEN;
 
         let pk_order = self.upstream_table.pk_serializer().get_order_types();
-
-        #[cfg(madsim)]
-        let snapshot_read_delay = if let Ok(v) = std::env::var("RW_BACKFILL_SNAPSHOT_READ_DELAY")
-            && let Ok(v) = v.parse::<u64>() {
-            v
-        } else {
-            0
-        };
 
         let upstream_table_id = self.upstream_table.table_id().table_id;
 
@@ -172,6 +159,7 @@ where
             mut old_state,
         } = Self::recover_backfill_state(self.state_table.as_ref(), pk_in_output_indices.len())
             .await?;
+        tracing::trace!(is_finished, row_count, "backfill state recovered");
 
         let mut builder =
             DataChunkBuilder::new(self.upstream_table.schema().data_types(), self.chunk_size);
@@ -303,14 +291,6 @@ where
                                         break 'backfill_loop;
                                     }
                                     Some(chunk) => {
-                                        #[cfg(madsim)]
-                                        {
-                                            tokio::time::sleep(std::time::Duration::from_millis(
-                                                snapshot_read_delay as u64,
-                                            ))
-                                            .await;
-                                        }
-
                                         // Raise the current position.
                                         // As snapshot read streams are ordered by pk, so we can
                                         // just use the last row to update `current_pos`.
