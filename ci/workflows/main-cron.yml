@@ -8,8 +8,11 @@ steps:
   - label: "test notification"
     command: "echo test && exit 1"
     notify:
-      - slack: "risingwave-labs#notification-buildkite@noelkwan"
-        if: build.pull_request.labels includes "ci/main-cron/test-notify"
+      - slack:
+          channels:
+            - "#notification-buildkite"
+          if: build.pull_request.labels includes "ci/main-cron/test-notify"
+          message: "$BUILDKITE_BUILD_URL @Noel Kwan"
 
   - label: "build"
     command: "ci/scripts/build.sh -p ci-release"
