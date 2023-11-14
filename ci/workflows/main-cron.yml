@@ -11,7 +11,7 @@ steps:
     notify:
       - slack: "#notification-buildkite"
         if: build.pull_request.labels includes "ci/main-cron/test-notify"
-        message: "$BUILDKITE_BUILD_URL @Noel Kwan"
+#        message: "$BUILDKITE_BUILD_URL @Noel Kwan"
 
   - label: "build"
     command: "ci/scripts/build.sh -p ci-release"
