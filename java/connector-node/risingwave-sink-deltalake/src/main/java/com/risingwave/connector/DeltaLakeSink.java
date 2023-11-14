@@ -24,7 +24,9 @@ import io.delta.standalone.Operation;
 import io.delta.standalone.OptimisticTransaction;
 import io.delta.standalone.actions.AddFile;
 import io.delta.standalone.exceptions.DeltaConcurrentModificationException;
+import io.delta.standalone.types.TimestampType;
 import java.io.IOException;
+import java.sql.Timestamp;
 import java.util.*;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
@@ -80,7 +82,20 @@ public class DeltaLakeSink extends SinkWriterBase {
                 case INSERT:
                     GenericRecord record = new GenericData.Record(this.sinkSchema);
                     for (int i = 0; i < this.sinkSchema.getFields().size(); i++) {
-                        record.put(i, row.get(i));
+                        Object values;
+                        if (DeltaLakeSinkUtil.convertType(
+                                        this.getTableSchema()
+                                                .getColumnDescs()
+                                                .get(i)
+                                                .getDataType()
+                                                .getTypeName())
+                                .equals(new TimestampType())) {
+                            values = ((Timestamp) row.get(i)).getTime();
+                            System.out.println(values);
+                        } else {
+                            values = row.get(i);
+                        }
+                        record.put(i, values);
                     }
                     try {
                         this.parquetWriter.write(record);
