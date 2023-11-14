@@ -42,6 +42,7 @@ use crate::manager::{CatalogManagerRef, FragmentManagerRef, WorkerId};
 use crate::model::{ActorId, DispatcherId, FragmentId, TableFragments};
 use crate::stream::{
     build_actor_connector_splits, ScaleControllerRef, SourceManagerRef, SplitAssignment,
+    ThrottleConfig,
 };
 use crate::MetaResult;
 
@@ -151,7 +152,7 @@ pub enum Command {
     SourceSplitAssignment(SplitAssignment),
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
-    /// the `rate_limit` of FlowControl Executor after Chain or Source.
+    /// the `rate_limit` of FlowControl Executor after StreamScan or Source.
     Throttle(ThrottleConfig),
 }
 
@@ -662,6 +663,8 @@ impl CommandContext {
     pub async fn post_collect(&self) -> MetaResult<()> {
         match &self.command {
             Command::Plain(_) => {}
+
+            Command::Throttle(_) => {}
 
             Command::Pause(reason) => {
                 if let PausedReason::ConfigChange = reason {

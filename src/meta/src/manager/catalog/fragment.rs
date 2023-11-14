@@ -790,7 +790,7 @@ impl FragmentManager {
                 for actor in &fragment.actors {
                     if let Some(stream_node) = actor.nodes.as_ref() {
                         if let Some(NodeBody::Source(ref node)) = stream_node.node_body.as_ref() {
-                            if let Some(node_inner) = &node.source_inner && node_inner.source_id == source_id {
+                            if let Some(node_inner) = &node.source_inner && node_inner.source_id == source_id as u32 {
                                 table_id_to_apply.insert(*table_id);
                                 continue 'table;
                             }
@@ -855,7 +855,8 @@ impl FragmentManager {
             let mut actor_to_apply = Vec::new();
             for actor in &mut fragment.actors {
                 if let Some(stream_node) = actor.nodes.as_mut() {
-                    if let Some(NodeBody::Chain(ref mut node)) = stream_node.node_body.as_mut() {
+                    if let Some(NodeBody::StreamScan(ref mut node)) = stream_node.node_body.as_mut()
+                    {
                         node.rate_limit = rate_limit;
                         actor_to_apply.push(actor.actor_id);
                     }
