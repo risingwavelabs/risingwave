@@ -26,9 +26,9 @@ impl<C: OpenDalProperties> OpendalEnumerator<C>
 where
     C: Sized + Send + Clone + PartialEq + 'static + Sync,
 {
-    /// create opendal gcs engine.
+    /// create opendal s3 engine.
     pub fn new_s3_source(s3_properties: S3Properties) -> anyhow::Result<Self> {
-        // Create gcs backend builder.
+        // Create s3 backend builder.
         let mut builder = S3::default();
 
         builder.bucket(&s3_properties.bucket_name);
