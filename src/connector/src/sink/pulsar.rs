@@ -354,4 +354,8 @@ impl AsyncTruncateSinkWriter for PulsarSinkWriter {
             Ok(())
         })
     }
+
+    async fn barrier(&mut self) -> Result<()> {
+        self.producer.send_batch().map_err(pulsar_to_sink_err).await
+    }
 }
