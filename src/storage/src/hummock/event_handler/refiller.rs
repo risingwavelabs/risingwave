@@ -20,6 +20,7 @@ use std::task::{ready, Context, Poll};
 use std::time::{Duration, Instant};
 
 use foyer::common::code::Key;
+use foyer::common::range::RangeBoundsExt;
 use futures::future::{join_all, try_join_all};
 use futures::{Future, FutureExt};
 use itertools::Itertools;
@@ -37,7 +38,8 @@ use tokio::task::JoinHandle;
 use crate::hummock::file_cache::preclude::*;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::{
-    Block, HummockError, HummockResult, Sstable, SstableBlockIndex, SstableStoreRef, TableHolder,
+    CachedBlock, FileCacheCompression, HummockError, HummockResult, Sstable, SstableBlockIndex,
+    SstableStoreRef, TableHolder,
 };
 use crate::monitor::StoreLocalStatistic;
 
@@ -382,14 +384,15 @@ impl CacheRefillTask {
             let mut admits = 0;
 
             for block_index in block_index_start..block_index_end {
-                let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
+                let (range, _uncompressed_capacity) = sst.calculate_block_info(block_index);
                 let key = SstableBlockIndex {
                     sst_id: object_id,
                     block_idx: block_index as u64,
                 };
+                // see `CachedBlock::serialized_len()`
                 let mut writer = sstable_store
                     .data_file_cache()
-                    .writer(key, key.serialized_len() + uncompressed_capacity);
+                    .writer(key, key.serialized_len() + 1 + 8 + range.size().unwrap());
 
                 if writer.judge() {
                     admits += 1;
@@ -422,13 +425,16 @@ impl CacheRefillTask {
                         let bytes = data.slice(offset..offset + len);
 
                         let future = async move {
-                            let block = Block::decode(
+                            let value = CachedBlock::Fetched {
                                 bytes,
-                                writer.weight() - writer.key().serialized_len(),
-                            )?;
-                            let block = Box::new(block);
+                                uncompressed_capacity: writer.weight()
+                                    - writer.key().serialized_len(),
+                            };
                             writer.force();
-                            let res = writer.finish(block).await.map_err(HummockError::file_cache);
+                            // TODO(MrCroxx): compress if raw is not compressed?
+                            // skip compression for it may already be compressed.
+                            writer.set_compression(FileCacheCompression::None);
+                            let res = writer.finish(value).await.map_err(HummockError::file_cache);
                             if matches!(res, Ok(true)) {
                                 GLOBAL_CACHE_REFILL_METRICS
                                     .data_refill_success_bytes

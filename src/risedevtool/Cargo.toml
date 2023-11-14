@@ -18,7 +18,7 @@ anyhow = { version = "1", features = ["backtrace"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive"] }
 console = "0.15"
-fs-err = "2.9.0"
+fs-err = "2.10.0"
 glob = "0.3"
 google-cloud-pubsub = "0.20"
 indicatif = "0.17"

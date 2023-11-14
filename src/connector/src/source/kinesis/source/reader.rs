@@ -137,7 +137,7 @@ impl CommonSplitReader for KinesisSplitReader {
             match self.get_records().await {
                 Ok(resp) => {
                     self.shard_iter = resp.next_shard_iterator().map(String::from);
-                    let chunk = (resp.records().unwrap().iter())
+                    let chunk = (resp.records().iter())
                         .map(|r| {
                             SourceMessage::from(KinesisMessage::new(
                                 self.shard_id.clone(),

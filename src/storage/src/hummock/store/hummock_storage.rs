@@ -156,6 +156,7 @@ impl HummockStorage {
         tokio::spawn(start_pinned_version_worker(
             pin_version_rx,
             hummock_meta_client.clone(),
+            options.max_version_pinning_duration_sec,
         ));
         let filter_key_extractor_manager = FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
             filter_key_extractor_manager.clone(),

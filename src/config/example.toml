@@ -98,6 +98,7 @@ min_sst_size_for_streaming_upload = 33554432
 max_sub_compaction = 4
 max_concurrent_compaction_task_number = 16
 max_preload_wait_time_mill = 0
+max_version_pinning_duration_sec = 10800
 object_store_streaming_read_timeout_ms = 600000
 object_store_streaming_upload_timeout_ms = 600000
 object_store_upload_timeout_ms = 3600000
