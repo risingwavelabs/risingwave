@@ -2621,11 +2621,15 @@ impl CatalogManager {
         infos
             .into_iter()
             .flat_map(|info| {
-                guard.database.find_creating_streaming_job_id(&(
-                    info.database_id,
-                    info.schema_id,
-                    info.name,
-                ))
+                let relation_key = &(info.database_id, info.schema_id, info.name);
+                guard
+                    .database
+                    .find_creating_streaming_job_id(&relation_key)
+                    .or_else(|| {
+                        guard
+                            .database
+                            .find_persisted_creating_table_id(&relation_key)
+                    })
             })
             .collect_vec()
     }
