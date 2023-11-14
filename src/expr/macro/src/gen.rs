@@ -984,11 +984,24 @@ impl FunctionAttr {
                 .expect("invalid prebuild syntax"),
             None => quote! { () },
         };
-        let iter = match user_fn.return_type_kind {
-            ReturnTypeKind::T => quote! { iter },
-            ReturnTypeKind::Option => quote! { iter.flatten() },
-            ReturnTypeKind::Result => quote! { iter? },
-            ReturnTypeKind::ResultOption => quote! { value?.flatten() },
+        let iter = quote! { #fn_name(#(#inputs,)* #prebuilt_arg #context) };
+        let mut iter = match user_fn.return_type_kind {
+            ReturnTypeKind::T => quote! { #iter },
+            ReturnTypeKind::Result => quote! { #iter? },
+            ReturnTypeKind::Option => quote! { if let Some(it) = #iter { it } else { continue; } },
+            ReturnTypeKind::ResultOption => {
+                quote! { if let Some(it) = #iter? { it } else { continue; } }
+            }
+        };
+        // if user function accepts non-option arguments, we assume the function
+        // returns empty on null input, so we need to unwrap the inputs before calling.
+        if !user_fn.arg_option {
+            iter = quote! {
+                match (#(#inputs,)*) {
+                    (#(Some(#inputs),)*) => #iter,
+                    _ => continue,
+                }
+            };
         };
         let iterator_item_type = user_fn.iterator_item_kind.clone().ok_or_else(|| {
             Error::new(
@@ -1058,23 +1071,23 @@ impl FunctionAttr {
                         let mut index_builder = I32ArrayBuilder::new(self.chunk_size);
                         #(let mut #builders = #builder_types::with_type(self.chunk_size, #return_types);)*
 
-                        for (i, (row, visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.visibility().iter()).enumerate() {
-                            if let (#(Some(#inputs),)*) = row && visible {
-                                let iter = #fn_name(#(#inputs,)* #prebuilt_arg #context);
-                                for output in #iter {
-                                    index_builder.append(Some(i as i32));
-                                    match #output {
-                                        Some((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* }
-                                        None => { #(#builders.append_null();)* }
-                                    }
+                        for (i, ((#(#inputs,)*), visible)) in multizip((#(#arrays.iter(),)*)).zip_eq_fast(input.visibility().iter()).enumerate() {
+                            if !visible {
+                                continue;
+                            }
+                            for output in #iter {
+                                index_builder.append(Some(i as i32));
+                                match #output {
+                                    Some((#(#outputs),*)) => { #(#builders.append(#optioned_outputs);)* }
+                                    None => { #(#builders.append_null();)* }
+                                }
 
-                                    if index_builder.len() == self.chunk_size {
-                                        let len = index_builder.len();
-                                        let index_array = std::mem::replace(&mut index_builder, I32ArrayBuilder::new(self.chunk_size)).finish().into_ref();
-                                        let value_arrays = [#(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref()),*];
-                                        #build_value_array
-                                        yield DataChunk::new(vec![index_array, value_array], self.chunk_size);
-                                    }
+                                if index_builder.len() == self.chunk_size {
+                                    let len = index_builder.len();
+                                    let index_array = std::mem::replace(&mut index_builder, I32ArrayBuilder::new(self.chunk_size)).finish().into_ref();
+                                    let value_arrays = [#(std::mem::replace(&mut #builders, #builder_types::with_type(self.chunk_size, #return_types)).finish().into_ref()),*];
+                                    #build_value_array
+                                    yield DataChunk::new(vec![index_array, value_array], self.chunk_size);
                                 }
                             }
                         }

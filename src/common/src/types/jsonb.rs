@@ -18,9 +18,10 @@ use std::hash::Hash;
 use bytes::Buf;
 use jsonbb::{Value, ValueRef};
 
-use super::{Datum, IntoOrdered, ListValue, ScalarImpl, F64};
+use super::{Datum, IntoOrdered, ListValue, ScalarImpl, StructRef, ToOwnedDatum, F64};
 use crate::estimate_size::EstimateSize;
 use crate::types::{DataType, Scalar, ScalarRef, StructType, StructValue};
+use crate::util::iter_util::ZipEqDebug;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JsonbVal(pub(crate) Value);
@@ -438,6 +439,29 @@ impl<'a> JsonbRef<'a> {
             let datum = match object.get(name) {
                 Some(v) => Self(v).to_datum(ty)?,
                 None => None,
+            };
+            fields.push(datum);
+        }
+        Ok(StructValue::new(fields))
+    }
+
+    /// Expands the top-level JSON object to a row having the struct type of the `base` argument.
+    pub fn populate_struct(
+        self,
+        ty: &StructType,
+        base: StructRef<'_>,
+    ) -> Result<StructValue, String> {
+        let object = self.0.as_object().ok_or_else(|| {
+            format!(
+                "cannot call populate_composite on a jsonb {}",
+                self.type_name()
+            )
+        })?;
+        let mut fields = Vec::with_capacity(ty.len());
+        for ((name, ty), base_field) in ty.iter().zip_eq_debug(base.iter_fields_ref()) {
+            let datum = match object.get(name) {
+                Some(v) => Self(v).to_datum(ty)?,
+                None => base_field.to_owned_datum(),
             };
             fields.push(datum);
         }
