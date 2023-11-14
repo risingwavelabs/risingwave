@@ -123,8 +123,12 @@ impl VirtualNode {
                 if let Some(serial) = serial {
                     extract_vnode_id_from_row_id(serial.as_row_id())
                 } else {
+                    // NOTE: here it will hash the entire row when the `_row_id` is missing,
+                    // which could result in rows from the same chunk being allocated to different chunks.
+                    // This process doesn’t guarantee the order of rows, producing indeterminate results in some cases,
+                    // such as when `distinct on` is used without an `order by`.
                     let (row, _) = data_chunk.row_at(idx);
-                    Self::compute_row(row, keys)
+                    row.hash(Crc32FastBuilder).into()
                 }
             } ).collect();
         }
