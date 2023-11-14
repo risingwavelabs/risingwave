@@ -61,7 +61,12 @@ async fn assert_event_count(mut session: Session, expected_count: u64) {
     assert_eq!(count, expected_count.to_string());
 }
 
-async fn assert_latest_event(mut session: Session, name: impl ToString, definition: impl ToString) {
+async fn assert_latest_event(
+    mut session: Session,
+    name: impl ToString,
+    definition: impl ToString,
+    error: impl ToString,
+) {
     let event_type = risingwave_pb::meta::event_log::EventType::CreateStreamJobFail.as_str_name();
     let info = session
         .run(format!(
@@ -84,6 +89,39 @@ async fn assert_latest_event(mut session: Session, name: impl ToString, definiti
             .to_lowercase(),
         definition.to_string().to_lowercase()
     );
+    assert!(json
+        .get("error")
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_lowercase()
+        .find(&error.to_string().to_lowercase())
+        .is_some());
+}
+
+async fn test_create_succ(
+    session: &mut Session,
+    expect_failure_count: &mut u64,
+    create_should_succ: &str,
+) {
+    session.run(create_should_succ).await.unwrap();
+    assert_event_count(session.clone(), *expect_failure_count).await;
+}
+
+async fn test_create_fail(
+    session: &mut Session,
+    expect_failure_count: &mut u64,
+    create_should_fail: &str,
+    name: &str,
+    error: &str,
+) {
+    let fp_start_actors_err = "start_actors_err";
+    fail::cfg(fp_start_actors_err, "return").unwrap();
+    session.run(create_should_fail).await.unwrap_err();
+    fail::remove(fp_start_actors_err);
+    *expect_failure_count += 1;
+    assert_event_count(session.clone(), *expect_failure_count).await;
+    assert_latest_event(session.clone(), name, create_should_fail, error).await;
 }
 
 /// Tests event log do record info of stream job creation failure, for CREATE TABLE/MV/INDEX/SINK.
@@ -95,82 +133,85 @@ async fn test_create_stream_job_fail() -> Result<()> {
     let mut expect_failure_count = 0;
 
     // create table succeeds.
-    session
-        .run("create table t1 (c int primary key);")
-        .await
-        .unwrap();
-    assert_event_count(session.clone(), expect_failure_count).await;
+    test_create_succ(
+        &mut session,
+        &mut expect_failure_count,
+        "create table t1 (c int primary key)",
+    )
+    .await;
     // create table fails due to injected failure and subsequent recovery.
-    let fp_start_actors_err = "start_actors_err";
-    let create_should_fail = "create table t2 (c int primary key)";
-    fail::cfg(fp_start_actors_err, "return").unwrap();
-    session.run(create_should_fail).await.unwrap_err();
-    fail::remove(fp_start_actors_err);
-    expect_failure_count += 1;
-    assert_event_count(session.clone(), expect_failure_count).await;
-    assert_latest_event(session.clone(), "t2", create_should_fail).await;
-
-    tokio::time::sleep(Duration::from_secs(WAIT_RECOVERY_SEC)).await;
-    // create table with source succeeds.
-    session
-        .run("create table ts1 (c int primary key) with (connector = 'datagen', datagen.rows.per.second = '1') format native encode native")
-        .await
-        .unwrap();
-    assert_event_count(session.clone(), expect_failure_count).await;
-    // create table with source fails due to injected failure and subsequent recovery.
-    let create_should_fail = "create table ts2 (c int primary key) with (connector = 'datagen', datagen.rows.per.second = '1') format native encode native";
-    fail::cfg(fp_start_actors_err, "return").unwrap();
-    session.run(create_should_fail).await.unwrap_err();
-    fail::remove(fp_start_actors_err);
-    expect_failure_count += 1;
-    assert_event_count(session.clone(), expect_failure_count).await;
-    assert_latest_event(session.clone(), "ts2", create_should_fail).await;
+    test_create_fail(
+        &mut session,
+        &mut expect_failure_count,
+        "create table t2 (c int primary key)",
+        "t2",
+        "clear during recovery",
+    )
+    .await;
 
     // wait for cluster recovery.
     tokio::time::sleep(Duration::from_secs(WAIT_RECOVERY_SEC)).await;
-    // create mv succeeds.
-    session
-        .run("create materialized view mv1 as select * from t1")
-        .await
-        .unwrap();
-    assert_event_count(session.clone(), expect_failure_count).await;
-    // create table fails due to injected failure and subsequent recovery.
-    let create_should_fail = "create materialized view mv2 as select * from mv1";
-    fail::cfg(fp_start_actors_err, "return").unwrap();
-    session.run(create_should_fail).await.unwrap_err();
-    fail::remove(fp_start_actors_err);
-    expect_failure_count += 1;
-    assert_event_count(session.clone(), expect_failure_count).await;
-    assert_latest_event(session.clone(), "mv2", create_should_fail).await;
+    // create table with source succeeds.
+    test_create_succ(
+        &mut session,
+        &mut expect_failure_count,
+        "create table ts1 (c int primary key) with (connector = 'datagen', datagen.rows.per.second = '1') format native encode native",
+    ).await;
+    test_create_fail(
+        &mut session,
+        &mut expect_failure_count,
+        "create table ts2 (c int primary key) with (connector = 'datagen', datagen.rows.per.second = '1') format native encode native",
+        "ts2",
+        "intentional start_actors_err",
+    ).await;
 
     tokio::time::sleep(Duration::from_secs(WAIT_RECOVERY_SEC)).await;
+    // create mv succeeds.
+    test_create_succ(
+        &mut session,
+        &mut expect_failure_count,
+        "create materialized view mv1 as select * from t1",
+    )
+    .await;
+    test_create_fail(
+        &mut session,
+        &mut expect_failure_count,
+        "create materialized view mv2 as select * from t1",
+        "mv2",
+        "clear during recovery",
+    )
+    .await;
+    tokio::time::sleep(Duration::from_secs(WAIT_RECOVERY_SEC)).await;
     // create sink succeeds succeeds.
-    session
-        .run("CREATE SINK s1 AS select * from t1 WITH ( connector = 'blackhole', type = 'append-only', force_append_only = 'true')")
-        .await
-        .unwrap();
-    // create sink fails due to injected failure and subsequent recovery.
-    assert_event_count(session.clone(), expect_failure_count).await;
-    fail::cfg(fp_start_actors_err, "return").unwrap();
-    let create_should_fail = "create sink s2 as select * from t1 with (connector = 'blackhole', type = 'append-only', force_append_only = 'true')";
-    session.run(create_should_fail).await.unwrap_err();
-    fail::remove(fp_start_actors_err);
-    expect_failure_count += 1;
-    assert_event_count(session.clone(), expect_failure_count).await;
-    assert_latest_event(session.clone(), "s2", create_should_fail).await;
+    test_create_succ(
+        &mut session,
+        &mut expect_failure_count,
+        "create sink s1 as select * from t1 with (connector = 'blackhole', type = 'append-only', force_append_only = 'true')",
+    ).await;
+    test_create_fail(
+        &mut session,
+        &mut expect_failure_count,
+        "create sink s2 as select * from t1 with (connector = 'blackhole', type = 'append-only', force_append_only = 'true')",
+        "s2",
+        "intentional start_actors_err",
+    ).await;
 
     tokio::time::sleep(Duration::from_secs(WAIT_RECOVERY_SEC)).await;
     // create index succeeds.
-    session.run("create index i1 on t1(c)").await.unwrap();
-    assert_event_count(session.clone(), expect_failure_count).await;
-    // create index fails due to injected failure and subsequent recovery.
-    let create_should_fail = "create index i2 on t1(c)";
-    fail::cfg(fp_start_actors_err, "return").unwrap();
-    session.run(create_should_fail).await.unwrap_err();
-    fail::remove(fp_start_actors_err);
-    expect_failure_count += 1;
-    assert_event_count(session.clone(), expect_failure_count).await;
-    assert_latest_event(session.clone(), "i2", create_should_fail).await;
+    test_create_succ(
+        &mut session,
+        &mut expect_failure_count,
+        "create index i1 on t1(c)",
+    )
+    .await;
+    test_create_fail(
+        &mut session,
+        &mut expect_failure_count,
+        "create index i2 on t1(c)",
+        "i2",
+        "intentional start_actors_err",
+    )
+    .await;
 
     Ok(())
 }

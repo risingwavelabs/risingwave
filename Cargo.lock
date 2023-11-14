@@ -7963,6 +7963,7 @@ dependencies = [
  "serde_json",
  "sync-point",
  "thiserror",
+ "thiserror-ext",
  "tokio-retry",
  "tokio-stream",
  "tower",

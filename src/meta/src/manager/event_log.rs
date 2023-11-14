@@ -154,6 +154,13 @@ pub fn start_event_log_manager(
     )
 }
 
+/// Gets a lease to attach it to new keys. The function
+/// - either returns the old lease,
+/// - or grant a new lease, if the old lease is likely to expire within `lease_ttl_sec`.
+///
+/// The idea is to make a trade-off between total number of lease granted and timeliness of key expiration.
+/// New lease's ttl is set to `lease_ttl_sec` + `lease_min_interval_sec`.
+/// Whenever a lease's remaining ttl is less than `lease_ttl_sec`, it should not be used for new keys anymore.
 async fn may_get_new_lease(
     etcd_client: &EtcdRetryClient,
     old_lease: Option<LeaseInfo>,
