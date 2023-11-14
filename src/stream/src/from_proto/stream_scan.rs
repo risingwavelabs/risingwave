@@ -76,8 +76,9 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect();
                 let table_type = CdcTableType::from_properties(&properties);
-                let table_reader =
-                    table_type.create_table_reader(properties.clone(), table_schema.clone())?;
+                let table_reader = table_type
+                    .create_table_reader(properties.clone(), table_schema.clone())
+                    .await?;
 
                 let table_pk_order_types = table_desc
                     .pk

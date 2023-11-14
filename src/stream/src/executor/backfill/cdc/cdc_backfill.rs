@@ -472,6 +472,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 .await?;
         }
 
+        // drop reader to release db connection
+        drop(upstream_table_reader);
+
         tracing::info!(
             "CdcBackfill has already finished and forward messages directly to the downstream"
         );
