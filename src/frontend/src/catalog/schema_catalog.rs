@@ -192,7 +192,7 @@ impl SchemaCatalog {
                     .unwrap();
                 entry.get_mut().remove(pos);
             }
-            Vacant(_entry) => unreachable!(),
+            Vacant(_entry) => (),
         };
     }
 
@@ -522,6 +522,10 @@ impl SchemaCatalog {
         self.table_by_id
             .get(&table_id)
             .map(|table| table.name.clone())
+    }
+
+    pub fn get_function_by_id(&self, function_id: FunctionId) -> Option<&Arc<FunctionCatalog>> {
+        self.function_by_id.get(&function_id)
     }
 
     pub fn get_function_by_name_args(

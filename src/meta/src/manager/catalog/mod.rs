@@ -1883,24 +1883,12 @@ impl CatalogManager {
             match object {
                 alter_set_schema_request::Object::TableId(table_id) => {
                     database_core.ensure_table_id(table_id)?;
-                    let Table {
-                        name,
-                        optional_associated_source_id,
-                        ..
-                    } = database_core.tables.get(&table_id).unwrap();
+                    let Table { name, .. } = database_core.tables.get(&table_id).unwrap();
                     database_core.check_relation_name_duplicated(&(
                         database_id,
                         new_schema_id,
                         name.to_owned(),
                     ))?;
-
-                    // Alter table's associated source if any.
-                    if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
-                        *optional_associated_source_id
-                    {
-                        objects_to_alter
-                            .push(alter_set_schema_request::Object::SourceId(source_id));
-                    }
 
                     // Alter table's associated indexes.
                     objects_to_alter.extend(
@@ -1996,8 +1984,6 @@ impl CatalogManager {
                 }
             }
         }
-
-        tracing::info!("relations!! {:#?}", relation_infos);
 
         let version = self
             .notify_frontend(

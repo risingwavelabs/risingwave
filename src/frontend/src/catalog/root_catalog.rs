@@ -293,15 +293,22 @@ impl Catalog {
             schema.update_index(proto);
         } else {
             // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
-            schema.create_index(proto);
-            database
+            let old_schema = database
                 .iter_schemas_mut()
                 .find(|schema| {
                     schema.id() != proto.schema_id
                         && schema.get_index_by_id(&proto.id.into()).is_some()
                 })
+                .unwrap();
+            old_schema.drop_index(proto.id.into());
+            let index_table = old_schema
+                .get_table_by_id(&proto.index_table_id.into())
                 .unwrap()
-                .drop_index(proto.id.into());
+                .clone();
+            old_schema.drop_table(proto.index_table_id.into());
+            let schema = database.get_schema_mut(proto.schema_id).unwrap();
+            schema.create_table(&index_table.to_prost(proto.schema_id, proto.database_id));
+            schema.create_index(proto);
         }
     }
 
@@ -405,6 +412,23 @@ impl Catalog {
     }
 
     pub fn update_function(&mut self, proto: &PbFunction) {
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        if schema.get_function_by_id(proto.id.into()).is_some() {
+            schema.update_function(proto);
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            schema.create_function(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id
+                        && schema.get_function_by_id(proto.id.into()).is_some()
+                })
+                .unwrap()
+                .drop_function(proto.id.into());
+        }
+
         self.get_database_mut(proto.database_id)
             .unwrap()
             .get_schema_mut(proto.schema_id)

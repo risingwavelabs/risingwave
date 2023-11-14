@@ -210,6 +210,7 @@ impl FrontendObserverNode {
             return;
         };
 
+        tracing::info!("notify!! {:#?} {:#?}", resp.operation(), info);
         let mut catalog_guard = self.catalog.write();
         match info {
             Info::Database(database) => match resp.operation() {

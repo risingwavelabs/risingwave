@@ -82,14 +82,14 @@ pub async fn handle_alter_set_schema(
             }
             StatementType::ALTER_SINK => {
                 let (sink, old_schema_name) =
-                    catalog_reader.get_source_by_name(db_name, schema_path, &real_obj_name)?;
+                    catalog_reader.get_sink_by_name(db_name, schema_path, &real_obj_name)?;
                 session.check_privilege_for_drop_alter(old_schema_name, &**sink)?;
                 catalog_reader.check_relation_name_duplicated(
                     db_name,
                     &new_schema_name,
                     &sink.name,
                 )?;
-                Object::SinkId(sink.id)
+                Object::SinkId(sink.id.sink_id)
             }
             StatementType::ALTER_FUNCTION => {
                 let (function, old_schema_name) = if let Some(args) = func_args {
