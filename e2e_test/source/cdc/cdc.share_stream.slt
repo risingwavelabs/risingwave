@@ -77,3 +77,12 @@ SELECT order_id,order_date,customer_name,product_id FROM orders_test order by or
 10001 2020-07-30 10:08:22 Jark 102
 10002 2020-07-30 10:11:09 Sally 105
 10003 2020-07-30 12:00:30 Edward 106
+
+statement ok
+drop source mysql_mytest cascade;
+
+statement error
+drop materialized view products_test_cnt;
+
+statement error
+drop table products_test cascade;
