@@ -30,10 +30,6 @@ pub struct StreamRowIdGen {
 
 impl StreamRowIdGen {
     pub fn new(input: PlanRef, row_id_index: usize) -> Self {
-        // if input.append_only() {
-        //     return Self::new_with_dist(input, row_id_index, Distribution::HashShard(vec![row_id_index]));
-        // }
-
         let distribution = input.distribution().clone();
         Self::new_with_dist(input, row_id_index, distribution)
     }
