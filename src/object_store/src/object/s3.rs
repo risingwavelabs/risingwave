@@ -294,9 +294,7 @@ impl StreamingUploader for S3StreamingUploader {
 
 fn get_upload_body(data: Vec<Bytes>) -> ByteStream {
     SdkBody::retryable(move || {
-        SdkBody::from_body_0_4(Body::wrap_stream(stream::iter(
-            data.clone().into_iter().map(ObjectResult::Ok),
-        )))
+        Body::wrap_stream(stream::iter(data.clone().into_iter().map(ObjectResult::Ok))).into()
     })
     .into()
 }
