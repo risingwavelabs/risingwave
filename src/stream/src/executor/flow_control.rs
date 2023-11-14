@@ -36,7 +36,6 @@ pub struct FlowControlExecutor {
 }
 
 impl FlowControlExecutor {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(input: Box<dyn Executor>, rate_limit: Option<u32>) -> Self {
         Self { input, rate_limit }
     }

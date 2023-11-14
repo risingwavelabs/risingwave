@@ -3181,7 +3181,7 @@ dependencies = [
 [[package]]
 name = "foyer"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=9232b3a#9232b3aa468460b60c44c26eac62dadf3594a383"
+source = "git+https://github.com/MrCroxx/foyer?rev=ce2e222#ce2e22292e39746a6792e74c09718855d06dd0a4"
 dependencies = [
  "foyer-common",
  "foyer-intrusive",
@@ -3192,8 +3192,9 @@ dependencies = [
 [[package]]
 name = "foyer-common"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=9232b3a#9232b3aa468460b60c44c26eac62dadf3594a383"
+source = "git+https://github.com/MrCroxx/foyer?rev=ce2e222#ce2e22292e39746a6792e74c09718855d06dd0a4"
 dependencies = [
+ "anyhow",
  "bytes",
  "foyer-workspace-hack",
  "itertools 0.11.0",
@@ -3207,7 +3208,7 @@ dependencies = [
 [[package]]
 name = "foyer-intrusive"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=9232b3a#9232b3aa468460b60c44c26eac62dadf3594a383"
+source = "git+https://github.com/MrCroxx/foyer?rev=ce2e222#ce2e22292e39746a6792e74c09718855d06dd0a4"
 dependencies = [
  "bytes",
  "cmsketch",
@@ -3224,7 +3225,7 @@ dependencies = [
 [[package]]
 name = "foyer-storage"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=9232b3a#9232b3aa468460b60c44c26eac62dadf3594a383"
+source = "git+https://github.com/MrCroxx/foyer?rev=ce2e222#ce2e22292e39746a6792e74c09718855d06dd0a4"
 dependencies = [
  "anyhow",
  "bitflags 2.4.0",
@@ -3237,6 +3238,7 @@ dependencies = [
  "futures",
  "itertools 0.11.0",
  "libc",
+ "lz4",
  "madsim-tokio",
  "memoffset",
  "nix 0.27.1",
@@ -3253,7 +3255,7 @@ dependencies = [
 [[package]]
 name = "foyer-workspace-hack"
 version = "0.1.0"
-source = "git+https://github.com/MrCroxx/foyer?rev=9232b3a#9232b3aa468460b60c44c26eac62dadf3594a383"
+source = "git+https://github.com/MrCroxx/foyer?rev=ce2e222#ce2e22292e39746a6792e74c09718855d06dd0a4"
 dependencies = [
  "cc",
  "crossbeam-utils",
@@ -3272,9 +3274,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rand",
- "regex",
- "regex-automata 0.4.1",
- "regex-syntax 0.8.0",
  "syn 2.0.37",
  "tokio",
  "tracing",
@@ -3341,9 +3340,12 @@ dependencies = [
 
 [[package]]
 name = "fs-err"
-version = "2.9.0"
+version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0845fa252299212f0389d64ba26f34fa32cfe41588355f21ed507c59a0f64541"
+checksum = "fb5fd9bcbe8b1087cbd395b51498c01bc997cef73e778a80b77a811af5e2d29f"
+dependencies = [
+ "autocfg",
+]
 
 [[package]]
 name = "fs2"
@@ -7651,6 +7653,7 @@ dependencies = [
  "prost-reflect",
  "prost-types 0.12.1",
  "protobuf-native",
+ "protobuf-src",
  "pulsar",
  "quote",
  "rand",
@@ -8217,6 +8220,7 @@ dependencies = [
  "serde_with",
  "serde_yaml",
  "tempfile",
+ "thiserror-ext",
  "walkdir",
  "workspace-hack",
 ]
@@ -9119,9 +9123,9 @@ dependencies = [
 
 [[package]]
 name = "self_cell"
-version = "1.0.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c309e515543e67811222dbc9e3dd7e1056279b782e1dacffe4242b718734fb6"
+checksum = "e388332cd64eb80cd595a00941baf513caffae8dce9cfd0467fc9c66397dade6"
 
 [[package]]
 name = "semver"
@@ -10158,9 +10162,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext"
-version = "0.0.5"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "764a8c5e60a634fe2173e20038dc4d11195559b4099c61fc60e489e813268a68"
+checksum = "b253f2e76cc35b73c1e1b9fd4e28d920f47e27b33b8b3e455bacc62cc0e40bf5"
 dependencies = [
  "thiserror",
  "thiserror-ext-derive",
@@ -10168,9 +10172,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext-derive"
-version = "0.0.5"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5741c7e65941d49975050cfc4d010e2786404a5e1cc130baa12132bfcf8efda4"
+checksum = "11737e1864ac6e6ec08409cdaba243912693de6b5c7fac56a6aeabb0d73a4ad3"
 dependencies = [
  "proc-macro2",
  "quote",

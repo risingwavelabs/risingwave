@@ -8,10 +8,13 @@ statement ok
 CREATE TABLE t (v1 int);
 
 statement ok
-INSERT INTO t select * from generate_series(1, 200000);
+INSERT INTO t select * from generate_series(1, 100000);
 
 statement ok
 FLUSH;
+
+statement ok
+SET STREAMING_RATE_LIMIT=10000;
 
 statement ok
 CREATE MATERIALIZED VIEW m1 as SELECT * FROM t;
@@ -19,48 +22,36 @@ CREATE MATERIALIZED VIEW m1 as SELECT * FROM t;
 statement ok
 CREATE MATERIALIZED VIEW m2 as SELECT * FROM t;
 
-statement ok
-CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
-
-# Disable the flaky check:
-# query I
-# select count(*) from rw_catalog.rw_ddl_progress;
-# ----
-# 3
+query I
+select count(*) from rw_catalog.rw_ddl_progress;
+----
+2
 
 statement error
 SELECT * FROM m1;
 
 # Meta should always reject duplicate mview.
 statement error
-CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
+CREATE MATERIALIZED VIEW m2 as SELECT * FROM t;
 
-# Wait for background ddl to finish
-sleep 30s
+statement ok
+wait;
 
 query I
 select count(*) from m1;
 ----
-200000
+100000
 
 query I
 select count(*) from m2;
 ----
-200000
-
-query I
-select count(*) from m3;
-----
-200000
+100000
 
 statement ok
 DROP MATERIALIZED VIEW m1;
 
 statement ok
 DROP MATERIALIZED VIEW m2;
-
-statement ok
-DROP MATERIALIZED VIEW m3;
 
 statement ok
 DROP TABLE t;

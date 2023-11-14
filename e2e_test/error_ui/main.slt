@@ -25,11 +25,9 @@ select v1 + v2 = v3;
 ----
 db error: ERROR: QueryError
 
-Caused by this error:
-  1: Bind error: failed to bind expression: v1 + v2 = v3
-
-Caused by:
-  Item not found: Invalid column: v1
+Caused by these errors (recent errors listed first):
+  1: Failed to bind expression: v1 + v2 = v3
+  2: Item not found: Invalid column: v1
 
 
 query error

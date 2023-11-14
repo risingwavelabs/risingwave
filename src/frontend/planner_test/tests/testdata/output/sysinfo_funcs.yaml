@@ -19,8 +19,8 @@
   batch_plan: 'BatchValues { rows: [[null:List(Varchar)]] }'
 - sql: |
     select current_schemas(true and false);
-  binder_error: |-
-    Bind error: failed to bind expression: current_schemas(true AND false)
+  binder_error: |
+    Failed to bind expression: current_schemas(true AND false)
 
     Caused by:
       Feature is not yet implemented: Only boolean literals are supported in `current_schemas`.

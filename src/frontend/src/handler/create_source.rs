@@ -31,7 +31,9 @@ use risingwave_connector::parser::{
     schema_to_columns, AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
     SpecificParserConfig,
 };
-use risingwave_connector::schema::schema_registry::name_strategy_from_str;
+use risingwave_connector::schema::schema_registry::{
+    name_strategy_from_str, SCHEMA_REGISTRY_PASSWORD, SCHEMA_REGISTRY_USERNAME,
+};
 use risingwave_connector::source::cdc::{
     CDC_SHARING_MODE_KEY, CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY, CITUS_CDC_CONNECTOR,
     MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR,
@@ -291,6 +293,7 @@ fn get_name_strategy_or_default(name_strategy: Option<AstString>) -> Result<Opti
 /// resolve the schema of the source from external schema file, return the relation's columns. see <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
 /// return `(columns, source info)`
 pub(crate) async fn bind_columns_from_source(
+    session: &SessionImpl,
     source_schema: &ConnectorSchema,
     with_properties: &HashMap<String, String>,
     create_cdc_source_job: bool,
@@ -567,17 +570,25 @@ pub(crate) async fn bind_columns_from_source(
             ))));
         }
     };
+
+    {
+        // fixme: remove this after correctly consuming the two options
+        options.remove(SCHEMA_REGISTRY_USERNAME);
+        options.remove(SCHEMA_REGISTRY_PASSWORD);
+    }
+
     if !options.is_empty() {
-        return Err(RwError::from(ProtocolError(format!(
-            "Unknown options for {:?} {:?}: {}",
+        let err_string = format!(
+            "Get unknown options for {:?} {:?}: {}",
             source_schema.format,
             source_schema.row_encode,
             options
-                .iter()
-                .map(|(k, v)| format!("{}:{}", k, v))
+                .keys()
+                .map(|k| k.to_string())
                 .collect::<Vec<String>>()
                 .join(","),
-        ))));
+        );
+        session.notice_to_user(err_string);
     }
 
     Ok(res)
@@ -707,7 +718,9 @@ pub(crate) async fn bind_source_pk(
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
 
     let res = match (&source_schema.format, &source_schema.row_encode) {
-        (Format::Native, Encode::Native) => sql_defined_pk_names,
+        (Format::Native, Encode::Native) | (Format::Plain, Encode::Json | Encode::Csv) => {
+            sql_defined_pk_names
+        }
         (Format::Plain, _) => {
             if is_key_mq_connector(with_properties) {
                 add_default_key_column(columns);
@@ -1135,8 +1148,13 @@ pub async fn handle_create_source(
     let create_cdc_source_job =
         is_cdc_connector(&with_properties) && session.config().get_cdc_backfill();
 
-    let (columns_from_resolve_source, source_info) =
-        bind_columns_from_source(&source_schema, &with_properties, create_cdc_source_job).await?;
+    let (columns_from_resolve_source, source_info) = bind_columns_from_source(
+        &session,
+        &source_schema,
+        &with_properties,
+        create_cdc_source_job,
+    )
+    .await?;
     let columns_from_sql = bind_sql_columns(&stmt.columns)?;
 
     let mut columns = bind_all_columns(
