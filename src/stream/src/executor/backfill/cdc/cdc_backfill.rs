@@ -446,6 +446,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             state_impl.mutate_state(last_binlog_offset).await?;
         }
 
+        // drop reader to release db connection
+        drop(upstream_table_reader);
+
         tracing::info!(
             actor = self.actor_id,
             "CdcBackfill has already finished and forward messages directly to the downstream"

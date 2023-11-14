@@ -45,7 +45,7 @@ pub struct StreamCdcTableScan {
 impl StreamCdcTableScan {
     pub fn new(core: generic::Scan) -> Self {
         let batch_plan_id = core.ctx.next_plan_node_id();
-        let distribution = Distribution::Single;
+        let distribution = Distribution::SomeShard;
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
