@@ -31,6 +31,7 @@ use aws_sdk_s3::types::{
     CompletedPart, Delete, ExpirationStatus, LifecycleRule, LifecycleRuleFilter, ObjectIdentifier,
 };
 use aws_sdk_s3::Client;
+use aws_smithy_http::futures_stream_adapter::FuturesStreamCompatByteStream;
 use aws_smithy_runtime::client::http::hyper_014::HyperClientBuilder;
 use aws_smithy_runtime_api::client::http::HttpClient;
 use aws_smithy_runtime_api::client::result::SdkError;
@@ -458,9 +459,10 @@ impl ObjectStore for S3ObjectStore {
             Self::should_retry,
         )
         .await?;
+        let reader = FuturesStreamCompatByteStream::new(resp.body);
 
         Ok(Box::pin(
-            resp.body
+            reader
                 .into_stream()
                 .map(|item| item.map_err(ObjectError::from)),
         ))
