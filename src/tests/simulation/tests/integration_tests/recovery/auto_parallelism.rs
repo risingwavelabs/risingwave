@@ -22,8 +22,11 @@ use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_c
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
+/// Please ensure that this value is the same as the one in the `risingwave-auto-scale.toml` file.
+const MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE: u64 = 15;
+
 #[tokio::test]
-async fn test_scale_in_when_recovery() -> Result<()> {
+async fn test_passive_online_and_offline() -> Result<()> {
     let config = Configuration::for_auto_scale();
     let mut cluster = Cluster::start(config.clone()).await?;
     let mut session = cluster.start_session();
@@ -91,12 +94,13 @@ async fn test_scale_in_when_recovery() -> Result<()> {
         config.compute_nodes * config.compute_node_cores
     );
 
-    // ensure the restart delay is longer than config in `risingwave-auto-scale.toml`
-    let restart_delay = 30;
+    cluster.simple_kill_nodes(vec![host_name.clone()]).await;
 
-    cluster
-        .kill_nodes_and_restart(vec![host_name], restart_delay)
-        .await;
+    // wait for a while
+    sleep(Duration::from_secs(
+        MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
+    ))
+    .await;
 
     let table_mat_fragment = cluster
         .locate_one_fragment(vec![
@@ -152,6 +156,42 @@ async fn test_scale_in_when_recovery() -> Result<()> {
 
     session.run("flush").await?;
 
+    session
+        .run("select count(*) from t")
+        .await?
+        .assert_result_eq("150");
+
+    session
+        .run("select * from m")
+        .await?
+        .assert_result_eq("150");
+
+    cluster.simple_restart_nodes(vec![host_name]).await;
+
+    // wait for a while
+    sleep(Duration::from_secs(
+        MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
+    ))
+    .await;
+
+    let table_mat_fragment = cluster
+        .locate_one_fragment(vec![
+            identity_contains("materialize"),
+            no_identity_contains("simpleAgg"),
+        ])
+        .await?;
+
+    let (_, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
+
+    assert_eq!(initialized_parallelism, used_parallel_units.len());
+
+    let stream_scan_fragment = cluster
+        .locate_one_fragment(vec![identity_contains("streamTableScan")])
+        .await?;
+
+    let (_, used_parallel_units) = stream_scan_fragment.parallel_unit_usage();
+
+    assert_eq!(initialized_parallelism, used_parallel_units.len());
     session
         .run("select count(*) from t")
         .await?

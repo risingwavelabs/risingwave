@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod auto_parallelism;
 mod backfill;
 mod background_ddl;
 mod nexmark_recovery;
 mod pause_on_bootstrap;
-mod scale_in_when_recovery;

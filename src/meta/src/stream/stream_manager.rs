@@ -722,7 +722,7 @@ impl GlobalStreamManager {
                     policy.insert(
                         fragment_id,
                         PbWorkerChanges {
-                            include_worker_ids: workers.iter().cloned().collect(),
+                            include_worker_ids: workers.clone(),
                             ..Default::default()
                         },
                     );
@@ -773,9 +773,10 @@ impl GlobalStreamManager {
                 notification = local_notification_rx.recv() => {
                     let notification = notification.expect("local notification channel closed in loop of stream manager");
                     if let LocalNotification::WorkerNodeActivated(worker) = &notification {
-                        self.env.opts.enable_scale_in_when_recovery
-                        if let Err(e) = self.trigger_scale_out(vec![worker.id]).await {
-                            tracing::error!(error = ?e, "Failed to trigger scale out");
+                        if self.env.opts.enable_automatic_parallelism_control {
+                            if let Err(e) = self.trigger_scale_out(vec![worker.id]).await {
+                                tracing::error!(error = ?e, "Failed to trigger scale out");
+                            }
                         }
                     }
                 }
