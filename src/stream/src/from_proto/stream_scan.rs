@@ -102,6 +102,8 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                 );
 
                 let vnodes = params.vnode_bitmap.map(Arc::new);
+                // cdc backfill should be singleton, so vnodes must be None.
+                assert_eq!(None, vnodes);
                 let state_table =
                     StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes)
                         .await;
