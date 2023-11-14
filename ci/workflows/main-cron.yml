@@ -5,6 +5,12 @@ auto-retry: &auto-retry
       limit: 3
 
 steps:
+  - label: "test notification"
+    command: "echo test && exit 1"
+    notify:
+      - slack: "risingwave-labs@noelkwan"
+        if: build.pull_request.labels includes "ci/main-cron/test-notify"
+
   - label: "build"
     command: "ci/scripts/build.sh -p ci-release"
     if: (!build.pull_request.labels includes "ci/main-cron/skip-ci" || build.pull_request.labels includes "ci/run-build")
@@ -273,6 +279,7 @@ steps:
     depends_on:
       - "build"
       - "build-other"
+
     plugins:
       - docker-compose#v4.9.0:
           run: rw-build-env
