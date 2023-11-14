@@ -5,14 +5,18 @@ auto-retry: &auto-retry
       limit: 3
 
 steps:
-  - label: "test notification [trigger fail]"
-    if: build.pull_request.labels includes "ci/main-cron/test-notify"
-    command: "echo test && exit 1"
-
-  - label: "test notification [notify]"
+  - label: "test-notify"
     if: build.pull_request.labels includes "ci/main-cron/test-notify"
     command: |
-      if [ $(buildkite-agent step get "outcome" --step "step1") == "failed" ]; then
+      bash -c 'echo test && exit 1'
+
+  - label: "test notification [notify]"
+    depends_on:
+      - "test-notify"
+    allow_dependency_failure: true
+    if: build.pull_request.labels includes "ci/main-cron/test-notify"
+    command: |
+      if [ $(buildkite-agent step get "outcome" --step "test-notify") == "failed" ]; then
       cat <<- YAML | buildkite-agent pipeline upload 
       steps:
       - label: "Notify slack about soft failed step"
