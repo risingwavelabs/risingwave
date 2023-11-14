@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use rand::Rng;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_connector::sink::catalog::SinkId;
@@ -172,25 +173,55 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<CreateSourceRequest>,
     ) -> Result<Response<CreateSourceResponse>, Status> {
-        let mut source = request.into_inner().get_source()?.clone();
+        let req = request.into_inner();
+        let mut source = req.get_source()?.clone();
 
         // validate connection before starting the DDL procedure
         if let Some(connection_id) = source.connection_id {
             self.validate_connection(connection_id).await?;
         }
 
-        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
-        source.id = id;
+        let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+        source.id = source_id;
 
-        let version = self
-            .ddl_controller
-            .run_command(DdlCommand::CreateSource(source))
-            .await?;
-        Ok(Response::new(CreateSourceResponse {
-            status: None,
-            source_id: id,
-            version,
-        }))
+        match req.fragment_graph {
+            None => {
+                let version = self
+                    .ddl_controller
+                    .run_command(DdlCommand::CreateSource(source))
+                    .await?;
+                Ok(Response::new(CreateSourceResponse {
+                    status: None,
+                    source_id,
+                    version,
+                }))
+            }
+            Some(mut fragment_graph) => {
+                for fragment in fragment_graph.fragments.values_mut() {
+                    visit_fragment(fragment, |node_body| {
+                        if let NodeBody::Source(source_node) = node_body {
+                            source_node.source_inner.as_mut().unwrap().source_id = source_id;
+                        }
+                    });
+                }
+
+                // The id of stream job has been set above
+                let stream_job = StreamingJob::Source(source);
+                let version = self
+                    .ddl_controller
+                    .run_command(DdlCommand::CreateStreamingJob(
+                        stream_job,
+                        fragment_graph,
+                        CreateType::Foreground,
+                    ))
+                    .await?;
+                Ok(Response::new(CreateSourceResponse {
+                    status: None,
+                    source_id,
+                    version,
+                }))
+            }
+        }
     }
 
     async fn drop_source(
@@ -422,29 +453,28 @@ impl DdlService for DdlServiceImpl {
         request: Request<CreateTableRequest>,
     ) -> Result<Response<CreateTableResponse>, Status> {
         let request = request.into_inner();
+        let job_type = request.get_job_type().unwrap_or_default();
         let mut source = request.source;
         let mut mview = request.materialized_view.unwrap();
         let mut fragment_graph = request.fragment_graph.unwrap();
         let table_id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+
         // If we're creating a table with connector, we should additionally fill its ID first.
-        if let Some(source) = &mut source {
+        let source_id = if source.is_some() {
             // Generate source id.
-            let source_id = self.gen_unique_id::<{ IdCategory::Table }>().await?; // TODO: Use source category
-            fill_table_source(source, source_id, &mut mview, table_id, &mut fragment_graph);
+            self.gen_unique_id::<{ IdCategory::Table }>().await? // TODO: Use source category
+        } else {
+            TableId::placeholder().into()
+        };
 
-            // Modify properties for cdc sources if needed
-            if let Some(connector) = source.properties.get(UPSTREAM_SOURCE_KEY) {
-                if matches!(
-                    CdcSourceType::from(connector.as_str()),
-                    CdcSourceType::Mysql
-                ) {
-                    fill_cdc_mysql_server_id(&mut fragment_graph);
-                }
-            }
-        }
+        fill_table_stream_graph_info(
+            source.as_mut().map(|source| (source, source_id)),
+            (&mut mview, table_id),
+            job_type,
+            &mut fragment_graph,
+        );
 
-        let mut stream_job = StreamingJob::Table(source, mview);
-
+        let mut stream_job = StreamingJob::Table(source, mview, job_type);
         stream_job.set_id(table_id);
 
         let version = self
@@ -546,11 +576,16 @@ impl DdlService for DdlServiceImpl {
         {
             let source = source.as_mut().unwrap();
             let table_id = table.id;
-            fill_table_source(source, source_id, &mut table, table_id, &mut fragment_graph);
+            fill_table_stream_graph_info(
+                Some((source, source_id)),
+                (&mut table, table_id),
+                TableJobType::General,
+                &mut fragment_graph,
+            );
         }
         let table_col_index_mapping =
             ColIndexMapping::from_protobuf(&req.table_col_index_mapping.unwrap());
-        let stream_job = StreamingJob::Table(source, table);
+        let stream_job = StreamingJob::Table(source, table, TableJobType::General);
 
         let version = self
             .ddl_controller
@@ -616,6 +651,21 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::AlterSourceColumn(source.unwrap()))
             .await?;
         Ok(Response::new(AlterSourceResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    async fn alter_owner(
+        &self,
+        request: Request<AlterOwnerRequest>,
+    ) -> Result<Response<AlterOwnerResponse>, Status> {
+        let AlterOwnerRequest { object, owner_id } = request.into_inner();
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterTableOwner(object.unwrap(), owner_id))
+            .await?;
+        Ok(Response::new(AlterOwnerResponse {
             status: None,
             version,
         }))
@@ -807,51 +857,60 @@ impl DdlServiceImpl {
     }
 }
 
-fn fill_table_source(
-    source: &mut PbSource,
-    source_id: u32,
-    table: &mut PbTable,
-    table_id: u32,
+/// Fill in necessary information for table stream graph.
+fn fill_table_stream_graph_info(
+    mut source_info: Option<(&mut PbSource, u32)>,
+    table_info: (&mut PbTable, u32),
+    table_job_type: TableJobType,
     fragment_graph: &mut PbStreamFragmentGraph,
 ) {
-    // If we're creating a table with connector, we should additionally fill its ID first.
-    source.id = source_id;
-
-    let mut source_count = 0;
+    let (table, table_id) = table_info;
     for fragment in fragment_graph.fragments.values_mut() {
         visit_fragment(fragment, |node_body| {
             if let NodeBody::Source(source_node) = node_body {
-                // TODO: Refactor using source id.
-                source_node.source_inner.as_mut().unwrap().source_id = source_id;
-                source_count += 1;
+                // If we're creating a table with connector, we should additionally fill its ID first.
+                if let Some(&mut (ref mut source, source_id)) = source_info.as_mut() {
+                    source.id = source_id;
+                    let mut source_count = 0;
+
+                    source_node.source_inner.as_mut().unwrap().source_id = source_id;
+                    source_count += 1;
+
+                    // Generate a random server id for mysql cdc source if needed
+                    // `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
+                    // group (that is, different from any other server id being used by any master or slave)
+                    if let Some(connector) = source.properties.get(UPSTREAM_SOURCE_KEY)
+                        && matches!(CdcSourceType::from(connector.as_str()),CdcSourceType::Mysql) {
+                        let props = &mut source_node.source_inner.as_mut().unwrap().properties;
+                        let rand_server_id = rand::thread_rng().gen_range(1..u32::MAX);
+                        props
+                            .entry("server.id".to_string())
+                            .or_insert(rand_server_id.to_string());
+
+                        // make these two `Source` consistent
+                        props.clone_into(&mut source.properties);
+                    }
+
+                    assert_eq!(
+                        source_count, 1,
+                        "require exactly 1 external stream source when creating table with a connector"
+                    );
+
+                    // Fill in the correct table id for source.
+                    source.optional_associated_table_id =
+                        Some(OptionalAssociatedTableId::AssociatedTableId(table_id));
+
+                    // Fill in the correct source id for mview.
+                    table.optional_associated_source_id =
+                        Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
+                }
             }
-        });
-    }
-    assert_eq!(
-        source_count, 1,
-        "require exactly 1 external stream source when creating table with a connector"
-    );
 
-    // Fill in the correct table id for source.
-    source.optional_associated_table_id =
-        Some(OptionalAssociatedTableId::AssociatedTableId(table_id));
-
-    // Fill in the correct source id for mview.
-    table.optional_associated_source_id =
-        Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
-}
-
-// `server.id` (in the range from 1 to 2^32 - 1). This value MUST be unique across whole replication
-// group (that is, different from any other server id being used by any master or slave)
-fn fill_cdc_mysql_server_id(fragment_graph: &mut PbStreamFragmentGraph) {
-    for fragment in fragment_graph.fragments.values_mut() {
-        visit_fragment(fragment, |node_body| {
-            if let NodeBody::Source(source_node) = node_body {
-                let props = &mut source_node.source_inner.as_mut().unwrap().properties;
-                let rand_server_id = rand::thread_rng().gen_range(1..u32::MAX);
-                props
-                    .entry("server.id".to_string())
-                    .or_insert(rand_server_id.to_string());
+            // fill table id for cdc backfill
+            if let NodeBody::StreamScan(node) = node_body && table_job_type == TableJobType::SharedCdcSource {
+                if let Some(table) = node.cdc_table_desc.as_mut() {
+                    table.table_id = table_id;
+                }
             }
         });
     }

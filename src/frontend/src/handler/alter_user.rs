@@ -102,7 +102,9 @@ fn alter_prost_user_info(
             }
             UserOption::Password(opt) => {
                 // TODO: Behaviour of PostgreSQL: Notice when password is empty string.
-                if let Some(password) = opt && !password.0.is_empty() {
+                if let Some(password) = opt
+                    && !password.0.is_empty()
+                {
                     user_info.auth_info = encrypted_password(&user_info.name, &password.0);
                 } else {
                     user_info.auth_info = None;

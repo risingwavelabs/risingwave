@@ -15,7 +15,6 @@
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::HashKey;
@@ -157,7 +156,6 @@ impl<K: HashKey, const WITH_TIES: bool> DerefMut for GroupTopNCache<K, WITH_TIES
     }
 }
 
-#[async_trait]
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool> TopNExecutorBase
     for InnerGroupTopNExecutor<K, S, WITH_TIES>
 where
@@ -193,7 +191,7 @@ where
                     .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
                     .inc();
                 let mut topn_cache =
-                    TopNCache::new(self.offset, self.limit, self.schema().data_types());
+                    TopNCache::new(self.offset, self.limit, self.info().schema.data_types());
                 self.managed_state
                     .init_topn_cache(Some(group_key), &mut topn_cache)
                     .await?;
@@ -229,7 +227,7 @@ where
             .group_top_n_cached_entry_count
             .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
             .set(self.caches.len() as i64);
-        generate_output(res_rows, res_ops, self.schema())
+        generate_output(res_rows, res_ops, &self.info().schema)
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {

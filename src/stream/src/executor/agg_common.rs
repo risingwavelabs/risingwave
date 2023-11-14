@@ -20,10 +20,10 @@ use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
 use super::aggregation::AggStateStorage;
-use super::Executor;
+use super::{Executor, ExecutorInfo};
 use crate::common::table::state_table::StateTable;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, PkIndices};
+use crate::executor::ActorContextRef;
 use crate::task::AtomicU64Ref;
 
 /// Arguments needed to construct an `XxxAggExecutor`.
@@ -33,8 +33,7 @@ pub struct AggExecutorArgs<S: StateStore, E: AggExecutorExtraArgs> {
     // basic
     pub input: Box<dyn Executor>,
     pub actor_ctx: ActorContextRef,
-    pub pk_indices: PkIndices,
-    pub executor_id: u64,
+    pub info: ExecutorInfo,
 
     // system configs
     pub extreme_cache_size: usize,

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
@@ -104,7 +103,6 @@ impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_T
     }
 }
 
-#[async_trait]
 impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase
     for InnerAppendOnlyTopNExecutor<S, WITH_TIES>
 where
@@ -113,7 +111,7 @@ where
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.cache.limit);
         let mut res_rows = Vec::with_capacity(self.cache.limit);
-        let data_types = self.schema().data_types();
+        let data_types = self.info().schema.data_types();
         let row_deserializer = RowDeserializer::new(data_types);
         // apply the chunk to state table
         for (op, row_ref) in chunk.rows() {
@@ -130,7 +128,7 @@ where
             )?;
         }
 
-        generate_output(res_rows, res_ops, self.schema())
+        generate_output(res_rows, res_ops, &self.info().schema)
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {

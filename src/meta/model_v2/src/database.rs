@@ -14,7 +14,7 @@
 
 use risingwave_pb::catalog::PbDatabase;
 use sea_orm::entity::prelude::*;
-use sea_orm::ActiveValue;
+use sea_orm::ActiveValue::Set;
 
 use crate::DatabaseId;
 
@@ -50,8 +50,8 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<PbDatabase> for ActiveModel {
     fn from(db: PbDatabase) -> Self {
         Self {
-            database_id: ActiveValue::Set(db.id),
-            name: ActiveValue::Set(db.name),
+            database_id: Set(db.id as _),
+            name: Set(db.name),
         }
     }
 }

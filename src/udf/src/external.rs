@@ -59,7 +59,7 @@ impl ArrowFlightUdfClient {
         let full_schema = Schema::try_from(info)
             .map_err(|e| FlightError::DecodeError(format!("Error decoding schema: {e}")))?;
         if input_num > full_schema.fields.len() {
-            return Err(Error::ServiceError(format!(
+            return Err(Error::service_error(format!(
                 "function {:?} schema info not consistency: input_num: {}, total_fields: {}",
                 id,
                 input_num,
@@ -73,13 +73,13 @@ impl ArrowFlightUdfClient {
         let expect_input_types: Vec<_> = args.fields.iter().map(|f| f.data_type()).collect();
         let expect_result_types: Vec<_> = returns.fields.iter().map(|f| f.data_type()).collect();
         if !data_types_match(&expect_input_types, &actual_input_types) {
-            return Err(Error::TypeMismatch(format!(
+            return Err(Error::type_mismatch(format!(
                 "function: {:?}, expect arguments: {:?}, actual: {:?}",
                 id, expect_input_types, actual_input_types
             )));
         }
         if !data_types_match(&expect_result_types, &actual_result_types) {
-            return Err(Error::TypeMismatch(format!(
+            return Err(Error::type_mismatch(format!(
                 "function: {:?}, expect return: {:?}, actual: {:?}",
                 id, expect_result_types, actual_result_types
             )));
@@ -91,7 +91,10 @@ impl ArrowFlightUdfClient {
     pub async fn call(&self, id: &str, input: RecordBatch) -> Result<RecordBatch> {
         let mut output_stream = self.call_stream(id, stream::once(async { input })).await?;
         // TODO: support no output
-        let head = output_stream.next().await.ok_or(Error::NoReturned)??;
+        let head = output_stream
+            .next()
+            .await
+            .ok_or_else(Error::no_returned)??;
         let mut remaining = vec![];
         while let Some(batch) = output_stream.next().await {
             remaining.push(batch?);

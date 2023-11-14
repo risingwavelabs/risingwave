@@ -19,7 +19,7 @@ use bytes::Buf;
 use jsonbb::{Value, ValueRef};
 
 use crate::estimate_size::EstimateSize;
-use crate::types::{Scalar, ScalarRef, F32, F64};
+use crate::types::{Scalar, ScalarRef};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JsonbVal(pub(crate) Value);
@@ -107,19 +107,6 @@ impl Ord for JsonbRef<'_> {
 
 impl crate::types::to_text::ToText for JsonbRef<'_> {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
-        struct FmtToIoUnchecked<F>(F);
-        impl<F: std::fmt::Write> std::io::Write for FmtToIoUnchecked<F> {
-            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-                let s = unsafe { std::str::from_utf8_unchecked(buf) };
-                self.0.write_str(s).map_err(|_| std::io::ErrorKind::Other)?;
-                Ok(buf.len())
-            }
-
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-        }
-
         // Use custom [`ToTextFormatter`] to serialize. If we are okay with the default, this can be
         // just `write!(f, "{}", self.0)`
         use serde::Serialize as _;
@@ -200,62 +187,9 @@ impl From<serde_json::Value> for JsonbVal {
     }
 }
 
-impl From<bool> for JsonbVal {
-    fn from(v: bool) -> Self {
-        Self(v.into())
-    }
-}
-
-impl From<i16> for JsonbVal {
-    fn from(v: i16) -> Self {
-        Self(v.into())
-    }
-}
-
-impl From<i32> for JsonbVal {
-    fn from(v: i32) -> Self {
-        Self(v.into())
-    }
-}
-
-impl From<i64> for JsonbVal {
-    fn from(v: i64) -> Self {
-        Self(v.into())
-    }
-}
-
-impl From<F32> for JsonbVal {
-    fn from(v: F32) -> Self {
-        if v.0 == f32::INFINITY {
-            Self("Infinity".into())
-        } else if v.0 == f32::NEG_INFINITY {
-            Self("-Infinity".into())
-        } else if v.0.is_nan() {
-            Self("NaN".into())
-        } else {
-            Self(v.0.into())
-        }
-    }
-}
-
-// NOTE: Infinite or NaN values are not JSON numbers. They are stored as strings in Postgres.
-impl From<F64> for JsonbVal {
-    fn from(v: F64) -> Self {
-        if v.0 == f64::INFINITY {
-            Self("Infinity".into())
-        } else if v.0 == f64::NEG_INFINITY {
-            Self("-Infinity".into())
-        } else if v.0.is_nan() {
-            Self("NaN".into())
-        } else {
-            Self(v.0.into())
-        }
-    }
-}
-
-impl From<&str> for JsonbVal {
-    fn from(v: &str) -> Self {
-        Self(v.into())
+impl From<Value> for JsonbVal {
+    fn from(v: Value) -> Self {
+        Self(v)
     }
 }
 
@@ -265,9 +199,9 @@ impl From<JsonbRef<'_>> for JsonbVal {
     }
 }
 
-impl From<Value> for JsonbVal {
-    fn from(v: Value) -> Self {
-        Self(v)
+impl From<f64> for JsonbVal {
+    fn from(v: f64) -> Self {
+        Self(v.into())
     }
 }
 
@@ -304,6 +238,24 @@ impl<'a> JsonbRef<'a> {
     /// Returns true if this is a jsonb `null`.
     pub fn is_jsonb_null(&self) -> bool {
         self.0.as_null().is_some()
+    }
+
+    /// Returns true if this is a jsonb null, boolean, number or string.
+    pub fn is_scalar(&self) -> bool {
+        matches!(
+            self.0,
+            ValueRef::Null | ValueRef::Bool(_) | ValueRef::Number(_) | ValueRef::String(_)
+        )
+    }
+
+    /// Returns true if this is a jsonb array.
+    pub fn is_array(&self) -> bool {
+        matches!(self.0, ValueRef::Array(_))
+    }
+
+    /// Returns true if this is a jsonb object.
+    pub fn is_object(&self) -> bool {
+        matches!(self.0, ValueRef::Object(_))
     }
 
     /// Returns the type name of this jsonb.
@@ -412,6 +364,16 @@ impl<'a> JsonbRef<'a> {
             .ok_or_else(|| format!("cannot deconstruct a jsonb {}", self.type_name()))?;
         Ok(object.iter().map(|(k, v)| (k, Self(v))))
     }
+
+    /// Pretty print the jsonb value to the given writer, with 4 spaces indentation.
+    pub fn pretty(self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        use serde::Serialize;
+        use serde_json::ser::{PrettyFormatter, Serializer};
+
+        let mut ser =
+            Serializer::with_formatter(FmtToIoUnchecked(f), PrettyFormatter::with_indent(b"    "));
+        self.0.serialize(&mut ser).map_err(|_| std::fmt::Error)
+    }
 }
 
 /// A custom implementation for [`serde_json::ser::Formatter`] to match PostgreSQL, which adds extra
@@ -446,5 +408,20 @@ impl serde_json::ser::Formatter for ToTextFormatter {
         W: ?Sized + std::io::Write,
     {
         writer.write_all(b": ")
+    }
+}
+
+/// A wrapper of [`std::fmt::Write`] to implement [`std::io::Write`].
+struct FmtToIoUnchecked<F>(F);
+
+impl<F: std::fmt::Write> std::io::Write for FmtToIoUnchecked<F> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let s = unsafe { std::str::from_utf8_unchecked(buf) };
+        self.0.write_str(s).map_err(|_| std::io::ErrorKind::Other)?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }

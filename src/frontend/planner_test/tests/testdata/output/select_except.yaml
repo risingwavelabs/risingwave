@@ -63,8 +63,8 @@
   sql: |
     create table t (v1 int, v2 int, v3 int);
     select * except (v1, v4) from t;
-  binder_error: |-
-    Bind error: failed to bind expression: v4
+  binder_error: |
+    Failed to bind expression: v4
 
     Caused by:
       Item not found: Invalid column: v4
@@ -77,8 +77,8 @@
   sql: |
     create table t (v1 int, v2 int);
     select * except (v1) from t t1 cross join t t2
-  binder_error: |-
-    Bind error: failed to bind expression: v1
+  binder_error: |
+    Failed to bind expression: v1
 
     Caused by:
       internal error: Ambiguous column name: v1

@@ -71,7 +71,7 @@ create sink sink_err from into_kafka with (
 format upsert encode avro (
   schema.registry = 'http://message_queue:8081');
 
-statement error encode extra_column error: field not in avro
+statement error field not in avro
 create sink sink_err as select 1 as extra_column, * from into_kafka with (
   connector = 'kafka',
   topic = 'test-rw-sink-upsert-avro',

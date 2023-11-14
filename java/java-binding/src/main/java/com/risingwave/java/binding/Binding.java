@@ -32,13 +32,17 @@ public class Binding {
     // Return a pointer to the iterator
     static native long iteratorNewHummock(byte[] readPlan);
 
+    static native long iteratorNewStreamChunk(long pointer);
+
     static native boolean iteratorNext(long pointer);
 
     static native void iteratorClose(long pointer);
 
-    static native long iteratorNewFromStreamChunkPayload(byte[] streamChunkPayload);
+    static native long newStreamChunkFromPayload(byte[] streamChunkPayload);
 
-    static native long iteratorNewFromStreamChunkPretty(String str);
+    static native long newStreamChunkFromPretty(String str);
+
+    static native void streamChunkClose(long pointer);
 
     static native byte[] iteratorGetKey(long pointer);
 
@@ -82,6 +86,8 @@ public class Binding {
     public static native byte[] recvSinkWriterRequestFromChannel(long channelPtr);
 
     public static native boolean sendSinkWriterResponseToChannel(long channelPtr, byte[] msg);
+
+    public static native boolean sendSinkWriterErrorToChannel(long channelPtr, String msg);
 
     public static native byte[] recvSinkCoordinatorRequestFromChannel(long channelPtr);
 

@@ -15,7 +15,8 @@
 use itertools::Itertools;
 use risingwave_common::error::ErrorCode::{self, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use simd_json::{BorrowedValue, Mutable, ValueAccess};
+use simd_json::prelude::{MutableObject, ValueAsScalar, ValueObjectAccess};
+use simd_json::BorrowedValue;
 
 use crate::only_parse_payload;
 use crate::parser::canal::operators::*;

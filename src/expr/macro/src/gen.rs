@@ -609,14 +609,18 @@ impl FunctionAttr {
             .collect_vec();
         let downcast_state = if custom_state.is_some() {
             quote! { let mut state: &mut #state_type = state0.downcast_mut(); }
-        } else if let Some(s) = &self.state && s == "ref" {
+        } else if let Some(s) = &self.state
+            && s == "ref"
+        {
             quote! { let mut state: Option<#state_type> = state0.as_datum_mut().as_ref().map(|x| x.as_scalar_ref_impl().try_into().unwrap()); }
         } else {
             quote! { let mut state: Option<#state_type> = state0.as_datum_mut().take().map(|s| s.try_into().unwrap()); }
         };
         let restore_state = if custom_state.is_some() {
             quote! {}
-        } else if let Some(s) = &self.state && s == "ref" {
+        } else if let Some(s) = &self.state
+            && s == "ref"
+        {
             quote! { *state0.as_datum_mut() = state.map(|x| x.to_owned_scalar().into()); }
         } else {
             quote! { *state0.as_datum_mut() = state.map(|s| s.into()); }
@@ -649,14 +653,15 @@ impl FunctionAttr {
         };
         let mut next_state = match user_fn {
             AggregateFnOrImpl::Fn(f) => {
+                let context = f.context.then(|| quote! { &self.context, });
                 let fn_name = format_ident!("{}", f.name);
                 match f.retract {
                     true => {
-                        quote! { #fn_name(state, #args matches!(op, Op::Delete | Op::UpdateDelete)) }
+                        quote! { #fn_name(state, #args matches!(op, Op::Delete | Op::UpdateDelete) #context) }
                     }
                     false => quote! {{
                         #panic_on_retract
-                        #fn_name(state, #args)
+                        #fn_name(state, #args #context)
                     }},
                 }
             }
@@ -694,10 +699,14 @@ impl FunctionAttr {
                     let first_state = if self.init_state.is_some() {
                         // for count, the state will never be None
                         quote! { unreachable!() }
-                    } else if let Some(s) = &self.state && s == "ref" {
+                    } else if let Some(s) = &self.state
+                        && s == "ref"
+                    {
                         // for min/max/first/last, the state is the first value
                         quote! { Some(v0) }
-                    } else if let AggregateFnOrImpl::Impl(impl_) = user_fn && impl_.create_state.is_some() {
+                    } else if let AggregateFnOrImpl::Impl(impl_) = user_fn
+                        && impl_.create_state.is_some()
+                    {
                         // use user-defined create_state function
                         quote! {{
                             let state = self.function.create_state();
@@ -727,7 +736,9 @@ impl FunctionAttr {
         };
         let get_result = if custom_state.is_some() {
             quote! { Ok(Some(state.downcast_ref::<#state_type>().into())) }
-        } else if let AggregateFnOrImpl::Impl(impl_) = user_fn && impl_.finalize.is_some() {
+        } else if let AggregateFnOrImpl::Impl(impl_) = user_fn
+            && impl_.finalize.is_some()
+        {
             quote! {
                 let state = match state.as_datum() {
                     Some(s) => s.as_scalar_ref_impl().try_into().unwrap(),
@@ -771,20 +782,25 @@ impl FunctionAttr {
                 use risingwave_common::buffer::Bitmap;
                 use risingwave_common::estimate_size::EstimateSize;
 
+                use risingwave_expr::expr::Context;
                 use risingwave_expr::Result;
                 use risingwave_expr::aggregate::AggregateState;
                 use risingwave_expr::codegen::async_trait;
 
-                #[derive(Clone)]
+                let context = Context {
+                    return_type: agg.return_type.clone(),
+                    arg_types: agg.args.arg_types().to_owned(),
+                };
+
                 struct Agg {
-                    return_type: DataType,
+                    context: Context,
                     #function_field
                 }
 
                 #[async_trait]
                 impl risingwave_expr::aggregate::AggregateFunction for Agg {
                     fn return_type(&self) -> DataType {
-                        self.return_type.clone()
+                        self.context.return_type.clone()
                     }
 
                     #create_state
@@ -833,7 +849,7 @@ impl FunctionAttr {
                 }
 
                 Ok(Box::new(Agg {
-                    return_type: agg.return_type.clone(),
+                    context,
                     #function_new
                 }))
             }
@@ -1109,8 +1125,12 @@ fn data_type(ty: &str) -> TokenStream2 {
 /// output_types("struct<key varchar, value jsonb>") -> ["varchar", "jsonb"]
 /// ```
 fn output_types(ty: &str) -> Vec<&str> {
-    if let Some(s) = ty.strip_prefix("struct<") && let Some(args) = s.strip_suffix('>') {
-        args.split(',').map(|s| s.split_whitespace().nth(1).unwrap()).collect()
+    if let Some(s) = ty.strip_prefix("struct<")
+        && let Some(args) = s.strip_suffix('>')
+    {
+        args.split(',')
+            .map(|s| s.split_whitespace().nth(1).unwrap())
+            .collect()
     } else {
         vec![ty]
     }

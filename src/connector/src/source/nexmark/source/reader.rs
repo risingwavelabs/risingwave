@@ -24,6 +24,7 @@ use nexmark::event::EventType;
 use nexmark::EventGenerator;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::error::RwError;
+use risingwave_common::estimate_size::EstimateSize;
 use tokio::time::Instant;
 
 use crate::parser::ParserConfig;
@@ -114,13 +115,18 @@ impl SplitReader for NexmarkSplitReader {
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;
         spawn_data_generation_stream(
-            self.into_native_stream()
-                .inspect_ok(move |chunk_with_states| {
+            self.into_native_stream().inspect_ok(
+                move |chunk_with_states: &StreamChunkWithState| {
                     metrics
                         .partition_input_count
                         .with_label_values(&[&actor_id, &source_id, &split_id])
                         .inc_by(chunk_with_states.chunk.cardinality() as u64);
-                }),
+                    metrics
+                        .partition_input_bytes
+                        .with_label_values(&[&actor_id, &source_id, &split_id])
+                        .inc_by(chunk_with_states.chunk.estimated_size() as u64);
+                },
+            ),
             BUFFER_SIZE,
         )
         .boxed()

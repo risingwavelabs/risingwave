@@ -19,8 +19,8 @@
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v1 from (select v2, v1 as v3 from t) where v2 > 1;
-  binder_error: |-
-    Bind error: failed to bind expression: v1
+  binder_error: |
+    Failed to bind expression: v1
 
     Caused by:
       Item not found: Invalid column: v1
@@ -89,24 +89,24 @@
 - sql: |
     create table t(x int);
     select * from t, (select * from t as t2 order by t.x desc) as t3;
-  binder_error: |-
-    Bind error: failed to bind expression: t.x
+  binder_error: |
+    Failed to bind expression: t.x
 
     Caused by:
       Item not found: Invalid column: x
 - sql: |
     create table t(x int);
     select * from t, (select t.x) as t1;
-  binder_error: |-
-    Bind error: failed to bind expression: t.x
+  binder_error: |
+    Failed to bind expression: t.x
 
     Caused by:
       Item not found: Invalid column: x
 - sql: |
     create table t(x int);
     select * from t CROSS JOIN (select t.x) as t1;
-  binder_error: |-
-    Bind error: failed to bind expression: t.x
+  binder_error: |
+    Failed to bind expression: t.x
 
     Caused by:
       Item not found: Invalid column: x
@@ -135,14 +135,12 @@
           select * from t where v1 = c
       ) as t0
     );
-  binder_error: |-
-    Bind error: failed to bind expression: EXISTS (SELECT * FROM bc, (SELECT * FROM t WHERE v1 = c) AS t0)
+  binder_error: |
+    Failed to bind expression: EXISTS (SELECT * FROM bc, (SELECT * FROM t WHERE v1 = c) AS t0)
 
-    Caused by:
-      Bind error: failed to bind expression: v1 = c
-
-    Caused by:
-      Item not found: Invalid column: c
+    Caused by these errors (recent errors listed first):
+      1: Failed to bind expression: v1 = c
+      2: Item not found: Invalid column: c
 - name: We need to ensure doubly nested reference to a left table is not permitted
   sql: |
     create table ab (a int, b int);
@@ -153,8 +151,8 @@
           select * from t where v1 = a
       ) as t0
     );
-  binder_error: |-
-    Bind error: failed to bind expression: v1 = a
+  binder_error: |
+    Failed to bind expression: v1 = a
 
     Caused by:
       Item not found: Invalid column: a
@@ -237,7 +235,7 @@
   logical_plan: |-
     LogicalProject { exprs: [rw_schemas.name, rw_tables.name, Case(($expr1 = 'r':Varchar), 'table':Varchar, ($expr1 = 'v':Varchar), 'view':Varchar, ($expr1 = 'm':Varchar), 'materialized view':Varchar, ($expr1 = 'i':Varchar), 'index':Varchar, ($expr1 = 'S':Varchar), 'sequence':Varchar, ($expr1 = 's':Varchar), 'special':Varchar, ($expr1 = 't':Varchar), 'TOAST table':Varchar, ($expr1 = 'f':Varchar), 'foreign table':Varchar, ($expr1 = 'p':Varchar), 'partitioned table':Varchar, ($expr1 = 'I':Varchar), 'partitioned index':Varchar) as $expr3, rw_users.name] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalFilter { predicate: In($expr1, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND (rw_schemas.name <> 'pg_catalog':Varchar) AND IsNull(RegexpMatch(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) }
+      ├─LogicalFilter { predicate: In($expr1, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND (rw_schemas.name <> 'pg_catalog':Varchar) AND Not(RegexpEq(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) }
       │ └─LogicalJoin { type: LeftOuter, on: (rw_schemas.id = rw_tables.schema_id), output: all }
       │   ├─LogicalShare { id: 16 }
       │   │ └─LogicalProject { exprs: [rw_tables.id, rw_tables.name, rw_tables.schema_id, rw_tables.owner, Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) as $expr1, 0:Int32, 0:Int32, Array as $expr2] }
@@ -302,7 +300,7 @@
             │   │     └─BatchFilter { predicate: true }
             │   │       └─BatchScan { table: rw_views, columns: [rw_views.name, rw_views.schema_id, rw_views.owner], distribution: Single }
             │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
-            │     └─BatchFilter { predicate: (rw_schemas.name <> 'pg_catalog':Varchar) AND IsNull(RegexpMatch(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) }
+            │     └─BatchFilter { predicate: (rw_schemas.name <> 'pg_catalog':Varchar) AND Not(RegexpEq(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) }
             │       └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
             └─BatchExchange { order: [], dist: HashShard(rw_users.id) }
               └─BatchProject { exprs: [rw_users.name, rw_users.id] }
@@ -803,15 +801,15 @@
     select * from integers where 2 in (select count(distinct k) + count(distinct v) from rows where correlated_col = integers.correlated_col);
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashJoin { type: LeftSemi, predicate: integers.correlated_col IS NOT DISTINCT FROM integers.correlated_col AND 2:Int64 = $expr1, output: [integers.i, integers.correlated_col] }
+    └─BatchHashJoin { type: LeftSemi, predicate: integers.correlated_col IS NOT DISTINCT FROM integers.correlated_col_expanded AND 2:Int64 = $expr1, output: [integers.i, integers.correlated_col] }
       ├─BatchExchange { order: [], dist: HashShard(integers.correlated_col) }
       │ └─BatchProject { exprs: [integers.i, integers.correlated_col, 2:Int64] }
       │   └─BatchScan { table: integers, columns: [integers.i, integers.correlated_col], distribution: SomeShard }
-      └─BatchProject { exprs: [integers.correlated_col, (count(rows.k) filter((flag = 0:Int64)) + count(rows.v) filter((flag = 1:Int64))) as $expr1] }
-        └─BatchHashAgg { group_key: [integers.correlated_col], aggs: [count(rows.k) filter((flag = 0:Int64)), count(rows.v) filter((flag = 1:Int64))] }
-          └─BatchExchange { order: [], dist: HashShard(integers.correlated_col) }
-            └─BatchHashAgg { group_key: [integers.correlated_col, rows.k, rows.v, flag], aggs: [] }
-              └─BatchExchange { order: [], dist: HashShard(integers.correlated_col, rows.k, rows.v, flag) }
+      └─BatchProject { exprs: [integers.correlated_col_expanded, (count(rows.k_expanded) filter((flag = 0:Int64)) + count(rows.v_expanded) filter((flag = 1:Int64))) as $expr1] }
+        └─BatchHashAgg { group_key: [integers.correlated_col_expanded], aggs: [count(rows.k_expanded) filter((flag = 0:Int64)), count(rows.v_expanded) filter((flag = 1:Int64))] }
+          └─BatchExchange { order: [], dist: HashShard(integers.correlated_col_expanded) }
+            └─BatchHashAgg { group_key: [integers.correlated_col_expanded, rows.k_expanded, rows.v_expanded, flag], aggs: [] }
+              └─BatchExchange { order: [], dist: HashShard(integers.correlated_col_expanded, rows.k_expanded, rows.v_expanded, flag) }
                 └─BatchExpand { column_subsets: [[integers.correlated_col, rows.k], [integers.correlated_col, rows.v]] }
                   └─BatchHashJoin { type: LeftOuter, predicate: integers.correlated_col IS NOT DISTINCT FROM rows.correlated_col, output: [integers.correlated_col, rows.k, rows.v, 1:Int32] }
                     ├─BatchHashAgg { group_key: [integers.correlated_col], aggs: [] }
@@ -847,7 +845,7 @@
     BatchHopWindow { time_col: t1.ts, slide: 00:10:00, size: 00:30:00, output: all }
     └─BatchExchange { order: [], dist: Single }
       └─BatchFilter { predicate: IsNotNull(t1.ts) }
-        └─BatchLookupJoin { type: Inner, predicate: 1:Int32 = t1.k AND IsNotNull(t1.ts), output: all }
+        └─BatchLookupJoin { type: Inner, predicate: 1:Int32 = t1.k AND IsNotNull(t1.ts), output: all, lookup table: t1 }
           └─BatchExchange { order: [], dist: UpstreamHashShard(1:Int32) }
             └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
               └─BatchExchange { order: [], dist: HashShard(1:Int32) }

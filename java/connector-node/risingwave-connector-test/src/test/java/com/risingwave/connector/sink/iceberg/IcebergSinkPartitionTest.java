@@ -18,7 +18,6 @@ import static com.risingwave.proto.Data.*;
 import static org.junit.Assert.*;
 import static org.junit.Assert.assertEquals;
 
-import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.risingwave.connector.AppendOnlyIcebergSinkWriter;
@@ -29,6 +28,7 @@ import com.risingwave.proto.ConnectorServiceProto;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -137,7 +137,7 @@ public class IcebergSinkPartitionTest {
 
         try {
             sink.beginEpoch(233);
-            sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 1, "Alice", "aaa")));
+            sink.write(Arrays.asList(new ArraySinkRow(Op.INSERT, 1, "Alice", "aaa")));
             ConnectorServiceProto.SinkMetadata metadata = sink.barrier(true).get();
             coordinator.commit(233, Collections.singletonList(metadata));
 
@@ -150,7 +150,7 @@ public class IcebergSinkPartitionTest {
             validateTableWithSpark(expected);
 
             sink.beginEpoch(234);
-            sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 2, "Bob", "bbb")));
+            sink.write(Arrays.asList(new ArraySinkRow(Op.INSERT, 2, "Bob", "bbb")));
             validateTableWithIceberg(expected);
             validateTableWithSpark(expected);
 
@@ -186,7 +186,7 @@ public class IcebergSinkPartitionTest {
         try {
             sink.beginEpoch(233);
             sink.write(
-                    Iterators.forArray(
+                    Arrays.asList(
                             new ArraySinkRow(Op.INSERT, 1, "Alice", "aaa"),
                             new ArraySinkRow(Op.INSERT, 2, "Bob", "bbb")));
             ConnectorServiceProto.SinkMetadata metadata = sink.barrier(true).get();

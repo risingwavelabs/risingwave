@@ -515,6 +515,56 @@ mod tests {
         assert_eq!(row, expected.into());
     }
 
+    #[cfg(not(madsim))] // Traced test does not work with madsim
+    #[tokio::test]
+    #[tracing_test::traced_test]
+    async fn test_json_parse_struct_missing_field_warning() {
+        let descs = vec![ColumnDesc::new_struct(
+            "struct",
+            0,
+            "",
+            vec![
+                ColumnDesc::new_atomic(DataType::Varchar, "varchar", 1),
+                ColumnDesc::new_atomic(DataType::Boolean, "boolean", 2),
+            ],
+        )]
+        .iter()
+        .map(SourceColumnDesc::from)
+        .collect_vec();
+
+        let parser = JsonParser::new(
+            SpecificParserConfig::DEFAULT_PLAIN_JSON,
+            descs.clone(),
+            Default::default(),
+        )
+        .unwrap();
+        let payload = br#"
+        {
+            "struct": {
+                "varchar": "varchar"
+            }
+        }
+        "#
+        .to_vec();
+        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
+        {
+            let writer = builder.row_writer();
+            parser.parse_inner(payload, writer).await.unwrap();
+        }
+        let chunk = builder.finish();
+        let (op, row) = chunk.rows().next().unwrap();
+        assert_eq!(op, Op::Insert);
+        let row = row.into_owned_row().into_inner();
+
+        let expected = vec![Some(ScalarImpl::Struct(StructValue::new(vec![
+            Some(ScalarImpl::Utf8("varchar".into())),
+            None,
+        ])))];
+        assert_eq!(row, expected.into());
+
+        assert!(logs_contain("undefined nested field, padding with `NULL`"));
+    }
+
     #[tokio::test]
     async fn test_json_upsert_parser() {
         let items = [

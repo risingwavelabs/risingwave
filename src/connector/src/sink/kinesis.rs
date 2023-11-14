@@ -25,6 +25,7 @@ use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
+use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
 use super::SinkParam;
@@ -127,7 +128,7 @@ impl Sink for KinesisSink {
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct KinesisSinkConfig {
     #[serde(flatten)]
     pub common: KinesisCommon,

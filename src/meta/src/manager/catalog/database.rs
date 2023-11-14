@@ -345,6 +345,17 @@ impl DatabaseManager {
             .copied()
             .chain(self.sinks.keys().copied())
             .chain(self.indexes.keys().copied())
+            .chain(self.sources.keys().copied())
+            .chain(
+                // filter cdc source jobs
+                self.sources
+                    .iter()
+                    .filter(|(_, source)| {
+                        source.info.as_ref().is_some_and(|info| info.cdc_source_job)
+                    })
+                    .map(|(id, _)| id)
+                    .copied(),
+            )
     }
 
     pub fn check_database_duplicated(&self, database_key: &DatabaseKey) -> MetaResult<()> {
@@ -431,6 +442,18 @@ impl DatabaseManager {
         self.in_progress_creation_streaming_job
             .iter()
             .find(|(_, v)| *v == key)
+            .map(|(k, _)| *k)
+    }
+
+    pub fn find_persisted_creating_table_id(&self, key: &RelationKey) -> Option<TableId> {
+        self.tables
+            .iter()
+            .find(|(_, t)| {
+                t.stream_job_status == PbStreamJobStatus::Creating as i32
+                    && t.database_id == key.0
+                    && t.schema_id == key.1
+                    && t.name == key.2
+            })
             .map(|(k, _)| *k)
     }
 

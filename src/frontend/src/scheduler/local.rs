@@ -282,7 +282,10 @@ impl LocalQueryExecution {
                     // `exchange_source`.
                     let (parallel_unit_ids, vnode_bitmaps): (Vec<_>, Vec<_>) =
                         vnode_bitmaps.clone().into_iter().unzip();
-                    let workers = self.worker_node_manager.manager.get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+                    let workers = self
+                        .worker_node_manager
+                        .manager
+                        .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
                     for (idx, (worker_node, partition)) in
                         (workers.into_iter().zip_eq_fast(vnode_bitmaps.into_iter())).enumerate()
                     {
@@ -355,8 +358,12 @@ impl LocalQueryExecution {
                         sources.push(exchange_source);
                     }
                 } else {
-                    let second_stage_plan_node =
-                        self.convert_plan_node(&second_stage.root, &mut None, None, next_executor_id)?;
+                    let second_stage_plan_node = self.convert_plan_node(
+                        &second_stage.root,
+                        &mut None,
+                        None,
+                        next_executor_id,
+                    )?;
                     let second_stage_plan_fragment = PlanFragment {
                         root: Some(second_stage_plan_node),
                         exchange_info: Some(ExchangeInfo {

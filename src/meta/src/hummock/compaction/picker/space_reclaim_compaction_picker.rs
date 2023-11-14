@@ -63,12 +63,16 @@ impl SpaceReclaimCompactionPicker {
     ) -> Option<CompactionInput> {
         assert!(!levels.levels.is_empty());
         let mut select_input_ssts = vec![];
-        if let Some(l0) = levels.l0.as_ref() && state.last_level == 0 {
+        if let Some(l0) = levels.l0.as_ref()
+            && state.last_level == 0
+        {
             // only pick trivial reclaim sstables because this kind of task could be optimized and do not need send to compactor.
             for level in &l0.sub_levels {
                 for sst in &level.table_infos {
                     let exist_count = self.exist_table_count(sst);
-                    if exist_count == sst.table_ids.len() ||  level_handlers[0].is_pending_compact( &sst.sst_id) {
+                    if exist_count == sst.table_ids.len()
+                        || level_handlers[0].is_pending_compact(&sst.sst_id)
+                    {
                         if !select_input_ssts.is_empty() {
                             break;
                         }

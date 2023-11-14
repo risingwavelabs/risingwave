@@ -12,6 +12,7 @@ async-trait = "0.1"
 aws-config = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
+aws-smithy-types = { workspace = true }
 bcc = { version = "0.0.33", optional = true }
 bytes = "1"
 bytesize = { version = "1", features = ["serde"] }

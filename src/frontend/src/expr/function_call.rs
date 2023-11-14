@@ -80,6 +80,8 @@ impl std::fmt::Debug for FunctionCall {
                 ExprType::BitwiseAnd => debug_binary_op(f, "&", &self.inputs),
                 ExprType::BitwiseOr => debug_binary_op(f, "|", &self.inputs),
                 ExprType::BitwiseXor => debug_binary_op(f, "#", &self.inputs),
+                ExprType::ArrayContains => debug_binary_op(f, "@>", &self.inputs),
+                ExprType::ArrayContained => debug_binary_op(f, "<@", &self.inputs),
                 _ => {
                     let func_name = format!("{:?}", self.func_type);
                     let mut builder = f.debug_tuple(&func_name);
@@ -111,12 +113,16 @@ impl FunctionCall {
         target: DataType,
         allows: CastContext,
     ) -> Result<(), CastError> {
-        if let ExprImpl::Parameter(expr) = child && !expr.has_infer() {
+        if let ExprImpl::Parameter(expr) = child
+            && !expr.has_infer()
+        {
             // Always Ok below. Safe to mutate `expr` (from `child`).
             expr.cast_infer_type(target);
             return Ok(());
         }
-        if let ExprImpl::FunctionCall(func) = child && func.func_type == ExprType::Row {
+        if let ExprImpl::FunctionCall(func) = child
+            && func.func_type == ExprType::Row
+        {
             // Row function will have empty fields in Datatype::Struct at this point. Therefore,
             // we will need to take some special care to generate the cast types. For normal struct
             // types, they will be handled in `cast_ok`.
@@ -354,6 +360,12 @@ impl std::fmt::Debug for FunctionCallDisplay<'_> {
             }
             ExprType::BitwiseXor => {
                 explain_verbose_binary_op(f, "#", &that.inputs, self.input_schema)
+            }
+            ExprType::ArrayContains => {
+                explain_verbose_binary_op(f, "@>", &that.inputs, self.input_schema)
+            }
+            ExprType::ArrayContained => {
+                explain_verbose_binary_op(f, "<@", &that.inputs, self.input_schema)
             }
             ExprType::Proctime => {
                 write!(f, "{:?}", that.func_type)

@@ -32,15 +32,22 @@ use super::*;
 /// It is used to throttle problematic MVs that are consuming too much resources.
 pub struct FlowControlExecutor {
     input: BoxedExecutor,
+    identity: String,
     rate_limit: Option<u32>,
 }
 
 impl FlowControlExecutor {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(input: Box<dyn Executor>, rate_limit: Option<u32>) -> Self {
-        #[cfg(madsim)]
-        println!("FlowControlExecutor rate limiter is disabled in madsim as it will spawn system threads");
-        Self { input, rate_limit }
+        let identity = if rate_limit.is_some() {
+            format!("{} (flow controlled)", input.identity())
+        } else {
+            input.identity().to_owned()
+        };
+        Self {
+            input,
+            identity,
+            rate_limit,
+        }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -56,18 +63,18 @@ impl FlowControlExecutor {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => {
-                    #[cfg(not(madsim))]
-                    {
-                        if let Some(rate_limiter) = &rate_limiter {
-                            let result = rate_limiter
-                                .until_n_ready(NonZeroU32::new(chunk.cardinality() as u32).unwrap())
-                                .await;
-                            if let Err(InsufficientCapacity(n)) = result {
-                                tracing::error!(
-                                    "Rate Limit {:?} smaller than chunk cardinality {n}",
-                                    self.rate_limit,
-                                );
-                            }
+                    let chunk_cardinality = chunk.cardinality();
+                    let Some(n) = NonZeroU32::new(chunk_cardinality as u32) else {
+                        // Handle case where chunk is empty
+                        continue;
+                    };
+                    if let Some(rate_limiter) = &rate_limiter {
+                        let result = rate_limiter.until_n_ready(n).await;
+                        if let Err(InsufficientCapacity(_max_cells)) = result {
+                            tracing::error!(
+                                "Rate Limit {:?} smaller than chunk cardinality {chunk_cardinality}",
+                                self.rate_limit,
+                            );
                         }
                     }
                     yield Message::Chunk(chunk);
@@ -100,6 +107,6 @@ impl Executor for FlowControlExecutor {
     }
 
     fn identity(&self) -> &str {
-        "FlowControlExecutor"
+        &self.identity
     }
 }

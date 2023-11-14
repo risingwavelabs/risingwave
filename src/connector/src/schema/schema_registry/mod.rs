@@ -22,7 +22,7 @@ pub(crate) use util::*;
 
 pub fn name_strategy_from_str(value: &str) -> Option<PbSchemaRegistryNameStrategy> {
     match value {
-        "topic_name_strategy" => Some(PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified),
+        "topic_name_strategy" => Some(PbSchemaRegistryNameStrategy::Unspecified),
         "record_name_strategy" => Some(PbSchemaRegistryNameStrategy::RecordNameStrategy),
         "topic_record_name_strategy" => Some(PbSchemaRegistryNameStrategy::TopicRecordNameStrategy),
         _ => None,
@@ -44,7 +44,7 @@ pub fn get_subject_by_strategy(
     };
     let record_option_name = if is_key { "key.message" } else { "message" };
     match name_strategy {
-        PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified => {
+        PbSchemaRegistryNameStrategy::Unspecified => {
             // default behavior
             let suffix = if is_key { "key" } else { "value" };
             Ok(format!("{topic}-{suffix}",))

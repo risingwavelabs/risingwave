@@ -34,6 +34,7 @@ pub mod builder;
 pub use builder::*;
 pub mod writer;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::epoch::MAX_EPOCH;
 pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
@@ -54,10 +55,11 @@ mod sstable_object_id_manager;
 mod utils;
 
 pub use delete_range_aggregator::{
-    get_min_delete_range_epoch_from_sstable, CompactionDeleteRanges, CompactionDeleteRangesBuilder,
+    get_min_delete_range_epoch_from_sstable, CompactionDeleteRangeIterator,
     SstableDeleteRangeIterator,
 };
 pub use filter::FilterBuilder;
+use itertools::Itertools;
 pub use sstable_object_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
@@ -66,6 +68,7 @@ use xxhash_rust::{xxh32, xxh64};
 use self::delete_range_aggregator::{apply_event, CompactionDeleteRangeEvent};
 use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
+use crate::hummock::sstable::delete_range_aggregator::TombstoneEnterExitEvent;
 use crate::hummock::CachePolicy;
 use crate::store::ReadOptions;
 
@@ -149,7 +152,7 @@ impl DeleteRangeTombstone {
 /// thus the `new epoch` is epoch2. epoch2 will be used from the event key wmk1 (5) and till the
 /// next event key wmk2 (7) (not inclusive).
 /// If there is no range deletes between current event key and next event key, `new_epoch` will be
-/// `HummockEpoch::MAX`.
+/// `MAX_EPOCH`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MonotonicDeleteEvent {
     pub event_key: PointRange<Vec<u8>>,
@@ -199,7 +202,8 @@ impl MonotonicDeleteEvent {
     }
 }
 
-pub(crate) fn create_monotonic_events_from_compaction_delete_events(
+#[cfg(any(test, feature = "test"))]
+fn create_monotonic_events_from_compaction_delete_events(
     compaction_delete_range_events: Vec<CompactionDeleteRangeEvent>,
 ) -> Vec<MonotonicDeleteEvent> {
     let mut epochs = BTreeSet::new();
@@ -208,7 +212,7 @@ pub(crate) fn create_monotonic_events_from_compaction_delete_events(
         apply_event(&mut epochs, &event);
         monotonic_tombstone_events.push(MonotonicDeleteEvent {
             event_key: event.0,
-            new_epoch: epochs.first().map_or(HummockEpoch::MAX, |epoch| *epoch),
+            new_epoch: epochs.first().map_or(MAX_EPOCH, |epoch| *epoch),
         });
     }
     monotonic_tombstone_events.dedup_by(|a, b| {
@@ -218,12 +222,54 @@ pub(crate) fn create_monotonic_events_from_compaction_delete_events(
     monotonic_tombstone_events
 }
 
+/// Assume that watermark1 is 5, watermark2 is 7, watermark3 is 11, delete ranges
+/// `{ [0, wmk1) in epoch1, [wmk1, wmk2) in epoch2, [wmk2, wmk3) in epoch3 }`
+/// can be transformed into events below:
+/// `{ <0, +epoch1> <wmk1, -epoch1> <wmk1, +epoch2> <wmk2, -epoch2> <wmk2, +epoch3> <wmk3,
+/// -epoch3> }`
+#[cfg(any(test, feature = "test"))]
+fn build_events(delete_tombstones: &Vec<DeleteRangeTombstone>) -> Vec<CompactionDeleteRangeEvent> {
+    let tombstone_len = delete_tombstones.len();
+    let mut events = Vec::with_capacity(tombstone_len * 2);
+    for DeleteRangeTombstone {
+        start_user_key,
+        end_user_key,
+        sequence,
+    } in delete_tombstones
+    {
+        events.push((start_user_key, 1, *sequence));
+        events.push((end_user_key, 0, *sequence));
+    }
+    events.sort();
+
+    let mut result = Vec::with_capacity(events.len());
+    for (user_key, group) in &events.into_iter().group_by(|(user_key, _, _)| *user_key) {
+        let (mut exit, mut enter) = (vec![], vec![]);
+        for (_, op, sequence) in group {
+            match op {
+                0 => exit.push(TombstoneEnterExitEvent {
+                    tombstone_epoch: sequence,
+                }),
+                1 => {
+                    enter.push(TombstoneEnterExitEvent {
+                        tombstone_epoch: sequence,
+                    });
+                }
+                _ => unreachable!(),
+            }
+        }
+        result.push((user_key.clone(), exit, enter));
+    }
+
+    result
+}
+
 #[cfg(any(test, feature = "test"))]
 pub(crate) fn create_monotonic_events(
     mut delete_range_tombstones: Vec<DeleteRangeTombstone>,
 ) -> Vec<MonotonicDeleteEvent> {
     delete_range_tombstones.sort();
-    let events = CompactionDeleteRangesBuilder::build_events(&delete_range_tombstones);
+    let events = build_events(&delete_range_tombstones);
     create_monotonic_events_from_compaction_delete_events(events)
 }
 
@@ -406,7 +452,7 @@ pub struct SstableMeta {
     /// epoch1 to epoch2, thus the `new epoch` is epoch2. epoch2 will be used from the event
     /// key wmk1 (5) and till the next event key wmk2 (7) (not inclusive).
     /// If there is no range deletes between current event key and next event key, `new_epoch` will
-    /// be `HummockEpoch::MAX`.
+    /// be `MAX_EPOCH`.
     pub monotonic_tombstone_events: Vec<MonotonicDeleteEvent>,
     /// Format version, for further compatibility.
     pub version: u32,

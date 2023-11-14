@@ -19,7 +19,7 @@ use itertools::{EitherOrBoth, Itertools};
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
-use risingwave_pb::stream_plan::ChainType;
+use risingwave_pb::stream_plan::StreamScanType;
 
 use super::generic::{
     push_down_into_join, push_down_join_condition, GenericPlanNode, GenericPlanRef,
@@ -518,8 +518,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
                 *i += left.schema().len();
             }
             map.append(&mut right_map);
-            let mut mapping =
-                ColIndexMapping::with_target_size(map, left.schema().len() + right.schema().len());
+            let mut mapping = ColIndexMapping::new(map, left.schema().len() + right.schema().len());
 
             let new_output_indices = self
                 .output_indices()
@@ -978,7 +977,10 @@ impl LogicalJoin {
         // Use primary table.
         let mut result_plan = self.to_stream_temporal_join(predicate.clone(), ctx);
         // Return directly if this temporal join can match the pk of its right table.
-        if let Ok(temporal_join) = &result_plan && temporal_join.eq_join_predicate().eq_indexes().len() == logical_scan.primary_key().len() {
+        if let Ok(temporal_join) = &result_plan
+            && temporal_join.eq_join_predicate().eq_indexes().len()
+                == logical_scan.primary_key().len()
+        {
             return result_plan;
         }
         let indexes = logical_scan.indexes();
@@ -1161,7 +1163,7 @@ impl LogicalJoin {
             .collect_vec();
         // Use UpstreamOnly chain type
         let new_stream_table_scan =
-            StreamTableScan::new_with_chain_type(new_scan, ChainType::UpstreamOnly);
+            StreamTableScan::new_with_stream_scan_type(new_scan, StreamScanType::UpstreamOnly);
         let right = RequiredDist::no_shuffle(new_stream_table_scan.into());
 
         // Construct a new logical join, because we have change its RHS.
