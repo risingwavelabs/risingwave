@@ -896,7 +896,7 @@ impl Dispatcher for CdcTableNameDispatcher {
             for vis_map in &mut vis_maps {
                 let should_emit = if let Some(row) = row && let Some(full_table_name) = self.downstream_table_name.as_ref() {
                     let table_name_datum = row.datum_at(self.table_name_col_index).unwrap();
-                    tracing::trace!(target: "events::stream::dispatch::hash::cdc", "keys: {:?}, table: {}", self.table_name_col_index, full_table_name);
+                    tracing::trace!(target: "events::stream::dispatch::cdc", "keys: {:?}, table: {}", self.table_name_col_index, full_table_name);
                     // dispatch based on downstream table name
                     table_name_datum == ScalarRefImpl::Utf8(full_table_name)
                 } else {

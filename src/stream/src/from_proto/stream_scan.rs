@@ -29,7 +29,7 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::external::ExternalStorageTable;
 use crate::executor::{
     BackfillExecutor, CdcBackfillExecutor, ChainExecutor, FlowControlExecutor,
-    RearrangedChainExecutor, SourceStateTableHandler,
+    RearrangedChainExecutor,
 };
 
 pub struct StreamScanExecutorBuilder;
@@ -102,11 +102,13 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     output_indices.clone(),
                 );
 
-                let source_state_handler = SourceStateTableHandler::from_table_catalog(
-                    node.get_state_table().as_ref().unwrap(),
-                    state_store.clone(),
-                )
-                .await;
+                let vnodes = params.vnode_bitmap.map(Arc::new);
+                // cdc backfill should be singleton, so vnodes must be None.
+                assert_eq!(None, vnodes);
+                let state_table =
+                    StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes)
+                        .await;
+
                 CdcBackfillExecutor::new(
                     params.actor_context.clone(),
                     params.info,
@@ -115,7 +117,8 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     output_indices,
                     Some(progress),
                     params.executor_stats,
-                    source_state_handler,
+                    Some(state_table),
+                    None,
                     true,
                     params.env.config().developer.chunk_size,
                 )
