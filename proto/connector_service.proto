@@ -58,13 +58,14 @@ message SinkWriterStreamRequest {
       bytes binary_data = 1;
     }
 
-    oneof payload {
-      JsonPayload json_payload = 1;
-      StreamChunkPayload stream_chunk_payload = 2;
-    }
+    uint64 batch_id = 1;
+    uint64 epoch = 2;
 
-    uint64 batch_id = 3;
-    uint64 epoch = 4;
+    oneof payload {
+      JsonPayload json_payload = 128;
+      StreamChunkPayload stream_chunk_payload = 129;
+      int64 stream_chunk_ref_pointer = 130;
+    }
   }
 
   message Barrier {

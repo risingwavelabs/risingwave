@@ -177,9 +177,12 @@ pub struct BidiStreamSender<REQ> {
 }
 
 impl<REQ> BidiStreamSender<REQ> {
-    pub async fn send_request(&mut self, request: REQ) -> Result<()> {
+    pub async fn send_request<R>(&mut self, request: R) -> Result<()>
+    where
+        REQ: From<R>,
+    {
         self.tx
-            .send(request)
+            .send(REQ::from(request))
             .await
             .map_err(|_| anyhow!("unable to send request {}", type_name::<REQ>()).into())
     }
