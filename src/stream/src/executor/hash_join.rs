@@ -247,10 +247,6 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// and do state cleaning if `clean_state` field of that inequality is `true`.
     inequality_watermarks: Vec<Option<Watermark>>,
 
-    #[expect(dead_code)]
-    /// Logical Operator Info
-    op_info: String,
-
     /// Whether the logic can be optimized for append-only stream
     append_only_optimize: bool,
 
@@ -444,7 +440,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         output_indices: Vec<usize>,
         cond: Option<NonStrictExpression>,
         inequality_pairs: Vec<(usize, usize, bool, Option<NonStrictExpression>)>,
-        op_info: String,
         state_table_l: StateTable<S>,
         degree_state_table_l: StateTable<S>,
         state_table_r: StateTable<S>,
@@ -669,7 +664,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             cond,
             inequality_pairs,
             inequality_watermarks,
-            op_info,
             append_only_optimize,
             metrics,
             chunk_size,
@@ -1394,7 +1388,6 @@ mod tests {
             (0..schema_len).collect_vec(),
             cond,
             inequality_pairs,
-            "HashJoinExecutor".to_string(),
             state_l,
             degree_state_l,
             state_r,
@@ -1485,7 +1478,6 @@ mod tests {
             (0..schema_len).collect_vec(),
             cond,
             vec![],
-            "HashJoinExecutor".to_string(),
             state_l,
             degree_state_l,
             state_r,
