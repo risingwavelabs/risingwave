@@ -114,7 +114,8 @@ impl AwsAuthProps {
             if let Some(id) = &self.external_id {
                 role = role.external_id(id);
             }
-            Ok(SharedCredentialsProvider::new(role.build(credential)))
+            let provider = role.build_from_provider(credential).await;
+            Ok(SharedCredentialsProvider::new(provider))
         } else {
             Ok(credential)
         }

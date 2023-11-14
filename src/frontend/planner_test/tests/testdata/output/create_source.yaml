@@ -57,7 +57,8 @@
     ) from mysql_mydb table 'mydb.t1';
   explain_output: |
     StreamMaterialize { columns: [v1, v2], stream_key: [v1], pk_columns: [v1], pk_conflict: Overwrite }
-    └─StreamDml { columns: [v1, v2] }
-      └─StreamCdcTableScan { table: mydb.t1, columns: [v1, v2] }
+    └─StreamExchange { dist: HashShard(mydb.t1.v1) }
+      └─StreamDml { columns: [v1, v2] }
+        └─StreamCdcTableScan { table: mydb.t1, columns: [v1, v2] }
   with_config_map:
     CDC_BACKFILL: 'true'

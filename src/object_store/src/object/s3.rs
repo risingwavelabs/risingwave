@@ -31,15 +31,16 @@ use aws_sdk_s3::types::{
     CompletedPart, Delete, ExpirationStatus, LifecycleRule, LifecycleRuleFilter, ObjectIdentifier,
 };
 use aws_sdk_s3::Client;
-use aws_smithy_client::http_connector::{ConnectorSettings, HttpConnector};
-use aws_smithy_http::body::SdkBody;
-use aws_smithy_http::result::SdkError;
+use aws_smithy_runtime::client::http::hyper_014::HyperClientBuilder;
+use aws_smithy_runtime_api::client::http::HttpClient;
+use aws_smithy_runtime_api::client::result::SdkError;
+use aws_smithy_types::body::SdkBody;
 use aws_smithy_types::retry::RetryConfig;
 use either::Either;
 use fail::fail_point;
 use futures::future::{try_join_all, BoxFuture, FutureExt};
 use futures::{stream, Stream, StreamExt, TryStreamExt};
-use hyper::Body;
+use hyper::{Body, Response};
 use itertools::Itertools;
 use risingwave_common::config::default::s3_objstore_config;
 use risingwave_common::monitor::connection::monitor_connector;
@@ -495,7 +496,7 @@ impl ObjectStore for S3ObjectStore {
             // Create identifiers from paths.
             let mut obj_ids = Vec::with_capacity(slice.len());
             for path in slice {
-                obj_ids.push(ObjectIdentifier::builder().key(path).build());
+                obj_ids.push(ObjectIdentifier::builder().key(path).build().unwrap());
             }
 
             // Build and submit request to delete objects.
@@ -504,12 +505,12 @@ impl ObjectStore for S3ObjectStore {
                 .client
                 .delete_objects()
                 .bucket(&self.bucket)
-                .delete(delete_builder.build()).send()
+                .delete(delete_builder.build().unwrap()).send()
                 .await?;
 
             // Check if there were errors.
-            if let Some(err_list) = delete_output.errors() && !err_list.is_empty() {
-                return Err(ObjectError::internal(format!("DeleteObjects request returned exception for some objects: {:?}", err_list)));
+            if !delete_output.errors().is_empty() {
+                return Err(ObjectError::internal(format!("DeleteObjects request returned exception for some objects: {:?}", delete_output.errors())));
             }
         }
 
@@ -541,41 +542,37 @@ impl S3ObjectStore {
         Self::new_with_config(bucket, metrics, S3ObjectStoreConfig::default()).await
     }
 
-    pub fn new_http_connector(config: &S3ObjectStoreConfig) -> impl Into<HttpConnector> {
-        // Customize http connector to set keepalive.
-        let native_tls = {
-            let mut tls = hyper_tls::native_tls::TlsConnector::builder();
-            let tls = tls
-                .min_protocol_version(Some(hyper_tls::native_tls::Protocol::Tlsv12))
-                .build()
-                .unwrap_or_else(|e| panic!("Error while creating TLS connector: {}", e));
-            let mut http = hyper::client::HttpConnector::new();
+    pub fn new_http_client(config: &S3ObjectStoreConfig) -> impl HttpClient {
+        let mut http = hyper::client::HttpConnector::new();
 
-            // connection config
-            if let Some(keepalive_ms) = config.keepalive_ms.as_ref() {
-                http.set_keepalive(Some(Duration::from_millis(*keepalive_ms)));
-            }
+        // connection config
+        if let Some(keepalive_ms) = config.keepalive_ms.as_ref() {
+            http.set_keepalive(Some(Duration::from_millis(*keepalive_ms)));
+        }
 
-            if let Some(nodelay) = config.nodelay.as_ref() {
-                http.set_nodelay(*nodelay);
-            }
+        if let Some(nodelay) = config.nodelay.as_ref() {
+            http.set_nodelay(*nodelay);
+        }
 
-            if let Some(recv_buffer_size) = config.recv_buffer_size.as_ref() {
-                http.set_recv_buffer_size(Some(*recv_buffer_size));
-            }
+        if let Some(recv_buffer_size) = config.recv_buffer_size.as_ref() {
+            http.set_recv_buffer_size(Some(*recv_buffer_size));
+        }
 
-            if let Some(send_buffer_size) = config.send_buffer_size.as_ref() {
-                http.set_send_buffer_size(Some(*send_buffer_size));
-            }
+        if let Some(send_buffer_size) = config.send_buffer_size.as_ref() {
+            http.set_send_buffer_size(Some(*send_buffer_size));
+        }
 
-            http.enforce_http(false);
-            hyper_tls::HttpsConnector::from((http, tls.into()))
-        };
+        http.enforce_http(false);
 
-        aws_smithy_client::hyper_ext::Adapter::builder()
-            .hyper_builder(hyper::client::Builder::default())
-            .connector_settings(ConnectorSettings::builder().build())
-            .build(monitor_connector(native_tls, "S3"))
+        let conn = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_webpki_roots()
+            .https_or_http()
+            .enable_all_versions()
+            .wrap_connector(http);
+
+        let conn = monitor_connector(conn, "S3");
+
+        HyperClientBuilder::new().build(conn)
     }
 
     pub async fn new_with_config(
@@ -585,7 +582,7 @@ impl S3ObjectStore {
     ) -> Self {
         let sdk_config_loader = aws_config::from_env()
             .retry_config(RetryConfig::standard().with_max_attempts(4))
-            .http_connector(Self::new_http_connector(&config));
+            .http_client(Self::new_http_client(&config));
 
         // Retry 3 times if we get server-side errors or throttling errors
         let client = match std::env::var("RW_S3_ENDPOINT") {
@@ -647,7 +644,7 @@ impl S3ObjectStore {
         let builder =
             aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await)
                 .force_path_style(true)
-                .http_connector(Self::new_http_connector(&S3ObjectStoreConfig::default()));
+                .http_client(Self::new_http_client(&S3ObjectStoreConfig::default()));
         let config = builder
             .region(Region::new("custom"))
             .endpoint_url(format!("{}{}", endpoint_prefix, address))
@@ -658,6 +655,7 @@ impl S3ObjectStore {
             ))
             .build();
         let client = Client::from_conf(config);
+
         Self {
             client,
             bucket: bucket.to_string(),
@@ -722,27 +720,28 @@ impl S3ObjectStore {
         let mut is_expiration_configured = false;
 
         if let Ok(config) = &get_config_result {
-            for rule in config.rules().unwrap_or_default() {
-                // Check if the filter is not set or the prifix in the filter is data directory in RisingWave,
-                // and if the expiration status of the rule is "Enabled".
-                // If both conditions are met, it is considered that there is a risk of data deletion.
-                match rule.filter().as_ref() {
-                    Some(&LifecycleRuleFilter::Prefix(prefix)) => {
-                        if let Some(ExpirationStatus::Enabled) = rule.status && data_directory.starts_with(prefix){
-                            is_expiration_configured = true;
+            for rule in config.rules() {
+                // When both of the conditions are met, it is considered that there is a risk of data deletion.
+                //
+                // 1. expiration status rule is enabled
+                // 2. (a) prefix filter is not set
+                // or (b) prefix filter is set to the data directory of RisingWave.
+                //
+                // P.S. 1 && (2a || 2b)
+                is_expiration_configured |= rule.status == ExpirationStatus::Enabled // 1
+                    && match rule.filter().as_ref() {
+                        // 2a
+                        None => true,
+                        // 2b
+                        Some(LifecycleRuleFilter::Prefix(prefix))
+                            if data_directory.starts_with(prefix) =>
+                        {
+                            true
                         }
-                    }
-                    None => {
-                        if let Some(ExpirationStatus::Enabled) = rule.status {
-                            is_expiration_configured = true;
-                        }
-                    }
-                    _ => {
+                        _ => false,
+                    };
 
-                    }
-                }
-
-                if matches!(rule.status().unwrap(), ExpirationStatus::Enabled)
+                if matches!(rule.status(), ExpirationStatus::Enabled)
                     && rule.abort_incomplete_multipart_upload().is_some()
                 {
                     configured_rules.push(rule);
@@ -766,10 +765,12 @@ impl S3ObjectStore {
                         .days_after_initiation(S3_INCOMPLETE_MULTIPART_UPLOAD_RETENTION_DAYS)
                         .build(),
                 )
-                .build();
+                .build()
+                .unwrap();
             let bucket_lifecycle_config = BucketLifecycleConfiguration::builder()
                 .rules(bucket_lifecycle_rule)
-                .build();
+                .build()
+                .unwrap();
             if self
                 .client
                 .put_bucket_lifecycle_configuration()
@@ -798,7 +799,9 @@ impl S3ObjectStore {
     }
 
     #[inline(always)]
-    fn should_retry(err: &Either<SdkError<GetObjectError>, ByteStreamError>) -> bool {
+    fn should_retry(
+        err: &Either<SdkError<GetObjectError, Response<SdkBody>>, ByteStreamError>,
+    ) -> bool {
         match err {
             Either::Left(err) => {
                 if let SdkError::DispatchFailure(e) = err {
@@ -874,7 +877,10 @@ struct S3ObjectIter {
     send_future: Option<
         BoxFuture<
             'static,
-            Result<(Vec<ObjectMetadata>, Option<String>, bool), SdkError<ListObjectsV2Error>>,
+            Result<
+                (Vec<ObjectMetadata>, Option<String>, bool),
+                SdkError<ListObjectsV2Error, Response<SdkBody>>,
+            >,
         >,
     >,
 }
@@ -931,7 +937,6 @@ impl Stream for S3ObjectIter {
                 Ok(r) => {
                     let more = r
                         .contents()
-                        .unwrap_or_default()
                         .iter()
                         .map(|obj| ObjectMetadata {
                             key: obj.key().expect("key required").to_owned(),
@@ -954,8 +959,8 @@ impl Stream for S3ObjectIter {
     }
 }
 
-impl From<Either<SdkError<GetObjectError>, ByteStreamError>> for ObjectError {
-    fn from(e: Either<SdkError<GetObjectError>, ByteStreamError>) -> Self {
+impl From<Either<SdkError<GetObjectError, Response<SdkBody>>, ByteStreamError>> for ObjectError {
+    fn from(e: Either<SdkError<GetObjectError, Response<SdkBody>>, ByteStreamError>) -> Self {
         match e {
             Either::Left(e) => e.into(),
             Either::Right(e) => e.into(),

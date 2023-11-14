@@ -68,37 +68,35 @@ repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
 await-tree = "0.1.1"
-aws-config = { version = "0.55", default-features = false, features = [
+aws-config = { version = "0.57", default-features = false, features = [
   "rt-tokio",
-  "native-tls",
+  "rustls",
 ] }
-aws-credential-types = { version = "0.55", default-features = false, features = [
+aws-credential-types = { version = "0.57", default-features = false, features = [
   "hardcoded-credentials",
 ] }
-aws-sdk-kinesis = { version = "0.28", default-features = false, features = [
+aws-sdk-kinesis = { version = "0.35", default-features = false, features = [
   "rt-tokio",
-  "native-tls",
+  "rustls",
 ] }
-aws-sdk-s3 = { version = "0.28", default-features = false, features = [
+aws-sdk-s3 = { version = "0.35", default-features = false, features = [
   "rt-tokio",
-  "native-tls",
+  "rustls",
 ] }
-aws-sdk-ec2 = { version = "0.28", default-features = false, features = [
+aws-sdk-ec2 = { version = "0.35", default-features = false, features = [
   "rt-tokio",
-  "native-tls",
+  "rustls",
 ] }
-aws-sdk-sqs = { version = "0.28", default-features = false, features = [
+aws-sdk-sqs = { version = "0.35", default-features = false, features = [
   "rt-tokio",
-  "native-tls",
+  "rustls",
 ] }
-aws-smithy-client = { version = "0.55", default-features = false, features = [
-  "rt-tokio",
-  "native-tls",
-] }
-aws-smithy-http = "0.55"
-aws-smithy-types = "0.55"
-aws-endpoint = "0.55"
-aws-types = "0.55"
+aws-smithy-http = "0.57"
+aws-smithy-runtime-api = "0.57"
+aws-smithy-runtime = "0.57"
+aws-smithy-types = { version = "0.57", default-features = false, features = ["hyper-0-14-x"] }
+aws-endpoint = "0.57"
+aws-types = "0.57"
 etcd-client = { package = "madsim-etcd-client", version = "0.4" }
 futures-async-stream = "0.2.9"
 hytra = "0.1"
@@ -114,7 +112,9 @@ criterion = { version = "0.5", features = ["async_futures"] }
 tonic = { package = "madsim-tonic", version = "0.4.0" }
 tonic-build = { package = "madsim-tonic-build", version = "0.4.2" }
 prost = { version = "0.12" }
-icelake = { git = "https://github.com/icelake-io/icelake", rev = "5cdcdffd24f4624a0a43f92c5f368988169a799b", features = ["prometheus"] }
+icelake = { git = "https://github.com/icelake-io/icelake", rev = "5cdcdffd24f4624a0a43f92c5f368988169a799b", features = [
+  "prometheus",
+] }
 arrow-array = "48"
 arrow-cast = "48"
 arrow-schema = "48"
