@@ -43,7 +43,7 @@ pub async fn handle_alter_set_schema(
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
     let new_schema_name = Binder::resolve_schema_name(new_schema_name)?;
-    let object = {
+    let (object, old_schema_name) = {
         let catalog_reader = session.env().catalog_reader().read_guard();
 
         match stmt_type {
@@ -56,7 +56,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     table.name(),
                 )?;
-                Object::TableId(table.id.table_id)
+                (Object::TableId(table.id.table_id), old_schema_name)
             }
             StatementType::ALTER_VIEW => {
                 let (view, old_schema_name) =
@@ -67,7 +67,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     view.name(),
                 )?;
-                Object::ViewId(view.id)
+                (Object::ViewId(view.id), old_schema_name)
             }
             StatementType::ALTER_SOURCE => {
                 let (source, old_schema_name) =
@@ -78,7 +78,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     &source.name,
                 )?;
-                Object::SourceId(source.id)
+                (Object::SourceId(source.id), old_schema_name)
             }
             StatementType::ALTER_SINK => {
                 let (sink, old_schema_name) =
@@ -89,7 +89,7 @@ pub async fn handle_alter_set_schema(
                     &new_schema_name,
                     &sink.name,
                 )?;
-                Object::SinkId(sink.id.sink_id)
+                (Object::SinkId(sink.id.sink_id), old_schema_name)
             }
             StatementType::ALTER_FUNCTION => {
                 let (function, old_schema_name) = if let Some(args) = func_args {
@@ -124,11 +124,18 @@ pub async fn handle_alter_set_schema(
                     &function.name,
                     &function.arg_types,
                 )?;
-                Object::FunctionId(function.id.function_id())
+                (
+                    Object::FunctionId(function.id.function_id()),
+                    old_schema_name,
+                )
             }
             _ => unreachable!(),
         }
     };
+
+    if old_schema_name == new_schema_name {
+        return Ok(RwPgResponse::empty_result(stmt_type));
+    }
 
     let (_, new_schema_id) =
         session.get_database_and_schema_id_for_create(Some(new_schema_name))?;
