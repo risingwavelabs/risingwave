@@ -250,6 +250,7 @@ message ExprNode {
     TO_JSONB = 617;
     JSONB_BUILD_ARRAY = 618;
     JSONB_BUILD_OBJECT = 619;
+    JSONB_TO_RECORD = 620;
 
     // Non-pure functions below (> 1000)
     // ------------------------
