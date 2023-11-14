@@ -250,7 +250,8 @@ message ExprNode {
     TO_JSONB = 617;
     JSONB_BUILD_ARRAY = 618;
     JSONB_BUILD_OBJECT = 619;
-    JSONB_TO_RECORD = 620;
+    JSONB_POPULATE_RECORD = 620;
+    JSONB_TO_RECORD = 621;
 
     // Non-pure functions below (> 1000)
     // ------------------------
@@ -293,6 +294,8 @@ message TableFunction {
     JSONB_EACH = 12;
     JSONB_EACH_TEXT = 13;
     JSONB_OBJECT_KEYS = 14;
+    JSONB_POPULATE_RECORDSET = 15;
+    JSONB_TO_RECORDSET = 16;
     // User defined table function
     UDTF = 100;
   }

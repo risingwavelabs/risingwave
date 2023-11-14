@@ -193,6 +193,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::JsonbStripNulls
             | expr_node::Type::JsonbBuildArray
             | expr_node::Type::JsonbBuildObject
+            | expr_node::Type::JsonbPopulateRecord
             | expr_node::Type::JsonbToRecord
             | expr_node::Type::IsJson
             | expr_node::Type::ToJsonb
