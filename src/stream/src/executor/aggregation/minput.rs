@@ -311,7 +311,7 @@ mod tests {
         .await;
 
         let order_columns = vec![
-            ColumnOrder::new(2, OrderType::ascending()), // min(c)
+            ColumnOrder::new(2, OrderType::ascending()), // c ASC for AggKind::Min
             ColumnOrder::new(3, OrderType::ascending()), // _row_id
         ];
         let mut state = MaterializedInputState::new(
@@ -537,7 +537,7 @@ mod tests {
         .unwrap();
 
         let order_columns_2 = vec![
-            ColumnOrder::new(1, OrderType::descending()), // b DESC for AggKind::Min
+            ColumnOrder::new(1, OrderType::descending()), // b DESC for AggKind::Max
             ColumnOrder::new(3, OrderType::ascending()),  // _row_id
         ];
         let mut state_2 = MaterializedInputState::new(
