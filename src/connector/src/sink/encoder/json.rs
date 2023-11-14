@@ -243,7 +243,7 @@ fn datum_to_json_object(
             TimestampHandlingMode::String => json!(v.0.format("%Y-%m-%d %H:%M:%S%.6f").to_string()),
         },
         (DataType::Bytea, ScalarRefImpl::Bytea(v)) => {
-            json!(general_purpose::STANDARD_NO_PAD.encode(v))
+            json!(general_purpose::STANDARD.encode(v))
         }
         // P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S
         (DataType::Interval, ScalarRefImpl::Interval(v)) => {
