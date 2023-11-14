@@ -264,7 +264,10 @@ impl<'w> PulsarPayloadWriter<'w> {
         let mut success_flag = false;
         let mut connection_err = None;
 
-        for _ in 0..self.config.max_retry_num {
+        for retry_num in 0..self.config.max_retry_num {
+            if retry_num > 0 {
+                tracing::warn!("Failed to send message, at retry no. {retry_num}");
+            }
             match self.producer.send(message.clone()).await {
                 // If the message is sent successfully,
                 // a SendFuture holding the message receipt
