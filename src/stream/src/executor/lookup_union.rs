@@ -29,8 +29,8 @@ use crate::executor::{BoxedMessageStream, ExecutorInfo};
 /// pipe the second, and finally the first. In the future we could have more efficient
 /// implementation.
 pub struct LookupUnionExecutor {
-    inputs: Vec<BoxedExecutor>,
     info: ExecutorInfo,
+    inputs: Vec<BoxedExecutor>,
     order: Vec<usize>,
 }
 

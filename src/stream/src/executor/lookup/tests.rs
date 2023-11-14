@@ -30,7 +30,8 @@ use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::test_utils::*;
 use crate::executor::{
-    ActorContext, Barrier, BoxedMessageStream, Executor, MaterializeExecutor, Message, PkIndices,
+    ActorContext, Barrier, BoxedMessageStream, Executor, ExecutorInfo, MaterializeExecutor,
+    Message, PkIndices,
 };
 
 fn arrangement_col_descs() -> Vec<ColumnDesc> {
@@ -193,23 +194,27 @@ async fn test_lookup_this_epoch() {
     let table_id = TableId::new(1);
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
-    let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
-        ctx: ActorContext::create(0),
-        arrangement,
-        stream,
-        arrangement_col_descs: arrangement_col_descs(),
-        arrangement_order_rules: arrangement_col_arrange_rules_join_key(),
-        pk_indices: vec![1, 2],
-        use_current_epoch: true,
-        stream_join_key_indices: vec![0],
-        arrange_join_key_indices: vec![1],
-        column_mapping: vec![2, 3, 0, 1],
+    let info = ExecutorInfo {
         schema: Schema::new(vec![
             Field::with_name(DataType::Int64, "join_column"),
             Field::with_name(DataType::Int64, "rowid_column"),
             Field::with_name(DataType::Int64, "rowid_column"),
             Field::with_name(DataType::Int64, "join_column"),
         ]),
+        pk_indices: vec![1, 2],
+        identity: "LookupExecutor".to_string(),
+    };
+    let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
+        ctx: ActorContext::create(0),
+        info,
+        arrangement,
+        stream,
+        arrangement_col_descs: arrangement_col_descs(),
+        arrangement_order_rules: arrangement_col_arrange_rules_join_key(),
+        use_current_epoch: true,
+        stream_join_key_indices: vec![0],
+        arrange_join_key_indices: vec![1],
+        column_mapping: vec![2, 3, 0, 1],
         storage_table: StorageTable::for_test(
             store.clone(),
             table_id,
@@ -263,23 +268,27 @@ async fn test_lookup_last_epoch() {
     let table_id = TableId::new(1);
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
-    let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
-        ctx: ActorContext::create(0),
-        arrangement,
-        stream,
-        arrangement_col_descs: arrangement_col_descs(),
-        arrangement_order_rules: arrangement_col_arrange_rules_join_key(),
-        pk_indices: vec![1, 2],
-        use_current_epoch: false,
-        stream_join_key_indices: vec![0],
-        arrange_join_key_indices: vec![1],
-        column_mapping: vec![0, 1, 2, 3],
+    let info = ExecutorInfo {
         schema: Schema::new(vec![
             Field::with_name(DataType::Int64, "rowid_column"),
             Field::with_name(DataType::Int64, "join_column"),
             Field::with_name(DataType::Int64, "join_column"),
             Field::with_name(DataType::Int64, "rowid_column"),
         ]),
+        pk_indices: vec![1, 2],
+        identity: "LookupExecutor".to_string(),
+    };
+    let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
+        ctx: ActorContext::create(0),
+        info,
+        arrangement,
+        stream,
+        arrangement_col_descs: arrangement_col_descs(),
+        arrangement_order_rules: arrangement_col_arrange_rules_join_key(),
+        use_current_epoch: false,
+        stream_join_key_indices: vec![0],
+        arrange_join_key_indices: vec![1],
+        column_mapping: vec![0, 1, 2, 3],
         storage_table: StorageTable::for_test(
             store.clone(),
             table_id,

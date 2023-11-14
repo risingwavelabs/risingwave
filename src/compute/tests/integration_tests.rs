@@ -56,7 +56,7 @@ use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
 use risingwave_stream::executor::source_executor::SourceExecutor;
 use risingwave_stream::executor::{
-    ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices,
+    ActorContext, Barrier, Executor, ExecutorInfo, MaterializeExecutor, Message, PkIndices,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -171,23 +171,27 @@ async fn test_table_materialize() -> StreamResult<()> {
     // Create a `SourceExecutor` to read the changes.
     let source_executor = SourceExecutor::<PanicStateStore>::new(
         actor_ctx.clone(),
-        all_schema.clone(),
-        pk_indices.clone(),
+        ExecutorInfo {
+            schema: all_schema.clone(),
+            pk_indices: pk_indices.clone(),
+            identity: format!("SourceExecutor {:X}", 1),
+        },
         None, // There is no external stream source.
         Arc::new(StreamingMetrics::unused()),
         barrier_rx,
         system_params_manager.get_params(),
-        1,
         SourceCtrlOpts::default(),
         ConnectorParams::default(),
     );
 
     // Create a `DmlExecutor` to accept data change from users.
     let dml_executor = DmlExecutor::new(
+        ExecutorInfo {
+            schema: all_schema.clone(),
+            pk_indices: pk_indices.clone(),
+            identity: format!("DmlExecutor {:X}", 2),
+        },
         Box::new(source_executor),
-        all_schema.clone(),
-        pk_indices.clone(),
-        2,
         dml_manager.clone(),
         table_id,
         INITIAL_TABLE_VERSION_ID,
@@ -196,10 +200,12 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     let row_id_gen_executor = RowIdGenExecutor::new(
         actor_ctx,
+        ExecutorInfo {
+            schema: all_schema.clone(),
+            pk_indices: pk_indices.clone(),
+            identity: format!("RowIdGenExecutor {:X}", 3),
+        },
         Box::new(dml_executor),
-        all_schema.clone(),
-        pk_indices.clone(),
-        3,
         row_id_index,
         vnodes,
     );

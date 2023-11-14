@@ -33,6 +33,7 @@ use super::*;
 pub struct FlowControlExecutor {
     input: BoxedExecutor,
     actor_ctx: ActorContextRef,
+    identity: String,
     rate_limit: Option<u32>,
 }
 
@@ -42,9 +43,15 @@ impl FlowControlExecutor {
         actor_ctx: ActorContextRef,
         rate_limit: Option<u32>,
     ) -> Self {
+        let identity = if rate_limit.is_some() {
+            format!("{} (flow controlled)", input.identity())
+        } else {
+            input.identity().to_owned()
+        };
         Self {
             input,
             actor_ctx,
+            identity,
             rate_limit,
         }
     }
@@ -131,6 +138,6 @@ impl Executor for FlowControlExecutor {
     }
 
     fn identity(&self) -> &str {
-        "FlowControlExecutor"
+        &self.identity
     }
 }

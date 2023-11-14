@@ -216,7 +216,8 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         vec![0, 1, 2],
         None,
         Arc::new(StreamingMetrics::unused()),
-        source_state_handler,
+        None,
+        Some(source_state_handler),
         false,
         4, // 4 rows in a snapshot chunk
     );
