@@ -5,22 +5,22 @@
     select t.v1 - INTERVAL '2' SECOND as v1 from t;
   logical_plan: |-
     LogicalProject { exprs: [(v1 - '00:00:02':Interval) as $expr1] }
-    └─LogicalSource { source: t, columns: [v1, _rw_key, _row_id], time_range: (Unbounded, Unbounded) }
+    └─LogicalSource { source: t, columns: [v1, _row_id], time_range: (Unbounded, Unbounded) }
   stream_plan: |-
     StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
     └─StreamProject { exprs: [SubtractWithTimeZone(v1, '00:00:02':Interval, 'UTC':Varchar) as $expr1, _row_id], output_watermarks: [$expr1] }
-      └─StreamRowIdGen { row_id_index: 2 }
+      └─StreamRowIdGen { row_id_index: 1 }
         └─StreamWatermarkFilter { watermark_descs: [Desc { column: v1, expr: (v1 - '00:00:01':Interval) }], output_watermarks: [v1] }
-          └─StreamSource { source: t, columns: [v1, _rw_key, _row_id] }
+          └─StreamSource { source: t, columns: [v1, _row_id] }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [SubtractWithTimeZone(v1, '00:00:02':Interval, 'UTC':Varchar) as $expr1, _row_id], output_watermarks: [$expr1] }
-        └── StreamRowIdGen { row_id_index: 2 }
+        └── StreamRowIdGen { row_id_index: 1 }
             └── StreamWatermarkFilter { watermark_descs: [Desc { column: v1, expr: (v1 - '00:00:01':Interval) }], output_watermarks: [v1] }
                 ├── state tables: [ 0 ]
-                └── StreamSource { source: t, columns: [v1, _rw_key, _row_id] } { source state table: 1 }
+                └── StreamSource { source: t, columns: [v1, _row_id] } { source state table: 1 }
 
     Table 0
     ├── columns: [ vnode, offset ]
@@ -48,11 +48,11 @@
   sql: |
     explain create table t (v1 timestamp with time zone, watermark for v1 as v1 - INTERVAL '1' SECOND) append only with (connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:1234', kafka.scan.startup.mode='earliest') FORMAT PLAIN ENCODE JSON;
   explain_output: |
-    StreamMaterialize { columns: [v1, _rw_key(hidden), _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
-    └─StreamRowIdGen { row_id_index: 2 }
+    StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
+    └─StreamRowIdGen { row_id_index: 1 }
       └─StreamWatermarkFilter { watermark_descs: [Desc { column: v1, expr: (v1 - '00:00:01':Interval) }], output_watermarks: [v1] }
-        └─StreamDml { columns: [v1, _rw_key, _row_id] }
-          └─StreamSource { source: t, columns: [v1, _rw_key, _row_id] }
+        └─StreamDml { columns: [v1, _row_id] }
+          └─StreamSource { source: t, columns: [v1, _row_id] }
 - name: watermark on append only table without source
   sql: |
     explain create table t (v1 timestamp with time zone, watermark for v1 as v1 - INTERVAL '1' SECOND) append only;
