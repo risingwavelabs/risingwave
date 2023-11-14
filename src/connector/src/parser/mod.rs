@@ -543,14 +543,12 @@ async fn into_chunk_stream<P: ByteStreamSourceParser>(mut parser: P, data_stream
 
         for (i, msg) in batch.into_iter().enumerate() {
             if msg.key.is_none() && msg.payload.is_none() {
-                if parser.parser_format() == ParserFormat::Debezium {
-                    tracing::debug!(offset = msg.offset, "skip parsing of heartbeat message");
-                    // empty payload means a heartbeat in cdc source
-                    // heartbeat message offset should not overwrite data messages offset
-                    split_offset_mapping
-                        .entry(msg.split_id)
-                        .or_insert(msg.offset.clone());
-                }
+                tracing::debug!(offset = msg.offset, "skip parsing of heartbeat message");
+                // assumes an empty message as a heartbeat
+                // heartbeat message offset should not overwrite data messages offset
+                split_offset_mapping
+                    .entry(msg.split_id)
+                    .or_insert(msg.offset.clone());
 
                 continue;
             }
