@@ -27,8 +27,10 @@ use risingwave_common::util::select_all;
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
-use risingwave_connector::source::filesystem::opendal_source::OpenDalProperties;
-use risingwave_connector::source::filesystem::{FsPageItem, GcsProperties, S3Properties};
+use risingwave_connector::source::filesystem::opendal_source::{
+    OpenDalProperties, OpendalS3Properties,
+};
+use risingwave_connector::source::filesystem::{FsPageItem, GcsProperties};
 use risingwave_connector::source::{
     create_split_reader, BoxSourceWithStateStream, BoxTryStream, Column, ConnectorProperties,
     ConnectorState, FsFilterCtrlCtx, SourceColumnDesc, SourceContext, SplitReader,
@@ -105,9 +107,9 @@ impl ConnectorSource {
                     lister,
                 ))
             }
-            ConnectorProperties::S3(prop) => {
-                let lister: OpendalEnumerator<S3Properties> =
-                    OpendalEnumerator::new_s3_source(*prop)?;
+            ConnectorProperties::OpenDalS3(prop) => {
+                let lister: OpendalEnumerator<OpendalS3Properties> =
+                    OpendalEnumerator::new_s3_source(prop.s3_properties)?;
                 Ok(build_opendal_fs_list_stream(
                     FsListCtrlContext {
                         interval: Duration::from_secs(60),

@@ -33,6 +33,7 @@ macro_rules! for_all_classified_sources {
                 { Nats, $crate::source::nats::NatsProperties, $crate::source::nats::split::NatsSplit },
                 { S3, $crate::source::filesystem::S3Properties, $crate::source::filesystem::FsSplit },
                 { Gcs, $crate::source::filesystem::opendal_source::GcsProperties , $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::GcsProperties> },
+                { OpenDalS3, $crate::source::filesystem::opendal_source::OpendalS3Properties, $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalS3Properties> },
                 { Test, $crate::source::test_source::TestSourceProperties, $crate::source::test_source::TestSourceSplit}
             }
             $(
