@@ -932,7 +932,6 @@ impl Binder {
                 ("jsonb_build_array", raw_call(ExprType::JsonbBuildArray)),
                 ("jsonb_build_object", raw_call(ExprType::JsonbBuildObject)),
                 ("jsonb_populate_record", raw_call(ExprType::JsonbPopulateRecord)),
-                ("jsonb_to_record", raw_call(ExprType::JsonbToRecord)),
                 // Functions that return a constant value
                 ("pi", pi()),
                 // greatest and least

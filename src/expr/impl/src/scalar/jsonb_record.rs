@@ -26,11 +26,11 @@ use risingwave_expr::{function, ExprError, Result};
 /// # Examples
 ///
 /// ```slt
-/// query T
-/// select * from jsonb_populate_record(
+/// query ITT
+/// select (jsonb_populate_record(
 ///     null::struct<a int, b text[], c struct<d int, e text>>,
 ///     '{"a": 1, "b": ["2", "a b"], "c": {"d": 4, "e": "a b c"}, "x": "foo"}'
-/// );
+/// )).*;
 /// ----
 /// 1 {2,"a b"} (4,"a b c")
 /// ```
@@ -110,10 +110,11 @@ fn jsonb_populate_recordset<'a>(
 ///
 /// # Examples
 ///
-/// ```slt
+/// // FIXME(runji): this query is blocked by parser and frontend support.
+/// ```ignore
 /// query T
-/// select jsonb_to_record('{"a":1,"b":[1,2,3],"c":[1,2,3],"e":"bar","r": {"a": 123, "b": "a b c"}}')
-/// :: struct<a int, b text, c int[], d text, r struct<a int, b int>>;
+/// select * from jsonb_to_record('{"a":1,"b":[1,2,3],"c":[1,2,3],"e":"bar","r": {"a": 123, "b": "a b c"}}')
+/// as x(a int, b text, c int[], d text, r struct<a int, b text>);
 /// ----
 /// 1 [1,2,3] {1,2,3} NULL (123,"a b c")
 /// ```
@@ -129,9 +130,10 @@ fn jsonb_to_record(jsonb: JsonbRef<'_>, ctx: &Context) -> Result<StructValue> {
 ///
 /// # Examples
 ///
-/// ```slt
+/// // FIXME(runji): this query is blocked by parser and frontend support.
+/// ```ignore
 /// query IT
-/// select * from json_to_recordset('[{"a":1,"b":"foo"}, {"a":"2","c":"bar"}]') as x(a int, b text);
+/// select * from jsonb_to_recordset('[{"a":1,"b":"foo"}, {"a":"2","c":"bar"}]') as x(a int, b text);
 /// ----
 /// 1 foo
 /// 2 NULL
