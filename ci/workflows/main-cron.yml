@@ -6,10 +6,9 @@ auto-retry: &auto-retry
 
 steps:
   - key: "test-notify"
-    label: "test-notify"
     if: build.pull_request.labels includes "ci/main-cron/test-notify"
     command: |
-      bash -c 'echo test && exit 1'
+      bash -c 'echo test && exit -1'
 
   - label: "test notification [notify]"
     allow_dependency_failure: true
