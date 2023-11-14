@@ -31,7 +31,6 @@ use crate::executor::SinkExecutor;
 
 pub struct SinkExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for SinkExecutorBuilder {
     type Node = SinkNode;
 

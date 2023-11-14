@@ -430,6 +430,13 @@ pub mod verify {
             self.actual.flush(delete_ranges).await
         }
 
+        async fn try_flush(&mut self) -> StorageResult<()> {
+            if let Some(expected) = &mut self.expected {
+                expected.try_flush().await?;
+            }
+            self.actual.try_flush().await
+        }
+
         async fn init(&mut self, options: InitOptions) -> StorageResult<()> {
             self.actual.init(options.clone()).await?;
             if let Some(expected) = &mut self.expected {
@@ -780,6 +787,8 @@ pub mod boxed_state_store {
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         ) -> StorageResult<usize>;
 
+        async fn try_flush(&mut self) -> StorageResult<()>;
+
         fn epoch(&self) -> u64;
 
         fn is_dirty(&self) -> bool;
@@ -833,6 +842,10 @@ pub mod boxed_state_store {
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         ) -> StorageResult<usize> {
             self.flush(delete_ranges).await
+        }
+
+        async fn try_flush(&mut self) -> StorageResult<()> {
+            self.try_flush().await
         }
 
         fn epoch(&self) -> u64 {
@@ -899,6 +912,10 @@ pub mod boxed_state_store {
             delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         ) -> impl Future<Output = StorageResult<usize>> + Send + '_ {
             self.deref_mut().flush(delete_ranges)
+        }
+
+        fn try_flush(&mut self) -> impl Future<Output = StorageResult<()>> + Send + '_ {
+            self.deref_mut().try_flush()
         }
 
         fn epoch(&self) -> u64 {

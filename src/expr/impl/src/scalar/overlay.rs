@@ -95,13 +95,16 @@ pub fn overlay_for(
         });
     }
 
-    let mut chars = s.chars();
-    for _ in 1..start {
-        if let Some(c) = chars.next() {
-            writer.write_char(c).unwrap();
-        }
-    }
+    let mut chars = s.char_indices().skip(start as usize - 1).peekable();
 
+    // write the substring before the overlay.
+    let leading = match chars.peek() {
+        Some((i, _)) => &s[..*i],
+        None => s,
+    };
+    writer.write_str(leading).unwrap();
+
+    // write the new substring.
     writer.write_str(new_sub_str).unwrap();
 
     let Ok(count) = count.try_into() else {
@@ -112,8 +115,9 @@ pub fn overlay_for(
         return super::substr::substr_start(s, start_right, writer);
     };
 
-    for c in chars.skip(count) {
-        writer.write_char(c).unwrap();
+    // write the substring after the overlay.
+    if let Some((i, _)) = chars.nth(count) {
+        writer.write_str(&s[i..]).unwrap();
     }
 
     Ok(())
@@ -125,25 +129,26 @@ mod tests {
 
     #[test]
     fn test_overlay() {
-        let cases = vec![
-            ("aaa__aaa", "XY", 4, None, "aaaXYaaa"),
-            // Place at end.
-            ("aaa", "XY", 4, None, "aaaXY"),
-            // Place at start.
-            ("aaa", "XY", 1, Some(0), "XYaaa"),
-            // Replace shorter string.
-            ("aaa_aaa", "XYZ", 4, Some(1), "aaaXYZaaa"),
-            ("aaaaaa", "XYZ", 4, Some(0), "aaaXYZaaa"),
-            // Replace longer string.
-            ("aaa___aaa", "X", 4, Some(3), "aaaXaaa"),
-            // start too large.
-            ("aaa", "XY", 123, None, "aaaXY"),
-            // count too small or large.
-            ("aaa", "X", 4, Some(-123), "aaaXaaa"),
-            ("aaa_", "X", 4, Some(123), "aaaX"),
-        ];
+        case("aaa__aaa", "XY", 4, None, "aaaXYaaa");
+        // Place at end.
+        case("aaa", "XY", 4, None, "aaaXY");
+        // Place at start.
+        case("aaa", "XY", 1, Some(0), "XYaaa");
+        // Replace shorter string.
+        case("aaa_aaa", "XYZ", 4, Some(1), "aaaXYZaaa");
+        case("aaaaaa", "XYZ", 4, Some(0), "aaaXYZaaa");
+        // Replace longer string.
+        case("aaa___aaa", "X", 4, Some(3), "aaaXaaa");
+        // start too large.
+        case("aaa", "XY", 123, None, "aaaXY");
+        // count too small or large.
+        case("aaa", "X", 4, Some(-123), "aaaXaaa");
+        case("aaa_", "X", 4, Some(123), "aaaX");
+        // very large start and count
+        case("aaa", "X", i32::MAX, Some(i32::MAX), "aaaX");
 
-        for (s, new_sub_str, start, count, expected) in cases {
+        #[track_caller]
+        fn case(s: &str, new_sub_str: &str, start: i32, count: Option<i32>, expected: &str) {
             let mut writer = String::new();
             match count {
                 None => overlay(s, new_sub_str, start, &mut writer),

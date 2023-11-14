@@ -21,7 +21,7 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.*;
 import com.risingwave.connector.deserializer.StreamChunkDeserializer;
 import com.risingwave.metrics.ConnectorNodeMetrics;
-import com.risingwave.metrics.MonitoredRowIterator;
+import com.risingwave.metrics.MonitoredRowIterable;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.grpc.stub.StreamObserver;
 import java.util.Optional;
@@ -125,13 +125,29 @@ public class SinkWriterStreamObserver
                             .asRuntimeException();
                 }
 
-                try (CloseableIterator<SinkRow> rowIter = deserializer.deserialize(batch)) {
-                    sink.write(
-                            new MonitoredRowIterator(
-                                    rowIter, connectorName, String.valueOf(sinkId)));
+                boolean batchWritten;
+
+                try (CloseableIterable<SinkRow> rowIter = deserializer.deserialize(batch)) {
+                    batchWritten =
+                            sink.write(
+                                    new MonitoredRowIterable(
+                                            rowIter, connectorName, String.valueOf(sinkId)));
                 }
 
                 currentBatchId = batch.getBatchId();
+
+                if (batchWritten) {
+                    responseObserver.onNext(
+                            ConnectorServiceProto.SinkWriterStreamResponse.newBuilder()
+                                    .setBatch(
+                                            ConnectorServiceProto.SinkWriterStreamResponse
+                                                    .BatchWrittenResponse.newBuilder()
+                                                    .setEpoch(currentEpoch)
+                                                    .setBatchId(currentBatchId)
+                                                    .build())
+                                    .build());
+                }
+
                 LOG.debug("Batch {} written to epoch {}", currentBatchId, batch.getEpoch());
             } else if (sinkTask.hasBarrier()) {
                 if (!isInitialized()) {

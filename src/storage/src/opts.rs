@@ -63,6 +63,7 @@ pub struct StorageOpts {
     /// Max sub compaction task numbers
     pub max_sub_compaction: u32,
     pub max_concurrent_compaction_task_number: u64,
+    pub max_version_pinning_duration_sec: u64,
 
     pub data_file_cache_dir: String,
     pub data_file_cache_capacity_mb: usize,
@@ -125,6 +126,8 @@ pub struct StorageOpts {
     pub compactor_max_sst_size: u64,
     /// enable FastCompactorRunner.
     pub enable_fast_compaction: bool,
+
+    pub mem_table_spill_threshold: usize,
 }
 
 impl Default for StorageOpts {
@@ -162,6 +165,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             min_sst_size_for_streaming_upload: c.storage.min_sst_size_for_streaming_upload,
             max_sub_compaction: c.storage.max_sub_compaction,
             max_concurrent_compaction_task_number: c.storage.max_concurrent_compaction_task_number,
+            max_version_pinning_duration_sec: c.storage.max_version_pinning_duration_sec,
             data_file_cache_dir: c.storage.data_file_cache.dir.clone(),
             data_file_cache_capacity_mb: c.storage.data_file_cache.capacity_mb,
             data_file_cache_file_capacity_mb: c.storage.data_file_cache.file_capacity_mb,
@@ -237,6 +241,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             compactor_max_task_multiplier: c.storage.compactor_max_task_multiplier,
             compactor_max_sst_size: c.storage.compactor_max_sst_size,
             enable_fast_compaction: c.storage.enable_fast_compaction,
+            mem_table_spill_threshold: c.storage.mem_table_spill_threshold,
         }
     }
 }

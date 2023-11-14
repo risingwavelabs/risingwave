@@ -36,7 +36,7 @@ use zstd::zstd_safe::WriteBuf;
 
 use super::utils::MemoryTracker;
 use super::{
-    Block, BlockCache, BlockMeta, BlockResponse, FileCache, RecentFilter, Sstable,
+    Block, BlockCache, BlockMeta, BlockResponse, CachedBlock, FileCache, RecentFilter, Sstable,
     SstableBlockIndex, SstableMeta, SstableWriter,
 };
 use crate::hummock::file_cache::preclude::*;
@@ -94,7 +94,7 @@ impl From<CachePolicy> for TracedCachePolicy {
 }
 
 struct BlockCacheEventListener {
-    data_file_cache: FileCache<SstableBlockIndex, Box<Block>>,
+    data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
 }
 
 impl LruCacheEventListener for BlockCacheEventListener {
@@ -106,7 +106,8 @@ impl LruCacheEventListener for BlockCacheEventListener {
             sst_id: key.0,
             block_idx: key.1,
         };
-        self.data_file_cache.insert_async(key, value);
+        self.data_file_cache
+            .insert_if_not_exists_async(key, CachedBlock::Loaded { block: value });
     }
 }
 
@@ -117,7 +118,7 @@ impl LruCacheEventListener for MetaCacheEventListener {
     type T = Box<Sstable>;
 
     fn on_release(&self, key: Self::K, value: Self::T) {
-        self.0.insert_async(key, value);
+        self.0.insert_if_not_exists_async(key, value);
     }
 }
 
@@ -127,7 +128,7 @@ pub struct SstableStore {
     block_cache: BlockCache,
     meta_cache: Arc<LruCache<HummockSstableObjectId, Box<Sstable>>>,
 
-    data_file_cache: FileCache<SstableBlockIndex, Box<Block>>,
+    data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
     meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
 
     recent_filter: Option<Arc<RecentFilter<HummockSstableObjectId>>>,
@@ -140,7 +141,7 @@ impl SstableStore {
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
         high_priority_ratio: usize,
-        data_file_cache: FileCache<SstableBlockIndex, Box<Block>>,
+        data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
         meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
         recent_filter: Option<Arc<RecentFilter<HummockSstableObjectId>>>,
     ) -> Self {
@@ -284,6 +285,7 @@ impl SstableStore {
                         .await
                         .map_err(HummockError::file_cache)?
                 {
+                    let block = block.into_inner();
                     return Ok(block);
                 }
 
@@ -323,7 +325,9 @@ impl SstableStore {
                         sst_id: object_id,
                         block_idx: block_index as u64,
                     },
-                    block.clone(),
+                    CachedBlock::Loaded {
+                        block: block.clone(),
+                    },
                 );
                 Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
             }
@@ -524,7 +528,7 @@ impl SstableStore {
         self.recent_filter.as_ref()
     }
 
-    pub fn data_file_cache(&self) -> &FileCache<SstableBlockIndex, Box<Block>> {
+    pub fn data_file_cache(&self) -> &FileCache<SstableBlockIndex, CachedBlock> {
         &self.data_file_cache
     }
 }

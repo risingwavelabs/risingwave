@@ -15,39 +15,37 @@
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{JsonbVal, ScalarImpl};
 use risingwave_expr::aggregate::AggStateDyn;
+use risingwave_expr::expr::Context;
 use risingwave_expr::{aggregate, ExprError, Result};
 
 use crate::scalar::ToJsonb;
 
-#[aggregate("jsonb_agg(boolean) -> jsonb")]
-#[aggregate("jsonb_agg(*int) -> jsonb")]
-#[aggregate("jsonb_agg(*float) -> jsonb")]
-#[aggregate("jsonb_agg(varchar) -> jsonb")]
-#[aggregate("jsonb_agg(jsonb) -> jsonb")]
-fn jsonb_agg(state: &mut JsonbArrayState, input: Option<impl ToJsonb>) -> Result<()> {
-    match input {
-        Some(input) => input.add_to(&mut state.0)?,
-        None => state.0.add_null(),
-    }
+/// Collects all the input values, including nulls, into a JSON array.
+/// Values are converted to JSON as per `to_jsonb`.
+#[aggregate("jsonb_agg(*) -> jsonb")]
+fn jsonb_agg(
+    state: &mut JsonbArrayState,
+    input: Option<impl ToJsonb>,
+    ctx: &Context,
+) -> Result<()> {
+    input.add_to(&ctx.arg_types[0], &mut state.0)?;
     Ok(())
 }
 
-#[aggregate("jsonb_object_agg(varchar, boolean) -> jsonb")]
-#[aggregate("jsonb_object_agg(varchar, *int) -> jsonb")]
-#[aggregate("jsonb_object_agg(varchar, *float) -> jsonb")]
-#[aggregate("jsonb_object_agg(varchar, varchar) -> jsonb")]
-#[aggregate("jsonb_object_agg(varchar, jsonb) -> jsonb")]
+/// Collects all the key/value pairs into a JSON object.
+/// // Key arguments are coerced to text;
+/// value arguments are converted as per `to_jsonb`.
+/// Values can be null, but keys cannot.
+#[aggregate("jsonb_object_agg(varchar, *) -> jsonb")]
 fn jsonb_object_agg(
     state: &mut JsonbObjectState,
     key: Option<&str>,
     value: Option<impl ToJsonb>,
+    ctx: &Context,
 ) -> Result<()> {
     let key = key.ok_or(ExprError::FieldNameNull)?;
     state.0.add_string(key);
-    match value {
-        Some(value) => value.add_to(&mut state.0)?,
-        None => state.0.add_null(),
-    }
+    value.add_to(&ctx.arg_types[1], &mut state.0)?;
     Ok(())
 }
 

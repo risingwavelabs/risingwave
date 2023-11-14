@@ -113,6 +113,7 @@ steps:
           - "citus-cdc"
           - "kinesis-s3-source"
           - "clickhouse-sink"
+          - "cockroach-sink"
         format:
           - "json"
           - "protobuf"
@@ -147,5 +148,9 @@ steps:
           skip: true
         - with:
             testcase: "clickhouse-sink"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "cockroach-sink"
             format: "protobuf"
           skip: true

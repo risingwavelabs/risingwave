@@ -23,6 +23,7 @@ use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
+use with_options::WithOptions;
 
 use super::encoder::TimestamptzHandlingMode;
 use super::utils::chunk_to_json;
@@ -39,7 +40,7 @@ use crate::sink::{Result, Sink, SinkError, SinkParam, SINK_TYPE_APPEND_ONLY};
 pub const NATS_SINK: &str = "nats";
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct NatsConfig {
     #[serde(flatten)]
     pub common: NatsCommon,

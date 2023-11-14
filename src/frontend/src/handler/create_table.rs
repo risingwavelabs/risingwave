@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
 use anyhow::anyhow;
+use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -47,7 +48,7 @@ use crate::binder::{bind_data_type, bind_struct_field, Clause};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableVersion;
-use crate::catalog::{check_valid_column_name, CatalogError, ColumnId};
+use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
     bind_all_columns, bind_columns_from_source, bind_source_pk, bind_source_watermark,
@@ -57,7 +58,7 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
-use crate::session::{CheckRelationError, SessionImpl};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::resolve_privatelink_in_with_option;
 use crate::{Binder, TableCatalog, WithOptions};
@@ -485,7 +486,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let sql_pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
 
     let (columns_from_resolve_source, mut source_info) =
-        bind_columns_from_source(&source_schema, &properties, false).await?;
+        bind_columns_from_source(context.session_ctx(), &source_schema, &properties, false).await?;
     let columns_from_sql = bind_sql_columns(&column_defs)?;
 
     let mut columns = bind_all_columns(
@@ -783,7 +784,7 @@ fn gen_table_plan_inner(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn gen_create_table_plan_for_cdc_source(
+pub(crate) fn gen_create_table_plan_for_cdc_source(
     context: OptimizerContextRef,
     source_name: ObjectName,
     table_name: ObjectName,
@@ -954,15 +955,13 @@ pub async fn handle_create_table(
         session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");
     }
 
-    match session.check_relation_name_duplicated(table_name.clone()) {
-        Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
-            return Ok(PgResponse::builder(StatementType::CREATE_TABLE)
-                .notice(format!("relation \"{}\" already exists, skipping", name))
-                .into());
-        }
-        Err(e) => return Err(e.into()),
-        Ok(_) => {}
-    };
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        table_name.clone(),
+        StatementType::CREATE_TABLE,
+        if_not_exists,
+    )? {
+        return Ok(resp);
+    }
 
     let (graph, source, table, job_type) = {
         let context = OptimizerContext::from_handler_args(handler_args);
