@@ -2624,11 +2624,11 @@ impl CatalogManager {
                 let relation_key = &(info.database_id, info.schema_id, info.name);
                 guard
                     .database
-                    .find_creating_streaming_job_id(&relation_key)
+                    .find_creating_streaming_job_id(relation_key)
                     .or_else(|| {
                         guard
                             .database
-                            .find_persisted_creating_table_id(&relation_key)
+                            .find_persisted_creating_table_id(relation_key)
                     })
             })
             .collect_vec()
