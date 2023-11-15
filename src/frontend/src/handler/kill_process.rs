@@ -30,7 +30,7 @@ pub(super) async fn handle_kill(
     session_exists |= session.env().cancel_creating_jobs_in_session(session_id);
 
     if session_exists {
-        Ok(PgResponse::empty_result(StatementType::KILL).into())
+        Ok(PgResponse::empty_result(StatementType::KILL))
     } else {
         Err(ErrorCode::SessionNotFound.into())
     }
