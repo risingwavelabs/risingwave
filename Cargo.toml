@@ -115,7 +115,7 @@ prost = { version = "0.12" }
 icelake = { git = "https://github.com/icelake-io/icelake", rev = "5cdcdffd24f4624a0a43f92c5f368988169a799b", features = [
   "prometheus",
 ] }
-arrow-array = "48"
+arrow-array = "49"
 arrow-cast = "48"
 arrow-schema = "48"
 arrow-buffer = "48"
