@@ -23,9 +23,9 @@ use risingwave_meta_model_v2::object::ObjectType;
 use risingwave_meta_model_v2::prelude::*;
 use risingwave_meta_model_v2::table::TableType;
 use risingwave_meta_model_v2::{
-    connection, database, fragment, function, index, object, object_dependency, schema, sink,
-    source, table, user_privilege, view, ColumnCatalogArray, ConnectionId, DatabaseId, FunctionId,
-    I32Array, IndexId, ObjectId, PrivateLinkService, SchemaId, SourceId, TableId, UserId,
+    connection, database, function, index, object, object_dependency, schema, sink, source, table,
+    user_privilege, view, ColumnCatalogArray, ConnectionId, DatabaseId, FunctionId, IndexId,
+    ObjectId, PrivateLinkService, SchemaId, SourceId, TableId, UserId,
 };
 use risingwave_pb::catalog::{
     PbComment, PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable,
@@ -693,7 +693,6 @@ impl CatalogController {
                         })?;
                     relations.push(PbRelationInfo::Source(ObjectModel(source, src_obj).into()));
                 }
-                // relations.push(PbRelationInfo::Table(ObjectModel(table, obj).into()));
 
                 // indexes.
                 let (index_ids, mut table_ids): (Vec<IndexId>, Vec<TableId>) =
@@ -710,22 +709,21 @@ impl CatalogController {
                     } else {
                         (vec![], vec![])
                     };
+                relations.push(PbRelationInfo::Table(ObjectModel(table, obj).into()));
 
                 // internal tables.
-                // todo: store internal table info directly in table catalog.
-                let internal_tables: Vec<I32Array> = Fragment::find()
+                let internal_tables: Vec<TableId> = Table::find()
                     .select_only()
-                    .column(fragment::Column::StateTableIds)
+                    .column(table::Column::TableId)
                     .filter(
-                        fragment::Column::JobId
+                        table::Column::BelongsToJobId
                             .is_in(table_ids.iter().cloned().chain(std::iter::once(object_id))),
                     )
                     .into_tuple()
                     .all(&txn)
                     .await?;
-                for table_id in internal_tables {
-                    table_ids.extend(table_id.into_inner());
-                }
+                table_ids.extend(internal_tables);
+
                 Object::update_many()
                     .col_expr(
                         object::Column::OwnerId,
@@ -774,17 +772,13 @@ impl CatalogController {
                 relations.push(PbRelationInfo::Sink(ObjectModel(sink, obj).into()));
 
                 // internal tables.
-                let internal_tables: Vec<I32Array> = Fragment::find()
+                let internal_tables: Vec<TableId> = Table::find()
                     .select_only()
-                    .column(fragment::Column::StateTableIds)
-                    .filter(fragment::Column::JobId.eq(object_id))
+                    .column(table::Column::TableId)
+                    .filter(table::Column::BelongsToJobId.eq(object_id))
                     .into_tuple()
                     .all(&txn)
                     .await?;
-                let internal_tables = internal_tables
-                    .into_iter()
-                    .flat_map(|arr| arr.into_inner().into_iter())
-                    .collect_vec();
 
                 Object::update_many()
                     .col_expr(
@@ -956,7 +950,7 @@ impl CatalogController {
             .into_partial_model()
             .all(&txn)
             .await?;
-        to_drop_objects.extend(to_drop_source_objs.clone());
+        to_drop_objects.extend(to_drop_source_objs);
         if object_type == ObjectType::Source {
             to_drop_source_ids.push(object_id);
         }
@@ -970,12 +964,24 @@ impl CatalogController {
             .all(&txn)
             .await?;
         to_drop_streaming_jobs.extend(index_table_ids);
-        let to_drop_internal_table_objs: Vec<PartialObject> = Object::find()
-            .filter(object::Column::Oid.is_in(to_drop_streaming_jobs.clone()))
-            .into_partial_model()
-            .all(&txn)
-            .await?;
-        to_drop_objects.extend(to_drop_internal_table_objs);
+
+        if !to_drop_streaming_jobs.is_empty() {
+            let to_drop_internal_table_objs: Vec<PartialObject> = Object::find()
+                .select_only()
+                .columns([
+                    object::Column::Oid,
+                    object::Column::ObjType,
+                    object::Column::SchemaId,
+                    object::Column::DatabaseId,
+                ])
+                .join(JoinType::InnerJoin, object::Relation::Table.def())
+                .filter(table::Column::BelongsToJobId.is_in(to_drop_streaming_jobs.clone()))
+                .into_partial_model()
+                .all(&txn)
+                .await?;
+
+            to_drop_objects.extend(to_drop_internal_table_objs);
+        }
 
         // Find affect users with privileges on all this objects.
         let to_update_user_ids: Vec<UserId> = UserPrivilege::find()
