@@ -59,7 +59,7 @@ WHERE nspname = 'test_schema';
 test_source test_schema
 
 statement ok
-CREATE SINK test_sink AS SELECT u FROM test_table WITH (
+CREATE SINK test_sink AS SELECT u FROM test_schema.test_table WITH (
     connector = 'blackhole'
 );
 

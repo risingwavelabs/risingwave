@@ -1150,7 +1150,7 @@ impl DdlController {
         new_schema_id: SchemaId,
     ) -> MetaResult<NotificationVersion> {
         self.catalog_manager
-            .alter_set_schema(object, new_schema_id)
+            .alter_set_schema(self.fragment_manager.clone(), object, new_schema_id)
             .await
     }
 

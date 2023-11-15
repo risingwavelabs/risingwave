@@ -1865,6 +1865,7 @@ impl CatalogManager {
 
     pub async fn alter_set_schema(
         &self,
+        fragment_manager: FragmentManagerRef,
         object: alter_set_schema_request::Object,
         new_schema_id: SchemaId,
     ) -> MetaResult<NotificationVersion> {
@@ -1883,7 +1884,10 @@ impl CatalogManager {
             alter_set_schema_request::Object::TableId(table_id) => {
                 database_core.ensure_table_id(table_id)?;
                 let Table {
-                    name, schema_id, ..
+                    name,
+                    optional_associated_source_id,
+                    schema_id,
+                    ..
                 } = database_core.tables.get(&table_id).unwrap();
                 if *schema_id == new_schema_id {
                     return Ok(IGNORED_NOTIFICATION_VERSION);
@@ -1895,30 +1899,61 @@ impl CatalogManager {
                     name.to_owned(),
                 ))?;
 
-                // Alter table's associated indexes.
-                let mut index_ids = Vec::new();
-                for (index_id, _) in database_core
+                // associated source id.
+                let to_update_source_id = if let Some(
+                    OptionalAssociatedSourceId::AssociatedSourceId(associated_source_id),
+                ) = optional_associated_source_id
+                {
+                    Some(*associated_source_id)
+                } else {
+                    None
+                };
+
+                let mut to_update_table_ids = vec![table_id];
+                let mut to_update_internal_table_ids = vec![];
+
+                // indexes and index tables.
+                let (to_update_index_ids, index_table_ids): (Vec<_>, Vec<_>) = database_core
                     .indexes
                     .iter()
                     .filter(|(_, index)| index.primary_table_id == table_id)
-                {
-                    database_core.ensure_index_id(*index_id)?;
-                    index_ids.push(*index_id);
+                    .map(|(index_id, index)| (*index_id, index.index_table_id))
+                    .unzip();
+                to_update_table_ids.extend(index_table_ids);
+
+                // internal tables.
+                for table_id in &to_update_table_ids {
+                    let table_fragment = fragment_manager
+                        .select_table_fragments_by_table_id(&(table_id.into()))
+                        .await?;
+                    to_update_internal_table_ids.extend(table_fragment.internal_table_ids());
                 }
 
                 let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
-                let mut table = tables.get_mut(table_id).unwrap();
-                table.schema_id = new_schema_id;
-                relation_infos.push(Some(RelationInfo::Table(table.clone())));
+                for table_id in to_update_table_ids
+                    .into_iter()
+                    .chain(to_update_internal_table_ids)
+                {
+                    let mut table = tables.get_mut(table_id).unwrap();
+                    table.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Table(table.clone())));
+                }
+
+                let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+                if let Some(source_id) = to_update_source_id {
+                    let mut source = sources.get_mut(source_id).unwrap();
+                    source.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Source(source.clone())));
+                }
 
                 let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
-                for index_id in index_ids {
+                for index_id in to_update_index_ids {
                     let mut index = indexes.get_mut(index_id).unwrap();
                     index.schema_id = new_schema_id;
                     relation_infos.push(Some(RelationInfo::Index(index.clone())));
                 }
 
-                commit_meta!(self, tables, indexes)?;
+                commit_meta!(self, tables, sources, indexes)?;
             }
             alter_set_schema_request::Object::ViewId(view_id) => {
                 database_core.ensure_view_id(view_id)?;
@@ -1969,6 +2004,14 @@ impl CatalogManager {
                     return Ok(IGNORED_NOTIFICATION_VERSION);
                 }
 
+                // internal tables.
+                let to_update_internal_table_ids = Vec::from_iter(
+                    fragment_manager
+                        .select_table_fragments_by_table_id(&(sink_id.into()))
+                        .await?
+                        .internal_table_ids(),
+                );
+
                 database_core.check_relation_name_duplicated(&(
                     database_id,
                     new_schema_id,
@@ -1978,7 +2021,15 @@ impl CatalogManager {
                 let mut sink = sinks.get_mut(sink_id).unwrap();
                 sink.schema_id = new_schema_id;
                 relation_infos.push(Some(RelationInfo::Sink(sink.clone())));
-                commit_meta!(self, sinks)?;
+
+                let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+                for table_id in to_update_internal_table_ids {
+                    let mut table = tables.get_mut(table_id).unwrap();
+                    table.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Table(table.clone())));
+                }
+
+                commit_meta!(self, sinks, tables)?;
             }
             alter_set_schema_request::Object::FunctionId(function_id) => {
                 database_core.ensure_function_id(function_id)?;

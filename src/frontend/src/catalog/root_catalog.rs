@@ -293,22 +293,15 @@ impl Catalog {
             schema.update_index(proto);
         } else {
             // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
-            let old_schema = database
+            schema.create_index(proto);
+            database
                 .iter_schemas_mut()
                 .find(|schema| {
                     schema.id() != proto.schema_id
                         && schema.get_index_by_id(&proto.id.into()).is_some()
                 })
-                .unwrap();
-            old_schema.drop_index(proto.id.into());
-            let index_table = old_schema
-                .get_table_by_id(&proto.index_table_id.into())
                 .unwrap()
-                .clone();
-            old_schema.drop_table(proto.index_table_id.into());
-            let schema = database.get_schema_mut(proto.schema_id).unwrap();
-            schema.create_table(&index_table.to_prost(proto.schema_id, proto.database_id));
-            schema.create_index(proto);
+                .drop_index(proto.id.into());
         }
     }
 
