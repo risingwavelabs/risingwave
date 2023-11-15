@@ -49,6 +49,8 @@ pub struct StorageOpts {
     pub meta_cache_capacity_mb: usize,
     /// Percent of the ratio of high priority data in block-cache
     pub high_priority_ratio: usize,
+    /// max memory usage for large query.
+    pub large_query_memory_usage_mb: usize,
     pub disable_remote_compactor: bool,
     /// Number of tasks shared buffer can upload in parallel.
     pub share_buffer_upload_concurrency: usize,
@@ -126,6 +128,7 @@ pub struct StorageOpts {
     pub compactor_max_sst_size: u64,
     /// enable FastCompactorRunner.
     pub enable_fast_compaction: bool,
+    pub max_preload_io_retry_times: usize,
 
     pub mem_table_spill_threshold: usize,
 }
@@ -157,6 +160,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             write_conflict_detection_enabled: c.storage.write_conflict_detection_enabled,
             high_priority_ratio: s.high_priority_ratio_in_percent,
             block_cache_capacity_mb: s.block_cache_capacity_mb,
+            large_query_memory_usage_mb: s.large_query_memory_usage_mb,
             meta_cache_capacity_mb: s.meta_cache_capacity_mb,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             share_buffer_upload_concurrency: c.storage.share_buffer_upload_concurrency,
@@ -234,6 +238,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .object_store_streaming_upload_timeout_ms,
             object_store_read_timeout_ms: c.storage.object_store_read_timeout_ms,
             object_store_upload_timeout_ms: c.storage.object_store_upload_timeout_ms,
+            max_preload_io_retry_times: c.storage.max_preload_io_retry_times,
             backup_storage_url: p.backup_storage_url().to_string(),
             backup_storage_directory: p.backup_storage_directory().to_string(),
             object_store_recv_buffer_size: c.storage.object_store_recv_buffer_size,

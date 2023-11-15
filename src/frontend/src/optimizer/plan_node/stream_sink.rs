@@ -238,14 +238,16 @@ impl StreamSink {
         format_desc: Option<&SinkFormatDesc>,
     ) -> Result<SinkType> {
         let frontend_derived_append_only = input_append_only;
-        let (user_defined_append_only, user_force_append_only) = match format_desc {
+        let (user_defined_append_only, user_force_append_only, syntax_legacy) = match format_desc {
             Some(f) => (
                 f.format == SinkFormat::AppendOnly,
                 Self::is_user_force_append_only(&WithOptions::from_inner(f.options.clone()))?,
+                false,
             ),
             None => (
                 Self::is_user_defined_append_only(properties)?,
                 Self::is_user_force_append_only(properties)?,
+                true,
             ),
         };
 
@@ -260,14 +262,14 @@ impl StreamSink {
             (false, true, false) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                        "The sink cannot be append-only. Please add \"force_append_only='true'\" in options to force the sink to be append-only. Notice that this will cause the sink executor to drop any UPDATE or DELETE message.",
+                        format!("The sink cannot be append-only. Please add \"force_append_only='true'\" in {} options to force the sink to be append-only. Notice that this will cause the sink executor to drop any UPDATE or DELETE message.", if syntax_legacy {"WITH"} else {"FORMAT ENCODE"}),
                 )))
                 .into())
             }
             (_, false, true) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                    "Cannot force the sink to be append-only without \"FORMAT PLAIN\" or \"type='append-only'\".",
+                    format!("Cannot force the sink to be append-only without \"{}\".", if syntax_legacy {"type='append-only'"} else {"FORMAT PLAIN"}),
                 )))
                 .into())
             }

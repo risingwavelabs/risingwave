@@ -447,6 +447,18 @@ impl DatabaseManager {
             .map(|(k, _)| *k)
     }
 
+    pub fn find_persisted_creating_table_id(&self, key: &RelationKey) -> Option<TableId> {
+        self.tables
+            .iter()
+            .find(|(_, t)| {
+                t.stream_job_status == PbStreamJobStatus::Creating as i32
+                    && t.database_id == key.0
+                    && t.schema_id == key.1
+                    && t.name == key.2
+            })
+            .map(|(k, _)| *k)
+    }
+
     pub fn all_creating_streaming_jobs(&self) -> impl Iterator<Item = TableId> + '_ {
         self.in_progress_creation_streaming_job.keys().cloned()
     }

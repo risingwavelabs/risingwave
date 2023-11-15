@@ -1141,7 +1141,9 @@ impl DdlController {
         object: Object,
         owner_id: UserId,
     ) -> MetaResult<NotificationVersion> {
-        self.catalog_manager.alter_owner(object, owner_id).await
+        self.catalog_manager
+            .alter_owner(self.fragment_manager.clone(), object, owner_id)
+            .await
     }
 
     async fn alter_set_schema(

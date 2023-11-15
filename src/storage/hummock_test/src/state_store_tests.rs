@@ -336,7 +336,7 @@ async fn test_basic_inner(
             ),
             epoch2,
             ReadOptions {
-                prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                prefetch_options: PrefetchOptions::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
                 ..Default::default()
             },
@@ -355,7 +355,7 @@ async fn test_basic_inner(
             ),
             epoch3,
             ReadOptions {
-                prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                prefetch_options: PrefetchOptions::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
                 ..Default::default()
             },
@@ -655,7 +655,7 @@ async fn test_reload_storage() {
             ),
             epoch1,
             ReadOptions {
-                prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                prefetch_options: PrefetchOptions::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
                 ..Default::default()
             },
@@ -703,7 +703,7 @@ async fn test_reload_storage() {
             ),
             epoch2,
             ReadOptions {
-                prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                prefetch_options: PrefetchOptions::default(),
                 cache_policy: CachePolicy::Fill(CachePriority::High),
                 ..Default::default()
             },
