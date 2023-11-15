@@ -2175,3 +2175,85 @@ async fn test_mem_table_spill_in_streaming() {
         ]))
     );
 }
+
+#[tokio::test]
+async fn test_mem_table_spill_in_streaming_multiple_times() {
+    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    let test_env = prepare_hummock_test_env().await;
+
+    let column_descs = vec![
+        ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
+        ColumnDesc::unnamed(ColumnId::from(1), DataType::Varchar),
+    ];
+    let size: usize = 5 * 1024 * 1024; // 5MB
+    let mut text1 = String::with_capacity(size);
+
+    for _ in 0..size {
+        text1.push('a');
+    }
+
+    let mut text2 = String::with_capacity(size);
+
+    for _ in 0..size {
+        text2.push('b');
+    }
+
+    let mut text3 = String::with_capacity(size);
+
+    for _ in 0..size {
+        text3.push('c');
+    }
+    let order_types = vec![OrderType::ascending()];
+    let pk_index = vec![0_usize];
+    let read_prefix_len_hint = 1;
+    let table = gen_prost_table(
+        TEST_TABLE_ID,
+        column_descs,
+        order_types,
+        pk_index,
+        read_prefix_len_hint,
+    );
+
+    test_env.register_table(table.clone()).await;
+    let mut state_table =
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
+            .await;
+
+    let epoch = EpochPair::new_test_epoch(1);
+    state_table.init_epoch(epoch);
+
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(text1.clone().into()),
+    ]));
+
+    state_table.try_flush().await.unwrap();
+
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(text2.clone().into()),
+    ]));
+
+    state_table.try_flush().await.unwrap();
+
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(text3.clone().into()),
+    ]));
+
+    state_table.try_flush().await.unwrap();
+
+    // spill occurs three times, and the epoch_with_gap is text3 > text2 > text1, should get text3.
+
+    let row = state_table
+        .get_row(&OwnedRow::new(vec![Some(1_i32.into())]))
+        .await
+        .unwrap();
+    assert_eq!(
+        row,
+        Some(OwnedRow::new(vec![
+            Some(1_i32.into()),
+            Some(text3.clone().into()),
+        ]))
+    );
+}
