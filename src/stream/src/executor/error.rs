@@ -36,6 +36,12 @@ pub struct StreamExecutorError {
     inner: Box<Inner>,
 }
 
+impl StreamExecutorError {
+    pub(crate) fn kind(&self) -> &ErrorKind {
+        &self.inner.kind
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 #[error("{kind}")]
 struct Inner {
@@ -45,7 +51,7 @@ struct Inner {
 }
 
 #[derive(thiserror::Error, Debug)]
-enum ErrorKind {
+pub(crate) enum ErrorKind {
     #[error("Storage error: {0}")]
     Storage(
         #[backtrace]

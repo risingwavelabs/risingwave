@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use core::time::Duration;
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::io::Write;
@@ -42,7 +43,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use super::{unique_executor_id, unique_operator_id, CollectResult};
-use crate::error::StreamResult;
+use crate::error::{StreamError, StreamResult};
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
@@ -266,8 +267,8 @@ impl LocalStreamManager {
     }
 
     /// Reset the state of the barrier manager.
-    pub fn reset_barrier_manager(&self) {
-        self.context.lock_barrier_manager().reset();
+    pub fn reset_barrier_manager(&self) -> Vec<StreamError> {
+        self.context.lock_barrier_manager().reset()
     }
 
     /// Use `epoch` to find collect rx. And wait for all actor to be collected before
@@ -347,13 +348,13 @@ impl LocalStreamManager {
     }
 
     /// Force stop all actors on this worker, and then drop their resources.
-    pub async fn stop_all_actors(&self) -> StreamResult<()> {
+    /// Returns the root cause of previous actor failure.
+    pub async fn stop_all_actors(&self) -> String {
         self.core.lock().await.stop_all_actors().await;
-        self.reset_barrier_manager();
+        let actor_errors = self.reset_barrier_manager();
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
-
-        Ok(())
+        try_find_root_cause(actor_errors)
     }
 
     pub async fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver> {
@@ -888,6 +889,36 @@ impl LocalStreamManagerCore {
     pub fn get_watermark_epoch(&self) -> AtomicU64Ref {
         self.watermark_epoch.clone()
     }
+}
+
+/// Tries to find the root cause of last actor failures, based on hard-coded rules.
+fn try_find_root_cause(actor_errors: Vec<StreamError>) -> String {
+    let stream_executor_error_score = |e: &StreamExecutorError| {
+        use crate::executor::error::ErrorKind;
+        match e.kind() {
+            ErrorKind::ChannelClosed(_) => 0,
+            ErrorKind::Internal(_) => 1,
+            _ => 999,
+        }
+    };
+    let stream_error_score = |e: &StreamError| {
+        use crate::error::ErrorKind;
+        match e.kind() {
+            ErrorKind::Internal(_) => 1000,
+            ErrorKind::Executor(ee) => 2000 + stream_executor_error_score(ee),
+            _ => 3000,
+        }
+    };
+    let cmp_stream_error = |a: &StreamError, b: &StreamError| -> Ordering {
+        stream_error_score(a).cmp(&stream_error_score(b))
+    };
+    actor_errors
+        .into_iter()
+        .sorted_by(cmp_stream_error)
+        .next_back()
+        // change to {:#?} to include backtrace
+        .map(|e| format!("{:#}", e))
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

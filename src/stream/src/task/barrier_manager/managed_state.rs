@@ -157,10 +157,13 @@ impl ManagedBarrierState {
     }
 
     /// Clear and reset all states.
-    pub(crate) fn clear_all_states(&mut self) {
+    pub(crate) fn clear_all_states(&mut self) -> Vec<StreamError> {
         tracing::debug!("clear all states in local barrier manager");
-
+        let errors = std::mem::take(&mut self.failure_actors)
+            .into_values()
+            .collect();
         *self = Self::new(self.state_store.clone());
+        errors
     }
 
     /// Notify unexpected actor exit with given `actor_id`.
