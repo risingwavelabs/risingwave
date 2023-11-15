@@ -14,6 +14,7 @@
 
 use std::cmp;
 use std::collections::VecDeque;
+use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{ready, Context, Poll};
@@ -30,6 +31,7 @@ use aws_sdk_s3::types::{
     CompletedPart, Delete, ExpirationStatus, LifecycleRule, LifecycleRuleFilter, ObjectIdentifier,
 };
 use aws_sdk_s3::Client;
+use aws_smithy_http::futures_stream_adapter::FuturesStreamCompatByteStream;
 use aws_smithy_runtime::client::http::hyper_014::HyperClientBuilder;
 use aws_smithy_runtime_api::client::http::HttpClient;
 use aws_smithy_runtime_api::client::result::SdkError;
@@ -38,13 +40,12 @@ use aws_smithy_types::retry::RetryConfig;
 use either::Either;
 use fail::fail_point;
 use futures::future::{try_join_all, BoxFuture, FutureExt};
-use futures::{stream, Stream};
+use futures::{stream, Stream, StreamExt, TryStreamExt};
 use hyper::{Body, Response};
 use itertools::Itertools;
 use risingwave_common::config::default::s3_objstore_config;
 use risingwave_common::monitor::connection::monitor_connector;
 use risingwave_common::range::RangeBoundsExt;
-use tokio::io::AsyncRead;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
@@ -53,7 +54,7 @@ use super::{
     BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectRangeBounds, ObjectResult,
     ObjectStore, StreamingUploader,
 };
-use crate::object::{try_update_failure_metric, ObjectMetadataIter};
+use crate::object::{try_update_failure_metric, ObjectDataStream, ObjectMetadataIter};
 
 type PartId = i32;
 
@@ -429,8 +430,8 @@ impl ObjectStore for S3ObjectStore {
     async fn streaming_read(
         &self,
         path: &str,
-        start_pos: Option<usize>,
-    ) -> ObjectResult<Box<dyn AsyncRead + Unpin + Send + Sync>> {
+        range: Range<usize>,
+    ) -> ObjectResult<ObjectDataStream> {
         fail_point!("s3_streaming_read_err", |_| Err(ObjectError::internal(
             "s3 streaming read error"
         )));
@@ -439,11 +440,7 @@ impl ObjectStore for S3ObjectStore {
         let resp = tokio_retry::RetryIf::spawn(
             self.config.get_retry_strategy(),
             || async {
-                match self
-                    .obj_store_request(path, start_pos.unwrap_or_default()..)
-                    .send()
-                    .await
-                {
+                match self.obj_store_request(path, range.clone()).send().await {
                     Ok(resp) => Ok(resp),
                     Err(err) => {
                         if let SdkError::DispatchFailure(e) = &err
@@ -462,8 +459,13 @@ impl ObjectStore for S3ObjectStore {
             Self::should_retry,
         )
         .await?;
+        let reader = FuturesStreamCompatByteStream::new(resp.body);
 
-        Ok(Box::new(resp.body.into_async_read()))
+        Ok(Box::pin(
+            reader
+                .into_stream()
+                .map(|item| item.map_err(ObjectError::from)),
+        ))
     }
 
     /// Permanently deletes the whole object.
@@ -527,6 +529,10 @@ impl ObjectStore for S3ObjectStore {
 
     fn store_media_type(&self) -> &'static str {
         "s3"
+    }
+
+    fn recv_buffer_size(&self) -> usize {
+        self.config.recv_buffer_size.unwrap_or(1 << 21)
     }
 }
 

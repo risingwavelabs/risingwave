@@ -993,7 +993,7 @@ async fn test_iter_with_min_epoch() {
                     epoch1,
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        prefetch_options: PrefetchOptions::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
                         ..Default::default()
                     },
@@ -1015,7 +1015,7 @@ async fn test_iter_with_min_epoch() {
                     epoch2,
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        prefetch_options: PrefetchOptions::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
                         ..Default::default()
                     },
@@ -1036,7 +1036,7 @@ async fn test_iter_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         retention_seconds: Some(0),
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        prefetch_options: PrefetchOptions::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
                         ..Default::default()
                     },
@@ -1076,7 +1076,7 @@ async fn test_iter_with_min_epoch() {
                     epoch1,
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        prefetch_options: PrefetchOptions::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
                         ..Default::default()
                     },
@@ -1098,7 +1098,7 @@ async fn test_iter_with_min_epoch() {
                     epoch2,
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        prefetch_options: PrefetchOptions::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
                         ..Default::default()
                     },
@@ -1121,7 +1121,7 @@ async fn test_iter_with_min_epoch() {
                     ReadOptions {
                         table_id: TEST_TABLE_ID,
                         retention_seconds: Some(0),
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        prefetch_options: PrefetchOptions::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
                         ..Default::default()
                     },
@@ -1229,7 +1229,7 @@ async fn test_hummock_version_reader() {
                         epoch1,
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
-                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                            prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(CachePriority::High),
                             ..Default::default()
                         },
@@ -1257,7 +1257,7 @@ async fn test_hummock_version_reader() {
                         epoch2,
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
-                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                            prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(CachePriority::High),
                             ..Default::default()
                         },
@@ -1286,7 +1286,7 @@ async fn test_hummock_version_reader() {
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             retention_seconds: Some(0),
-                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                            prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(CachePriority::High),
                             ..Default::default()
                         },
@@ -1355,7 +1355,7 @@ async fn test_hummock_version_reader() {
                         epoch1,
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
-                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                            prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(CachePriority::High),
                             ..Default::default()
                         },
@@ -1396,7 +1396,7 @@ async fn test_hummock_version_reader() {
                         epoch2,
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
-                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                            prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(CachePriority::High),
                             ..Default::default()
                         },
@@ -1433,7 +1433,7 @@ async fn test_hummock_version_reader() {
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
                             retention_seconds: Some(0),
-                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                            prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(CachePriority::High),
                             ..Default::default()
                         },
@@ -1469,7 +1469,7 @@ async fn test_hummock_version_reader() {
                         epoch3,
                         ReadOptions {
                             table_id: TEST_TABLE_ID,
-                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                            prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(CachePriority::High),
                             ..Default::default()
                         },
@@ -1511,7 +1511,7 @@ async fn test_hummock_version_reader() {
                             epoch2,
                             ReadOptions {
                                 table_id: TEST_TABLE_ID,
-                                prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                                prefetch_options: PrefetchOptions::default(),
                                 cache_policy: CachePolicy::Fill(CachePriority::High),
                                 ..Default::default()
                             },
@@ -1547,7 +1547,7 @@ async fn test_hummock_version_reader() {
                             epoch3,
                             ReadOptions {
                                 table_id: TEST_TABLE_ID,
-                                prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                                prefetch_options: PrefetchOptions::default(),
                                 cache_policy: CachePolicy::Fill(CachePriority::High),
                                 ..Default::default()
                             },
