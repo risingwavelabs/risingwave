@@ -18,6 +18,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use itertools::Itertools;
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::must_match;
@@ -28,16 +29,17 @@ use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 use super::iterator::test_utils::iterator_test_table_key_of;
 use super::{
-    create_monotonic_events, HummockResult, InMemWriter, SstableMeta, SstableWriterOptions,
-    DEFAULT_RESTART_INTERVAL,
+    HummockResult, InMemWriter, SstableMeta, SstableWriterOptions, DEFAULT_RESTART_INTERVAL,
 };
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{FilterKeyExtractorImpl, FullKeyFilterKeyExtractor};
+use crate::hummock::iterator::ForwardMergeRangeIterator;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BlockedXor16FilterBuilder, CachePolicy, DeleteRangeTombstone, FilterBuilder, LruCache, Sstable,
-    SstableBuilder, SstableBuilderOptions, SstableStoreRef, SstableWriter, Xor16FilterBuilder,
+    create_monotonic_events, BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator,
+    DeleteRangeTombstone, FilterBuilder, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
+    SstableStoreRef, SstableWriter, TableHolder, Xor16FilterBuilder,
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
@@ -273,7 +275,7 @@ pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
     object_id: HummockSstableObjectId,
     kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
-) -> Sstable {
+) -> TableHolder {
     let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
@@ -283,11 +285,10 @@ pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
         CachePolicy::NotFill,
     )
     .await;
-    let table = sstable_store
+    sstable_store
         .sstable(&sst_info, &mut StoreLocalStatistic::default())
         .await
-        .unwrap();
-    table.value().as_ref().clone()
+        .unwrap()
 }
 
 /// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
@@ -315,21 +316,16 @@ pub async fn gen_test_sstable_with_range_tombstone(
     kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
     range_tombstones: Vec<DeleteRangeTombstone>,
     sstable_store: SstableStoreRef,
-) -> Sstable {
-    let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
+) -> SstableInfo {
+    gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
         kv_iter,
         range_tombstones,
         sstable_store.clone(),
-        CachePolicy::NotFill,
+        CachePolicy::Fill(CachePriority::High),
     )
-    .await;
-    let table = sstable_store
-        .sstable(&sst_info, &mut StoreLocalStatistic::default())
-        .await
-        .unwrap();
-    table.value().as_ref().clone()
+    .await
 }
 
 /// Generates a user key with table id 0 and the given `table_key`
@@ -370,7 +366,7 @@ pub async fn gen_default_test_sstable(
     opts: SstableBuilderOptions,
     object_id: HummockSstableObjectId,
     sstable_store: SstableStoreRef,
-) -> Sstable {
+) -> TableHolder {
     gen_test_sstable(
         opts,
         object_id,
@@ -391,4 +387,35 @@ pub async fn count_stream<T>(s: impl Stream<Item = StorageResult<T>> + Send) -> 
 
 pub fn create_small_table_cache() -> Arc<LruCache<HummockSstableObjectId, Box<Sstable>>> {
     Arc::new(LruCache::new(1, 4, 0))
+}
+
+#[derive(Default)]
+pub struct CompactionDeleteRangesBuilder {
+    iter: ForwardMergeRangeIterator,
+}
+
+impl CompactionDeleteRangesBuilder {
+    pub fn add_delete_events(
+        &mut self,
+        epoch: HummockEpoch,
+        table_id: TableId,
+        delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
+    ) {
+        let size = SharedBufferBatch::measure_delete_range_size(&delete_ranges);
+        let batch = SharedBufferBatch::build_shared_buffer_batch(
+            epoch,
+            0,
+            vec![],
+            size,
+            delete_ranges,
+            table_id,
+            None,
+            None,
+        );
+        self.iter.add_batch_iter(batch.delete_range_iter());
+    }
+
+    pub fn build_for_compaction(self) -> CompactionDeleteRangeIterator {
+        CompactionDeleteRangeIterator::new(self.iter)
+    }
 }

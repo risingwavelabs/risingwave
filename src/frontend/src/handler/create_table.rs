@@ -486,7 +486,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let sql_pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
 
     let (columns_from_resolve_source, mut source_info) =
-        bind_columns_from_source(&source_schema, &properties, false).await?;
+        bind_columns_from_source(context.session_ctx(), &source_schema, &properties, false).await?;
     let columns_from_sql = bind_sql_columns(&column_defs)?;
 
     let mut columns = bind_all_columns(
@@ -562,6 +562,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
         let cdc_table_desc = CdcTableDesc {
             table_id: TableId::placeholder(),
+            source_id: TableId::placeholder(),
             external_table_name: "".to_string(),
             pk: table_pk,
             columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
@@ -784,7 +785,7 @@ fn gen_table_plan_inner(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn gen_create_table_plan_for_cdc_source(
+pub(crate) fn gen_create_table_plan_for_cdc_source(
     context: OptimizerContextRef,
     source_name: ObjectName,
     table_name: ObjectName,
@@ -847,7 +848,8 @@ fn gen_create_table_plan_for_cdc_source(
         derive_connect_properties(source.as_ref(), external_table_name.clone())?;
 
     let cdc_table_desc = CdcTableDesc {
-        table_id: source.id.into(), // source can be considered as an external table
+        table_id: TableId::placeholder(), // will be filled in meta node
+        source_id: source.id.into(),      // id of cdc source streaming job
         external_table_name: external_table_name.clone(),
         pk: table_pk,
         columns: columns.iter().map(|c| c.column_desc.clone()).collect(),

@@ -62,14 +62,12 @@ impl AwsEc2Client {
                 )
             })?;
 
-        if let Some(ret) = output.unsuccessful() {
-            if !ret.is_empty() {
-                return Err(MetaError::from(anyhow!(
-                    "Failed to delete VPC endpoint {}, error: {:?}",
-                    vpc_endpoint_id,
-                    ret
-                )));
-            }
+        if !output.unsuccessful().is_empty() {
+            return Err(MetaError::from(anyhow!(
+                "Failed to delete VPC endpoint {}, error: {:?}",
+                vpc_endpoint_id,
+                output.unsuccessful()
+            )));
         }
         Ok(())
     }
@@ -325,13 +323,11 @@ impl AwsEc2Client {
         let endpoint = output.vpc_endpoint().unwrap();
         let mut dns_names = Vec::new();
 
-        if let Some(dns_entries) = endpoint.dns_entries() {
-            dns_entries.iter().for_each(|e| {
-                if let Some(dns_name) = e.dns_name() {
-                    dns_names.push(dns_name.to_string());
-                }
-            });
-        }
+        endpoint.dns_entries().iter().for_each(|e| {
+            if let Some(dns_name) = e.dns_name() {
+                dns_names.push(dns_name.to_string());
+            }
+        });
 
         Ok((
             endpoint.vpc_endpoint_id().unwrap_or_default().to_string(),

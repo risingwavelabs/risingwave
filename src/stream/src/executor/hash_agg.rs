@@ -88,9 +88,6 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
 
-    /// Pk indices from input.
-    input_pk_indices: Vec<usize>,
-
     /// Schema from input.
     input_schema: Schema,
 
@@ -235,7 +232,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 version: args.version,
                 actor_ctx: args.actor_ctx,
                 info: args.info,
-                input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 group_key_indices: args.extra.group_key_indices,
                 group_key_table_pk_projection: group_key_table_pk_projection.to_vec().into(),
@@ -323,7 +319,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 &this.agg_funcs,
                                 &this.storages,
                                 &this.intermediate_state_table,
-                                &this.input_pk_indices,
                                 this.row_count_index,
                                 this.extreme_cache_size,
                                 &this.input_schema,
@@ -375,7 +370,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .zip_eq_fast(&mut this.storages)
             .zip_eq_fast(call_visibilities.iter())
         {
-            if let AggStateStorage::MaterializedInput { table, mapping } = storage
+            if let AggStateStorage::MaterializedInput { table, mapping, .. } = storage
                 && !call.distinct
             {
                 let chunk = chunk.project_with_vis(mapping.upstream_columns(), visibility.clone());
@@ -406,7 +401,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 .zip_eq_fast(&mut this.storages)
                 .zip_eq_fast(visibilities.iter())
             {
-                if let AggStateStorage::MaterializedInput { table, mapping } = storage
+                if let AggStateStorage::MaterializedInput { table, mapping, .. } = storage
                     && call.distinct
                 {
                     let chunk =
@@ -477,7 +472,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         &this.agg_funcs,
                         &this.storages,
                         &states,
-                        &this.input_pk_indices,
                         this.row_count_index,
                         this.extreme_cache_size,
                         &this.input_schema,

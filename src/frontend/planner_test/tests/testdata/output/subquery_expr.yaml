@@ -112,8 +112,8 @@
         └─LogicalScan { table: t2, columns: [t2.y] }
 - sql: |
     select (select 1, 2);
-  binder_error: |-
-    Bind error: failed to bind expression: (SELECT 1, 2)
+  binder_error: |
+    Failed to bind expression: (SELECT 1, 2)
 
     Caused by:
       Bind error: Subquery must return only one column
@@ -209,11 +209,12 @@
         └─LogicalValues { rows: [[1:Int32, 2:Int32, 3:Int32], [4:Int32, 5:Int32, 6:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32, *VALUES*_0.column_2:Int32] } }
 - sql: |
     select 1 + (select 2 from t);
-  binder_error: |-
-    Bind error: failed to bind expression: 1 + (SELECT 2 FROM t)
+  binder_error: |
+    Failed to bind expression: 1 + (SELECT 2 FROM t)
 
-    Caused by:
-      Catalog error: table or source not found: t
+    Caused by these errors (recent errors listed first):
+      1: Catalog error
+      2: table or source not found: t
 - sql: |
     create table t1(x int, y int);
     create table t2(x int, y int);

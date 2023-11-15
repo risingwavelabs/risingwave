@@ -22,8 +22,8 @@
   sql: |
     create table t(x int);
     select x from t group by (row_number(x) over());
-  binder_error: |-
-    Bind error: failed to bind expression: (row_number(x) OVER ())
+  binder_error: |
+    Failed to bind expression: (row_number(x) OVER ())
 
     Caused by:
       Invalid input syntax: window functions are not allowed in GROUP BY
@@ -31,8 +31,8 @@
   sql: |
     create table t(x int);
     select x from t having (row_number(x) over() > 1);
-  binder_error: |-
-    Bind error: failed to bind expression: (row_number(x) OVER () > 1)
+  binder_error: |
+    Failed to bind expression: (row_number(x) OVER () > 1)
 
     Caused by:
       Invalid input syntax: window functions are not allowed in HAVING
@@ -40,8 +40,8 @@
   sql: |
     create table t(x int);
     select x from t where (row_number(x) over() > 1);
-  binder_error: |-
-    Bind error: failed to bind expression: (row_number(x) OVER () > 1)
+  binder_error: |
+    Failed to bind expression: (row_number(x) OVER () > 1)
 
     Caused by:
       Invalid input syntax: window functions are not allowed in WHERE
@@ -49,8 +49,8 @@
   sql: |
     create table t(x int);
     select sum(x) filter (where row_number() over () > 1) from t;
-  binder_error: |-
-    Bind error: failed to bind expression: sum(x) FILTER(WHERE row_number() OVER () > 1)
+  binder_error: |
+    Failed to bind expression: sum(x) FILTER(WHERE row_number() OVER () > 1)
 
     Caused by:
       Invalid input syntax: window functions are not allowed in FILTER
@@ -58,8 +58,8 @@
   sql: |
     create table t(x int);
     select lag(x) from t;
-  binder_error: |-
-    Bind error: failed to bind expression: lag(x)
+  binder_error: |
+    Failed to bind expression: lag(x)
 
     Caused by:
       Invalid input syntax: Window function `lag` must have OVER clause
@@ -97,8 +97,8 @@
   sql: |
     create table t(x int);
     select lead(x, x + 1) over() from t;
-  binder_error: |-
-    Bind error: failed to bind expression: lead(x, x + 1) OVER ()
+  binder_error: |
+    Failed to bind expression: lead(x, x + 1) OVER ()
 
     Caused by:
       Feature is not yet implemented: non-const `offset` of `lead` function is not supported yet
@@ -239,8 +239,8 @@
   sql: |
     create table t(x int, y int);
     select x, y, min(x) over(PARTITION BY y ROWS UNBOUNDED FOLLOWING) from t;
-  binder_error: |-
-    Bind error: failed to bind expression: min(x) OVER (PARTITION BY y ROWS UNBOUNDED FOLLOWING)
+  binder_error: |
+    Failed to bind expression: min(x) OVER (PARTITION BY y ROWS UNBOUNDED FOLLOWING)
 
     Caused by:
       Invalid input syntax: window frame bounds `ROWS BETWEEN UNBOUNDED FOLLOWING AND CURRENT ROW` is not valid
@@ -248,8 +248,8 @@
   sql: |
     create table t(x int, y int);
     select x, y, min(x) over(PARTITION BY y ROWS BETWEEN 1 FOLLOWING AND 2 PRECEDING) from t;
-  binder_error: |-
-    Bind error: failed to bind expression: min(x) OVER (PARTITION BY y ROWS BETWEEN 1 FOLLOWING AND 2 PRECEDING)
+  binder_error: |
+    Failed to bind expression: min(x) OVER (PARTITION BY y ROWS BETWEEN 1 FOLLOWING AND 2 PRECEDING)
 
     Caused by:
       Invalid input syntax: window frame bounds `ROWS BETWEEN 1 FOLLOWING AND 2 PRECEDING` is not valid
@@ -257,8 +257,8 @@
   sql: |
     create table t(x int, y int);
     select x, y, max(x) over(PARTITION BY y ORDER BY x RANGE 100 PRECEDING) from t;
-  binder_error: |-
-    Bind error: failed to bind expression: max(x) OVER (PARTITION BY y ORDER BY x RANGE 100 PRECEDING)
+  binder_error: |
+    Failed to bind expression: max(x) OVER (PARTITION BY y ORDER BY x RANGE 100 PRECEDING)
 
     Caused by:
       Feature is not yet implemented: window frame in `RANGE` mode is not supported yet
@@ -267,8 +267,8 @@
   sql: |
     create table t(x int, y int);
     select x, y, max(x) over(PARTITION BY y ORDER BY x RANGE BETWEEN 100 PRECEDING and UNBOUNDED FOLLOWING) from t;
-  binder_error: |-
-    Bind error: failed to bind expression: max(x) OVER (PARTITION BY y ORDER BY x RANGE BETWEEN 100 PRECEDING AND UNBOUNDED FOLLOWING)
+  binder_error: |
+    Failed to bind expression: max(x) OVER (PARTITION BY y ORDER BY x RANGE BETWEEN 100 PRECEDING AND UNBOUNDED FOLLOWING)
 
     Caused by:
       Feature is not yet implemented: window frame in `RANGE` mode is not supported yet

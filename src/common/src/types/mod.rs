@@ -1219,7 +1219,7 @@ mod tests {
         );
         assert_eq!(
             format!("{}", d),
-            "struct<i integer,j character varying>".to_string()
+            "struct<i integer, j character varying>".to_string()
         );
     }
 
