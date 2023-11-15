@@ -5,33 +5,6 @@ auto-retry: &auto-retry
       limit: 3
 
 steps:
-  - key: "test-notify"
-    if: build.pull_request.labels includes "ci/main-cron/test-notify"
-    command: |
-      bash -c 'echo test && exit -1'
-
-  - label: "test notification [notify]"
-    allow_dependency_failure: true
-    depends_on:
-      - "test-notify"
-    if: build.pull_request.labels includes "ci/main-cron/test-notify"
-    command: |
-      OUTCOME=$(buildkite-agent step get "outcome" --step "test-notify")
-      echo "outcome: $$OUTCOME"
-      if [[ $$OUTCOME == "hard_failed" || $$OUTCOME == "soft_failed" ]]; then
-        cat <<- YAML | buildkite-agent pipeline upload 
-        steps:
-          - label: "notify test inner"
-            command: echo "notify test"
-            notify:
-              - slack:
-                  channels:
-                    - "#notification-buildkite"
-                  message: "<@noelkwan> test"
-      YAML
-      fi
-      
-
   - label: "build"
     command: "ci/scripts/build.sh -p ci-release"
     if: (!build.pull_request.labels includes "ci/main-cron/skip-ci" || build.pull_request.labels includes "ci/run-build")
@@ -295,6 +268,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end iceberg sink test (release)"
+    key: "e2e-iceberg-sink-tests"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-release"
     if: (!build.pull_request.labels includes "ci/main-cron/skip-ci" || build.pull_request.labels includes "ci/run-e2e-iceberg-sink-tests")
     depends_on:
@@ -326,6 +300,7 @@ steps:
     retry: *auto-retry
 
   - label: "e2e java-binding test (release)"
+    key: "e2e-java-binding-tests"
     command: "ci/scripts/java-binding-test.sh -p ci-release"
     if: (!build.pull_request.labels includes "ci/main-cron/skip-ci" || build.pull_request.labels includes "ci/run-e2e-java-binding-tests")
     depends_on:
@@ -433,6 +408,7 @@ steps:
     retry: *auto-retry
 
   - label: "S3 source on OpenDAL fs engine"
+    key: "s3-source-test-for-opendal-fs-engine"
     command: "ci/scripts/s3-source-test-for-opendal-fs-engine.sh -p ci-release -s run"
     if: (!build.pull_request.labels includes "ci/main-cron/skip-ci" || build.pull_request.labels includes "ci/run-s3-source-tests")
     depends_on: build
@@ -451,6 +427,7 @@ steps:
     retry: *auto-retry
 
   - label: "pulsar source check"
+    key: "pulsar-source-tests"
     command: "ci/scripts/pulsar-source-test.sh -p ci-release"
     if: (!build.pull_request.labels includes "ci/main-cron/skip-ci" || build.pull_request.labels includes "ci/run-pulsar-source-tests")
     depends_on:
@@ -532,6 +509,7 @@ steps:
     soft_fail: true
 
   - label: "Backfill tests"
+    key: "backfill-tests"
     command: "ci/scripts/backfill-test.sh -p ci-release"
     if: (!build.pull_request.labels includes "ci/main-cron/skip-ci" || build.pull_request.labels includes "ci/run-backfill-tests")
     depends_on:
@@ -577,6 +555,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end clickhouse sink test"
+    key: "e2e-clickhouse-sink-tests"
     command: "ci/scripts/e2e-clickhouse-sink-test.sh -p ci-release"
     if: (!build.pull_request.labels includes "ci/main-cron/skip-ci" || build.pull_request.labels includes "ci/run-e2e-clickhouse-sink-tests")
     depends_on:
@@ -592,6 +571,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end pulsar sink test"
+    key: "e2e-pulsar-sink-tests"
     command: "ci/scripts/e2e-pulsar-sink-test.sh -p ci-release"
     if: (!build.pull_request.labels includes "ci/main-cron/skip-ci" || build.pull_request.labels includes "ci/run-e2e-pulsar-sink-tests")
     depends_on:
@@ -607,6 +587,7 @@ steps:
     retry: *auto-retry
 
   - label: "connector node integration test Java {{matrix.java_version}}"
+    key: "connector-node-integration-test-{{matrix.java_version}}"
     command: "ci/scripts/connector-node-integration-test.sh -p ci-release -v {{matrix.java_version}}"
     if: (!build.pull_request.labels includes "ci/main-cron/skip-ci" || build.pull_request.labels includes "ci/run-connector-node-integration-tests")
     depends_on:
@@ -688,3 +669,62 @@ steps:
             DOCKER_TOKEN: docker-token
     timeout_in_minutes: 10
     retry: *auto-retry
+
+  # Template for how to use notification.
+  - key: "test-notify"
+    if: build.pull_request.labels includes "ci/main-cron/test-notify"
+    command: |
+      bash -c 'echo test && exit -1'
+
+  # Template for how to use notification.
+  - label: "test notification [notify]"
+    allow_dependency_failure: true
+    depends_on:
+      - "test-notify"
+    if: build.pull_request.labels includes "ci/main-cron/test-notify"
+    command: |
+      OUTCOME=$(buildkite-agent step get "outcome" --step "test-notify")
+      echo "outcome: $$OUTCOME"
+      if [[ $$OUTCOME == "hard_failed" || $$OUTCOME == "soft_failed" ]]; then
+        cat <<- YAML | buildkite-agent pipeline upload 
+        steps:
+          - label: "notify test inner"
+            command: echo "notify test"
+            notify:
+              - slack:
+                  channels:
+                    - "#notification-buildkite"
+                  message: "<@noelkwan> test"
+      YAML
+      fi
+
+  # Notifies on test failure for specific tests.
+  - label: "Test Failure Notification"
+    allow_dependency_failure: true
+    depends_on:
+      - "test-notify"
+      - "e2e-iceberg-sink-tests"
+      - "e2e-java-binding-tests"
+      - "e2e-clickhouse-sink-tests"
+      - "e2e-pulsar-sink-tests"
+      - "s3-source-test-for-opendal-fs-engine"
+      - "pulsar-source-tests"
+      - "connector-node-integration-test-11"
+      - "connector-node-integration-test-17"
+    if: build.pull_request.labels includes "ci/main-cron/test-notify"
+    command: |
+      OUTCOME=$(buildkite-agent step get "outcome" --step "test-notify")
+      echo "outcome: $$OUTCOME"
+      
+      if [[ $$OUTCOME == "hard_failed" || $$OUTCOME == "soft_failed" ]]; then
+        cat <<- YAML | buildkite-agent pipeline upload 
+        steps:
+          - label: "notify test inner"
+            command: echo "notify test"
+            notify:
+              - slack:
+                  channels:
+                    - "#notification-buildkite"
+                  message: "<@noelkwan> test"
+      YAML
+      fi
