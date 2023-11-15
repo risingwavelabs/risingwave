@@ -68,7 +68,7 @@ pub trait AsyncTruncateSinkWriter: Send + 'static {
         add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> impl Future<Output = Result<()>> + Send + 'a;
 
-    fn barrier(&mut self) -> impl Future<Output = Result<()>> + Send + '_ {
+    fn barrier(&mut self, _is_checkpoint: bool) -> impl Future<Output = Result<()>> + Send + '_ {
         async { Ok(()) }
     }
 }
@@ -265,10 +265,8 @@ impl<W: AsyncTruncateSinkWriter> LogSinker for AsyncTruncateLogSinkerOf<W> {
                             let add_future = self.future_manager.start_write_chunk(epoch, chunk_id);
                             self.writer.write_chunk(chunk, add_future).await?;
                         }
-                        LogStoreReadItem::Barrier {
-                            is_checkpoint: _is_checkpoint,
-                        } => {
-                            self.writer.barrier().await?;
+                        LogStoreReadItem::Barrier { is_checkpoint } => {
+                            self.writer.barrier(is_checkpoint).await?;
                             self.future_manager.add_barrier(epoch);
                         }
                         LogStoreReadItem::UpdateVnodeBitmap(_) => {}

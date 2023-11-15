@@ -355,7 +355,14 @@ impl AsyncTruncateSinkWriter for PulsarSinkWriter {
         })
     }
 
-    async fn barrier(&mut self) -> Result<()> {
-        self.producer.send_batch().map_err(pulsar_to_sink_err).await
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
+        if is_checkpoint {
+            self.producer
+                .send_batch()
+                .map_err(pulsar_to_sink_err)
+                .await?;
+        }
+
+        Ok(())
     }
 }
