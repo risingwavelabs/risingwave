@@ -676,11 +676,12 @@ steps:
     command: |
       bash -c 'echo test && exit -1'
 
-  # This should be the LAST part of the main-cron file.
-  - label: "Test Failure Notification"
-    wait: true
+  - wait: true
     continue_on_failure: true
     allow_dependency_failure: true
+
+  # This should be the LAST part of the main-cron file.
+  - label: "Test Failure Notification"
     if: build.pull_request.labels includes "ci/main-cron/test-notify"
     command: |
       OUTCOME=$(buildkite-agent step get "outcome" --step "test-notify")
