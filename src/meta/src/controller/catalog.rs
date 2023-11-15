@@ -717,7 +717,7 @@ impl CatalogController {
                     .select_only()
                     .column(fragment::Column::StateTableIds)
                     .filter(
-                        fragment::Column::TableId
+                        fragment::Column::JobId
                             .is_in(table_ids.iter().cloned().chain(std::iter::once(object_id))),
                     )
                     .into_tuple()
@@ -777,7 +777,7 @@ impl CatalogController {
                 let internal_tables: Vec<I32Array> = Fragment::find()
                     .select_only()
                     .column(fragment::Column::StateTableIds)
-                    .filter(fragment::Column::TableId.eq(object_id))
+                    .filter(fragment::Column::JobId.eq(object_id))
                     .into_tuple()
                     .all(&txn)
                     .await?;
