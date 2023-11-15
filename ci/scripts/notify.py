@@ -4,6 +4,8 @@ import subprocess
 
 # Add new test keys here.
 # Add their corresponding owners (by slack username) here.
+# NOTE(kwannoel): we may have to migrate to use `slack_user_id`.
+# I use `slack_username` since it is more readable, but not officially supported in the docs.
 TEST_MAP = {
     "test-notify": ["noelkwan", "noelkwan"],
     "backfill-tests": ["noelkwan"],
