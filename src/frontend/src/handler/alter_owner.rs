@@ -52,7 +52,7 @@ pub async fn handle_alter_owner(
                 let (table, schema_name) =
                     catalog_reader.get_table_by_name(db_name, schema_path, &real_obj_name)?;
                 session.check_privilege_for_drop_alter(schema_name, &**table)?;
-                if table.owner == owner_id {
+                if table.owner() == owner_id {
                     return Ok(RwPgResponse::empty_result(stmt_type));
                 }
                 Object::TableId(table.id.table_id)
@@ -61,7 +61,7 @@ pub async fn handle_alter_owner(
                 let (view, schema_name) =
                     catalog_reader.get_view_by_name(db_name, schema_path, &real_obj_name)?;
                 session.check_privilege_for_drop_alter(schema_name, &**view)?;
-                if view.owner == owner_id {
+                if view.owner() == owner_id {
                     return Ok(RwPgResponse::empty_result(stmt_type));
                 }
                 Object::ViewId(view.id)
@@ -70,7 +70,7 @@ pub async fn handle_alter_owner(
                 let (source, schema_name) =
                     catalog_reader.get_source_by_name(db_name, schema_path, &real_obj_name)?;
                 session.check_privilege_for_drop_alter(schema_name, &**source)?;
-                if source.owner == owner_id {
+                if source.owner() == owner_id {
                     return Ok(RwPgResponse::empty_result(stmt_type));
                 }
                 Object::SourceId(source.id)
@@ -79,7 +79,7 @@ pub async fn handle_alter_owner(
                 let (sink, schema_name) =
                     catalog_reader.get_sink_by_name(db_name, schema_path, &real_obj_name)?;
                 session.check_privilege_for_drop_alter(schema_name, &**sink)?;
-                if sink.owner.user_id == owner_id {
+                if sink.owner() == owner_id {
                     return Ok(RwPgResponse::empty_result(stmt_type));
                 }
                 Object::SinkId(sink.id.sink_id)
