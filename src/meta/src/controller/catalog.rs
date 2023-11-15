@@ -1020,6 +1020,8 @@ impl CatalogController {
 #[cfg(test)]
 #[cfg(not(madsim))]
 mod tests {
+    use risingwave_meta_model_v2::ViewId;
+
     use super::*;
 
     const TEST_DATABASE_ID: DatabaseId = 1;
@@ -1109,6 +1111,88 @@ mod tests {
 
         mgr.drop_function(function.function_id).await?;
         assert!(Object::find_by_id(function.function_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_alter_rename() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await)?;
+        let pb_source = PbSource {
+            schema_id: TEST_SCHEMA_ID as _,
+            database_id: TEST_DATABASE_ID as _,
+            name: "s1".to_string(),
+            owner: TEST_OWNER_ID as _,
+            definition: r#"CREATE SOURCE s1 (v1 int) with (
+  connector = 'kafka',
+  topic = 'kafka_alter',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON"#
+                .to_string(),
+            ..Default::default()
+        };
+        mgr.create_source(pb_source).await?;
+        let source_id: SourceId = Source::find()
+            .select_only()
+            .column(source::Column::SourceId)
+            .filter(source::Column::Name.eq("s1"))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+
+        let pb_view = PbView {
+            schema_id: TEST_SCHEMA_ID as _,
+            database_id: TEST_DATABASE_ID as _,
+            name: "view_1".to_string(),
+            owner: TEST_OWNER_ID as _,
+            sql: "CREATE VIEW view_1 AS SELECT v1 FROM s1".to_string(),
+            dependent_relations: vec![source_id as _],
+            ..Default::default()
+        };
+        mgr.create_view(pb_view).await?;
+        let view_id: ViewId = View::find()
+            .select_only()
+            .column(view::Column::ViewId)
+            .filter(view::Column::Name.eq("view_1"))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+
+        mgr.alter_relation_name(ObjectType::Source, source_id, "s2")
+            .await?;
+        let source = Source::find_by_id(source_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        assert_eq!(source.name, "s2");
+        assert_eq!(
+            source.definition,
+            "CREATE SOURCE s2 (v1 INT) WITH (\
+  connector = 'kafka', \
+  topic = 'kafka_alter', \
+  properties.bootstrap.server = 'message_queue:29092', \
+  scan.startup.mode = 'earliest'\
+) FORMAT PLAIN ENCODE JSON"
+        );
+
+        let view = View::find_by_id(view_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        assert_eq!(
+            view.definition,
+            "CREATE VIEW view_1 AS SELECT v1 FROM s2 AS s1"
+        );
+
+        mgr.drop_relation(ObjectType::Source, source_id, DropMode::Cascade)
+            .await?;
+        assert!(View::find_by_id(view_id)
             .one(&mgr.inner.read().await.db)
             .await?
             .is_none());
