@@ -58,3 +58,6 @@ risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
 
 [lints]
 workspace = true
+
+[lib]
+test = false
