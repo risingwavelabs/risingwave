@@ -682,5 +682,5 @@ steps:
 
   # This should be the LAST part of the main-cron file.
   - label: "Test Failure Notification"
-    if: build.pull_request.labels includes "ci/main-cron/test-notify"
+    if: build.pull_request.labels includes "ci/main-cron/test-notify" || build.branch == "main"
     command: "ci/scripts/notify.py"

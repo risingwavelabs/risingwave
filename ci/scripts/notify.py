@@ -30,7 +30,7 @@ def generate_test_status_message(failed_test_map):
     return message
 
 def get_buildkite_test_status(test):
-    result = subprocess.run(f"buildkite-agent step get \"outcome\" --step \"{test}\"", capture_output = True, text = True)
+    result = subprocess.run(f"buildkite-agent step get \"outcome\" --step \"{test}\"", capture_output = True, text = True, shell=True)
     outcome = result.stdout.strip()
     return outcome
 
@@ -98,6 +98,6 @@ def main():
         print(message)
         cmd = format_cmd(messages)
         print(cmd)
-        # subprocess.run(cmd)
+        # subprocess.run(cmd, shell=True)
 
 main()
