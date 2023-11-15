@@ -158,7 +158,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             .collect_vec();
 
                         let table_reader = table_type
-                            .create_table_reader(source.properties.clone(), table_schema.clone())?;
+                            .create_table_reader(source.properties.clone(), table_schema.clone()).await?;
                         let external_table = ExternalStorageTable::new(
                             TableId::new(source.source_id),
                             upstream_table_name,
@@ -183,7 +183,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             (0..table_schema.len()).collect_vec(),
                             None,
                             params.executor_stats,
-                            source_state_handler,
+                            None,
+                            Some(source_state_handler),
                             false,
                             source_ctrl_opts.chunk_size,
                         );

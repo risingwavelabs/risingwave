@@ -8,6 +8,9 @@ statement ok
 CREATE TABLE t (v1 INT primary key, v2 STRUCT<v1 INT, v2 STRUCT<v1 INT, v2 INT>>);
 
 statement ok
+CREATE INDEX t_idx ON t (v1);
+
+statement ok
 ALTER TABLE t OWNER TO user1;
 
 query TT
@@ -24,6 +27,21 @@ WHERE
     AND pg_class.relname = 't';
 ----
 t user1
+
+query TT
+SELECT
+    pg_class.relname AS rel_name,
+    pg_roles.rolname AS owner
+FROM
+    pg_class
+    JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace
+    JOIN pg_roles ON pg_roles.oid = pg_class.relowner
+WHERE
+    pg_namespace.nspname NOT LIKE 'pg_%'
+    AND pg_namespace.nspname != 'information_schema'
+    AND pg_class.relname = 't_idx';
+----
+t_idx user1
 
 statement ok
 CREATE VIEW v AS ( SELECT * FROM t WHERE v1 = 1);

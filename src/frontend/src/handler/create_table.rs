@@ -562,6 +562,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
 
         let cdc_table_desc = CdcTableDesc {
             table_id: TableId::placeholder(),
+            source_id: TableId::placeholder(),
             external_table_name: "".to_string(),
             pk: table_pk,
             columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
@@ -847,7 +848,8 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
         derive_connect_properties(source.as_ref(), external_table_name.clone())?;
 
     let cdc_table_desc = CdcTableDesc {
-        table_id: source.id.into(), // source can be considered as an external table
+        table_id: TableId::placeholder(), // will be filled in meta node
+        source_id: source.id.into(),      // id of cdc source streaming job
         external_table_name: external_table_name.clone(),
         pk: table_pk,
         columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
