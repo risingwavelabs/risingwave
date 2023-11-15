@@ -676,7 +676,10 @@ impl TryFrom<&arrow_array::ListArray> for ListArray {
     fn try_from(array: &arrow_array::ListArray) -> Result<Self, Self::Error> {
         Ok(ListArray {
             value: Box::new(ArrayImpl::try_from(array.values())?),
-            bitmap: array.nulls().expect("no null bitmap").iter().collect(),
+            bitmap: match array.nulls() {
+                Some(nulls) => nulls.iter().collect(),
+                None => Bitmap::ones(array.len()),
+            },
             offsets: array.offsets().iter().map(|o| *o as u32).collect(),
         })
     }

@@ -222,6 +222,7 @@ impl ListArray {
     /// Flatten the list array into a single array.
     ///
     /// # Example
+    ///
     /// ```text
     /// [[1,2,3],NULL,[4,5]] => [1,2,3,4,5]
     /// [[[1],[2]],[[3],[4]]] => [1,2,3,4]
