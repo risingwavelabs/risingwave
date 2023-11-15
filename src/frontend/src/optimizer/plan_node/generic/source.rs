@@ -117,9 +117,16 @@ impl Source {
             sub_fields: vec![],
             type_name: "".to_string(),
         };
+        let update_time = Field {
+            data_type: DataType::Timestamptz,
+            name: "update_time".to_string(),
+            sub_fields: vec![],
+            type_name: "".to_string(),
+        };
 
         let ordered_col_idx = builder.add_column(&key);
         builder.add_column(&value);
+        builder.add_column(&update_time);
         builder.add_order_column(ordered_col_idx, OrderType::ascending());
 
         builder.build(vec![], 1)

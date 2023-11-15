@@ -16,13 +16,14 @@ use std::collections::HashSet;
 use std::ops::{Bound, Deref};
 use std::sync::Arc;
 
+use chrono::Utc;
 use futures::{pin_mut, StreamExt};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRef, ScalarRefImpl};
+use risingwave_common::types::{JsonbVal, ScalarImpl, ScalarRef, ScalarRefImpl, Timestamptz};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
@@ -158,9 +159,11 @@ impl<S: StateStore> SourceStateTableHandler<S> {
     }
 
     pub async fn set(&mut self, key: SplitId, value: JsonbVal) -> StreamExecutorResult<()> {
+        let update_time = Timestamptz::from_micros(Utc::now().timestamp_micros());
         let row = [
             Some(Self::string_to_scalar(key.deref())),
             Some(ScalarImpl::Jsonb(value)),
+            Some(update_time.into()),
         ];
         match self.get(key).await? {
             Some(prev_row) => {

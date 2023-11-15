@@ -8502,6 +8502,7 @@ dependencies = [
  "auto_enums",
  "await-tree",
  "bytes",
+ "chrono",
  "criterion",
  "educe",
  "either",
