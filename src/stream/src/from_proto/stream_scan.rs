@@ -218,11 +218,6 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
             }
             StreamScanType::Unspecified => unreachable!(),
         };
-        if let Ok(rate_limit) = node.get_rate_limit() {
-            tracing::debug!(rate_limit, "flow control enabled");
-            Ok(FlowControlExecutor::new(executor, *rate_limit).boxed())
-        } else {
-            Ok(executor)
-        }
+        Ok(FlowControlExecutor::new(executor, node.rate_limit.map(|x| x as _)).boxed())
     }
 }
