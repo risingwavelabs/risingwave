@@ -700,19 +700,19 @@ impl ListValue {
                         }
                         (i, c @ ',' | c @ '}') => {
                             let s = &self.input[..i];
-                            let trimmed = s.trim_end();
                             // consume the value and leave the ',' or '}' for parent
                             self.input = &self.input[i..];
 
-                            if trimmed.is_empty() {
-                                return Err(format!("Unexpected \"{c}\" character."));
-                            }
-                            if trimmed.eq_ignore_ascii_case("null") {
-                                return Ok(None);
-                            }
                             break if has_escape {
                                 Cow::Owned(Self::unescape_trim_end(s))
                             } else {
+                                let trimmed = s.trim_end();
+                                if trimmed.is_empty() {
+                                    return Err(format!("Unexpected \"{c}\" character."));
+                                }
+                                if trimmed.eq_ignore_ascii_case("null") {
+                                    return Ok(None);
+                                }
                                 Cow::Borrowed(trimmed)
                             };
                         }
@@ -786,11 +786,16 @@ impl ListValue {
             }
 
             /// Consume the next 4 characters if it matches "null".
+            ///
+            /// Note: We don't use this function when parsing non-array values.
+            ///       Because we can't decide whether it is a null value or a string starts with "null".
+            ///       Consider this case: `{null value}` => `["null value"]`
             fn try_parse_null(&mut self) -> bool {
                 if let Some(s) = self.input.get(..4) && s.eq_ignore_ascii_case("null") {
                     let next_char = self.input[4..].chars().next();
                     match next_char {
-                        None | Some(',' | '{' | '}' | '\t' | '\n' | '\r' | '\x0B' | '\x0C' | ' ') => {}
+                        None | Some(',' | '}') => {}
+                        Some(c) if c.is_ascii_whitespace() => {}
                         // following normal characters
                         _ => return false,
                     }
