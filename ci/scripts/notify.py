@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import subprocess
+import sys
 
 TEST_MAP = {
     "test-notify": ["noelkwan", "noelkwan"],
@@ -98,6 +99,8 @@ def main():
         print(message)
         cmd = format_cmd(message)
         print(cmd)
+        print("notification sent")
         # subprocess.run(cmd, shell=True)
+        sys.exit(1)
 
 main()

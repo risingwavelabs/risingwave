@@ -680,6 +680,8 @@ steps:
     continue_on_failure: true
     allow_dependency_failure: true
 
+  # Notifies on test failure for certain tests.
+  # You may update `notify.py` to add tests and people to notify.
   # This should be the LAST part of the main-cron file.
   - label: "Test Failure Notification"
     if: build.pull_request.labels includes "ci/main-cron/test-notify" || build.branch == "main"
