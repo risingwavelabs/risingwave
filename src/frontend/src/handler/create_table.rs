@@ -698,6 +698,8 @@ fn gen_table_plan_inner(
     let connection_id =
         resolve_privatelink_in_with_option(&mut with_options, &schema_name, &session)?;
 
+    let is_external_source = source_info.is_some();
+
     let source = source_info.map(|source_info| PbSource {
         id: TableId::placeholder().table_id,
         schema_id,
@@ -776,6 +778,7 @@ fn gen_table_plan_inner(
         append_only,
         watermark_descs,
         version,
+        is_external_source,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -884,12 +887,15 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
         pk_column_ids,
         None,
         append_only,
-        vec![], // no watermarks
+        vec![],
         Some(col_id_gen.into_version()),
+        true,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
     table.owner = session.user_id();
+    table.dependent_relations = vec![source.id];
+
     Ok((materialize.into(), table))
 }
 
@@ -934,43 +940,21 @@ fn derive_connect_properties(
     Ok(connect_properties.into_iter().collect())
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn handle_create_table(
-    handler_args: HandlerArgs,
+pub(super) async fn handle_create_table_plan(
+    context: OptimizerContext,
+    col_id_gen: ColumnIdGenerator,
+    source_schema: Option<ConnectorSchema>,
+    cdc_table_info: Option<CdcTableInfo>,
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-    if_not_exists: bool,
-    source_schema: Option<ConnectorSchema>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
-    notice: Option<String>,
-    cdc_table_info: Option<CdcTableInfo>,
-) -> Result<RwPgResponse> {
-    let session = handler_args.session.clone();
-    // TODO(st1page): refactor it
-    if let Some(notice) = notice {
-        session.notice_to_user(notice)
-    }
+) -> Result<(PlanRef, Option<PbSource>, PbTable, TableJobType)> {
+    let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
 
-    if append_only {
-        session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");
-    }
-
-    if let Either::Right(resp) = session.check_relation_name_duplicated(
-        table_name.clone(),
-        StatementType::CREATE_TABLE,
-        if_not_exists,
-    )? {
-        return Ok(resp);
-    }
-
-    let (graph, source, table, job_type) = {
-        let context = OptimizerContext::from_handler_args(handler_args);
-        let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
-        let col_id_gen = ColumnIdGenerator::new_initial();
-
-        let ((plan, source, table), job_type) = match (source_schema, cdc_table_info.as_ref()) {
+    let ((plan, source, table), job_type) =
+        match (source_schema, cdc_table_info.as_ref()) {
             (Some(source_schema), None) => (
                 gen_create_table_plan_with_source(
                     context,
@@ -1018,6 +1002,56 @@ pub async fn handle_create_table(
             )
             .into()),
         };
+    Ok((plan, source, table, job_type))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn handle_create_table(
+    handler_args: HandlerArgs,
+    table_name: ObjectName,
+    column_defs: Vec<ColumnDef>,
+    constraints: Vec<TableConstraint>,
+    if_not_exists: bool,
+    source_schema: Option<ConnectorSchema>,
+    source_watermarks: Vec<SourceWatermark>,
+    append_only: bool,
+    notice: Option<String>,
+    cdc_table_info: Option<CdcTableInfo>,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session.clone();
+    // TODO(st1page): refactor it
+    if let Some(notice) = notice {
+        session.notice_to_user(notice)
+    }
+
+    if append_only {
+        session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");
+    }
+
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        table_name.clone(),
+        StatementType::CREATE_TABLE,
+        if_not_exists,
+    )? {
+        return Ok(resp);
+    }
+
+    let (graph, source, table, job_type) = {
+        let context = OptimizerContext::from_handler_args(handler_args);
+        let col_id_gen = ColumnIdGenerator::new_initial();
+        let (plan, source, table, job_type) = handle_create_table_plan(
+            context,
+            col_id_gen,
+            source_schema,
+            cdc_table_info,
+            table_name.clone(),
+            column_defs,
+            constraints,
+            source_watermarks,
+            append_only,
+        )
+        .await?;
+
         let mut graph = build_graph(plan);
         graph.parallelism = session
             .config()

@@ -723,14 +723,15 @@ impl S3ObjectStore {
 
         if let Ok(config) = &get_config_result {
             for rule in config.rules() {
-                // When both of the conditions are met, it is considered that there is a risk of data deletion.
-                //
-                // 1. expiration status rule is enabled
-                // 2. (a) prefix filter is not set
-                // or (b) prefix filter is set to the data directory of RisingWave.
-                //
-                // P.S. 1 && (2a || 2b)
-                is_expiration_configured |= rule.status == ExpirationStatus::Enabled // 1
+                if rule.expiration().is_some() {
+                    // When both of the conditions are met, it is considered that there is a risk of data deletion.
+                    //
+                    // 1. expiration status rule is enabled
+                    // 2. (a) prefix filter is not set
+                    // or (b) prefix filter is set to the data directory of RisingWave.
+                    //
+                    // P.S. 1 && (2a || 2b)
+                    is_expiration_configured |= rule.status == ExpirationStatus::Enabled // 1
                     && match rule.filter().as_ref() {
                         // 2a
                         None => true,
@@ -743,10 +744,11 @@ impl S3ObjectStore {
                         _ => false,
                     };
 
-                if matches!(rule.status(), ExpirationStatus::Enabled)
-                    && rule.abort_incomplete_multipart_upload().is_some()
-                {
-                    configured_rules.push(rule);
+                    if matches!(rule.status(), ExpirationStatus::Enabled)
+                        && rule.abort_incomplete_multipart_upload().is_some()
+                    {
+                        configured_rules.push(rule);
+                    }
                 }
             }
         }

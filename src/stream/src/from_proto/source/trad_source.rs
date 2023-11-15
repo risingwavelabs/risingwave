@@ -70,7 +70,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     // TODO: use the correct information to fill in pk_dicies.
                     // We should consdier add back the "pk_column_ids" field removed by #8841 in
                     // StreamSource
-                    params.pk_indices.clone(),
+                    params.info.pk_indices.clone(),
                 );
 
                 let source_ctrl_opts = SourceCtrlOpts {

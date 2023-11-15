@@ -45,6 +45,7 @@ use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamDedup,
     ToStreamContext,
 };
+use crate::optimizer::property::Distribution::HashShard;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, IndexRewriter};
 
@@ -574,7 +575,7 @@ impl ToStream for LogicalSource {
         if let Some(row_id_index) = self.core.row_id_index
             && self.core.gen_row_id
         {
-            plan = StreamRowIdGen::new(plan, row_id_index).into();
+            plan = StreamRowIdGen::new_with_dist(plan, row_id_index, HashShard(vec![row_id_index])).into();
         }
         Ok(plan)
     }
