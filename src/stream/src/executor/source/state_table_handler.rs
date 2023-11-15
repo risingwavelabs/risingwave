@@ -280,6 +280,7 @@ pub fn default_source_internal_table(id: u32) -> PbTable {
     let columns = vec![
         make_column(TypeName::Varchar, 0),
         make_column(TypeName::Jsonb, 1),
+        make_column(TypeName::Timestamptz, 2),
     ];
     PbTable {
         id,
