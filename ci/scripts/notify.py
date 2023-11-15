@@ -8,8 +8,7 @@ TEST_MAP = {
     "e2e-pulsar-sink-tests": [],
     "s3-source-test-for-opendal-fs-engine": [],
     "pulsar-source-tests": [],
-    "connector-node-integration-test-11": [],
-    "connector-node-integration-test-17": []
+    "connector-node-integration-test": [],
 }
 
 def get_failed_tests(get_test_status, test_map):
@@ -39,8 +38,7 @@ def get_mock_test_status(test):
         # "e2e-pulsar-sink-tests": [],
         # "s3-source-test-for-opendal-fs-engine": [],
         # "pulsar-source-tests": [],
-        # "connector-node-integration-test-11": [],
-        # "connector-node-integration-test-17": []
+        # "connector-node-integration-test": [],
     }
     return mock_test_map[test]
 

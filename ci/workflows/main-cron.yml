@@ -587,7 +587,7 @@ steps:
     retry: *auto-retry
 
   - label: "connector node integration test Java {{matrix.java_version}}"
-    key: "connector-node-integration-test-{{matrix.java_version}}"
+    key: "connector-node-integration-test"
     command: "ci/scripts/connector-node-integration-test.sh -p ci-release -v {{matrix.java_version}}"
     if: (!build.pull_request.labels includes "ci/main-cron/skip-ci" || build.pull_request.labels includes "ci/run-connector-node-integration-tests")
     depends_on:
