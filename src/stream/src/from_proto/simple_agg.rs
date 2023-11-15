@@ -61,8 +61,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
 
             input,
             actor_ctx: params.actor_context,
-            pk_indices: params.pk_indices,
-            executor_id: params.executor_id,
+            info: params.info,
 
             extreme_cache_size: stream.config.developer.unsafe_extreme_cache_size,
 

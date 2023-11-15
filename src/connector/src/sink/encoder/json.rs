@@ -196,15 +196,16 @@ fn datum_to_json_object(
             CustomJsonType::Doris(map) => {
                 if !matches!(v, Decimal::Normalized(_)) {
                     return Err(ArrayError::internal(
-                        "doris can't support decimal Inf, -Inf, Nan".to_string(),
+                        "doris/starrocks can't support decimal Inf, -Inf, Nan".to_string(),
                     ));
                 }
                 let (p, s) = map.get(&field.name).unwrap();
                 v.rescale(*s as u32);
                 let v_string = v.to_text();
-                if v_string.len() > *p as usize {
+                let len = v_string.clone().replace(['.', '-'], "").len();
+                if len > *p as usize {
                     return Err(ArrayError::internal(
-                        format!("rw Decimal's precision is large than doris max decimal len is {:?}, doris max is {:?}",v_string.len(),p)));
+                        format!("rw Decimal's precision is large than doris/starrocks max decimal len is {:?}, doris max is {:?}",v_string.len(),p)));
                 }
                 json!(v_string)
             }
@@ -242,7 +243,7 @@ fn datum_to_json_object(
             TimestampHandlingMode::String => json!(v.0.format("%Y-%m-%d %H:%M:%S%.6f").to_string()),
         },
         (DataType::Bytea, ScalarRefImpl::Bytea(v)) => {
-            json!(general_purpose::STANDARD_NO_PAD.encode(v))
+            json!(general_purpose::STANDARD.encode(v))
         }
         // P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S
         (DataType::Interval, ScalarRefImpl::Interval(v)) => {

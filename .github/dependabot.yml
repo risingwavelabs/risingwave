@@ -28,3 +28,7 @@ updates:
       patterns:
         - "opentelemetry*"
         - "tracing-opentelemetry"
+    mysql:
+      patterns:
+        - "mysql_common"
+        - "mysql_async"

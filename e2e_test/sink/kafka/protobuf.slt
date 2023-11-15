@@ -76,7 +76,7 @@ format plain encode protobuf (
   schema.location = 'file:///risingwave/proto-recursiv',
   message = 'recursive.AllTypes');
 
-statement error encode extra_column error: field not in proto
+statement error field not in proto
 create sink sink_err as select 1 as extra_column with (
   connector = 'kafka',
   topic = 'test-rw-sink-append-only-protobuf',

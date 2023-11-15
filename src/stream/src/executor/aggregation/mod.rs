@@ -19,45 +19,18 @@ use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::aggregate::{AggCall, AggKind};
 use risingwave_expr::expr::{LogReport, NonStrictExpression};
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::Executor;
 
 mod agg_group;
 mod agg_state;
 mod agg_state_cache;
 mod distinct;
 mod minput;
-
-/// Generate [`crate::executor::HashAggExecutor`]'s schema from `input`, `agg_calls` and
-/// `group_key_indices`. For [`crate::executor::HashAggExecutor`], the group key indices should
-/// be provided.
-pub fn generate_agg_schema(
-    input: &dyn Executor,
-    agg_calls: &[AggCall],
-    group_key_indices: Option<&[usize]>,
-) -> Schema {
-    let aggs = agg_calls
-        .iter()
-        .map(|agg| Field::unnamed(agg.return_type.clone()));
-
-    let fields = if let Some(key_indices) = group_key_indices {
-        let keys = key_indices
-            .iter()
-            .map(|idx| input.schema().fields[*idx].clone());
-
-        keys.chain(aggs).collect()
-    } else {
-        aggs.collect()
-    };
-
-    Schema { fields }
-}
 
 pub async fn agg_call_filter_res(
     agg_call: &AggCall,

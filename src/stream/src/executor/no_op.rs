@@ -14,21 +14,23 @@
 
 use risingwave_common::catalog::Schema;
 
-use super::{ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, PkIndicesRef};
+use super::{
+    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, PkIndicesRef,
+};
 
 /// No-op executor directly forwards the input stream. Currently used to break the multiple edges in
 /// the fragment graph.
 pub struct NoOpExecutor {
     _ctx: ActorContextRef,
-    identity: String,
+    info: ExecutorInfo,
     input: BoxedExecutor,
 }
 
 impl NoOpExecutor {
-    pub fn new(ctx: ActorContextRef, input: BoxedExecutor, executor_id: u64) -> Self {
+    pub fn new(ctx: ActorContextRef, info: ExecutorInfo, input: BoxedExecutor) -> Self {
         Self {
             _ctx: ctx,
-            identity: format!("NoOpExecutor {:X}", executor_id),
+            info,
             input,
         }
     }
@@ -40,14 +42,14 @@ impl Executor for NoOpExecutor {
     }
 
     fn schema(&self) -> &Schema {
-        self.input.schema()
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        self.input.pk_indices()
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        &self.identity
+        &self.info.identity
     }
 }

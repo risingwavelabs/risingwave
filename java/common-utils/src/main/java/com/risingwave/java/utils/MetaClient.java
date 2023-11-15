@@ -93,7 +93,7 @@ public class MetaClient implements AutoCloseable {
 
         AddWorkerNodeRequest req =
                 AddWorkerNodeRequest.newBuilder()
-                        .setWorkerType(WorkerType.RISE_CTL)
+                        .setWorkerType(WorkerType.WORKER_TYPE_RISE_CTL)
                         .setHost(
                                 HostAddress.newBuilder().setHost("127.0.0.1").setPort(8880).build())
                         .setProperty(

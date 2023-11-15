@@ -81,6 +81,8 @@ pub struct MetaOpts {
     /// Whether to enable the recovery of the cluster. If disabled, the meta service will exit on
     /// abnormal cases.
     pub enable_recovery: bool,
+    /// Whether to enable the scale-in feature when compute-node is removed.
+    pub enable_scale_in_when_recovery: bool,
     /// The maximum number of barriers in-flight in the compute nodes.
     pub in_flight_barrier_nums: usize,
     /// After specified seconds of idle (no mview or flush), the process will be exited.
@@ -174,6 +176,7 @@ impl MetaOpts {
     pub fn test(enable_recovery: bool) -> Self {
         Self {
             enable_recovery,
+            enable_scale_in_when_recovery: false,
             in_flight_barrier_nums: 40,
             max_idle_ms: 0,
             compaction_deterministic_test: false,

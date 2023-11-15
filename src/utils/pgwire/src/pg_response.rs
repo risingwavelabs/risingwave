@@ -67,6 +67,8 @@ pub enum StatementType {
     DROP_DATABASE,
     DROP_USER,
     DROP_CONNECTION,
+    ALTER_DATABASE,
+    ALTER_SCHEMA,
     ALTER_INDEX,
     ALTER_VIEW,
     ALTER_TABLE,
@@ -94,6 +96,7 @@ pub enum StatementType {
     SET_TRANSACTION,
     CANCEL_COMMAND,
     WAIT,
+    KILL,
 }
 
 impl std::fmt::Display for StatementType {
