@@ -4,13 +4,13 @@ import subprocess
 
 TEST_MAP = {
     "test-notify": ["noelkwan", "noelkwan"],
-    "e2e-iceberg-sink-tests": ["liurenjie"],
+    "e2e-iceberg-sink-tests": ["renjie"],
     "e2e-java-binding-tests": ["yiming"],
-    "e2e-clickhouse-sink-tests": ["bohanzhang"],
-    "e2e-pulsar-sink-tests": ["liurenjie"],
-    "s3-source-test-for-opendal-fs-engine": ["congyiwang"],
-    "pulsar-source-tests": ["liurenjie"],
-    "connector-node-integration-test": ["siyuanwang"],
+    "e2e-clickhouse-sink-tests": ["bohan"],
+    "e2e-pulsar-sink-tests": ["renjie"],
+    "s3-source-test-for-opendal-fs-engine": ["congyi"],
+    "pulsar-source-tests": ["renjie"],
+    "connector-node-integration-test": ["siyuan"],
 }
 
 def get_failed_tests(get_test_status, test_map):
@@ -84,7 +84,7 @@ def run_test_1():
     else:
         print("Some tests failed, notify users")
         print(message)
-        cmd = format_cmd(messages)
+        cmd = format_cmd(message)
         print(cmd)
 
 def main():
@@ -96,7 +96,7 @@ def main():
     else:
         print("Some tests failed, notify users")
         print(message)
-        cmd = format_cmd(messages)
+        cmd = format_cmd(message)
         print(cmd)
         # subprocess.run(cmd, shell=True)
 
