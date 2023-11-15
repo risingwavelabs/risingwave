@@ -121,7 +121,7 @@ impl SchemaTableName {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct MySqlOffset {
     pub filename: String,
     pub position: u64,
@@ -133,14 +133,14 @@ impl MySqlOffset {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct PostgresOffset {
     pub txid: u64,
     pub lsn: u64,
     pub tx_usec: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum CdcOffset {
     MySql(MySqlOffset),
     Postgres(PostgresOffset),

@@ -42,7 +42,9 @@ pub const STORAGE_BLOCK_CACHE_MEMORY_PROPORTION: f64 = 0.3;
 pub const STORAGE_META_CACHE_MAX_MEMORY_MB: usize = 4096;
 pub const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
 pub const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
-pub const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 70;
+pub const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 50;
+// Since the new feature prefetch does not cost much memory, we set a large value by default for performance. If we meet OOM during long time batch query, we shall reduce this configuration.
+pub const STORAGE_DEFAULT_LARGE_QUERY_MEMORY_USAGE_MB: usize = 32 * 1024;
 
 /// `MemoryControlStats` contains the state from previous control loop
 #[derive(Default)]
@@ -144,6 +146,9 @@ pub fn storage_memory_config(
             default_meta_cache_capacity >> 20,
             STORAGE_META_CACHE_MAX_MEMORY_MB,
         ));
+    let large_query_memory_usage_mb = storage_config
+        .large_query_memory_usage_mb
+        .unwrap_or(STORAGE_DEFAULT_LARGE_QUERY_MEMORY_USAGE_MB);
     if meta_cache_capacity_mb == STORAGE_META_CACHE_MAX_MEMORY_MB {
         block_cache_capacity_mb += (default_meta_cache_capacity >> 20) - meta_cache_capacity_mb;
     }
@@ -196,6 +201,7 @@ pub fn storage_memory_config(
         data_file_cache_ring_buffer_capacity_mb,
         meta_file_cache_ring_buffer_capacity_mb,
         compactor_memory_limit_mb,
+        large_query_memory_usage_mb,
         high_priority_ratio_in_percent,
     }
 }
