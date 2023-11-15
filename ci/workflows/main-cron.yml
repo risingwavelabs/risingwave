@@ -670,47 +670,17 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  # Template for how to use notification.
+  # Notification test.
   - key: "test-notify"
     if: build.pull_request.labels includes "ci/main-cron/test-notify"
     command: |
       bash -c 'echo test && exit -1'
 
-  # Template for how to use notification.
-  - label: "test notification [notify]"
-    allow_dependency_failure: true
-    depends_on:
-      - "test-notify"
-    if: build.pull_request.labels includes "ci/main-cron/test-notify"
-    command: |
-      OUTCOME=$(buildkite-agent step get "outcome" --step "test-notify")
-      echo "outcome: $$OUTCOME"
-      if [[ $$OUTCOME == "hard_failed" || $$OUTCOME == "soft_failed" ]]; then
-        cat <<- YAML | buildkite-agent pipeline upload 
-        steps:
-          - label: "notify test inner"
-            command: echo "notify test"
-            notify:
-              - slack:
-                  channels:
-                    - "#notification-buildkite"
-                  message: "<@noelkwan> test"
-      YAML
-      fi
-
-  # Notifies on test failure for specific tests.
+  # This should be the LAST part of the main-cron file.
   - label: "Test Failure Notification"
+    wait: true
+    continue_on_failure: true
     allow_dependency_failure: true
-    depends_on:
-      - "test-notify"
-      - "e2e-iceberg-sink-tests"
-      - "e2e-java-binding-tests"
-      - "e2e-clickhouse-sink-tests"
-      - "e2e-pulsar-sink-tests"
-      - "s3-source-test-for-opendal-fs-engine"
-      - "pulsar-source-tests"
-      - "connector-node-integration-test-11"
-      - "connector-node-integration-test-17"
     if: build.pull_request.labels includes "ci/main-cron/test-notify"
     command: |
       OUTCOME=$(buildkite-agent step get "outcome" --step "test-notify")
