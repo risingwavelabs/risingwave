@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import subprocess
-import sys
 
 # Add new test keys here.
 # Add their corresponding owners (by slack username) here.
