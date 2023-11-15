@@ -91,7 +91,6 @@ public class DeltaLakeSink extends SinkWriterBase {
                                                 .getTypeName())
                                 .equals(new TimestampType())) {
                             values = ((Timestamp) row.get(i)).getTime();
-                            System.out.println(values);
                         } else {
                             values = row.get(i);
                         }
