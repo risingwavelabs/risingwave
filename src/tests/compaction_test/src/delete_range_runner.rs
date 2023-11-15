@@ -55,7 +55,9 @@ use risingwave_storage::hummock::{
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
-use risingwave_storage::store::{LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions};
+use risingwave_storage::store::{
+    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, SealCurrentEpochOptions,
+};
 use risingwave_storage::StateStore;
 
 use crate::CompactionTestOpts;
@@ -418,7 +420,8 @@ impl NormalState {
             .flush(delete_ranges)
             .await
             .map_err(|e| format!("{:?}", e))?;
-        self.storage.seal_current_epoch(next_epoch);
+        self.storage
+            .seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
         Ok(())
     }
 

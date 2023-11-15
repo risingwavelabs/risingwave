@@ -39,6 +39,7 @@ use risingwave_hummock_sdk::key::{
     start_bound_of_excluded_prefix, TableKey,
 };
 use risingwave_pb::catalog::Table;
+use risingwave_pb::hummock::{vnodes, VnodeWatermark, Vnodes};
 use risingwave_storage::error::{StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
@@ -48,7 +49,7 @@ use risingwave_storage::row_serde::row_serde_util::{
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     InitOptions, LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions,
-    StateStoreIterItemStream,
+    SealCurrentEpochOptions, StateStoreIterItemStream,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution, KeyedRow};
@@ -910,7 +911,8 @@ where
         self.watermark_buffer_strategy.tick();
         if !self.is_dirty() {
             // If the state table is not modified, go fast path.
-            self.local_store.seal_current_epoch(new_epoch.curr);
+            self.local_store
+                .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::new(None));
             return Ok(());
         } else {
             self.seal_current_epoch(new_epoch.curr)
@@ -978,7 +980,8 @@ where
         // Tick the watermark buffer here because state table is expected to be committed once
         // per epoch.
         self.watermark_buffer_strategy.tick();
-        self.local_store.seal_current_epoch(new_epoch.curr);
+        self.local_store
+            .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::new(None));
     }
 
     /// Write to state store.
@@ -1025,6 +1028,8 @@ where
             )
         });
 
+        let mut seal_watermark = None;
+
         // Compute Delete Ranges
         if should_clean_watermark
             && let Some(watermark_suffix) = watermark_suffix
@@ -1041,9 +1046,6 @@ where
                 .unwrap()
                 .is_ascending()
             {
-                // We either serialize null into `0u8`, data into `(1u8 || scalar)`, or serialize null
-                // into `1u8`, data into `(0u8 || scalar)`. We do not want to delete null
-                // here, so `range_begin_suffix` cannot be `vec![]` when null is represented as `0u8`.
                 let range_begin_suffix = vec![*first_byte];
                 for vnode in self.vnodes.iter_vnodes() {
                     let mut range_begin = vnode.to_be_bytes().to_vec();
@@ -1055,7 +1057,17 @@ where
                         Bound::Excluded(Bytes::from(range_end)),
                     ));
                 }
+                seal_watermark = Some(VnodeWatermark {
+                    watermark: Vec::from(watermark_suffix.as_ref()),
+                    vnodes: Some(Vnodes {
+                        vnodes: Some(vnodes::Vnodes::VnodeBitmap(self.vnodes.to_protobuf()))
+                    }),
+                    is_ascending: true,
+                });
             } else {
+                // We either serialize null into `0u8`, data into `(1u8 || scalar)`, or serialize null
+                // into `1u8`, data into `(0u8 || scalar)`. We do not want to delete null
+                // here, so `range_begin_suffix` cannot be `vec![]` when null is represented as `0u8`.
                 assert_ne!(*first_byte, u8::MAX);
                 let following_bytes = next_key(&watermark_suffix[1..]);
                 if !following_bytes.is_empty() {
@@ -1071,6 +1083,13 @@ where
                         ));
                     }
                 }
+                seal_watermark = Some(VnodeWatermark {
+                    watermark: Vec::from(watermark_suffix.as_ref()),
+                    vnodes: Some(Vnodes {
+                        vnodes: Some(vnodes::Vnodes::VnodeBitmap(self.vnodes.to_protobuf()))
+                    }),
+                    is_ascending: false,
+                });
             }
         }
         self.prev_cleaned_watermark = watermark;
@@ -1087,7 +1106,8 @@ where
         }
 
         self.local_store.flush(delete_ranges).await?;
-        self.local_store.seal_current_epoch(next_epoch);
+        self.local_store
+            .seal_current_epoch(next_epoch, SealCurrentEpochOptions::new(seal_watermark));
         Ok(())
     }
 

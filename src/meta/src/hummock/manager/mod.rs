@@ -56,7 +56,7 @@ use risingwave_pb::hummock::{
     version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta,
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
     HummockVersionCheckpoint, HummockVersionDelta, HummockVersionDeltas, HummockVersionStats,
-    IntraLevelDelta, SstableInfo, SubscribeCompactionEventRequest, TableOption,
+    IntraLevelDelta, SstableInfo, SubscribeCompactionEventRequest, TableOption, WatermarkList,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -1403,6 +1403,7 @@ impl HummockManager {
         &self,
         epoch: HummockEpoch,
         sstables: Vec<impl Into<ExtendedSstableInfo>>,
+        watermarks: HashMap<u64, WatermarkList>,
         sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     ) -> Result<Option<HummockSnapshot>> {
         let mut sstables = sstables.into_iter().map(|s| s.into()).collect_vec();
@@ -1435,6 +1436,7 @@ impl HummockManager {
             build_version_delta_after_version(old_version),
         );
         new_version_delta.max_committed_epoch = epoch;
+        new_version_delta.new_watermarks = watermarks;
         let mut new_hummock_version = old_version.clone();
         new_hummock_version.id = new_version_delta.id;
         let mut incorrect_ssts = vec![];

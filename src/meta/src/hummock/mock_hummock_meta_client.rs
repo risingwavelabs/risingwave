@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -163,7 +164,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), self.context_id))
             .collect();
         self.hummock_manager
-            .commit_epoch(epoch, sstables, sst_to_worker)
+            .commit_epoch(epoch, sstables, HashMap::new(), sst_to_worker)
             .await
             .map_err(mock_err)?;
         Ok(())

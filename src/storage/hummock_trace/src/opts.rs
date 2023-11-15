@@ -213,3 +213,9 @@ impl From<TracedEpochPair> for EpochPair {
 pub struct TracedInitOptions {
     pub epoch: TracedEpochPair,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
+pub struct TracedSealCurrentEpochOptions {
+    // The watermark is serialized into protobuf
+    pub watermark: Option<Vec<u8>>,
+}

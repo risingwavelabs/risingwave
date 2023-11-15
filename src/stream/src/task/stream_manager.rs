@@ -26,12 +26,13 @@ use hytra::TrAdder;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::config::{MetricLevel, StreamingConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::hummock::WatermarkList;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -290,7 +291,10 @@ impl LocalStreamManager {
         Ok(result)
     }
 
-    pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<Vec<LocalSstableInfo>> {
+    pub async fn sync_epoch(
+        &self,
+        epoch: u64,
+    ) -> StreamResult<(Vec<LocalSstableInfo>, HashMap<TableId, WatermarkList>)> {
         let timer = self
             .core
             .lock()
@@ -300,7 +304,7 @@ impl LocalStreamManager {
             .start_timer();
         let res = dispatch_state_store!(self.state_store.clone(), store, {
             match store.sync(epoch).await {
-                Ok(sync_result) => Ok(sync_result.uncommitted_ssts),
+                Ok(sync_result) => Ok((sync_result.uncommitted_ssts, sync_result.watermarks)),
                 Err(e) => {
                     tracing::error!(
                         "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",

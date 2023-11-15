@@ -12,22 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::default::Default;
 use std::future::Future;
 use std::ops::Bound;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use prost::Message;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedPrefetchOptions, TracedReadOptions,
-    TracedWriteOptions,
+    TracedSealCurrentEpochOptions, TracedWriteOptions,
 };
+use risingwave_pb::hummock::{VnodeWatermark, WatermarkList};
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
@@ -160,6 +164,7 @@ pub struct SyncResult {
     pub sync_size: usize,
     /// The sst_info of sync.
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
+    pub watermarks: HashMap<TableId, WatermarkList>,
 }
 
 pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
@@ -245,12 +250,12 @@ pub trait LocalStateStore: StaticSendSync {
     /// In some cases like replicated state table, state table may not be empty initially,
     /// as such we need to wait for `epoch.prev` checkpoint to complete,
     /// hence this interface is made async.
-    fn init(&mut self, epoch: InitOptions) -> impl Future<Output = StorageResult<()>> + Send + '_;
+    fn init(&mut self, opts: InitOptions) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
     /// Updates the monotonically increasing write epoch to `new_epoch`.
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
     /// the previous write epoch is sealed.
-    fn seal_current_epoch(&mut self, next_epoch: u64);
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
 
     /// Check existence of a given `key_range`.
     /// It is better to provide `prefix_hint` in `read_options`, which will be used
@@ -480,5 +485,51 @@ impl From<TracedInitOptions> for InitOptions {
         InitOptions {
             epoch: value.epoch.into(),
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct SealCurrentEpochOptions {
+    pub watermark: Option<VnodeWatermark>,
+}
+
+impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
+    fn from(value: SealCurrentEpochOptions) -> Self {
+        TracedSealCurrentEpochOptions {
+            watermark: value
+                .watermark
+                .map(|watermark| Message::encode_to_vec(&watermark)),
+        }
+    }
+}
+
+impl TryInto<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
+    type Error = anyhow::Error;
+
+    fn try_into(self) -> Result<SealCurrentEpochOptions, Self::Error> {
+        let watermark = match self.watermark {
+            None => None,
+            Some(serialized_watermark) => Some(
+                Message::decode(serialized_watermark.as_slice())
+                    .map_err(|e| anyhow!("failed to decode: {:?}", e))?,
+            ),
+        };
+        Ok(SealCurrentEpochOptions { watermark })
+    }
+}
+
+impl SealCurrentEpochOptions {
+    pub fn new(watermark: Option<VnodeWatermark>) -> Self {
+        Self { watermark }
+    }
+
+    pub fn new_with_watermark(watermark: VnodeWatermark) -> Self {
+        Self {
+            watermark: Some(watermark),
+        }
+    }
+
+    pub fn for_test() -> Self {
+        Self { watermark: None }
     }
 }

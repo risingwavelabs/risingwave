@@ -31,6 +31,7 @@ use risingwave_common::util::tracing::TracingContext;
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_pb::hummock::{EpochNewWatermarks, WatermarkList};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::PausedReason;
@@ -1014,7 +1015,7 @@ impl GlobalBarrierManager {
                 // the L0 layer files are generated.
                 // See https://github.com/risingwave-labs/risingwave/issues/1251
                 let kind = node.command_ctx.kind;
-                let (sst_to_worker, synced_ssts) = collect_synced_ssts(resps);
+                let (sst_to_worker, synced_ssts, watermarks) = collect_synced_ssts(resps);
                 // hummock_manager commit epoch.
                 let mut new_snapshot = None;
 
@@ -1030,6 +1031,7 @@ impl GlobalBarrierManager {
                             .commit_epoch(
                                 node.command_ctx.prev_epoch.value().0,
                                 synced_ssts,
+                                watermarks,
                                 sst_to_worker,
                             )
                             .await?;
@@ -1174,9 +1176,11 @@ fn collect_synced_ssts(
 ) -> (
     HashMap<HummockSstableObjectId, WorkerId>,
     Vec<ExtendedSstableInfo>,
+    HashMap<u64, WatermarkList>,
 ) {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, WorkerId> = HashMap::new();
     let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
+    let mut watermarks: HashMap<u64, Vec<EpochNewWatermarks>> = HashMap::new();
     for resp in &mut *resps {
         let mut t: Vec<ExtendedSstableInfo> = resp
             .synced_sstables
@@ -1192,6 +1196,28 @@ fn collect_synced_ssts(
             })
             .collect_vec();
         synced_ssts.append(&mut t);
+        for (table_id, new_watermarks) in resp.watermarks.drain() {
+            watermarks
+                .entry(table_id)
+                .or_default()
+                .extend(new_watermarks.epoch_watermarks)
+        }
     }
-    (sst_to_worker, synced_ssts)
+    (
+        sst_to_worker,
+        synced_ssts,
+        watermarks
+            .into_iter()
+            .map(|(key, mut value)| {
+                // older epoch at the front
+                value.sort_by_key(|w| w.epoch);
+                (
+                    key,
+                    WatermarkList {
+                        epoch_watermarks: value,
+                    },
+                )
+            })
+            .collect(),
+    )
 }

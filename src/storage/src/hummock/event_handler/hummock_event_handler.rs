@@ -21,10 +21,12 @@ use arc_swap::ArcSwap;
 use await_tree::InstrumentAwait;
 use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericGauge};
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::version_update_payload::Payload;
+use risingwave_pb::hummock::WatermarkList;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, trace, warn};
@@ -578,6 +580,18 @@ impl HummockEventHandler {
                     self.uploader.start_merge_imms(epoch);
                 }
             }
+
+            HummockEvent::LocalSealEpoch {
+                epoch,
+                opts,
+                table_id,
+                ..
+            } => {
+                if let Some(watermark) = opts.watermark {
+                    self.uploader.add_watermark(epoch, table_id, watermark)
+                }
+            }
+
             #[cfg(any(test, feature = "test"))]
             HummockEvent::FlushEvent(sender) => {
                 let _ = sender.send(()).inspect_err(|e| {
@@ -681,10 +695,10 @@ fn send_sync_result(
 }
 
 fn to_sync_result(
-    staging_sstable_infos: &HummockResult<Vec<StagingSstableInfo>>,
+    result: &HummockResult<(Vec<StagingSstableInfo>, HashMap<TableId, WatermarkList>)>,
 ) -> HummockResult<SyncResult> {
-    match staging_sstable_infos {
-        Ok(staging_sstable_infos) => {
+    match result {
+        Ok((staging_sstable_infos, watermarks)) => {
             let sync_size = staging_sstable_infos
                 .iter()
                 .map(StagingSstableInfo::imm_size)
@@ -695,6 +709,7 @@ fn to_sync_result(
                     .iter()
                     .flat_map(|staging_sstable_info| staging_sstable_info.sstable_infos().clone())
                     .collect(),
+                watermarks: watermarks.clone(),
             })
         }
         Err(e) => Err(HummockError::other(format!("sync task failed for {:?}", e))),

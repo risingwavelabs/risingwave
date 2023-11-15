@@ -768,7 +768,7 @@ async fn test_invalid_sst_id() {
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), WorkerId::MAX))
         .collect();
     let error = hummock_manager
-        .commit_epoch(epoch, ssts.clone(), sst_to_worker)
+        .commit_epoch(epoch, ssts.clone(), HashMap::new(), sst_to_worker)
         .await
         .unwrap_err();
     assert!(matches!(error, Error::InvalidSst(1)));
@@ -778,7 +778,7 @@ async fn test_invalid_sst_id() {
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, ssts, HashMap::new(), sst_to_worker)
         .await
         .unwrap();
 }
@@ -1168,7 +1168,7 @@ async fn test_version_stats() {
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), worker_node.id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, ssts, HashMap::new(), sst_to_worker)
         .await
         .unwrap();
 
@@ -1267,7 +1267,12 @@ async fn test_split_compaction_group_on_commit() {
         table_stats: Default::default(),
     };
     hummock_manager
-        .commit_epoch(30, vec![sst_1], HashMap::from([(10, context_id)]))
+        .commit_epoch(
+            30,
+            vec![sst_1],
+            HashMap::new(),
+            HashMap::from([(10, context_id)]),
+        )
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;
@@ -1409,6 +1414,7 @@ async fn test_split_compaction_group_on_demand_basic() {
         .commit_epoch(
             30,
             vec![sst_1, sst_2],
+            HashMap::new(),
             HashMap::from([(10, context_id), (11, context_id)]),
         )
         .await
@@ -1501,7 +1507,12 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
         .await
         .unwrap();
     hummock_manager
-        .commit_epoch(30, vec![sst_1], HashMap::from([(10, context_id)]))
+        .commit_epoch(
+            30,
+            vec![sst_1],
+            HashMap::new(),
+            HashMap::from([(10, context_id)]),
+        )
         .await
         .unwrap();
 
@@ -1617,6 +1628,7 @@ async fn test_split_compaction_group_trivial_expired() {
         .commit_epoch(
             30,
             vec![sst_1, sst_2, sst_3, sst_4],
+            HashMap::new(),
             HashMap::from([
                 (10, context_id),
                 (11, context_id),
@@ -1751,7 +1763,12 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
         table_stats: Default::default(),
     };
     hummock_manager
-        .commit_epoch(30, vec![sst_1.clone()], HashMap::from([(10, context_id)]))
+        .commit_epoch(
+            30,
+            vec![sst_1.clone()],
+            HashMap::new(),
+            HashMap::from([(10, context_id)]),
+        )
         .await
         .unwrap();
     // Construct data via manual compaction
@@ -1915,6 +1932,7 @@ async fn test_compaction_task_expiration_due_to_split_group() {
         .commit_epoch(
             30,
             vec![sst_1, sst_2],
+            HashMap::new(),
             HashMap::from([(10, context_id), (11, context_id)]),
         )
         .await
@@ -1972,7 +1990,12 @@ async fn test_move_tables_between_compaction_group() {
         .unwrap();
     let sst_1 = gen_extend_sstable_info(10, 2, 1, vec![100, 101, 102]);
     hummock_manager
-        .commit_epoch(30, vec![sst_1.clone()], HashMap::from([(10, context_id)]))
+        .commit_epoch(
+            30,
+            vec![sst_1.clone()],
+            HashMap::new(),
+            HashMap::from([(10, context_id)]),
+        )
         .await
         .unwrap();
     // Construct data via manual compaction
@@ -1995,7 +2018,12 @@ async fn test_move_tables_between_compaction_group() {
         .unwrap());
     let sst_2 = gen_extend_sstable_info(14, 2, 1, vec![101, 102]);
     hummock_manager
-        .commit_epoch(31, vec![sst_2.clone()], HashMap::from([(14, context_id)]))
+        .commit_epoch(
+            31,
+            vec![sst_2.clone()],
+            HashMap::new(),
+            HashMap::from([(14, context_id)]),
+        )
         .await
         .unwrap();
     let current_version = hummock_manager.get_current_version().await;

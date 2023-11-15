@@ -572,6 +572,13 @@ impl HummockVersionUpdateExt for HummockVersion {
         self.id = version_delta.id;
         self.max_committed_epoch = version_delta.max_committed_epoch;
         self.safe_epoch = version_delta.safe_epoch;
+        for (table_id, watermarks) in &version_delta.new_watermarks {
+            self.table_watermarks
+                .entry(*table_id)
+                .or_default()
+                .epoch_watermarks
+                .extend(watermarks.epoch_watermarks.clone());
+        }
         sst_split_info
     }
 
@@ -1002,6 +1009,7 @@ pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVer
         max_committed_epoch: version.max_committed_epoch,
         group_deltas: Default::default(),
         gc_object_ids: vec![],
+        new_watermarks: HashMap::new(),
     }
 }
 
@@ -1250,6 +1258,7 @@ mod tests {
             )]),
             max_committed_epoch: 0,
             safe_epoch: 0,
+            table_watermarks: HashMap::new(),
         };
         assert_eq!(version.get_object_ids().len(), 0);
 
@@ -1312,6 +1321,7 @@ mod tests {
             ]),
             max_committed_epoch: 0,
             safe_epoch: 0,
+            table_watermarks: HashMap::new(),
         };
         let version_delta = HummockVersionDelta {
             id: 1,
@@ -1394,6 +1404,7 @@ mod tests {
                 ]),
                 max_committed_epoch: 0,
                 safe_epoch: 0,
+                table_watermarks: HashMap::new(),
             }
         );
     }
