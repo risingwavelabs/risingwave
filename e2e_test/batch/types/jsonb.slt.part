@@ -33,6 +33,12 @@ null
 true
 NULL
 
+# typed string
+query TT
+select jsonb 'true', JsonB '{}';
+----
+true {}
+
 query T
 select 'true'::jsonb::bool;
 ----
@@ -221,14 +227,8 @@ b "bar"
 query T
 select jsonb_each('{"a":"foo", "b":"bar"}'::jsonb);
 ----
-(a,"foo")
-(b,"bar")
-
-# FIXME: the output format is inconsistent with pg
-# https://github.com/risingwavelabs/risingwave/issues/4769
-#
-# (a,"""foo""")
-# (b,"""bar""")
+(a,"""foo""")
+(b,"""bar""")
 
 statement error cannot deconstruct
 select * from jsonb_each('null'::jsonb)

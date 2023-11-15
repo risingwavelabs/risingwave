@@ -74,7 +74,7 @@ EOF
 setup_old_cluster() {
   echo "--- Build risedev for $OLD_VERSION, it may not be backwards compatible"
   git config --global --add safe.directory /risingwave
-  git checkout "v${OLD_VERSION}-rc"
+  git checkout "v${OLD_VERSION}"
   cargo build -p risedev
   OLD_URL=https://github.com/risingwavelabs/risingwave/releases/download/v${OLD_VERSION}/risingwave-v${OLD_VERSION}-x86_64-unknown-linux.tar.gz
   wget $OLD_URL

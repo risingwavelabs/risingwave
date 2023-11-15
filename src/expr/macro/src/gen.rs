@@ -579,9 +579,13 @@ impl FunctionAttr {
 
     /// Generate build function for aggregate function.
     fn generate_agg_build_fn(&self, user_fn: &AggregateFnOrImpl) -> Result<TokenStream2> {
-        let state_type: TokenStream2 = match &self.state {
-            Some(state) if state == "ref" => types::ref_type(&self.ret).parse().unwrap(),
-            Some(state) if state != "ref" => types::owned_type(state).parse().unwrap(),
+        // If the first argument of the aggregate function is of type `&mut T`,
+        // we assume it is a user defined state type.
+        let custom_state = user_fn.accumulate().first_mut_ref_arg.as_ref();
+        let state_type: TokenStream2 = match (custom_state, &self.state) {
+            (Some(s), _) => s.parse().unwrap(),
+            (_, Some(state)) if state == "ref" => types::ref_type(&self.ret).parse().unwrap(),
+            (_, Some(state)) if state != "ref" => types::owned_type(state).parse().unwrap(),
             _ => types::owned_type(&self.ret).parse().unwrap(),
         };
         let let_arrays = self
@@ -603,24 +607,41 @@ impl FunctionAttr {
                 quote! { let #v = unsafe { #a.value_at_unchecked(row_id) }; }
             })
             .collect_vec();
-        let let_state = match &self.state {
-            Some(s) if s == "ref" => {
-                quote! { state0.as_ref().map(|x| x.as_scalar_ref_impl().try_into().unwrap()) }
+        let downcast_state = if custom_state.is_some() {
+            quote! { let mut state: &mut #state_type = state0.downcast_mut(); }
+        } else if let Some(s) = &self.state
+            && s == "ref"
+        {
+            quote! { let mut state: Option<#state_type> = state0.as_datum_mut().as_ref().map(|x| x.as_scalar_ref_impl().try_into().unwrap()); }
+        } else {
+            quote! { let mut state: Option<#state_type> = state0.as_datum_mut().take().map(|s| s.try_into().unwrap()); }
+        };
+        let restore_state = if custom_state.is_some() {
+            quote! {}
+        } else if let Some(s) = &self.state
+            && s == "ref"
+        {
+            quote! { *state0.as_datum_mut() = state.map(|x| x.to_owned_scalar().into()); }
+        } else {
+            quote! { *state0.as_datum_mut() = state.map(|s| s.into()); }
+        };
+        let create_state = if custom_state.is_some() {
+            quote! {
+                fn create_state(&self) -> AggregateState {
+                    AggregateState::Any(Box::<#state_type>::default())
+                }
             }
-            _ => quote! { state0.take().map(|s| s.try_into().unwrap()) },
-        };
-        let assign_state = match &self.state {
-            Some(s) if s == "ref" => quote! { state.map(|x| x.to_owned_scalar().into()) },
-            _ => quote! { state.map(|s| s.into()) },
-        };
-        let create_state = self.init_state.as_ref().map(|state| {
+        } else if let Some(state) = &self.init_state {
             let state: TokenStream2 = state.parse().unwrap();
             quote! {
                 fn create_state(&self) -> AggregateState {
                     AggregateState::Datum(Some(#state.into()))
                 }
             }
-        });
+        } else {
+            // by default: `AggregateState::Datum(None)`
+            quote! {}
+        };
         let args = (0..self.args.len()).map(|i| format_ident!("v{i}"));
         let args = quote! { #(#args,)* };
         let panic_on_retract = {
@@ -632,14 +653,15 @@ impl FunctionAttr {
         };
         let mut next_state = match user_fn {
             AggregateFnOrImpl::Fn(f) => {
+                let context = f.context.then(|| quote! { &self.context, });
                 let fn_name = format_ident!("{}", f.name);
                 match f.retract {
                     true => {
-                        quote! { #fn_name(state, #args matches!(op, Op::Delete | Op::UpdateDelete)) }
+                        quote! { #fn_name(state, #args matches!(op, Op::Delete | Op::UpdateDelete) #context) }
                     }
                     false => quote! {{
                         #panic_on_retract
-                        #fn_name(state, #args)
+                        #fn_name(state, #args #context)
                     }},
                 }
             }
@@ -677,10 +699,14 @@ impl FunctionAttr {
                     let first_state = if self.init_state.is_some() {
                         // for count, the state will never be None
                         quote! { unreachable!() }
-                    } else if let Some(s) = &self.state && s == "ref" {
+                    } else if let Some(s) = &self.state
+                        && s == "ref"
+                    {
                         // for min/max/first/last, the state is the first value
                         quote! { Some(v0) }
-                    } else if let AggregateFnOrImpl::Impl(impl_) = user_fn && impl_.create_state.is_some() {
+                    } else if let AggregateFnOrImpl::Impl(impl_) = user_fn
+                        && impl_.create_state.is_some()
+                    {
                         // use user-defined create_state function
                         quote! {{
                             let state = self.function.create_state();
@@ -703,17 +729,25 @@ impl FunctionAttr {
                 _ => todo!("multiple arguments are not supported for non-option function"),
             }
         }
-        let get_result = match user_fn {
-            AggregateFnOrImpl::Impl(impl_) if impl_.finalize.is_some() => {
-                quote! {
-                    let state = match state {
-                        Some(s) => s.as_scalar_ref_impl().try_into().unwrap(),
-                        None => return Ok(None),
-                    };
-                    Ok(Some(self.function.finalize(state).into()))
-                }
+        let update_state = if custom_state.is_some() {
+            quote! { _ = #next_state; }
+        } else {
+            quote! { state = #next_state; }
+        };
+        let get_result = if custom_state.is_some() {
+            quote! { Ok(Some(state.downcast_ref::<#state_type>().into())) }
+        } else if let AggregateFnOrImpl::Impl(impl_) = user_fn
+            && impl_.finalize.is_some()
+        {
+            quote! {
+                let state = match state.as_datum() {
+                    Some(s) => s.as_scalar_ref_impl().try_into().unwrap(),
+                    None => return Ok(None),
+                };
+                Ok(Some(self.function.finalize(state).into()))
             }
-            _ => quote! { Ok(state.clone()) },
+        } else {
+            quote! { Ok(state.as_datum().clone()) }
         };
         let function_field = match user_fn {
             AggregateFnOrImpl::Fn(_) => quote! {},
@@ -748,47 +782,50 @@ impl FunctionAttr {
                 use risingwave_common::buffer::Bitmap;
                 use risingwave_common::estimate_size::EstimateSize;
 
+                use risingwave_expr::expr::Context;
                 use risingwave_expr::Result;
                 use risingwave_expr::aggregate::AggregateState;
                 use risingwave_expr::codegen::async_trait;
 
-                #[derive(Clone)]
+                let context = Context {
+                    return_type: agg.return_type.clone(),
+                    arg_types: agg.args.arg_types().to_owned(),
+                };
+
                 struct Agg {
-                    return_type: DataType,
+                    context: Context,
                     #function_field
                 }
 
                 #[async_trait]
                 impl risingwave_expr::aggregate::AggregateFunction for Agg {
                     fn return_type(&self) -> DataType {
-                        self.return_type.clone()
+                        self.context.return_type.clone()
                     }
 
                     #create_state
 
                     async fn update(&self, state0: &mut AggregateState, input: &StreamChunk) -> Result<()> {
                         #(#let_arrays)*
-                        let state0 = state0.as_datum_mut();
-                        let mut state: Option<#state_type> = #let_state;
+                        #downcast_state
                         for row_id in input.visibility().iter_ones() {
                             let op = unsafe { *input.ops().get_unchecked(row_id) };
                             #(#let_values)*
-                            state = #next_state;
+                            #update_state
                         }
-                        *state0 = #assign_state;
+                        #restore_state
                         Ok(())
                     }
 
                     async fn update_range(&self, state0: &mut AggregateState, input: &StreamChunk, range: Range<usize>) -> Result<()> {
                         assert!(range.end <= input.capacity());
                         #(#let_arrays)*
-                        let state0 = state0.as_datum_mut();
-                        let mut state: Option<#state_type> = #let_state;
+                        #downcast_state
                         if input.is_compacted() {
                             for row_id in range {
                                 let op = unsafe { *input.ops().get_unchecked(row_id) };
                                 #(#let_values)*
-                                state = #next_state;
+                                #update_state
                             }
                         } else {
                             for row_id in input.visibility().iter_ones() {
@@ -799,21 +836,20 @@ impl FunctionAttr {
                                 }
                                 let op = unsafe { *input.ops().get_unchecked(row_id) };
                                 #(#let_values)*
-                                state = #next_state;
+                                #update_state
                             }
                         }
-                        *state0 = #assign_state;
+                        #restore_state
                         Ok(())
                     }
 
                     async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
-                        let state = state.as_datum();
                         #get_result
                     }
                 }
 
                 Ok(Box::new(Agg {
-                    return_type: agg.return_type.clone(),
+                    context,
                     #function_new
                 }))
             }
@@ -1089,8 +1125,12 @@ fn data_type(ty: &str) -> TokenStream2 {
 /// output_types("struct<key varchar, value jsonb>") -> ["varchar", "jsonb"]
 /// ```
 fn output_types(ty: &str) -> Vec<&str> {
-    if let Some(s) = ty.strip_prefix("struct<") && let Some(args) = s.strip_suffix('>') {
-        args.split(',').map(|s| s.split_whitespace().nth(1).unwrap()).collect()
+    if let Some(s) = ty.strip_prefix("struct<")
+        && let Some(args) = s.strip_suffix('>')
+    {
+        args.split(',')
+            .map(|s| s.split_whitespace().nth(1).unwrap())
+            .collect()
     } else {
         vec![ty]
     }

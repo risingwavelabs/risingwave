@@ -205,8 +205,8 @@ message SinkDesc {
 enum SinkLogStoreType {
   /// Default value is the normal in memory log store to be backward compatible with the previously unset value
   SINK_LOG_STORE_TYPE_UNSPECIFIED = 0;
-  KV_LOG_STORE = 1;
-  IN_MEMORY_LOG_STORE = 2;
+  SINK_LOG_STORE_TYPE_KV_LOG_STORE = 1;
+  SINK_LOG_STORE_TYPE_IN_MEMORY_LOG_STORE = 2;
 }
 
 message SinkNode {
@@ -258,6 +258,7 @@ message AggCallState {
     // for constructing state table column mapping
     repeated uint32 included_upstream_indices = 2;
     repeated uint32 table_value_indices = 3;
+    repeated common.ColumnOrder order_columns = 4;
   }
 
   oneof inner {
@@ -266,6 +267,16 @@ message AggCallState {
   }
   reserved 2;
   reserved "table_state";
+}
+
+enum AggNodeVersion {
+  AGG_NODE_VERSION_UNSPECIFIED = 0;
+
+  // https://github.com/risingwavelabs/risingwave/issues/12140#issuecomment-1776289808
+  AGG_NODE_VERSION_ISSUE_12140 = 1;
+
+  // Used for test only.
+  AGG_NODE_VERSION_MAX = 2147483647;
 }
 
 message SimpleAggNode {
@@ -279,6 +290,7 @@ message SimpleAggNode {
   bool is_append_only = 5;
   map<uint32, catalog.Table> distinct_dedup_tables = 6;
   uint32 row_count_index = 7;
+  AggNodeVersion version = 8;
 }
 
 message HashAggNode {
@@ -292,6 +304,7 @@ message HashAggNode {
   map<uint32, catalog.Table> distinct_dedup_tables = 6;
   uint32 row_count_index = 7;
   bool emit_on_window_close = 8;
+  AggNodeVersion version = 9;
 }
 
 message TopNNode {
@@ -435,43 +448,48 @@ message ExchangeNode {
   DispatchStrategy strategy = 1;
 }
 
-enum ChainType {
-  CHAIN_UNSPECIFIED = 0;
+// Decides which kind of Executor will be used
+enum StreamScanType {
+  STREAM_SCAN_TYPE_UNSPECIFIED = 0;
 
-  // CHAIN is corresponding to the chain executor.
-  CHAIN = 1;
+  // ChainExecutor
+  STREAM_SCAN_TYPE_CHAIN = 1;
 
-  // REARRANGE is corresponding to the rearranged chain executor.
-  REARRANGE = 2;
+  // RearrangedChainExecutor
+  STREAM_SCAN_TYPE_REARRANGE = 2;
 
-  // BACKFILL is corresponding to the backfill executor.
-  BACKFILL = 3;
+  // BackfillExecutor
+  STREAM_SCAN_TYPE_BACKFILL = 3;
 
-  // UPSTREAM_ONLY is corresponding to the chain executor, but doesn't consume the snapshot.
-  UPSTREAM_ONLY = 4;
+  // ChainExecutor with upstream_only = true
+  STREAM_SCAN_TYPE_UPSTREAM_ONLY = 4;
+
+  // CdcBackfillExecutor
+  STREAM_SCAN_TYPE_CDC_BACKFILL = 5;
 }
 
-// ChainNode is used for mv on mv.
-// ChainNode is like a "UNION" on mv snapshot and streaming. So it takes two inputs with fixed order:
-//   1. MergeNode (as a placeholder) for streaming read.
-//   2. BatchPlanNode for snapshot read.
-message ChainNode {
+// StreamScanNode reads data from upstream table first, and then pass all events to downstream.
+// It always these 2 inputs in the following order:
+// 1. A MergeNode (as a placeholder) of upstream.
+// 2. A BatchPlanNode for the snapshot read.
+message StreamScanNode {
   uint32 table_id = 1;
 
-  // The columns from the upstream table that'll be internally required by this chain node.
-  // - For non-backfill chain node, it's the same as the output columns.
-  // - For backfill chain node, there're additionally primary key columns.
+  // The columns from the upstream table that'll be internally required by this stream scan node.
+  // - For non-backfill stream scan node, it's the same as the output columns.
+  // - For backfill stream scan node, there're additionally primary key columns.
   repeated int32 upstream_column_ids = 2;
-  // The columns to be output by this chain node. The index is based on the internal required columns.
-  // - For non-backfill chain node, it's simply all the columns.
-  // - For backfill chain node, this strips the primary key columns if they're unnecessary.
+
+  // The columns to be output by this stream scan node. The index is based on the internal required columns.
+  // - For non-backfill stream scan node, it's simply all the columns.
+  // - For backfill stream scan node, this strips the primary key columns if they're unnecessary.
   repeated uint32 output_indices = 3;
 
   // Generally, the barrier needs to be rearranged during the MV creation process, so that data can
   // be flushed to shared buffer periodically, instead of making the first epoch from batch query extra
-  // large. However, in some cases, e.g., shared state, the barrier cannot be rearranged in ChainNode.
-  // ChainType is used to decide which implementation for the ChainNode.
-  ChainType chain_type = 4;
+  // large. However, in some cases, e.g., shared state, the barrier cannot be rearranged in StreamScanNode.
+  // StreamScanType is used to decide which implementation for the StreamScanNode.
+  StreamScanType stream_scan_type = 4;
 
   /// The state table used by Backfill operator for persisting internal state
   catalog.Table state_table = 5;
@@ -479,11 +497,14 @@ message ChainNode {
   // The upstream materialized view info used by backfill.
   plan_common.StorageTableDesc table_desc = 7;
 
-  // The rate limit for the chain node.
+  // The rate limit for the stream scan node.
   optional uint32 rate_limit = 8;
 
   // Snapshot read every N barriers
   uint32 snapshot_read_barrier_interval = 9 [deprecated = true];
+
+  // The external table that will be backfilled for CDC.
+  plan_common.ExternalTableDesc cdc_table_desc = 10;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -653,7 +674,7 @@ message StreamNode {
     HopWindowNode hop_window = 110;
     MergeNode merge = 111;
     ExchangeNode exchange = 112;
-    ChainNode chain = 113;
+    StreamScanNode stream_scan = 113;
     BatchPlanNode batch_plan = 114;
     LookupNode lookup = 115;
     ArrangeNode arrange = 116;
@@ -693,20 +714,25 @@ message StreamNode {
 }
 
 enum DispatcherType {
-  UNSPECIFIED = 0;
+  DISPATCHER_TYPE_UNSPECIFIED = 0;
   // Dispatch by hash key, hashed by consistent hash.
-  HASH = 1;
+  DISPATCHER_TYPE_HASH = 1;
   // Broadcast to all downstreams.
   //
   // Note a broadcast cannot be represented as multiple simple dispatchers, since they are
   // different when we update dispatchers during scaling.
-  BROADCAST = 2;
+  DISPATCHER_TYPE_BROADCAST = 2;
   // Only one downstream.
-  SIMPLE = 3;
+  DISPATCHER_TYPE_SIMPLE = 3;
   // A special kind of exchange that doesn't involve shuffle. The upstream actor will be directly
   // piped into the downstream actor, if there are the same number of actors. If number of actors
   // are not the same, should use hash instead. Should be only used when distribution is the same.
-  NO_SHUFFLE = 4;
+  DISPATCHER_TYPE_NO_SHUFFLE = 4;
+
+  // Dispatch by table name from upstream DB, used in CDC scenario which should has only one downstream actor.
+  // From the optimizer's point of view, it can be treated as a specialized version of HASH distribution
+  // that the hash key is the upstream table name.
+  DISPATCHER_TYPE_CDC_TABLENAME = 5;
 }
 
 // The property of an edge in the fragment graph.
@@ -715,6 +741,8 @@ message DispatchStrategy {
   DispatcherType type = 1;
   repeated uint32 dist_key_indices = 2;
   repeated uint32 output_indices = 3;
+  // The full table name of the downstream CDC table.
+  optional string downstream_table_name = 4;
 }
 
 // A dispatcher redistribute messages.
@@ -736,6 +764,8 @@ message Dispatcher {
   uint64 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;
+  // The full table name of the downstream CDC table.
+  optional string downstream_table_name = 7;
 }
 
 // A StreamActor is a running fragment of the overall stream graph,
@@ -765,7 +795,7 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_MVIEW = 2;
   FRAGMENT_TYPE_FLAG_SINK = 4;
   FRAGMENT_TYPE_FLAG_NOW = 8; // TODO: Remove this and insert a `BarrierRecv` instead.
-  FRAGMENT_TYPE_FLAG_CHAIN_NODE = 16;
+  FRAGMENT_TYPE_FLAG_STREAM_SCAN = 16;
   FRAGMENT_TYPE_FLAG_BARRIER_RECV = 32;
   FRAGMENT_TYPE_FLAG_VALUES = 64;
   FRAGMENT_TYPE_FLAG_DML = 128;
@@ -791,7 +821,7 @@ message StreamFragmentGraph {
     bool requires_singleton = 4;
     // Number of table ids (stateful states) for this fragment.
     uint32 table_ids_cnt = 5;
-    // Mark the upstream table ids of this fragment, Used for fragments with `Chain`s.
+    // Mark the upstream table ids of this fragment, Used for fragments with `StreamScan`s.
     repeated uint32 upstream_table_ids = 6;
   }
 

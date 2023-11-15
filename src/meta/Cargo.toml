@@ -36,7 +36,6 @@ hyper = "0.14"
 itertools = "0.11"
 memcomparable = { version = "0.2" }
 mime_guess = "2"
-model_migration = { path = "src/model_v2/migration" }
 num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
@@ -50,6 +49,8 @@ risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
+risingwave_meta_model_migration = { workspace = true }
+risingwave_meta_model_v2 = { workspace = true }
 risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
@@ -91,6 +92,7 @@ workspace-hack = { path = "../workspace-hack" }
 assert_matches = "1"
 maplit = "1.0.2"
 rand = "0.8"
+risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
 risingwave_test_runner = { workspace = true }
 
 [features]

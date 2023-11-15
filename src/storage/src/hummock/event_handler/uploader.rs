@@ -1091,6 +1091,7 @@ mod tests {
         };
         SharedBufferBatch::build_shared_buffer_batch(
             epoch,
+            0,
             sorted_items,
             size,
             vec![],
@@ -1333,7 +1334,9 @@ mod tests {
             assert_eq!(epoch, uploader.max_sealed_epoch);
             // check sealed data has two imms
             let imms_by_epoch = uploader.sealed_data.imms_by_epoch();
-            if let Some((e, imms)) = imms_by_epoch.last_key_value() && *e == epoch{
+            if let Some((e, imms)) = imms_by_epoch.last_key_value()
+                && *e == epoch
+            {
                 assert_eq!(2, imms.len());
             }
 

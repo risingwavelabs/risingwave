@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::array::{ListRef, ListValue, StructRef, StructValue};
 use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Int256, IntoOrdered, JsonbRef, ToText, F64};
+use risingwave_common::types::{Int256, IntoOrdered, JsonbRef, ToText, F64};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{
     build_func, Context, Expression, ExpressionBoxExt, InputRefExpression,
@@ -37,14 +37,22 @@ use risingwave_pb::expr::expr_node::PbType;
 #[function("cast(varchar) -> timestamp")]
 #[function("cast(varchar) -> interval")]
 #[function("cast(varchar) -> jsonb")]
-pub fn str_parse<T>(elem: &str) -> Result<T>
+pub fn str_parse<T>(elem: &str, ctx: &Context) -> Result<T>
 where
     T: FromStr,
     <T as FromStr>::Err: std::fmt::Display,
 {
-    elem.trim()
-        .parse()
-        .map_err(|err: <T as FromStr>::Err| ExprError::Parse(err.to_string().into()))
+    elem.trim().parse().map_err(|err: <T as FromStr>::Err| {
+        ExprError::Parse(format!("{} {}", ctx.return_type, err).into())
+    })
+}
+
+// TODO: introduce `FromBinary` and support all types
+#[function("pgwire_recv(bytea) -> int8")]
+pub fn pgwire_recv(elem: &[u8]) -> Result<i64> {
+    let fixed_length =
+        <[u8; 8]>::try_from(elem).map_err(|e| ExprError::Parse(e.to_string().into()))?;
+    Ok(i64::from_be_bytes(fixed_length))
 }
 
 #[function("cast(int2) -> int256")]
@@ -156,6 +164,12 @@ pub fn general_to_text(elem: impl ToText, mut writer: &mut impl Write) {
     elem.write(&mut writer).unwrap();
 }
 
+// TODO: use `ToBinary` and support all types
+#[function("pgwire_send(int8) -> bytea")]
+fn pgwire_send(elem: i64) -> Box<[u8]> {
+    elem.to_be_bytes().into()
+}
+
 #[function("cast(boolean) -> varchar")]
 pub fn bool_to_varchar(input: bool, writer: &mut impl Write) {
     writer
@@ -175,63 +189,9 @@ pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
     cast::str_to_bytea(elem).map_err(|err| ExprError::Parse(err.into()))
 }
 
-// TODO(nanderstabel): optimize for multidimensional List. Depth can be given as a parameter to this
-// function.
-/// Takes a string input in the form of a comma-separated list enclosed in braces, and returns a
-/// vector of strings containing the list items.
-///
-/// # Examples
-/// - "{1, 2, 3}" => ["1", "2", "3"]
-/// - "{1, {2, 3}}" => ["1", "{2, 3}"]
-fn unnest(input: &str) -> Result<Vec<&str>> {
-    let trimmed = input.trim();
-    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
-        return Err(ExprError::Parse("Input must be braced".into()));
-    }
-    let trimmed = &trimmed[1..trimmed.len() - 1];
-
-    let mut items = Vec::new();
-    let mut depth = 0;
-    let mut start = 0;
-    for (i, c) in trimmed.chars().enumerate() {
-        match c {
-            '{' => depth += 1,
-            '}' => depth -= 1,
-            ',' if depth == 0 => {
-                let item = trimmed[start..i].trim();
-                items.push(item);
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    if depth != 0 {
-        return Err(ExprError::Parse("Unbalanced braces".into()));
-    }
-    let last = trimmed[start..].trim();
-    if !last.is_empty() {
-        items.push(last);
-    }
-    Ok(items)
-}
-
 #[function("cast(varchar) -> anyarray", type_infer = "panic")]
 fn str_to_list(input: &str, ctx: &Context) -> Result<ListValue> {
-    let cast = build_func(
-        PbType::Cast,
-        ctx.return_type.as_list().clone(),
-        vec![InputRefExpression::new(DataType::Varchar, 0).boxed()],
-    )
-    .unwrap();
-    let mut values = vec![];
-    for item in unnest(input)? {
-        let v = cast
-            .eval_row(&OwnedRow::new(vec![Some(item.to_string().into())])) // TODO: optimize
-            .now_or_never()
-            .unwrap()?;
-        values.push(v);
-    }
-    Ok(ListValue::new(values))
+    ListValue::from_str(input, &ctx.return_type).map_err(|err| ExprError::Parse(err.into()))
 }
 
 /// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.
@@ -336,31 +296,6 @@ mod tests {
         test!(general_to_text(Decimal::try_from(1.222).unwrap()), "1.222");
 
         test!(general_to_text(Decimal::NaN), "NaN");
-    }
-
-    #[test]
-    fn test_unnest() {
-        assert_eq!(unnest("{ }").unwrap(), vec![] as Vec<String>);
-        assert_eq!(
-            unnest("{1, 2, 3}").unwrap(),
-            vec!["1".to_string(), "2".to_string(), "3".to_string()]
-        );
-        assert_eq!(
-            unnest("{{1, 2, 3}, {4, 5, 6}}").unwrap(),
-            vec!["{1, 2, 3}".to_string(), "{4, 5, 6}".to_string()]
-        );
-        assert_eq!(
-            unnest("{{{1, 2, 3}}, {{4, 5, 6}}}").unwrap(),
-            vec!["{{1, 2, 3}}".to_string(), "{{4, 5, 6}}".to_string()]
-        );
-        assert_eq!(
-            unnest("{{{1, 2, 3}, {4, 5, 6}}}").unwrap(),
-            vec!["{{1, 2, 3}, {4, 5, 6}}".to_string()]
-        );
-        assert_eq!(
-            unnest("{{{aa, bb, cc}, {dd, ee, ff}}}").unwrap(),
-            vec!["{{aa, bb, cc}, {dd, ee, ff}}".to_string()]
-        );
     }
 
     #[test]
@@ -507,7 +442,11 @@ mod tests {
     async fn test_unary() {
         test_unary_bool::<BoolArray, _>(|x| !x, PbType::Not).await;
         test_unary_date::<TimestampArray, _>(|x| try_cast(x).unwrap(), PbType::Cast).await;
-        test_str_to_int16::<I16Array, _>(|x| str_parse(x).unwrap()).await;
+        let ctx_str_to_int16 = Context {
+            arg_types: vec![DataType::Varchar],
+            return_type: DataType::Int16,
+        };
+        test_str_to_int16::<I16Array, _>(|x| str_parse(x, &ctx_str_to_int16).unwrap()).await;
     }
 
     #[tokio::test]

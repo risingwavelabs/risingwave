@@ -1,0 +1,86 @@
+pk_types:
+  - boolean
+  - bigint
+  - date
+datatypes:
+  - name: boolean
+    aliases:
+      - bool
+    zero: false
+    minimum: false
+    maximum: true
+    rw_type: boolean
+  - name: smallint
+    zero: 0
+    minimum: -32767
+    maximum: 32767
+    rw_type:
+  - name: integer
+    aliases:
+      - int
+    zero: 0
+    minimum: -2147483647
+    maximum: 2147483647
+  - name: bigint
+    zero: 0
+    minimum: -9223372036854775807
+    maximum: 9223372036854775807
+  - name: decimal
+    aliases:
+      - numeric
+    zero: 0
+    minimum: -9.9999999999999999999999999999999
+    maximum: -9.9999999999999999999999999999999
+  - name: real
+    zero: 0
+    minimum: -9999.999999
+    maximum: 9999.999999
+  - name: double precision
+    zero: 0
+    minimum: -9999.99999999999999
+    maximum: 9999.99999999999999
+  - name: varchar
+    aliases:
+      - character varying
+      - string
+    zero: "''"
+    minimum: "''"
+    maximum_gen_py: "\"'{}'\".format('z'*65535)"
+  - name: bytea
+    zero: "'\\x00'"
+    minimum: "'\\x00'"
+    maximum_gen_py: "\"'{}'\".format('\\\\x'+'f'*65534)"
+  - name: date
+    zero: "'0001-01-01'"
+    minimum: "'0001-01-01'"
+    maximum: "'9999-12-31'"
+  - name: time
+    aliases:
+      - time without time zone
+    zero: "'00:00:00'"
+    minimum: "'00:00:00'"
+    maximum: "'23:59:59'"
+  - name: timestamp
+    aliases:
+      - timestamp without time zone
+    zero: "'0001-01-01 00:00:00'::timestamp"
+    minimum: "'0001-01-01 00:00:00'::timestamp"
+    maximum: "'9999-12-31 23:59:59'::timestamp"
+  - name: timestamptz
+    aliases:
+      - timestamp with time zone
+    zero: "'0001-01-01 00:00:00'::timestamptz"
+    minimum: "'0001-01-01 00:00:00'::timestamptz"
+    maximum: "'9999-12-31 23:59:59'::timestamptz"
+  - name: interval
+    zero: "interval '0 second'"
+    minimum: "interval '0 second'"
+    maximum: "interval '9990 year'"
+  - name: jsonb
+    zero: "'{}'"
+    minimum: "'{}'"
+    maximum: "'{\"whatever\":\"meaningless\"}'"
+
+
+
+

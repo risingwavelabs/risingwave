@@ -18,14 +18,16 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::must_match;
 use risingwave_common::types::Datum;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::aggregate::{AggCall, AggregateState, BoxedAggregateFunction};
+use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
 use super::minput::MaterializedInputState;
 use super::GroupKey;
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
-use crate::executor::{PkIndices, StreamExecutorResult};
+use crate::executor::StreamExecutorResult;
 
 /// Represents the persistent storage of aggregation state.
 pub enum AggStateStorage<S: StateStore> {
@@ -34,10 +36,11 @@ pub enum AggStateStorage<S: StateStore> {
 
     /// The state is stored as a materialization of input chunks, in a standalone state table.
     /// `mapping` describes the mapping between the columns in the state table and the input
-    /// chunks.
+    /// chunks. `order_columns` list the index and order type of sort keys.
     MaterializedInput {
         table: StateTable<S>,
         mapping: StateTableColumnMapping,
+        order_columns: Vec<ColumnOrder>,
     },
 }
 
@@ -65,11 +68,11 @@ impl AggState {
     /// Create an [`AggState`] from a given [`AggCall`].
     #[allow(clippy::too_many_arguments)]
     pub fn create(
+        version: PbAggNodeVersion,
         agg_call: &AggCall,
         agg_func: &BoxedAggregateFunction,
         storage: &AggStateStorage<impl StateStore>,
         encoded_state: Option<&Datum>,
-        pk_indices: &PkIndices,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
@@ -81,15 +84,18 @@ impl AggState {
                 };
                 Self::Value(state)
             }
-            AggStateStorage::MaterializedInput { mapping, .. } => {
-                Self::MaterializedInput(Box::new(MaterializedInputState::new(
-                    agg_call,
-                    pk_indices,
-                    mapping,
-                    extreme_cache_size,
-                    input_schema,
-                )?))
-            }
+            AggStateStorage::MaterializedInput {
+                mapping,
+                order_columns,
+                ..
+            } => Self::MaterializedInput(Box::new(MaterializedInputState::new(
+                version,
+                agg_call,
+                order_columns,
+                mapping,
+                extreme_cache_size,
+                input_schema,
+            )?)),
         })
     }
 

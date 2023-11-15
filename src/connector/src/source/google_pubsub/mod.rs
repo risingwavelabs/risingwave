@@ -22,13 +22,14 @@ pub use enumerator::*;
 use serde_with::{serde_as, DisplayFromStr};
 pub use source::*;
 pub use split::*;
+use with_options::WithOptions;
 
 use crate::source::SourceProperties;
 
 pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Hash)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Hash, WithOptions)]
 pub struct PubsubProperties {
     #[serde_as(as = "DisplayFromStr")]
     #[serde(rename = "pubsub.split_count")]

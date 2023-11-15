@@ -34,14 +34,14 @@ pub async fn handle_drop_user(
 
     let user_name = Binder::resolve_user_name(user_name)?;
     let user_info_reader = session.env().user_info_reader();
-    let user = user_info_reader
+    let user_id = user_info_reader
         .read_guard()
         .get_user_by_name(&user_name)
-        .cloned();
-    match user {
-        Some(user) => {
+        .map(|u| u.id);
+    match user_id {
+        Some(user_id) => {
             let user_info_writer = session.user_info_writer()?;
-            user_info_writer.drop_user(user.id).await?;
+            user_info_writer.drop_user(user_id).await?;
         }
         None => {
             return if if_exists {

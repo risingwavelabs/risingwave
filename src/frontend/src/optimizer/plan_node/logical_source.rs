@@ -32,9 +32,9 @@ use super::generic::GenericPlanRef;
 use super::stream_watermark_filter::StreamWatermarkFilter;
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, BatchProject, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject,
-    PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen, StreamSource, ToBatch,
-    ToStream,
+    generic, BatchProject, BatchSource, ColPrunable, ExprRewritable, Logical, LogicalFilter,
+    LogicalProject, PlanBase, PlanRef, PredicatePushdown, StreamProject, StreamRowIdGen,
+    StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
@@ -45,13 +45,14 @@ use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamDedup,
     ToStreamContext,
 };
+use crate::optimizer::property::Distribution::HashShard;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, IndexRewriter};
 
 /// `LogicalSource` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalSource {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     pub core: generic::Source,
 
     /// Expressions to output. This field presents and will be turned to a `Project` when
@@ -127,7 +128,7 @@ impl LogicalSource {
                     mapping[idx] = None;
                 }
             }
-            ColIndexMapping::with_target_size(mapping, columns.len())
+            ColIndexMapping::new(mapping, columns.len())
         };
 
         let mut rewriter = IndexRewriter::new(col_mapping);
@@ -571,8 +572,10 @@ impl ToStream for LogicalSource {
         }
 
         assert!(!(self.core.gen_row_id && self.core.for_table));
-        if let Some(row_id_index) = self.core.row_id_index && self.core.gen_row_id {
-            plan = StreamRowIdGen::new(plan, row_id_index).into();
+        if let Some(row_id_index) = self.core.row_id_index
+            && self.core.gen_row_id
+        {
+            plan = StreamRowIdGen::new_with_dist(plan, row_id_index, HashShard(vec![row_id_index])).into();
         }
         Ok(plan)
     }

@@ -19,15 +19,15 @@ use itertools::{EitherOrBoth, Itertools};
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
-use risingwave_pb::stream_plan::ChainType;
+use risingwave_pb::stream_plan::StreamScanType;
 
 use super::generic::{
     push_down_into_join, push_down_join_condition, GenericPlanNode, GenericPlanRef,
 };
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, PredicatePushdown,
-    StreamHashJoin, StreamProject, ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeBinary,
+    PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::DynamicFilter;
@@ -49,7 +49,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Condit
 /// right columns, dependent on the output indices provided. A repeat output index is illegal.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Join<PlanRef>,
 }
 
@@ -518,8 +518,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
                 *i += left.schema().len();
             }
             map.append(&mut right_map);
-            let mut mapping =
-                ColIndexMapping::with_target_size(map, left.schema().len() + right.schema().len());
+            let mut mapping = ColIndexMapping::new(map, left.schema().len() + right.schema().len());
 
             let new_output_indices = self
                 .output_indices()
@@ -866,6 +865,8 @@ impl LogicalJoin {
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
     ) -> Result<PlanRef> {
+        use super::stream::prelude::*;
+
         assert!(predicate.has_eq());
         let mut right = self.right().to_stream_with_dist_required(
             &RequiredDist::shard_by_key(self.right().schema().len(), &predicate.right_eq_indexes()),
@@ -976,7 +977,10 @@ impl LogicalJoin {
         // Use primary table.
         let mut result_plan = self.to_stream_temporal_join(predicate.clone(), ctx);
         // Return directly if this temporal join can match the pk of its right table.
-        if let Ok(temporal_join) = &result_plan && temporal_join.eq_join_predicate().eq_indexes().len() == logical_scan.primary_key().len() {
+        if let Ok(temporal_join) = &result_plan
+            && temporal_join.eq_join_predicate().eq_indexes().len()
+                == logical_scan.primary_key().len()
+        {
             return result_plan;
         }
         let indexes = logical_scan.indexes();
@@ -1009,6 +1013,8 @@ impl LogicalJoin {
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
     ) -> Result<StreamTemporalJoin> {
+        use super::stream::prelude::*;
+
         assert!(predicate.has_eq());
 
         let right = self.right();
@@ -1157,7 +1163,7 @@ impl LogicalJoin {
             .collect_vec();
         // Use UpstreamOnly chain type
         let new_stream_table_scan =
-            StreamTableScan::new_with_chain_type(new_scan, ChainType::UpstreamOnly);
+            StreamTableScan::new_with_stream_scan_type(new_scan, StreamScanType::UpstreamOnly);
         let right = RequiredDist::no_shuffle(new_stream_table_scan.into());
 
         // Construct a new logical join, because we have change its RHS.
@@ -1179,6 +1185,8 @@ impl LogicalJoin {
         predicate: Condition,
         ctx: &mut ToStreamContext,
     ) -> Result<Option<PlanRef>> {
+        use super::stream::prelude::*;
+
         // If there is exactly one predicate, it is a comparison (<, <=, >, >=), and the
         // join is a `Inner` or `LeftSemi` join, we can convert the scalar subquery into a
         // `StreamDynamicFilter`

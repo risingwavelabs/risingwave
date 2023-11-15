@@ -24,6 +24,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
+use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam, SinkWriterParam};
@@ -36,7 +37,7 @@ use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
 };
 use crate::sink::{DummySinkCommitCoordinator, Result};
-use crate::{deserialize_duration_from_string, dispatch_sink_formatter_impl};
+use crate::{deserialize_duration_from_string, dispatch_sink_formatter_str_key_impl};
 
 pub const PULSAR_SINK: &str = "pulsar";
 
@@ -83,7 +84,7 @@ async fn build_pulsar_producer(
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct PulsarPropertiesProducer {
     #[serde(rename = "properties.batch.size", default = "_default_batch_size")]
     #[serde_as(as = "DisplayFromStr")]
@@ -98,7 +99,7 @@ pub struct PulsarPropertiesProducer {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct PulsarConfig {
     #[serde(rename = "properties.retry.max", default = "_default_max_retries")]
     #[serde_as(as = "DisplayFromStr")]
@@ -194,6 +195,7 @@ impl Sink for PulsarSink {
             self.downstream_pk.clone(),
             self.db_name.clone(),
             self.sink_from_name.clone(),
+            &self.config.common.topic,
         )
         .await?;
 
@@ -237,9 +239,15 @@ impl PulsarSinkWriter {
         db_name: String,
         sink_from_name: String,
     ) -> Result<Self> {
-        let formatter =
-            SinkFormatterImpl::new(format_desc, schema, downstream_pk, db_name, sink_from_name)
-                .await?;
+        let formatter = SinkFormatterImpl::new(
+            format_desc,
+            schema,
+            downstream_pk,
+            db_name,
+            sink_from_name,
+            &config.common.topic,
+        )
+        .await?;
         let pulsar = config.common.build_client().await?;
         let producer = build_pulsar_producer(&pulsar, &config).await?;
         Ok(Self {
@@ -256,7 +264,10 @@ impl<'w> PulsarPayloadWriter<'w> {
         let mut success_flag = false;
         let mut connection_err = None;
 
-        for _ in 0..self.config.max_retry_num {
+        for retry_num in 0..self.config.max_retry_num {
+            if retry_num > 0 {
+                tracing::warn!("Failed to send message, at retry no. {retry_num}");
+            }
             match self.producer.send(message.clone()).await {
                 // If the message is sent successfully,
                 // a SendFuture holding the message receipt
@@ -322,7 +333,7 @@ impl AsyncTruncateSinkWriter for PulsarSinkWriter {
         chunk: StreamChunk,
         add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        dispatch_sink_formatter_impl!(&self.formatter, formatter, {
+        dispatch_sink_formatter_str_key_impl!(&self.formatter, formatter, {
             let mut payload_writer = PulsarPayloadWriter {
                 producer: &mut self.producer,
                 add_future,
@@ -342,5 +353,16 @@ impl AsyncTruncateSinkWriter for PulsarSinkWriter {
             }
             Ok(())
         })
+    }
+
+    async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {
+        if is_checkpoint {
+            self.producer
+                .send_batch()
+                .map_err(pulsar_to_sink_err)
+                .await?;
+        }
+
+        Ok(())
     }
 }

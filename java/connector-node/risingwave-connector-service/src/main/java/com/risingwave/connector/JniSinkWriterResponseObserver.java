@@ -16,6 +16,7 @@ package com.risingwave.connector;
 
 import com.risingwave.java.binding.Binding;
 import com.risingwave.proto.ConnectorServiceProto;
+import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,7 +26,7 @@ public class JniSinkWriterResponseObserver
     private static final Logger LOG = LoggerFactory.getLogger(JniSinkWriterResponseObserver.class);
     private long responseTxPtr;
 
-    private boolean success;
+    private boolean success = true;
 
     public JniSinkWriterResponseObserver(long responseTxPtr) {
         this.responseTxPtr = responseTxPtr;
@@ -33,12 +34,17 @@ public class JniSinkWriterResponseObserver
 
     @Override
     public void onNext(ConnectorServiceProto.SinkWriterStreamResponse response) {
-        this.success =
-                Binding.sendSinkWriterResponseToChannel(this.responseTxPtr, response.toByteArray());
+        if (!Binding.sendSinkWriterResponseToChannel(this.responseTxPtr, response.toByteArray())) {
+            throw Status.INTERNAL.withDescription("unable to send response").asRuntimeException();
+        }
     }
 
     @Override
     public void onError(Throwable throwable) {
+        if (!Binding.sendSinkWriterErrorToChannel(this.responseTxPtr, throwable.getMessage())) {
+            LOG.warn("unable to send error: {}", throwable.getMessage());
+        }
+        this.success = false;
         LOG.error("JniSinkWriterHandler onError: ", throwable);
     }
 

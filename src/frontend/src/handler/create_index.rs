@@ -15,30 +15,32 @@
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::{PbIndex, PbStreamJobStatus, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
-use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_pb::user::grant_privilege::Object;
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::CatalogError;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
-use crate::session::{CheckRelationError, SessionImpl};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
 pub(crate) fn gen_create_index_plan(
@@ -74,7 +76,7 @@ pub(crate) fn gen_create_index_plan(
 
     session.check_privileges(&[ObjectCheckItem::new(
         table.owner,
-        Action::Select,
+        AclMode::Select,
         Object::TableId(table.id.table_id),
     )])?;
 
@@ -323,7 +325,7 @@ fn assemble_materialize(
 
     let logical_scan = LogicalScan::create(
         table_name,
-        false,
+        ScanTableType::default(),
         table_desc.clone(),
         // Index table has no indexes.
         vec![],
@@ -409,17 +411,13 @@ pub async fn handle_create_index(
 
     let (graph, index_table, index) = {
         {
-            match session.check_relation_name_duplicated(index_name.clone()) {
-                Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name)))
-                    if if_not_exists =>
-                {
-                    return Ok(PgResponse::builder(StatementType::CREATE_INDEX)
-                        .notice(format!("relation \"{}\" already exists, skipping", name))
-                        .into());
-                }
-                Err(e) => return Err(e.into()),
-                Ok(_) => {}
-            };
+            if let Either::Right(resp) = session.check_relation_name_duplicated(
+                index_name.clone(),
+                StatementType::CREATE_INDEX,
+                if_not_exists,
+            )? {
+                return Ok(resp);
+            }
         }
 
         let context = OptimizerContext::from_handler_args(handler_args);

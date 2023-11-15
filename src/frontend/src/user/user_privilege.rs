@@ -13,54 +13,23 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::acl;
+use risingwave_common::acl::{AclMode, AclModeSet};
 use risingwave_common::catalog::DEFAULT_SUPER_USER_ID;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, PbAction, PbObject};
 use risingwave_pb::user::PbGrantPrivilege;
 use risingwave_sqlparser::ast::{Action, GrantObjects, Privileges};
 
-// TODO: add user_privilege mod under user manager and move check and expand logic there, and bitmap
-// impl for privilege check.
-static AVAILABLE_ACTION_ON_DATABASE: &[Action] = &[Action::Connect, Action::Create];
-static AVAILABLE_ACTION_ON_SCHEMA: &[Action] = &[Action::Create];
-
-static AVAILABLE_ACTION_ON_TABLE: &[Action] = &[
-    Action::Select { columns: None },
-    Action::Update { columns: None },
-    Action::Insert { columns: None },
-    Action::Delete,
-];
-static AVAILABLE_ACTION_ON_MVIEW: &[Action] = &[Action::Select { columns: None }];
-static AVAILABLE_ACTION_ON_VIEW: &[Action] = AVAILABLE_ACTION_ON_MVIEW;
-static AVAILABLE_ACTION_ON_SOURCE: &[Action] = AVAILABLE_ACTION_ON_MVIEW;
-static AVAILABLE_ACTION_ON_SINK: &[Action] = &[];
-static AVAILABLE_ACTION_ON_FUNCTION: &[Action] = &[];
-
 pub fn check_privilege_type(privilege: &Privileges, objects: &GrantObjects) -> Result<()> {
     match privilege {
         Privileges::All { .. } => Ok(()),
         Privileges::Actions(actions) => {
-            let valid = match objects {
-                GrantObjects::Databases(_) => actions
-                    .iter()
-                    .all(|action| AVAILABLE_ACTION_ON_DATABASE.contains(action)),
-                GrantObjects::Schemas(_) => actions
-                    .iter()
-                    .all(|action| AVAILABLE_ACTION_ON_SCHEMA.contains(action)),
-                GrantObjects::Sources(_) | GrantObjects::AllSourcesInSchema { .. } => actions
-                    .iter()
-                    .all(|action| AVAILABLE_ACTION_ON_SOURCE.contains(action)),
-                GrantObjects::Mviews(_) | GrantObjects::AllMviewsInSchema { .. } => actions
-                    .iter()
-                    .all(|action| AVAILABLE_ACTION_ON_MVIEW.contains(action)),
-                GrantObjects::Tables(_) | GrantObjects::AllTablesInSchema { .. } => actions
-                    .iter()
-                    .all(|action| AVAILABLE_ACTION_ON_TABLE.contains(action)),
-                GrantObjects::Sinks(_) => actions
-                    .iter()
-                    .all(|action| AVAILABLE_ACTION_ON_SINK.contains(action)),
-                GrantObjects::Sequences(_) | GrantObjects::AllSequencesInSchema { .. } => true,
-            };
+            let acl_sets = get_all_available_modes(objects)?;
+            let valid = actions
+                .iter()
+                .map(get_prost_action)
+                .all(|action| acl_sets.has_mode(action.into()));
             if !valid {
                 return Err(ErrorCode::BindError(
                     "Invalid privilege type for the given object.".to_string(),
@@ -73,23 +42,29 @@ pub fn check_privilege_type(privilege: &Privileges, objects: &GrantObjects) -> R
     }
 }
 
-pub fn available_privilege_actions(objects: &GrantObjects) -> Result<Vec<Action>> {
-    match objects {
-        GrantObjects::Databases(_) => Ok(AVAILABLE_ACTION_ON_DATABASE.to_vec()),
-        GrantObjects::Schemas(_) => Ok(AVAILABLE_ACTION_ON_SCHEMA.to_vec()),
+fn get_all_available_modes(object: &GrantObjects) -> Result<&AclModeSet> {
+    match object {
+        GrantObjects::Databases(_) => Ok(&acl::ALL_AVAILABLE_DATABASE_MODES),
+        GrantObjects::Schemas(_) => Ok(&acl::ALL_AVAILABLE_SCHEMA_MODES),
         GrantObjects::Sources(_) | GrantObjects::AllSourcesInSchema { .. } => {
-            Ok(AVAILABLE_ACTION_ON_SOURCE.to_vec())
+            Ok(&acl::ALL_AVAILABLE_SOURCE_MODES)
         }
         GrantObjects::Mviews(_) | GrantObjects::AllMviewsInSchema { .. } => {
-            Ok(AVAILABLE_ACTION_ON_MVIEW.to_vec())
+            Ok(&acl::ALL_AVAILABLE_MVIEW_MODES)
         }
         GrantObjects::Tables(_) | GrantObjects::AllTablesInSchema { .. } => {
-            Ok(AVAILABLE_ACTION_ON_TABLE.to_vec())
+            Ok(&acl::ALL_AVAILABLE_TABLE_MODES)
         }
+        GrantObjects::Sinks(_) => Ok(&acl::ALL_AVAILABLE_SINK_MODES),
         _ => Err(
             ErrorCode::BindError("Invalid privilege type for the given object.".to_string()).into(),
         ),
     }
+}
+
+pub fn available_privilege_actions(objects: &GrantObjects) -> Result<Vec<PbAction>> {
+    let acl_sets = get_all_available_modes(objects)?;
+    Ok(acl_sets.iter().map(Into::into).collect_vec())
 }
 
 #[inline(always)]
@@ -101,31 +76,32 @@ pub fn get_prost_action(action: &Action) -> PbAction {
         Action::Delete { .. } => PbAction::Delete,
         Action::Connect => PbAction::Connect,
         Action::Create => PbAction::Create,
+        Action::Usage => PbAction::Usage,
         _ => unreachable!(),
     }
 }
 
 pub fn available_prost_privilege(object: PbObject, for_dml_table: bool) -> PbGrantPrivilege {
-    let actions = match object {
-        PbObject::DatabaseId(_) => AVAILABLE_ACTION_ON_DATABASE.to_vec(),
-        PbObject::SchemaId(_) => AVAILABLE_ACTION_ON_SCHEMA.to_vec(),
-        PbObject::SourceId(_) => AVAILABLE_ACTION_ON_SOURCE.to_vec(),
+    let acl_set = match object {
+        PbObject::DatabaseId(_) => &acl::ALL_AVAILABLE_DATABASE_MODES,
+        PbObject::SchemaId(_) => &acl::ALL_AVAILABLE_SCHEMA_MODES,
+        PbObject::SourceId(_) => &acl::ALL_AVAILABLE_SOURCE_MODES,
         PbObject::TableId(_) => {
             if for_dml_table {
-                AVAILABLE_ACTION_ON_TABLE.to_vec()
+                &acl::ALL_AVAILABLE_TABLE_MODES
             } else {
-                AVAILABLE_ACTION_ON_MVIEW.to_vec()
+                &acl::ALL_AVAILABLE_MVIEW_MODES
             }
         }
-        PbObject::ViewId(_) => AVAILABLE_ACTION_ON_VIEW.to_vec(),
-        PbObject::SinkId(_) => AVAILABLE_ACTION_ON_SINK.to_vec(),
-        PbObject::FunctionId(_) => AVAILABLE_ACTION_ON_FUNCTION.to_vec(),
+        PbObject::ViewId(_) => &acl::ALL_AVAILABLE_VIEW_MODES,
+        PbObject::SinkId(_) => &acl::ALL_AVAILABLE_SINK_MODES,
+        PbObject::FunctionId(_) => &acl::ALL_AVAILABLE_FUNCTION_MODES,
         _ => unreachable!("Invalid object type"),
     };
-    let actions = actions
+    let actions = acl_set
         .iter()
-        .map(|action| ActionWithGrantOption {
-            action: get_prost_action(action) as i32,
+        .map(|mode| ActionWithGrantOption {
+            action: <AclMode as Into<PbAction>>::into(mode) as i32,
             with_grant_option: false,
             granted_by: DEFAULT_SUPER_USER_ID,
         })

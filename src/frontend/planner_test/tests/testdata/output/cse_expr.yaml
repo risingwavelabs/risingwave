@@ -5,13 +5,13 @@
     select v1->'a'->'c' x, v1->'a'->'b' y from t;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [JsonbAccessInner($expr1, 'c':Varchar) as $expr2, JsonbAccessInner($expr1, 'b':Varchar) as $expr3] }
-      └─BatchProject { exprs: [t.v1, JsonbAccessInner(t.v1, 'a':Varchar) as $expr1] }
+    └─BatchProject { exprs: [JsonbAccess($expr1, 'c':Varchar) as $expr2, JsonbAccess($expr1, 'b':Varchar) as $expr3] }
+      └─BatchProject { exprs: [t.v1, JsonbAccess(t.v1, 'a':Varchar) as $expr1] }
         └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [JsonbAccessInner($expr1, 'c':Varchar) as $expr2, JsonbAccessInner($expr1, 'b':Varchar) as $expr3, t._row_id] }
-      └─StreamProject { exprs: [t.v1, JsonbAccessInner(t.v1, 'a':Varchar) as $expr1, t._row_id] }
+    └─StreamProject { exprs: [JsonbAccess($expr1, 'c':Varchar) as $expr2, JsonbAccess($expr1, 'b':Varchar) as $expr3, t._row_id] }
+      └─StreamProject { exprs: [t.v1, JsonbAccess(t.v1, 'a':Varchar) as $expr1, t._row_id] }
         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: Common sub expression extract2
   sql: |
@@ -20,12 +20,12 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [$expr1, $expr1] }
-      └─BatchProject { exprs: [t.v1, JsonbAccessInner(JsonbAccessInner(t.v1, 'a':Varchar), 'c':Varchar) as $expr1] }
+      └─BatchProject { exprs: [t.v1, JsonbAccess(JsonbAccess(t.v1, 'a':Varchar), 'c':Varchar) as $expr1] }
         └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [$expr1, $expr1, t._row_id] }
-      └─StreamProject { exprs: [t.v1, JsonbAccessInner(JsonbAccessInner(t.v1, 'a':Varchar), 'c':Varchar) as $expr1, t._row_id] }
+      └─StreamProject { exprs: [t.v1, JsonbAccess(JsonbAccess(t.v1, 'a':Varchar), 'c':Varchar) as $expr1, t._row_id] }
         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: Common sub expression shouldn't extract impure function
   sql: |
@@ -84,5 +84,5 @@
   sql: |
     with t(v, arr) as (select 1, array[2, 3]) select v < all(arr), v < some(arr) from t;
   batch_plan: |-
-    BatchProject { exprs: [All((1:Int32 < $expr10060)) as $expr1, Some((1:Int32 < $expr10060)) as $expr2] }
+    BatchProject { exprs: [All((1:Int32 < $expr10063)) as $expr1, Some((1:Int32 < $expr10063)) as $expr2] }
     └─BatchValues { rows: [[1:Int32, ARRAY[2, 3]:List(Int32)]] }

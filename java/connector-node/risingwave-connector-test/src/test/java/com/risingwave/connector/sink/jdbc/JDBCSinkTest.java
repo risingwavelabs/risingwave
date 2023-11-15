@@ -16,7 +16,6 @@ package com.risingwave.connector.sink.jdbc;
 
 import static org.junit.Assert.*;
 
-import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.risingwave.connector.JDBCSink;
 import com.risingwave.connector.JDBCSinkConfig;
@@ -26,6 +25,7 @@ import com.risingwave.proto.Data;
 import com.risingwave.proto.Data.DataType.TypeName;
 import com.risingwave.proto.Data.Op;
 import java.sql.*;
+import java.util.List;
 import org.junit.Test;
 import org.testcontainers.containers.JdbcDatabaseContainer;
 import org.testcontainers.containers.MySQLContainer;
@@ -81,10 +81,10 @@ public class JDBCSinkTest {
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
                         getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
-        Connection conn = sink.getConn();
+        Connection conn = DriverManager.getConnection(container.getJdbcUrl());
 
         sink.write(
-                Iterators.forArray(
+                List.of(
                         new ArraySinkRow(
                                 Op.INSERT,
                                 1,
@@ -94,7 +94,7 @@ public class JDBCSinkTest {
                                 new Timestamp(1000000000),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes())));
-        sink.sync();
+        sink.barrier(true);
 
         Statement stmt = conn.createStatement();
         try (var rs = stmt.executeQuery(String.format("SELECT * FROM %s", tableName))) {
@@ -106,7 +106,7 @@ public class JDBCSinkTest {
         }
 
         sink.write(
-                Iterators.forArray(
+                List.of(
                         new ArraySinkRow(
                                 Op.INSERT,
                                 2,
@@ -116,7 +116,7 @@ public class JDBCSinkTest {
                                 new Timestamp(1000000000),
                                 "{\"key\": \"password\", \"value\": \"Singularity123\"}",
                                 "I want to sleep".getBytes())));
-        sink.sync();
+        sink.barrier(true);
         try (var rs = stmt.executeQuery(String.format("SELECT * FROM %s", tableName))) {
             int count;
             for (count = 0; rs.next(); ) {
@@ -125,8 +125,9 @@ public class JDBCSinkTest {
             assertEquals(2, count);
         }
         stmt.close();
+        conn.close();
 
-        sink.sync();
+        sink.barrier(true);
         sink.drop();
     }
 
@@ -140,11 +141,11 @@ public class JDBCSinkTest {
                         new JDBCSinkConfig(container.getJdbcUrl(), tableName, "upsert"),
                         getTestTableSchema());
         assertEquals(tableName, sink.getTableName());
-        Connection conn = sink.getConn();
+        Connection conn = DriverManager.getConnection(container.getJdbcUrl());
         Statement stmt = conn.createStatement();
 
         sink.write(
-                Iterators.forArray(
+                List.of(
                         new ArraySinkRow(
                                 Op.INSERT,
                                 1,
@@ -171,7 +172,7 @@ public class JDBCSinkTest {
         }
 
         sink.write(
-                Iterators.forArray(
+                List.of(
                         new ArraySinkRow(
                                 Op.UPDATE_DELETE,
                                 1,
@@ -216,8 +217,9 @@ public class JDBCSinkTest {
             assertFalse(rs.next());
         }
 
-        sink.sync();
+        sink.barrier(true);
         stmt.close();
+        conn.close();
     }
 
     static void testJDBCDrop(JdbcDatabaseContainer<?> container, TestType testType)
@@ -232,11 +234,7 @@ public class JDBCSinkTest {
         assertEquals(tableName, sink.getTableName());
         Connection conn = sink.getConn();
         sink.drop();
-        try {
-            assertTrue(conn.isClosed());
-        } catch (SQLException e) {
-            fail(String.valueOf(e));
-        }
+        assertTrue(conn.isClosed());
     }
 
     @Test

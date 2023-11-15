@@ -7,23 +7,36 @@ create materialized view mv3 as select sum(v1) as sum_v1 from t3;
 statement ok
 create view v3 as select sum(v2) as sum_v2 from t3;
 
-query TTT
+statement ok
+comment on table t3 is 'volutpat vitae';
+
+statement ok
+comment on column t3.v1 is 'turpis vehicula';
+
+statement ok
+comment on column t3.v2 is 'Lorem ipsum dolor sit amet';
+
+statement ok
+comment on column public.t3._row_id is 'consectetur adipiscing elit';
+
+query TTTT
 describe t3;
 ----
-v1 integer false
-v2 integer false
-v3 integer false
-_row_id serial true
-primary key _row_id NULL
-distribution key _row_id NULL
+v1                 integer  false  turpis vehicula
+v2                 integer  false  Lorem ipsum dolor sit amet
+v3                 integer  false  NULL
+_row_id             serial   true  consectetur adipiscing elit
+primary key        _row_id   NULL  NULL
+distribution key   _row_id   NULL  NULL
+table description       t3   NULL  volutpat vitae
 
 query TTT
 show columns from t3;
 ----
-v1 integer false
-v2 integer false
-v3 integer false
-_row_id serial true
+v1 integer false turpis vehicula
+v2 integer false Lorem ipsum dolor sit amet
+v3 integer false NULL
+_row_id serial true consectetur adipiscing elit
 
 statement ok
 create index idx1 on t3 (v1,v2);
@@ -33,16 +46,29 @@ show indexes from t3;
 ----
 idx1 t3 v1 ASC, v2 ASC v3 v1
 
-query TTT
+statement ok
+comment on table public.t3 is 'consectetur turpis';
+
+statement ok
+comment on column t3.v1 is 'Nemo enim ipsam';
+
+statement ok
+comment on column t3.v2 is '';
+
+statement ok
+comment on column t3._row_id is NULL;
+
+query TTTT
 describe t3;
 ----
-v1 integer false
-v2 integer false
-v3 integer false
-_row_id serial true
-primary key _row_id NULL
-distribution key _row_id NULL
-idx1 index(v1 ASC, v2 ASC) include(v3) distributed by(v1) NULL
+v1                 integer  false  Nemo enim ipsam
+v2                 integer  false  NULL
+v3                 integer  false  NULL
+_row_id             serial   true  NULL
+primary key        _row_id   NULL  NULL
+distribution key   _row_id   NULL  NULL
+idx1               index(v1 ASC, v2 ASC) include(v3) distributed by(v1) NULL NULL
+table description       t3   NULL  consectetur turpis
 
 query TT
 show create index idx1;

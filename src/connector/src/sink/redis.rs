@@ -22,13 +22,14 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde_derive::{Deserialize, Serialize};
 use serde_with::serde_as;
+use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
 use super::encoder::template::TemplateEncoder;
 use super::formatter::SinkFormatterImpl;
 use super::writer::FormattedSink;
 use super::{SinkError, SinkParam};
-use crate::dispatch_sink_formatter_impl;
+use crate::dispatch_sink_formatter_str_key_impl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
@@ -38,7 +39,8 @@ use crate::sink::{DummySinkCommitCoordinator, Result, Sink, SinkWriterParam};
 pub const REDIS_SINK: &str = "redis";
 pub const KEY_FORMAT: &str = "key_format";
 pub const VALUE_FORMAT: &str = "value_format";
-#[derive(Deserialize, Serialize, Debug, Clone)]
+
+#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct RedisCommon {
     #[serde(rename = "redis.url")]
     pub url: String,
@@ -51,7 +53,7 @@ impl RedisCommon {
     }
 }
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct RedisConfig {
     #[serde(flatten)]
     pub common: RedisCommon,
@@ -224,6 +226,7 @@ impl RedisSinkWriter {
             pk_indices.clone(),
             db_name,
             sink_from_name,
+            "NO_TOPIC",
         )
         .await?;
 
@@ -248,6 +251,7 @@ impl RedisSinkWriter {
             pk_indices.clone(),
             "d1".to_string(),
             "t1".to_string(),
+            "NO_TOPIC",
         )
         .await?;
         Ok(Self {
@@ -266,7 +270,7 @@ impl AsyncTruncateSinkWriter for RedisSinkWriter {
         chunk: StreamChunk,
         _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        dispatch_sink_formatter_impl!(&self.formatter, formatter, {
+        dispatch_sink_formatter_str_key_impl!(&self.formatter, formatter, {
             self.payload_writer.write_chunk(chunk, formatter).await
         })
     }

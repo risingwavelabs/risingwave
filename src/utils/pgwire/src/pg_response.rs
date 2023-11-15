@@ -53,6 +53,7 @@ pub enum StatementType {
     CREATE_INDEX,
     CREATE_FUNCTION,
     CREATE_CONNECTION,
+    COMMENT,
     DESCRIBE,
     GRANT_PRIVILEGE,
     DROP_TABLE,
@@ -66,6 +67,8 @@ pub enum StatementType {
     DROP_DATABASE,
     DROP_USER,
     DROP_CONNECTION,
+    ALTER_DATABASE,
+    ALTER_SCHEMA,
     ALTER_INDEX,
     ALTER_VIEW,
     ALTER_TABLE,
@@ -93,6 +96,7 @@ pub enum StatementType {
     SET_TRANSACTION,
     CANCEL_COMMAND,
     WAIT,
+    KILL,
 }
 
 impl std::fmt::Display for StatementType {

@@ -18,13 +18,14 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{DistributedLookupJoinNode, LocalLookupJoinNode};
 
+use super::batch::prelude::*;
 use super::generic::{self, GenericPlanRef};
 use super::utils::{childless_record, Distill};
 use super::ExprRewritable;
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
-    EqJoinPredicate, EqJoinPredicateDisplay, PlanBase, PlanTreeNodeUnary, ToBatchPb,
+    EqJoinPredicate, EqJoinPredicateDisplay, LogicalScan, PlanBase, PlanTreeNodeUnary, ToBatchPb,
     ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -33,7 +34,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchLookupJoin {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::Join<PlanRef>,
 
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
@@ -128,6 +129,11 @@ impl Distill for BatchLookupJoin {
         if verbose {
             let data = IndicesDisplay::from_join(&self.core, &concat_schema);
             vec.push(("output", data));
+        }
+
+        if let Some(scan) = self.core.right.as_logical_scan() {
+            let scan: &LogicalScan = scan;
+            vec.push(("lookup table", Pretty::display(&scan.table_name())));
         }
 
         childless_record("BatchLookupJoin", vec)

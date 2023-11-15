@@ -25,11 +25,12 @@ use serde_derive::Deserialize;
 use serde_with::serde_as;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
+use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
 use super::SinkParam;
 use crate::common::KinesisCommon;
-use crate::dispatch_sink_formatter_impl;
+use crate::dispatch_sink_formatter_str_key_impl;
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::formatter::SinkFormatterImpl;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
@@ -94,6 +95,7 @@ impl Sink for KinesisSink {
             self.pk_indices.clone(),
             self.db_name.clone(),
             self.sink_from_name.clone(),
+            &self.config.common.stream_name,
         )
         .await?;
 
@@ -126,7 +128,7 @@ impl Sink for KinesisSink {
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct KinesisSinkConfig {
     #[serde(flatten)]
     pub common: KinesisCommon,
@@ -161,9 +163,15 @@ impl KinesisSinkWriter {
         db_name: String,
         sink_from_name: String,
     ) -> Result<Self> {
-        let formatter =
-            SinkFormatterImpl::new(format_desc, schema, pk_indices, db_name, sink_from_name)
-                .await?;
+        let formatter = SinkFormatterImpl::new(
+            format_desc,
+            schema,
+            pk_indices,
+            db_name,
+            sink_from_name,
+            &config.common.stream_name,
+        )
+        .await?;
         let client = config
             .common
             .build_client()
@@ -228,7 +236,7 @@ impl AsyncTruncateSinkWriter for KinesisSinkWriter {
         chunk: StreamChunk,
         _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        dispatch_sink_formatter_impl!(
+        dispatch_sink_formatter_str_key_impl!(
             &self.formatter,
             formatter,
             self.payload_writer.write_chunk(chunk, formatter).await

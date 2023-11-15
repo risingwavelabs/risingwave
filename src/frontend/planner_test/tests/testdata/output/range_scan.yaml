@@ -32,22 +32,38 @@
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id = 1/0
-  batch_error: 'Expr error: Division by zero'
+  batch_error: |
+    Expr error
+
+    Caused by:
+      Division by zero
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id = 2147483647 + 1
-  batch_error: 'Expr error: Numeric out of range'
+  batch_error: |
+    Expr error
+
+    Caused by:
+      Numeric out of range
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id = 'a'
-  batch_error: 'Expr error: Parse error: invalid digit found in string'
+  batch_error: |
+    Expr error
+
+    Caused by:
+      Parse error: bigint invalid digit found in string
 - before:
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id > 'a'
-  batch_error: 'Expr error: Parse error: invalid digit found in string'
+  batch_error: |
+    Expr error
+
+    Caused by:
+      Parse error: bigint invalid digit found in string
 - before:
   - create_table_and_mv
   sql: |
@@ -129,7 +145,11 @@
   - create_table_and_mv
   sql: |
     SELECT * FROM orders_count_by_user WHERE user_id in ('42', '43.0')
-  batch_error: 'Expr error: Parse error: invalid digit found in string'
+  batch_error: |
+    Expr error
+
+    Caused by:
+      Parse error: bigint invalid digit found in string
 - before:
   - create_table_and_mv
   sql: |

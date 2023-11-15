@@ -31,7 +31,7 @@ use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl, Timestamptz};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::source::KAFKA_CONNECTOR;
+use risingwave_connector::source::{KAFKA_CONNECTOR, KINESIS_CONNECTOR, PULSAR_CONNECTOR};
 use risingwave_sqlparser::ast::display_comma_separated;
 
 use crate::catalog::IndexCatalog;
@@ -187,6 +187,7 @@ pub fn col_descs_to_rows(columns: Vec<ColumnCatalog>) -> Vec<Row> {
                         Some(c.name.into()),
                         Some(type_name.into()),
                         Some(col.is_hidden.to_string().into()),
+                        c.description.map(Into::into),
                     ])
                 })
                 .collect_vec()
@@ -251,6 +252,26 @@ pub fn is_kafka_connector(with_properties: &HashMap<String, String>) -> bool {
     };
 
     connector == KAFKA_CONNECTOR
+}
+
+#[inline(always)]
+pub fn is_key_mq_connector(with_properties: &HashMap<String, String>) -> bool {
+    let Some(connector) = get_connector(with_properties) else {
+        return false;
+    };
+
+    matches!(
+        connector.as_str(),
+        KINESIS_CONNECTOR | PULSAR_CONNECTOR | KAFKA_CONNECTOR
+    )
+}
+
+#[inline(always)]
+pub fn is_cdc_connector(with_properties: &HashMap<String, String>) -> bool {
+    let Some(connector) = get_connector(with_properties) else {
+        return false;
+    };
+    connector.contains("-cdc")
 }
 
 #[inline(always)]

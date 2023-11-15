@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
+use risingwave_meta::stream::{ScaleController, ScaleControllerRef};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
@@ -35,6 +38,7 @@ pub struct ScaleServiceImpl {
     catalog_manager: CatalogManagerRef,
     stream_manager: GlobalStreamManagerRef,
     barrier_manager: BarrierManagerRef,
+    scale_controller: ScaleControllerRef,
 }
 
 impl ScaleServiceImpl {
@@ -46,6 +50,12 @@ impl ScaleServiceImpl {
         stream_manager: GlobalStreamManagerRef,
         barrier_manager: BarrierManagerRef,
     ) -> Self {
+        let scale_controller = Arc::new(ScaleController::new(
+            fragment_manager.clone(),
+            cluster_manager.clone(),
+            source_manager.clone(),
+            stream_manager.env.clone(),
+        ));
         Self {
             fragment_manager,
             cluster_manager,
@@ -53,6 +63,7 @@ impl ScaleServiceImpl {
             catalog_manager,
             stream_manager,
             barrier_manager,
+            scale_controller,
         }
     }
 }
@@ -203,7 +214,7 @@ impl ScaleService for ScaleServiceImpl {
             .policy
             .ok_or_else(|| Status::invalid_argument("policy is required"))?;
 
-        let plan = self.stream_manager.get_reschedule_plan(policy).await?;
+        let plan = self.scale_controller.get_reschedule_plan(policy).await?;
 
         let next_revision = self.fragment_manager.get_revision().await;
 

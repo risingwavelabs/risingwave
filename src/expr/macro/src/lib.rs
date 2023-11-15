@@ -522,6 +522,8 @@ struct UserFunctionAttr {
     retract: bool,
     /// The argument type are `Option`s.
     arg_option: bool,
+    /// If the first argument type is `&mut T`, then `Some(T)`.
+    first_mut_ref_arg: Option<String>,
     /// The return type kind.
     return_type_kind: ReturnTypeKind,
     /// The kind of inner type `T` in `impl Iterator<Item = T>`
