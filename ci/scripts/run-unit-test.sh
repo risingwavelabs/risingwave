@@ -11,7 +11,8 @@ python3 -m pytest
 cd ${REPO_ROOT}
 
 echo "+++ Run unit tests with coverage"
-# use tee to disable progress bar
+cargo test --no-run --features failpoints,sync_point --workspace --exclude risingwave_simulation --timings
+buildkite-agent artifact upload target/cargo-timings/cargo-timing.html
 NEXTEST_PROFILE=ci cargo llvm-cov nextest --lcov --output-path lcov.info --features failpoints,sync_point --workspace --exclude risingwave_simulation
 
 echo "--- Show sccache stats"
