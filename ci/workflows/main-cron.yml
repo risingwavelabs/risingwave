@@ -725,6 +725,6 @@ steps:
               - slack:
                   channels:
                     - "#notification-buildkite"
-                  message: "<@noelkwan> test"
+                  message: "<@noelkwan> test\\n <@noelkwan> test"
       YAML
       fi
