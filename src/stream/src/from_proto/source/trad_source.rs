@@ -183,7 +183,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             (0..table_schema.len()).collect_vec(),
                             None,
                             params.executor_stats,
-                            source_state_handler,
+                            None,
+                            Some(source_state_handler),
                             false,
                             source_ctrl_opts.chunk_size,
                         );

@@ -61,6 +61,7 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
             Arc::new(SstableIteratorReadOptions {
                 cache_policy: CachePolicy::NotFill,
                 must_iterated_end_user_key: None,
+                max_preload_retry_times: 0,
             }),
         );
         let mut previous_key: Option<FullKey<Vec<u8>>> = None;
