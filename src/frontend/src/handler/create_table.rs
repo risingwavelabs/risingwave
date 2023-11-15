@@ -890,6 +890,8 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
     table.owner = session.user_id();
+    table.dependent_relations = vec![source.id];
+
     Ok((materialize.into(), table))
 }
 
@@ -934,43 +936,21 @@ fn derive_connect_properties(
     Ok(connect_properties.into_iter().collect())
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn handle_create_table(
-    handler_args: HandlerArgs,
+pub(super) async fn handle_create_table_plan(
+    context: OptimizerContext,
+    col_id_gen: ColumnIdGenerator,
+    source_schema: Option<ConnectorSchema>,
+    cdc_table_info: Option<CdcTableInfo>,
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-    if_not_exists: bool,
-    source_schema: Option<ConnectorSchema>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
-    notice: Option<String>,
-    cdc_table_info: Option<CdcTableInfo>,
-) -> Result<RwPgResponse> {
-    let session = handler_args.session.clone();
-    // TODO(st1page): refactor it
-    if let Some(notice) = notice {
-        session.notice_to_user(notice)
-    }
+) -> Result<(PlanRef, Option<PbSource>, PbTable, TableJobType)> {
+    let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
 
-    if append_only {
-        session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");
-    }
-
-    if let Either::Right(resp) = session.check_relation_name_duplicated(
-        table_name.clone(),
-        StatementType::CREATE_TABLE,
-        if_not_exists,
-    )? {
-        return Ok(resp);
-    }
-
-    let (graph, source, table, job_type) = {
-        let context = OptimizerContext::from_handler_args(handler_args);
-        let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
-        let col_id_gen = ColumnIdGenerator::new_initial();
-
-        let ((plan, source, table), job_type) = match (source_schema, cdc_table_info.as_ref()) {
+    let ((plan, source, table), job_type) =
+        match (source_schema, cdc_table_info.as_ref()) {
             (Some(source_schema), None) => (
                 gen_create_table_plan_with_source(
                     context,
@@ -1018,6 +998,56 @@ pub async fn handle_create_table(
             )
             .into()),
         };
+    Ok((plan, source, table, job_type))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn handle_create_table(
+    handler_args: HandlerArgs,
+    table_name: ObjectName,
+    column_defs: Vec<ColumnDef>,
+    constraints: Vec<TableConstraint>,
+    if_not_exists: bool,
+    source_schema: Option<ConnectorSchema>,
+    source_watermarks: Vec<SourceWatermark>,
+    append_only: bool,
+    notice: Option<String>,
+    cdc_table_info: Option<CdcTableInfo>,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session.clone();
+    // TODO(st1page): refactor it
+    if let Some(notice) = notice {
+        session.notice_to_user(notice)
+    }
+
+    if append_only {
+        session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");
+    }
+
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        table_name.clone(),
+        StatementType::CREATE_TABLE,
+        if_not_exists,
+    )? {
+        return Ok(resp);
+    }
+
+    let (graph, source, table, job_type) = {
+        let context = OptimizerContext::from_handler_args(handler_args);
+        let col_id_gen = ColumnIdGenerator::new_initial();
+        let (plan, source, table, job_type) = handle_create_table_plan(
+            context,
+            col_id_gen,
+            source_schema,
+            cdc_table_info,
+            table_name.clone(),
+            column_defs,
+            constraints,
+            source_watermarks,
+            append_only,
+        )
+        .await?;
+
         let mut graph = build_graph(plan);
         graph.parallelism = session
             .config()
