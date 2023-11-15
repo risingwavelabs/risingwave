@@ -532,6 +532,7 @@ Instructions about submitting PRs are included in the [contribution guidelines](
 - `ci/run-main-cron`: Run full `main-cron`.
 - `ci/run-main-cron` + `ci/main-cron/skip-ci` + `[ci/run-xxx …]` : Run specific steps indicated by `ci/run-xxx`
   from the `main-cron` workflow, in your PR. Can use to verify some `main-cron` fix works as expected.
+- To reference `[ci/run-xxx ...]` labels, you may look at steps from `pull-request.yml` and `main-cron.yml`.
 - **Be sure to add all the dependencies.**
 
   For example to run `e2e-test` for `main-cron` in your pull request:
