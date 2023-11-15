@@ -1788,6 +1788,9 @@ impl CatalogManager {
 
                 let table = tables.tree_ref().get(&table_id).unwrap();
                 let old_owner_id = table.owner;
+                if old_owner_id == owner_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
                 // associated source id.
                 let to_update_source_id = if let Some(
                     OptionalAssociatedSourceId::AssociatedSourceId(associated_source_id),
