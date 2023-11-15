@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 
 TEST_MAP = {
-    "test-notify": [],
-    "e2e-iceberg-sink-tests": [],
-    "e2e-java-binding-tests": [],
-    "e2e-clickhouse-sink-tests": [],
-    "e2e-pulsar-sink-tests": [],
-    "s3-source-test-for-opendal-fs-engine": [],
-    "pulsar-source-tests": [],
-    "connector-node-integration-test": [],
+    "test-notify": ["noelkwan", "noelkwan"],
+    "e2e-iceberg-sink-tests": ["liurenjie"],
+    "e2e-java-binding-tests": ["yimingwen"],
+    "e2e-clickhouse-sink-tests": ["bohanzhang"],
+    "e2e-pulsar-sink-tests": ["liurenjie"],
+    "s3-source-test-for-opendal-fs-engine": ["congyiwang"],
+    "pulsar-source-tests": ["liurenjie"],
+    "connector-node-integration-test": ["siyuanwang"],
 }
 
 def get_failed_tests(get_test_status, test_map):

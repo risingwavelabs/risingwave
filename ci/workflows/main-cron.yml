@@ -696,6 +696,6 @@ steps:
               - slack:
                   channels:
                     - "#notification-buildkite"
-                  message: "<@noelkwan> test\\n <@noelkwan> test"
+                  message: "test:\\n<@noelkwan>\\n<liurenjie>\\n<yimingwen>\\n<bohanzhang>\\n<congyiwang>\\n<xinhaoxu>"
       YAML
       fi
