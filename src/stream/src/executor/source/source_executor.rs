@@ -42,12 +42,7 @@ const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
-
-    identity: String,
-
-    schema: Schema,
-
-    pk_indices: PkIndices,
+    info: ExecutorInfo,
 
     /// Streaming source for external
     stream_source_core: Option<StreamSourceCore<S>>,
@@ -72,21 +67,17 @@ impl<S: StateStore> SourceExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         actor_ctx: ActorContextRef,
-        schema: Schema,
-        pk_indices: PkIndices,
+        info: ExecutorInfo,
         stream_source_core: Option<StreamSourceCore<S>>,
         metrics: Arc<StreamingMetrics>,
         barrier_receiver: UnboundedReceiver<Barrier>,
         system_params: SystemParamsReaderRef,
-        executor_id: u64,
         source_ctrl_opts: SourceCtrlOpts,
         connector_params: ConnectorParams,
     ) -> Self {
         Self {
             actor_ctx,
-            identity: format!("SourceExecutor {:X}", executor_id),
-            schema,
-            pk_indices,
+            info,
             stream_source_core,
             metrics,
             barrier_receiver: Some(barrier_receiver),
@@ -558,7 +549,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                 self_paused = true;
                                 tracing::warn!(
                                     "source {} paused, wait barrier for {:?}",
-                                    self.identity,
+                                    self.info.identity,
                                     last_barrier_time.elapsed()
                                 );
                                 stream.pause_stream();
@@ -657,15 +648,15 @@ impl<S: StateStore> Executor for SourceExecutor<S> {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        self.identity.as_str()
+        &self.info.identity
     }
 }
 
@@ -675,7 +666,7 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
             f.debug_struct("SourceExecutor")
                 .field("source_id", &core.source_id)
                 .field("column_ids", &core.column_ids)
-                .field("pk_indices", &self.pk_indices)
+                .field("pk_indices", &self.info.pk_indices)
                 .finish()
         } else {
             f.debug_struct("SourceExecutor").finish()
@@ -751,13 +742,15 @@ mod tests {
 
         let executor = SourceExecutor::new(
             ActorContext::create(0),
-            schema,
-            pk_indices,
+            ExecutorInfo {
+                schema,
+                pk_indices,
+                identity: "SourceExecutor".to_string(),
+            },
             Some(core),
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            1,
             SourceCtrlOpts::default(),
             ConnectorParams::default(),
         );
@@ -843,13 +836,15 @@ mod tests {
 
         let executor = SourceExecutor::new(
             ActorContext::create(0),
-            schema,
-            pk_indices,
+            ExecutorInfo {
+                schema,
+                pk_indices,
+                identity: "SourceExecutor".to_string(),
+            },
             Some(core),
             Arc::new(StreamingMetrics::unused()),
             barrier_rx,
             system_params_manager.get_params(),
-            1,
             SourceCtrlOpts::default(),
             ConnectorParams::default(),
         );

@@ -23,7 +23,7 @@ use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::Datum;
 use risingwave_common::util::row_serde::OrderedRowSerde;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::aggregate::{AggCall, AggKind, BoxedAggregateFunction};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::store::PrefetchOptions;
@@ -34,7 +34,7 @@ use super::GroupKey;
 use crate::common::cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
-use crate::executor::{PkIndices, StreamExecutorResult};
+use crate::executor::StreamExecutorResult;
 
 /// Aggregation state as a materialization of input chunks.
 ///
@@ -71,58 +71,23 @@ impl MaterializedInputState {
     pub fn new(
         version: PbAggNodeVersion,
         agg_call: &AggCall,
-        pk_indices: &PkIndices,
+        order_columns: &Vec<ColumnOrder>,
         col_mapping: &StateTableColumnMapping,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
         let arg_col_indices = agg_call.args.val_indices().to_vec();
-        let (mut order_col_indices, mut order_types) =
-            if matches!(agg_call.kind, AggKind::Min | AggKind::Max) {
-                // `min`/`max` need not to order by any other columns, but have to
-                // order by the agg value implicitly.
-                let order_type = if agg_call.kind == AggKind::Min {
-                    OrderType::ascending()
-                } else {
-                    OrderType::descending()
-                };
-                (vec![arg_col_indices[0]], vec![order_type])
-            } else {
-                agg_call
-                    .column_orders
-                    .iter()
-                    .map(|p| {
-                        (
-                            p.column_index,
-                            if agg_call.kind == AggKind::LastValue {
-                                p.order_type.reverse()
-                            } else {
-                                p.order_type
-                            },
-                        )
-                    })
-                    .unzip()
-            };
+        let mut order_col_indices = vec![];
+        let mut order_types = vec![];
+        for o in order_columns {
+            order_col_indices.push(o.column_index);
+            order_types.push(o.order_type);
+        }
 
-        if agg_call.distinct {
-            if version < PbAggNodeVersion::Issue12140 {
-                panic!(
-                    "RisingWave versions before issue #12140 is resolved has critical bug, you must re-create current MV to ensure correctness."
-                );
-            }
-
-            // If distinct, we need to materialize input with the distinct keys
-            // As we only support single-column distinct for now, we use the
-            // `agg_call.args.val_indices()[0]` as the distinct key.
-            if !order_col_indices.contains(&agg_call.args.val_indices()[0]) {
-                order_col_indices.push(agg_call.args.val_indices()[0]);
-                order_types.push(OrderType::ascending());
-            }
-        } else {
-            // If not distinct, we need to materialize input with the primary keys
-            let pk_len = pk_indices.len();
-            order_col_indices.extend(pk_indices.iter());
-            order_types.extend(itertools::repeat_n(OrderType::ascending(), pk_len));
+        if agg_call.distinct && version < PbAggNodeVersion::Issue12140 {
+            panic!(
+                "RisingWave versions before issue #12140 is resolved has critical bug, you must re-create current MV to ensure correctness."
+            );
         }
 
         // map argument columns to state table column indices
@@ -213,7 +178,7 @@ impl MaterializedInputState {
                     group_key.map(GroupKey::table_pk),
                     sub_range,
                     PrefetchOptions {
-                        exhaust_iter: cache_filler.capacity().is_none(),
+                        preload: cache_filler.capacity().is_none(),
                     },
                 )
                 .await?;
@@ -272,7 +237,7 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
-    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_expr::aggregate::{build_append_only, AggCall};
     use risingwave_pb::stream_plan::PbAggNodeVersion;
     use risingwave_storage::memory::MemoryStateStore;
@@ -325,7 +290,6 @@ mod tests {
         // Assumption of input schema:
         // (a: varchar, b: int32, c: int32, _row_id: int64)
 
-        let input_pk_indices = vec![3]; // _row_id
         let field1 = Field::unnamed(DataType::Varchar);
         let field2 = Field::unnamed(DataType::Int32);
         let field3 = Field::unnamed(DataType::Int32);
@@ -346,10 +310,14 @@ mod tests {
         )
         .await;
 
+        let order_columns = vec![
+            ColumnOrder::new(2, OrderType::ascending()), // c ASC for AggKind::Min
+            ColumnOrder::new(3, OrderType::ascending()), // _row_id
+        ];
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::Max,
             &agg_call,
-            &input_pk_indices,
+            &order_columns,
             &mapping,
             usize::MAX,
             &input_schema,
@@ -402,7 +370,7 @@ mod tests {
             let mut state = MaterializedInputState::new(
                 PbAggNodeVersion::Max,
                 &agg_call,
-                &input_pk_indices,
+                &order_columns,
                 &mapping,
                 usize::MAX,
                 &input_schema,
@@ -420,7 +388,6 @@ mod tests {
         // Assumption of input schema:
         // (a: varchar, b: int32, c: int32, _row_id: int64)
 
-        let input_pk_indices = vec![3]; // _row_id
         let field1 = Field::unnamed(DataType::Varchar);
         let field2 = Field::unnamed(DataType::Int32);
         let field3 = Field::unnamed(DataType::Int32);
@@ -441,10 +408,14 @@ mod tests {
         )
         .await;
 
+        let order_columns = vec![
+            ColumnOrder::new(2, OrderType::descending()), // c DESC for AggKind::Max
+            ColumnOrder::new(3, OrderType::ascending()),  // _row_id
+        ];
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::Max,
             &agg_call,
-            &input_pk_indices,
+            &order_columns,
             &mapping,
             usize::MAX,
             &input_schema,
@@ -497,7 +468,7 @@ mod tests {
             let mut state = MaterializedInputState::new(
                 PbAggNodeVersion::Max,
                 &agg_call,
-                &input_pk_indices,
+                &order_columns,
                 &mapping,
                 usize::MAX,
                 &input_schema,
@@ -516,7 +487,6 @@ mod tests {
         // Assumption of input schema:
         // (a: varchar, b: int32, c: int32, _row_id: int64)
 
-        let input_pk_indices = vec![3]; // _row_id
         let field1 = Field::unnamed(DataType::Varchar);
         let field2 = Field::unnamed(DataType::Int32);
         let field3 = Field::unnamed(DataType::Int32);
@@ -552,20 +522,28 @@ mod tests {
         table_1.init_epoch(epoch);
         table_2.init_epoch(epoch);
 
+        let order_columns_1 = vec![
+            ColumnOrder::new(0, OrderType::ascending()), // a ASC for AggKind::Min
+            ColumnOrder::new(3, OrderType::ascending()), // _row_id
+        ];
         let mut state_1 = MaterializedInputState::new(
             PbAggNodeVersion::Max,
             &agg_call_1,
-            &input_pk_indices,
+            &order_columns_1,
             &mapping_1,
             usize::MAX,
             &input_schema,
         )
         .unwrap();
 
+        let order_columns_2 = vec![
+            ColumnOrder::new(1, OrderType::descending()), // b DESC for AggKind::Max
+            ColumnOrder::new(3, OrderType::ascending()),  // _row_id
+        ];
         let mut state_2 = MaterializedInputState::new(
             PbAggNodeVersion::Max,
             &agg_call_2,
-            &input_pk_indices,
+            &order_columns_2,
             &mapping_2,
             usize::MAX,
             &input_schema,
@@ -624,7 +602,6 @@ mod tests {
         // Assumption of input schema:
         // (a: varchar, b: int32, c: int32, _row_id: int64)
 
-        let input_pk_indices = vec![3];
         let field1 = Field::unnamed(DataType::Varchar);
         let field2 = Field::unnamed(DataType::Int32);
         let field3 = Field::unnamed(DataType::Int32);
@@ -646,10 +623,14 @@ mod tests {
         )
         .await;
 
+        let order_columns = vec![
+            ColumnOrder::new(1, OrderType::descending()), // b DESC for AggKind::Max
+            ColumnOrder::new(3, OrderType::ascending()),  // _row_id
+        ];
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::Max,
             &agg_call,
-            &input_pk_indices,
+            &order_columns,
             &mapping,
             usize::MAX,
             &input_schema,
@@ -701,7 +682,7 @@ mod tests {
             let mut state = MaterializedInputState::new(
                 PbAggNodeVersion::Max,
                 &agg_call,
-                &input_pk_indices,
+                &order_columns,
                 &mapping,
                 usize::MAX,
                 &input_schema,
@@ -720,7 +701,6 @@ mod tests {
         // Assumption of input schema:
         // (a: int32, _row_id: int64)
 
-        let input_pk_indices = vec![1]; // _row_id
         let field1 = Field::unnamed(DataType::Int32);
         let field2 = Field::unnamed(DataType::Int64);
         let input_schema = Schema::new(vec![field1, field2]);
@@ -742,10 +722,14 @@ mod tests {
         let mut epoch = EpochPair::new_test_epoch(1);
         table.init_epoch(epoch);
 
+        let order_columns = vec![
+            ColumnOrder::new(0, OrderType::ascending()), // a ASC for AggKind::Min
+            ColumnOrder::new(1, OrderType::ascending()), // _row_id
+        ];
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::Max,
             &agg_call,
-            &input_pk_indices,
+            &order_columns,
             &mapping,
             1024,
             &input_schema,
@@ -823,7 +807,6 @@ mod tests {
         // Assumption of input schema:
         // (a: int32, _row_id: int64)
 
-        let input_pk_indices = vec![1]; // _row_id
         let field1 = Field::unnamed(DataType::Int32);
         let field2 = Field::unnamed(DataType::Int64);
         let input_schema = Schema::new(vec![field1, field2]);
@@ -842,10 +825,14 @@ mod tests {
         )
         .await;
 
+        let order_columns = vec![
+            ColumnOrder::new(0, OrderType::ascending()), // a ASC for AggKind::Min
+            ColumnOrder::new(1, OrderType::ascending()), // _row_id
+        ];
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::Max,
             &agg_call,
-            &input_pk_indices,
+            &order_columns,
             &mapping,
             3, // cache capacity = 3 for easy testing
             &input_schema,
@@ -924,7 +911,6 @@ mod tests {
         // (a: varchar, _delim: varchar, b: int32, c: int32, _row_id: int64)
         // where `a` is the column to aggregate
 
-        let input_pk_indices = vec![4];
         let input_schema = Schema::new(vec![
             Field::unnamed(DataType::Varchar),
             Field::unnamed(DataType::Varchar),
@@ -950,10 +936,15 @@ mod tests {
         )
         .await;
 
+        let order_columns = vec![
+            ColumnOrder::new(2, OrderType::ascending()),  // b ASC
+            ColumnOrder::new(0, OrderType::descending()), // a DESC
+            ColumnOrder::new(4, OrderType::ascending()),  // _row_id ASC
+        ];
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::Max,
             &agg_call,
-            &input_pk_indices,
+            &order_columns,
             &mapping,
             usize::MAX,
             &input_schema,
@@ -1008,7 +999,6 @@ mod tests {
         // (a: varchar, b: int32, c: int32, _row_id: int64)
         // where `a` is the column to aggregate
 
-        let input_pk_indices = vec![3];
         let field1 = Field::unnamed(DataType::Varchar);
         let field2 = Field::unnamed(DataType::Int32);
         let field3 = Field::unnamed(DataType::Int32);
@@ -1030,10 +1020,15 @@ mod tests {
         )
         .await;
 
+        let order_columns = vec![
+            ColumnOrder::new(2, OrderType::ascending()),  // c ASC
+            ColumnOrder::new(0, OrderType::descending()), // a DESC
+            ColumnOrder::new(3, OrderType::ascending()),  // _row_id ASC
+        ];
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::Max,
             &agg_call,
-            &input_pk_indices,
+            &order_columns,
             &mapping,
             usize::MAX,
             &input_schema,

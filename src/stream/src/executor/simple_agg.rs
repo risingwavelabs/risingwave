@@ -29,7 +29,7 @@ use super::monitor::StreamingMetrics;
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::aggregation::{generate_agg_schema, AggGroup};
+use crate::executor::aggregation::AggGroup;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message};
 use crate::task::AtomicU64Ref;
@@ -58,9 +58,6 @@ struct ExecutorInner<S: StateStore> {
 
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
-
-    /// Pk indices from input.
-    input_pk_indices: Vec<usize>,
 
     /// Schema from input.
     input_schema: Schema,
@@ -135,18 +132,12 @@ impl<S: StateStore> Executor for SimpleAggExecutor<S> {
 impl<S: StateStore> SimpleAggExecutor<S> {
     pub fn new(args: AggExecutorArgs<S, SimpleAggExecutorExtraArgs>) -> StreamResult<Self> {
         let input_info = args.input.info();
-        let schema = generate_agg_schema(args.input.as_ref(), &args.agg_calls, None);
         Ok(Self {
             input: args.input,
             inner: ExecutorInner {
                 version: args.version,
                 actor_ctx: args.actor_ctx,
-                info: ExecutorInfo {
-                    schema,
-                    pk_indices: args.pk_indices,
-                    identity: format!("SimpleAggExecutor-{:X}", args.executor_id),
-                },
-                input_pk_indices: input_info.pk_indices,
+                info: args.info,
                 input_schema: input_info.schema,
                 agg_funcs: args.agg_calls.iter().map(build_retractable).try_collect()?,
                 agg_calls: args.agg_calls,
@@ -193,7 +184,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
         // Materialize input chunk if needed and possible.
         for (storage, visibility) in this.storages.iter_mut().zip_eq_fast(visibilities.iter()) {
-            if let AggStateStorage::MaterializedInput { table, mapping } = storage {
+            if let AggStateStorage::MaterializedInput { table, mapping, .. } = storage {
                 let chunk = chunk.project_with_vis(mapping.upstream_columns(), visibility.clone());
                 table.write_chunk(chunk);
             }
@@ -286,7 +277,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 &this.agg_funcs,
                 &this.storages,
                 &this.intermediate_state_table,
-                &this.input_pk_indices,
                 this.row_count_index,
                 this.extreme_cache_size,
                 &this.input_schema,

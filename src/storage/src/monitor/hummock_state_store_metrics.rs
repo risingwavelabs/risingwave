@@ -77,6 +77,7 @@ pub struct HummockStateStoreMetrics {
     // memory
     pub mem_table_memory_size: IntGaugeVec,
     pub mem_table_item_count: IntGaugeVec,
+    pub mem_table_spill_counts: RelabeledCounterVec,
 }
 
 pub static GLOBAL_HUMMOCK_STATE_STORE_METRICS: OnceLock<HummockStateStoreMetrics> = OnceLock::new();
@@ -374,6 +375,20 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
+        let mem_table_spill_counts = register_int_counter_vec_with_registry!(
+            "state_store_mem_table_spill_counts",
+            "Total number of mem table spill occurs for one table",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let mem_table_spill_counts = RelabeledCounterVec::with_metric_level(
+            MetricLevel::Info,
+            mem_table_spill_counts,
+            metric_level,
+        );
+
         Self {
             bloom_filter_true_negative_counts,
             bloom_filter_check_counts,
@@ -400,6 +415,7 @@ impl HummockStateStoreMetrics {
             uploader_uploading_task_size,
             mem_table_memory_size,
             mem_table_item_count,
+            mem_table_spill_counts,
         }
     }
 

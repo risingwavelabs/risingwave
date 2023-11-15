@@ -128,7 +128,7 @@ impl<S: StateStore> ManagedTopNState<S> {
                 &group_key,
                 sub_range,
                 PrefetchOptions {
-                    exhaust_iter: cache_size_limit == usize::MAX,
+                    preload: cache_size_limit == usize::MAX,
                 },
             )
             .await?;
@@ -179,7 +179,7 @@ impl<S: StateStore> ManagedTopNState<S> {
                 &group_key,
                 sub_range,
                 PrefetchOptions {
-                    exhaust_iter: topn_cache.limit == usize::MAX,
+                    preload: topn_cache.limit == usize::MAX,
                 },
             )
             .await?;

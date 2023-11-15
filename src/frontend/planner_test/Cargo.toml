@@ -24,6 +24,7 @@ risingwave_sqlparser = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 serde_with = "3"
 serde_yaml = "0.9"
+thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",

@@ -82,7 +82,7 @@ enum ErrorKind {
         SinkError,
     ),
 
-    #[error("RPC error: {0}")]
+    #[error(transparent)]
     RpcError(
         #[from]
         #[backtrace]

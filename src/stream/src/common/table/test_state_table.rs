@@ -1015,11 +1015,7 @@ async fn test_state_table_write_chunk() {
     state_table.write_chunk(chunk);
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let rows: Vec<_> = state_table
-        .iter_with_prefix(
-            row::empty(),
-            sub_range,
-            PrefetchOptions::new_for_exhaust_iter(),
-        )
+        .iter_with_prefix(row::empty(), sub_range, PrefetchOptions::default())
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1133,11 +1129,7 @@ async fn test_state_table_write_chunk_visibility() {
     state_table.write_chunk(chunk);
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let rows: Vec<_> = state_table
-        .iter_with_prefix(
-            row::empty(),
-            sub_range,
-            PrefetchOptions::new_for_exhaust_iter(),
-        )
+        .iter_with_prefix(row::empty(), sub_range, PrefetchOptions::default())
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1249,11 +1241,7 @@ async fn test_state_table_write_chunk_value_indices() {
     state_table.write_chunk(chunk);
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let rows: Vec<_> = state_table
-        .iter_with_prefix(
-            row::empty(),
-            sub_range,
-            PrefetchOptions::new_for_exhaust_iter(),
-        )
+        .iter_with_prefix(row::empty(), sub_range, PrefetchOptions::default())
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1535,11 +1523,7 @@ async fn test_state_table_watermark_cache_ignore_null() {
     state_table.write_chunk(chunk);
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let inserted_rows: Vec<_> = state_table
-        .iter_with_prefix(
-            row::empty(),
-            sub_range,
-            PrefetchOptions::new_for_exhaust_iter(),
-        )
+        .iter_with_prefix(row::empty(), sub_range, PrefetchOptions::default())
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1826,11 +1810,7 @@ async fn test_state_table_watermark_cache_refill() {
     }
     let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
     let inserted_rows: Vec<_> = state_table
-        .iter_with_prefix(
-            row::empty(),
-            sub_range,
-            PrefetchOptions::new_for_exhaust_iter(),
-        )
+        .iter_with_prefix(row::empty(), sub_range, PrefetchOptions::default())
         .await
         .unwrap()
         .collect::<Vec<_>>()
