@@ -44,7 +44,7 @@ fixedbitset = { version = "0.4", features = ["std"] }
 fs-err = "2"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4.3"
-http = "0.2"
+http = "1.0"
 humantime = "2.1"
 hyper = "0.14"
 hytra = { workspace = true }
