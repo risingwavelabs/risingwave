@@ -18,6 +18,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::{Stream, TryStreamExt};
 use itertools::Itertools;
+use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::must_match;
@@ -38,7 +39,7 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{
     create_monotonic_events, BlockedXor16FilterBuilder, CachePolicy, CompactionDeleteRangeIterator,
     DeleteRangeTombstone, FilterBuilder, LruCache, Sstable, SstableBuilder, SstableBuilderOptions,
-    SstableStoreRef, SstableWriter, Xor16FilterBuilder,
+    SstableStoreRef, SstableWriter, TableHolder, Xor16FilterBuilder,
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
@@ -274,7 +275,7 @@ pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
     object_id: HummockSstableObjectId,
     kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
-) -> Sstable {
+) -> TableHolder {
     let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
@@ -284,11 +285,10 @@ pub async fn gen_test_sstable<B: AsRef<[u8]> + Clone + Default + Eq>(
         CachePolicy::NotFill,
     )
     .await;
-    let table = sstable_store
+    sstable_store
         .sstable(&sst_info, &mut StoreLocalStatistic::default())
         .await
-        .unwrap();
-    table.value().as_ref().clone()
+        .unwrap()
 }
 
 /// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
@@ -316,21 +316,16 @@ pub async fn gen_test_sstable_with_range_tombstone(
     kv_iter: impl Iterator<Item = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>)>,
     range_tombstones: Vec<DeleteRangeTombstone>,
     sstable_store: SstableStoreRef,
-) -> Sstable {
-    let sst_info = gen_test_sstable_impl::<_, Xor16FilterBuilder>(
+) -> SstableInfo {
+    gen_test_sstable_impl::<_, Xor16FilterBuilder>(
         opts,
         object_id,
         kv_iter,
         range_tombstones,
         sstable_store.clone(),
-        CachePolicy::NotFill,
+        CachePolicy::Fill(CachePriority::High),
     )
-    .await;
-    let table = sstable_store
-        .sstable(&sst_info, &mut StoreLocalStatistic::default())
-        .await
-        .unwrap();
-    table.value().as_ref().clone()
+    .await
 }
 
 /// Generates a user key with table id 0 and the given `table_key`
@@ -371,7 +366,7 @@ pub async fn gen_default_test_sstable(
     opts: SstableBuilderOptions,
     object_id: HummockSstableObjectId,
     sstable_store: SstableStoreRef,
-) -> Sstable {
+) -> TableHolder {
     gen_test_sstable(
         opts,
         object_id,
