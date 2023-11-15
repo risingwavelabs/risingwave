@@ -932,7 +932,7 @@ fn derive_connect_properties(
     Ok(connect_properties.into_iter().collect())
 }
 
-pub(crate) async fn handle_create_table_plan(
+pub(super) async fn handle_create_table_plan(
     context: OptimizerContext,
     col_id_gen: ColumnIdGenerator,
     source_schema: Option<ConnectorSchema>,
