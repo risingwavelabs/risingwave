@@ -1171,12 +1171,15 @@ mod tests {
             .await?
             .unwrap();
         assert_eq!(source.name, "s2");
-        assert_eq!(source.definition, "CREATE SOURCE s2 (v1 INT) WITH (\
+        assert_eq!(
+            source.definition,
+            "CREATE SOURCE s2 (v1 INT) WITH (\
   connector = 'kafka', \
   topic = 'kafka_alter', \
   properties.bootstrap.server = 'message_queue:29092', \
   scan.startup.mode = 'earliest'\
-) FORMAT PLAIN ENCODE JSON");
+) FORMAT PLAIN ENCODE JSON"
+        );
 
         let view = View::find_by_id(view_id)
             .one(&mgr.inner.read().await.db)
