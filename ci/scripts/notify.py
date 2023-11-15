@@ -3,8 +3,11 @@
 import subprocess
 import sys
 
+# Add new test keys here.
+# Add their corresponding owners (by slack username) here.
 TEST_MAP = {
     "test-notify": ["noelkwan", "noelkwan"],
+    "backfill-tests": ["noelkwan"],
     "e2e-iceberg-sink-tests": ["renjie"],
     "e2e-java-binding-tests": ["yiming"],
     "e2e-clickhouse-sink-tests": ["bohan"],
@@ -66,7 +69,7 @@ def format_cmd(messages):
 cat <<- YAML | buildkite-agent pipeline upload 
 steps:
   - label: "Test"
-    command: echo "running failed test notification"
+    command: echo "running failed test notification" && exit 1
     notify:
       - slack:
           channels:
@@ -101,8 +104,5 @@ def main():
         print(cmd)
         subprocess.run(cmd, shell=True)
         print("notification sent")
-        # Exit 1 so that when buildkite sends error message,
-        # it will colour code it red.
-        sys.exit(1)
 
 main()
