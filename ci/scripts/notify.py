@@ -101,5 +101,8 @@ def main():
         print(cmd)
         subprocess.run(cmd, shell=True)
         print("notification sent")
+        # Exit 1 so that when buildkite sends error message,
+        # it will colour code it red.
+        sys.exit(1)
 
 main()
