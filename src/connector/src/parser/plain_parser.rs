@@ -70,7 +70,7 @@ impl PlainParser {
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<()> {
-        // if key is empty, set it as vec![]su
+        // if key is empty, set it as vec![]
         let key_data = key.unwrap_or_default();
         // if payload is empty, report error
         let payload_data = payload.ok_or_else(|| {

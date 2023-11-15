@@ -19,10 +19,12 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use aws_sdk_s3::client as s3_client;
 use aws_sdk_s3::operation::get_object::GetObjectError;
-use aws_smithy_http::byte_stream::ByteStream;
-use aws_smithy_http::result::SdkError;
-use futures::TryStreamExt;
+use aws_smithy_http::futures_stream_adapter::FuturesStreamCompatByteStream;
+use aws_smithy_runtime_api::client::result::SdkError;
+use aws_smithy_types::body::SdkBody;
+use aws_smithy_types::byte_stream::ByteStream;
 use futures_async_stream::try_stream;
+use hyper::Response;
 use io::StreamReader;
 use risingwave_common::error::RwError;
 use tokio::io::BufReader;
@@ -91,9 +93,10 @@ impl S3FileReader {
             }
         };
 
-        let stream_reader = StreamReader::new(
-            byte_stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
-        );
+        // FYI: https://github.com/awslabs/smithy-rs/pull/2983
+        let byte_stream = FuturesStreamCompatByteStream::new(byte_stream);
+
+        let stream_reader = StreamReader::new(byte_stream);
 
         let reader = pin!(BufReader::new(stream_reader));
 
@@ -142,7 +145,7 @@ impl S3FileReader {
         bucket_name: &str,
         object_name: &str,
         start: usize,
-    ) -> std::result::Result<ByteStream, SdkError<GetObjectError>> {
+    ) -> std::result::Result<ByteStream, SdkError<GetObjectError, Response<SdkBody>>> {
         let range = if start == 0 {
             None
         } else {

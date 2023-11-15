@@ -609,7 +609,7 @@ where
                 row::empty(),
                 range_bounds,
                 ordered,
-                PrefetchOptions::new_for_exhaust_iter(),
+                PrefetchOptions::new_for_large_range_scan(),
             )
             .await?;
 

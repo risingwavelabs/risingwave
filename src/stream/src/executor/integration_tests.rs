@@ -57,12 +57,12 @@ async fn test_merger_sum_aggr() {
         // for the local aggregator, we need two states: row count and sum
         let aggregator = StatelessSimpleAggExecutor::new(
             actor_ctx.clone(),
-            input.boxed(),
             ExecutorInfo {
                 schema,
                 pk_indices: vec![],
                 identity: format!("StatelessSimpleAggExecutor {:X}", 1),
             },
+            input.boxed(),
             agg_calls,
         )
         .unwrap();

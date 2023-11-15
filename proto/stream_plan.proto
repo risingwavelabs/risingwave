@@ -258,6 +258,7 @@ message AggCallState {
     // for constructing state table column mapping
     repeated uint32 included_upstream_indices = 2;
     repeated uint32 table_value_indices = 3;
+    repeated common.ColumnOrder order_columns = 4;
   }
 
   oneof inner {

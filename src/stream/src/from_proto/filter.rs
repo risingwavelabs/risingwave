@@ -33,12 +33,6 @@ impl ExecutorBuilder for FilterExecutorBuilder {
         let search_condition =
             build_non_strict_from_prost(node.get_search_condition()?, params.eval_error_report)?;
 
-        Ok(FilterExecutor::new(
-            params.actor_context,
-            input,
-            search_condition,
-            params.executor_id,
-        )
-        .boxed())
+        Ok(FilterExecutor::new(params.actor_context, params.info, input, search_condition).boxed())
     }
 }
