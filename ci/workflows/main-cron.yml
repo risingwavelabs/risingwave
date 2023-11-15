@@ -683,19 +683,4 @@ steps:
   # This should be the LAST part of the main-cron file.
   - label: "Test Failure Notification"
     if: build.pull_request.labels includes "ci/main-cron/test-notify"
-    command: |
-      OUTCOME=$(buildkite-agent step get "outcome" --step "test-notify")
-      echo "outcome: $$OUTCOME"
-      
-      if [[ $$OUTCOME == "hard_failed" || $$OUTCOME == "soft_failed" ]]; then
-        cat <<- YAML | buildkite-agent pipeline upload 
-        steps:
-          - label: "notify test inner"
-            command: echo "notify test"
-            notify:
-              - slack:
-                  channels:
-                    - "#notification-buildkite"
-                  message: "test:\\n<@noelkwan>\\n<@renjie>\\n<@yiming>\\n<@bohan>\\n<@congyi>\\n<@xinhao>\\n<@siyuan>"
-      YAML
-      fi
+    command: "ci/scripts/notify.py"

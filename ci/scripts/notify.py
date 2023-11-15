@@ -21,15 +21,18 @@ def get_failed_tests(get_test_status, test_map):
             failed_test_map[test] = test_map[test]
     return failed_test_map
 
-def generate_test_status_messages(failed_test_map):
+def generate_test_status_message(failed_test_map):
     messages = []
     for test, users in failed_test_map.items():
         users = " ".join(map(lambda user: f"<@{user}>", users))
         messages.append(f"Test {test} failed {users}")
-    return messages
+    message = "\\n".join(messages)
+    return message
 
-def get_buildkite_test_status():
-    return
+def get_buildkite_test_status(test):
+    result = subprocess.run(f"buildkite-agent step get \"outcome\" --step \"{test}\"", capture_output = True, text = True)
+    outcome = result.stdout.strip()
+    return outcome
 
 def get_mock_test_status(test):
     mock_test_map = {
@@ -58,57 +61,43 @@ def get_mock_test_status_all_pass(test):
     return mock_test_map[test]
 
 def format_cmd(messages):
-    messages = "\\n".join(messages)
-    if messages == "":
-        cmd = "echo no failed tests"
-    else:
-        cmd=f"""
-            cat <<- YAML | buildkite-agent pipeline upload 
-            steps:
-              - label: "notify test inner"
-                command: echo "notify test"
-                notify:
-                  - slack:
-                      channels:
-                        - "#notification-buildkite"
-                      message: {messages}
-          YAML
-          fi
+    cmd=f"""
+cat <<- YAML | buildkite-agent pipeline upload 
+steps:
+  - label: "notify test inner"
+    command: echo "notify test"
+    notify:
+      - slack:
+          channels:
+            - "#notification-buildkite"
+          message: {messages}
+YAML
         """
     return cmd
 
 def run_test_1():
     failed_test_map = get_failed_tests(get_mock_test_status, TEST_MAP)
-    messages = generate_test_status_messages(failed_test_map)
-    print(messages)
-    cmd = format_cmd(messages)
-    print(cmd)
-
-def run_test_2():
-    failed_test_map = get_failed_tests(get_mock_test_status, TEST_MAP)
-    messages = generate_test_status_messages(failed_test_map)
-    print(messages)
-    cmd = format_cmd(messages)
-    print(cmd)
+    message = generate_test_status_message(failed_test_map)
+    if message == "":
+        print("All tests passed, no need to notify")
+        return
+    else:
+        print("Some tests failed, notify users")
+        print(message)
+        cmd = format_cmd(messages)
+        print(cmd)
 
 def main():
     failed_test_map = get_failed_tests(get_buildkite_test_status, TEST_MAP)
-    messages = generate_test_status_messages(failed_test_map)
+    message = generate_test_status_message(failed_test_map)
+    if message == "":
+        print("All tests passed, no need to notify")
+        return
+    else:
+        print("Some tests failed, notify users")
+        print(message)
+        cmd = format_cmd(messages)
+        print(cmd)
+        # subprocess.run(cmd)
 
-run_test()
-
-# OUTCOME=$(buildkite-agent step get "outcome" --step "test-notify")
-# echo "outcome: $$OUTCOME"
-#
-# if [[ $$OUTCOME == "hard_failed" || $$OUTCOME == "soft_failed" ]]; then
-# cat <<- YAML | buildkite-agent pipeline upload
-# steps:
-# - label: "notify test inner"
-# command: echo "notify test"
-# notify:
-# - slack:
-# channels:
-# - "#notification-buildkite"
-# message: "<@noelkwan> test"
-# YAML
-# fi
+main()
