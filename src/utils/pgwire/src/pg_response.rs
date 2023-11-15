@@ -96,6 +96,7 @@ pub enum StatementType {
     SET_TRANSACTION,
     CANCEL_COMMAND,
     WAIT,
+    KILL,
 }
 
 impl std::fmt::Display for StatementType {
