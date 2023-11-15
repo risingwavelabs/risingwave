@@ -65,8 +65,8 @@ def format_cmd(messages):
     cmd=f"""
 cat <<- YAML | buildkite-agent pipeline upload 
 steps:
-  - label: "notify test inner"
-    command: echo "notify test"
+  - label: "failed test notification"
+    command: echo "running failed test notification"
     notify:
       - slack:
           channels:
@@ -99,8 +99,7 @@ def main():
         print(message)
         cmd = format_cmd(message)
         print(cmd)
+        subprocess.run(cmd, shell=True)
         print("notification sent")
-        # subprocess.run(cmd, shell=True)
-        sys.exit(1)
 
 main()
