@@ -868,6 +868,11 @@ fn fill_table_stream_graph_info(
     for fragment in fragment_graph.fragments.values_mut() {
         visit_fragment(fragment, |node_body| {
             if let NodeBody::Source(source_node) = node_body {
+                if source_node.source_inner.is_none() {
+                    // skip empty source for dml node
+                    return;
+                }
+
                 // If we're creating a table with connector, we should additionally fill its ID first.
                 if let Some(&mut (ref mut source, source_id)) = source_info.as_mut() {
                     source.id = source_id;
