@@ -22,6 +22,7 @@
 
 pub mod error;
 pub mod error_or_notice;
+pub mod net;
 pub mod pg_extended;
 pub mod pg_field_descriptor;
 pub mod pg_message;

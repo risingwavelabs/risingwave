@@ -19,7 +19,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
+use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, ObjectStoreRef,
 };
@@ -65,6 +65,7 @@ pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableSto
         64 << 20,
         64 << 20,
         0,
+        64 << 20,
         FileCache::none(),
         FileCache::none(),
         None,
@@ -90,7 +91,7 @@ pub fn iterator_test_bytes_user_key_of(idx: usize) -> UserKey<Bytes> {
 pub fn iterator_test_key_of(idx: usize) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: iterator_test_user_key_of(idx),
-        epoch: 233,
+        epoch_with_gap: EpochWithGap::new_from_epoch(233),
     }
 }
 
@@ -103,7 +104,7 @@ pub fn iterator_test_bytes_key_of(idx: usize) -> FullKey<Bytes> {
 pub fn iterator_test_key_of_epoch(idx: usize, epoch: HummockEpoch) -> FullKey<Vec<u8>> {
     FullKey {
         user_key: iterator_test_user_key_of(idx),
-        epoch,
+        epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
     }
 }
 

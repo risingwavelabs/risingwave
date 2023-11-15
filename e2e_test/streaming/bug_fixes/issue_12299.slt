@@ -2,6 +2,9 @@
 # TL;DR When upstream's stream key is not pk and the stream scan does not contain whole pk.
 
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 create table t1(
   id bigint primary key,
   i bigint

@@ -29,6 +29,7 @@ import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.util.Base64;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 public class JsonDeserializer implements Deserializer {
     private final TableSchema tableSchema;
@@ -40,7 +41,7 @@ public class JsonDeserializer implements Deserializer {
     // Encoding here should be consistent with `datum_to_json_object()` in
     // src/connector/src/sink/mod.rs
     @Override
-    public CloseableIterator<SinkRow> deserialize(
+    public CloseableIterable<SinkRow> deserialize(
             ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch writeBatch) {
         if (!writeBatch.hasJsonPayload()) {
             throw INVALID_ARGUMENT
@@ -48,7 +49,7 @@ public class JsonDeserializer implements Deserializer {
                     .asRuntimeException();
         }
         JsonPayload jsonPayload = writeBatch.getJsonPayload();
-        return new TrivialCloseIterator<>(
+        return new TrivialCloseIterable<>(
                 jsonPayload.getRowOpsList().stream()
                         .map(
                                 rowOp -> {
@@ -72,7 +73,7 @@ public class JsonDeserializer implements Deserializer {
                                     }
                                     return (SinkRow) new ArraySinkRow(rowOp.getOpType(), values);
                                 })
-                        .iterator());
+                        .collect(Collectors.toList()));
     }
 
     private static Long castLong(Object value) {

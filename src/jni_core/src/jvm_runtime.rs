@@ -24,6 +24,8 @@ use jni::{InitArgsBuilder, JNIVersion, JavaVM, NativeMethod};
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use tracing::error;
 
+use crate::call_method;
+
 /// Use 10% of compute total memory by default. Compute node uses 0.7 * system memory by default.
 const DEFAULT_MEMORY_PROPORTION: f64 = 0.07;
 
@@ -100,7 +102,14 @@ impl JavaVmWrapper {
             .option("-Dis_embedded_connector=true")
             .option(format!("-Djava.class.path={}", class_vec.join(":")))
             .option("-Xms16m")
-            .option(format!("-Xmx{}", jvm_heap_size));
+            .option(format!("-Xmx{}", jvm_heap_size))
+            // Quoted from the debezium document:
+            // > Your application should always properly stop the engine to ensure graceful and complete
+            // > shutdown and that each source record is sent to the application exactly one time.
+            // In RisingWave we assume the upstream changelog may contain duplicate events and
+            // handle conflicts in the mview operator, thus we don't need to obey the above
+            // instructions. So we decrease the wait time here to reclaim jvm thread faster.
+            .option("-Ddebezium.embedded.shutdown.pause.before.interrupt.ms=1");
 
         tracing::info!("JVM args: {:?}", args_builder);
         let jvm_args = args_builder
@@ -138,12 +147,12 @@ pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::E
         () => {{
             $crate::for_all_native_methods! {gen_native_method_array}
         }};
-        ({$({ $func_name:ident, {$($ret:tt)+}, {$($args:tt)*} }),*}) => {
+        ({$({ $func_name:ident, {$($ret:tt)+}, {$($args:tt)*} })*}) => {
             [
                 $(
                     {
                         let fn_ptr = paste::paste! {[<Java_com_risingwave_java_binding_Binding_ $func_name> ]} as *mut c_void;
-                        let sig = $crate::gen_jni_sig! { $($ret)+ ($($args)*)};
+                        let sig = $crate::gen_jni_sig! { {$($ret)+}, {$($args)*}};
                         NativeMethod {
                             name: JNIString::from(stringify! {$func_name}),
                             sig: JNIString::from(sig),
@@ -161,32 +170,24 @@ pub fn register_native_method_for_jvm(jvm: &JavaVM) -> Result<(), jni::errors::E
     Ok(())
 }
 
-/// Load JVM memory statistics from the runtime. If JVM is not initialized or fail to initialize, return zero.
+/// Load JVM memory statistics from the runtime. If JVM is not initialized or fail to initialize,
+/// return zero.
 pub fn load_jvm_memory_stats() -> (usize, usize) {
     match JVM_RESULT.get() {
         Some(Ok(jvm)) => {
             let result: Result<(usize, usize), jni::errors::Error> = try {
                 let mut env = jvm.attach_current_thread()?;
 
-                let runtime_instance = env
-                    .call_static_method(
-                        "java/lang/Runtime",
-                        "getRuntime",
-                        "()Ljava/lang/Runtime;",
-                        &[],
-                    )?
-                    .l()
-                    .expect("should be object");
+                let runtime_instance = crate::call_static_method!(
+                    env,
+                    {Runtime},
+                    {Runtime getRuntime()}
+                )?;
 
-                let total_memory = env
-                    .call_method(runtime_instance.as_ref(), "totalMemory", "()J", &[])?
-                    .j()
-                    .expect("should be long");
-
-                let free_memory = env
-                    .call_method(runtime_instance, "freeMemory", "()J", &[])?
-                    .j()
-                    .expect("should be long");
+                let total_memory =
+                    call_method!(env, runtime_instance.as_ref(), {long totalMemory()})?;
+                let free_memory =
+                    call_method!(env, runtime_instance.as_ref(), {long freeMemory()})?;
 
                 (total_memory as usize, (total_memory - free_memory) as usize)
             };

@@ -121,7 +121,7 @@ select * from t order by v1;
 1 1 aa
 3 2 bb
 
-statement error QueryError: Bind error: update modifying the PK column is unsupported
+statement error update modifying the PK column is unsupported
 update t set (v3, v2) = (v3||v3, v1+v2);
 
 statement ok

@@ -474,7 +474,7 @@ impl BlockBuilder {
                 KeyComparator::compare_encoded_full_key(&self.last_key[..], &key[..]),
                 Ordering::Less,
                 "epoch: {}, table key: {}",
-                full_key.epoch,
+                full_key.epoch_with_gap.pure_epoch(),
                 u64::from_be_bytes(
                     full_key.user_key.table_key.as_ref()[0..8]
                         .try_into()

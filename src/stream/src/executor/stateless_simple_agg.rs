@@ -22,7 +22,7 @@ use risingwave_expr::aggregate::{
     build_retractable, AggCall, AggregateState, BoxedAggregateFunction,
 };
 
-use super::aggregation::{agg_call_filter_res, generate_agg_schema};
+use super::aggregation::agg_call_filter_res;
 use super::error::StreamExecutorError;
 use super::*;
 use crate::error::StreamResult;
@@ -125,18 +125,10 @@ impl StatelessSimpleAggExecutor {
     pub fn new(
         ctx: ActorContextRef,
         input: Box<dyn Executor>,
+        info: ExecutorInfo,
         agg_calls: Vec<AggCall>,
-        pk_indices: PkIndices,
-        executor_id: u64,
     ) -> StreamResult<Self> {
-        let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
-        let info = ExecutorInfo {
-            schema,
-            pk_indices,
-            identity: format!("StatelessSimpleAggExecutor-{}", executor_id),
-        };
         let aggs = agg_calls.iter().map(build_retractable).try_collect()?;
-
         Ok(StatelessSimpleAggExecutor {
             _ctx: ctx,
             input,
@@ -156,6 +148,7 @@ mod tests {
     use risingwave_common::catalog::schema_test_utils;
 
     use super::*;
+    use crate::executor::test_utils::agg_executor::generate_agg_schema;
     use crate::executor::test_utils::MockSource;
     use crate::executor::{Executor, StatelessSimpleAggExecutor};
 
@@ -168,14 +161,19 @@ mod tests {
         tx.push_barrier(3, false);
 
         let agg_calls = vec![AggCall::from_pretty("(count:int8)")];
+        let schema = generate_agg_schema(&source, &agg_calls, None);
+        let info = ExecutorInfo {
+            schema,
+            pk_indices: vec![],
+            identity: "StatelessSimpleAggExecutor".to_string(),
+        };
 
         let simple_agg = Box::new(
             StatelessSimpleAggExecutor::new(
                 ActorContext::create(123),
                 Box::new(source),
+                info,
                 agg_calls,
-                vec![],
-                1,
             )
             .unwrap(),
         );
@@ -221,14 +219,19 @@ mod tests {
             AggCall::from_pretty("(sum:int8 $0:int8)"),
             AggCall::from_pretty("(sum:int8 $1:int8)"),
         ];
+        let schema = generate_agg_schema(&source, &agg_calls, None);
+        let info = ExecutorInfo {
+            schema,
+            pk_indices: vec![],
+            identity: "StatelessSimpleAggExecutor".to_string(),
+        };
 
         let simple_agg = Box::new(
             StatelessSimpleAggExecutor::new(
                 ActorContext::create(123),
                 Box::new(source),
+                info,
                 agg_calls,
-                vec![],
-                1,
             )
             .unwrap(),
         );

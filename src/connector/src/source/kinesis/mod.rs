@@ -17,6 +17,7 @@ pub mod source;
 pub mod split;
 
 use serde::Deserialize;
+use with_options::WithOptions;
 
 use crate::common::KinesisCommon;
 use crate::source::kinesis::enumerator::client::KinesisSplitEnumerator;
@@ -26,7 +27,7 @@ use crate::source::SourceProperties;
 
 pub const KINESIS_CONNECTOR: &str = "kinesis";
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct KinesisProperties {
     #[serde(rename = "scan.startup.mode", alias = "kinesis.scan.startup.mode")]
     // accepted values: "latest", "earliest", "timestamp"

@@ -38,7 +38,9 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tracing = "0.1"
 
 [dev-dependencies]
+expect-test = "1"
 risingwave_expr = { workspace = true }
+risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }
 
 [lints]
 workspace = true

@@ -23,7 +23,6 @@ use crate::executor::WatermarkFilterExecutor;
 
 pub struct WatermarkFilterBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for WatermarkFilterBuilder {
     type Node = WatermarkFilterNode;
 

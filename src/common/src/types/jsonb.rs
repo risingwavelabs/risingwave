@@ -19,7 +19,7 @@ use bytes::Buf;
 use jsonbb::{Value, ValueRef};
 
 use crate::estimate_size::EstimateSize;
-use crate::types::{Scalar, ScalarRef, F32, F64};
+use crate::types::{Scalar, ScalarRef};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct JsonbVal(pub(crate) Value);
@@ -187,62 +187,9 @@ impl From<serde_json::Value> for JsonbVal {
     }
 }
 
-impl From<bool> for JsonbVal {
-    fn from(v: bool) -> Self {
-        Self(v.into())
-    }
-}
-
-impl From<i16> for JsonbVal {
-    fn from(v: i16) -> Self {
-        Self(v.into())
-    }
-}
-
-impl From<i32> for JsonbVal {
-    fn from(v: i32) -> Self {
-        Self(v.into())
-    }
-}
-
-impl From<i64> for JsonbVal {
-    fn from(v: i64) -> Self {
-        Self(v.into())
-    }
-}
-
-impl From<F32> for JsonbVal {
-    fn from(v: F32) -> Self {
-        if v.0 == f32::INFINITY {
-            Self("Infinity".into())
-        } else if v.0 == f32::NEG_INFINITY {
-            Self("-Infinity".into())
-        } else if v.0.is_nan() {
-            Self("NaN".into())
-        } else {
-            Self(v.0.into())
-        }
-    }
-}
-
-// NOTE: Infinite or NaN values are not JSON numbers. They are stored as strings in Postgres.
-impl From<F64> for JsonbVal {
-    fn from(v: F64) -> Self {
-        if v.0 == f64::INFINITY {
-            Self("Infinity".into())
-        } else if v.0 == f64::NEG_INFINITY {
-            Self("-Infinity".into())
-        } else if v.0.is_nan() {
-            Self("NaN".into())
-        } else {
-            Self(v.0.into())
-        }
-    }
-}
-
-impl From<&str> for JsonbVal {
-    fn from(v: &str) -> Self {
-        Self(v.into())
+impl From<Value> for JsonbVal {
+    fn from(v: Value) -> Self {
+        Self(v)
     }
 }
 
@@ -252,9 +199,9 @@ impl From<JsonbRef<'_>> for JsonbVal {
     }
 }
 
-impl From<Value> for JsonbVal {
-    fn from(v: Value) -> Self {
-        Self(v)
+impl From<f64> for JsonbVal {
+    fn from(v: f64) -> Self {
+        Self(v.into())
     }
 }
 

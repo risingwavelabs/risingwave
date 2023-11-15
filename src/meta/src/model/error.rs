@@ -14,6 +14,7 @@
 
 use anyhow::anyhow;
 use risingwave_pb::PbFieldNotFound;
+use risingwave_rpc_client::error::ToTonicStatus;
 use thiserror::Error;
 
 use crate::storage::MetaStoreError;
@@ -23,13 +24,21 @@ pub type MetadataModelResult<T> = std::result::Result<T, MetadataModelError>;
 #[derive(Error, Debug)]
 pub enum MetadataModelError {
     #[error("Meta store error: {0}")]
-    MetaStoreError(#[from] MetaStoreError),
+    MetaStoreError(
+        #[from]
+        #[backtrace]
+        MetaStoreError,
+    ),
 
     #[error("Pb decode error: {0}")]
     PbDecode(#[from] prost::DecodeError),
 
     #[error(transparent)]
-    InternalError(anyhow::Error),
+    InternalError(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 impl From<PbFieldNotFound> for MetadataModelError {
@@ -43,7 +52,7 @@ impl From<PbFieldNotFound> for MetadataModelError {
 
 impl From<MetadataModelError> for tonic::Status {
     fn from(e: MetadataModelError) -> Self {
-        tonic::Status::new(tonic::Code::Internal, format!("{}", e))
+        e.to_status(tonic::Code::Internal, "meta")
     }
 }
 
