@@ -67,7 +67,7 @@ def get_mock_test_status_all_pass(test):
 
 def format_cmd(messages):
     cmd=f"""
-cat <<- YAML | buildkite-agent pipeline upload 
+cat <<- YAML | buildkite-agent pipeline upload
 steps:
   - label: "Test"
     command: echo "running failed test notification" && exit 1
