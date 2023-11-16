@@ -98,12 +98,12 @@ impl SystemData {
         let mut sys = System::new();
 
         let memory = {
-            let available = system_memory_available_bytes();
+            let total = system_memory_available_bytes();
             let used = total_memory_used_bytes();
             Memory {
-                available,
+                available: total - used,
                 used,
-                total: available + used,
+                total,
             }
         };
 
