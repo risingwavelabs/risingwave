@@ -83,8 +83,8 @@ public class Binding {
 
     public static native boolean sendCdcSourceMsgToChannel(long channelPtr, byte[] msg);
 
-    public static native JniSinkWriterStreamRequest recvSinkWriterRequestFromChannel(
-            long channelPtr);
+    public static native com.risingwave.java.binding.JniSinkWriterStreamRequest
+            recvSinkWriterRequestFromChannel(long channelPtr);
 
     public static native boolean sendSinkWriterResponseToChannel(long channelPtr, byte[] msg);
 
