@@ -5,7 +5,7 @@ statement ok
 create table t1 (k int, v int) append only;
 
 statement ok
-create materialized view mv1 as select distinct on (k) k + v as sum from t1;
+create materialized view mv1 as select distinct on (k) k + v as sum from t1 order by k, v;
 
 statement ok
 insert into t1 values (1,11), (2,22), (3,33), (1,111);
@@ -21,7 +21,7 @@ statement ok
 create table t2 (k int, v int);
 
 statement ok
-create materialized view mv2 as select distinct on (k) k + v as sum from t2;
+create materialized view mv2 as select distinct on (k) k + v as sum from t2 order by k, v;
 
 statement ok
 insert into t2 values (1,11), (2,22), (3,33), (1,111);

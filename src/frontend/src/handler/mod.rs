@@ -29,6 +29,7 @@ use self::util::DataChunkToRowSetAdapter;
 use self::variable::handle_set_time_zone;
 use crate::catalog::table_catalog::TableType;
 use crate::handler::cancel_job::handle_cancel;
+use crate::handler::kill_process::handle_kill;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
@@ -70,6 +71,7 @@ pub mod explain;
 pub mod extended_handle;
 mod flush;
 pub mod handle_privilege;
+mod kill_process;
 pub mod privilege;
 pub mod query;
 mod show;
@@ -703,6 +705,7 @@ pub async fn handle(
             session,
         } => transaction::handle_set(handler_args, modes, snapshot, session).await,
         Statement::CancelJobs(jobs) => handle_cancel(handler_args, jobs).await,
+        Statement::Kill(process_id) => handle_kill(handler_args, process_id).await,
         Statement::Comment {
             object_type,
             object_name,

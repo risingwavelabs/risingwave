@@ -36,16 +36,9 @@ impl ExecutorBuilder for StatelessSimpleAggExecutorBuilder {
             .map(AggCall::from_protobuf)
             .try_collect()?;
 
-        Ok(StatelessSimpleAggExecutor::new(
-            params.actor_context,
-            input,
-            ExecutorInfo {
-                schema: params.schema,
-                pk_indices: params.pk_indices,
-                identity: params.identity,
-            },
-            agg_calls,
-        )?
-        .boxed())
+        Ok(
+            StatelessSimpleAggExecutor::new(params.actor_context, params.info, input, agg_calls)?
+                .boxed(),
+        )
     }
 }
