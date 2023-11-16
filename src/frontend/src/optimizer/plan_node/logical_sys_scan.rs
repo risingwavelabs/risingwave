@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
@@ -85,34 +85,12 @@ impl LogicalSysScan {
         .into()
     }
 
-    pub fn create_for_cdc(
-        table_name: String, // explain-only
-        cdc_table_desc: Rc<CdcTableDesc>,
-        ctx: OptimizerContextRef,
-    ) -> Self {
-        generic::SysScan::new_for_cdc(
-            table_name,
-            (0..cdc_table_desc.columns.len()).collect(),
-            cdc_table_desc,
-            ctx,
-        )
-        .into()
-    }
-
     pub fn table_name(&self) -> &str {
         &self.core.table_name
     }
 
     pub fn scan_table_type(&self) -> &SysScanTableType {
         &self.core.scan_table_type
-    }
-
-    pub fn is_sys_table(&self) -> bool {
-        self.core.is_sys_table()
-    }
-
-    pub fn is_cdc_table(&self) -> bool {
-        false
     }
 
     pub fn for_system_time_as_of_proctime(&self) -> bool {
@@ -127,10 +105,6 @@ impl LogicalSysScan {
     /// Get a reference to the logical scan's table desc.
     pub fn table_desc(&self) -> &TableDesc {
         self.core.table_desc.as_ref()
-    }
-
-    pub fn cdc_table_desc(&self) -> &CdcTableDesc {
-        self.core.cdc_table_desc.as_ref()
     }
 
     /// Get the descs of the output columns.
@@ -426,11 +400,6 @@ impl PredicatePushdown for LogicalSysScan {
         mut predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        // skip pushdown if the table is cdc table
-        if self.is_cdc_table() {
-            return self.clone().into();
-        }
-
         // If the predicate contains `CorrelatedInputRef` or `now()`. We don't push down.
         // This case could come from the predicate push down before the subquery unnesting.
         struct HasCorrelated {}
@@ -570,52 +539,9 @@ impl ToStream for LogicalSysScan {
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        if self.is_sys_table() {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "streaming on system table is not allowed".to_string(),
-                None.into(),
-            )));
-        }
-
-        if self.is_cdc_table() {
-            return Ok((
-                self.clone().into(),
-                ColIndexMapping::identity(self.schema().len()),
-            ));
-        }
-
-        match self.base.stream_key().is_none() {
-            true => {
-                let mut col_ids = HashSet::new();
-
-                for &idx in self.output_col_idx() {
-                    col_ids.insert(self.table_desc().columns[idx].column_id);
-                }
-                let col_need_to_add = self
-                    .table_desc()
-                    .pk
-                    .iter()
-                    .filter_map(|c| {
-                        if !col_ids.contains(&self.table_desc().columns[c.column_index].column_id) {
-                            Some(c.column_index)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect_vec();
-
-                let mut output_col_idx = self.output_col_idx().clone();
-                output_col_idx.extend(col_need_to_add);
-                let new_len = output_col_idx.len();
-                Ok((
-                    self.clone_with_output_indices(output_col_idx).into(),
-                    ColIndexMapping::identity_or_none(self.schema().len(), new_len),
-                ))
-            }
-            false => Ok((
-                self.clone().into(),
-                ColIndexMapping::identity(self.schema().len()),
-            )),
-        }
+        Err(RwError::from(ErrorCode::NotImplemented(
+            "streaming on system table is not allowed".to_string(),
+            None.into(),
+        )))
     }
 }
