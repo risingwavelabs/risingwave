@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::sdk::propagation::TraceContextPropagator;
+use opentelemetry_sdk::propagation::TraceContextPropagator;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 /// Context for tracing used for propagating tracing information in a distributed system.
