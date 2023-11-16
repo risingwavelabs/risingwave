@@ -48,7 +48,12 @@ pub fn wait(
 
         if let Some(ref timeout) = timeout {
             if std::time::Instant::now() - start_time >= *timeout {
-                return Err(anyhow!("failed to connect, last error: {:?}", last_error));
+                let context = "timeout when trying to connect";
+                return Err(if let Some(last_error) = last_error {
+                    last_error.context(context)
+                } else {
+                    anyhow!(context)
+                });
             }
         }
 
