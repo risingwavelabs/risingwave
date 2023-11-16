@@ -26,16 +26,15 @@ use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{childless_record, Distill};
 use super::{
     generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
-    PredicatePushdown, StreamTableScan, ToBatch, ToStream,
+    PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::generic::SysScanTableType;
 use crate::optimizer::plan_node::{
-    BatchSeqScan, BatchSysSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject,
-    LogicalValues, PredicatePushdownContext, RewriteStreamContext, StreamCdcTableScan,
-    ToStreamContext,
+    BatchSysSeqScan, ColumnPruningContext, LogicalFilter, LogicalValues, PredicatePushdownContext,
+    RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{Cardinality, Order};
 use crate::optimizer::rule::IndexSelectionRule;
@@ -560,11 +559,11 @@ impl ToBatch for LogicalSysScan {
 }
 
 impl ToStream for LogicalSysScan {
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        return Err(RwError::from(ErrorCode::NotImplemented(
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        Err(RwError::from(ErrorCode::NotImplemented(
             "streaming on system table is not allowed".to_string(),
             None.into(),
-        )));
+        )))
     }
 
     fn logical_rewrite_for_stream(
