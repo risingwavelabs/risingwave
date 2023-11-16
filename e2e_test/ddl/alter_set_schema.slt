@@ -113,10 +113,10 @@ test_func test_schema
 test_func test_schema
 
 statement ok
-DROP FUNCTION test_schema.test_func()
+DROP FUNCTION test_schema.test_func();
 
 statement ok
-DROP FUNCTION test_schema.test_func(INT)
+DROP FUNCTION test_schema.test_func(INT);
 
 statement ok
 DROP CONNECTION test_schema.test_conn;
