@@ -17,6 +17,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::RowRef;
 use risingwave_common::catalog::{ColumnDesc, Schema};
+use risingwave_common::estimate_size::VecWithKvSize;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -29,17 +30,19 @@ use risingwave_storage::StateStore;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
 use crate::cache::cache_may_stale;
-use crate::common::StreamChunkBuilder;
+use crate::common::metrics::MetricsInfo;
+use crate::common::JoinStreamChunkBuilder;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
-use crate::executor::{ActorContextRef, Barrier, Executor, Message, PkIndices};
+use crate::executor::{ActorContextRef, Barrier, Executor, ExecutorInfo, Message};
 use crate::task::AtomicU64Ref;
 
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
     pub ctx: ActorContextRef,
+    pub info: ExecutorInfo,
 
     /// The side for arrangement. Currently, it should be a
     /// `MaterializeExecutor`.
@@ -69,24 +72,6 @@ pub struct LookupExecutorParams<S: StateStore> {
     /// For the MV pk, they will only be contained in `arrangement_col_descs`, without being part
     /// of this `arrangement_order_rules`.
     pub arrangement_order_rules: Vec<ColumnOrder>,
-
-    /// Primary key indices of the lookup result (after reordering).
-    ///
-    /// [`LookupExecutor`] will lookup a row from the stream using the join key in the arrangement.
-    /// Therefore, the output of the [`LookupExecutor`] will be:
-    ///
-    /// ```plain
-    /// | stream columns | arrangement columns |
-    /// ```
-    ///
-    /// ... and will be reordered by `output_column_reorder_idx`.
-    ///
-    /// The optimizer should select pk with pk of the stream columns, and pk of the original
-    /// materialized view (upstream of arrangement).
-    pub pk_indices: PkIndices,
-
-    /// Schema of the lookup result (after reordering).
-    pub schema: Schema,
 
     /// By default, the output of [`LookupExecutor`] is `stream columns + arrangement columns`.
     /// The executor will do a reorder of columns before producing output, so that data can be
@@ -120,15 +105,14 @@ impl<S: StateStore> LookupExecutor<S> {
     pub fn new(params: LookupExecutorParams<S>) -> Self {
         let LookupExecutorParams {
             ctx,
+            info,
             arrangement,
             stream,
             arrangement_col_descs,
             arrangement_order_rules,
-            pk_indices,
             use_current_epoch,
             stream_join_key_indices,
             arrange_join_key_indices,
-            schema: output_schema,
             column_mapping,
             storage_table,
             watermark_epoch,
@@ -193,7 +177,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
         // check the inferred schema is really the same as the output schema of the lookup executor.
         assert_eq!(
-            output_schema
+            info.schema
                 .fields
                 .iter()
                 .map(|x| x.data_type())
@@ -205,11 +189,17 @@ impl<S: StateStore> LookupExecutor<S> {
             "mismatched output schema"
         );
 
+        let metrics_info = MetricsInfo::new(
+            ctx.streaming_metrics.clone(),
+            storage_table.table_id().table_id(),
+            ctx.id,
+            "Lookup",
+        );
+
         Self {
             ctx,
+            info,
             chunk_data_types,
-            schema: output_schema,
-            pk_indices,
             last_barrier: None,
             stream_executor: Some(stream),
             arrangement_executor: Some(arrangement),
@@ -229,7 +219,7 @@ impl<S: StateStore> LookupExecutor<S> {
             },
             column_mapping,
             key_indices_mapping,
-            lookup_cache: LookupCache::new(watermark_epoch),
+            lookup_cache: LookupCache::new(watermark_epoch, metrics_info),
             chunk_size,
         }
     }
@@ -255,8 +245,8 @@ impl<S: StateStore> LookupExecutor<S> {
             .boxed()
         };
 
-        let (stream_to_output, arrange_to_output) = StreamChunkBuilder::get_i2o_mapping(
-            self.column_mapping.iter().cloned(),
+        let (stream_to_output, arrange_to_output) = JoinStreamChunkBuilder::get_i2o_mapping(
+            &self.column_mapping,
             self.stream.col_types.len(),
             self.arrangement.col_types.len(),
         );
@@ -301,9 +291,9 @@ impl<S: StateStore> LookupExecutor<S> {
                     let chunk = chunk.compact();
                     let (chunk, ops) = chunk.into_parts();
 
-                    let mut builder = StreamChunkBuilder::new(
+                    let mut builder = JoinStreamChunkBuilder::new(
                         self.chunk_size,
-                        &reorder_chunk_data_types,
+                        reorder_chunk_data_types.clone(),
                         stream_to_output.clone(),
                         arrange_to_output.clone(),
                     );
@@ -313,7 +303,7 @@ impl<S: StateStore> LookupExecutor<S> {
                             .lookup_one_row(&row, self.last_barrier.as_ref().unwrap().epoch)
                             .await?
                         {
-                            tracing::trace!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
+                            tracing::debug!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
 
                             if let Some(chunk) = builder.append_row(*op, row, &matched_row) {
                                 yield Message::Chunk(chunk);
@@ -360,13 +350,28 @@ impl<S: StateStore> LookupExecutor<S> {
         let lookup_row = stream_row
             .project(&self.key_indices_mapping)
             .into_owned_row();
+        let table_id_str = self.arrangement.storage_table.table_id().to_string();
+        let actor_id_str = self.ctx.id.to_string();
+        let fragment_id_str = self.ctx.fragment_id.to_string();
+        self.ctx
+            .streaming_metrics
+            .lookup_total_query_cache_count
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .inc();
         if let Some(result) = self.lookup_cache.lookup(&lookup_row) {
             return Ok(result.iter().cloned().collect_vec());
         }
 
-        tracing::trace!(target: "events::stream::lookup::lookup_row", "{:?}", lookup_row);
+        // cache miss
+        self.ctx
+            .streaming_metrics
+            .lookup_cache_miss_count
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .inc();
 
-        let mut all_rows = vec![];
+        tracing::debug!(target: "events::stream::lookup::lookup_row", "{:?}", lookup_row);
+
+        let mut all_rows = VecWithKvSize::new();
         // Drop the stream.
         {
             let all_data_iter = match self.arrangement.use_current_epoch {
@@ -378,7 +383,7 @@ impl<S: StateStore> LookupExecutor<S> {
                             &lookup_row,
                             ..,
                             false,
-                            PrefetchOptions::new_for_exhaust_iter(),
+                            PrefetchOptions::default(),
                         )
                         .await?
                 }
@@ -390,7 +395,7 @@ impl<S: StateStore> LookupExecutor<S> {
                             &lookup_row,
                             ..,
                             false,
-                            PrefetchOptions::new_for_exhaust_iter(),
+                            PrefetchOptions::default(),
                         )
                         .await?
                 }
@@ -403,11 +408,16 @@ impl<S: StateStore> LookupExecutor<S> {
             }
         }
 
-        tracing::trace!(target: "events::stream::lookup::result", "{:?} => {:?}", lookup_row, all_rows);
+        tracing::debug!(target: "events::stream::lookup::result", "{:?} => {:?}", lookup_row, all_rows.inner());
 
-        self.lookup_cache
-            .batch_update(lookup_row, all_rows.iter().cloned());
+        self.lookup_cache.batch_update(lookup_row, all_rows.clone());
 
-        Ok(all_rows)
+        self.ctx
+            .streaming_metrics
+            .lookup_cached_entry_count
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .set(self.lookup_cache.len() as i64);
+
+        Ok(all_rows.into_inner())
     }
 }

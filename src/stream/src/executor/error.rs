@@ -14,7 +14,6 @@
 
 use std::backtrace::Backtrace;
 
-use either::Either;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, Error, TrackingIssue};
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
@@ -26,32 +25,69 @@ use risingwave_rpc_client::error::RpcError;
 use risingwave_storage::error::StorageError;
 
 use super::Barrier;
-use crate::common::log_store::LogStoreError;
+
+/// A specialized Result type for streaming executors.
+pub type StreamExecutorResult<T> = std::result::Result<T, StreamExecutorError>;
+
+/// The error type for streaming executors.
+#[derive(thiserror::Error)]
+#[error("{inner}")]
+pub struct StreamExecutorError {
+    inner: Box<Inner>,
+}
 
 #[derive(thiserror::Error, Debug)]
-enum Inner {
+#[error("{kind}")]
+struct Inner {
+    #[from]
+    kind: ErrorKind,
+    backtrace: Backtrace,
+}
+
+#[derive(thiserror::Error, Debug)]
+enum ErrorKind {
     #[error("Storage error: {0}")]
     Storage(
         #[backtrace]
-        #[source]
+        #[from]
         StorageError,
     ),
 
-    #[error("Log store error: {0}")]
-    LogStoreError(LogStoreError),
+    #[error("Chunk operation error: {0}")]
+    ArrayError(
+        #[from]
+        #[backtrace]
+        ArrayError,
+    ),
 
     #[error("Chunk operation error: {0}")]
-    EvalError(Either<ArrayError, ExprError>),
+    ExprError(
+        #[from]
+        #[backtrace]
+        ExprError,
+    ),
 
     // TODO: remove this after state table is fully used
     #[error("Serialize/deserialize error: {0}")]
-    SerdeError(BoxedError),
+    SerdeError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
 
     #[error("Sink error: {0}")]
-    SinkError(SinkError),
+    SinkError(
+        #[from]
+        #[backtrace]
+        SinkError,
+    ),
 
-    #[error("RPC error: {0}")]
-    RpcError(RpcError),
+    #[error(transparent)]
+    RpcError(
+        #[from]
+        #[backtrace]
+        RpcError,
+    ),
 
     #[error("Channel closed: {0}")]
     ChannelClosed(String),
@@ -60,96 +96,109 @@ enum Inner {
     AlignBarrier(Box<Barrier>, Box<Barrier>),
 
     #[error("Connector error: {0}")]
-    ConnectorError(BoxedError),
+    ConnectorError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
+
+    #[error("Dml error: {0}")]
+    DmlError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
 
     #[error("Feature is not yet implemented: {0}, {1}")]
     NotImplemented(String, TrackingIssue),
 
     #[error(transparent)]
-    Internal(anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 impl StreamExecutorError {
     fn serde_error(error: impl Error) -> Self {
-        Inner::SerdeError(error.into()).into()
+        ErrorKind::SerdeError(error.into()).into()
     }
 
     pub fn channel_closed(name: impl Into<String>) -> Self {
-        Inner::ChannelClosed(name.into()).into()
+        ErrorKind::ChannelClosed(name.into()).into()
     }
 
     pub fn align_barrier(expected: Barrier, received: Barrier) -> Self {
-        Inner::AlignBarrier(expected.into(), received.into()).into()
+        ErrorKind::AlignBarrier(expected.into(), received.into()).into()
     }
 
     pub fn connector_error(error: impl Error) -> Self {
-        Inner::ConnectorError(error.into()).into()
+        ErrorKind::ConnectorError(error.into()).into()
     }
 
     pub fn not_implemented(error: impl Into<String>, issue: impl Into<TrackingIssue>) -> Self {
-        Inner::NotImplemented(error.into(), issue.into()).into()
+        ErrorKind::NotImplemented(error.into(), issue.into()).into()
     }
-}
 
-/// Error type for streaming executors.
-#[derive(thiserror::Error)]
-#[error("{inner}")]
-pub struct StreamExecutorError {
-    #[from]
-    inner: Inner,
-    backtrace: Backtrace,
+    pub fn dml_error(error: impl Error) -> Self {
+        ErrorKind::DmlError(error.into()).into()
+    }
 }
 
 impl std::fmt::Debug for StreamExecutorError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use std::error::Error;
 
-        write!(f, "{}", self.inner)?;
+        write!(f, "{}", self.inner.kind)?;
         writeln!(f)?;
-        if let Some(backtrace) = (&self.inner as &dyn Error).request_ref::<Backtrace>() {
+        if let Some(backtrace) =
+            std::error::request_ref::<Backtrace>(&self.inner.kind as &dyn Error)
+        {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
             write!(
                 f,
                 "  backtrace of `StreamExecutorError`:\n{}",
-                self.backtrace
+                self.inner.backtrace
             )?;
         }
         Ok(())
     }
 }
 
-/// Storage error.
-impl From<StorageError> for StreamExecutorError {
-    fn from(s: StorageError) -> Self {
-        Inner::Storage(s).into()
+impl From<ErrorKind> for StreamExecutorError {
+    fn from(kind: ErrorKind) -> Self {
+        Self {
+            inner: Box::new(kind.into()),
+        }
     }
 }
 
-/// Log store error
-impl From<LogStoreError> for StreamExecutorError {
-    fn from(e: LogStoreError) -> Self {
-        Inner::LogStoreError(e).into()
+/// Storage error.
+impl From<StorageError> for StreamExecutorError {
+    fn from(s: StorageError) -> Self {
+        ErrorKind::Storage(s).into()
     }
 }
 
 /// Chunk operation error.
 impl From<ArrayError> for StreamExecutorError {
     fn from(e: ArrayError) -> Self {
-        Inner::EvalError(Either::Left(e)).into()
+        ErrorKind::ArrayError(e).into()
     }
 }
 
 impl From<ExprError> for StreamExecutorError {
     fn from(e: ExprError) -> Self {
-        Inner::EvalError(Either::Right(e)).into()
+        ErrorKind::ExprError(e).into()
     }
 }
 
 /// Internal error.
 impl From<anyhow::Error> for StreamExecutorError {
     fn from(a: anyhow::Error) -> Self {
-        Inner::Internal(a).into()
+        ErrorKind::Internal(a).into()
     }
 }
 
@@ -167,7 +216,7 @@ impl From<ValueEncodingError> for StreamExecutorError {
 
 impl From<RpcError> for StreamExecutorError {
     fn from(e: RpcError) -> Self {
-        Inner::RpcError(e).into()
+        ErrorKind::RpcError(e).into()
     }
 }
 
@@ -180,7 +229,7 @@ impl From<ConnectorError> for StreamExecutorError {
 
 impl From<SinkError> for StreamExecutorError {
     fn from(e: SinkError) -> Self {
-        Inner::SinkError(e).into()
+        ErrorKind::SinkError(e).into()
     }
 }
 
@@ -193,7 +242,13 @@ impl From<PbFieldNotFound> for StreamExecutorError {
     }
 }
 
-pub type StreamExecutorResult<T> = std::result::Result<T, StreamExecutorError>;
+impl From<String> for StreamExecutorError {
+    fn from(s: String) -> Self {
+        ErrorKind::Internal(anyhow::anyhow!(s)).into()
+    }
+}
+
+static_assertions::const_assert_eq!(std::mem::size_of::<StreamExecutorError>(), 8);
 
 #[cfg(test)]
 mod tests {

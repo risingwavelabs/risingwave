@@ -16,19 +16,17 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = { version = "1.0", default-features = false }
-async-trait = "0.1"
-byteorder = "1.4"
+auto_enums = { version = "0.8", features = ["tokio1"] }
+byteorder = "1.5"
 bytes = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-itertools = "0.10"
-openssl = "0.10.48"
-pg_interval = "0.4"
-postgres-types = { version = "0.2.5", features = ["derive","with-chrono-0_4"] }
-regex = "1.5"
-risingwave_common = { path = "../../common" }
-risingwave_sqlparser = { path = "../../sqlparser" }
+itertools = "0.11"
+openssl = "0.10.57"
+panic-message = "0.3"
+risingwave_common = { workspace = true }
+risingwave_sqlparser = { workspace = true }
 thiserror = "1"
+thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }
 tokio-openssl = "0.6.3"
 tracing = "0.1"
@@ -37,4 +35,8 @@ tracing = "0.1"
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
+tempfile = "3"
 tokio-postgres = "0.7"
+
+[lints]
+workspace = true

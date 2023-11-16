@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![cfg_attr(not(madsim), allow(unused_imports))]
+
 use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
@@ -19,15 +21,21 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
+use cfg_or_panic::cfg_or_panic;
 use clap::Parser;
 use futures::channel::{mpsc, oneshot};
 use futures::future::join_all;
 use futures::{SinkExt, StreamExt};
-use madsim::net::ipvs::*;
+use itertools::Itertools;
+#[cfg(madsim)]
 use madsim::runtime::{Handle, NodeHandle};
+use rand::seq::IteratorRandom;
 use rand::Rng;
+use risingwave_pb::common::WorkerNode;
 use sqllogictest::AsyncDB;
+#[cfg(not(madsim))]
+use tokio::runtime::Handle;
 
 use crate::client::RisingWave;
 
@@ -41,7 +49,7 @@ pub enum ConfigPath {
 }
 
 impl ConfigPath {
-    fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &str {
         match self {
             ConfigPath::Regular(s) => s,
             ConfigPath::Temp(p) => p.as_os_str().to_str().unwrap(),
@@ -105,6 +113,74 @@ impl Configuration {
             etcd_data_path: None,
         }
     }
+
+    pub fn for_auto_scale() -> Self {
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+            file.write_all(include_bytes!("risingwave-auto-scale.toml"))
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 1,
+            compute_nodes: 3,
+            meta_nodes: 1,
+            compactor_nodes: 1,
+            compute_node_cores: 2,
+            etcd_timeout_rate: 0.0,
+            etcd_data_path: None,
+        }
+    }
+
+    /// Returns the config for backfill test.
+    pub fn for_backfill() -> Self {
+        // Embed the config file and create a temporary file at runtime. The file will be deleted
+        // automatically when it's dropped.
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+            file.write_all(include_bytes!("backfill.toml"))
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 1,
+            compute_nodes: 1,
+            meta_nodes: 1,
+            compactor_nodes: 1,
+            compute_node_cores: 4,
+            etcd_timeout_rate: 0.0,
+            etcd_data_path: None,
+        }
+    }
+
+    pub fn for_background_ddl() -> Self {
+        // Embed the config file and create a temporary file at runtime. The file will be deleted
+        // automatically when it's dropped.
+        let config_path = {
+            let mut file =
+                tempfile::NamedTempFile::new().expect("failed to create temp config file");
+            file.write_all(include_bytes!("background_ddl.toml"))
+                .expect("failed to write config file");
+            file.into_temp_path()
+        };
+
+        Configuration {
+            config_path: ConfigPath::Temp(config_path.into()),
+            frontend_nodes: 2,
+            compute_nodes: 3,
+            meta_nodes: 3,
+            compactor_nodes: 2,
+            compute_node_cores: 2,
+            etcd_timeout_rate: 0.0,
+            etcd_data_path: None,
+        }
+    }
 }
 
 /// A risingwave cluster.
@@ -126,7 +202,9 @@ impl Configuration {
 pub struct Cluster {
     config: Configuration,
     handle: Handle,
+    #[cfg(madsim)]
     pub(crate) client: NodeHandle,
+    #[cfg(madsim)]
     pub(crate) ctl: NodeHandle,
 }
 
@@ -134,7 +212,10 @@ impl Cluster {
     /// Start a RisingWave cluster for testing.
     ///
     /// This function should be called exactly once in a test.
+    #[cfg_or_panic(madsim)]
     pub async fn start(conf: Configuration) -> Result<Self> {
+        use madsim::net::ipvs::*;
+
         let handle = madsim::runtime::Handle::current();
         println!("seed = {}", handle.seed());
         println!("{:#?}", conf);
@@ -150,6 +231,7 @@ impl Cluster {
         }
 
         net.add_dns_record("frontend", "192.168.2.0".parse().unwrap());
+        net.add_dns_record("message_queue", "192.168.11.1".parse().unwrap());
         net.global_ipvs().add_service(
             ServiceAddr::Tcp("192.168.2.0:4566".into()),
             Scheduler::RoundRobin,
@@ -217,7 +299,7 @@ impl Cluster {
 
         // meta node
         for i in 1..=conf.meta_nodes {
-            let opts = risingwave_meta::MetaNodeOpts::parse_from([
+            let opts = risingwave_meta_node::MetaNodeOpts::parse_from([
                 "meta-node",
                 "--config-path",
                 conf.config_path.as_str(),
@@ -238,7 +320,7 @@ impl Cluster {
                 .create_node()
                 .name(format!("meta-{i}"))
                 .ip([192, 168, 1, i as u8].into())
-                .init(move || risingwave_meta::start(opts.clone()))
+                .init(move || risingwave_meta_node::start(opts.clone()))
                 .build();
         }
 
@@ -333,6 +415,7 @@ impl Cluster {
     }
 
     /// Start a SQL session on the client node.
+    #[cfg_or_panic(madsim)]
     pub fn start_session(&mut self) -> Session {
         let (query_tx, mut query_rx) = mpsc::channel::<SessionRequest>(0);
 
@@ -376,12 +459,25 @@ impl Cluster {
     }
 
     /// Run a future on the client node.
+    #[cfg_or_panic(madsim)]
     pub async fn run_on_client<F>(&self, future: F) -> F::Output
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
         self.client.spawn(future).await.unwrap()
+    }
+
+    pub async fn get_random_worker_nodes(&self, n: usize) -> Result<Vec<WorkerNode>> {
+        let worker_nodes = self.get_cluster_info().await?.get_worker_nodes().clone();
+        if worker_nodes.len() < n {
+            return Err(anyhow!("cannot remove more nodes than present"));
+        }
+        let rand_nodes = worker_nodes
+            .iter()
+            .choose_multiple(&mut rand::thread_rng(), n)
+            .to_vec();
+        Ok(rand_nodes.iter().cloned().cloned().collect_vec())
     }
 
     /// Run a SQL query from the client and wait until the condition is met.
@@ -393,7 +489,7 @@ impl Cluster {
         timeout: Duration,
     ) -> Result<String> {
         let fut = async move {
-            let mut interval = madsim::time::interval(interval);
+            let mut interval = tokio::time::interval(interval);
             loop {
                 interval.tick().await;
                 let result = self.run(sql.clone()).await?;
@@ -403,7 +499,7 @@ impl Cluster {
             }
         };
 
-        match madsim::time::timeout(timeout, fut).await {
+        match tokio::time::timeout(timeout, fut).await {
             Ok(r) => Ok(r?),
             Err(_) => bail!("wait_until timeout"),
         }
@@ -420,7 +516,8 @@ impl Cluster {
             .await
     }
 
-    /// Kill some nodes and restart them in 2s.
+    /// Generate a list of random worker nodes to kill by `opts`, then call `kill_nodes` to kill and
+    /// restart them.
     pub async fn kill_node(&self, opts: &KillOpts) {
         let mut nodes = vec![];
         if opts.kill_meta {
@@ -475,28 +572,59 @@ impl Cluster {
                 nodes.push(format!("compactor-{}", i));
             }
         }
-        join_all(nodes.iter().map(|name| async move {
+
+        self.kill_nodes(nodes, opts.restart_delay_secs).await
+    }
+
+    /// Kill the given nodes by their names and restart them in 2s + restart_delay_secs with a
+    /// probability of 0.1.
+    #[cfg_or_panic(madsim)]
+    pub async fn kill_nodes(
+        &self,
+        nodes: impl IntoIterator<Item = impl AsRef<str>>,
+        restart_delay_secs: u32,
+    ) {
+        join_all(nodes.into_iter().map(|name| async move {
+            let name = name.as_ref();
             let t = rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
             tokio::time::sleep(t).await;
             tracing::info!("kill {name}");
-            madsim::runtime::Handle::current().kill(name);
+            Handle::current().kill(name);
 
             let mut t =
                 rand::thread_rng().gen_range(Duration::from_secs(0)..Duration::from_secs(1));
             // has a small chance to restart after a long time
             // so that the node is expired and removed from the cluster
             if rand::thread_rng().gen_bool(0.1) {
-                // max_heartbeat_interval_secs = 60
-                t += Duration::from_secs(opts.restart_delay_secs as u64);
+                // max_heartbeat_interval_secs = 15
+                t += Duration::from_secs(restart_delay_secs as u64);
             }
             tokio::time::sleep(t).await;
             tracing::info!("restart {name}");
-            madsim::runtime::Handle::current().restart(name);
+            Handle::current().restart(name);
+        }))
+        .await;
+    }
+
+    #[cfg_or_panic(madsim)]
+    pub async fn kill_nodes_and_restart(
+        &self,
+        nodes: impl IntoIterator<Item = impl AsRef<str>>,
+        restart_delay_secs: u32,
+    ) {
+        join_all(nodes.into_iter().map(|name| async move {
+            let name = name.as_ref();
+            tracing::info!("kill {name}");
+            Handle::current().kill(name);
+            tokio::time::sleep(Duration::from_secs(restart_delay_secs as u64)).await;
+            tracing::info!("restart {name}");
+            Handle::current().restart(name);
         }))
         .await;
     }
 
     /// Create a node for kafka producer and prepare data.
+    #[cfg_or_panic(madsim)]
     pub async fn create_kafka_producer(&self, datadir: &str) {
         self.handle
             .create_node()
@@ -512,6 +640,7 @@ impl Cluster {
     }
 
     /// Create a kafka topic.
+    #[cfg_or_panic(madsim)]
     pub fn create_kafka_topics(&self, topics: HashMap<String, i32>) {
         self.handle
             .create_node()
@@ -525,7 +654,12 @@ impl Cluster {
         self.config.clone()
     }
 
+    pub fn handle(&self) -> &Handle {
+        &self.handle
+    }
+
     /// Graceful shutdown all RisingWave nodes.
+    #[cfg_or_panic(madsim)]
     pub async fn graceful_shutdown(&self) {
         let mut nodes = vec![];
         let mut metas = vec![];
@@ -548,12 +682,12 @@ impl Cluster {
         for node in &nodes {
             self.handle.send_ctrl_c(node);
         }
-        madsim::time::sleep(waiting_time).await;
+        tokio::time::sleep(waiting_time).await;
         // shutdown metas
         for meta in &metas {
             self.handle.send_ctrl_c(meta);
         }
-        madsim::time::sleep(waiting_time).await;
+        tokio::time::sleep(waiting_time).await;
 
         // check all nodes are exited
         for node in nodes.iter().chain(metas.iter()) {
@@ -582,6 +716,12 @@ impl Session {
         self.query_tx.send((sql.into(), tx)).await?;
         rx.await?
     }
+
+    /// Run `FLUSH` on the session.
+    pub async fn flush(&mut self) -> Result<()> {
+        self.run("FLUSH").await?;
+        Ok(())
+    }
 }
 
 /// Options for killing nodes.
@@ -604,5 +744,13 @@ impl KillOpts {
         kill_compute: true,
         kill_compactor: true,
         restart_delay_secs: 20,
+    };
+    pub const ALL_FAST: Self = KillOpts {
+        kill_rate: 1.0,
+        kill_meta: true,
+        kill_frontend: true,
+        kill_compute: true,
+        kill_compactor: true,
+        restart_delay_secs: 2,
     };
 }

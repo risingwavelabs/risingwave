@@ -1,7 +1,20 @@
+auto-retry: &auto-retry
+  automatic:
+    # Agent terminated because the AWS EC2 spot instance killed by AWS.
+    - signal_reason: agent_stop
+      limit: 3
+
 steps:
   - label: "Run Demos {{matrix.testcase}} {{matrix.format}}"
     command: "ci/scripts/integration-tests.sh -c {{matrix.testcase}} -f {{matrix.format}}"
     timeout_in_minutes: 30
+    retry: *auto-retry
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GHCR_USERNAME: ghcr-username
+            GHCR_TOKEN: ghcr-token
+      - ./ci/plugins/docker-compose-logs
     matrix:
       setup:
         testcase:
@@ -10,15 +23,14 @@ steps:
           - "cdn-metrics"
           - "clickstream"
           - "livestream"
-          - "twitter"
-          - "twitter-pulsar"
           - "prometheus"
           - "schema-registry"
           - "mysql-cdc"
           - "postgres-cdc"
           - "mysql-sink"
           - "postgres-sink"
-          - "iceberg-sink"
+          - "iceberg-cdc"
+          # - "iceberg-sink"
           - "debezium-mysql"
         format:
           - "json"
@@ -64,15 +76,81 @@ steps:
             testcase: "postgres-sink"
             format: "protobuf"
           skip: true
+        # - with:
+        #    testcase: "iceberg-sink"
+        #    format: "protobuf"
+        #  skip: true
         - with:
-            testcase: "iceberg-sink"
+            testcase: "iceberg-cdc"
             format: "protobuf"
           skip: true
         - with:
             testcase: "debezium-mysql"
             format: "protobuf"
           skip: true
+
+  # NOTE: buildkite matrix-limits
+  # Each build matrix has a limit of 6 dimensions, 20 elements in each dimension and a total of 12 adjustments.
+  - label: "Run Demos {{matrix.testcase}} {{matrix.format}}"
+    command: "ci/scripts/integration-tests.sh -c {{matrix.testcase}} -f {{matrix.format}}"
+    timeout_in_minutes: 30
+    retry: *auto-retry
+    plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GHCR_USERNAME: ghcr-username
+            GHCR_TOKEN: ghcr-token
+      - ./ci/plugins/docker-compose-logs
+    matrix:
+      setup:
+        testcase:
+          - "twitter"
+          - "twitter-pulsar"
+          # - "debezium-mongo"
+          - "debezium-postgres"
+          - "tidb-cdc-sink"
+          - "debezium-sqlserver"
+          - "citus-cdc"
+          - "kinesis-s3-source"
+          - "clickhouse-sink"
+          - "cockroach-sink"
+        format:
+          - "json"
+          - "protobuf"
+      adjustments:
         - with:
             testcase: "twitter-pulsar"
+            format: "protobuf"
+          skip: true
+        # - with:
+        #     testcase: "debezium-mongo"
+        #     format: "protobuf"
+        #   skip: true
+        - with:
+            testcase: "debezium-postgres"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "tidb-cdc-sink"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "debezium-sqlserver"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "citus-cdc"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "kinesis-s3-source"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "clickhouse-sink"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "cockroach-sink"
             format: "protobuf"
           skip: true

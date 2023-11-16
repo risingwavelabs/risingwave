@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TableFunctionNode;
 
+use super::batch::prelude::*;
+use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchPb, ToDistributedBatch};
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::logical_table_function::LogicalTableFunction;
@@ -26,7 +27,7 @@ use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchTableFunction {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     logical: LogicalTableFunction,
 }
 
@@ -39,7 +40,7 @@ impl BatchTableFunction {
     }
 
     pub fn with_dist(logical: LogicalTableFunction, dist: Distribution) -> Self {
-        let ctx = logical.base.ctx.clone();
+        let ctx = logical.base.ctx().clone();
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         BatchTableFunction { base, logical }
     }
@@ -50,13 +51,10 @@ impl BatchTableFunction {
     }
 }
 
-impl fmt::Display for BatchTableFunction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "BatchTableFunction {{ {:?} }}",
-            self.logical.table_function
-        )
+impl Distill for BatchTableFunction {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let data = Pretty::debug(&self.logical.table_function);
+        childless_record("BatchTableFunction", vec![("table_function", data)])
     }
 }
 

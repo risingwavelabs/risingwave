@@ -12,61 +12,65 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use itertools::Itertools;
+use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode, PbStreamNode};
+use risingwave_pb::stream_plan::PbStreamNode;
 
-use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::generic::GenericPlanRef;
+use super::stream::prelude::*;
+use super::utils::Distill;
+use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamExchange, StreamNode};
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
-use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::Explain;
 
 /// `StreamShare` will be translated into an `ExchangeNode` based on its distribution finally.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamShare {
-    pub base: PlanBase,
-    logical: generic::Share<PlanRef>,
+    pub base: PlanBase<Stream>,
+    core: generic::Share<PlanRef>,
 }
 
 impl StreamShare {
-    pub fn new(logical: generic::Share<PlanRef>) -> Self {
-        let input = logical.input.borrow().0.clone();
-        let dist = input.distribution().clone();
-        // Filter executor won't change the append-only behavior of the stream.
-        let base = PlanBase::new_stream_with_logical(
-            &logical,
-            dist,
-            input.append_only(),
-            input.emit_on_window_close(),
-            input.watermark_columns().clone(),
-        );
-        StreamShare { base, logical }
+    pub fn new(core: generic::Share<PlanRef>) -> Self {
+        let base = {
+            let input = core.input.borrow();
+            let dist = input.distribution().clone();
+            // Filter executor won't change the append-only behavior of the stream.
+            PlanBase::new_stream_with_core(
+                &core,
+                dist,
+                input.append_only(),
+                input.emit_on_window_close(),
+                input.watermark_columns().clone(),
+            )
+        };
+
+        StreamShare { base, core }
     }
 }
 
-impl fmt::Display for StreamShare {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        LogicalShare::fmt_with_name(&self.base, f, "StreamShare")
+impl Distill for StreamShare {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        LogicalShare::pretty_fields(&self.base, "StreamShare")
     }
 }
 
 impl PlanTreeNodeUnary for StreamShare {
     fn input(&self) -> PlanRef {
-        self.logical.input.borrow().clone()
+        self.core.input.borrow().clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let logical = self.logical.clone();
-        logical.replace_input(input);
-        Self::new(logical)
+        let core = self.core.clone();
+        core.replace_input(input);
+        Self::new(core)
     }
 }
 
 impl StreamShare {
     pub fn replace_input(&self, plan: PlanRef) {
-        self.logical.replace_input(plan);
+        self.core.replace_input(plan);
     }
 }
 
@@ -80,47 +84,13 @@ impl StreamNode for StreamShare {
 
 impl StreamShare {
     pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> PbStreamNode {
-        let operator_id = self.base.id.0 as u32;
-        let output_indices = (0..self.schema().len() as u32).collect_vec();
+        let operator_id = self.base.id().0 as u32;
 
         match state.get_share_stream_node(operator_id) {
             None => {
-                let dispatch_strategy = match &self.base.dist {
-                    Distribution::HashShard(keys) | Distribution::UpstreamHashShard(keys, _) => {
-                        DispatchStrategy {
-                            r#type: DispatcherType::Hash as i32,
-                            dist_key_indices: keys.iter().map(|x| *x as u32).collect_vec(),
-                            output_indices,
-                        }
-                    }
-                    Distribution::Single => DispatchStrategy {
-                        r#type: DispatcherType::Simple as i32,
-                        dist_key_indices: vec![],
-                        output_indices,
-                    },
-                    Distribution::Broadcast => DispatchStrategy {
-                        r#type: DispatcherType::Broadcast as i32,
-                        dist_key_indices: vec![],
-                        output_indices,
-                    },
-                    Distribution::SomeShard => {
-                        // FIXME: use another DispatcherType?
-                        DispatchStrategy {
-                            r#type: DispatcherType::Hash as i32,
-                            dist_key_indices: self
-                                .base
-                                .logical_pk
-                                .iter()
-                                .map(|x| *x as u32)
-                                .collect_vec(),
-                            output_indices,
-                        }
-                    }
-                };
+                let node_body =
+                    StreamExchange::new_no_shuffle(self.input()).to_stream_prost_body(state);
 
-                let node_body = Some(PbNodeBody::Exchange(ExchangeNode {
-                    strategy: Some(dispatch_strategy),
-                }));
                 let input = self
                     .inputs()
                     .into_iter()
@@ -129,10 +99,16 @@ impl StreamShare {
 
                 let stream_node = PbStreamNode {
                     input,
-                    identity: format!("{}", self),
-                    node_body,
+                    identity: self.distill_to_string(),
+                    node_body: Some(node_body),
                     operator_id: self.id().0 as _,
-                    stream_key: self.logical_pk().iter().map(|x| *x as u32).collect(),
+                    stream_key: self
+                        .stream_key()
+                        .unwrap_or_else(|| panic!("should always have a stream key in the stream plan but not, sub plan: {}",
+                       PlanRef::from(self.clone()).explain_to_string()))
+                        .iter()
+                        .map(|x| *x as u32)
+                        .collect(),
                     fields: self.schema().to_prost(),
                     append_only: self.append_only(),
                 };

@@ -13,6 +13,7 @@ import (
 type KinesisConfig struct {
 	StreamName string
 	Region     string
+	Endpoint   string
 }
 
 type KinesisSink struct {
@@ -22,7 +23,11 @@ type KinesisSink struct {
 
 func OpenKinesisSink(cfg KinesisConfig) (*KinesisSink, error) {
 	ss := session.Must(session.NewSession())
-	client := kinesis.New(ss, aws.NewConfig().WithRegion(cfg.Region))
+	config := aws.NewConfig().WithRegion(cfg.Region)
+	if cfg.Endpoint != "" {
+		config = config.WithEndpoint(cfg.Endpoint)
+	}
+	client := kinesis.New(ss, config)
 	return &KinesisSink{
 		client: client,
 		cfg:    cfg,
@@ -38,10 +43,10 @@ func (p *KinesisSink) Close() error {
 }
 
 func (p *KinesisSink) WriteRecord(ctx context.Context, format string, record sink.SinkRecord) error {
-	_, key, data := sink.RecordToKafka(record, format)
+	data := sink.Encode(record, format)
 	_, err := p.client.PutRecordWithContext(ctx, &kinesis.PutRecordInput{
 		Data:         data,
-		PartitionKey: aws.String(key),
+		PartitionKey: aws.String(record.Key()),
 		StreamName:   aws.String(p.cfg.StreamName),
 	})
 	if err != nil {
@@ -49,4 +54,8 @@ func (p *KinesisSink) WriteRecord(ctx context.Context, format string, record sin
 	} else {
 		return nil
 	}
+}
+
+func (p *KinesisSink) Flush(ctx context.Context) error {
+	return nil
 }

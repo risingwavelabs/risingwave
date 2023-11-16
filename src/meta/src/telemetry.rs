@@ -18,13 +18,13 @@ use risingwave_common::config::MetaBackend;
 use risingwave_common::telemetry::report::{TelemetryInfoFetcher, TelemetryReportCreator};
 use risingwave_common::telemetry::{
     current_timestamp, SystemData, TelemetryNodeType, TelemetryReport, TelemetryReportBase,
+    TelemetryResult,
 };
 use risingwave_pb::common::WorkerType;
 use serde::{Deserialize, Serialize};
 
 use crate::manager::ClusterManager;
 use crate::model::ClusterId;
-use crate::storage::MetaStore;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct NodeCount {
@@ -35,7 +35,7 @@ struct NodeCount {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub(crate) struct MetaTelemetryReport {
+pub struct MetaTelemetryReport {
     #[serde(flatten)]
     base: TelemetryReportBase,
     node_count: NodeCount,
@@ -43,38 +43,33 @@ pub(crate) struct MetaTelemetryReport {
     meta_backend: MetaBackend,
 }
 
-impl TelemetryReport for MetaTelemetryReport {
-    fn to_json(&self) -> anyhow::Result<String> {
-        let json = serde_json::to_string(self)?;
-        Ok(json)
-    }
-}
+impl TelemetryReport for MetaTelemetryReport {}
 
-pub(crate) struct MetaTelemetryInfoFetcher {
+pub struct MetaTelemetryInfoFetcher {
     tracking_id: ClusterId,
 }
 
 impl MetaTelemetryInfoFetcher {
-    pub(crate) fn new(tracking_id: ClusterId) -> Self {
+    pub fn new(tracking_id: ClusterId) -> Self {
         Self { tracking_id }
     }
 }
 
 #[async_trait::async_trait]
 impl TelemetryInfoFetcher for MetaTelemetryInfoFetcher {
-    async fn fetch_telemetry_info(&self) -> anyhow::Result<Option<String>> {
+    async fn fetch_telemetry_info(&self) -> TelemetryResult<Option<String>> {
         Ok(Some(self.tracking_id.clone().into()))
     }
 }
 
 #[derive(Clone)]
-pub(crate) struct MetaReportCreator<S: MetaStore> {
-    cluster_mgr: Arc<ClusterManager<S>>,
+pub struct MetaReportCreator {
+    cluster_mgr: Arc<ClusterManager>,
     meta_backend: MetaBackend,
 }
 
-impl<S: MetaStore> MetaReportCreator<S> {
-    pub(crate) fn new(cluster_mgr: Arc<ClusterManager<S>>, meta_backend: MetaBackend) -> Self {
+impl MetaReportCreator {
+    pub fn new(cluster_mgr: Arc<ClusterManager>, meta_backend: MetaBackend) -> Self {
         Self {
             cluster_mgr,
             meta_backend,
@@ -83,13 +78,14 @@ impl<S: MetaStore> MetaReportCreator<S> {
 }
 
 #[async_trait::async_trait]
-impl<S: MetaStore> TelemetryReportCreator for MetaReportCreator<S> {
+impl TelemetryReportCreator for MetaReportCreator {
+    #[expect(refining_impl_trait)]
     async fn create_report(
         &self,
         tracking_id: String,
         session_id: String,
         up_time: u64,
-    ) -> anyhow::Result<MetaTelemetryReport> {
+    ) -> TelemetryResult<MetaTelemetryReport> {
         let node_map = self.cluster_mgr.count_worker_node().await;
         Ok(MetaTelemetryReport {
             base: TelemetryReportBase {

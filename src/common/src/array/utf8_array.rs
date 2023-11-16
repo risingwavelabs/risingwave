@@ -153,6 +153,10 @@ impl ArrayBuilder for Utf8ArrayBuilder {
         self.bytes.pop()
     }
 
+    fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
     fn finish(self) -> Utf8Array {
         Utf8Array {
             bytes: self.bytes.finish(),
@@ -368,7 +372,7 @@ mod tests {
                     None => NULL_VAL_FOR_HASH.hash(state),
                 })
         });
-        let hashes = hash_finish(&mut states[..]);
+        let hashes = hash_finish(&states[..]);
 
         let count = hashes.iter().counts().len();
         assert_eq!(count, 30);

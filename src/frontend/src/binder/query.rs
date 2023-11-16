@@ -92,9 +92,17 @@ impl BoundQuery {
         depth: Depth,
         correlated_id: CorrelatedId,
     ) -> Vec<usize> {
-        // TODO: collect `correlated_input_ref` in `extra_order_exprs`.
-        self.body
-            .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+        let mut correlated_indices = vec![];
+
+        correlated_indices.extend(
+            self.body
+                .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+        );
+
+        correlated_indices.extend(self.extra_order_exprs.iter_mut().flat_map(|expr| {
+            expr.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+        }));
+        correlated_indices
     }
 
     /// Simple `VALUES` without other clauses.
@@ -176,20 +184,8 @@ impl Binder {
             self.bind_with(with)?;
         }
         let body = self.bind_set_expr(body)?;
-        let mut name_to_index = HashMap::new();
-        body.schema()
-            .fields()
-            .iter()
-            .enumerate()
-            .for_each(|(index, field)| {
-                name_to_index
-                    .entry(field.name.clone())
-                    // Ambiguous (duplicate) output names are marked with usize::MAX.
-                    // This is not necessarily an error as long as not actually referenced by order
-                    // by.
-                    .and_modify(|v| *v = usize::MAX)
-                    .or_insert(index);
-            });
+        let name_to_index =
+            Self::build_name_to_index(body.schema().fields().iter().map(|f| f.name.clone()));
         let mut extra_order_exprs = vec![];
         let visible_output_num = body.schema().len();
         let order = order_by
@@ -213,10 +209,24 @@ impl Binder {
         })
     }
 
+    pub fn build_name_to_index(names: impl Iterator<Item = String>) -> HashMap<String, usize> {
+        let mut m = HashMap::new();
+        names.enumerate().for_each(|(index, name)| {
+            m.entry(name)
+                // Ambiguous (duplicate) output names are marked with usize::MAX.
+                // This is not necessarily an error as long as not actually referenced.
+                .and_modify(|v| *v = usize::MAX)
+                .or_insert(index);
+        });
+        m
+    }
+
     /// Bind an `ORDER BY` expression in a [`Query`], which can be either:
     /// * an output-column name
     /// * index of an output column
     /// * an arbitrary expression
+    ///
+    /// Refer to `bind_group_by_expr_in_select` to see their similarities and differences.
     ///
     /// # Arguments
     ///
@@ -252,7 +262,7 @@ impl Binder {
                 Ok(index) if 1 <= index && index <= visible_output_num => index - 1,
                 _ => {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
-                        "Invalid value in ORDER BY: {}",
+                        "Invalid ordinal number in ORDER BY: {}",
                         number
                     ))
                     .into())

@@ -1,0 +1,73 @@
+---
+version: "3"
+services:
+  compactor-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compactor-0
+  compute-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compute-node-0
+  etcd-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: etcd-0
+  frontend-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: frontend-node-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  meta-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: meta-node-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+  localstack:
+    container_name: localstack
+    image: localstack/localstack:2.2
+    networks:
+      default:
+        aliases:
+          - ad-click.localstack
+    # ports:
+      # - "127.0.0.1:14566:4566"             # LocalStack Gateway
+      # - "127.0.0.1:14510-14559:4510-4559"  # external services port range
+  datagen:
+    build: ../datagen
+    depends_on: [localstack]
+    command:
+      - /bin/sh
+      - -c
+      - |
+        export AWS_ACCESS_KEY_ID="test"
+        export AWS_SECRET_ACCESS_KEY="test"
+        export AWS_DEFAULT_REGION="us-east-1"
+        aws --endpoint-url=http://localstack:4566 kinesis create-stream --stream-name ad-impression
+        aws --endpoint-url=http://localstack:4566 s3api create-bucket --bucket ad-click
+        /datagen --mode ad-ctr --topic ad_impression --qps 10 kinesis --region us-east-1 --name ad-impression --endpoint http://localstack:4566 &
+        /datagen --mode ad-ctr --topic ad_click --qps 10 s3 --region us-east-1 --bucket ad-click --endpoint http://localstack:4566
+    restart: always
+    container_name: datagen
+volumes:
+  compute-node-0:
+    external: false
+  etcd-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+name: risingwave-compose

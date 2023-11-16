@@ -17,13 +17,25 @@ use risingwave_pb::connector_service::CdcMessage;
 use crate::source::base::SourceMessage;
 use crate::source::SourceMeta;
 
+#[derive(Debug, Clone)]
+pub struct DebeziumCdcMeta {
+    pub full_table_name: String,
+}
+
 impl From<CdcMessage> for SourceMessage {
     fn from(message: CdcMessage) -> Self {
         SourceMessage {
-            payload: Some(message.payload.as_bytes().to_vec()),
+            key: None,
+            payload: if message.payload.is_empty() {
+                None // heartbeat message
+            } else {
+                Some(message.payload.as_bytes().to_vec())
+            },
             offset: message.offset,
             split_id: message.partition.into(),
-            meta: SourceMeta::Empty,
+            meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta {
+                full_table_name: message.full_table_name,
+            }),
         }
     }
 }

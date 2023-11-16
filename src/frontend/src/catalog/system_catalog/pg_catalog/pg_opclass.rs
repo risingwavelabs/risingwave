@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
 use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::{infer_dummy_view_sql, BuiltinView, SystemCatalogColumnsDef};
 
-/// The catalog `pg_opclass` defines index access method operator classes.
-/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-opclass.html`].
-pub const PG_OPCLASS_TABLE_NAME: &str = "pg_opclass";
 pub const PG_OPCLASS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "oid"),
     (DataType::Int32, "opcmethod"),
@@ -30,3 +30,12 @@ pub const PG_OPCLASS_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     (DataType::Int32, "opcdefault"),
     (DataType::Int32, "opckeytype"),
 ];
+
+/// The catalog `pg_opclass` defines index access method operator classes.
+/// Reference: [`https://www.postgresql.org/docs/current/catalog-pg-opclass.html`].
+pub static PG_OPCLASS: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: "pg_opclass",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: PG_OPCLASS_COLUMNS,
+    sql: infer_dummy_view_sql(PG_OPCLASS_COLUMNS),
+});

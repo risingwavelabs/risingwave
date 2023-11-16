@@ -22,8 +22,8 @@ use crate::binder::statement::RewriteExprsRecursive;
 use crate::expr::{ExprImpl, InputRef};
 
 const ERROR_1ST_ARG: &str = "The 1st arg of watermark function should be a table name (incl. source, CTE, view) but not complex structure (subquery, join, another table function). Consider using an intermediate CTE or view as workaround.";
-const ERROR_2ND_ARG_EXPR: &str = "The 2st arg of watermark function should be a column name but not complex expression. Consider using an intermediate CTE or view as workaround.";
-const ERROR_2ND_ARG_TYPE: &str = "The 2st arg of watermark function should be a column of type timestamp with time zone, timestamp or date.";
+const ERROR_2ND_ARG_EXPR: &str = "The 2nd arg of watermark function should be a column name but not complex expression. Consider using an intermediate CTE or view as workaround.";
+const ERROR_2ND_ARG_TYPE: &str = "The 2nd arg of watermark function should be a column of type timestamp with time zone, timestamp or date.";
 
 #[derive(Debug, Clone)]
 #[expect(dead_code)]

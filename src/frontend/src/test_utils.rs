@@ -14,30 +14,40 @@
 
 use std::collections::HashMap;
 use std::io::Write;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use futures_async_stream::for_await;
 use parking_lot::RwLock;
+use pgwire::net::{Address, AddressRef};
 use pgwire::pg_response::StatementType;
 use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Row;
 use risingwave_common::catalog::{
     FunctionId, IndexId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
-    DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
+    DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
 };
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
-    PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
+    PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
-use risingwave_pb::ddl_service::{create_connection_request, DdlProgress};
-use risingwave_pb::hummock::HummockSnapshot;
+use risingwave_pb::ddl_service::alter_owner_request::Object;
+use risingwave_pb::ddl_service::{create_connection_request, DdlProgress, PbTableJobType};
+use risingwave_pb::hummock::write_limits::WriteLimit;
+use risingwave_pb::hummock::{
+    BranchedObject, CompactionGroupInfo, HummockSnapshot, HummockVersion, HummockVersionDelta,
+};
+use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
+use risingwave_pb::meta::list_actor_states_response::ActorState;
+use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
+use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::{CreatingJobInfo, SystemParams};
+use risingwave_pb::meta::SystemParams;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -47,14 +57,13 @@ use tempfile::{Builder, NamedTempFile};
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId};
-use crate::handler::extended_handle::{Portal, PrepareStatement};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
 use crate::session::{AuthContext, FrontendEnv, SessionImpl};
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
 use crate::user::UserId;
-use crate::{FrontendOpts, PgResponseStream};
+use crate::FrontendOpts;
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
 pub struct LocalFrontend {
@@ -62,13 +71,14 @@ pub struct LocalFrontend {
     env: FrontendEnv,
 }
 
-impl SessionManager<PgResponseStream, PrepareStatement, Portal> for LocalFrontend {
+impl SessionManager for LocalFrontend {
     type Session = SessionImpl;
 
     fn connect(
         &self,
         _database: &str,
         _user_name: &str,
+        _peer_addr: AddressRef,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         Ok(self.session_ref())
     }
@@ -97,8 +107,17 @@ impl LocalFrontend {
         &self,
         sql: impl Into<String>,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
-        let sql = sql.into();
-        self.session_ref().run_statement(sql.as_str(), vec![]).await
+        let sql: Arc<str> = Arc::from(sql.into());
+        self.session_ref().run_statement(sql, vec![]).await
+    }
+
+    pub async fn run_sql_with_session(
+        &self,
+        session_ref: Arc<SessionImpl>,
+        sql: impl Into<String>,
+    ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let sql: Arc<str> = Arc::from(sql.into());
+        session_ref.run_statement(sql, vec![]).await
     }
 
     pub async fn run_user_sql(
@@ -108,9 +127,9 @@ impl LocalFrontend {
         user_name: String,
         user_id: UserId,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
-        let sql = sql.into();
+        let sql: Arc<str> = Arc::from(sql.into());
         self.session_user_ref(database, user_name, user_id)
-            .run_statement(sql.as_str(), vec![])
+            .run_statement(sql, vec![])
             .await
     }
 
@@ -128,7 +147,7 @@ impl LocalFrontend {
 
     pub async fn get_explain_output(&self, sql: impl Into<String>) -> String {
         let mut rsp = self.run_sql(sql).await.unwrap();
-        assert_eq!(rsp.get_stmt_type(), StatementType::EXPLAIN);
+        assert_eq!(rsp.stmt_type(), StatementType::EXPLAIN);
         let mut res = String::new();
         #[for_await]
         for row_set in rsp.values_stream() {
@@ -162,12 +181,17 @@ impl LocalFrontend {
             UserAuthenticator::None,
             // Local Frontend use a non-sense id.
             (0, 0),
+            Address::Tcp(SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                6666,
+            ))
+            .into(),
         ))
     }
 }
 
 pub async fn get_explain_output(mut rsp: RwPgResponse) -> String {
-    if rsp.get_stmt_type() != StatementType::EXPLAIN {
+    if rsp.stmt_type() != StatementType::EXPLAIN {
         panic!("RESPONSE INVALID: {rsp:?}");
     }
     let mut res = String::new();
@@ -202,6 +226,8 @@ impl CatalogWriter for MockCatalogWriter {
         self.create_schema(database_id, DEFAULT_SCHEMA_NAME, owner)
             .await?;
         self.create_schema(database_id, PG_CATALOG_SCHEMA_NAME, owner)
+            .await?;
+        self.create_schema(database_id, RW_CATALOG_SCHEMA_NAME, owner)
             .await?;
         Ok(())
     }
@@ -246,6 +272,7 @@ impl CatalogWriter for MockCatalogWriter {
         source: Option<PbSource>,
         mut table: PbTable,
         graph: StreamFragmentGraph,
+        _job_type: PbTableJobType,
     ) -> Result<()> {
         if let Some(source) = source {
             let source_id = self.create_source_inner(source)?;
@@ -258,6 +285,7 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn replace_table(
         &self,
+        _source: Option<PbSource>,
         table: PbTable,
         _graph: StreamFragmentGraph,
         _mapping: ColIndexMapping,
@@ -267,6 +295,14 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn create_source(&self, source: PbSource) -> Result<()> {
+        self.create_source_inner(source).map(|_| ())
+    }
+
+    async fn create_source_with_graph(
+        &self,
+        source: PbSource,
+        _graph: StreamFragmentGraph,
+    ) -> Result<()> {
         self.create_source_inner(source).map(|_| ())
     }
 
@@ -309,7 +345,23 @@ impl CatalogWriter for MockCatalogWriter {
         unreachable!()
     }
 
-    async fn drop_table(&self, source_id: Option<u32>, table_id: TableId) -> Result<()> {
+    async fn comment_on(&self, _comment: PbComment) -> Result<()> {
+        unreachable!()
+    }
+
+    async fn drop_table(
+        &self,
+        source_id: Option<u32>,
+        table_id: TableId,
+        cascade: bool,
+    ) -> Result<()> {
+        if cascade {
+            return Err(ErrorCode::NotSupported(
+                "drop cascade in MockCatalogWriter is unsupported".to_string(),
+                "use drop instead".to_string(),
+            )
+            .into());
+        }
         if let Some(source_id) = source_id {
             self.drop_table_or_source_id(source_id);
         }
@@ -319,7 +371,7 @@ impl CatalogWriter for MockCatalogWriter {
                 .read()
                 .get_all_indexes_related_to_object(database_id, schema_id, table_id);
         for index in indexes {
-            self.drop_index(index.id).await?;
+            self.drop_index(index.id, cascade).await?;
         }
         self.catalog
             .write()
@@ -332,18 +384,25 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_view(&self, _view_id: u32) -> Result<()> {
+    async fn drop_view(&self, _view_id: u32, _cascade: bool) -> Result<()> {
         unreachable!()
     }
 
-    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
+    async fn drop_materialized_view(&self, table_id: TableId, cascade: bool) -> Result<()> {
+        if cascade {
+            return Err(ErrorCode::NotSupported(
+                "drop cascade in MockCatalogWriter is unsupported".to_string(),
+                "use drop instead".to_string(),
+            )
+            .into());
+        }
         let (database_id, schema_id) = self.drop_table_or_source_id(table_id.table_id);
         let indexes =
             self.catalog
                 .read()
                 .get_all_indexes_related_to_object(database_id, schema_id, table_id);
         for index in indexes {
-            self.drop_index(index.id).await?;
+            self.drop_index(index.id, cascade).await?;
         }
         self.catalog
             .write()
@@ -351,7 +410,14 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_source(&self, source_id: u32) -> Result<()> {
+    async fn drop_source(&self, source_id: u32, cascade: bool) -> Result<()> {
+        if cascade {
+            return Err(ErrorCode::NotSupported(
+                "drop cascade in MockCatalogWriter is unsupported".to_string(),
+                "use drop instead".to_string(),
+            )
+            .into());
+        }
         let (database_id, schema_id) = self.drop_table_or_source_id(source_id);
         self.catalog
             .write()
@@ -359,7 +425,14 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_sink(&self, sink_id: u32) -> Result<()> {
+    async fn drop_sink(&self, sink_id: u32, cascade: bool) -> Result<()> {
+        if cascade {
+            return Err(ErrorCode::NotSupported(
+                "drop cascade in MockCatalogWriter is unsupported".to_string(),
+                "use drop instead".to_string(),
+            )
+            .into());
+        }
         let (database_id, schema_id) = self.drop_table_or_sink_id(sink_id);
         self.catalog
             .write()
@@ -367,7 +440,14 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn drop_index(&self, index_id: IndexId) -> Result<()> {
+    async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<()> {
+        if cascade {
+            return Err(ErrorCode::NotSupported(
+                "drop cascade in MockCatalogWriter is unsupported".to_string(),
+                "use drop instead".to_string(),
+            )
+            .into());
+        }
         let &schema_id = self
             .table_id_to_schema_id
             .read()
@@ -420,6 +500,31 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn alter_source_column(&self, source: PbSource) -> Result<()> {
+        self.catalog.write().update_source(&source);
+        Ok(())
+    }
+
+    async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()> {
+        for database in self.catalog.read().iter_databases() {
+            for schema in database.iter_schemas() {
+                match object {
+                    Object::TableId(table_id) => {
+                        if let Some(table) = schema.get_table_by_id(&TableId::from(table_id)) {
+                            let mut pb_table = table.to_prost(schema.id(), database.id());
+                            pb_table.owner = owner_id;
+                            self.catalog.write().update_table(&pb_table);
+                            return Ok(());
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+
+        Err(ErrorCode::ItemNotFound(format!("object not found: {:?}", object)).into())
+    }
+
     async fn alter_view_name(&self, _view_id: u32, _view_name: &str) -> Result<()> {
         unreachable!()
     }
@@ -456,12 +561,19 @@ impl MockCatalogWriter {
             database_id: 0,
             owner: DEFAULT_SUPER_USER_ID,
         });
+        catalog.write().create_schema(&PbSchema {
+            id: 3,
+            name: RW_CATALOG_SCHEMA_NAME.to_string(),
+            database_id: 0,
+            owner: DEFAULT_SUPER_USER_ID,
+        });
         let mut map: HashMap<u32, DatabaseId> = HashMap::new();
         map.insert(1_u32, 0_u32);
         map.insert(2_u32, 0_u32);
+        map.insert(3_u32, 0_u32);
         Self {
             catalog,
-            id: AtomicU32::new(2),
+            id: AtomicU32::new(3),
             table_id_to_schema_id: Default::default(),
             schema_id_to_database_id: RwLock::new(map),
         }
@@ -579,8 +691,10 @@ impl UserInfoWriter for MockUserInfoWriter {
     ) -> Result<()> {
         let mut lock = self.user_info.write();
         let id = update_user.get_id();
-        let old_name = lock.get_user_name_by_id(id).unwrap();
-        let mut user_info = lock.get_user_by_name(&old_name).unwrap().clone();
+        let Some(old_name) = lock.get_user_name_by_id(id) else {
+            return Ok(());
+        };
+        let mut user_info = lock.get_user_by_name(&old_name).unwrap().to_prost();
         update_fields.into_iter().for_each(|field| match field {
             UpdateField::Super => user_info.is_super = update_user.is_super,
             UpdateField::Login => user_info.can_login = update_user.can_login,
@@ -614,7 +728,7 @@ impl UserInfoWriter for MockUserInfoWriter {
             .collect::<Vec<_>>();
         for user_id in users {
             if let Some(u) = self.user_info.write().get_user_mut(user_id) {
-                u.grant_privileges.extend(privileges.clone());
+                u.extend_privileges(privileges.clone());
             }
         }
         Ok(())
@@ -633,32 +747,7 @@ impl UserInfoWriter for MockUserInfoWriter {
     ) -> Result<()> {
         for user_id in users {
             if let Some(u) = self.user_info.write().get_user_mut(user_id) {
-                u.grant_privileges.iter_mut().for_each(|p| {
-                    for rp in &privileges {
-                        if rp.object != p.object {
-                            continue;
-                        }
-                        if revoke_grant_option {
-                            for ao in &mut p.action_with_opts {
-                                if rp
-                                    .action_with_opts
-                                    .iter()
-                                    .any(|rao| rao.action == ao.action)
-                                {
-                                    ao.with_grant_option = false;
-                                }
-                            }
-                        } else {
-                            p.action_with_opts.retain(|po| {
-                                rp.action_with_opts
-                                    .iter()
-                                    .all(|rao| rao.action != po.action)
-                            });
-                        }
-                    }
-                });
-                u.grant_privileges
-                    .retain(|p| !p.action_with_opts.is_empty());
+                u.revoke_privileges(privileges.clone(), revoke_grant_option);
             }
         }
         Ok(())
@@ -698,7 +787,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         })
     }
 
-    async fn get_epoch(&self) -> RpcResult<HummockSnapshot> {
+    async fn get_snapshot(&self) -> RpcResult<HummockSnapshot> {
         Ok(HummockSnapshot {
             committed_epoch: 0,
             current_epoch: 0,
@@ -712,8 +801,12 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         })
     }
 
-    async fn cancel_creating_jobs(&self, _infos: Vec<CreatingJobInfo>) -> RpcResult<()> {
+    async fn wait(&self) -> RpcResult<()> {
         Ok(())
+    }
+
+    async fn cancel_creating_jobs(&self, _infos: PbJobs) -> RpcResult<Vec<u32>> {
+        Ok(vec![])
     }
 
     async fn list_table_fragments(
@@ -721,6 +814,18 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _table_ids: &[u32],
     ) -> RpcResult<HashMap<u32, TableFragmentInfo>> {
         Ok(HashMap::default())
+    }
+
+    async fn list_table_fragment_states(&self) -> RpcResult<Vec<TableFragmentState>> {
+        Ok(vec![])
+    }
+
+    async fn list_fragment_distribution(&self) -> RpcResult<Vec<FragmentDistribution>> {
+        Ok(vec![])
+    }
+
+    async fn list_actor_states(&self) -> RpcResult<Vec<ActorState>> {
+        Ok(vec![])
     }
 
     async fn unpin_snapshot(&self) -> RpcResult<()> {
@@ -739,12 +844,56 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(SystemParams::default().into())
     }
 
-    async fn set_system_param(&self, _param: String, _value: Option<String>) -> RpcResult<()> {
-        Ok(())
+    async fn set_system_param(
+        &self,
+        _param: String,
+        _value: Option<String>,
+    ) -> RpcResult<Option<SystemParamsReader>> {
+        Ok(Some(SystemParams::default().into()))
     }
 
     async fn list_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
         Ok(vec![])
+    }
+
+    async fn get_tables(&self, _table_ids: &[u32]) -> RpcResult<HashMap<u32, Table>> {
+        Ok(HashMap::new())
+    }
+
+    async fn list_hummock_pinned_versions(&self) -> RpcResult<Vec<(u32, u64)>> {
+        unimplemented!()
+    }
+
+    async fn list_hummock_pinned_snapshots(&self) -> RpcResult<Vec<(u32, u64)>> {
+        unimplemented!()
+    }
+
+    async fn get_hummock_current_version(&self) -> RpcResult<HummockVersion> {
+        unimplemented!()
+    }
+
+    async fn get_hummock_checkpoint_version(&self) -> RpcResult<HummockVersion> {
+        unimplemented!()
+    }
+
+    async fn list_version_deltas(&self) -> RpcResult<Vec<HummockVersionDelta>> {
+        unimplemented!()
+    }
+
+    async fn list_branched_objects(&self) -> RpcResult<Vec<BranchedObject>> {
+        unimplemented!()
+    }
+
+    async fn list_hummock_compaction_group_configs(&self) -> RpcResult<Vec<CompactionGroupInfo>> {
+        unimplemented!()
+    }
+
+    async fn list_hummock_active_write_limits(&self) -> RpcResult<HashMap<u64, WriteLimit>> {
+        unimplemented!()
+    }
+
+    async fn list_hummock_meta_configs(&self) -> RpcResult<HashMap<String, String>> {
+        unimplemented!()
     }
 }
 

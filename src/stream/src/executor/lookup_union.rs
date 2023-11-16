@@ -29,8 +29,8 @@ use crate::executor::{BoxedMessageStream, ExecutorInfo};
 /// pipe the second, and finally the first. In the future we could have more efficient
 /// implementation.
 pub struct LookupUnionExecutor {
-    inputs: Vec<BoxedExecutor>,
     info: ExecutorInfo,
+    inputs: Vec<BoxedExecutor>,
     order: Vec<usize>,
 }
 
@@ -113,7 +113,7 @@ impl LookupUnionExecutor {
                     end = false;
                     match msg {
                         Message::Watermark(_) => {
-                            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                            // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                         }
 
                         msg @ Message::Chunk(_) => yield msg,

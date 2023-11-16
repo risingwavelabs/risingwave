@@ -9,31 +9,31 @@ CREATE TABLE orders (
 
 statement ok
 CREATE MATERIALIZED VIEW orders_count_by_user AS
-      SELECT user_id, date, count(*) AS orders_count 
-      FROM orders 
+      SELECT user_id, date, count(*) AS orders_count
+      FROM orders
       GROUP BY user_id, date;
 
 statement ok
 CREATE MATERIALIZED VIEW orders_count_by_user_1 AS
-      SELECT user_id, date, count(*) AS orders_count 
-      FROM orders 
+      SELECT user_id, date, count(*) AS orders_count
+      FROM orders
       GROUP BY user_id, date ORDER BY user_id desc, date desc;
 
 statement ok
 CREATE MATERIALIZED VIEW orders_count_by_user_2 AS
-      SELECT user_id, date, count(*) AS orders_count 
-      FROM orders 
+      SELECT user_id, date, count(*) AS orders_count
+      FROM orders
       GROUP BY user_id, date ORDER BY user_id asc, date desc;
 
 statement ok
 CREATE MATERIALIZED VIEW orders_count_by_user_3 AS
-      SELECT user_id, date, count(*) AS orders_count 
-      FROM orders 
+      SELECT user_id, date, count(*) AS orders_count
+      FROM orders
       GROUP BY user_id, date ORDER BY user_id desc, date asc;
 
 statement ok
-insert into orders values 
-    (0, 42, 1111), 
+insert into orders values
+    (0, 42, 1111),
     (1, 42, 2222),
     (2, 42, 2222),
     (3, 43, 1111),
@@ -227,9 +227,9 @@ drop materialized view orders_count_by_user_3;
 
 statement ok
 CREATE MATERIALIZED VIEW orders_count_by_user AS
-      SELECT user_id, date, count(*) AS orders_count 
-      FROM orders 
-      GROUP BY user_id, date 
+      SELECT user_id, date, count(*) AS orders_count
+      FROM orders
+      GROUP BY user_id, date
       ORDER BY orders_count;
 
 query III rowsort

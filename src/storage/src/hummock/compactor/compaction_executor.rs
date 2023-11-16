@@ -14,6 +14,7 @@
 
 use std::future::Future;
 
+use risingwave_common::util::resource_util;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use tokio::task::JoinHandle;
 
@@ -21,21 +22,25 @@ use tokio::task::JoinHandle;
 pub struct CompactionExecutor {
     /// Runtime for compaction tasks.
     runtime: BackgroundShutdownRuntime,
+    worker_num: usize,
 }
 
 impl CompactionExecutor {
     pub fn new(worker_threads_num: Option<usize>) -> Self {
+        let mut worker_num = resource_util::cpu::total_cpu_available() as usize;
         let runtime = {
             let mut builder = tokio::runtime::Builder::new_multi_thread();
             builder.thread_name("risingwave-compaction");
             if let Some(worker_threads_num) = worker_threads_num {
                 builder.worker_threads(worker_threads_num);
+                worker_num = worker_threads_num;
             }
             builder.enable_all().build().unwrap()
         };
 
         Self {
             runtime: runtime.into(),
+            worker_num,
         }
     }
 
@@ -46,5 +51,9 @@ impl CompactionExecutor {
         T: Send + 'static,
     {
         self.runtime.spawn(t)
+    }
+
+    pub fn worker_num(&self) -> usize {
+        self.worker_num
     }
 }

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -26,6 +26,9 @@ pub type TaskProgressManagerRef = Arc<Mutex<HashMap<HummockCompactionTaskId, Arc
 pub struct TaskProgress {
     pub num_ssts_sealed: AtomicU32,
     pub num_ssts_uploaded: AtomicU32,
+    pub num_progress_key: AtomicU64,
+    pub num_pending_read_io: AtomicUsize,
+    pub num_pending_write_io: AtomicUsize,
 }
 
 impl TaskProgress {
@@ -35,6 +38,11 @@ impl TaskProgress {
 
     pub fn inc_ssts_uploaded(&self) {
         self.num_ssts_uploaded.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_progress_key(&self, inc_key_num: u64) {
+        self.num_progress_key
+            .fetch_add(inc_key_num, Ordering::Relaxed);
     }
 }
 

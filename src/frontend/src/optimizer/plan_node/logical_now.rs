@@ -12,26 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use itertools::Itertools;
+use pretty_xmlish::XmlNode;
 use risingwave_common::bail;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::utils::IndicesDisplay;
+use super::generic::GenericPlanRef;
+use super::utils::{childless_record, Distill};
 use super::{
-    ColPrunable, ColumnPruningContext, ExprRewritable, LogicalFilter, PlanBase, PlanRef,
+    ColPrunable, ColumnPruningContext, ExprRewritable, Logical, LogicalFilter, PlanBase, PlanRef,
     PredicatePushdown, RewriteStreamContext, StreamNow, ToBatch, ToStream, ToStreamContext,
 };
+use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMapping;
 use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalNow {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
 }
 
 impl LogicalNow {
@@ -42,35 +42,30 @@ impl LogicalNow {
             sub_fields: vec![],
             type_name: String::default(),
         }]);
-        let base = PlanBase::new_logical(ctx, schema, vec![], FunctionalDependencySet::default());
+        let base = PlanBase::new_logical(
+            ctx,
+            schema,
+            Some(vec![]),
+            FunctionalDependencySet::default(),
+        );
         Self { base }
     }
 }
 
-impl fmt::Display for LogicalNow {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("LogicalNow");
+impl Distill for LogicalNow {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let vec = if self.base.ctx().is_explain_verbose() {
+            vec![("output", column_names_pretty(self.schema()))]
+        } else {
+            vec![]
+        };
 
-        if verbose {
-            // For now, output all columns from the left side. Make it explicit here.
-            builder.field(
-                "output",
-                &IndicesDisplay {
-                    indices: &(0..self.schema().fields.len()).collect_vec(),
-                    input_schema: self.schema(),
-                },
-            );
-        }
-
-        builder.finish()
+        childless_record("LogicalNow", vec)
     }
 }
 
 impl_plan_tree_node_for_leaf! { LogicalNow }
-
 impl ExprRewritable for LogicalNow {}
-
 impl PredicatePushdown for LogicalNow {
     fn predicate_pushdown(
         &self,
@@ -86,7 +81,7 @@ impl ToStream for LogicalNow {
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        Ok((self.clone().into(), ColIndexMapping::new(vec![Some(0)])))
+        Ok((self.clone().into(), ColIndexMapping::new(vec![Some(0)], 1)))
     }
 
     /// `to_stream` is equivalent to `to_stream_with_dist_required(RequiredDist::Any)`

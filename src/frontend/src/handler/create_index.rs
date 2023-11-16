@@ -15,15 +15,17 @@
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_pb::catalog::{PbIndex, PbTable};
+use risingwave_pb::catalog::{PbIndex, PbStreamJobStatus, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
-use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_pb::user::grant_privilege::Object;
 use risingwave_sqlparser::ast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
@@ -33,8 +35,9 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
@@ -73,7 +76,7 @@ pub(crate) fn gen_create_index_plan(
 
     session.check_privileges(&[ObjectCheckItem::new(
         table.owner,
-        Action::Select,
+        AclMode::Select,
         Object::TableId(table.id.table_id),
     )])?;
 
@@ -185,13 +188,14 @@ pub(crate) fn gen_create_index_plan(
         index_table_name.clone(),
         &index_columns_ordered_expr,
         &include_columns_expr,
-        // We use the whole index columns as distributed key by default if users
+        // We use the first index column as distributed key by default if users
         // haven't specify the distributed by columns.
         if distributed_columns_expr.is_empty() {
-            index_columns_ordered_expr.len()
+            1
         } else {
             distributed_columns_expr.len()
         },
+        table.cardinality,
     )?;
 
     let (index_database_id, index_schema_id) =
@@ -238,6 +242,9 @@ pub(crate) fn gen_create_index_plan(
         primary_table_id: table.id.table_id,
         index_item,
         original_columns,
+        initialized_at_epoch: None,
+        created_at_epoch: None,
+        stream_job_status: PbStreamJobStatus::Creating.into(),
     };
 
     let plan: PlanRef = materialize.into();
@@ -245,7 +252,7 @@ pub(crate) fn gen_create_index_plan(
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
         ctx.trace("Create Index:");
-        ctx.trace(plan.explain_to_string().unwrap());
+        ctx.trace(plan.explain_to_string());
     }
 
     Ok((plan, index_table_prost, index_prost))
@@ -308,6 +315,7 @@ fn assemble_materialize(
     index_columns: &[(ExprImpl, OrderType)],
     include_columns: &[ExprImpl],
     distributed_by_columns_len: usize,
+    cardinality: Cardinality,
 ) -> Result<StreamMaterialize> {
     // Build logical plan and then call gen_create_index_plan
     // LogicalProject(index_columns, include_columns)
@@ -317,12 +325,13 @@ fn assemble_materialize(
 
     let logical_scan = LogicalScan::create(
         table_name,
-        false,
+        ScanTableType::default(),
         table_desc.clone(),
         // Index table has no indexes.
         vec![],
         context,
         false,
+        cardinality,
     );
 
     let exprs = index_columns
@@ -348,7 +357,7 @@ fn assemble_materialize(
                 .name
                 .clone(),
             ExprImpl::FunctionCall(func) => {
-                let func_name = func.get_expr_type().as_str_name().to_string();
+                let func_name = func.func_type().as_str_name().to_string();
                 let mut name = func_name.clone();
                 while !col_names.insert(name.clone()) {
                     count += 1;
@@ -402,15 +411,12 @@ pub async fn handle_create_index(
 
     let (graph, index_table, index) = {
         {
-            if let Err(e) = session.check_relation_name_duplicated(index_name.clone()) {
-                if if_not_exists {
-                    return Ok(PgResponse::empty_result_with_notice(
-                        StatementType::CREATE_INDEX,
-                        format!("relation \"{}\" already exists, skipping", index_name),
-                    ));
-                } else {
-                    return Err(e);
-                }
+            if let Either::Right(resp) = session.check_relation_name_duplicated(
+                index_name.clone(),
+                StatementType::CREATE_INDEX,
+                if_not_exists,
+            )? {
+                return Ok(resp);
             }
         }
 
@@ -449,7 +455,7 @@ pub async fn handle_create_index(
                 index.name.clone(),
             ));
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_index(index, index_table, graph)
         .await?;

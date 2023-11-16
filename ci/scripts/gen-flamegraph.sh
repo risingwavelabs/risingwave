@@ -6,6 +6,8 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
+RUST_TOOLCHAIN=$(cat rust-toolchain)
+
 QUERY_DIR="/risingwave/ci/scripts/sql/nexmark"
 
 # TODO(kwannoel): This is a workaround since workdir is `/risingwave` in the docker container.
@@ -27,7 +29,7 @@ get_nexmark_queries_to_run() {
       https://api.github.com/repos/risingwavelabs/risingwave/issues/"$PULL_REQUEST"/labels \
     | parse_labels)
   elif [[ "$NEXMARK_QUERIES" == "all" ]]; then
-    export NEXMARK_QUERIES="$(ls $QUERY_DIR | sed -n 's/^q\([0-9]*\)\.sql/\1/p' | sort -n | sed 's/\(.*\)/nexmark-q\1/')"
+    export NEXMARK_QUERIES="$(ls $QUERY_DIR | grep -v "\.drop\.sql" | grep -v "ddl.sql" | sed 's/\(.*\)\.sql/nexmark-\1/' | sort)"
   else
     echo "NEXMARK_QUERIES already set."
   fi
@@ -78,6 +80,8 @@ install_all() {
   echo ">>> Installing addr2line"
   git clone https://github.com/gimli-rs/addr2line
   pushd addr2line
+  git checkout 0.20.0
+  echo "$RUST_TOOLCHAIN" > rust-toolchain
   cargo b --examples -r
   mv ./target/release/examples/addr2line $(which addr2line)
   popd
@@ -93,8 +97,8 @@ install_all() {
   promql --version
 
   echo ">>> Installing Kafka"
-  wget https://downloads.apache.org/kafka/3.4.0/kafka_2.13-3.4.0.tgz
-  tar -zxvf kafka_2.13-3.4.0.tgz
+  wget https://downloads.apache.org/kafka/3.4.1/kafka_2.13-3.4.1.tgz
+  tar -zxvf kafka_2.13-3.4.1.tgz
 
   echo ">>> Installing nexmark bench"
   buildkite-agent artifact download nexmark-server /usr/local/bin
@@ -180,8 +184,8 @@ start_nperf() {
 }
 
 start_kafka() {
-  ./kafka_2.13-3.4.0/bin/zookeeper-server-start.sh ./kafka_2.13-3.4.0/config/zookeeper.properties > zookeeper.log 2>&1 &
-  ./kafka_2.13-3.4.0/bin/kafka-server-start.sh ./kafka_2.13-3.4.0/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
+  ./kafka_2.13-3.4.1/bin/zookeeper-server-start.sh ./kafka_2.13-3.4.1/config/zookeeper.properties > zookeeper.log 2>&1 &
+  ./kafka_2.13-3.4.1/bin/kafka-server-start.sh ./kafka_2.13-3.4.1/config/server.properties --override num.partitions=8 > kafka.log 2>&1 &
   sleep 10
   # TODO(kwannoel): `trap ERR` and upload these logs.
   # buildkite-agent artifact upload ./zookeeper.log
@@ -193,7 +197,7 @@ start_kafka() {
 gen_events() {
   pushd nexmark-bench
   nexmark-server -c
-  NEXMARK_EVENTS=$((400 * 1000 * 1000))
+  NEXMARK_EVENTS=$((300 * 1000 * 1000))
   echo "Generating $NEXMARK_EVENTS events"
   nexmark-server \
     --event-rate 500000 \
@@ -205,7 +209,7 @@ gen_events() {
 }
 
 show_kafka_topics() {
-  ./kafka_2.13-3.4.0/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --topic nexmark --bootstrap-server localhost:9092
+  ./kafka_2.13-3.4.1/bin/kafka-run-class.sh kafka.tools.GetOffsetShell --topic nexmark --bootstrap-server localhost:9092
 }
 
 gen_cpu_flamegraph() {

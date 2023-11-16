@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod column;
+mod external_table;
 mod internal_table;
 mod physical_table;
 mod schema;
@@ -23,6 +24,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 pub use column::*;
+pub use external_table::*;
 pub use internal_table::*;
 use parse_display::Display;
 pub use physical_table::*;
@@ -41,6 +43,10 @@ pub type CatalogVersion = u64;
 pub type TableVersionId = u64;
 /// The default version ID for a new table.
 pub const INITIAL_TABLE_VERSION_ID: u64 = 0;
+/// The version number of the per-source catalog.
+pub type SourceVersionId = u64;
+/// The default version ID for a new source.
+pub const INITIAL_SOURCE_VERSION_ID: u64 = 0;
 
 pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "public";
@@ -55,13 +61,29 @@ pub const DEFAULT_SUPER_USER_FOR_PG: &str = "postgres";
 pub const DEFAULT_SUPER_USER_FOR_PG_ID: u32 = 2;
 
 pub const NON_RESERVED_USER_ID: i32 = 11;
-pub const NON_RESERVED_PG_CATALOG_TABLE_ID: i32 = 1001;
+pub const NON_RESERVED_SYS_CATALOG_ID: i32 = 1001;
 
 pub const SYSTEM_SCHEMAS: [&str; 3] = [
     PG_CATALOG_SCHEMA_NAME,
     INFORMATION_SCHEMA_SCHEMA_NAME,
     RW_CATALOG_SCHEMA_NAME,
 ];
+
+pub const RW_RESERVED_COLUMN_NAME_PREFIX: &str = "_rw_";
+
+// When there is no primary key specified while creating source, will use the
+// the message key as primary key in `BYTEA` type with this name.
+pub const DEFAULT_KEY_COLUMN_NAME: &str = "_rw_key";
+
+/// For kafka source, we attach a hidden column [`KAFKA_TIMESTAMP_COLUMN_NAME`] to it, so that we
+/// can limit the timestamp range when querying it directly with batch query. The column type is
+/// [`DataType::Timestamptz`]. For more details, please refer to
+/// [this rfc](https://github.com/risingwavelabs/rfcs/pull/20).
+pub const KAFKA_TIMESTAMP_COLUMN_NAME: &str = "_rw_kafka_timestamp";
+
+pub fn is_system_schema(schema_name: &str) -> bool {
+    SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)
+}
 
 pub const ROWID_PREFIX: &str = "_row_id";
 
@@ -90,6 +112,49 @@ pub fn row_id_column_desc() -> ColumnDesc {
         field_descs: vec![],
         type_name: "".to_string(),
         generated_or_default_column: None,
+        description: None,
+    }
+}
+
+pub const OFFSET_COLUMN_NAME: &str = "_rw_offset";
+
+pub fn offset_column_name() -> String {
+    OFFSET_COLUMN_NAME.to_string()
+}
+
+pub const CDC_SOURCE_COLUMN_NUM: u32 = 4;
+pub const TABLE_NAME_COLUMN_NAME: &str = "_rw_table_name";
+pub fn cdc_table_name_column_name() -> String {
+    TABLE_NAME_COLUMN_NAME.to_string()
+}
+
+pub fn is_offset_column_name(name: &str) -> bool {
+    name.starts_with(OFFSET_COLUMN_NAME)
+}
+/// Creates a offset column for storing upstream offset
+/// Used in cdc source currently
+pub fn offset_column_desc() -> ColumnDesc {
+    ColumnDesc {
+        data_type: DataType::Varchar,
+        column_id: ColumnId::placeholder(),
+        name: offset_column_name(),
+        field_descs: vec![],
+        type_name: "".to_string(),
+        generated_or_default_column: None,
+        description: None,
+    }
+}
+
+/// A column to store the upstream table name of the cdc table
+pub fn cdc_table_name_column_desc() -> ColumnDesc {
+    ColumnDesc {
+        data_type: DataType::Varchar,
+        column_id: ColumnId::placeholder(),
+        name: cdc_table_name_column_name(),
+        field_descs: vec![],
+        type_name: "".to_string(),
+        generated_or_default_column: None,
+        description: None,
     }
 }
 
@@ -418,9 +483,10 @@ impl ConflictBehavior {
             PbHandleConflictBehavior::Overwrite => ConflictBehavior::Overwrite,
             PbHandleConflictBehavior::Ignore => ConflictBehavior::IgnoreConflict,
             // This is for backward compatibility, in the previous version
-            // `ConflictBehaviorUnspecified' represented `NoCheck`, so just treat it as `NoCheck`.
-            PbHandleConflictBehavior::NoCheck
-            | PbHandleConflictBehavior::ConflictBehaviorUnspecified => ConflictBehavior::NoCheck,
+            // `HandleConflictBehavior::Unspecified` represented `NoCheck`, so just treat it as `NoCheck`.
+            PbHandleConflictBehavior::NoCheck | PbHandleConflictBehavior::Unspecified => {
+                ConflictBehavior::NoCheck
+            }
         }
     }
 

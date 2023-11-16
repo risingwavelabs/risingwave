@@ -7,7 +7,7 @@ CREATE SOURCE ad_impression (
     topic = 'ad_impression',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) ROW FORMAT JSON;
+) FORMAT PLAIN ENCODE JSON;
 
 CREATE SOURCE ad_click (
     bid_id BIGINT,
@@ -17,4 +17,4 @@ CREATE SOURCE ad_click (
     topic = 'ad_click',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) ROW FORMAT JSON;
+) FORMAT PLAIN ENCODE JSON;

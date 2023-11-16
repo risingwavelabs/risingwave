@@ -1,0 +1,30 @@
+- sql: values (''::numeric(20));
+  expected_outputs:
+  - binder_error
+- sql: values ('1'::float);
+  expected_outputs:
+  - logical_plan
+- sql: values ('1'::float(24));
+  expected_outputs:
+  - logical_plan
+- sql: values ('1'::float(25));
+  expected_outputs:
+  - logical_plan
+- sql: values ('1'::float(53));
+  expected_outputs:
+  - logical_plan
+- sql: values (''::timestamp with time zone);
+  expected_outputs:
+  - logical_plan
+- sql: values (''::time with time zone);
+  expected_outputs:
+  - binder_error
+- sql: select '1'::iNt2;
+  expected_outputs:
+  - logical_plan
+- sql: select ''::"iNt2";
+  expected_outputs:
+  - binder_error
+- sql: select ''::public.int2;
+  expected_outputs:
+  - binder_error

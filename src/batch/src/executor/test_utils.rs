@@ -13,13 +13,11 @@
 // limitations under the License.
 
 use std::collections::VecDeque;
-use std::future::Future;
 
 use assert_matches::assert_matches;
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, DataChunkTestExt};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
@@ -47,6 +45,7 @@ pub fn gen_data(batch_size: usize, batch_num: usize, data_types: &[DataType]) ->
         batch_size,
         data_types,
         &VarcharProperty::RandomFixedLength(None),
+        1.0,
     )
 }
 
@@ -74,7 +73,7 @@ pub fn gen_sorted_data(
         let mut array_builder = DataType::Int64.create_array_builder(batch_size);
 
         for _ in 0..batch_size {
-            array_builder.append_datum(&data_gen.generate_datum(0));
+            array_builder.append(&data_gen.generate_datum(0));
         }
 
         let array = array_builder.finish();
@@ -101,13 +100,13 @@ pub fn gen_projected_data(
         let mut array_builder = DataType::Int64.create_array_builder(batch_size);
 
         for j in 0..batch_size {
-            array_builder.append_datum(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
+            array_builder.append(&data_gen.generate_datum(((i + 1) * (j + 1)) as u64));
         }
 
         let chunk = DataChunk::new(vec![array_builder.finish().into()], batch_size);
 
         let array = futures::executor::block_on(expr.eval(&chunk)).unwrap();
-        let chunk = DataChunk::new(vec![Column::new(array)], batch_size);
+        let chunk = DataChunk::new(vec![array], batch_size);
         ret.push(chunk);
     }
 
@@ -214,14 +213,14 @@ pub async fn diff_executor_output(actual: BoxedExecutor, expect: BoxedExecutor) 
         .columns()
         .iter()
         .zip_eq_fast(actual.columns().iter())
-        .for_each(|(c1, c2)| assert_eq!(c1.array(), c2.array()));
+        .for_each(|(c1, c2)| assert_eq!(c1, c2));
 
     is_data_chunk_eq(&expect, &actual)
 }
 
 fn is_data_chunk_eq(left: &DataChunk, right: &DataChunk) {
-    assert!(left.visibility().is_none());
-    assert!(right.visibility().is_none());
+    assert!(left.is_compacted());
+    assert!(right.is_compacted());
 
     assert_eq!(
         left.cardinality(),
@@ -246,15 +245,11 @@ impl FakeExchangeSource {
 }
 
 impl ExchangeSource for FakeExchangeSource {
-    type TakeDataFuture<'a> = impl Future<Output = Result<Option<DataChunk>>> + 'a;
-
-    fn take_data(&mut self) -> Self::TakeDataFuture<'_> {
-        async {
-            if let Some(chunk) = self.chunks.pop() {
-                Ok(chunk)
-            } else {
-                Ok(None)
-            }
+    async fn take_data(&mut self) -> Result<Option<DataChunk>> {
+        if let Some(chunk) = self.chunks.pop() {
+            Ok(chunk)
+        } else {
+            Ok(None)
         }
     }
 

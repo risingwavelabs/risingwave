@@ -12,14 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::meta::PausedReason;
+
 use crate::CtlContext;
+
+fn desc(reason: PausedReason) -> &'static str {
+    // Method on optional enums derived from `prost` will use `Unspecified` if unset. So we treat
+    // `Unspecified` as not paused here.
+    match reason {
+        PausedReason::Unspecified => "not paused",
+        PausedReason::ConfigChange => "paused due to configuration change",
+        PausedReason::Manual => "paused manually",
+    }
+}
 
 pub async fn pause(context: &CtlContext) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
 
-    meta_client.pause().await?;
+    let response = meta_client.pause().await?;
 
-    println!("Paused");
+    println!(
+        "Done.\nPrevious: {}\nCurrent: {}",
+        desc(response.prev()),
+        desc(response.curr())
+    );
 
     Ok(())
 }
@@ -27,9 +43,13 @@ pub async fn pause(context: &CtlContext) -> anyhow::Result<()> {
 pub async fn resume(context: &CtlContext) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
 
-    meta_client.resume().await?;
+    let response = meta_client.resume().await?;
 
-    println!("Resumed");
+    println!(
+        "Done.\nPrevious: {}\nCurrent: {}",
+        desc(response.prev()),
+        desc(response.curr())
+    );
 
     Ok(())
 }

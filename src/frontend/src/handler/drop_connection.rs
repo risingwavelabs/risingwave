@@ -42,13 +42,12 @@ pub async fn handle_drop_connection(
                 Ok((c, s)) => (c, s),
                 Err(e) => {
                     return if if_exists {
-                        Ok(RwPgResponse::empty_result_with_notice(
-                            StatementType::DROP_CONNECTION,
-                            format!(
+                        Ok(RwPgResponse::builder(StatementType::DROP_CONNECTION)
+                            .notice(format!(
                                 "connection \"{}\" does not exist, skipping",
                                 connection_name
-                            ),
-                        ))
+                            ))
+                            .into())
                     } else {
                         Err(e.into())
                     }
@@ -59,7 +58,7 @@ pub async fn handle_drop_connection(
         connection.id
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_connection(connection_id).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_CONNECTION))

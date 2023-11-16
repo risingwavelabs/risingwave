@@ -19,7 +19,7 @@ def do_test(config, N, n, prefix):
     cur = conn.cursor()
 
     # Execute a SELECT statement
-    cur.execute(f'''CREATE TABLE s3_test( 
+    cur.execute(f'''CREATE TABLE s3_test(
         id int,
         name TEXT,
         sex int,
@@ -32,7 +32,7 @@ def do_test(config, N, n, prefix):
         s3.credentials.access = '{config['S3_ACCESS_KEY']}',
         s3.credentials.secret = '{config['S3_SECRET_KEY']}',
         s3.endpoint_url = 'https://{config['S3_ENDPOINT']}'
-    ) ROW FORMAT json;''')
+    ) FORMAT PLAIN ENCODE JSON;''')
 
     total_row = int(N * n)
     sleep(120)
@@ -103,7 +103,7 @@ if __name__ == "__main__":
                 config["S3_BUCKET"],
                    f"{run_id}_data_{i}.ndjson",
                 f"data_{i}.ndjson"
-             
+
             )
             print(f"Uploaded {run_id}_data_{i}.ndjson to S3")
             os.remove(f"data_{i}.ndjson")

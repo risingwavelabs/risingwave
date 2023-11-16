@@ -1,0 +1,141 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (
+    v1 int,
+    v2 numeric,
+    v3 double,
+    v4 interval,
+    b bool,
+    s varchar,
+    bs bytea,
+    j jsonb,
+    arr int[]);
+
+statement ok
+create materialized view mv_sum as
+select
+    count(*) as count_all,
+    count(v1) as count_v1,
+    count(v2) as count_v2,
+    count(v3) as count_v3,
+    count(v4) as count_v4,
+    count(b) as count_b,
+    count(s) as count_s,
+    count(bs) as count_bs,
+    count(j) as count_j,
+    count(arr) as count_arr,
+    sum(v1) as sum_v1,
+    sum(v2) as sum_v2,
+    sum(v3) as sum_v3,
+    sum(v4) as sum_v4,
+    min(v1) as min_v1,
+    min(v2) as min_v2,
+    min(v3) as min_v3,
+    min(v4) as min_v4,
+    max(v1) as max_v1,
+    max(v2) as max_v2,
+    max(v3) as max_v3,
+    max(v4) as max_v4
+from t;
+
+statement ok
+flush;
+
+# For basic/simple agg, there should be the trivial agg values
+# even without any input rows.
+query I
+select * from mv_sum;
+----
+0 0 0 0 0 0 0 0 0 0 NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL NULL
+
+statement ok
+insert into t values
+(null, 2, 3, interval '1' second, true,  '',   '',     'null', array[]::int[]),
+(4, null, 6, interval '1' minute, null,  'a',  'a',    '1',    null),
+(7, 8, null, interval '1' hour,   false, null, '\x31', '"a"',  array[2]),
+(10, 11, 12, null,                null,  'zz', null,   null,   array[3,2]);
+
+query I
+select * from mv_sum;
+----
+4  3  3  3  3  2  3  3  3  3  21  21  21  01:01:01  4  2  3  00:00:01  10  11  12  01:00:00
+
+statement ok
+drop materialized view mv_sum;
+
+statement ok
+drop table t;
+
+statement ok
+create table t1 (id int);
+
+statement ok
+create materialized view v as select count(*) cnt, sum(id) sum, array_agg(id) arr from t1;
+
+statement ok
+create materialized view v2 as select count(*) cnt, sum(id) sum, array_agg(id) arr from t1 group by id;
+
+statement ok
+insert into t1 values (1);
+
+statement ok
+delete from t1;
+
+query III
+select * from v;
+----
+0 NULL NULL
+
+query II
+select * from v2;
+----
+
+statement ok
+insert into t1 values (1);
+
+query III
+select * from v;
+----
+1 1 {1}
+
+query III
+select * from v2;
+----
+1 1 {1}
+
+statement ok
+drop materialized view v;
+
+statement ok
+drop materialized view v2;
+
+statement ok
+drop table t1;
+
+statement ok
+create table t(v1 int, v2 int);
+
+statement ok
+create materialized view mv as
+select
+    first_value(v1 order by v1) as o1
+  , first_value(v1 order by v2 desc) as o2
+  , last_value(v1 order by v1) as o3
+  , last_value(v1 order by v2 asc nulls first) as o4
+from t;
+
+statement ok
+insert into t values (1, 2), (5, null), (4, 0);
+
+query iiii
+select * from mv;
+----
+1  5  5  1
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;

@@ -3,7 +3,7 @@ extend = [
   { path = "src/risedevtool/prometheus.toml" },
   { path = "src/risedevtool/minio.toml" },
   { path = "src/risedevtool/etcd.toml" },
-  { path = "src/risedevtool/jaeger.toml" },
+  { path = "src/risedevtool/tempo.toml" },
   { path = "src/risedevtool/kafka.toml" },
   { path = "src/risedevtool/gcloud-pubsub.toml" },
   { path = "src/risedevtool/redis.toml" },
@@ -14,6 +14,7 @@ extend = [
   { path = "src/tests/compaction_test/Makefile.toml" },
   { path = "src/storage/backup/integration_tests/Makefile.toml" },
   { path = "src/java_binding/make-java-binding.toml" },
+  { path = "src/stream/tests/integration_tests/integration_test.toml" },
 ]
 
 env_files = ["./risedev-components.user.env"]
@@ -22,11 +23,18 @@ env_scripts = [
   '''
 #!@duckscript
 
+# only duckscript can modify env variables in cargo-make
+# duckscript doc: https://github.com/sagiegurari/duckscript/blob/master/docs/sdk.md
+
 set_env ENABLE_TELEMETRY "false"
 
 is_sanitizer_enabled = get_env ENABLE_SANITIZER
 is_all_in_one_enabled = get_env ENABLE_ALL_IN_ONE
 is_hdfs_backend = get_env ENABLE_HDFS
+is_release = get_env ENABLE_RELEASE_PROFILE
+is_not_release = not ${is_release}
+is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
+is_hummock_trace = get_env ENABLE_HUMMOCK_TRACE
 
 if ${is_sanitizer_enabled}
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -39,8 +47,10 @@ end
 
 if ${is_all_in_one_enabled}
   set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd_all"
+  set_env RISEDEV_CTL_RUN_CMD "-- risectl"
 else
   set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd"
+  set_env RISEDEV_CTL_RUN_CMD "--bin risectl --"
 end
 
 if ${is_hdfs_backend}
@@ -49,6 +59,38 @@ else
   set_env BUILD_HDFS_BACKEND_CMD ""
 end
 
+if ${is_not_release} and ${is_dynamic_linking}
+  set_env RISINGWAVE_FEATURE_FLAGS "--features rw-dynamic-link --no-default-features"
+else
+  set_env RISINGWAVE_FEATURE_FLAGS "--features rw-static-link"
+end
+
+if ${is_hummock_trace}
+  set_env BUILD_HUMMOCK_TRACE_CMD "-p risingwave_storage --features hm-trace"
+else
+  set_env BUILD_HUMMOCK_TRACE_CMD ""
+end
+
+is_ci = get_env RISINGWAVE_CI
+is_not_ci = not ${is_ci}
+
+if ${is_not_ci}
+  query_log_path = get_env RW_QUERY_LOG_PATH
+  no_query_log_path = not ${query_log_path}
+
+  if ${no_query_log_path}
+    set_env RW_QUERY_LOG_PATH "${PREFIX_LOG}"
+  fi
+
+  rust_log = get_env RUST_LOG
+  no_rust_log = not ${rust_log}
+
+  if ${no_rust_log}
+    set_env RUST_LOG "pgwire_query_log=info"
+  else
+    set_env RUST_LOG "pgwire_query_log=info,${rust_log}"
+  end
+end
 ''',
 ]
 
@@ -59,18 +101,18 @@ skip_core_tasks = true
 skip_git_env_info = true
 skip_rust_env_info = false
 skip_crate_env_info = true
-min_version = "0.36.6"
+min_version = "0.36.10"
 
 [tasks.clean-full]
 category = "Misc"
-description = "Clean all downloaded binaries by deleting .risingwave folder"
+description = "Clean all downloaded binaries and all data, config and logs by deleting .risingwave folder"
 script = '''
 #!@duckscript
 rm -rf "${PREFIX}"
 '''
 
 [tasks.clean-data]
-category = "Misc"
+category = "RiseDev - Start/Stop"
 description = "Clean all data, config and logs"
 script = '''
 #!@duckscript
@@ -85,20 +127,19 @@ rm -rf "${PREFIX_PROFILING}"
 alias = "logs"
 
 [tasks.logs]
-category = "Misc"
-description = "Open logs with VSCode and dump in console"
+category = "RiseDev - Start/Stop"
+description = "Open logs with VSCode or dump in console"
 script = '''
 #!/usr/bin/env bash
-set -e
 
-code "${PREFIX_LOG}" || true
+code "${PREFIX_LOG}" 2> /dev/null
+if [[ $? -eq 0 ]]; then
+  exit 0
+fi
 
 for out_file in ${PREFIX_LOG}/*.log
 do
-  echo ""
-  echo "==="
-  echo "=== Dump log file $out_file ==="
-  echo "==="
+  echo "~~~ Dump log file $out_file"
   echo ""
   cat "$out_file" | tail -n 300
 done
@@ -129,7 +170,7 @@ watch -n 1 "tmux list-windows -t risedev | grep -v active | cut -d'(' -f1"
 alias = "delete"
 
 [tasks.delete]
-category = "Misc"
+category = "RiseDev - Start/Stop"
 description = "Delete a node in the cluster"
 script = '''
 #!/usr/bin/env bash
@@ -161,7 +202,7 @@ tmux kill-window -t $1
 alias = "follow"
 
 [tasks.follow]
-category = "misc"
+category = "Misc"
 description = "Follows the end of the logs of a specific component"
 script = '''
 #!/usr/bin/env bash
@@ -185,23 +226,27 @@ tail -f -n 5 ${PREFIX_LOG}/$1
 '''
 
 [tasks.check-logs]
-category = "Misc"
+private = true
+category = "RiseDev - CI"
 description = "Check if there is panic in log or significant log size issue"
 script = '''
 #!/usr/bin/env bash
 set -e
 
+echo "~~~ Check logs"
+du -ah ${PREFIX_LOG}
+
 for out_file in ${PREFIX_LOG}/*.log
 do
   if grep "panicked at" "$out_file" -C 100; then
-    echo "$(tput setaf 3)\"panicked at\" found in $out_file$(tput sgr0), please check if there's any bugs in this PR."
+    echo "$(tput setaf 1)\"panicked at\" found in $out_file$(tput sgr0), please check if there's any bugs in this PR."
     echo "You may find \"risedev-logs\" artifacts and download logs after all workflows finish."
     exit 1
   fi
 done
 
 if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 2000 )) ; then
-    echo "$(tput setaf 3)log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
+    echo "$(tput setaf 1)ERROR: log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
     exit 1
 fi
 '''
@@ -218,6 +263,7 @@ python -mwebbrowser file://$(pwd)/target/doc/index.html
 '''
 
 [tasks.link-standalone-binaries]
+private = true
 category = "RiseDev - Build"
 description = "Link standalone cmds to RiseDev bin"
 condition = { env_not_set = ["ENABLE_ALL_IN_ONE"] }
@@ -228,13 +274,16 @@ rm -f "${PREFIX_BIN}/compute-node"
 rm -f "${PREFIX_BIN}/meta-node"
 rm -f "${PREFIX_BIN}/frontend"
 rm -f "${PREFIX_BIN}/compactor"
+rm -f "${PREFIX_BIN}/risectl"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/compute-node" "${PREFIX_BIN}/compute-node"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/meta-node" "${PREFIX_BIN}/meta-node"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/frontend" "${PREFIX_BIN}/frontend"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/compactor" "${PREFIX_BIN}/compactor"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risectl" "${PREFIX_BIN}/risectl"
 '''
 
 [tasks.link-all-in-one-binaries]
+private = true
 category = "RiseDev - Build"
 description = "Link all-in-one cmds to RiseDev bin"
 condition = { env_set = ["ENABLE_ALL_IN_ONE"] }
@@ -250,9 +299,55 @@ ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "$
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/compactor"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/risectl"
 ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/playground"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/standalone"
+'''
+
+[tasks.codesign-playground]
+private = true
+category = "RiseDev - Build"
+description = "Codesign playground binary to support coredump"
+# If core dump is enabled by RiseDev and we're on an Apple Silicon platform,
+# codesign the binary before running.
+# https://developer.apple.com/forums/thread/694233?answerId=695943022#695943022
+condition = { env_set = [
+  "ENABLE_COREDUMP",
+], env = { "SYSTEM" = "darwin-arm64" } }
+script = '''
+#!/usr/bin/env bash
+
+set -ex
+codesign -s - -f --entitlements scripts/coredump/coredump.entitlements "target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave"
+'''
+
+[tasks.codesign-binaries]
+private = true
+category = "RiseDev - Build"
+description = "Codesign all binaries to support coredump"
+# If core dump is enabled by RiseDev and we're on an Apple Silicon platform,
+# codesign the binary before running.
+# https://developer.apple.com/forums/thread/694233?answerId=695943022#695943022
+condition = { env_set = [
+  "ENABLE_COREDUMP",
+], env = { "SYSTEM" = "darwin-arm64" } }
+script = '''
+#!/usr/bin/env bash
+set -e
+
+binaries=()
+
+if [[ "$ENABLE_ALL_IN_ONE" == "true" ]]; then
+  binaries=("risingwave")
+else
+  binaries=("meta-node" "compute-node" "frontend" "compactor")
+fi
+
+set -ex
+echo -n "${binaries[*]}" | parallel -d ' ' \
+  "codesign -s - -f --entitlements scripts/coredump/coredump.entitlements \"target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/{}\""
 '''
 
 [tasks.link-user-bin]
+private = true
 category = "RiseDev - Build"
 description = "Link all binaries to .bin"
 condition = { env_set = ["ENABLE_ALL_IN_ONE"] }
@@ -277,6 +372,7 @@ dependencies = [
   "link-standalone-binaries",
   "link-all-in-one-binaries",
   "link-user-bin",
+  "codesign-binaries",
 ]
 
 [tasks.b]
@@ -286,9 +382,10 @@ alias = "build-risingwave"
 alias = "build-risingwave"
 
 [tasks.extract-dashboard-artifact]
+private = true
 category = "RiseDev - Build"
 description = "Extract dashboard artifact"
-condition = { env_not_set = ["ENABLE_BUILD_DASHBOARD_V2"] }
+condition = { env_not_set = ["ENABLE_BUILD_DASHBOARD"] }
 script = '''
 #!/usr/bin/env bash
 
@@ -301,10 +398,20 @@ git worktree prune
 git worktree add "${PREFIX_UI}" origin/dashboard-artifact
 '''
 
-[tasks.export-dashboard-v2]
+[tasks.export-dashboard]
+private = true
 category = "RiseDev - Build"
-description = "Build dashboard v2"
-condition = { env_set = ["ENABLE_BUILD_DASHBOARD_V2"] }
+description = "Build dashboard"
+condition = { env_set = [
+  "ENABLE_BUILD_DASHBOARD",
+], files_modified = { input = [
+  "./dashboard/**/*.js",
+  "./dashboard/**/*.ts*",
+  "./dashboard/package.json",
+  "./dashboard/next.config.js",
+], output = [
+  "./dashboard/out/**/*.html",
+] } }
 script = """
 #!/usr/bin/env bash
 set -e
@@ -317,7 +424,7 @@ cd .. && ln -s "$(pwd)/dashboard/out" "${PREFIX_UI}"
 [tasks.build-risingwave]
 category = "RiseDev - Build"
 description = "Build Rust components"
-condition = { env_set = ["ENABLE_BUILD_RUST"] }
+condition = { env_true = ["ENABLE_BUILD_RUST"] }
 script = '''
 #!/usr/bin/env bash
 
@@ -328,12 +435,38 @@ echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build 
 echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
 set -xe
 cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev ${BUILD_HDFS_BACKEND_CMD}\
+${BUILD_HUMMOCK_TRACE_CMD}\
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
-            --features "${RISINGWAVE_FEATURES}" \
+            ${RISINGWAVE_FEATURE_FLAGS} \
             ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
 '''
 
+[tasks.build-risingwave-playground]
+category = "RiseDev - Build"
+description = "Build RisingWave playground"
+condition = { env_true = ["ENABLE_BUILD_RUST"] }
+script = '''
+#!/usr/bin/env bash
+
+set -e
+[[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
+echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
+set -xe
+
+cargo build -p risingwave_cmd_all \
+          --profile "${RISINGWAVE_BUILD_PROFILE}" \
+          ${RISINGWAVE_FEATURE_FLAGS} \
+          ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
+'''
+
 [tasks.clean]
+private = true
+category = "RiseDev - Build"
+description = "Clean all build targets"
+dependencies = ["clean-rust", "clean-java"]
+
+[tasks.clean-rust]
+private = true
 category = "RiseDev - Build"
 description = "Clean Rust targets"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
@@ -343,7 +476,27 @@ set -e
 cargo clean
 '''
 
+[tasks.clean-java]
+private = true
+category = "RiseDev - Build"
+description = "Clean Rust targets"
+condition = { env_set = ["ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+script = '''
+#!/usr/bin/env bash
+set -e
+
+if command -v mvn &> /dev/null; then
+  MAVEN_PATH="$(command -v mvn)"
+else
+  MAVEN_PATH="${PREFIX_BIN}/maven/bin/mvn"
+fi
+
+cd "${JAVA_DIR}"
+"${MAVEN_PATH}" clean
+'''
+
 [tasks.build-docs]
+private = true
 category = "RiseDev - Build"
 description = "Build Rust docs"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
@@ -357,6 +510,7 @@ cargo doc --workspace --no-deps --document-private-items
 '''
 
 [tasks.prepare-config]
+private = true
 category = "RiseDev - Prepare"
 description = "Copy necessary configuration files to RiseDev"
 script = '''
@@ -370,13 +524,14 @@ cp "src/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 '''
 
 [tasks.download-all]
-category = "RiseDev - Components"
+private = true
+category = "Misc"
 description = "Download all available components at once"
 dependencies = [
   "download-maven",
   "download-etcd",
   "download-grafana",
-  "download-jaeger",
+  "download-tempo",
   "download-kafka",
   "download-mcli",
   "download-minio",
@@ -386,9 +541,12 @@ dependencies = [
 ]
 
 [tasks.create-user-profiles-file]
+private = true
 category = "RiseDev - Prepare"
 description = "Create user profiles file if not exists"
-condition = { files_not_exist = ["${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/risedev-profiles.user.yml"] }
+condition = { files_not_exist = [
+  "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/risedev-profiles.user.yml",
+] }
 script = '''
 #!/usr/bin/env bash
 
@@ -420,7 +578,7 @@ dependencies = [
   "build-connector-node",
   "post-build-risingwave",
   "extract-dashboard-artifact",
-  "export-dashboard-v2",
+  "export-dashboard",
   "prepare-config",
 ]
 
@@ -433,70 +591,181 @@ dependencies = [
   "download-etcd",
   "download-grafana",
   "download-prometheus",
-  "download-jaeger",
+  "download-tempo",
   "download-kafka",
   "download-redis",
 ]
+
+[tasks.pre-start-playground]
+category = "RiseDev - Prepare"
+description = "Preparation steps for playground"
+dependencies = [
+  "build-risingwave-playground",
+  "codesign-playground",
+  "build-connector-node",
+]
+
+[tasks.check-risedev-env-file]
+private = true
+category = "RiseDev - Prepare"
+description = "Check if risedev-env file exists"
+script = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+RC_ENV_FILE="${PREFIX_CONFIG}/risedev-env"
+
+if [ ! -f "${RC_ENV_FILE}" ]; then
+  echo "risedev-env file not found. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0) or $(tput setaf 4)\`./risedev p\`$(tput sgr0)?"
+  exit 1
+fi
+'''
+
+[tasks.psql]
+category = "RiseDev - Start/Stop"
+description = "Run local psql client with default connection parameters. You can pass extra arguments to psql."
+dependencies = ["check-risedev-env-file"]
+env_files = ["${PREFIX_CONFIG}/risedev-env"]
+script = '''
+#!/usr/bin/env bash
+psql -h $RW_FRONTEND_LISTEN_ADDRESS -p $RW_FRONTEND_PORT -U root -d dev "$@"
+'''
+
+[tasks.ctl]
+category = "RiseDev - Start/Stop"
+description = "Start RiseCtl"
+dependencies = ["check-risedev-env-file"]
+env_files = ["${PREFIX_CONFIG}/risedev-env"]
+script = '''
+#!/usr/bin/env bash
+cargo run -p ${RISEDEV_CARGO_BUILD_CRATE} --profile "${RISINGWAVE_BUILD_PROFILE}" ${RISEDEV_CTL_RUN_CMD} "$@"
+test $? -eq 0 || exit 1
+'''
 
 [tasks.p]
 alias = "playground"
 
 [tasks.playground]
-category = "RiseDev - Start"
-description = "Start a lite RisingWave playground using risingwave all-in-one binary"
-dependencies = ["build-connector-node"]
+category = "RiseDev - Start/Stop"
+description = "🌟 Start a lite RisingWave playground using risingwave all-in-one binary"
+dependencies = ["pre-start-playground"]
 script = '''
 #!/usr/bin/env bash
 
-set -ex
-
-RUST_BACKTRACE=1 RW_NODE=playground \
-cargo run --bin risingwave \
-          --profile "${RISINGWAVE_BUILD_PROFILE}" \
-          --features "${RISINGWAVE_FEATURES}"
-'''
-
-[tasks.ctl]
-category = "RiseDev - Start"
-description = "Start RiseCtl"
-script = '''
-#!/usr/bin/env bash
-
-RC_ENV_FILE="${PREFIX_CONFIG}/risectl-env"
-
-if [ ! -f "${RC_ENV_FILE}" ]; then
-  echo "risectl-env file not found. Did you start cluster using $(tput setaf 4)\`./risedev d\`$(tput sgr0)?"
-  exit 1
+set -e
+if [[ $ENABLE_COREDUMP == "true" ]]; then
+  echo "+ ulimit -c unlimited"
+  ulimit -c unlimited
 fi
 
-source "${RC_ENV_FILE}"
-
-cargo run --bin risectl --profile "${RISINGWAVE_BUILD_PROFILE}" -- "$@"
-test $? -eq 0 || exit 1
+set -x
+target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave playground $@
 '''
+
+[tasks.standalone]
+category = "RiseDev - Start/Stop"
+description = "🌟 Start a RisingWave standalone instance"
+dependencies = ["pre-start-playground"]
+script = '''
+#!/usr/bin/env bash
+
+set -e
+if [[ $ENABLE_COREDUMP == "true" ]]; then
+  echo "+ ulimit -c unlimited"
+  ulimit -c unlimited
+fi
+
+set -x
+target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave standalone $@
+'''
+
+# TODO(kwannoel): Support `tasks.standalone-dev` as well.
+# Then we can reuse risedev to start peripheral services, e.g. compactor, etcd, kafka, etc...
+[tasks.standalone-demo-dev]
+category = "RiseDev - Start/Stop"
+description = "🌟 Start a RisingWave standalone demo."
+dependencies = ["build"]
+script = "./src/cmd_all/scripts/standalone-demo-dev.sh"
+
+[tasks.standalone-demo-full]
+category = "RiseDev - Start/Stop"
+description = "🌟 Start a RisingWave standalone demo."
+dependencies = ["build"]
+script = "./src/cmd_all/scripts/standalone-demo-full.sh"
 
 [tasks.d]
 alias = "dev"
 
 [tasks.dev]
-category = "RiseDev - Start"
+category = "RiseDev - Start/Stop"
 dependencies = ["pre-start-dev"]
-script = "RUST_BACKTRACE=1 target/${BUILD_MODE_DIR}/risedev-dev ${@}"
-description = "Start a full RisingWave dev cluster using risedev-dev"
+description = "🌟 Start a full RisingWave dev cluster using risedev-dev"
+script = '''
+#!/usr/bin/env bash
 
-[tasks.kafka]
-category = "RiseDev - Start"
-description = "Start a RisingWave dev cluster alongside with a Kafka instance"
-command = "./risedev"
-args = ["dev", "ci-kafka"]
+set -e
+if [[ $ENABLE_COREDUMP == "true" ]]; then
+  echo "+ ulimit -c unlimited"
+  ulimit -c unlimited
+fi
+
+set -x
+target/${BUILD_MODE_DIR}/risedev-dev ${@}
+'''
 
 [tasks.kill-risedev]
-category = "RiseDev - Stop"
+category = "RiseDev - Start/Stop"
 description = "Kill RisingWave dev cluster"
 script = '''
 #!/usr/bin/env bash
 
-tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
+set -euo pipefail
+
+wait_kafka_exit() {
+  # Follow kafka-server-stop.sh
+  while [[ -n "$(ps ax | grep ' kafka\.Kafka ' | grep java | grep -v grep | awk '{print $1}')" ]]; do
+    echo "Waiting for kafka to exit"
+    sleep 1
+  done
+}
+
+wait_zookeeper_exit() {
+  # Follow zookeeper-server-stop.sh
+  while [[ -n "$(ps ax | grep java | grep -i QuorumPeerMain | grep -v grep | awk '{print $1}')" ]]; do
+    echo "Waiting for zookeeper to exit"
+    sleep 1
+  done
+}
+
+kill_kafka() {
+  ${PREFIX_BIN}/kafka/bin/kafka-server-stop.sh
+  wait_kafka_exit
+}
+
+kill_zookeeper() {
+  ${PREFIX_BIN}/kafka/bin/zookeeper-server-stop.sh
+  wait_zookeeper_exit
+}
+
+# Kill other components
+tmux list-windows -t risedev -F "#{window_name} #{pane_id}" \
+| grep -v 'kafka' \
+| grep -v 'zookeeper' \
+| awk '{ print $2 }' \
+| xargs -I {} tmux send-keys -t {} C-c C-d
+
+if [[ -n $(tmux list-windows -t risedev | grep kafka) ]];
+then
+  echo "kill kafka"
+  kill_kafka
+
+  echo "kill zookeeper"
+  kill_zookeeper
+
+  # Kill their tmux sessions
+  tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
+fi
+
 tmux kill-session -t risedev
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
@@ -508,17 +777,25 @@ alias = "kill-risedev"
 alias = "kill-risedev"
 
 [tasks.down]
-category = "RiseDev - Stop"
+category = "RiseDev - Start/Stop"
 description = "Kill RisingWave dev cluster and clean the data"
 dependencies = ["k", "clean-data"]
 
 [tasks.install-nextest]
+private = true
 category = "RiseDev - Check"
-install_crate = { min_version = "0.9.51", crate_name = "cargo-nextest", binary = "cargo", test_arg = ["nextest", "--help"], install_command = "binstall" }
+install_crate = { min_version = "0.9.51", crate_name = "cargo-nextest", binary = "cargo", test_arg = [
+  "nextest",
+  "--help",
+], install_command = "binstall" }
 
 [tasks.install-llvm-cov]
+private = true
 category = "RiseDev - Check"
-install_crate = { min_version = "0.5.17", crate_name = "cargo-llvm-cov", binary = "cargo", test_arg = ["llvm-cov", "--help"], install_command = "binstall" }
+install_crate = { min_version = "0.5.17", crate_name = "cargo-llvm-cov", binary = "cargo", test_arg = [
+  "llvm-cov",
+  "--help",
+], install_command = "binstall" }
 
 [tasks.install-tools]
 category = "RiseDev - Check"
@@ -527,17 +804,12 @@ script = """
 
 set -e
 
-for tool in cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-make
+for tool in cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-make cargo-udeps
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
   cargo binstall -y --no-symlinks $tool
   echo
 done
-
-# Need https://github.com/est31/cargo-udeps/pull/147 to make --exclude work
-echo "install: $(tput setaf 4)cargo-udeps$(tput sgr0)"
-cargo install cargo-udeps --locked --git https://github.com/est31/cargo-udeps --rev 63dd458
-echo
 
 # Tools that fallback to `cargo install` when using `cargo binstall`.
 # We directly use `cargo install` here to be faster.
@@ -563,6 +835,10 @@ echo
 echo "check: $(tput setaf 4)protoc >= 3.12.0$(tput sgr0)"
 protoc --version || echo "$(tput setaf 3)protoc$(tput sgr0) not found."
 echo
+
+echo "check: $(tput setaf 4)parallel >= 2022XXXX$(tput sgr0)"
+parallel --version || echo "$(tput setaf 3)parallel$(tput sgr0) not found."
+echo
 """
 description = "Install (or upgrade) required tools to do pre-CI check and run e2e tests"
 
@@ -580,7 +856,7 @@ script = """
 set -e
 
 export CARGO_TARGET_DIR=target/coverage
-cargo llvm-cov nextest --html
+cargo llvm-cov nextest --html --workspace --exclude risingwave_simulation
 """
 description = "Run unit tests and report coverage"
 
@@ -591,14 +867,16 @@ script = """
 #!/usr/bin/env bash
 set -e
 
-cargo nextest run "$@"
+cargo nextest run --workspace --exclude risingwave_simulation "$@"
 """
-description = "Run unit tests"
+description = "🌟 Run unit tests"
 
 [tasks.build-connector-node]
-category = "RiseDev - Components"
+category = "RiseDev - Build"
 dependencies = ["prepare"]
-condition = { env_set = ["ENABLE_BUILD_RW_CONNECTOR"], files_modified = { input = [
+condition = { env_set = [
+  "ENABLE_BUILD_RW_CONNECTOR",
+], files_modified = { input = [
   "./java/connector-node/**/*.java",
 ], output = [
   "./java/connector-node/assembly/target/*",
@@ -619,7 +897,7 @@ TARGET_PATH="${JAVA_DIR}/connector-node/assembly/target/${ARTIFACT}"
 
 echo "Building connector node..."
 cd "${JAVA_DIR}"
-"${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
+"${MAVEN_PATH}" --batch-mode --update-snapshots package -Dmaven.test.skip -Dno-build-rust
 
 rm -rf ${PREFIX_BIN}/connector-node
 mkdir -p "${PREFIX_BIN}/connector-node"
@@ -627,7 +905,7 @@ tar xf ${TARGET_PATH} -C "${PREFIX_BIN}/connector-node"
 '''
 
 [tasks.sbuild]
-category = "RiseDev - Build in simulation mode"
+category = "RiseDev - Build"
 description = "Build in simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -652,7 +930,7 @@ cargo build \
 """
 
 [tasks.stest]
-category = "RiseDev - Deterministic Simulation Test"
+category = "RiseDev - Deterministic Simulation"
 description = "Run unit tests in deterministic simulation mode"
 dependencies = ["install-nextest"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -676,13 +954,8 @@ cargo nextest run \
   "$@"
 """
 
-[tasks.sscale-test]
-category = "RiseDev - Simulation integration tests"
-description = "Run scaling tests in deterministic simulation mode"
-deprecated = "Please use `risedev sit-test scale::` instead."
-
 [tasks.sit-test]
-category = "RiseDev - Simulation integration tests"
+category = "RiseDev - Deterministic Simulation"
 description = "Run integration tests in deterministic simulation mode"
 dependencies = ["install-nextest"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -697,7 +970,7 @@ cargo nextest run \
 """
 
 [tasks.sarchive-it-test]
-category = "RiseDev - Simulation integration tests"
+category = "RiseDev - Deterministic Simulation"
 description = "Archive integration tests in deterministic simulation mode"
 dependencies = ["install-nextest"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -713,7 +986,7 @@ cargo nextest archive \
 """
 
 [tasks.scheck]
-category = "RiseDev - Deterministic Simulation End-to-end Test"
+category = "RiseDev - Deterministic Simulation"
 description = "Run cargo check in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -723,11 +996,22 @@ set -e
 
 cargo check \
   --config "target.'cfg(all())'.rustflags = ['--cfg=madsim']" \
-  -p risingwave_simulation --all-targets "$@"
+  -p risingwave_batch \
+  -p risingwave_common \
+  -p risingwave_compute \
+  -p risingwave_connector \
+  -p risingwave_frontend \
+  -p risingwave_meta \
+  -p risingwave_object_store \
+  -p risingwave_source \
+  -p risingwave_storage \
+  -p risingwave_stream \
+  -p pgwire \
+  -p risingwave_simulation --tests "$@"
 """
 
 [tasks.sslt]
-category = "RiseDev - Deterministic Simulation End-to-end Test"
+category = "RiseDev - Deterministic Simulation"
 description = "Run e2e tests in deterministic simulation mode"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -741,7 +1025,7 @@ cargo run \
 """
 
 [tasks.sslt-build-all]
-category = "RiseDev - Deterministic Simulation End-to-end Test"
+category = "RiseDev - Deterministic Simulation"
 description = "Build deterministic simulation runner and tests"
 dependencies = ["warn-on-missing-tools"]
 env = { CARGO_TARGET_DIR = "target/sim" }
@@ -756,7 +1040,7 @@ cargo build \
 """
 
 [tasks.sslt-cov]
-category = "RiseDev - Deterministic Simulation End-to-end Test"
+category = "RiseDev - Deterministic Simulation"
 description = "Run e2e tests in deterministic simulation mode and report code coverage"
 dependencies = ["install-llvm-cov"]
 env = { CARGO_TARGET_DIR = "target/sim-cov" }
@@ -771,6 +1055,7 @@ cargo llvm-cov run \
 """
 
 [tasks.check-java]
+private = true
 category = "RiseDev - Check"
 description = "Run mvn spotless:check in connector-node"
 dependencies = ["warn-on-missing-tools"]
@@ -790,6 +1075,7 @@ cd "${JAVA_DIR}"
 """
 
 [tasks.check-java-fix]
+private = true
 category = "RiseDev - Check"
 description = "Run mvn spotless:apply in connector-node"
 dependencies = ["warn-on-missing-tools"]
@@ -809,9 +1095,13 @@ cd "${JAVA_DIR}"
 """
 
 [tasks.check-hakari]
+private = true
 category = "RiseDev - Check"
 description = "Run cargo hakari check and attempt to fix"
-install_crate = { min_version = "0.9.24", crate_name = "cargo-hakari", binary = "cargo", test_arg = ["hakari", "--help"], install_command = "binstall" }
+install_crate = { min_version = "0.9.24", crate_name = "cargo-hakari", binary = "cargo", test_arg = [
+  "hakari",
+  "--help",
+], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
 
@@ -823,9 +1113,13 @@ test $? -eq 0 || exit 1
 """
 
 [tasks.check-dep-sort]
+private = true
 category = "RiseDev - Check"
 description = "Run cargo sort check and attempt to fix"
-install_crate = { min_version = "1.0.9", crate_name = "cargo-sort", binary = "cargo", test_arg = ["sort", "--help"], install_command = "binstall" }
+install_crate = { min_version = "1.0.9", crate_name = "cargo-sort", binary = "cargo", test_arg = [
+  "sort",
+  "--help",
+], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
 
@@ -837,6 +1131,7 @@ test $? -eq 0 || { echo "cargo sort check failed. You may run $(tput setaf 4)car
 """
 
 [tasks.check-fmt]
+private = true
 category = "RiseDev - Check"
 description = "Run cargo fmt check and attempt to fix"
 script = """
@@ -848,18 +1143,20 @@ test $? -eq 0 || exit 1
 """
 
 [tasks.check-clippy]
+private = true
 category = "RiseDev - Check"
 description = "Run cargo clippy check"
 script = """
 #!/usr/bin/env bash
 
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
-cargo clippy --all-targets --all-features
+cargo clippy --all-targets ${RISINGWAVE_FEATURE_FLAGS}
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 echo "Alternately, you may run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to fix those packages (e.g. frontend, meta)."
 """
 
 [tasks.check-clippy-fix]
+private = true
 category = "RiseDev - Check"
 description = "Run cargo clippy check and fixes all files (including dirty and staged)"
 script = """
@@ -870,18 +1167,21 @@ if [ $# -gt 0 ]; then
   ARGS=("$@")
 
   echo "Applying clippy --fix for $@ (including dirty and staged files)"
-  cargo clippy ${ARGS[@]/#/--package risingwave_} --all-features --fix --allow-dirty --allow-staged
+  cargo clippy ${ARGS[@]/#/--package risingwave_} --fix --allow-dirty --allow-staged
 else
   echo "Applying clippy --fix for all targets to all files (including dirty and staged files)"
   echo "Tip: run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to only check-fix those packages (e.g. frontend, meta)."
-  cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
+  cargo clippy --all-targets ${RISINGWAVE_FEATURE_FLAGS} --fix --allow-dirty --allow-staged
 fi
 """
 
 [tasks.check-typos]
+private = true
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
-install_crate = { min_version = "1.14.8", crate_name = "typos-cli", binary = "typos", test_arg = ["--help"], install_command = "binstall" }
+install_crate = { min_version = "1.15.0", crate_name = "typos-cli", binary = "typos", test_arg = [
+  "--help",
+], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
 
@@ -891,10 +1191,14 @@ fi
 """
 
 [tasks.check-udeps]
+private = true
 category = "RiseDev - Check"
 description = "Check unused dependencies"
 env = { RUSTFLAGS = "--cfg tokio_unstable" }
-install_crate = { min_version = "0.1.35", crate_name = "cargo-udeps", binary = "cargo", test_arg = ["udeps", "--help"], install_command = "binstall" }
+install_crate = { min_version = "0.1.35", crate_name = "cargo-udeps", binary = "cargo", test_arg = [
+  "udeps",
+  "--help",
+], install_command = "binstall" }
 script = """
 #!/usr/bin/env bash
 
@@ -903,9 +1207,19 @@ script = """
 
 echo "Running $(tput setaf 4)cargo udeps$(tput sgr0) checks"
 
-cargo udeps --workspace --all-targets --all-features --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_udf --exclude risingwave_simulation
+cargo udeps --workspace --all-targets ${RISINGWAVE_FEATURE_FLAGS} --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_udf --exclude risingwave_simulation
 """
 
+[tasks.check-trailing-spaces]
+private = true
+category = "RiseDev - Check"
+description = "Check trailing spaces and attempt to fix"
+script = """
+#!/usr/bin/env bash
+
+# This can trim trailing spaces in all git-managed text files, including .md, .toml, .sh, etc.
+scripts/check/check-trailing-spaces.sh --fix
+"""
 
 [tasks.check]
 category = "RiseDev - Check"
@@ -914,8 +1228,9 @@ dependencies = [
   "check-hakari",
   "check-dep-sort",
   "check-fmt",
-  "check-clippy",
+  "check-trailing-spaces",
   "check-typos",
+  "check-clippy",
   "check-java",
 ]
 script = """
@@ -924,7 +1239,7 @@ script = """
 echo "Tip: use the alias $(tput setaf 4)./risedev c$(tput sgr0)."
 echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
 """
-description = "Perform pre-CI checks and automatically fix cargo sort, cargo hakari, cargo fmt warnings"
+description = "🌟 Perform pre-CI checks and automatically fix cargo sort/hakari/fmt warnings"
 
 [tasks.c]
 alias = "check"
@@ -936,8 +1251,9 @@ dependencies = [
   "check-hakari",
   "check-dep-sort",
   "check-fmt",
-  "check-clippy-fix",
+  "check-trailing-spaces",
   "check-typos",
+  "check-clippy-fix",
   "check-java-fix",
 ]
 script = """
@@ -946,15 +1262,15 @@ script = """
 echo "Tip: use the alias $(tput setaf 4)./risedev cf$(tput sgr0)."
 echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
 """
-description = "Perform pre-CI checks and automatically fix cargo sort, cargo hakari, fixes cargo fmt warnings"
+description = "Same as check, but also fixes clippy"
 
 [tasks.cf]
 alias = "check-fix"
 
 
 [tasks.install]
-category = "RiseDev - Prepare"
-description = "Install RiseDev to user local"
+category = "Misc"
+description = "🌟 Install RiseDev so you can run it from anywhere"
 script = """
 #!/usr/bin/env bash
 set -e
@@ -992,15 +1308,40 @@ description = "Clean data and start a full RisingWave dev cluster using risedev-
 
 [tasks.ci-kill]
 category = "RiseDev - CI"
-dependencies = ["k", "l", "check-logs"]
+dependencies = ["k", "l", "check-logs", "wait-processes-exit"]
 description = "Kill cluster, dump logs and check logs"
+
+[tasks.wait-processes-exit]
+category = "Misc"
+description = "Wait for RisingWave processes to exit"
+script = """
+wait_for_process() {
+    process_name="$1"
+
+    while pgrep -x "$process_name" > /dev/null; do
+        echo "Process $process_name is still running... Wait for 1 sec"
+        sleep 1
+    done
+}
+
+wait_for_process meta-node
+wait_for_process compute-node
+wait_for_process frontend
+wait_for_process compactor
+echo "All processes has exited."
+"""
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { min_version = "0.1.13", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = ["--help"] }
+install_crate = { version = "0.18.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+  "--help",
+], install_command = "binstall" }
+dependencies = ["check-risedev-env-file"]
+env_files = ["${PREFIX_CONFIG}/risedev-env"]
+env = { SLT_HOST = "${RW_FRONTEND_LISTEN_ADDRESS}", SLT_PORT = "${RW_FRONTEND_PORT}", SLT_DB = "dev" }
 command = "sqllogictest"
 args = ["${@}"]
-description = "Run SQLLogicTest"
+description = "🌟 Run SQLLogicTest"
 
 [tasks.slt-streaming]
 category = "RiseDev - SQLLogicTest"
@@ -1031,7 +1372,7 @@ description = "Extract SQL examples written in SQLLogicTest syntax from Rust doc
 script = '''
 #!/usr/bin/env bash
 set -e
-cargo run --bin risedev-docslt -- "$@"
+cargo run -p risedev --bin risedev-docslt -- "$@"
 '''
 
 [tasks.compose]
@@ -1042,7 +1383,7 @@ script = '''
 set -e
 rm -rf ${PREFIX_DOCKER}/*
 mkdir -p "${PREFIX_DOCKER}"
-cargo run --bin risedev-compose -- -d "${PREFIX_DOCKER}" "$@"
+cargo run -p risedev --bin risedev-compose -- -d "${PREFIX_DOCKER}" "$@"
 echo docker-compose file generated in $(tput setaf 4)${PREFIX_DOCKER}$(tput sgr0)
 '''
 
@@ -1054,7 +1395,7 @@ script = '''
 set -e
 rm -rf "${PREFIX_DOCKER}"/*
 mkdir -p "${PREFIX_DOCKER}"
-cargo run --bin risedev-compose -- -d "${PREFIX_DOCKER}" --deploy "$@"
+cargo run -p risedev --bin risedev-compose -- -d "${PREFIX_DOCKER}" --deploy "$@"
 echo docker-compose file and deploy.sh generated in $(tput setaf 4)${PREFIX_DOCKER}$(tput sgr0)
 echo If you are ready, run $(tput setaf 4)./risedev apply-compose-deploy$(tput sgr0) to do the deployment.
 '''
@@ -1085,12 +1426,34 @@ cp -a .risingwave/rw-docker/* docker
 '''
 
 [tasks.generate-example-config]
-category = "misc"
+private = true
+category = "Misc"
 description = "Generate default config and write to src/config/example.toml"
 script = '''
-cat << EOF > src/config/example.toml
-# This file is generated by ./risedev generate-example-config
-# Check detailed comments in src/common/src/config.rs
-EOF
-cargo run --bin example-config >> src/config/example.toml
+UPDATE_EXPECT=1 cargo test --package risingwave_common --lib -- config::tests::test_example_up_to_date
 '''
+
+[tasks.generate-with-options]
+private = true
+category = "Misc"
+description = "This command extracts WITH options from the Rust code and maintains them in a single source of truth `with_options.yaml`"
+script = '''
+UPDATE_EXPECT=1 cargo nextest run risingwave_connector tests::test_with_options_yaml_up_to_date
+'''
+
+[tasks.backwards-compat-test]
+category = "RiseDev - Backwards Compatibility Test"
+description = "Run backwards compatibility test"
+script = "./backwards-compat-tests/scripts/run_local.sh"
+
+# For debugging.
+# To show the env for a specific task, use `run_task = "show-env"` for that task.
+[tasks.show-env]
+private = true
+description = "Show cargo-make runtime environment variables"
+script = """
+#!@duckscript
+# https://github.com/sagiegurari/cargo-make/issues/889
+vars = dump_variables
+echo ${vars}
+"""

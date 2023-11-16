@@ -1,0 +1,37 @@
+- sql: |
+    create table t1 (v1 int, v2 int);
+    with cte as (select v1, v2 from t1) select v1 from cte;
+  expected_outputs:
+  - logical_plan
+  - stream_plan
+- sql: |
+    create table t1 (v1 int, v2 int);
+    create table t2 (v3 int, v4 int);
+    with cte as (select v1 from t1) select * from t2 inner join cte on t2.v3 = cte.v1;
+  expected_outputs:
+  - stream_plan
+  - logical_plan
+- sql: |
+    create table t1 (v1 int, v2 int);
+    create table t2 (v3 int, v4 int);
+    with cte as (select v1, v2 from t1), cte2 as (select v1 from cte) select * from cte2;
+  expected_outputs:
+  - stream_plan
+  - logical_plan
+- sql: |
+    create table t1 (x int);
+    with with_0 as (select * from t1 group by x having EXISTS(select 0.1)) select * from with_0;
+  expected_outputs:
+  - logical_plan
+- name: Ensure we can bind CTE with aliases in both table name and columns
+  sql: |
+    create table t1 (x int, y int);
+    with cte (cosT) as (select * from t1) select * from cte as t2 (ouTflow, profit) join cte on (outflow = cost);
+  expected_outputs:
+  - logical_plan
+- sql: |
+    create table t (v int, c varchar);
+    with dict(abbr, real) as (values ('cn', 'China'), ('us', 'United States')) select * from t join dict on t.c = dict.abbr;
+  expected_outputs:
+  - logical_plan
+  - stream_plan

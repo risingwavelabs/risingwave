@@ -12,19 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::acl::AclMode;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::catalog::PbTable;
+use risingwave_pb::catalog::{CreateType, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
-use risingwave_pb::user::grant_privilege::Action;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
 
 use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
+use crate::catalog::check_valid_column_name;
 use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
 use crate::planner::Planner;
@@ -64,7 +67,7 @@ pub(super) fn get_column_names(
         }
         if let Some(relation) = &select.from {
             let mut check_items = Vec::new();
-            resolve_relation_privileges(relation, Action::Select, &mut check_items);
+            resolve_relation_privileges(relation, AclMode::Select, &mut check_items);
             session.check_privileges(&check_items)?;
         }
     }
@@ -106,6 +109,9 @@ pub fn gen_create_mv_plan(
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     if let Some(col_names) = col_names {
+        for name in &col_names {
+            check_valid_column_name(name)?;
+        }
         plan_root.set_out_names(col_names)?;
     }
     let materialize =
@@ -133,7 +139,7 @@ pub fn gen_create_mv_plan(
     let explain_trace = ctx.is_explain_trace();
     if explain_trace {
         ctx.trace("Create Materialized View:");
-        ctx.trace(plan.explain_to_string().unwrap());
+        ctx.trace(plan.explain_to_string());
     }
 
     Ok((plan, table))
@@ -141,6 +147,7 @@ pub fn gen_create_mv_plan(
 
 pub async fn handle_create_mv(
     handler_args: HandlerArgs,
+    if_not_exists: bool,
     name: ObjectName,
     query: Query,
     columns: Vec<Ident>,
@@ -148,9 +155,15 @@ pub async fn handle_create_mv(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
-    session.check_relation_name_duplicated(name.clone())?;
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        name.clone(),
+        StatementType::CREATE_MATERIALIZED_VIEW,
+        if_not_exists,
+    )? {
+        return Ok(resp);
+    }
 
-    let (table, graph) = {
+    let (mut table, graph) = {
         let context = OptimizerContext::from_handler_args(handler_args);
 
         let has_order_by = !query.order_by.is_empty();
@@ -162,7 +175,7 @@ It only indicates the physical clustering of the data, which may improve the per
 
         let (plan, table) =
             gen_create_mv_plan(&session, context.into(), query, name, columns, emit_mode)?;
-        let context = plan.plan_base().ctx.clone();
+        let context = plan.plan_base().ctx().clone();
         let mut graph = build_graph(plan);
         graph.parallelism = session
             .config()
@@ -175,6 +188,7 @@ It only indicates the physical clustering of the data, which may improve the per
         (table, graph)
     };
 
+    // Ensure writes to `StreamJobTracker` are atomic.
     let _job_guard =
         session
             .env()
@@ -186,7 +200,16 @@ It only indicates the physical clustering of the data, which may improve the per
                 table.name.clone(),
             ));
 
-    let catalog_writer = session.env().catalog_writer();
+    let run_in_background = session.config().get_background_ddl();
+    let create_type = if run_in_background {
+        CreateType::Background
+    } else {
+        CreateType::Foreground
+    };
+    table.create_type = create_type.into();
+
+    let session = session.clone();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_materialized_view(table, graph)
         .await?;
@@ -229,7 +252,7 @@ pub mod tests {
         let sql = format!(
             r#"CREATE SOURCE t1
     WITH (connector = 'kinesis')
-    ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
+    FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );
         let frontend = LocalFrontend::new(Default::default()).await;
@@ -323,12 +346,12 @@ pub mod tests {
         // Without order by
         let sql = "create materialized view mv1 as select * from t";
         let response = frontend.run_sql(sql).await.unwrap();
-        assert_eq!(response.get_stmt_type(), CREATE_MATERIALIZED_VIEW);
-        assert!(response.get_notices().is_empty());
+        assert_eq!(response.stmt_type(), CREATE_MATERIALIZED_VIEW);
+        assert!(response.notices().is_empty());
 
         // With order by
         let sql = "create materialized view mv2 as select * from t order by x";
         let response = frontend.run_sql(sql).await.unwrap();
-        assert_eq!(response.get_stmt_type(), CREATE_MATERIALIZED_VIEW);
+        assert_eq!(response.stmt_type(), CREATE_MATERIALIZED_VIEW);
     }
 }

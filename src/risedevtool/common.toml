@@ -1,7 +1,10 @@
 [env]
+RISEDEV = "1"
+RUST_BACKTRACE = "1"
 OS = { source = "${CARGO_MAKE_RUST_TARGET_OS}", mapping = { linux = "linux", macos = "darwin" } }
 ARCH = { source = "${CARGO_MAKE_RUST_TARGET_ARCH}", mapping = { x86_64 = "amd64", aarch64 = "arm64" } }
 SYSTEM = "${OS}-${ARCH}"
+SYSTEM_UNDERSCORE = "${OS}_${ARCH}"
 SYSTEM_AMD64 = "${OS}-amd64" # some components do not support darwin-arm64 for now, use amd64 for fallback
 PREFIX = "${PWD}/.risingwave"
 JAVA_DIR = "${PWD}/java"
@@ -17,7 +20,6 @@ PREFIX_PROFILING = "${PREFIX}/profiling"
 
 BUILD_MODE_DIR = { source = "${ENABLE_RELEASE_PROFILE}", default_value = "debug", mapping = { true = "release" } }
 RISINGWAVE_BUILD_PROFILE = { source = "${ENABLE_RELEASE_PROFILE}", default_value = "dev", mapping = { true = "release" } }
-RISINGWAVE_FEATURES = { source = "${ENABLE_RELEASE_PROFILE}", default_value = "rw-dynamic-link", mapping = { true = "rw-static-link" } }
 
 [tasks.prepare-dir]
 private = true
@@ -38,6 +40,7 @@ exit 1
 '''
 
 [tasks.prepare]
+private = true
 category = "Misc"
 description = "Create .risingwave folder for storing temporary files and data"
 dependencies = ["prepare-dir", "check-risedev-configured"]

@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "risingwave"
+version = "0.0.11"
+authors = [{ name = "RisingWave Labs" }]
+description = "RisingWave Python API"
+readme = "README.md"
+license = { text = "Apache Software License" }
+classifiers = [
+    "Programming Language :: Python",
+    "License :: OSI Approved :: Apache Software License",
+]
+requires-python = ">=3.8"
+dependencies = ["pyarrow"]
+
+[project.optional-dependencies]
+test = ["pytest"]

@@ -20,7 +20,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::field_generator::VarcharProperty;
 use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::DataType;
-use risingwave_expr::agg::{AggArgs, AggCall, AggKind};
+use risingwave_expr::aggregate::AggCall;
 use risingwave_expr::expr::*;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::StateStore;
@@ -28,6 +28,8 @@ use risingwave_stream::executor::test_utils::agg_executor::new_boxed_hash_agg_ex
 use risingwave_stream::executor::test_utils::*;
 use risingwave_stream::executor::{BoxedExecutor, PkIndices};
 use tokio::runtime::Runtime;
+
+risingwave_expr_impl::enable!();
 
 fn bench_hash_agg(c: &mut Criterion) {
     let mut group = c.benchmark_group("Q17");
@@ -37,7 +39,7 @@ fn bench_hash_agg(c: &mut Criterion) {
     group.bench_function("benchmark_hash_agg", |b| {
         b.to_async(&rt).iter_batched(
             || setup_bench_hash_agg(MemoryStateStore::new()),
-            |e| execute_executor(e),
+            execute_executor,
             BatchSize::SmallInput,
         )
     });
@@ -85,91 +87,24 @@ fn setup_bench_hash_agg<S: StateStore>(store: S) -> BoxedExecutor {
     let group_key_indices = vec![0, 1];
 
     let agg_calls = vec![
-         AggCall {
-            kind: AggKind::Count,
-            args: AggArgs::None,
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-         },
-         AggCall {
-            kind: AggKind::Count,
-            args: AggArgs::None,
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: Some(build_from_pretty("(less_than:boolean $2:int8 10000:int8)").into()),
-            distinct: false,
-         },
-         AggCall {
-            kind: AggKind::Count,
-            args: AggArgs::None,
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: Some(build_from_pretty("(and:boolean (greater_than_or_equal:boolean $2:int8 10000:int8) (less_than:boolean $2:int8 100000:int8))").into()),
-            distinct: false,
-         },
-         AggCall {
-            kind: AggKind::Count,
-            args: AggArgs::None,
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: Some(build_from_pretty("(greater_than_or_equal:boolean $2:int8 100000:int8)").into()),
-            distinct: false,
-        },
+         AggCall::from_pretty("(count:int8)"),
+         AggCall::from_pretty("(count:int8)")
+            .with_filter(build_from_pretty("(less_than:boolean $2:int8 10000:int8)")),
+         AggCall::from_pretty("(count:int8)")
+            .with_filter(build_from_pretty("(and:boolean (greater_than_or_equal:boolean $2:int8 10000:int8) (less_than:boolean $2:int8 100000:int8))")),
+         AggCall::from_pretty("(count:int8)")
+            .with_filter(build_from_pretty("(greater_than_or_equal:boolean $2:int8 100000:int8)")),
         // FIXME(kwannoel): Can ignore for now, since it is low cost in q17 (blackhole).
         // It does not work can't diagnose root cause yet.
-        // AggCall {
-        //     kind: AggKind::Min,
-        //     args: FuncArgs::Unary(DataType::Int64, 2),
-        //     return_type: DataType::Int64,
-        //     column_orders: vec![],
-        //     filter: None,
-        //     distinct: false,
-        // },
-        // AggCall {
-        //     kind: AggKind::Max,
-        //     args: FuncArgs::Unary(DataType::Int64, 2),
-        //     return_type: DataType::Int64,
-        //     column_orders: vec![],
-        //     filter: None,
-        //     distinct: false,
-        // },
+        // AggCall::from_pretty("(min:int8 $2:int8)"),
+        // AggCall::from_pretty("(max:int8 $2:int8)"),
         // Not supported, just use extra sum + count
-        // AggCall {
-        //     kind: AggKind::Avg,
-        //     args: FuncArgs::Unary(DataType::Int64, 2),
-        //     return_type: DataType::Int64,
-        //     column_orders: vec![],
-        //     filter: None,
-        //     distinct: false,
-        // },
+        // AggCall::from_pretty("(avg:int8 $2:int8)"),
         // avg (sum)
-        AggCall {
-            kind: AggKind::Sum,
-            args: AggArgs::Unary(DataType::Int64, 2),
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-        },
+        AggCall::from_pretty("(sum:int8 $2:int8)"),
         // avg (count)
-        AggCall {
-            kind: AggKind::Count,
-            args: AggArgs::Unary(DataType::Int64, 2),
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-        },
-        AggCall {
-            kind: AggKind::Sum,
-            args: AggArgs::Unary(DataType::Int64, 2),
-            return_type: DataType::Int64,
-            column_orders: vec![],
-            filter: None,
-            distinct: false,
-        },
+        AggCall::from_pretty("(count:int8 $2:int8)"),
+        AggCall::from_pretty("(sum:int8 $2:int8)"),
     ];
 
     // ---- Generate Data ----

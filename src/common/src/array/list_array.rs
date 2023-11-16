@@ -12,24 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::fmt;
 use std::cmp::Ordering;
+use std::fmt;
 use std::fmt::Debug;
+use std::future::Future;
 use std::hash::Hash;
 use std::mem::size_of;
+use std::ops::{Index, IndexMut};
 
 use bytes::{Buf, BufMut};
 use either::Either;
 use itertools::Itertools;
 use risingwave_pb::data::{ListArrayData, PbArray, PbArrayType};
-use serde::{Deserializer, Serializer};
+use serde::{Deserialize, Serializer};
 
 use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, RowRef};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::row::Row;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ToDatumRef, ToText,
+    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarRefImpl, ToDatumRef, ToText,
 };
 use crate::util::memcmp_encoding;
 use crate::util::value_encoding::estimate_serialize_datum_size;
@@ -106,13 +108,13 @@ impl ArrayBuilder for ListArrayBuilder {
                 self.bitmap.append_n(n, true);
                 for _ in 0..n {
                     let last = *self.offsets.last().unwrap();
-                    let elems = v.iter_elems_ref();
+                    let elems = v.iter();
                     self.offsets.push(
                         last.checked_add(elems.len() as u32)
                             .expect("offset overflow"),
                     );
                     for elem in elems {
-                        self.value.append_datum(elem);
+                        self.value.append(elem);
                     }
                 }
             }
@@ -140,6 +142,10 @@ impl ArrayBuilder for ListArrayBuilder {
         Some(())
     }
 
+    fn len(&self) -> usize {
+        self.bitmap.len()
+    }
+
     fn finish(self) -> ListArray {
         ListArray {
             bitmap: self.bitmap.finish(),
@@ -158,7 +164,7 @@ impl ListArrayBuilder {
             .push(last.checked_add(row.len() as u32).expect("offset overflow"));
         self.len += 1;
         for v in row.iter() {
-            self.value.append_datum(v);
+            self.value.append(v);
         }
     }
 }
@@ -166,9 +172,9 @@ impl ListArrayBuilder {
 /// Each item of this `ListArray` is a `List<T>`, or called `T[]` (T array).
 ///
 /// * As other arrays, there is a null bitmap, with `1` meaning nonnull and `0` meaning null.
-/// * As [`BytesArray`], there is an offsets `Vec` and a value `Array`. The value `Array` has all
-///   items concatenated, and the offsets `Vec` stores start and end indices into it for slicing.
-///   Effectively, the inner array is the flattened form, and `offsets.len() == n + 1`.
+/// * As [`super::BytesArray`], there is an offsets `Vec` and a value `Array`. The value `Array` has
+///   all items concatenated, and the offsets `Vec` stores start and end indices into it for
+///   slicing. Effectively, the inner array is the flattened form, and `offsets.len() == n + 1`.
 ///
 /// For example, `values (array[1]), (array[]::int[]), (null), (array[2, 3]);` stores an inner
 ///  `I32Array` with `[1, 2, 3]`, along with offsets `[0, 1, 1, 1, 3]` and null bitmap `TTFT`.
@@ -234,6 +240,16 @@ impl Array for ListArray {
 }
 
 impl ListArray {
+    /// Returns the total number of elements in the flattened array.
+    pub fn flatten_len(&self) -> usize {
+        self.value.len()
+    }
+
+    /// Flatten the list array into a single array.
+    pub fn flatten(&self) -> ArrayImpl {
+        (*self.value).clone()
+    }
+
     pub fn from_protobuf(array: &PbArray) -> ArrayResult<ArrayImpl> {
         ensure!(
             array.values.is_empty(),
@@ -255,6 +271,31 @@ impl ListArray {
         Ok(arr.into())
     }
 
+    /// Apply the function on the underlying elements.
+    /// e.g. `map_inner([[1,2,3],NULL,[4,5]], DOUBLE) = [[2,4,6],NULL,[8,10]]`
+    pub async fn map_inner<E, Fut, F>(self, f: F) -> std::result::Result<ListArray, E>
+    where
+        F: FnOnce(ArrayImpl) -> Fut,
+        Fut: Future<Output = std::result::Result<ArrayImpl, E>>,
+    {
+        let Self {
+            bitmap,
+            offsets,
+            value,
+            ..
+        } = self;
+
+        let new_value = (f)(*value).await?;
+        let new_value_type = new_value.data_type();
+
+        Ok(Self {
+            offsets,
+            bitmap,
+            value: Box::new(new_value),
+            value_type: new_value_type,
+        })
+    }
+
     // Used for testing purposes
     pub fn from_iter(
         values: impl IntoIterator<Item = Option<ArrayImpl>>,
@@ -265,7 +306,7 @@ impl ListArray {
 
         let mut offsets = vec![0u32];
         offsets.reserve(size_hint);
-        let mut builder = ArrayBuilderImpl::from_type(&value_type, size_hint);
+        let mut builder = ArrayBuilderImpl::with_type(size_hint, value_type.clone());
         let mut bitmap = BitmapBuilder::with_capacity(size_hint);
         for v in values {
             bitmap.append(v.is_some());
@@ -309,13 +350,27 @@ pub struct ListValue {
 
 impl PartialOrd for ListValue {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.as_scalar_ref().partial_cmp(&other.as_scalar_ref())
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for ListValue {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap()
+        self.as_scalar_ref().cmp(&other.as_scalar_ref())
+    }
+}
+
+impl Index<usize> for ListValue {
+    type Output = Datum;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.values[index]
+    }
+}
+
+impl IndexMut<usize> for ListValue {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.values[index]
     }
 }
 
@@ -340,6 +395,12 @@ pub fn display_for_explain(list: &ListValue) -> String {
 impl From<Vec<Datum>> for ListValue {
     fn from(data: Vec<Datum>) -> Self {
         ListValue::new(data)
+    }
+}
+
+impl From<ListValue> for Vec<Datum> {
+    fn from(list: ListValue) -> Self {
+        list.values.into()
     }
 }
 
@@ -368,25 +429,7 @@ impl ListValue {
         datatype: &DataType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
-        // This is a bit dirty, but idk how to correctly deserialize bytes in memcomparable
-        // format without this...
-        struct Visitor<'a>(&'a DataType);
-        impl<'a> serde::de::Visitor<'a> for Visitor<'a> {
-            type Value = Vec<u8>;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(formatter, "a list of {}", self.0)
-            }
-
-            fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Ok(v)
-            }
-        }
-        let visitor = Visitor(datatype);
-        let bytes = deserializer.deserialize_byte_buf(visitor)?;
+        let bytes = serde_bytes::ByteBuf::deserialize(deserializer)?;
         let mut inner_deserializer = memcomparable::Deserializer::new(bytes.as_slice());
         let mut values = Vec::new();
         while inner_deserializer.has_remaining() {
@@ -406,7 +449,22 @@ pub enum ListRef<'a> {
 }
 
 impl<'a> ListRef<'a> {
+    /// Returns the length of the list.
+    pub fn len(&self) -> usize {
+        match self {
+            ListRef::Indexed { arr, idx } => (arr.offsets[*idx + 1] - arr.offsets[*idx]) as usize,
+            ListRef::ValueRef { val } => val.values.len(),
+        }
+    }
+
+    /// Returns `true` if the list has a length of 0.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Returns the elements in the flattened list.
     pub fn flatten(self) -> Vec<DatumRef<'a>> {
+        // XXX: avoid using vector
         iter_elems_ref!(self, it, {
             it.flat_map(|datum_ref| {
                 if let Some(ScalarRefImpl::List(list_ref)) = datum_ref {
@@ -420,15 +478,29 @@ impl<'a> ListRef<'a> {
         })
     }
 
+    /// Returns the total number of elements in the flattened list.
+    pub fn flatten_len(self) -> usize {
+        iter_elems_ref!(self, it, {
+            it.map(|datum_ref| {
+                if let Some(ScalarRefImpl::List(list_ref)) = datum_ref {
+                    list_ref.flatten_len()
+                } else {
+                    1
+                }
+            })
+            .sum()
+        })
+    }
+
     /// Iterates over the elements of the list.
     ///
     /// Prefer using the macro `iter_elems_ref!` if possible to avoid the cost of enum dispatching.
-    pub fn iter_elems_ref(self) -> impl ExactSizeIterator<Item = DatumRef<'a>> + 'a {
+    pub fn iter(self) -> impl ExactSizeIterator<Item = DatumRef<'a>> + 'a {
         iter_elems_ref!(self, it, { Either::Left(it) }, { Either::Right(it) })
     }
 
     /// Get the element at the given index. Returns `None` if the index is out of bounds.
-    pub fn elem_at(self, index: usize) -> Option<DatumRef<'a>> {
+    pub fn get(self, index: usize) -> Option<DatumRef<'a>> {
         iter_elems_ref!(self, it, {
             let mut it = it;
             it.nth(index)
@@ -474,35 +546,29 @@ impl PartialEq for ListRef<'_> {
     }
 }
 
+impl Eq for ListRef<'_> {}
+
 impl PartialOrd for ListRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ListRef<'_> {
+    fn cmp(&self, other: &Self) -> Ordering {
         iter_elems_ref!(*self, lhs, {
             iter_elems_ref!(*other, rhs, {
-                Some(lhs.cmp_by(rhs, |lv, rv| cmp_list_value(&lv, &rv)))
+                lhs.cmp_by(rhs, |lv, rv| lv.default_cmp(&rv))
             })
         })
     }
 }
 
-fn cmp_list_value(l: &Option<ScalarRefImpl<'_>>, r: &Option<ScalarRefImpl<'_>>) -> Ordering {
-    match (l, r) {
-        // Comparability check was performed by frontend beforehand.
-        (Some(sl), Some(sr)) => sl.partial_cmp(sr).unwrap(),
-        // Nulls are larger than everything, ARRAY[1, null] > ARRAY[1, 2] for example.
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
-    }
-}
-
 impl Debug for ListRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        iter_elems_ref!(*self, it, {
-            for v in it {
-                Debug::fmt(&v, f)?;
-            }
-            Ok(())
-        })
+        let mut f = f.debug_list();
+        iter_elems_ref!(*self, it, { f.entries(it) });
+        f.finish()
     }
 }
 
@@ -552,12 +618,9 @@ impl ToText for ListRef<'_> {
     }
 }
 
-impl Eq for ListRef<'_> {}
-
-impl Ord for ListRef<'_> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // The order between two lists is deterministic.
-        self.partial_cmp(other).unwrap()
+impl<'a> From<&'a ListValue> for ListRef<'a> {
+    fn from(val: &'a ListValue) -> Self {
+        ListRef::ValueRef { val }
     }
 }
 
@@ -566,17 +629,17 @@ mod tests {
     use more_asserts::{assert_gt, assert_lt};
 
     use super::*;
-    use crate::{array, empty_array, try_match_expand};
+    use crate::try_match_expand;
 
     #[test]
     fn test_list_with_values() {
         use crate::array::*;
         let arr = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(12), Some(-7), Some(25)] }.into()),
+                Some(I32Array::from_iter([Some(12), Some(-7), Some(25)]).into()),
                 None,
-                Some(array! { I32Array, [Some(0), Some(-127), Some(127), Some(50)] }.into()),
-                Some(empty_array! { I32Array }.into()),
+                Some(I32Array::from_iter([Some(0), Some(-127), Some(127), Some(50)]).into()),
+                Some(I32Array::from_iter([0; 0]).into()),
             ],
             DataType::Int32,
         );
@@ -614,7 +677,7 @@ mod tests {
 
         let part1 = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(12), Some(-7), Some(25)] }.into()),
+                Some(I32Array::from_iter([Some(12), Some(-7), Some(25)]).into()),
                 None,
             ],
             DataType::Int32,
@@ -622,8 +685,8 @@ mod tests {
 
         let part2 = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(0), Some(-127), Some(127), Some(50)] }.into()),
-                Some(empty_array! { I32Array }.into()),
+                Some(I32Array::from_iter([Some(0), Some(-127), Some(127), Some(50)]).into()),
+                Some(I32Array::from_iter([0; 0]).into()),
             ],
             DataType::Int32,
         );
@@ -641,7 +704,7 @@ mod tests {
         use crate::array::*;
         let arr = ListArray::from_iter(
             [Some(
-                array! { F32Array, [Some(2.0), Some(42.0), Some(1.0)] }.into(),
+                F32Array::from_iter([Some(2.0), Some(42.0), Some(1.0)]).into(),
             )],
             DataType::Float32,
         );
@@ -686,10 +749,7 @@ mod tests {
 
             let val = arr.value_at(0).unwrap();
 
-            let datums = val
-                .iter_elems_ref()
-                .map(ToOwnedDatum::to_owned_datum)
-                .collect_vec();
+            let datums = val.iter().map(ToOwnedDatum::to_owned_datum).collect_vec();
             assert_eq!(datums, list1.values.to_vec());
         }
     }
@@ -700,23 +760,23 @@ mod tests {
 
         let listarray1 = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(1), Some(2)] }.into()),
-                Some(array! { I32Array, [Some(3), Some(4)] }.into()),
+                Some(I32Array::from_iter([Some(1), Some(2)]).into()),
+                Some(I32Array::from_iter([Some(3), Some(4)]).into()),
             ],
             DataType::Int32,
         );
 
         let listarray2 = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(5), Some(6), Some(7)] }.into()),
+                Some(I32Array::from_iter([Some(5), Some(6), Some(7)]).into()),
                 None,
-                Some(array! { I32Array, [Some(8)] }.into()),
+                Some(I32Array::from_iter([Some(8)]).into()),
             ],
             DataType::Int32,
         );
 
         let listarray3 = ListArray::from_iter(
-            [Some(array! { I32Array, [Some(9), Some(10)] }.into())],
+            [Some(I32Array::from_iter([Some(9), Some(10)]).into())],
             DataType::Int32,
         );
 
@@ -795,9 +855,9 @@ mod tests {
             ListValue::new(vec![Some(1.into()), Some(2.into()), Some(1.into())]),
         );
         // null > 1
-        assert_eq!(
-            cmp_list_value(&None, &Some(ScalarRefImpl::Int32(1))),
-            Ordering::Greater
+        assert_gt!(
+            ListValue::new(vec![None]),
+            ListValue::new(vec![Some(1.into())]),
         );
         // ARRAY[1, 2, null] > ARRAY[1, 2, 1]
         assert_gt!(
@@ -950,9 +1010,9 @@ mod tests {
         use crate::types;
         let arr = ListArray::from_iter(
             [
-                Some(array! { I32Array, [Some(1), Some(2), Some(3)] }.into()),
+                Some(I32Array::from_iter([Some(1), Some(2), Some(3)]).into()),
                 None,
-                Some(array! { I32Array, [Some(4), Some(5), Some(6), Some(7)] }.into()),
+                Some(I32Array::from_iter([Some(4), Some(5), Some(6), Some(7)]).into()),
             ],
             DataType::Int32,
         );
@@ -972,7 +1032,7 @@ mod tests {
         );
 
         // Get 2nd value from ListRef
-        let scalar = list_ref.elem_at(1).unwrap();
+        let scalar = list_ref.get(1).unwrap();
         assert_eq!(scalar, Some(types::ScalarRefImpl::Int32(5)));
     }
 }

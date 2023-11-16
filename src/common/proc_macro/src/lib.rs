@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(coverage, feature(no_coverage))]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 use estimate_size::{
     add_trait_bounds, extract_ignored_generics_list, has_nested_flag_attribute_list,
@@ -43,6 +43,7 @@ mod estimate_size;
 ///
 /// will generate
 ///
+/// ```ignore
 /// impl OverrideConfig for Opts {
 ///     fn r#override(self, config: &mut RwConfig) {
 ///         if let Some(v) = self.required_str {
@@ -51,7 +52,7 @@ mod estimate_size;
 ///     }
 /// }
 /// ```
-#[cfg_attr(coverage, no_coverage)]
+#[cfg_attr(coverage, coverage(off))]
 #[proc_macro_derive(OverrideConfig, attributes(override_opts))]
 #[proc_macro_error]
 pub fn override_config(input: TokenStream) -> TokenStream {
@@ -99,7 +100,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
 
             let mut cmds = Vec::with_capacity(data_enum.variants.len());
 
-            for variant in data_enum.variants.iter() {
+            for variant in &data_enum.variants {
                 let ident = &variant.ident;
 
                 match &variant.fields {
@@ -142,7 +143,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
 
                         let mut field_cmds = Vec::with_capacity(num_fields);
 
-                        for field in named_fields.named.iter() {
+                        for field in &named_fields.named {
                             let field_ident = field.ident.as_ref().unwrap();
 
                             field_idents.push(field_ident);
@@ -189,24 +190,45 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
             if data_struct.fields.is_empty() {
                 // Empty structs are easy to implement.
                 let gen = quote! {
-                    impl EstimateSize for #name {}
+                    impl EstimateSize for #name {
+                        fn estimated_heap_size(&self) -> usize {
+                            0
+                        }
+                    }
                 };
                 return gen.into();
             }
 
-            let mut cmds = Vec::with_capacity(data_struct.fields.len());
+            let mut field_cmds = Vec::with_capacity(data_struct.fields.len());
 
-            for field in data_struct.fields.iter() {
-                // Check if the value should be ignored. If so skip it.
-                if has_nested_flag_attribute_list(&field.attrs, "estimate_size", "ignore") {
-                    continue;
+            match data_struct.fields {
+                syn::Fields::Unnamed(unnamed_fields) => {
+                    for (i, field) in unnamed_fields.unnamed.iter().enumerate() {
+                        // Check if the value should be ignored. If so skip it.
+                        if has_nested_flag_attribute_list(&field.attrs, "estimate_size", "ignore") {
+                            continue;
+                        }
+
+                        let idx = syn::Index::from(i);
+                        field_cmds.push(quote! {
+                            total += EstimateSize::estimated_heap_size(&self.#idx);
+                        })
+                    }
                 }
+                syn::Fields::Named(named_fields) => {
+                    for field in &named_fields.named {
+                        // Check if the value should be ignored. If so skip it.
+                        if has_nested_flag_attribute_list(&field.attrs, "estimate_size", "ignore") {
+                            continue;
+                        }
 
-                let ident = field.ident.as_ref().unwrap();
-
-                cmds.push(quote! {
-                    total += &self.#ident.estimated_heap_size();;
-                })
+                        let field_ident = field.ident.as_ref().unwrap();
+                        field_cmds.push(quote! {
+                            total += &self.#field_ident.estimated_heap_size();
+                        })
+                    }
+                }
+                syn::Fields::Unit => {}
             }
 
             // Build the trait implementation
@@ -215,7 +237,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
                     fn estimated_heap_size(&self) -> usize {
                         let mut total = 0;
 
-                        #(#cmds)*;
+                        #(#field_cmds)*;
 
                         total
                     }

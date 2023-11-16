@@ -12,431 +12,544 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::marker::PhantomData;
+use std::fmt::Debug;
+use std::hash::Hash;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use nix::sys::statfs::{
-    statfs, FsType as NixFsType, BTRFS_SUPER_MAGIC, EXT4_SUPER_MAGIC, TMPFS_MAGIC,
+use bytes::{Buf, BufMut, Bytes};
+use foyer::common::code::{CodingResult, Key, Value};
+use foyer::intrusive::eviction::lfu::LfuConfig;
+use foyer::storage::admission::rated_ticket::RatedTicketAdmissionPolicy;
+use foyer::storage::admission::AdmissionPolicy;
+use foyer::storage::compress::Compression;
+use foyer::storage::device::fs::FsDeviceConfig;
+pub use foyer::storage::metrics::set_metrics_registry as set_foyer_metrics_registry;
+use foyer::storage::reinsertion::ReinsertionPolicy;
+use foyer::storage::runtime::{
+    RuntimeConfig, RuntimeLazyStore, RuntimeLazyStoreConfig, RuntimeLazyStoreWriter,
 };
-use parking_lot::RwLock;
-use risingwave_common::cache::{CachePriority, LruCache, LruCacheEventListener};
-use risingwave_common::util::iter_util::ZipEqFast;
-use tokio::sync::RwLock as AsyncRwLock;
-use tracing::Instrument;
+use foyer::storage::storage::{Storage, StorageWriter};
+use foyer::storage::store::{LfuFsStoreConfig, NoneStore, NoneStoreWriter};
+use risingwave_hummock_sdk::HummockSstableObjectId;
 
-use super::error::{Error, Result};
-use super::file::{CacheFile, CacheFileOptions};
-use super::meta::{BlockLoc, MetaFile, SlotId};
-use super::metrics::FileCacheMetricsRef;
-use super::{utils, DioBuffer, DIO_BUFFER_ALLOCATOR};
-use crate::hummock::{HashBuilder, TieredCacheKey, TieredCacheValue};
+use crate::hummock::{Block, Sstable, SstableMeta};
 
-const META_FILE_FILENAME: &str = "meta";
-const CACHE_FILE_FILENAME: &str = "cache";
-
-const FREELIST_DEFAULT_CAPACITY: usize = 64;
-
-#[derive(PartialEq, Clone, Copy, Debug)]
-pub enum FsType {
-    Xfs,
-    Ext4,
-    Btrfs,
-    Tmpfs,
+pub mod preclude {
+    pub use foyer::storage::storage::{
+        AsyncStorageExt, ForceStorageExt, Storage, StorageExt, StorageWriter,
+    };
 }
 
-pub struct StoreBatchWriter<'a, K, V>
+pub type Result<T> = core::result::Result<T, FileCacheError>;
+
+pub type EvictionConfig = foyer::intrusive::eviction::lfu::LfuConfig;
+pub type DeviceConfig = foyer::storage::device::fs::FsDeviceConfig;
+
+pub type FileCacheResult<T> = foyer::storage::error::Result<T>;
+pub type FileCacheError = foyer::storage::error::Error;
+pub type FileCacheCompression = foyer::storage::compress::Compression;
+
+#[derive(Debug)]
+pub struct FileCacheConfig<K, V>
 where
-    K: TieredCacheKey,
-    V: TieredCacheValue,
+    K: Key,
+    V: Value,
 {
-    keys: Vec<K>,
-    /// `buffers` are fragmented by [`WRITER_MAX_IO_SIZE`].
-    buffers: Vec<DioBuffer>,
-    blocs: Vec<BlockLoc>,
-    data_len: usize,
-
-    block_size: usize,
-    buffer_capacity: usize,
-    max_write_size: usize,
-
-    store: &'a Store<K, V>,
-}
-
-impl<'a, K, V> StoreBatchWriter<'a, K, V>
-where
-    K: TieredCacheKey,
-    V: TieredCacheValue,
-{
-    fn new(
-        store: &'a Store<K, V>,
-        block_size: usize,
-        buffer_capacity: usize,
-        item_capacity: usize,
-        max_write_size: usize,
-    ) -> Self {
-        Self {
-            keys: Vec::with_capacity(item_capacity),
-            buffers: Vec::with_capacity(item_capacity),
-            blocs: Vec::with_capacity(item_capacity),
-            data_len: 0,
-
-            block_size,
-            buffer_capacity,
-            max_write_size,
-
-            store,
-        }
-    }
-
-    #[allow(clippy::uninit_vec)]
-    pub fn append<'b>(&'b mut self, key: K, value: &V) {
-        let offset = self.data_len;
-        let len = value.encoded_len();
-        let bloc = BlockLoc {
-            bidx: offset as u32 / self.block_size as u32,
-            len: len as u32,
-        };
-        self.blocs.push(bloc);
-
-        let rotate_last_mut = |buffers: &'b mut Vec<_>| {
-            buffers.push(DioBuffer::with_capacity_in(
-                self.buffer_capacity,
-                &DIO_BUFFER_ALLOCATOR,
-            ));
-            buffers.last_mut().unwrap()
-        };
-
-        let buffer = match self.buffers.last_mut() {
-            Some(buffer) if buffer.len() + len > self.max_write_size => {
-                rotate_last_mut(&mut self.buffers)
-            }
-            None => rotate_last_mut(&mut self.buffers),
-            Some(buffer) => buffer,
-        };
-
-        let buffer_offset = buffer.len();
-        let buffer_len = utils::align_up(self.block_size, len);
-        buffer.reserve(buffer_offset + buffer_len);
-        unsafe {
-            buffer.set_len(buffer_offset + buffer_len);
-        }
-        value.encode(&mut buffer[buffer_offset..buffer_offset + buffer_len]);
-        self.data_len += buffer_len;
-
-        self.keys.push(key);
-    }
-
-    #[inline(always)]
-    pub fn len(&self) -> usize {
-        self.blocs.len()
-    }
-
-    #[inline(always)]
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub async fn finish(mut self) -> Result<(Vec<K>, Vec<SlotId>)> {
-        // First free slots during last batch.
-
-        let mut freelist = Vec::with_capacity(FREELIST_DEFAULT_CAPACITY);
-        std::mem::swap(&mut *self.store.freelist.write(), &mut freelist);
-
-        if !freelist.is_empty() {
-            let mut guard = self
-                .store
-                .meta_file
-                .write()
-                .instrument(tracing::trace_span!("meta_write_lock_free_slots"))
-                .await;
-            for slot in freelist {
-                if let Some(bloc) = guard.free(slot) {
-                    let offset = bloc.bidx as u64 * self.block_size as u64;
-                    let len = bloc.blen(self.block_size as u32) as usize;
-                    self.store.cache_file.punch_hole(offset, len)?;
-                }
-            }
-            drop(guard);
-        }
-
-        if self.is_empty() {
-            return Ok((vec![], vec![]));
-        }
-
-        // Write new cache entries.
-
-        let mut slots = Vec::with_capacity(self.blocs.len());
-
-        let mut boff: Option<u32> = None;
-
-        for buffer in self.buffers {
-            let blen = buffer.len();
-
-            let timer = self.store.metrics.disk_write_latency.start_timer();
-            let offset = self.store.cache_file.append(buffer).await? / self.block_size as u64;
-            timer.observe_duration();
-
-            if boff.is_none() {
-                boff = Some(offset.try_into().unwrap());
-            }
-
-            self.store.metrics.disk_write_bytes.inc_by(blen as f64);
-            self.store.metrics.disk_write_io_size.observe(blen as f64);
-        }
-
-        let boff = boff.unwrap();
-
-        for bloc in &mut self.blocs {
-            bloc.bidx += boff;
-        }
-
-        // Write guard is only needed when updating meta file, for data file is append-only.
-        let mut guard = self
-            .store
-            .meta_file
-            .write()
-            .instrument(tracing::trace_span!("meta_write_lock_update_slots"))
-            .await;
-
-        for (key, bloc) in self.keys.iter().zip_eq_fast(self.blocs.iter()) {
-            slots.push(guard.insert(key, bloc)?);
-        }
-
-        Ok((self.keys, slots))
-    }
-}
-
-pub struct StoreOptions {
-    pub dir: String,
+    pub name: String,
+    pub dir: PathBuf,
     pub capacity: usize,
-    pub buffer_capacity: usize,
-    pub cache_file_fallocate_unit: usize,
-    pub cache_meta_fallocate_unit: usize,
-    pub cache_file_max_write_size: usize,
-
-    pub metrics: FileCacheMetricsRef,
+    pub file_capacity: usize,
+    pub device_align: usize,
+    pub device_io_size: usize,
+    pub flushers: usize,
+    pub reclaimers: usize,
+    pub reclaim_rate_limit: usize,
+    pub recover_concurrency: usize,
+    pub lfu_window_to_cache_size_ratio: usize,
+    pub lfu_tiny_lru_capacity_ratio: f64,
+    pub insert_rate_limit: usize,
+    pub ring_buffer_capacity: usize,
+    pub catalog_bits: usize,
+    pub admissions: Vec<Arc<dyn AdmissionPolicy<Key = K, Value = V>>>,
+    pub reinsertions: Vec<Arc<dyn ReinsertionPolicy<Key = K, Value = V>>>,
+    pub compression: Compression,
 }
 
-pub struct Store<K, V>
+impl<K, V> Clone for FileCacheConfig<K, V>
 where
-    K: TieredCacheKey,
-    V: TieredCacheValue,
+    K: Key,
+    V: Value,
 {
-    dir: String,
-    _capacity: usize,
-
-    fs_type: FsType,
-    _fs_block_size: usize,
-    block_size: usize,
-    buffer_capacity: usize,
-    cache_file_max_write_size: usize,
-
-    meta_file: Arc<AsyncRwLock<MetaFile<K>>>,
-    cache_file: CacheFile,
-
-    freelist: Arc<RwLock<Vec<SlotId>>>,
-
-    metrics: FileCacheMetricsRef,
-
-    _phantom: PhantomData<V>,
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            dir: self.dir.clone(),
+            capacity: self.capacity,
+            file_capacity: self.file_capacity,
+            device_align: self.device_align,
+            device_io_size: self.device_io_size,
+            flushers: self.flushers,
+            reclaimers: self.reclaimers,
+            reclaim_rate_limit: self.reclaim_rate_limit,
+            recover_concurrency: self.recover_concurrency,
+            lfu_window_to_cache_size_ratio: self.lfu_window_to_cache_size_ratio,
+            lfu_tiny_lru_capacity_ratio: self.lfu_tiny_lru_capacity_ratio,
+            insert_rate_limit: self.insert_rate_limit,
+            ring_buffer_capacity: self.ring_buffer_capacity,
+            catalog_bits: self.catalog_bits,
+            admissions: self.admissions.clone(),
+            reinsertions: self.reinsertions.clone(),
+            compression: self.compression,
+        }
+    }
 }
 
-impl<K, V> Store<K, V>
+#[derive(Debug)]
+pub enum FileCacheWriter<K, V>
 where
-    K: TieredCacheKey,
-    V: TieredCacheValue,
+    K: Key,
+    V: Value,
 {
-    pub async fn open(options: StoreOptions) -> Result<Self> {
-        if !PathBuf::from(options.dir.as_str()).exists() {
-            std::fs::create_dir_all(options.dir.as_str())?;
+    Foyer {
+        writer: RuntimeLazyStoreWriter<K, V>,
+    },
+    None {
+        writer: NoneStoreWriter<K, V>,
+    },
+}
+
+impl<K, V> From<RuntimeLazyStoreWriter<K, V>> for FileCacheWriter<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn from(writer: RuntimeLazyStoreWriter<K, V>) -> Self {
+        Self::Foyer { writer }
+    }
+}
+
+impl<K, V> From<NoneStoreWriter<K, V>> for FileCacheWriter<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn from(writer: NoneStoreWriter<K, V>) -> Self {
+        Self::None { writer }
+    }
+}
+
+impl<K, V> StorageWriter for FileCacheWriter<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    type Key = K;
+    type Value = V;
+
+    fn key(&self) -> &Self::Key {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.key(),
+            FileCacheWriter::None { writer } => writer.key(),
+        }
+    }
+
+    fn weight(&self) -> usize {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.weight(),
+            FileCacheWriter::None { writer } => writer.weight(),
+        }
+    }
+
+    fn judge(&mut self) -> bool {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.judge(),
+            FileCacheWriter::None { writer } => writer.judge(),
+        }
+    }
+
+    fn force(&mut self) {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.force(),
+            FileCacheWriter::None { writer } => writer.force(),
+        }
+    }
+
+    async fn finish(self, value: Self::Value) -> FileCacheResult<bool> {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.finish(value).await,
+            FileCacheWriter::None { writer } => writer.finish(value).await,
+        }
+    }
+
+    fn compression(&self) -> Compression {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.compression(),
+            FileCacheWriter::None { writer } => writer.compression(),
+        }
+    }
+
+    fn set_compression(&mut self, compression: Compression) {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.set_compression(compression),
+            FileCacheWriter::None { writer } => writer.set_compression(compression),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum FileCache<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    Foyer { store: RuntimeLazyStore<K, V> },
+    None { store: NoneStore<K, V> },
+}
+
+impl<K, V> Clone for FileCache<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    fn clone(&self) -> Self {
+        match self {
+            Self::Foyer { store } => Self::Foyer {
+                store: store.clone(),
+            },
+            Self::None { store } => Self::None {
+                store: store.clone(),
+            },
+        }
+    }
+}
+
+impl<K, V> FileCache<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    pub fn none() -> Self {
+        Self::None {
+            store: NoneStore::default(),
+        }
+    }
+}
+
+impl<K, V> Storage for FileCache<K, V>
+where
+    K: Key,
+    V: Value,
+{
+    type Config = FileCacheConfig<K, V>;
+    type Key = K;
+    type Value = V;
+    type Writer = FileCacheWriter<K, V>;
+
+    async fn open(config: Self::Config) -> FileCacheResult<Self> {
+        let mut admissions = config.admissions;
+        if config.insert_rate_limit > 0 {
+            admissions.push(Arc::new(RatedTicketAdmissionPolicy::new(
+                config.insert_rate_limit,
+            )));
         }
 
-        // Get file system type and block size by `statfs(2)`.
-        let fs_stat = statfs(options.dir.as_str())?;
-        let fs_type = match fs_stat.filesystem_type() {
-            // FYI: https://github.com/nix-rust/nix/issues/1742
-            // FYI: Aftere https://github.com/nix-rust/nix/pull/1743 is release,
-            //      we can bump to the new nix version and use nix type instead of libc's.
-            NixFsType(libc::XFS_SUPER_MAGIC) => FsType::Xfs,
-            EXT4_SUPER_MAGIC => FsType::Ext4,
-            BTRFS_SUPER_MAGIC => FsType::Btrfs,
-            TMPFS_MAGIC => FsType::Tmpfs,
-            nix_fs_type => return Err(Error::UnsupportedFilesystem(nix_fs_type.0)),
+        let c = RuntimeLazyStoreConfig {
+            store: LfuFsStoreConfig {
+                name: config.name.clone(),
+                eviction_config: LfuConfig {
+                    window_to_cache_size_ratio: config.lfu_window_to_cache_size_ratio,
+                    tiny_lru_capacity_ratio: config.lfu_tiny_lru_capacity_ratio,
+                },
+                device_config: FsDeviceConfig {
+                    dir: config.dir,
+                    capacity: config.capacity,
+                    file_capacity: config.file_capacity,
+                    align: config.device_align,
+                    io_size: config.device_io_size,
+                },
+                ring_buffer_capacity: config.ring_buffer_capacity,
+                catalog_bits: config.catalog_bits,
+                admissions,
+                reinsertions: config.reinsertions,
+                flusher_buffer_size: 131072, // TODO: make it configurable
+                flushers: config.flushers,
+                reclaimers: config.reclaimers,
+                reclaim_rate_limit: config.reclaim_rate_limit,
+                clean_region_threshold: config.reclaimers + config.reclaimers / 2,
+                recover_concurrency: config.recover_concurrency,
+                compression: config.compression,
+            }
+            .into(),
+            runtime: RuntimeConfig {
+                worker_threads: None,
+                thread_name: Some(config.name),
+            },
         };
-        let fs_block_size = fs_stat.block_size() as usize;
-
-        let cf_opts = CacheFileOptions {
-            fs_type,
-            // TODO: Make it configurable.
-            block_size: fs_block_size,
-            fallocate_unit: options.cache_file_fallocate_unit,
-        };
-
-        let mf = MetaFile::open(
-            PathBuf::from(&options.dir).join(META_FILE_FILENAME),
-            options.cache_meta_fallocate_unit,
-        )?;
-
-        let cf = CacheFile::open(
-            PathBuf::from(&options.dir).join(CACHE_FILE_FILENAME),
-            cf_opts,
-        )
-        .await?;
-
-        Ok(Self {
-            dir: options.dir,
-            _capacity: options.capacity,
-
-            fs_type,
-            _fs_block_size: fs_block_size,
-            // TODO: Make it configurable.
-            block_size: fs_block_size,
-            buffer_capacity: options.buffer_capacity,
-            cache_file_max_write_size: options.cache_file_max_write_size,
-
-            meta_file: Arc::new(AsyncRwLock::new(mf)),
-            cache_file: cf,
-
-            freelist: Arc::new(RwLock::new(Vec::with_capacity(FREELIST_DEFAULT_CAPACITY))),
-
-            metrics: options.metrics,
-
-            _phantom: PhantomData::default(),
-        })
+        let store = RuntimeLazyStore::open(c).await?;
+        Ok(Self::Foyer { store })
     }
 
-    pub fn fs_type(&self) -> FsType {
-        self.fs_type
+    fn is_ready(&self) -> bool {
+        match self {
+            FileCache::Foyer { store } => store.is_ready(),
+            FileCache::None { store } => store.is_ready(),
+        }
     }
 
-    pub fn block_size(&self) -> usize {
-        self.block_size
+    async fn close(&self) -> FileCacheResult<()> {
+        match self {
+            FileCache::Foyer { store } => store.close().await,
+            FileCache::None { store } => store.close().await,
+        }
     }
 
-    pub async fn size(&self) -> usize {
-        self.cache_file.size() + self.meta_file.read().await.size()
+    fn writer(&self, key: Self::Key, weight: usize) -> Self::Writer {
+        match self {
+            FileCache::Foyer { store } => store.writer(key, weight).into(),
+            FileCache::None { store } => store.writer(key, weight).into(),
+        }
     }
 
-    pub async fn meta_file_size(&self) -> usize {
-        self.meta_file.read().await.size()
+    fn exists(&self, key: &Self::Key) -> FileCacheResult<bool> {
+        match self {
+            FileCache::Foyer { store } => store.exists(key),
+            FileCache::None { store } => store.exists(key),
+        }
     }
 
-    pub fn cache_file_size(&self) -> usize {
-        self.cache_file.size()
+    async fn lookup(&self, key: &Self::Key) -> FileCacheResult<Option<Self::Value>> {
+        match self {
+            FileCache::Foyer { store } => store.lookup(key).await,
+            FileCache::None { store } => store.lookup(key).await,
+        }
     }
 
-    pub fn cache_file_len(&self) -> usize {
-        self.cache_file.len()
+    fn remove(&self, key: &Self::Key) -> FileCacheResult<bool> {
+        match self {
+            FileCache::Foyer { store } => store.remove(key),
+            FileCache::None { store } => store.remove(key),
+        }
     }
 
-    pub fn meta_file_path(&self) -> PathBuf {
-        PathBuf::from(&self.dir).join(META_FILE_FILENAME)
+    fn clear(&self) -> FileCacheResult<()> {
+        match self {
+            FileCache::Foyer { store } => store.clear(),
+            FileCache::None { store } => store.clear(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
+pub struct SstableBlockIndex {
+    pub sst_id: HummockSstableObjectId,
+    pub block_idx: u64,
+}
+
+impl Key for SstableBlockIndex {
+    fn serialized_len(&self) -> usize {
+        8 + 8 // sst_id (8B) + block_idx (8B)
     }
 
-    pub fn cache_file_path(&self) -> PathBuf {
-        PathBuf::from(&self.dir).join(CACHE_FILE_FILENAME)
+    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
+        buf.put_u64(self.sst_id);
+        buf.put_u64(self.block_idx);
+        Ok(())
     }
 
-    pub async fn restore<S: HashBuilder>(
-        &self,
-        indices: &Arc<LruCache<K, SlotId>>,
-        hash_builder: &S,
-    ) -> Result<()> {
-        let slots = self.meta_file.read().await.slots();
+    fn read(mut buf: &[u8]) -> CodingResult<Self> {
+        let sst_id = buf.get_u64();
+        let block_idx = buf.get_u64();
+        Ok(Self { sst_id, block_idx })
+    }
+}
 
-        for slot in 0..slots {
-            // Wrap the read guard, or there will be deadlock when evicting entries.
-            let res = { self.meta_file.read().await.get(slot) };
-            if let Some((block_loc, key)) = res {
-                indices.insert(
-                    key.clone(),
-                    hash_builder.hash_one(&key),
-                    utils::align_up(self.block_size, block_loc.len as usize),
-                    slot,
-                    CachePriority::High,
-                );
+/// [`CachedBlock`] uses different coding for writing to use/bypass compression.
+///
+/// But when reading, it will always be `Loaded`.
+#[derive(Debug)]
+pub enum CachedBlock {
+    Loaded {
+        block: Box<Block>,
+    },
+    Fetched {
+        bytes: Bytes,
+        uncompressed_capacity: usize,
+    },
+}
+
+impl CachedBlock {
+    pub fn should_compress(&self) -> bool {
+        match self {
+            CachedBlock::Loaded { .. } => true,
+            // TODO(MrCroxx): based on block original compression algorithm?
+            CachedBlock::Fetched { .. } => false,
+        }
+    }
+
+    pub fn into_inner(self) -> Box<Block> {
+        match self {
+            CachedBlock::Loaded { block } => block,
+            CachedBlock::Fetched { .. } => unreachable!(),
+        }
+    }
+}
+
+impl Value for CachedBlock {
+    fn serialized_len(&self) -> usize {
+        1 /* type */ + match self {
+            CachedBlock::Loaded { block } => block.raw_data().len(),
+            CachedBlock::Fetched { bytes, uncompressed_capacity: _ } => 8 + bytes.len(),
+        }
+    }
+
+    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
+        match self {
+            CachedBlock::Loaded { block } => {
+                buf.put_u8(0);
+                buf.put_slice(block.raw_data())
+            }
+            CachedBlock::Fetched {
+                bytes,
+                uncompressed_capacity,
+            } => {
+                buf.put_u8(1);
+                buf.put_u64(*uncompressed_capacity as u64);
+                buf.put_slice(bytes);
             }
         }
-
         Ok(())
     }
 
-    pub fn start_batch_writer(&self, item_capacity: usize) -> StoreBatchWriter<'_, K, V> {
-        StoreBatchWriter::new(
-            self,
-            self.block_size,
-            self.buffer_capacity,
-            item_capacity,
-            self.cache_file_max_write_size,
-        )
+    fn read(mut buf: &[u8]) -> CodingResult<Self> {
+        let v = buf.get_u8();
+        let res = match v {
+            0 => {
+                let data = Bytes::copy_from_slice(buf);
+                let block = Block::decode_from_raw(data);
+                let block = Box::new(block);
+                Self::Loaded { block }
+            }
+            1 => {
+                let uncompressed_capacity = buf.get_u64() as usize;
+                let data = Bytes::copy_from_slice(buf);
+                let block = Block::decode(data, uncompressed_capacity)?;
+                let block = Box::new(block);
+                Self::Loaded { block }
+            }
+            _ => unreachable!(),
+        };
+        Ok(res)
+    }
+}
+
+impl Value for Box<Block> {
+    fn serialized_len(&self) -> usize {
+        self.raw_data().len()
     }
 
-    #[tracing::instrument(skip(self))]
-    pub async fn get(&self, slot: SlotId) -> Result<Vec<u8>> {
-        // Read guard should be held during reading meta and loading data.
-        let guard = self
-            .meta_file
-            .read()
-            .instrument(tracing::trace_span!("meta_file_read_lock"))
-            .await;
-
-        let (bloc, _key) = guard.get(slot).ok_or(Error::InvalidSlot(slot))?;
-        let offset = bloc.bidx as u64 * self.block_size as u64;
-        let blen = bloc.blen(self.block_size as u32) as usize;
-
-        let timer = self.metrics.disk_read_latency.start_timer();
-        let buf = self.cache_file.read(offset, blen).await?;
-        timer.observe_duration();
-        self.metrics.disk_read_bytes.inc_by(buf.len() as f64);
-        self.metrics.disk_read_io_size.observe(buf.len() as f64);
-
-        drop(guard);
-
-        Ok(buf[..bloc.len as usize].to_vec())
-    }
-
-    pub fn erase(&self, slot: SlotId) -> Result<()> {
-        self.free(slot)
-    }
-
-    fn free(&self, slot: SlotId) -> Result<()> {
-        // `free` is called by `CacheableEntry::drop` which cannot be async, so delay actual free
-        // until next batch write.
-
-        // TODO(MrCroxx): Optimize freelist to use lock-free queue with batching read.
-        self.freelist.write().push(slot);
+    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
+        buf.put_slice(self.raw_data());
         Ok(())
     }
-}
 
-impl<K, V> LruCacheEventListener for Store<K, V>
-where
-    K: TieredCacheKey,
-    V: TieredCacheValue,
-{
-    type K = K;
-    type T = SlotId;
-
-    fn on_release(&self, _key: Self::K, slot: Self::T) {
-        // TODO: Throw warning log instead?
-        self.free(slot).unwrap();
+    fn read(buf: &[u8]) -> CodingResult<Self> {
+        let data = Bytes::copy_from_slice(buf);
+        let block = Block::decode_from_raw(data);
+        let block = Box::new(block);
+        Ok(block)
     }
 }
 
-pub type StoreRef<K, V> = Arc<Store<K, V>>;
+impl Value for Box<Sstable> {
+    fn serialized_len(&self) -> usize {
+        8 + self.meta.encoded_size() // id (8B) + meta size
+    }
+
+    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
+        buf.put_u64(self.id);
+        // TODO(MrCroxx): avoid buffer copy
+        let mut buffer = vec![];
+        self.meta.encode_to(&mut buffer);
+        buf.put_slice(&buffer[..]);
+        Ok(())
+    }
+
+    fn read(mut buf: &[u8]) -> CodingResult<Self> {
+        let id = buf.get_u64();
+        let meta = SstableMeta::decode(buf).unwrap();
+        let sstable = Box::new(Sstable::new(id, meta));
+        Ok(sstable)
+    }
+}
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::key::FullKey;
 
     use super::*;
-    use crate::hummock::file_cache::test_utils::{TestCacheKey, TestCacheValue};
-
-    fn is_send_sync_clone<T: Send + Sync + Clone + 'static>() {}
+    use crate::hummock::{
+        BlockBuilder, BlockBuilderOptions, BlockHolder, BlockIterator, CompressionAlgorithm,
+    };
 
     #[test]
-    fn ensure_send_sync_clone() {
-        is_send_sync_clone::<StoreRef<TestCacheKey, TestCacheValue>>();
+    fn test_enc_dec() {
+        let options = BlockBuilderOptions {
+            compression_algorithm: CompressionAlgorithm::Lz4,
+            ..Default::default()
+        };
+
+        let mut builder = BlockBuilder::new(options);
+        builder.add_for_test(construct_full_key_struct(0, b"k1", 1), b"v01");
+        builder.add_for_test(construct_full_key_struct(0, b"k2", 2), b"v02");
+        builder.add_for_test(construct_full_key_struct(0, b"k3", 3), b"v03");
+        builder.add_for_test(construct_full_key_struct(0, b"k4", 4), b"v04");
+
+        let block = Box::new(
+            Block::decode(
+                builder.build().to_vec().into(),
+                builder.uncompressed_block_size(),
+            )
+            .unwrap(),
+        );
+
+        let mut buf = vec![0; block.serialized_len()];
+        block.write(&mut buf[..]).unwrap();
+
+        let block = <Box<Block> as Value>::read(&buf[..]).unwrap();
+
+        let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
+
+        bi.seek_to_first();
+        assert!(bi.is_valid());
+        assert_eq!(construct_full_key_struct(0, b"k1", 1), bi.key());
+        assert_eq!(b"v01", bi.value());
+
+        bi.next();
+        assert!(bi.is_valid());
+        assert_eq!(construct_full_key_struct(0, b"k2", 2), bi.key());
+        assert_eq!(b"v02", bi.value());
+
+        bi.next();
+        assert!(bi.is_valid());
+        assert_eq!(construct_full_key_struct(0, b"k3", 3), bi.key());
+        assert_eq!(b"v03", bi.value());
+
+        bi.next();
+        assert!(bi.is_valid());
+        assert_eq!(construct_full_key_struct(0, b"k4", 4), bi.key());
+        assert_eq!(b"v04", bi.value());
+
+        bi.next();
+        assert!(!bi.is_valid());
+    }
+
+    pub fn construct_full_key_struct(
+        table_id: u32,
+        table_key: &[u8],
+        epoch: u64,
+    ) -> FullKey<&[u8]> {
+        FullKey::for_test(TableId::new(table_id), table_key, epoch)
     }
 }

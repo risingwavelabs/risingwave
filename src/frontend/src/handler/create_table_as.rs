@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::ColumnDesc;
+use either::Either;
+use pgwire::pg_response::StatementType;
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Query, Statement};
 
@@ -29,10 +31,10 @@ pub async fn handle_create_as(
     table_name: ObjectName,
     if_not_exists: bool,
     query: Box<Query>,
-    columns: Vec<ColumnDef>,
+    column_defs: Vec<ColumnDef>,
     append_only: bool,
 ) -> Result<RwPgResponse> {
-    if columns.iter().any(|column| column.data_type.is_some()) {
+    if column_defs.iter().any(|column| column.data_type.is_some()) {
         return Err(ErrorCode::InvalidInputSyntax(
             "Should not specify data type in CREATE TABLE AS".into(),
         )
@@ -40,21 +42,18 @@ pub async fn handle_create_as(
     }
     let session = handler_args.session.clone();
 
-    if let Err(e) = session.check_relation_name_duplicated(table_name.clone()) {
-        if if_not_exists {
-            return Ok(PgResponse::empty_result_with_notice(
-                StatementType::CREATE_TABLE,
-                format!("relation \"{}\" already exists, skipping", table_name),
-            ));
-        } else {
-            return Err(e);
-        }
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        table_name.clone(),
+        StatementType::CREATE_TABLE,
+        if_not_exists,
+    )? {
+        return Ok(resp);
     }
 
     let mut col_id_gen = ColumnIdGenerator::new_initial();
 
     // Generate catalog descs from query
-    let mut column_descs: Vec<_> = {
+    let mut columns: Vec<_> = {
         let mut binder = Binder::new(&session);
         let bound = binder.bind(Statement::Query(query.clone()))?;
         if let BoundStatement::Query(query) = bound {
@@ -65,7 +64,10 @@ pub async fn handle_create_as(
                 .iter()
                 .map(|field| {
                     let id = col_id_gen.generate(&field.name);
-                    ColumnDesc::from_field_with_column_id(field, id.get_id())
+                    ColumnCatalog {
+                        column_desc: ColumnDesc::from_field_with_column_id(field, id.get_id()),
+                        is_hidden: false,
+                    }
                 })
                 .collect()
         } else {
@@ -73,7 +75,7 @@ pub async fn handle_create_as(
         }
     };
 
-    if columns.len() > column_descs.len() {
+    if column_defs.len() > columns.len() {
         return Err(ErrorCode::InvalidInputSyntax(
             "too many column names were specified".to_string(),
         )
@@ -81,8 +83,8 @@ pub async fn handle_create_as(
     }
 
     // Override column name if it specified in creaet statement.
-    columns.iter().enumerate().for_each(|(idx, column)| {
-        column_descs[idx].name = column.name.real_value();
+    column_defs.iter().enumerate().for_each(|(idx, column)| {
+        columns[idx].column_desc.name = column.name.real_value();
     });
 
     let (graph, source, table) = {
@@ -96,7 +98,7 @@ pub async fn handle_create_as(
         let (plan, source, table) = gen_create_table_plan_without_bind(
             context,
             table_name.clone(),
-            column_descs,
+            columns,
             vec![],
             vec![],
             properties,
@@ -119,8 +121,10 @@ pub async fn handle_create_as(
         serde_json::to_string_pretty(&graph).unwrap()
     );
 
-    let catalog_writer = session.env().catalog_writer();
-    catalog_writer.create_table(source, table, graph).await?;
+    let catalog_writer = session.catalog_writer()?;
+    catalog_writer
+        .create_table(source, table, graph, TableJobType::Unspecified)
+        .await?;
 
     // Generate insert
     let insert = Statement::Insert {

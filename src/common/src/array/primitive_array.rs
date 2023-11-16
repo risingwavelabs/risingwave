@@ -116,7 +116,8 @@ impl_primitive_for_others! {
     { Interval, Interval, Interval },
     { Date, Date, Date },
     { Time, Time, Time },
-    { Timestamp, Timestamp, Timestamp }
+    { Timestamp, Timestamp, Timestamp },
+    { Timestamptz, Timestamptz, Timestamptz }
 }
 
 /// `PrimitiveArray` is a collection of primitive types, such as `i32`, `f32`.
@@ -150,6 +151,30 @@ impl<T: PrimitiveArrayItemType> FromIterator<T> for PrimitiveArray<T> {
             bitmap: Bitmap::ones(data.len()),
             data,
         }
+    }
+}
+
+impl FromIterator<Option<f32>> for PrimitiveArray<F32> {
+    fn from_iter<I: IntoIterator<Item = Option<f32>>>(iter: I) -> Self {
+        iter.into_iter().map(|o| o.map(F32::from)).collect()
+    }
+}
+
+impl FromIterator<Option<f64>> for PrimitiveArray<F64> {
+    fn from_iter<I: IntoIterator<Item = Option<f64>>>(iter: I) -> Self {
+        iter.into_iter().map(|o| o.map(F64::from)).collect()
+    }
+}
+
+impl FromIterator<f32> for PrimitiveArray<F32> {
+    fn from_iter<I: IntoIterator<Item = f32>>(iter: I) -> Self {
+        iter.into_iter().map(F32::from).collect()
+    }
+}
+
+impl FromIterator<f64> for PrimitiveArray<F64> {
+    fn from_iter<I: IntoIterator<Item = f64>>(iter: I) -> Self {
+        iter.into_iter().map(F64::from).collect()
     }
 }
 
@@ -237,10 +262,7 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
     }
 
     fn with_type(capacity: usize, ty: DataType) -> Self {
-        // Timestamptz shares the same underlying type as Int64
-        assert!(
-            ty == T::DATA_TYPE || ty == DataType::Timestamptz && T::DATA_TYPE == DataType::Int64
-        );
+        assert_eq!(ty, T::DATA_TYPE);
         Self::new(capacity)
     }
 
@@ -266,6 +288,10 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
 
     fn pop(&mut self) -> Option<()> {
         self.data.pop().map(|_| self.bitmap.pop().unwrap())
+    }
+
+    fn len(&self) -> usize {
+        self.bitmap.len()
     }
 
     fn finish(self) -> PrimitiveArray<T> {

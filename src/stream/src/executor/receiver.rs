@@ -18,6 +18,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
+use tokio::time::Instant;
 
 use super::exchange::input::BoxedInput;
 use super::ActorContextRef;
@@ -115,15 +116,20 @@ impl Executor for ReceiverExecutor {
     fn execute(mut self: Box<Self>) -> BoxedMessageStream {
         let actor_id = self.actor_context.id;
         let actor_id_str = actor_id.to_string();
+        let fragment_id_str = self.fragment_id.to_string();
         let mut upstream_fragment_id_str = self.upstream_fragment_id.to_string();
 
         let stream = #[try_stream]
         async move {
-            let mut start_time = minstant::Instant::now();
+            let mut start_time = Instant::now();
             while let Some(msg) = self.input.next().await {
                 self.metrics
                     .actor_input_buffer_blocking_duration_ns
-                    .with_label_values(&[&actor_id_str, &upstream_fragment_id_str])
+                    .with_label_values(&[
+                        &actor_id_str,
+                        &fragment_id_str,
+                        &upstream_fragment_id_str,
+                    ])
                     .inc_by(start_time.elapsed().as_nanos() as u64);
                 let mut msg: Message = msg?;
 
@@ -134,12 +140,12 @@ impl Executor for ReceiverExecutor {
                     Message::Chunk(chunk) => {
                         self.metrics
                             .actor_in_record_cnt
-                            .with_label_values(&[&actor_id_str])
+                            .with_label_values(&[&actor_id_str, &fragment_id_str])
                             .inc_by(chunk.cardinality() as _);
                     }
                     Message::Barrier(barrier) => {
-                        tracing::trace!(
-                            target: "events::barrier::path",
+                        tracing::debug!(
+                            target: "events::stream::barrier::path",
                             actor_id = actor_id,
                             "receiver receives barrier from path: {:?}",
                             barrier.passed_actors
@@ -196,7 +202,7 @@ impl Executor for ReceiverExecutor {
                 };
 
                 yield msg;
-                start_time = minstant::Instant::now();
+                start_time = Instant::now();
             }
         };
 
@@ -334,6 +340,7 @@ mod tests {
             vnode_bitmaps: Default::default(),
             dropped_actors: Default::default(),
             actor_splits: Default::default(),
+            actor_new_dispatchers: Default::default(),
         });
         send!([new], Message::Barrier(b1.clone()));
         assert!(recv!().is_none()); // We should not receive the barrier, as new is not the upstream.

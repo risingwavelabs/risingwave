@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Debug, Display};
 use std::ops::Bound;
 use std::rc::Rc;
@@ -22,7 +22,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableDesc};
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, DefaultOrd, ScalarImpl};
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 
 use crate::expr::{
@@ -170,7 +170,7 @@ impl Condition {
         self,
         input_col_nums: &[usize],
         only_eq: bool,
-    ) -> (HashMap<(usize, usize), Self>, Self) {
+    ) -> (BTreeMap<(usize, usize), Self>, Self) {
         let mut bitmaps = Vec::with_capacity(input_col_nums.len());
         let mut cols_seen = 0;
         for cols in input_col_nums {
@@ -178,7 +178,7 @@ impl Condition {
             cols_seen += cols;
         }
 
-        let mut pairwise_conditions = HashMap::with_capacity(self.conjunctions.len());
+        let mut pairwise_conditions = BTreeMap::new();
         let mut non_eq_join = vec![];
 
         for expr in self.conjunctions {
@@ -403,9 +403,13 @@ impl Condition {
                 ));
             }
 
-            let Some((lower_bound_conjunctions,upper_bound_conjunctions,eq_conds,part_of_other_conds)) = Self::analyze_group(
-                group,
-            )? else {
+            let Some((
+                lower_bound_conjunctions,
+                upper_bound_conjunctions,
+                eq_conds,
+                part_of_other_conds,
+            )) = Self::analyze_group(group)?
+            else {
                 return Ok(false_cond());
             };
             other_conds.extend(part_of_other_conds.into_iter());
@@ -561,9 +565,9 @@ impl Condition {
                 };
 
                 let Some(new_cond) = new_expr.fold_const()? else {
-                        // column = NULL, the result is always NULL.
-                        return Ok(None);
-                    };
+                    // column = NULL, the result is always NULL.
+                    return Ok(None);
+                };
                 if Self::mutual_exclusive_with_eq_conds(&new_cond, &eq_conds) {
                     return Ok(None);
                 }
@@ -583,8 +587,8 @@ impl Condition {
                         .unwrap();
                     let value = const_expr.fold_const()?;
                     let Some(value) = value else {
-                            continue;
-                        };
+                        continue;
+                    };
                     scalars.insert(Some(value));
                 }
                 if scalars.is_empty() {
@@ -601,7 +605,10 @@ impl Condition {
                     }
                 }
                 // Sort to ensure a deterministic result for planner test.
-                eq_conds = scalars.into_iter().sorted().collect();
+                eq_conds = scalars
+                    .into_iter()
+                    .sorted_by(DefaultOrd::default_cmp)
+                    .collect();
             } else if let Some((input_ref, op, const_expr)) = expr.as_comparison_const() {
                 let new_expr = if let Ok(expr) = const_expr
                     .clone()
@@ -638,9 +645,9 @@ impl Condition {
                     }
                 };
                 let Some(value) = new_expr.fold_const()? else {
-                        // column compare with NULL, the result is always  NULL.
-                        return Ok(None);
-                    };
+                    // column compare with NULL, the result is always  NULL.
+                    return Ok(None);
+                };
                 match op {
                     ExprType::LessThan => {
                         upper_bound_conjunctions.push(Bound::Excluded(value));
@@ -692,14 +699,14 @@ impl Condition {
                     (Bound::Unbounded, Bound::Included(_)) => std::cmp::Ordering::Less,
                     (Bound::Unbounded, Bound::Excluded(_)) => std::cmp::Ordering::Less,
                     (Bound::Unbounded, Bound::Unbounded) => std::cmp::Ordering::Equal,
-                    (Bound::Included(a), Bound::Included(b)) => a.cmp(b),
-                    (Bound::Excluded(a), Bound::Excluded(b)) => a.cmp(b),
+                    (Bound::Included(a), Bound::Included(b)) => a.default_cmp(b),
+                    (Bound::Excluded(a), Bound::Excluded(b)) => a.default_cmp(b),
                     // excluded bound is strict than included bound so we assume it more greater.
-                    (Bound::Included(a), Bound::Excluded(b)) => match a.cmp(b) {
+                    (Bound::Included(a), Bound::Excluded(b)) => match a.default_cmp(b) {
                         std::cmp::Ordering::Equal => std::cmp::Ordering::Less,
                         other => other,
                     },
-                    (Bound::Excluded(a), Bound::Included(b)) => match a.cmp(b) {
+                    (Bound::Excluded(a), Bound::Included(b)) => match a.default_cmp(b) {
                         std::cmp::Ordering::Equal => std::cmp::Ordering::Greater,
                         other => other,
                     },
@@ -718,14 +725,14 @@ impl Condition {
                     (Bound::Unbounded, Bound::Included(_)) => std::cmp::Ordering::Greater,
                     (Bound::Unbounded, Bound::Excluded(_)) => std::cmp::Ordering::Greater,
                     (Bound::Unbounded, Bound::Unbounded) => std::cmp::Ordering::Equal,
-                    (Bound::Included(a), Bound::Included(b)) => a.cmp(b),
-                    (Bound::Excluded(a), Bound::Excluded(b)) => a.cmp(b),
+                    (Bound::Included(a), Bound::Included(b)) => a.default_cmp(b),
+                    (Bound::Excluded(a), Bound::Excluded(b)) => a.default_cmp(b),
                     // excluded bound is strict than included bound so we assume it more greater.
-                    (Bound::Included(a), Bound::Excluded(b)) => match a.cmp(b) {
+                    (Bound::Included(a), Bound::Excluded(b)) => match a.default_cmp(b) {
                         std::cmp::Ordering::Equal => std::cmp::Ordering::Greater,
                         other => other,
                     },
-                    (Bound::Excluded(a), Bound::Included(b)) => match a.cmp(b) {
+                    (Bound::Excluded(a), Bound::Included(b)) => match a.default_cmp(b) {
                         std::cmp::Ordering::Equal => std::cmp::Ordering::Less,
                         other => other,
                     },
@@ -736,10 +743,10 @@ impl Condition {
 
     fn is_invalid_range(lower_bound: &Bound<ScalarImpl>, upper_bound: &Bound<ScalarImpl>) -> bool {
         match (lower_bound, upper_bound) {
-            (Bound::Included(l), Bound::Included(u)) => l > u,
-            (Bound::Included(l), Bound::Excluded(u)) => l >= u,
-            (Bound::Excluded(l), Bound::Included(u)) => l >= u,
-            (Bound::Excluded(l), Bound::Excluded(u)) => l >= u,
+            (Bound::Included(l), Bound::Included(u)) => l.default_cmp(u).is_gt(), // l > u
+            (Bound::Included(l), Bound::Excluded(u)) => l.default_cmp(u).is_ge(), // l >= u
+            (Bound::Excluded(l), Bound::Included(u)) => l.default_cmp(u).is_ge(), // l >= u
+            (Bound::Excluded(l), Bound::Excluded(u)) => l.default_cmp(u).is_ge(), // l >= u
             _ => false,
         }
     }
@@ -763,12 +770,14 @@ impl Condition {
                 if let Some(cond) = cond {
                     match lower_bound {
                         Bound::Included(val) => {
-                            if cond < val {
+                            if cond.default_cmp(val).is_lt() {
+                                // cond < val
                                 return false;
                             }
                         }
                         Bound::Excluded(val) => {
-                            if cond <= val {
+                            if cond.default_cmp(val).is_le() {
+                                // cond <= val
                                 return false;
                             }
                         }
@@ -776,12 +785,14 @@ impl Condition {
                     }
                     match upper_bound {
                         Bound::Included(val) => {
-                            if cond > val {
+                            if cond.default_cmp(val).is_gt() {
+                                // cond > val
                                 return false;
                             }
                         }
                         Bound::Excluded(val) => {
-                            if cond >= val {
+                            if cond.default_cmp(val).is_ge() {
+                                // cond >= val
                                 return false;
                             }
                         }
@@ -833,7 +844,7 @@ impl Condition {
         .simplify()
     }
 
-    pub fn visit_expr<R: Default, V: ExprVisitor<R> + ?Sized>(&self, visitor: &mut V) -> R {
+    pub fn visit_expr<V: ExprVisitor + ?Sized>(&self, visitor: &mut V) -> V::Result {
         self.conjunctions
             .iter()
             .map(|expr| visitor.visit_expr(expr))
@@ -878,7 +889,9 @@ impl Condition {
         }
         // remove all constant boolean `true`
         res.retain(|expr| {
-            if let Some(v) = try_get_bool_constant(expr) && v {
+            if let Some(v) = try_get_bool_constant(expr)
+                && v
+            {
                 false
             } else {
                 true

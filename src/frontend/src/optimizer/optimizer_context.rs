@@ -33,7 +33,7 @@ pub struct OptimizerContext {
     /// Store plan node id
     next_plan_node_id: RefCell<i32>,
     /// The original SQL string, used for debugging.
-    sql: String,
+    sql: Arc<str>,
     /// Normalized SQL string. See [`HandlerArgs::normalize_sql`].
     normalized_sql: String,
     /// Explain options
@@ -97,7 +97,7 @@ impl OptimizerContext {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),
             next_plan_node_id: RefCell::new(0),
-            sql: "".to_owned(),
+            sql: Arc::from(""),
             normalized_sql: "".to_owned(),
             explain_options: ExplainOptions::default(),
             optimizer_trace: RefCell::new(vec![]),
@@ -164,7 +164,7 @@ impl OptimizerContext {
         }
         let mut optimizer_trace = self.optimizer_trace.borrow_mut();
         let string = str.into();
-        tracing::trace!("{}", string);
+        tracing::trace!(target: "explain_trace", "{}", string);
         optimizer_trace.push(string);
         optimizer_trace.push("\n".to_string());
     }

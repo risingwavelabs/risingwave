@@ -32,17 +32,20 @@ use serde::{Deserialize, Serialize};
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
-    AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
-    ReferentialAction, SourceWatermark, TableConstraint,
+    AlterColumnOperation, AlterDatabaseOperation, AlterSchemaOperation, AlterTableOperation,
+    ColumnDef, ColumnOption, ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint,
 };
-pub use self::operator::{BinaryOperator, UnaryOperator};
+pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
     Cte, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView, OrderByExpr, Query,
     Select, SelectItem, SetExpr, SetOperator, TableAlias, TableFactor, TableWithJoins, Top, Values,
     With,
 };
 pub use self::statement::*;
-pub use self::value::{DateTimeField, DollarQuotedString, TrimWhereField, Value};
+pub use self::value::{
+    CstyleEscapedString, DateTimeField, DollarQuotedString, JsonPredicateType, TrimWhereField,
+    Value,
+};
 pub use crate::ast::ddl::{
     AlterIndexOperation, AlterSinkOperation, AlterSourceOperation, AlterViewOperation,
 };
@@ -178,7 +181,7 @@ impl fmt::Display for Ident {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.quote_style {
             Some(q) if q == '"' || q == '\'' || q == '`' => write!(f, "{}{}{}", q, self.value, q),
-            Some(q) if q == '[' => write!(f, "[{}]", self.value),
+            Some('[') => write!(f, "[{}]", self.value),
             None => f.write_str(&self.value),
             _ => panic!("unexpected quote style"),
         }
@@ -199,6 +202,10 @@ impl ObjectName {
             .map(|ident| ident.real_value())
             .collect::<Vec<_>>()
             .join(".")
+    }
+
+    pub fn from_test_str(s: &str) -> Self {
+        ObjectName::from(vec![s.into()])
     }
 }
 
@@ -278,10 +285,24 @@ pub enum Expr {
     IsFalse(Box<Expr>),
     /// `IS NOT FALSE` operator
     IsNotFalse(Box<Expr>),
+    /// `IS UNKNOWN` operator
+    IsUnknown(Box<Expr>),
+    /// `IS NOT UNKNOWN` operator
+    IsNotUnknown(Box<Expr>),
     /// `IS DISTINCT FROM` operator
     IsDistinctFrom(Box<Expr>, Box<Expr>),
     /// `IS NOT DISTINCT FROM` operator
     IsNotDistinctFrom(Box<Expr>, Box<Expr>),
+    /// ```text
+    /// IS [ NOT ] JSON [ VALUE | ARRAY | OBJECT | SCALAR ]
+    /// [ { WITH | WITHOUT } UNIQUE [ KEYS ] ]
+    /// ```
+    IsJson {
+        expr: Box<Expr>,
+        negated: bool,
+        item_type: JsonPredicateType,
+        unique_keys: bool,
+    },
     /// `[ NOT ] IN (val1, val2, ...)`
     InList {
         expr: Box<Expr>,
@@ -312,7 +333,10 @@ pub enum Expr {
     /// ALL operation e.g. `foo > ALL(bar)`, It will be wrapped in the right side of BinaryExpr
     AllOp(Box<Expr>),
     /// Unary operation e.g. `NOT foo`
-    UnaryOp { op: UnaryOperator, expr: Box<Expr> },
+    UnaryOp {
+        op: UnaryOperator,
+        expr: Box<Expr>,
+    },
     /// CAST an expression to a different data type e.g. `CAST(foo AS VARCHAR)`
     Cast {
         expr: Box<Expr>,
@@ -330,29 +354,32 @@ pub enum Expr {
         timestamp: Box<Expr>,
         time_zone: String,
     },
-    /// EXTRACT(DateTimeField FROM <expr>)
-    Extract { field: String, expr: Box<Expr> },
-    /// SUBSTRING(<expr> [FROM <expr>] [FOR <expr>])
+    /// `EXTRACT(DateTimeField FROM <expr>)`
+    Extract {
+        field: String,
+        expr: Box<Expr>,
+    },
+    /// `SUBSTRING(<expr> [FROM <expr>] [FOR <expr>])`
     Substring {
         expr: Box<Expr>,
         substring_from: Option<Box<Expr>>,
         substring_for: Option<Box<Expr>>,
     },
-    /// POSITION(<expr> IN <expr>)
+    /// `POSITION(<expr> IN <expr>)`
     Position {
         substring: Box<Expr>,
         string: Box<Expr>,
     },
-    /// OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])
+    /// `OVERLAY(<expr> PLACING <expr> FROM <expr> [ FOR <expr> ])`
     Overlay {
         expr: Box<Expr>,
         new_substring: Box<Expr>,
         start: Box<Expr>,
         count: Option<Box<Expr>>,
     },
-    /// TRIM([BOTH | LEADING | TRAILING] [<expr>] FROM <expr>)\
+    /// `TRIM([BOTH | LEADING | TRAILING] [<expr>] FROM <expr>)`\
     /// Or\
-    /// TRIM([BOTH | LEADING | TRAILING] [FROM] <expr> [, <expr>])
+    /// `TRIM([BOTH | LEADING | TRAILING] [FROM] <expr> [, <expr>])`
     Trim {
         expr: Box<Expr>,
         // ([BOTH | LEADING | TRAILING], <expr>)
@@ -369,11 +396,16 @@ pub enum Expr {
     /// A literal value, such as string, number, date or NULL
     Value(Value),
     /// Parameter Symbol e.g. `$1`, `$1::int`
-    Parameter { index: u64 },
+    Parameter {
+        index: u64,
+    },
     /// A constant of form `<data_type> 'value'`.
     /// This can represent ANSI SQL `DATE`, `TIME`, and `TIMESTAMP` literals (such as `DATE
     /// '2020-01-01'`), as well as constants of other types (a non-standard PostgreSQL extension).
-    TypedString { data_type: DataType, value: String },
+    TypedString {
+        data_type: DataType,
+        value: String,
+    },
     /// Scalar function call e.g. `LEFT(foo, 5)`
     Function(Function),
     /// `CASE [<operand>] WHEN <condition> THEN <result> ... [ELSE <result>] END`
@@ -401,16 +433,24 @@ pub enum Expr {
     Rollup(Vec<Vec<Expr>>),
     /// The `ROW` expr. The `ROW` keyword can be omitted,
     Row(Vec<Expr>),
-    /// The `ARRAY` expr. Alternative syntax for `ARRAY` is by utilizing curly braces,
-    /// e.g. {1, 2, 3},
+    /// An array constructor `ARRAY[[2,3,4],[5,6,7]]`
     Array(Array),
-    /// An array index expression e.g. `(ARRAY[1, 2])[1]` or `(current_schemas(FALSE))[1]`
-    ArrayIndex { obj: Box<Expr>, index: Box<Expr> },
-    /// An array range index expression e.g. `(Array[1, 2, 3, 4])[1:3]`
+    /// An array constructing subquery `ARRAY(SELECT 2 UNION SELECT 3)`
+    ArraySubquery(Box<Query>),
+    /// A subscript expression `arr[1]`
+    ArrayIndex {
+        obj: Box<Expr>,
+        index: Box<Expr>,
+    },
+    /// A slice expression `arr[1:3]`
     ArrayRangeIndex {
         obj: Box<Expr>,
         start: Option<Box<Expr>>,
         end: Option<Box<Expr>>,
+    },
+    LambdaFunction {
+        args: Vec<Ident>,
+        body: Box<Expr>,
     },
 }
 
@@ -427,6 +467,25 @@ impl fmt::Display for Expr {
             Expr::IsNotTrue(ast) => write!(f, "{} IS NOT TRUE", ast),
             Expr::IsFalse(ast) => write!(f, "{} IS FALSE", ast),
             Expr::IsNotFalse(ast) => write!(f, "{} IS NOT FALSE", ast),
+            Expr::IsUnknown(ast) => write!(f, "{} IS UNKNOWN", ast),
+            Expr::IsNotUnknown(ast) => write!(f, "{} IS NOT UNKNOWN", ast),
+            Expr::IsJson {
+                expr,
+                negated,
+                item_type,
+                unique_keys,
+            } => write!(
+                f,
+                "{} IS {}JSON{}{}",
+                expr,
+                if *negated { "NOT " } else { "" },
+                item_type,
+                if *unique_keys {
+                    " WITH UNIQUE KEYS"
+                } else {
+                    ""
+                },
+            ),
             Expr::InList {
                 expr,
                 list,
@@ -624,6 +683,15 @@ impl fmt::Display for Expr {
                 Ok(())
             }
             Expr::Array(exprs) => write!(f, "{}", exprs),
+            Expr::ArraySubquery(s) => write!(f, "ARRAY ({})", s),
+            Expr::LambdaFunction { args, body } => {
+                write!(
+                    f,
+                    "|{}| {}",
+                    args.iter().map(ToString::to_string).join(", "),
+                    body
+                )
+            }
         }
     }
 }
@@ -675,7 +743,7 @@ pub struct WindowFrame {
     /// indicates the shorthand form (e.g. `ROWS 1 PRECEDING`), which must
     /// behave the same as `end_bound = WindowFrameBound::CurrentRow`.
     pub end_bound: Option<WindowFrameBound>,
-    // TBD: EXCLUDE
+    pub exclusion: Option<WindowFrameExclusion>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -734,6 +802,27 @@ impl fmt::Display for WindowFrameBound {
     }
 }
 
+/// Frame exclusion option of [WindowFrame].
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum WindowFrameExclusion {
+    CurrentRow,
+    Group,
+    Ties,
+    NoOthers,
+}
+
+impl fmt::Display for WindowFrameExclusion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WindowFrameExclusion::CurrentRow => f.write_str("EXCLUDE CURRENT ROW"),
+            WindowFrameExclusion::Group => f.write_str("EXCLUDE GROUP"),
+            WindowFrameExclusion::Ties => f.write_str("EXCLUDE TIES"),
+            WindowFrameExclusion::NoOthers => f.write_str("EXCLUDE NO OTHERS"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AddDropSync {
@@ -766,7 +855,15 @@ pub enum ShowObject {
     Columns { table: ObjectName },
     Connection { schema: Option<Ident> },
     Function { schema: Option<Ident> },
+    Indexes { table: ObjectName },
+    Cluster,
+    Jobs,
+    ProcessList,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct JobIdents(pub Vec<u32>);
 
 impl fmt::Display for ShowObject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -798,6 +895,12 @@ impl fmt::Display for ShowObject {
             ShowObject::Columns { table } => write!(f, "COLUMNS FROM {}", table),
             ShowObject::Connection { schema } => write!(f, "CONNECTIONS{}", fmt_schema(schema)),
             ShowObject::Function { schema } => write!(f, "FUNCTIONS{}", fmt_schema(schema)),
+            ShowObject::Indexes { table } => write!(f, "INDEXES FROM {}", table),
+            ShowObject::Cluster => {
+                write!(f, "CLUSTER")
+            }
+            ShowObject::Jobs => write!(f, "JOBS"),
+            ShowObject::ProcessList => write!(f, "PROCESSLIST"),
         }
     }
 }
@@ -902,6 +1005,13 @@ impl fmt::Display for ExplainOptions {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CdcTableInfo {
+    pub source_name: ObjectName,
+    pub external_table_name: String,
+}
+
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -956,6 +1066,7 @@ pub enum Statement {
     CreateView {
         or_replace: bool,
         materialized: bool,
+        if_not_exists: bool,
         /// View name
         name: ObjectName,
         columns: Vec<Ident>,
@@ -975,13 +1086,15 @@ pub enum Statement {
         constraints: Vec<TableConstraint>,
         with_options: Vec<SqlOption>,
         /// Optional schema of the external source with which the table is created
-        source_schema: Option<SourceSchema>,
+        source_schema: Option<CompatibleSourceSchema>,
         /// The watermark defined on source.
         source_watermarks: Vec<SourceWatermark>,
         /// Append only table.
         append_only: bool,
         /// `AS ( query )`
         query: Option<Box<Query>>,
+        /// `FROM cdc_source TABLE database_name.table_name`
+        cdc_table_info: Option<CdcTableInfo>,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -1002,7 +1115,7 @@ pub enum Statement {
     CreateConnection { stmt: CreateConnectionStatement },
     /// CREATE FUNCTION
     ///
-    /// Postgres: https://www.postgresql.org/docs/15/sql-createfunction.html
+    /// Postgres: <https://www.postgresql.org/docs/15/sql-createfunction.html>
     CreateFunction {
         or_replace: bool,
         temporary: bool,
@@ -1011,6 +1124,28 @@ pub enum Statement {
         returns: Option<CreateFunctionReturns>,
         /// Optional parameters.
         params: CreateFunctionBody,
+    },
+    /// CREATE AGGREGATE
+    ///
+    /// Postgres: <https://www.postgresql.org/docs/15/sql-createaggregate.html>
+    CreateAggregate {
+        or_replace: bool,
+        name: ObjectName,
+        args: Vec<OperateFunctionArg>,
+        /// Optional parameters.
+        returns: Option<DataType>,
+        append_only: bool,
+        params: CreateFunctionBody,
+    },
+    /// ALTER DATABASE
+    AlterDatabase {
+        name: ObjectName,
+        operation: AlterDatabaseOperation,
+    },
+    /// ALTER SCHEMA
+    AlterSchema {
+        name: ObjectName,
+        operation: AlterSchemaOperation,
     },
     /// ALTER TABLE
     AlterTable {
@@ -1049,7 +1184,10 @@ pub enum Statement {
         name: ObjectName,
     },
     /// SHOW OBJECT COMMAND
-    ShowObjects(ShowObject),
+    ShowObjects {
+        object: ShowObject,
+        filter: Option<ShowStatementFilter>,
+    },
     /// SHOW CREATE COMMAND
     ShowCreateObject {
         /// Show create object type
@@ -1057,6 +1195,8 @@ pub enum Statement {
         /// Show create object name
         name: ObjectName,
     },
+    /// CANCEL JOBS COMMAND
+    CancelJobs(JobIdents),
     /// DROP
     Drop(DropStatement),
     /// DROP Function
@@ -1067,7 +1207,7 @@ pub enum Statement {
         /// `CASCADE` or `RESTRICT`
         option: Option<ReferentialAction>,
     },
-    /// SET <variable>
+    /// `SET <variable>`
     ///
     /// Note: this is not a standard SQL statement, but it is supported by at
     /// least MySQL and PostgreSQL. Not all MySQL-specific syntactic forms are
@@ -1077,14 +1217,14 @@ pub enum Statement {
         variable: Ident,
         value: Vec<SetVariableValue>,
     },
-    /// SHOW <variable>
+    /// `SHOW <variable>`
     ///
     /// Note: this is a PostgreSQL-specific statement.
     ShowVariable { variable: Vec<Ident> },
     /// `START TRANSACTION ...`
     StartTransaction { modes: Vec<TransactionMode> },
     /// `BEGIN [ TRANSACTION | WORK ]`
-    BEGIN { modes: Vec<TransactionMode> },
+    Begin { modes: Vec<TransactionMode> },
     /// ABORT
     Abort,
     /// `SET TRANSACTION ...`
@@ -1175,6 +1315,9 @@ pub enum Statement {
     ///
     /// Note: RisingWave specific statement.
     Flush,
+    /// WAIT for ALL running stream jobs to finish.
+    /// It will block the current session the condition is met.
+    Wait,
 }
 
 impl fmt::Display for Statement {
@@ -1210,8 +1353,11 @@ impl fmt::Display for Statement {
                 write!(f, "DESCRIBE {}", name)?;
                 Ok(())
             }
-            Statement::ShowObjects(show_object) => {
+            Statement::ShowObjects{ object: show_object, filter} => {
                 write!(f, "SHOW {}", show_object)?;
+                if let Some(filter) = filter {
+                    write!(f, " {}", filter)?;
+                }
                 Ok(())
             }
             Statement::ShowCreateObject{ create_type: show_type, name } => {
@@ -1325,9 +1471,33 @@ impl fmt::Display for Statement {
                 write!(f, "{params}")?;
                 Ok(())
             }
+            Statement::CreateAggregate {
+                or_replace,
+                name,
+                args,
+                returns,
+                append_only,
+                params,
+            } => {
+                write!(
+                    f,
+                    "CREATE {or_replace}AGGREGATE {name}",
+                    or_replace = if *or_replace { "OR REPLACE " } else { "" },
+                )?;
+                write!(f, "({})", display_comma_separated(args))?;
+                if let Some(return_type) = returns {
+                    write!(f, " RETURNS {}", return_type)?;
+                }
+                if *append_only {
+                    write!(f, " APPEND ONLY")?;
+                }
+                write!(f, "{params}")?;
+                Ok(())
+            }
             Statement::CreateView {
                 name,
                 or_replace,
+                if_not_exists,
                 columns,
                 query,
                 materialized,
@@ -1336,21 +1506,23 @@ impl fmt::Display for Statement {
             } => {
                 write!(
                     f,
-                    "CREATE {or_replace}{materialized}VIEW {name}",
+                    "CREATE {or_replace}{materialized}VIEW {if_not_exists}{name}",
                     or_replace = if *or_replace { "OR REPLACE " } else { "" },
                     materialized = if *materialized { "MATERIALIZED " } else { "" },
+                    if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                     name = name
                 )?;
-                if let Some(emit_mode) = emit_mode {
-                    write!(f, " EMIT {}", emit_mode)?;
-                }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
                 }
                 if !columns.is_empty() {
                     write!(f, " ({})", display_comma_separated(columns))?;
                 }
-                write!(f, " AS {}", query)
+                write!(f, " AS {}", query)?;
+                if let Some(emit_mode) = emit_mode {
+                    write!(f, " EMIT {}", emit_mode)?;
+                }
+                Ok(())
             }
             Statement::CreateTable {
                 name,
@@ -1364,6 +1536,7 @@ impl fmt::Display for Statement {
                 source_watermarks,
                 append_only,
                 query,
+                cdc_table_info,
             } => {
                 // We want to allow the following options
                 // Empty column list, allowed by PostgreSQL:
@@ -1393,10 +1566,14 @@ impl fmt::Display for Statement {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;
                 }
                 if let Some(source_schema) = source_schema {
-                    write!(f, " ROW FORMAT {}", source_schema)?;
+                    write!(f, " {}", source_schema)?;
                 }
                 if let Some(query) = query {
                     write!(f, " AS {}", query)?;
+                }
+                if let Some(info) = cdc_table_info {
+                    write!(f, " FROM {}", info.source_name)?;
+                    write!(f, " TABLE '{}'", info.external_table_name)?;
                 }
                 Ok(())
             }
@@ -1436,6 +1613,12 @@ impl fmt::Display for Statement {
             ),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
+            Statement::AlterDatabase { name, operation } => {
+                write!(f, "ALTER DATABASE {} {}", name, operation)
+            }
+            Statement::AlterSchema { name, operation } => {
+                write!(f, "ALTER SCHEMA {} {}", name, operation)
+            }
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
             }
@@ -1639,11 +1822,18 @@ impl fmt::Display for Statement {
             Statement::Flush => {
                 write!(f, "FLUSH")
             }
-            Statement::BEGIN { modes } => {
+            Statement::Wait => {
+                write!(f, "WAIT")
+            }
+            Statement::Begin { modes } => {
                 write!(f, "BEGIN")?;
                 if !modes.is_empty() {
                     write!(f, " {}", display_comma_separated(modes))?;
                 }
+                Ok(())
+            }
+            Statement::CancelJobs(jobs) => {
+                write!(f, "CANCEL JOBS {}", display_comma_separated(&jobs.0))?;
                 Ok(())
             }
         }
@@ -1879,10 +2069,11 @@ pub enum FunctionArgExpr {
     /// Idents are the prefix of `*`, which are consecutive field accesses.
     /// e.g. `(table.v1).*` or `(table).v1.*`
     ExprQualifiedWildcard(Expr, Vec<Ident>),
-    /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`.
-    QualifiedWildcard(ObjectName),
-    /// An unqualified `*`
-    Wildcard,
+    /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`, followed by optional
+    /// except syntax
+    QualifiedWildcard(ObjectName, Option<Vec<Expr>>),
+    /// An unqualified `*` or `* except (columns)`
+    Wildcard(Option<Vec<Expr>>),
 }
 
 impl fmt::Display for FunctionArgExpr {
@@ -1899,8 +2090,34 @@ impl fmt::Display for FunctionArgExpr {
                         .format_with("", |i, f| f(&format_args!(".{i}")))
                 )
             }
-            FunctionArgExpr::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
-            FunctionArgExpr::Wildcard => f.write_str("*"),
+            FunctionArgExpr::QualifiedWildcard(prefix, except) => match except {
+                Some(exprs) => write!(
+                    f,
+                    "{}.* EXCEPT ({})",
+                    prefix,
+                    exprs
+                        .iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<String>>()
+                        .as_slice()
+                        .join(", ")
+                ),
+                None => write!(f, "{}.*", prefix),
+            },
+
+            FunctionArgExpr::Wildcard(except) => match except {
+                Some(exprs) => write!(
+                    f,
+                    "* EXCEPT ({})",
+                    exprs
+                        .iter()
+                        .map(|v| v.to_string())
+                        .collect::<Vec<String>>()
+                        .as_slice()
+                        .join(", ")
+                ),
+                None => f.write_str("*"),
+            },
         }
     }
 }
@@ -1942,6 +2159,7 @@ pub struct Function {
     // aggregate functions may contain order_by_clause
     pub order_by: Vec<OrderByExpr>,
     pub filter: Option<Box<Expr>>,
+    pub within_group: Option<Box<OrderByExpr>>,
 }
 
 impl Function {
@@ -1953,6 +2171,7 @@ impl Function {
             distinct: false,
             order_by: vec![],
             filter: None,
+            within_group: None,
         }
     }
 }

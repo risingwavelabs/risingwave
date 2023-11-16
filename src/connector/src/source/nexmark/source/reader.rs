@@ -24,6 +24,7 @@ use nexmark::event::EventType;
 use nexmark::EventGenerator;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::error::RwError;
+use risingwave_common::estimate_size::EstimateSize;
 use tokio::time::Instant;
 
 use crate::parser::ParserConfig;
@@ -33,8 +34,8 @@ use crate::source::nexmark::source::combined_event::{
 };
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
-    SplitReader, StreamChunkWithState,
+    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitMetaData, SplitReader,
+    StreamChunkWithState,
 };
 
 #[derive(Debug)]
@@ -55,11 +56,12 @@ pub struct NexmarkSplitReader {
 #[async_trait]
 impl SplitReader for NexmarkSplitReader {
     type Properties = NexmarkProperties;
+    type Split = NexmarkSplit;
 
     #[allow(clippy::unused_async)]
     async fn new(
         properties: NexmarkProperties,
-        splits: Vec<SplitImpl>,
+        splits: Vec<NexmarkSplit>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
@@ -67,7 +69,7 @@ impl SplitReader for NexmarkSplitReader {
         tracing::debug!("Splits for nexmark found! {:?}", splits);
         assert!(splits.len() == 1);
         // TODO: currently, assume there's only one split in one reader
-        let split = splits.into_iter().next().unwrap().into_nexmark().unwrap();
+        let split = splits.into_iter().next().unwrap();
         let split_id = split.id();
 
         let split_index = split.split_index as u64;
@@ -88,7 +90,7 @@ impl SplitReader for NexmarkSplitReader {
             .common
             .rw_columns
             .into_iter()
-            .position(|column| column.is_row_id);
+            .position(|column| column.is_row_id());
 
         Ok(NexmarkSplitReader {
             generator,
@@ -113,13 +115,18 @@ impl SplitReader for NexmarkSplitReader {
         // Will buffer at most 4 event chunks.
         const BUFFER_SIZE: usize = 4;
         spawn_data_generation_stream(
-            self.into_native_stream()
-                .inspect_ok(move |chunk_with_states| {
+            self.into_native_stream().inspect_ok(
+                move |chunk_with_states: &StreamChunkWithState| {
                     metrics
                         .partition_input_count
                         .with_label_values(&[&actor_id, &source_id, &split_id])
                         .inc_by(chunk_with_states.chunk.cardinality() as u64);
-                }),
+                    metrics
+                        .partition_input_bytes
+                        .with_label_values(&[&actor_id, &source_id, &split_id])
+                        .inc_by(chunk_with_states.chunk.estimated_size() as u64);
+                },
+            ),
             BUFFER_SIZE,
         )
         .boxed()
@@ -182,7 +189,7 @@ mod tests {
 
     use super::*;
     use crate::source::nexmark::{NexmarkPropertiesInner, NexmarkSplitEnumerator};
-    use crate::source::{SplitEnumerator, SplitImpl};
+    use crate::source::{SourceEnumeratorContext, SplitEnumerator};
 
     #[tokio::test]
     async fn test_nexmark_split_reader() -> Result<()> {
@@ -194,13 +201,10 @@ mod tests {
             ..Default::default()
         });
 
-        let mut enumerator = NexmarkSplitEnumerator::new(props.clone()).await?;
-        let list_splits_resp: Vec<SplitImpl> = enumerator
-            .list_splits()
-            .await?
-            .into_iter()
-            .map(SplitImpl::Nexmark)
-            .collect();
+        let mut enumerator =
+            NexmarkSplitEnumerator::new(props.clone(), SourceEnumeratorContext::default().into())
+                .await?;
+        let list_splits_resp: Vec<_> = enumerator.list_splits().await?.into_iter().collect();
 
         assert_eq!(list_splits_resp.len(), 2);
 

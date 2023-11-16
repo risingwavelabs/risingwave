@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use pretty_xmlish::XmlNode;
 use risingwave_common::error::Result;
 
+use super::utils::{childless_record, Distill};
 use super::{
-    gen_filter_and_pushdown, generic, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
-    PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase,
+    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{collect_input_refs, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -33,7 +33,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Substi
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalProject {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Project<PlanRef>,
 }
 
@@ -84,15 +84,6 @@ impl LogicalProject {
         &self.core.exprs
     }
 
-    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-        self.core.fmt_with_name(f, name, self.base.schema())
-    }
-
-    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
-        self.core
-            .fmt_fields_with_builder(builder, self.base.schema())
-    }
-
     pub fn is_identity(&self) -> bool {
         self.core.is_identity()
     }
@@ -139,9 +130,12 @@ impl PlanTreeNodeUnary for LogicalProject {
 
 impl_plan_tree_node_for_unary! {LogicalProject}
 
-impl fmt::Display for LogicalProject {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt_with_name(f, "LogicalProject")
+impl Distill for LogicalProject {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        childless_record(
+            "LogicalProject",
+            self.core.fields_pretty(self.base.schema()),
+        )
     }
 }
 
@@ -223,23 +217,8 @@ impl ToBatch for LogicalProject {
             .rewrite_provided_order(required_order);
         let new_input = self.input().to_batch_with_order_required(&input_order)?;
         let mut new_logical = self.core.clone();
-        new_logical.input = new_input.clone();
-        let batch_project = if let Some(input_proj) = new_input.as_batch_project() {
-            let outer_project = new_logical;
-            let inner_project = input_proj.as_logical();
-            let mut subst = Substitute {
-                mapping: inner_project.exprs.clone(),
-            };
-            let exprs = outer_project
-                .exprs
-                .iter()
-                .cloned()
-                .map(|expr| subst.rewrite_expr(expr))
-                .collect();
-            BatchProject::new(generic::Project::new(exprs, inner_project.input.clone()))
-        } else {
-            BatchProject::new(new_logical)
-        };
+        new_logical.input = new_input;
+        let batch_project = BatchProject::new(new_logical);
         required_order.enforce_if_not_satisfies(batch_project.into())
     }
 }
@@ -268,23 +247,8 @@ impl ToStream for LogicalProject {
             .input()
             .to_stream_with_dist_required(&input_required, ctx)?;
         let mut new_logical = self.core.clone();
-        new_logical.input = new_input.clone();
-        let stream_plan = if let Some(input_proj) = new_input.as_stream_project() {
-            let outer_project = new_logical;
-            let inner_project = input_proj.as_logical();
-            let mut subst = Substitute {
-                mapping: inner_project.exprs.clone(),
-            };
-            let exprs = outer_project
-                .exprs
-                .iter()
-                .cloned()
-                .map(|expr| subst.rewrite_expr(expr))
-                .collect();
-            StreamProject::new(generic::Project::new(exprs, inner_project.input.clone()))
-        } else {
-            StreamProject::new(new_logical)
-        };
+        new_logical.input = new_input;
+        let stream_plan = StreamProject::new(new_logical);
         required_dist.enforce_if_not_satisfies(stream_plan.into(), &Order::any())
     }
 
@@ -300,7 +264,7 @@ impl ToStream for LogicalProject {
         let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
 
         // Add missing columns of input_pk into the select list.
-        let input_pk = input.logical_pk();
+        let input_pk = input.expect_stream_key();
         let i2o = proj.i2o_col_mapping();
         let col_need_to_add = input_pk
             .iter()
@@ -320,7 +284,7 @@ impl ToStream for LogicalProject {
         // But the target size of `out_col_change` should be the same as the length of the new
         // schema.
         let (map, _) = out_col_change.into_parts();
-        let out_col_change = ColIndexMapping::with_target_size(map, proj.base.schema.len());
+        let out_col_change = ColIndexMapping::new(map, proj.base.schema().len());
         Ok((proj.into(), out_col_change))
     }
 }

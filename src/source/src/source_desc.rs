@@ -17,13 +17,13 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::ErrorCode::ProtocolError;
-use risingwave_common::error::Result;
-use risingwave_connector::parser::SpecificParserConfig;
+use risingwave_common::error::{Result, RwError};
+use risingwave_connector::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use risingwave_connector::source::monitor::SourceMetrics;
-use risingwave_connector::source::{SourceColumnDesc, SourceFormat};
+use risingwave_connector::source::{ConnectorProperties, SourceColumnDesc, SourceColumnType};
 use risingwave_connector::ConnectorParams;
 use risingwave_pb::catalog::PbStreamSourceInfo;
-use risingwave_pb::plan_common::{PbColumnCatalog, PbRowFormatType};
+use risingwave_pb::plan_common::PbColumnCatalog;
 
 use crate::connector_source::ConnectorSource;
 use crate::fs_connector_source::FsConnectorSource;
@@ -31,19 +31,19 @@ use crate::fs_connector_source::FsConnectorSource;
 pub const DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 16;
 
 /// `SourceDesc` describes a stream source.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SourceDesc {
     pub source: ConnectorSource,
-    pub format: SourceFormat,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
+
+    pub is_new_fs_source: bool,
 }
 
 /// `FsSourceDesc` describes a stream source.
 #[derive(Debug)]
 pub struct FsSourceDesc {
     pub source: FsConnectorSource,
-    pub format: SourceFormat,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
 }
@@ -57,6 +57,7 @@ pub struct SourceDescBuilder {
     source_info: PbStreamSourceInfo,
     connector_params: ConnectorParams,
     connector_message_buffer_size: usize,
+    pk_indices: Vec<usize>,
 }
 
 impl SourceDescBuilder {
@@ -69,6 +70,7 @@ impl SourceDescBuilder {
         source_info: PbStreamSourceInfo,
         connector_params: ConnectorParams,
         connector_message_buffer_size: usize,
+        pk_indices: Vec<usize>,
     ) -> Self {
         Self {
             columns,
@@ -78,6 +80,7 @@ impl SourceDescBuilder {
             source_info,
             connector_params,
             connector_message_buffer_size,
+            pk_indices,
         }
     }
 
@@ -88,49 +91,37 @@ impl SourceDescBuilder {
             .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
         if let Some(row_id_index) = self.row_id_index {
-            columns[row_id_index].is_row_id = true;
+            columns[row_id_index].column_type = SourceColumnType::RowId;
+        }
+        for pk_index in &self.pk_indices {
+            columns[*pk_index].is_pk = true;
         }
         columns
     }
 
-    pub async fn build(self) -> Result<SourceDesc> {
-        let format = match self.source_info.get_row_format()? {
-            PbRowFormatType::Json => SourceFormat::Json,
-            PbRowFormatType::Protobuf => SourceFormat::Protobuf,
-            PbRowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
-            PbRowFormatType::Avro => SourceFormat::Avro,
-            PbRowFormatType::Maxwell => SourceFormat::Maxwell,
-            PbRowFormatType::CanalJson => SourceFormat::CanalJson,
-            PbRowFormatType::Native => SourceFormat::Native,
-            PbRowFormatType::DebeziumAvro => SourceFormat::DebeziumAvro,
-            PbRowFormatType::UpsertJson => SourceFormat::UpsertJson,
-            PbRowFormatType::UpsertAvro => SourceFormat::UpsertAvro,
-            PbRowFormatType::DebeziumMongoJson => SourceFormat::DebeziumMongoJson,
-            _ => unreachable!(),
-        };
-
-        if format == SourceFormat::Protobuf && self.source_info.row_schema_location.is_empty() {
-            return Err(ProtocolError("protobuf file location not provided".to_string()).into());
-        }
-
+    pub fn build(mut self) -> Result<SourceDesc> {
         let columns = self.column_catalogs_to_source_column_descs();
 
-        let psrser_config =
-            SpecificParserConfig::new(format, &self.source_info, &self.properties).await?;
+        let psrser_config = SpecificParserConfig::new(&self.source_info, &self.properties)?;
+
+        let is_new_fs_source = ConnectorProperties::is_new_fs_connector_hash_map(&self.properties);
+        if is_new_fs_source {
+            // new fs source requires `connector='s3_v2' but we simply reuse S3 connector`
+            ConnectorProperties::rewrite_upstream_source_key_hash_map(&mut self.properties);
+        }
 
         let source = ConnectorSource::new(
             self.properties,
             columns.clone(),
-            self.connector_params.connector_rpc_endpoint,
             self.connector_message_buffer_size,
             psrser_config,
         )?;
 
         Ok(SourceDesc {
             source,
-            format,
             columns,
             metrics: self.metrics,
+            is_new_fs_source,
         })
     }
 
@@ -138,28 +129,39 @@ impl SourceDescBuilder {
         self.metrics.clone()
     }
 
-    pub async fn build_fs_source_desc(&self) -> Result<FsSourceDesc> {
-        let format = match self.source_info.get_row_format()? {
-            PbRowFormatType::Csv => SourceFormat::Csv,
-            PbRowFormatType::Json => SourceFormat::Json,
-            _ => unreachable!(),
-        };
+    pub fn build_fs_source_desc(&self) -> Result<FsSourceDesc> {
+        let parser_config = SpecificParserConfig::new(&self.source_info, &self.properties)?;
+
+        match (
+            &parser_config.protocol_config,
+            &parser_config.encoding_config,
+        ) {
+            (
+                ProtocolProperties::Plain,
+                EncodingProperties::Csv(_) | EncodingProperties::Json(_),
+            ) => {}
+            (format, encode) => {
+                return Err(RwError::from(ProtocolError(format!(
+                    "Unsupported combination of format {:?} and encode {:?}",
+                    format, encode
+                ))));
+            }
+        }
 
         let columns = self.column_catalogs_to_source_column_descs();
-
-        let parser_config =
-            SpecificParserConfig::new(format, &self.source_info, &self.properties).await?;
 
         let source = FsConnectorSource::new(
             self.properties.clone(),
             columns.clone(),
-            self.connector_params.connector_rpc_endpoint.clone(),
+            self.connector_params
+                .connector_client
+                .as_ref()
+                .map(|client| client.endpoint().clone()),
             parser_config,
         )?;
 
         Ok(FsSourceDesc {
             source,
-            format,
             columns,
             metrics: self.metrics.clone(),
         })
@@ -180,6 +182,7 @@ pub mod test_utils {
         row_id_index: Option<usize>,
         source_info: StreamSourceInfo,
         properties: HashMap<String, String>,
+        pk_indices: Vec<usize>,
     ) -> SourceDescBuilder {
         let columns = schema
             .fields
@@ -194,6 +197,7 @@ pub mod test_utils {
                         field_descs: vec![],
                         type_name: "".to_string(),
                         generated_or_default_column: None,
+                        description: None,
                     }
                     .to_protobuf(),
                 ),
@@ -208,6 +212,7 @@ pub mod test_utils {
             source_info,
             connector_params: Default::default(),
             connector_message_buffer_size: DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE,
+            pk_indices,
         }
     }
 }

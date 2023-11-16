@@ -12,50 +12,54 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Deref;
 use std::sync::Arc;
 
-use prometheus::IntGauge;
+use super::MonitoredGlobalAlloc;
+use crate::metrics::{LabelGuardedIntGauge, TrAdderGauge};
 
-use crate::metrics::TrAdderGauge;
+pub trait MemCounter: Send + Sync + 'static {
+    fn add(&self, bytes: i64);
+    fn get_bytes_used(&self) -> i64;
+}
+
+impl MemCounter for TrAdderGauge {
+    fn add(&self, bytes: i64) {
+        self.add(bytes)
+    }
+
+    fn get_bytes_used(&self) -> i64 {
+        self.get()
+    }
+}
+
+impl<const N: usize> MemCounter for LabelGuardedIntGauge<N> {
+    fn add(&self, bytes: i64) {
+        self.deref().add(bytes)
+    }
+
+    fn get_bytes_used(&self) -> i64 {
+        self.get()
+    }
+}
 
 struct MemoryContextInner {
-    counter: MemCounter,
+    counter: Box<dyn MemCounter>,
     parent: Option<MemoryContext>,
 }
 
 #[derive(Clone)]
 pub struct MemoryContext {
     /// Add None op mem context, so that we don't need to return [`Option`] in
-    /// [`BatchTaskContext`]. This helps with later `Allocator` implementation.
+    /// `BatchTaskContext`. This helps with later `Allocator` implementation.
     inner: Option<Arc<MemoryContextInner>>,
 }
 
-pub enum MemCounter {
-    /// Used when the add/sub operation don't have much conflicts.
-    Atomic(IntGauge),
-    /// Used when the add/sub operation may cause a lot of conflicts.
-    TrAdder(TrAdderGauge),
-}
-
-impl From<IntGauge> for MemCounter {
-    fn from(value: IntGauge) -> Self {
-        MemCounter::Atomic(value)
-    }
-}
-
-impl From<TrAdderGauge> for MemCounter {
-    fn from(value: TrAdderGauge) -> Self {
-        MemCounter::TrAdder(value)
-    }
-}
-
 impl MemoryContext {
-    pub fn new<C: Into<MemCounter>>(parent: Option<MemoryContext>, counter: C) -> Self {
+    pub fn new(parent: Option<MemoryContext>, counter: impl MemCounter) -> Self {
+        let c = Box::new(counter);
         Self {
-            inner: Some(Arc::new(MemoryContextInner {
-                counter: counter.into(),
-                parent,
-            })),
+            inner: Some(Arc::new(MemoryContextInner { counter: c, parent })),
         }
     }
 
@@ -64,17 +68,14 @@ impl MemoryContext {
         Self { inner: None }
     }
 
-    pub fn root<C: Into<MemCounter>>(counter: C) -> Self {
+    pub fn root(counter: impl MemCounter) -> Self {
         Self::new(None, counter)
     }
 
     /// Add `bytes` memory usage. Pass negative value to decrease memory usage.
     pub fn add(&self, bytes: i64) {
         if let Some(inner) = &self.inner {
-            match &inner.counter {
-                MemCounter::TrAdder(c) => c.add(bytes),
-                MemCounter::Atomic(c) => c.add(bytes),
-            }
+            inner.counter.add(bytes);
 
             if let Some(parent) = &inner.parent {
                 parent.add(bytes);
@@ -84,22 +85,22 @@ impl MemoryContext {
 
     pub fn get_bytes_used(&self) -> i64 {
         if let Some(inner) = &self.inner {
-            match &inner.counter {
-                MemCounter::TrAdder(c) => c.get(),
-                MemCounter::Atomic(c) => c.get(),
-            }
+            inner.counter.get_bytes_used()
         } else {
             0
         }
     }
+
+    /// Creates a new global allocator that reports memory usage to this context.
+    pub fn global_allocator(&self) -> MonitoredGlobalAlloc {
+        MonitoredGlobalAlloc::with_memory_context(self.clone())
+    }
 }
 
-impl Drop for MemoryContext {
+impl Drop for MemoryContextInner {
     fn drop(&mut self) {
-        if let Some(inner) = &self.inner {
-            if let Some(p) = &inner.parent {
-                p.add(-self.get_bytes_used())
-            }
+        if let Some(p) = &self.parent {
+            p.add(-self.counter.get_bytes_used())
         }
     }
 }

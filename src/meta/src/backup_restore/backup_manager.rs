@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
 use arc_swap::ArcSwap;
-use itertools::Itertools;
 use risingwave_backup::error::BackupError;
-use risingwave_backup::storage::{BoxedMetaSnapshotStorage, ObjectStoreMetaSnapshotStorage};
+use risingwave_backup::storage::{MetaSnapshotStorage, ObjectStoreMetaSnapshotStorage};
 use risingwave_backup::{MetaBackupJobId, MetaSnapshotId, MetaSnapshotManifest};
 use risingwave_common::bail;
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -28,12 +28,11 @@ use risingwave_pb::backup_service::{BackupJobStatus, MetaBackupManifestId};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::task::JoinHandle;
 
-use crate::backup_restore::meta_snapshot_builder::MetaSnapshotBuilder;
+use crate::backup_restore::meta_snapshot_builder;
 use crate::backup_restore::metrics::BackupManagerMetrics;
 use crate::hummock::{HummockManagerRef, HummockVersionSafePoint};
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::rpc::metrics::MetaMetrics;
-use crate::storage::MetaStore;
 use crate::MetaResult;
 
 pub enum BackupJobResult {
@@ -59,25 +58,27 @@ impl BackupJobHandle {
     }
 }
 
-pub type BackupManagerRef<S> = Arc<BackupManager<S>>;
+pub type BackupManagerRef = Arc<BackupManager>;
 /// (url, dir)
 type StoreConfig = (String, String);
 
 /// `BackupManager` manages lifecycle of all existent backups and the running backup job.
-pub struct BackupManager<S: MetaStore> {
-    env: MetaSrvEnv<S>,
-    hummock_manager: HummockManagerRef<S>,
-    backup_store: ArcSwap<(BoxedMetaSnapshotStorage, StoreConfig)>,
+pub struct BackupManager {
+    env: MetaSrvEnv,
+    hummock_manager: HummockManagerRef,
+    backup_store: ArcSwap<(ObjectStoreMetaSnapshotStorage, StoreConfig)>,
     /// Tracks the running backup job. Concurrent jobs is not supported.
-    running_backup_job: tokio::sync::Mutex<Option<BackupJobHandle>>,
+    running_job_handle: tokio::sync::Mutex<Option<BackupJobHandle>>,
     metrics: BackupManagerMetrics,
     meta_metrics: Arc<MetaMetrics>,
+    /// (job id, status, message)
+    latest_job_info: ArcSwap<(MetaBackupJobId, BackupJobStatus, String)>,
 }
 
-impl<S: MetaStore> BackupManager<S> {
+impl BackupManager {
     pub async fn new(
-        env: MetaSrvEnv<S>,
-        hummock_manager: HummockManagerRef<S>,
+        env: MetaSrvEnv,
+        hummock_manager: HummockManagerRef,
         metrics: Arc<MetaMetrics>,
         store_url: &str,
         store_dir: &str,
@@ -139,18 +140,19 @@ impl<S: MetaStore> BackupManager<S> {
     }
 
     fn with_store(
-        env: MetaSrvEnv<S>,
-        hummock_manager: HummockManagerRef<S>,
+        env: MetaSrvEnv,
+        hummock_manager: HummockManagerRef,
         meta_metrics: Arc<MetaMetrics>,
-        backup_store: (BoxedMetaSnapshotStorage, StoreConfig),
+        backup_store: (ObjectStoreMetaSnapshotStorage, StoreConfig),
     ) -> Self {
         Self {
             env,
             hummock_manager,
             backup_store: ArcSwap::from_pointee(backup_store),
-            running_backup_job: tokio::sync::Mutex::new(None),
-            metrics: BackupManagerMetrics::new(meta_metrics.registry.clone()),
+            running_job_handle: tokio::sync::Mutex::new(None),
+            metrics: BackupManagerMetrics::default(),
             meta_metrics,
+            latest_job_info: ArcSwap::from_pointee((0, BackupJobStatus::NotFound, "".into())),
         }
     }
 
@@ -167,13 +169,13 @@ impl<S: MetaStore> BackupManager<S> {
     }
 
     #[cfg(test)]
-    pub fn for_test(env: MetaSrvEnv<S>, hummock_manager: HummockManagerRef<S>) -> Self {
+    pub async fn for_test(env: MetaSrvEnv, hummock_manager: HummockManagerRef) -> Self {
         Self::with_store(
             env,
             hummock_manager,
-            Arc::new(MetaMetrics::new()),
+            Arc::new(MetaMetrics::default()),
             (
-                Box::<risingwave_backup::storage::DummyMetaSnapshotStorage>::default(),
+                risingwave_backup::storage::unused().await,
                 StoreConfig::default(),
             ),
         )
@@ -182,7 +184,7 @@ impl<S: MetaStore> BackupManager<S> {
     /// Starts a backup job in background. It's non-blocking.
     /// Returns job id.
     pub async fn start_backup_job(self: &Arc<Self>) -> MetaResult<MetaBackupJobId> {
-        let mut guard = self.running_backup_job.lock().await;
+        let mut guard = self.running_job_handle.lock().await;
         if let Some(job) = (*guard).as_ref() {
             bail!(format!(
                 "concurrent backup job is not supported: existent job {}",
@@ -214,6 +216,8 @@ impl<S: MetaStore> BackupManager<S> {
             .id_gen_manager()
             .generate::<{ IdCategory::Backup }>()
             .await?;
+        self.latest_job_info
+            .store(Arc::new((job_id, BackupJobStatus::Running, "".into())));
         let hummock_version_safe_point = self.hummock_manager.register_safe_point().await;
         // Ideally `BackupWorker` and its r/w IO can be made external to meta node.
         // The justification of keeping `BackupWorker` in meta node are:
@@ -228,27 +232,12 @@ impl<S: MetaStore> BackupManager<S> {
         Ok(job_id)
     }
 
-    pub async fn get_backup_job_status(
-        &self,
-        job_id: MetaBackupJobId,
-    ) -> MetaResult<BackupJobStatus> {
-        if let Some(running_job) = self.running_backup_job.lock().await.as_ref() {
-            if running_job.job_id == job_id {
-                return Ok(BackupJobStatus::Running);
-            }
+    pub fn get_backup_job_status(&self, job_id: MetaBackupJobId) -> (BackupJobStatus, String) {
+        let last = self.latest_job_info.load();
+        if last.0 == job_id {
+            return (last.1, last.2.clone());
         }
-        if self
-            .backup_store
-            .load()
-            .0
-            .manifest()
-            .snapshot_metadata
-            .iter()
-            .any(|m| m.id == job_id)
-        {
-            return Ok(BackupJobStatus::Succeeded);
-        }
-        Ok(BackupJobStatus::NotFound)
+        (BackupJobStatus::NotFound, "".into())
     }
 
     async fn finish_backup_job(&self, job_id: MetaBackupJobId, job_result: BackupJobResult) {
@@ -270,16 +259,24 @@ impl<S: MetaStore> BackupManager<S> {
                             id: self.backup_store.load().0.manifest().manifest_id,
                         }),
                     );
+                self.latest_job_info.store(Arc::new((
+                    job_id,
+                    BackupJobStatus::Succeeded,
+                    "".into(),
+                )));
             }
             BackupJobResult::Failed(e) => {
                 self.metrics.job_latency_failure.observe(job_latency);
-                tracing::warn!("failed backup job {}: {}", job_id, e);
+                let message = format!("failed backup job {}: {}", job_id, e);
+                tracing::warn!(message);
+                self.latest_job_info
+                    .store(Arc::new((job_id, BackupJobStatus::Failed, message)));
             }
         }
     }
 
     async fn take_job_handle_by_job_id(&self, job_id: u64) -> Option<BackupJobHandle> {
-        let mut guard = self.running_backup_job.lock().await;
+        let mut guard = self.running_job_handle.lock().await;
         match (*guard).as_ref() {
             None => {
                 return None;
@@ -308,7 +305,7 @@ impl<S: MetaStore> BackupManager<S> {
     }
 
     /// List all `SSTables` required by backups.
-    pub fn list_pinned_ssts(&self) -> Vec<HummockSstableObjectId> {
+    pub fn list_pinned_ssts(&self) -> HashSet<HummockSstableObjectId> {
         self.backup_store
             .load()
             .0
@@ -316,8 +313,7 @@ impl<S: MetaStore> BackupManager<S> {
             .snapshot_metadata
             .iter()
             .flat_map(|s| s.ssts.clone())
-            .dedup()
-            .collect_vec()
+            .collect()
     }
 
     pub fn manifest(&self) -> Arc<MetaSnapshotManifest> {
@@ -326,20 +322,21 @@ impl<S: MetaStore> BackupManager<S> {
 }
 
 /// `BackupWorker` creates a database snapshot.
-struct BackupWorker<S: MetaStore> {
-    backup_manager: BackupManagerRef<S>,
+struct BackupWorker {
+    backup_manager: BackupManagerRef,
 }
 
-impl<S: MetaStore> BackupWorker<S> {
-    fn new(backup_manager: BackupManagerRef<S>) -> Self {
+impl BackupWorker {
+    fn new(backup_manager: BackupManagerRef) -> Self {
         Self { backup_manager }
     }
 
     fn start(self, job_id: u64) -> JoinHandle<()> {
         let backup_manager_clone = self.backup_manager.clone();
         let job = async move {
-            let mut snapshot_builder =
-                MetaSnapshotBuilder::new(backup_manager_clone.env.meta_store_ref());
+            let mut snapshot_builder = meta_snapshot_builder::MetaSnapshotV1Builder::new(
+                backup_manager_clone.env.meta_store_ref(),
+            );
             // Reuse job id as snapshot id.
             let hummock_manager = backup_manager_clone.hummock_manager.clone();
             snapshot_builder
@@ -368,8 +365,8 @@ impl<S: MetaStore> BackupWorker<S> {
 async fn create_snapshot_store(
     config: &StoreConfig,
     metric: Arc<ObjectStoreMetrics>,
-) -> MetaResult<BoxedMetaSnapshotStorage> {
+) -> MetaResult<ObjectStoreMetaSnapshotStorage> {
     let object_store = Arc::new(parse_remote_object_store(&config.0, metric, "Meta Backup").await);
     let store = ObjectStoreMetaSnapshotStorage::new(&config.1, object_store).await?;
-    Ok(Box::new(store))
+    Ok(store)
 }

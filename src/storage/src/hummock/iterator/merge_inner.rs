@@ -19,7 +19,7 @@ use std::ops::{Deref, DerefMut};
 
 use bytes::Bytes;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::hummock::iterator::{DirectionEnum, Forward, HummockIterator, HummockIteratorDirection};
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
@@ -42,33 +42,33 @@ pub struct Node<I: HummockIterator, T: NodeExtraOrderInfo> {
 }
 
 impl<I: HummockIterator, T: NodeExtraOrderInfo> Eq for Node<I, T> where Self: PartialEq {}
-impl<I: HummockIterator, T: NodeExtraOrderInfo> Ord for Node<I, T>
+impl<I: HummockIterator, T: NodeExtraOrderInfo> PartialOrd for Node<I, T>
 where
-    Self: PartialOrd,
+    Self: Ord,
 {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other).unwrap()
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
-/// Implement `PartialOrd` for unordered iter node. Only compare the key.
-impl<I: HummockIterator> PartialOrd for Node<I, UnorderedNodeExtra> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+/// Implement `Ord` for unordered iter node. Only compare the key.
+impl<I: HummockIterator> Ord for Node<I, UnorderedNodeExtra> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // Note: to implement min-heap by using max-heap internally, the comparing
         // order should be reversed.
 
-        Some(match I::Direction::direction() {
+        match I::Direction::direction() {
             DirectionEnum::Forward => other.iter.key().cmp(&self.iter.key()),
             DirectionEnum::Backward => self.iter.key().cmp(&other.iter.key()),
-        })
+        }
     }
 }
 
-/// Implement `PartialOrd` for ordered iter node. Compare key and use order index as tie breaker.
-impl<I: HummockIterator> PartialOrd for Node<I, OrderedNodeExtra> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+/// Implement `Ord` for ordered iter node. Compare key and use order index as tie breaker.
+impl<I: HummockIterator> Ord for Node<I, OrderedNodeExtra> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // The `extra_info` is used as a tie-breaker when the keys are equal.
-        Some(match I::Direction::direction() {
+        match I::Direction::direction() {
             DirectionEnum::Forward => other
                 .iter
                 .key()
@@ -79,7 +79,7 @@ impl<I: HummockIterator> PartialOrd for Node<I, OrderedNodeExtra> {
                 .key()
                 .cmp(&other.iter.key())
                 .then_with(|| self.extra_order_info.cmp(&other.extra_order_info)),
-        })
+        }
     }
 }
 
@@ -137,14 +137,14 @@ impl<I: HummockIterator> OrderedMergeIteratorInner<I> {
 
 impl OrderedMergeIteratorInner<SharedBufferBatchIterator<Forward>> {
     /// Used in `merge_imms_in_memory` to merge immutable memtables.
-    pub fn current_item(&self) -> (Bytes, (HummockEpoch, HummockValue<Bytes>)) {
+    pub fn current_item(&self) -> (TableKey<Bytes>, (EpochWithGap, HummockValue<Bytes>)) {
         let item = self
             .heap
             .peek()
             .expect("no inner iter for imm merge")
             .iter
             .current_item();
-        (item.0.clone(), item.1.clone())
+        (item.0.clone(), (item.1 .0, item.1 .1.clone()))
     }
 }
 
@@ -203,7 +203,7 @@ where
 
         self.heap = self
             .unused_iters
-            .drain_filter(|i| i.iter.is_valid())
+            .extract_if(|i| i.iter.is_valid())
             .collect();
     }
 }
@@ -300,7 +300,7 @@ impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
                         table_id: top_key.user_key.table_id,
                         table_key: TableKey(self.last_table_key.as_slice()),
                     },
-                    epoch: top_key.epoch,
+                    epoch_with_gap: top_key.epoch_with_gap,
                 }
             };
             loop {

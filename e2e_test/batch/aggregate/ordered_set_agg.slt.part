@@ -1,0 +1,33 @@
+statement error
+select p, percentile_cont(p) within group (order by x::float8)
+from generate_series(1,5) x,
+     (values (0::float8),(0.1),(0.25),(0.4),(0.5),(0.6),(0.75),(0.9),(1)) v(p)
+group by p order by p;
+
+statement error
+select percentile_cont(array[0,1,0.25,0.75,0.5,1,0.3,0.32,0.35,0.38,0.4]) within group (order by x)
+from generate_series(1,6) x;
+
+statement error
+select percentile_disc(array[0.25,0.5,0.75]) within group (order by x)
+from unnest('{fred,jim,fred,jack,jill,fred,jill,jim,jim,sheila,jim,sheila}'::text[]) u(x);
+
+statement error
+select pg_collation_for(percentile_disc(1) within group (order by x collate "POSIX"))
+  from (values ('fred'),('jim')) v(x);
+
+query RR
+select
+  percentile_cont(0.5) within group (order by a),
+  percentile_disc(0.5) within group (order by a)
+from (values(1::float8),(3),(5),(7)) t(a);
+----
+4 3
+
+query RR
+select
+  percentile_cont(0.25) within group (order by a),
+  percentile_disc(0.5) within group (order by a)
+from (values(1::float8),(3),(5),(7)) t(a);
+----
+2.5 3

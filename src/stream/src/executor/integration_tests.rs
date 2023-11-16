@@ -14,14 +14,13 @@
 
 use std::sync::{Arc, Mutex};
 
-use anyhow::Context;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use multimap::MultiMap;
 use risingwave_common::array::*;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::*;
-use risingwave_expr::agg::{AggArgs, AggCall, AggKind};
+use risingwave_expr::aggregate::AggCall;
 use risingwave_expr::expr::*;
 use risingwave_storage::memory::MemoryStateStore;
 
@@ -32,7 +31,9 @@ use crate::executor::dispatch::*;
 use crate::executor::exchange::output::{BoxedOutput, LocalOutput};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::receiver::ReceiverExecutor;
-use crate::executor::test_utils::agg_executor::new_boxed_simple_agg_executor;
+use crate::executor::test_utils::agg_executor::{
+    generate_agg_schema, new_boxed_simple_agg_executor,
+};
 use crate::executor::{Executor, MergeExecutor, ProjectExecutor, StatelessSimpleAggExecutor};
 use crate::task::SharedContext;
 
@@ -48,30 +49,21 @@ async fn test_merger_sum_aggr() {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
         let input = ReceiverExecutor::for_test(input_rx);
+        let agg_calls = vec![
+            AggCall::from_pretty("(count:int8)"),
+            AggCall::from_pretty("(sum:int8 $0:int8)"),
+        ];
+        let schema = generate_agg_schema(&input, &agg_calls, None);
         // for the local aggregator, we need two states: row count and sum
         let aggregator = StatelessSimpleAggExecutor::new(
             actor_ctx.clone(),
             input.boxed(),
-            vec![
-                AggCall {
-                    kind: AggKind::Count,
-                    args: AggArgs::None,
-                    return_type: DataType::Int64,
-                    column_orders: vec![],
-                    filter: None,
-                    distinct: false,
-                },
-                AggCall {
-                    kind: AggKind::Sum,
-                    args: AggArgs::Unary(DataType::Int64, 0),
-                    return_type: DataType::Int64,
-                    column_orders: vec![],
-                    filter: None,
-                    distinct: false,
-                },
-            ],
-            vec![],
-            1,
+            ExecutorInfo {
+                schema,
+                pk_indices: vec![],
+                identity: format!("StatelessSimpleAggExecutor {:X}", 1),
+            },
+            agg_calls,
         )
         .unwrap();
         let (tx, rx) = channel_for_test();
@@ -126,6 +118,7 @@ async fn test_merger_sum_aggr() {
             0,
         ))],
         0,
+        0,
         ctx,
         metrics,
     );
@@ -150,30 +143,9 @@ async fn test_merger_sum_aggr() {
         merger.boxed(),
         is_append_only,
         vec![
-            AggCall {
-                kind: AggKind::Sum0,
-                args: AggArgs::Unary(DataType::Int64, 0),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-            AggCall {
-                kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 1),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-            AggCall {
-                kind: AggKind::Count, // as row count, index: 2
-                args: AggArgs::None,
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
+            AggCall::from_pretty("(sum0:int8 $0:int8)"),
+            AggCall::from_pretty("(sum:int8 $1:int8)"),
+            AggCall::from_pretty("(count:int8)"),
         ],
         2, // row_count_index
         vec![],
@@ -183,14 +155,20 @@ async fn test_merger_sum_aggr() {
 
     let projection = ProjectExecutor::new(
         actor_ctx.clone(),
+        ExecutorInfo {
+            schema: Schema {
+                fields: vec![Field::unnamed(DataType::Int64)],
+            },
+            pk_indices: vec![],
+            identity: format!("ProjectExecutor {:X}", 3),
+        },
         aggregator,
-        vec![],
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
-            Box::new(InputRefExpression::new(DataType::Int64, 1)),
+            NonStrictExpression::for_test(InputRefExpression::new(DataType::Int64, 1)),
         ],
-        3,
         MultiMap::new(),
+        vec![],
         0.0,
     );
 
@@ -220,8 +198,7 @@ async fn test_merger_sum_aggr() {
         for i in 0..10 {
             let chunk = StreamChunk::new(
                 vec![op; i],
-                vec![I64Array::from_iter(vec![1; i]).into()],
-                None,
+                vec![I64Array::from_iter(vec![1; i]).into_ref()],
             );
             input.send(Message::Chunk(chunk)).await.unwrap();
         }
@@ -245,7 +222,7 @@ async fn test_merger_sum_aggr() {
     }
 
     let data = items.lock().unwrap();
-    let array = data.last().unwrap().column_at(0).array_ref().as_int64();
+    let array = data.last().unwrap().column_at(0).as_int64();
     assert_eq!(array.value_at(array.len() - 1), Some((0..10).sum()));
 }
 
@@ -265,7 +242,7 @@ impl StreamConsumer for MockConsumer {
             while let Some(item) = input.next().await {
                 match item? {
                     Message::Watermark(_) => {
-                        todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                        // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
                     }
                     Message::Chunk(chunk) => data.lock().unwrap().push(chunk),
                     Message::Barrier(barrier) => yield barrier,
@@ -293,7 +270,7 @@ impl StreamConsumer for SenderConsumer {
                 let msg = item?;
                 let barrier = msg.as_barrier().cloned();
 
-                channel.send(msg).await.context("failed to send message")?;
+                channel.send(msg).await.expect("failed to send message");
 
                 if let Some(barrier) = barrier {
                     yield barrier;

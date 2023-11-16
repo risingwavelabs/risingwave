@@ -9,7 +9,7 @@ import argparse
 
 
 def run_sql_file(f: str, dir: str):
-    print("Running SQL file: {}".format(f))
+    print("Running SQL file: {} on RisingWave".format(f))
     # ON_ERROR_STOP=1 will let psql return error code when the query fails.
     # https://stackoverflow.com/questions/37072245/check-return-status-of-psql-command-in-unix-shell-scripting
     proc = subprocess.run(["psql", "-h", "localhost", "-p", "4566",
@@ -19,14 +19,14 @@ def run_sql_file(f: str, dir: str):
         sys.exit(1)
 
 
-def run_demo(demo: str, format: str):
+def run_demo(demo: str, format: str, wait_time = 40):
     file_dir = dirname(abspath(__file__))
     project_dir = dirname(file_dir)
     demo_dir = os.path.join(project_dir, demo)
     print("Running demo: {}".format(demo))
 
-    subprocess.run(["docker", "compose", "up", "-d"], cwd=demo_dir, check=True)
-    sleep(40)
+    subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=demo_dir, check=True)
+    sleep(wait_time)
 
     sql_files = ['create_source.sql', 'create_mv.sql', 'query.sql']
     for fname in sql_files:
@@ -42,6 +42,13 @@ def run_demo(demo: str, format: str):
         run_sql_file(sql_file, demo_dir)
         sleep(10)
 
+def iceberg_cdc_demo():
+    demo = "iceberg-cdc"
+    file_dir = dirname(abspath(__file__))
+    project_dir = dirname(file_dir)
+    demo_dir = os.path.join(project_dir, demo)
+    print("Running demo: iceberg-cdc")
+    subprocess.run(["bash","./run_test.sh"], cwd=demo_dir, check=True)
 
 def run_iceberg_demo():
     demo = "iceberg-sink"
@@ -50,7 +57,7 @@ def run_iceberg_demo():
     demo_dir = os.path.join(project_dir, demo)
     print("Running demo: iceberg-sink")
 
-    subprocess.run(["docker", "compose", "up", "-d"], cwd=demo_dir, check=True)
+    subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=demo_dir, check=True)
     sleep(40)
 
     subprocess.run(["docker", "compose", "exec", "spark", "bash", "/spark-script/run-sql-file.sh", "create-table"],
@@ -86,6 +93,46 @@ def run_iceberg_demo():
 
     assert len(output_content.strip()) > 0
 
+def run_clickhouse_demo():
+    demo = "clickhouse-sink"
+    file_dir = dirname(abspath(__file__))
+    project_dir = dirname(file_dir)
+    demo_dir = os.path.join(project_dir, demo)
+    print("Running demo: clickhouse-sink")
+
+    subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=demo_dir, check=True)
+    sleep(40)
+
+
+    subprocess.run(["docker", "compose", "exec", "clickhouse-server", "bash", "/opt/clickhouse/clickhouse-sql/run-sql-file.sh", "create_clickhouse_table"],
+                   cwd=demo_dir, check=True)
+
+    sql_files = ['create_source.sql', 'create_mv.sql', 'create_sink.sql']
+    for fname in sql_files:
+        sql_file = os.path.join(demo_dir,  fname)
+        print("executing sql: ", open(sql_file).read())
+        run_sql_file(sql_file, demo_dir)
+        sleep(10)
+
+    print("sink created. Wait for 2 min time for ingestion")
+
+    # wait for two minutes ingestion
+    sleep(120)
+
+    query_output_file_name = "query_outout.txt"
+
+    query_output_file = open(query_output_file_name, "wb")
+
+    subprocess.run(["docker", "compose", "exec", "clickhouse-server", "bash", "/opt/clickhouse/clickhouse-sql/run-sql-file.sh", "clickhouse_query"],
+                   cwd=demo_dir, check=True, stdout=query_output_file)
+    query_output_file.close()
+
+    output_content = open(query_output_file_name).read()
+
+    print(output_content)
+
+    assert len(output_content.strip()) > 0
+
 
 arg_parser = argparse.ArgumentParser(description='Run the demo')
 arg_parser.add_argument('--format',
@@ -107,5 +154,9 @@ if args.case == "iceberg-sink":
         print("skip protobuf test for iceberg-sink")
     else:
         run_iceberg_demo()
+elif args.case == "clickhouse-sink":
+    run_clickhouse_demo()
+elif args.case == "iceberg-cdc":
+    iceberg_cdc_demo()
 else:
     run_demo(args.case, args.format)

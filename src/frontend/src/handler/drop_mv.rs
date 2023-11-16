@@ -27,6 +27,7 @@ pub async fn handle_drop_mv(
     handler_args: HandlerArgs,
     table_name: ObjectName,
     if_exists: bool,
+    cascade: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = session.database();
@@ -43,16 +44,15 @@ pub async fn handle_drop_mv(
                 Ok((t, s)) => (t, s),
                 Err(e) => {
                     return if if_exists {
-                        Ok(RwPgResponse::empty_result_with_notice(
-                            StatementType::DROP_MATERIALIZED_VIEW,
-                            format!(
+                        Ok(RwPgResponse::builder(StatementType::DROP_MATERIALIZED_VIEW)
+                            .notice(format!(
                                 "materialized view \"{}\" does not exist, skipping",
                                 table_name
-                            ),
-                        ))
+                            ))
+                            .into())
                     } else {
                         match e {
-                            CatalogError::NotFound(kind, name) if kind == "table" => {
+                            CatalogError::NotFound("table", name) => {
                                 Err(CatalogError::NotFound("materialized view", name).into())
                             }
                             _ => Err(e.into()),
@@ -71,8 +71,10 @@ pub async fn handle_drop_mv(
         table.id()
     };
 
-    let catalog_writer = session.env().catalog_writer();
-    catalog_writer.drop_materialized_view(table_id).await?;
+    let catalog_writer = session.catalog_writer()?;
+    catalog_writer
+        .drop_materialized_view(table_id, cascade)
+        .await?;
 
     Ok(PgResponse::empty_result(
         StatementType::DROP_MATERIALIZED_VIEW,

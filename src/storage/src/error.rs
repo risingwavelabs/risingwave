@@ -31,10 +31,18 @@ pub enum StorageError {
     ),
 
     #[error("Deserialize row error {0}.")]
-    DeserializeRow(ValueEncodingError),
+    DeserializeRow(
+        #[source]
+        #[backtrace]
+        ValueEncodingError,
+    ),
 
     #[error("Serialize/deserialize error: {0}")]
-    SerdeError(memcomparable::Error),
+    SerdeError(
+        #[source]
+        #[backtrace]
+        memcomparable::Error,
+    ),
 
     #[error("Sled error: {0}")]
     Sled(
@@ -77,7 +85,7 @@ impl std::fmt::Debug for StorageError {
 
         write!(f, "{}", self)?;
         writeln!(f)?;
-        if let Some(backtrace) = (&self as &dyn Error).request_ref::<Backtrace>() {
+        if let Some(backtrace) = std::error::request_ref::<Backtrace>(&self as &dyn Error) {
             // Since we forward all backtraces from source, `self.backtrace()` is the backtrace of
             // inner error.
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;

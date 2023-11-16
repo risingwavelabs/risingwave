@@ -17,6 +17,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
 
+use await_tree::InstrumentAwait;
 use futures::Future;
 use risingwave_common::cache::{
     CachePriority, CacheableEntry, LookupResponse, LruCache, LruCacheEventListener,
@@ -25,7 +26,7 @@ use risingwave_hummock_sdk::HummockSstableObjectId;
 use tokio::sync::oneshot::Receiver;
 use tokio::task::JoinHandle;
 
-use super::{Block, HummockResult, TieredCacheEntry};
+use super::{Block, HummockResult};
 use crate::hummock::HummockError;
 
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024;
@@ -67,15 +68,6 @@ impl BlockHolder {
             block: ptr,
         }
     }
-
-    pub fn from_tiered_cache(
-        entry: TieredCacheEntry<(HummockSstableObjectId, u64), Box<Block>>,
-    ) -> Self {
-        match entry {
-            TieredCacheEntry::Cache(entry) => Self::from_cached_block(entry),
-            TieredCacheEntry::Owned(block) => Self::from_owned_block(*block),
-        }
-    }
 }
 
 impl Deref for BlockHolder {
@@ -108,10 +100,12 @@ impl BlockResponse {
         match self {
             BlockResponse::Block(block_holder) => Ok(block_holder),
             BlockResponse::WaitPendingRequest(receiver) => receiver
+                .verbose_instrument_await("wait_pending_fetch_block")
                 .await
                 .map_err(|recv_error| recv_error.into())
                 .map(BlockHolder::from_cached_block),
             BlockResponse::Miss(join_handle) => join_handle
+                .verbose_instrument_await("fetch_block")
                 .await
                 .unwrap()
                 .map(BlockHolder::from_cached_block),

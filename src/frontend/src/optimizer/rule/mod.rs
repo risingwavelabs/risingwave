@@ -29,6 +29,8 @@ pub trait Description {
 
 pub(super) type BoxedRule = Box<dyn Rule>;
 
+mod over_window_merge_rule;
+pub use over_window_merge_rule::*;
 mod project_join_merge_rule;
 pub use project_join_merge_rule::*;
 mod project_eliminate_rule;
@@ -66,9 +68,13 @@ pub use index_selection_rule::*;
 mod push_calculation_of_join_rule;
 pub use push_calculation_of_join_rule::*;
 mod join_commute_rule;
-mod over_agg_to_topn_rule;
+mod over_window_to_agg_and_join_rule;
+pub use over_window_to_agg_and_join_rule::*;
+mod over_window_split_rule;
+pub use over_window_split_rule::*;
+mod over_window_to_topn_rule;
 pub use join_commute_rule::*;
-pub use over_agg_to_topn_rule::*;
+pub use over_window_to_topn_rule::*;
 mod union_to_distinct_rule;
 pub use union_to_distinct_rule::*;
 mod agg_project_merge_rule;
@@ -111,6 +117,43 @@ mod intersect_merge_rule;
 pub use intersect_merge_rule::*;
 mod except_merge_rule;
 pub use except_merge_rule::*;
+mod apply_union_transpose_rule;
+pub use apply_union_transpose_rule::*;
+mod apply_dedup_transpose_rule;
+pub use apply_dedup_transpose_rule::*;
+mod project_join_separate_rule;
+pub use project_join_separate_rule::*;
+mod grouping_sets_to_expand_rule;
+pub use grouping_sets_to_expand_rule::*;
+mod apply_project_set_transpose_rule;
+pub use apply_project_set_transpose_rule::*;
+mod cross_join_eliminate_rule;
+pub use cross_join_eliminate_rule::*;
+mod table_function_to_project_set_rule;
+pub use cross_join_eliminate_rule::*;
+pub use table_function_to_project_set_rule::*;
+mod apply_topn_transpose_rule;
+pub use apply_topn_transpose_rule::*;
+mod apply_limit_transpose_rule;
+pub use apply_limit_transpose_rule::*;
+mod batch;
+pub use batch::batch_project_merge_rule::*;
+mod common_sub_expr_extract_rule;
+pub use common_sub_expr_extract_rule::*;
+mod apply_over_window_transpose_rule;
+pub use apply_over_window_transpose_rule::*;
+mod apply_expand_transpose_rule;
+pub use apply_expand_transpose_rule::*;
+mod expand_to_project_rule;
+pub use expand_to_project_rule::*;
+mod agg_group_by_simplify_rule;
+pub use agg_group_by_simplify_rule::*;
+mod apply_hop_window_transpose_rule;
+pub use apply_hop_window_transpose_rule::*;
+mod agg_call_merge_rule;
+pub use agg_call_merge_rule::*;
+mod values_extract_project_rule;
+pub use values_extract_project_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -119,6 +162,7 @@ macro_rules! for_all_rules {
               { ApplyAggTransposeRule }
             , { ApplyFilterTransposeRule }
             , { ApplyProjectTransposeRule }
+            , { ApplyProjectSetTransposeRule }
             , { ApplyEliminateRule }
             , { ApplyJoinTransposeRule }
             , { ApplyShareEliminateRule }
@@ -136,6 +180,9 @@ macro_rules! for_all_rules {
             , { PushCalculationOfJoinRule }
             , { IndexSelectionRule }
             , { OverWindowToTopNRule }
+            , { OverWindowToAggAndJoinRule }
+            , { OverWindowSplitRule }
+            , { OverWindowMergeRule }
             , { JoinCommuteRule }
             , { UnionToDistinctRule }
             , { AggProjectMergeRule }
@@ -157,6 +204,23 @@ macro_rules! for_all_rules {
             , { ExceptToAntiJoinRule }
             , { IntersectMergeRule }
             , { ExceptMergeRule }
+            , { ApplyUnionTransposeRule }
+            , { ApplyDedupTransposeRule }
+            , { ProjectJoinSeparateRule }
+            , { GroupingSetsToExpandRule }
+            , { CrossJoinEliminateRule }
+            , { ApplyTopNTransposeRule }
+            , { TableFunctionToProjectSetRule }
+            , { ApplyLimitTransposeRule }
+            , { CommonSubExprExtractRule }
+            , { BatchProjectMergeRule }
+            , { ApplyOverWindowTransposeRule }
+            , { ApplyExpandTransposeRule }
+            , { ExpandToProjectRule }
+            , { AggGroupBySimplifyRule }
+            , { ApplyHopWindowTransposeRule }
+            , { AggCallMergeRule }
+            , { ValuesExtractProjectRule }
         }
     };
 }

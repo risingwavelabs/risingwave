@@ -26,8 +26,36 @@ pub enum ConnectorError {
     #[error("Kafka error: {0}")]
     Kafka(#[from] rdkafka::error::KafkaError),
 
+    #[error("Config error: {0}")]
+    Config(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+
+    #[error("Connection error: {0}")]
+    Connection(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+
+    #[error("MySQL error: {0}")]
+    MySql(#[from] mysql_async::Error),
+
+    #[error("Pulsar error: {0}")]
+    Pulsar(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
+
     #[error(transparent)]
-    Internal(#[from] anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 impl From<ConnectorError> for RwError {

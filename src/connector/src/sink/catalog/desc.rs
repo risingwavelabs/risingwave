@@ -19,10 +19,9 @@ use risingwave_common::catalog::{
     ColumnCatalog, ConnectionId, DatabaseId, SchemaId, TableId, UserId,
 };
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::plan_common::PbColumnDesc;
 use risingwave_pb::stream_plan::PbSinkDesc;
 
-use super::{SinkCatalog, SinkId, SinkType};
+use super::{SinkCatalog, SinkFormatDesc, SinkId, SinkType};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SinkDesc {
@@ -55,6 +54,16 @@ pub struct SinkDesc {
     // based on both its own derivation on the append-only attribute and other user-specified
     // options in `properties`.
     pub sink_type: SinkType,
+
+    // The format and encode of the sink.
+    pub format_desc: Option<SinkFormatDesc>,
+
+    /// Name of the database
+    pub db_name: String,
+
+    /// Name of the "table" field for Debezium. If the sink is from table or mv,
+    /// it is the name of table/mv. Otherwise, it is the name of the sink.
+    pub sink_from_name: String,
 }
 
 impl SinkDesc {
@@ -80,7 +89,12 @@ impl SinkDesc {
             dependent_relations,
             properties: self.properties.into_iter().collect(),
             sink_type: self.sink_type,
+            format_desc: self.format_desc,
             connection_id,
+            created_at_epoch: None,
+            initialized_at_epoch: None,
+            db_name: self.db_name,
+            sink_from_name: self.sink_from_name,
         }
     }
 
@@ -89,16 +103,19 @@ impl SinkDesc {
             id: self.id.sink_id,
             name: self.name.clone(),
             definition: self.definition.clone(),
-            columns: self
+            column_catalogs: self
                 .columns
                 .iter()
-                .map(|column| Into::<PbColumnDesc>::into(&column.column_desc))
+                .map(|column| column.to_protobuf())
                 .collect_vec(),
             plan_pk: self.plan_pk.iter().map(|k| k.to_protobuf()).collect_vec(),
             downstream_pk: self.downstream_pk.iter().map(|idx| *idx as _).collect_vec(),
             distribution_key: self.distribution_key.iter().map(|k| *k as _).collect_vec(),
             properties: self.properties.clone().into_iter().collect(),
             sink_type: self.sink_type.to_proto() as i32,
+            format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
+            db_name: self.db_name.clone(),
+            sink_from_name: self.sink_from_name.clone(),
         }
     }
 }

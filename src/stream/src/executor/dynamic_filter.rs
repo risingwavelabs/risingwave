@@ -15,17 +15,19 @@
 use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
-use futures::{pin_mut, StreamExt};
+use futures::{pin_mut, stream, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
+use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{once, OwnedRow as RowData, Row};
-use risingwave_common::types::{DataType, Datum, ScalarImpl, ToDatumRef, ToOwnedDatum};
+use risingwave_common::row::{self, once, OwnedRow, OwnedRow as RowData, Row};
+use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_expr::expr::{build, BoxedExpression, InputRefExpression, LiteralExpression};
+use risingwave_expr::expr::{
+    build_func_non_strict, InputRefExpression, LiteralExpression, NonStrictExpression,
+};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::{
     GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual,
@@ -37,83 +39,73 @@ use super::barrier_align::*;
 use super::error::StreamExecutorError;
 use super::monitor::StreamingMetrics;
 use super::{
-    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
+    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
+    PkIndicesRef,
 };
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{StateTable, WatermarkCacheParameterizedStateTable};
 use crate::common::StreamChunkBuilder;
 use crate::executor::expect_first_barrier_from_aligned_stream;
+use crate::task::ActorEvalErrorReport;
 
-pub struct DynamicFilterExecutor<S: StateStore> {
+pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool> {
     ctx: ActorContextRef,
+    info: ExecutorInfo,
+
     source_l: Option<BoxedExecutor>,
     source_r: Option<BoxedExecutor>,
     key_l: usize,
-    pk_indices: PkIndices,
-    identity: String,
     comparator: ExprNodeType,
-    left_table: StateTable<S>,
+    left_table: WatermarkCacheParameterizedStateTable<S, USE_WATERMARK_CACHE>,
     right_table: StateTable<S>,
-    schema: Schema,
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
 }
 
-impl<S: StateStore> DynamicFilterExecutor<S> {
+impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, USE_WATERMARK_CACHE> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         source_l: BoxedExecutor,
         source_r: BoxedExecutor,
         key_l: usize,
-        pk_indices: PkIndices,
-        executor_id: u64,
         comparator: ExprNodeType,
-        state_table_l: StateTable<S>,
+        state_table_l: WatermarkCacheParameterizedStateTable<S, USE_WATERMARK_CACHE>,
         state_table_r: StateTable<S>,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
     ) -> Self {
-        let schema = source_l.schema().clone();
         Self {
             ctx,
+            info,
             source_l: Some(source_l),
             source_r: Some(source_r),
             key_l,
-            pk_indices,
-            identity: format!("DynamicFilterExecutor {:X}", executor_id),
             comparator,
             left_table: state_table_l,
             right_table: state_table_r,
             metrics,
-            schema,
             chunk_size,
         }
     }
 
     async fn apply_batch(
         &mut self,
-        data_chunk: &DataChunk,
-        ops: Vec<Op>,
-        condition: Option<BoxedExpression>,
+        chunk: &StreamChunk,
+        condition: Option<NonStrictExpression>,
     ) -> Result<(Vec<Op>, Bitmap), StreamExecutorError> {
-        debug_assert_eq!(ops.len(), data_chunk.cardinality());
-        let mut new_ops = Vec::with_capacity(ops.len());
-        let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
+        let mut new_ops = Vec::with_capacity(chunk.capacity());
+        let mut new_visibility = BitmapBuilder::with_capacity(chunk.capacity());
         let mut last_res = false;
 
         let eval_results = if let Some(cond) = condition {
-            Some(
-                cond.eval_infallible(data_chunk, |err| {
-                    self.ctx.on_compute_error(err, &self.identity)
-                })
-                .await,
-            )
+            Some(cond.eval_infallible(chunk).await)
         } else {
             None
         };
 
-        for (idx, (row, op)) in data_chunk.rows().zip_eq_debug(ops.iter()).enumerate() {
+        for (idx, (op, row)) in chunk.rows().enumerate() {
             let left_val = row.datum_at(self.key_l).to_owned_datum();
 
             let res = if let Some(array) = &eval_results {
@@ -127,9 +119,9 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                 false
             };
 
-            match *op {
+            match op {
                 Op::Insert | Op::Delete => {
-                    new_ops.push(*op);
+                    new_ops.push(op);
                     if res {
                         new_visibility.append(true);
                     } else {
@@ -171,7 +163,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
             // null key in left side of predicate should never be stored
             // (it will never satisfy the filter condition)
             if left_val.is_some() {
-                match *op {
+                match op {
                     Op::Insert | Op::UpdateInsert => {
                         self.left_table.insert(row);
                     }
@@ -183,7 +175,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         }
 
         let new_visibility = new_visibility.finish();
-
+        self.left_table.try_flush().await?;
         Ok((new_ops, new_visibility))
     }
 
@@ -211,7 +203,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                 (range, is_lower, is_insert)
             }
             (Some(c), Some(p)) => {
-                if c < p {
+                if c.default_cmp(&p).is_lt() {
                     let range = match self.comparator {
                         GreaterThan | LessThanOrEqual => (Excluded(c), Included(p)),
                         GreaterThanOrEqual | LessThan => (Included(c), Excluded(p)),
@@ -236,11 +228,15 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
     async fn recover_rhs(&mut self) -> Result<Option<RowData>, StreamExecutorError> {
         // Recover value for RHS if available
-        let rhs_stream = self.right_table.iter(Default::default()).await?;
+        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
+        let rhs_stream = self
+            .right_table
+            .iter_with_prefix(row::empty(), sub_range, Default::default())
+            .await?;
         pin_mut!(rhs_stream);
 
         if let Some(res) = rhs_stream.next().await {
-            let value = res?;
+            let value = res?.into_owned_row();
             assert!(rhs_stream.next().await.is_none());
             Ok(Some(value))
         } else {
@@ -257,29 +253,36 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         let input_l = self.source_l.take().unwrap();
         let input_r = self.source_r.take().unwrap();
 
-        let left_len = input_l.schema().len();
         // Derive the dynamic expression
         let l_data_type = input_l.schema().data_types()[self.key_l].clone();
         let r_data_type = input_r.schema().data_types()[0].clone();
         // The types are aligned by frontend.
         assert_eq!(l_data_type, r_data_type);
-        let dynamic_cond = move |literal: Datum| {
-            literal.map(|scalar| {
-                build(
-                    self.comparator,
-                    DataType::Boolean,
-                    vec![
-                        Box::new(InputRefExpression::new(l_data_type.clone(), self.key_l)),
-                        Box::new(LiteralExpression::new(r_data_type.clone(), Some(scalar))),
-                    ],
-                )
-            })
+        let dynamic_cond = {
+            let eval_error_report = ActorEvalErrorReport {
+                actor_context: self.ctx.clone(),
+                identity: Arc::from(self.info.identity.as_str()),
+            };
+            move |literal: Datum| {
+                literal.map(|scalar| {
+                    build_func_non_strict(
+                        self.comparator,
+                        DataType::Boolean,
+                        vec![
+                            Box::new(InputRefExpression::new(l_data_type.clone(), self.key_l)),
+                            Box::new(LiteralExpression::new(r_data_type.clone(), Some(scalar))),
+                        ],
+                        eval_error_report.clone(),
+                    )
+                })
+            }
         };
 
         let aligned_stream = barrier_align(
             input_l.execute(),
             input_r.execute(),
             self.ctx.id,
+            self.ctx.fragment_id,
             self.metrics.clone(),
         );
 
@@ -301,14 +304,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
 
-        let (left_to_output, _) =
-            StreamChunkBuilder::get_i2o_mapping(0..self.schema.len(), left_len, 0);
-        let mut stream_chunk_builder = StreamChunkBuilder::new(
-            self.chunk_size,
-            &self.schema.data_types(),
-            vec![],
-            left_to_output,
-        );
+        let mut stream_chunk_builder =
+            StreamChunkBuilder::new(self.chunk_size, self.info.schema.data_types());
 
         let watermark_can_clean_state = !matches!(self.comparator, LessThan | LessThanOrEqual);
         let mut unused_clean_hint = None;
@@ -319,21 +316,19 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                 AlignedMessage::Left(chunk) => {
                     // Reuse the logic from `FilterExecutor`
                     let chunk = chunk.compact(); // Is this unnecessary work?
-                    let (data_chunk, ops) = chunk.into_parts();
-
                     let right_val = prev_epoch_value.clone().flatten();
 
                     // The condition is `None` if it is always false by virtue of a NULL right
                     // input, so we save evaluating it on the datachunk
                     let condition = dynamic_cond(right_val).transpose()?;
 
-                    let (new_ops, new_visibility) =
-                        self.apply_batch(&data_chunk, ops, condition).await?;
+                    let (new_ops, new_visibility) = self.apply_batch(&chunk, condition).await?;
 
-                    let (columns, _) = data_chunk.into_parts();
+                    let columns = chunk.into_parts().0.into_parts().0;
 
                     if new_visibility.count_ones() > 0 {
-                        let new_chunk = StreamChunk::new(new_ops, columns, Some(new_visibility));
+                        let new_chunk =
+                            StreamChunk::with_visibility(new_ops, columns, new_visibility);
                         yield Message::Chunk(new_chunk)
                     }
                 }
@@ -392,25 +387,28 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         let range = (Self::to_row_bound(range.0), Self::to_row_bound(range.1));
 
                         // TODO: prefetching for append-only case.
-                        for vnode in self.left_table.vnodes().iter_vnodes() {
-                            let row_stream = self
-                                .left_table
-                                .iter_with_pk_range(
-                                    &range,
+                        let streams = futures::future::try_join_all(
+                            self.left_table.vnodes().iter_vnodes().map(|vnode| {
+                                self.left_table.iter_with_vnode(
                                     vnode,
-                                    PrefetchOptions::new_for_exhaust_iter(),
+                                    &range,
+                                    PrefetchOptions::default(),
                                 )
-                                .await?;
-                            pin_mut!(row_stream);
-                            while let Some(res) = row_stream.next().await {
-                                let row = res?;
-                                if let Some(chunk) = stream_chunk_builder.append_row_matched(
-                                    // All rows have a single identity at this point
-                                    if is_insert { Op::Insert } else { Op::Delete },
-                                    row,
-                                ) {
-                                    yield Message::Chunk(chunk);
-                                }
+                            }),
+                        )
+                        .await?
+                        .into_iter()
+                        .map(Box::pin);
+
+                        #[for_await]
+                        for res in stream::select_all(streams) {
+                            let row = res?;
+                            if let Some(chunk) = stream_chunk_builder.append_row(
+                                // All rows have a single identity at this point
+                                if is_insert { Op::Insert } else { Op::Delete },
+                                row.as_ref(),
+                            ) {
+                                yield Message::Chunk(chunk);
                             }
                         }
 
@@ -468,21 +466,23 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
     }
 }
 
-impl<S: StateStore> Executor for DynamicFilterExecutor<S> {
+impl<S: StateStore, const USE_WATERMARK_CACHE: bool> Executor
+    for DynamicFilterExecutor<S, USE_WATERMARK_CACHE>
+{
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        self.identity.as_str()
+        &self.info.identity
     }
 }
 
@@ -540,13 +540,19 @@ mod tests {
         let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![0]);
         let (tx_r, source_r) = MockSource::channel(schema, vec![]);
 
-        let executor = DynamicFilterExecutor::<MemoryStateStore>::new(
+        let schema = source_l.schema().clone();
+        let info = ExecutorInfo {
+            schema,
+            pk_indices: vec![0],
+            identity: "DynamicFilterExecutor".to_string(),
+        };
+
+        let executor = DynamicFilterExecutor::<MemoryStateStore, false>::new(
             ActorContext::create(123),
+            info,
             Box::new(source_l),
             Box::new(source_r),
             0,
-            vec![0],
-            1,
             comparator,
             mem_state_l,
             mem_state_r,

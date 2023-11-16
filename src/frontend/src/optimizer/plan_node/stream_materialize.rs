@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -24,18 +24,22 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::derive_columns;
+use super::stream::prelude::*;
+use super::stream::StreamPlanRef;
+use super::utils::{childless_record, Distill};
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
+use crate::catalog::table_catalog::{CreateType, TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::derive::derive_pk;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// Materializes a stream.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamMaterialize {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     /// Child of Materialize plan
     input: PlanRef,
     table: TableCatalog,
@@ -44,7 +48,16 @@ pub struct StreamMaterialize {
 impl StreamMaterialize {
     #[must_use]
     pub fn new(input: PlanRef, table: TableCatalog) -> Self {
-        let base = PlanBase::derive_stream_plan_base(&input);
+        let base = PlanBase::new_stream(
+            input.ctx(),
+            input.schema().clone(),
+            Some(table.stream_key.clone()),
+            input.functional_dependency().clone(),
+            input.distribution().clone(),
+            input.append_only(),
+            input.emit_on_window_close(),
+            input.watermark_columns().clone(),
+        );
         Self { base, input, table }
     }
 
@@ -62,6 +75,7 @@ impl StreamMaterialize {
         out_names: Vec<String>,
         definition: String,
         table_type: TableType,
+        cardinality: Cardinality,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, table_type)?;
         // the hidden column name might refer some expr id
@@ -79,6 +93,7 @@ impl StreamMaterialize {
             None,
             table_type,
             None,
+            cardinality,
         )?;
 
         Ok(Self::new(input, table))
@@ -115,6 +130,7 @@ impl StreamMaterialize {
             row_id_index,
             TableType::Table,
             version,
+            Cardinality::unknown(), // unknown cardinality for tables
         )?;
 
         Ok(Self::new(input, table))
@@ -136,7 +152,22 @@ impl StreamMaterialize {
                 TableType::MaterializedView => {
                     assert_matches!(user_distributed_by, RequiredDist::Any);
                     // ensure the same pk will not shuffle to different node
-                    RequiredDist::shard_by_key(input.schema().len(), input.logical_pk())
+                    let required_dist =
+                        RequiredDist::shard_by_key(input.schema().len(), input.expect_stream_key());
+
+                    // If the input is a stream join, enforce the stream key as the materialized
+                    // view distribution key to avoid slow backfilling caused by
+                    // data skew of the dimension table join key.
+                    // See <https://github.com/risingwavelabs/risingwave/issues/12824> for more information.
+                    let is_stream_join = matches!(input.as_stream_hash_join(), Some(_join))
+                        || matches!(input.as_stream_temporal_join(), Some(_join))
+                        || matches!(input.as_stream_delta_join(), Some(_join));
+
+                    if is_stream_join {
+                        return Ok(required_dist.enforce(input, &Order::any()));
+                    }
+
+                    required_dist
                 }
                 TableType::Index => {
                     assert_matches!(
@@ -168,6 +199,7 @@ impl StreamMaterialize {
         row_id_index: Option<usize>,
         table_type: TableType,
         version: Option<TableVersion>,
+        cardinality: Cardinality,
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
@@ -177,24 +209,25 @@ impl StreamMaterialize {
         let append_only = input.append_only();
         let watermark_columns = input.watermark_columns().clone();
 
-        let (pk, stream_key) = if let Some(pk_column_indices) = pk_column_indices {
-            let pk = pk_column_indices
+        let (table_pk, stream_key) = if let Some(pk_column_indices) = pk_column_indices {
+            let table_pk = pk_column_indices
                 .iter()
                 .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
                 .collect();
-            // No order by for create table, so stream key is identical to pk.
-            (pk, pk_column_indices)
+            // No order by for create table, so stream key is identical to table pk.
+            (table_pk, pk_column_indices)
         } else {
             derive_pk(input, user_order_by, &columns)
         };
+        // assert: `stream_key` is a subset of `table_pk`
 
-        let read_prefix_len_hint = stream_key.len();
+        let read_prefix_len_hint = table_pk.len();
         Ok(TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
             name,
             columns,
-            pk,
+            pk: table_pk,
             stream_key,
             distribution_key,
             table_type,
@@ -203,6 +236,7 @@ impl StreamMaterialize {
             properties,
             // TODO(zehua): replace it with FragmentId::placeholder()
             fragment_id: FragmentId::MAX - 1,
+            dml_fragment_id: None,
             vnode_col_index: None,
             row_id_index,
             value_indices,
@@ -212,6 +246,12 @@ impl StreamMaterialize {
             version,
             watermark_columns,
             dist_key_in_pk: vec![],
+            cardinality,
+            created_at_epoch: None,
+            initialized_at_epoch: None,
+            cleaned_by_watermark: false,
+            create_type: CreateType::Foreground, // Will be updated in the handler itself.
+            description: None,
         })
     }
 
@@ -226,51 +266,42 @@ impl StreamMaterialize {
     }
 }
 
-impl fmt::Display for StreamMaterialize {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Distill for StreamMaterialize {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let table = self.table();
 
-        let column_names = table
-            .columns()
-            .iter()
-            .map(|c| c.name_with_hidden())
-            .join(", ");
+        let column_names = (table.columns.iter())
+            .map(|col| col.name_with_hidden().to_string())
+            .map(Pretty::from)
+            .collect();
 
-        let stream_key = table
-            .stream_key
-            .iter()
-            .map(|&k| &table.columns[k].column_desc.name)
-            .join(", ");
+        let stream_key = (table.stream_key.iter())
+            .map(|&k| table.columns[k].name().to_string())
+            .map(Pretty::from)
+            .collect();
 
-        let pk_columns = table
-            .pk
-            .iter()
-            .map(|o| table.columns()[o.column_index].column_desc.name.clone())
-            .join(", ");
-
-        let mut builder = f.debug_struct("StreamMaterialize");
-        builder
-            .field("columns", &format_args!("[{}]", column_names))
-            .field("stream_key", &format_args!("[{}]", stream_key))
-            .field("pk_columns", &format_args!("[{}]", pk_columns));
-
+        let pk_columns = (table.pk.iter())
+            .map(|o| table.columns[o.column_index].name().to_string())
+            .map(Pretty::from)
+            .collect();
+        let mut vec = Vec::with_capacity(5);
+        vec.push(("columns", Pretty::Array(column_names)));
+        vec.push(("stream_key", Pretty::Array(stream_key)));
+        vec.push(("pk_columns", Pretty::Array(pk_columns)));
         let pk_conflict_behavior = self.table.conflict_behavior().debug_to_string();
 
-        builder.field("pk_conflict", &pk_conflict_behavior);
+        vec.push(("pk_conflict", Pretty::from(pk_conflict_behavior)));
 
-        let watermark_columns = &self.base.watermark_columns;
-        if self.base.watermark_columns.count_ones(..) > 0 {
+        let watermark_columns = &self.base.watermark_columns();
+        if self.base.watermark_columns().count_ones(..) > 0 {
             let watermark_column_names = watermark_columns
                 .ones()
-                .map(|i| table.columns()[i].name_with_hidden())
-                .join(", ");
-            builder.field(
-                "watermark_columns",
-                &format_args!("[{}]", watermark_column_names),
-            );
+                .map(|i| table.columns()[i].name_with_hidden().to_string())
+                .map(Pretty::from)
+                .collect();
+            vec.push(("watermark_columns", Pretty::Array(watermark_column_names)));
         };
-
-        builder.finish()
+        childless_record("StreamMaterialize", vec)
     }
 }
 
@@ -282,16 +313,16 @@ impl PlanTreeNodeUnary for StreamMaterialize {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let new = Self::new(input, self.table().clone());
         new.base
-            .schema
+            .schema()
             .fields
             .iter()
-            .zip_eq_fast(self.base.schema.fields.iter())
+            .zip_eq_fast(self.base.schema().fields.iter())
             .for_each(|(a, b)| {
                 assert_eq!(a.data_type, b.data_type);
                 assert_eq!(a.type_name, b.type_name);
                 assert_eq!(a.sub_fields, b.sub_fields);
             });
-        assert_eq!(new.plan_base().logical_pk, self.plan_base().logical_pk);
+        assert_eq!(new.plan_base().stream_key(), self.plan_base().stream_key());
         new
     }
 }

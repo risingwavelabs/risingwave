@@ -13,4 +13,7 @@
 // limitations under the License.
 
 mod const_eval_rewriter;
+mod cse_rewriter;
+
 pub(crate) use const_eval_rewriter::ConstEvalRewriter;
+pub(crate) use cse_rewriter::CseRewriter;

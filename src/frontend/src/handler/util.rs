@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -26,15 +26,16 @@ use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, FormatIterator, Row};
 use pin_project_lite::pin_project;
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::{ColumnDesc, Field};
+use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::row::Row as _;
-use risingwave_common::types::{DataType, ScalarRefImpl};
+use risingwave_common::types::{DataType, ScalarRefImpl, Timestamptz};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::source::KAFKA_CONNECTOR;
-use risingwave_expr::vector_op::timestamptz::timestamptz_to_string;
+use risingwave_connector::source::{KAFKA_CONNECTOR, KINESIS_CONNECTOR, PULSAR_CONNECTOR};
+use risingwave_sqlparser::ast::display_comma_separated;
 
-use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
+use crate::catalog::IndexCatalog;
+use crate::handler::create_source::{CONNECTION_NAME_KEY, UPSTREAM_SOURCE_KEY};
 use crate::session::SessionImpl;
 
 pin_project! {
@@ -132,14 +133,13 @@ fn timestamptz_to_string_with_session_data(
     d: ScalarRefImpl<'_>,
     session_data: &StaticSessionData,
 ) -> Bytes {
-    let mut buf = String::new();
-    match d {
-        ScalarRefImpl::<'_>::Int64(d) => {
-            timestamptz_to_string(d, &session_data.timezone, &mut buf).unwrap()
-        }
-        _ => unreachable!(),
-    };
-    buf.into()
+    let tz = d.into_timestamptz();
+    let time_zone = Timestamptz::lookup_time_zone(&session_data.timezone).unwrap();
+    let instant_local = tz.to_datetime_in_zone(time_zone);
+    instant_local
+        .format("%Y-%m-%d %H:%M:%S%.f%:z")
+        .to_string()
+        .into()
 }
 
 fn to_pg_rows(
@@ -170,11 +170,12 @@ fn to_pg_rows(
 }
 
 /// Convert column descs to rows which conclude name and type
-pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
+pub fn col_descs_to_rows(columns: Vec<ColumnCatalog>) -> Vec<Row> {
     columns
         .iter()
         .flat_map(|col| {
-            col.flatten()
+            col.column_desc
+                .flatten()
                 .into_iter()
                 .map(|c| {
                     let type_name = if let DataType::Struct { .. } = c.data_type {
@@ -182,9 +183,48 @@ pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
                     } else {
                         c.data_type.to_string()
                     };
-                    Row::new(vec![Some(c.name.into()), Some(type_name.into())])
+                    Row::new(vec![
+                        Some(c.name.into()),
+                        Some(type_name.into()),
+                        Some(col.is_hidden.to_string().into()),
+                        c.description.map(Into::into),
+                    ])
                 })
                 .collect_vec()
+        })
+        .collect_vec()
+}
+
+pub fn indexes_to_rows(indexes: Vec<Arc<IndexCatalog>>) -> Vec<Row> {
+    indexes
+        .iter()
+        .map(|index| {
+            let index_display = index.display();
+            Row::new(vec![
+                Some(index.name.clone().into()),
+                Some(index.primary_table.name.clone().into()),
+                Some(
+                    format!(
+                        "{}",
+                        display_comma_separated(&index_display.index_columns_with_ordering)
+                    )
+                    .into(),
+                ),
+                Some(
+                    format!(
+                        "{}",
+                        display_comma_separated(&index_display.include_columns)
+                    )
+                    .into(),
+                ),
+                Some(
+                    format!(
+                        "{}",
+                        display_comma_separated(&index_display.distributed_by_columns)
+                    )
+                    .into(),
+                ),
+            ])
         })
         .collect_vec()
 }
@@ -214,11 +254,39 @@ pub fn is_kafka_connector(with_properties: &HashMap<String, String>) -> bool {
     connector == KAFKA_CONNECTOR
 }
 
+#[inline(always)]
+pub fn is_key_mq_connector(with_properties: &HashMap<String, String>) -> bool {
+    let Some(connector) = get_connector(with_properties) else {
+        return false;
+    };
+
+    matches!(
+        connector.as_str(),
+        KINESIS_CONNECTOR | PULSAR_CONNECTOR | KAFKA_CONNECTOR
+    )
+}
+
+#[inline(always)]
+pub fn is_cdc_connector(with_properties: &HashMap<String, String>) -> bool {
+    let Some(connector) = get_connector(with_properties) else {
+        return false;
+    };
+    connector.contains("-cdc")
+}
+
+#[inline(always)]
+pub fn get_connection_name(with_properties: &BTreeMap<String, String>) -> Option<String> {
+    with_properties
+        .get(CONNECTION_NAME_KEY)
+        .map(|s| s.to_lowercase())
+}
+
 #[cfg(test)]
 mod tests {
     use bytes::BytesMut;
     use postgres_types::{ToSql, Type};
     use risingwave_common::array::*;
+    use risingwave_common::types::Timestamptz;
 
     use super::*;
 
@@ -366,7 +434,11 @@ mod tests {
         assert_eq!(&f(&T::Boolean, S::Bool(true), Format::Text), "t");
         assert_eq!(&f(&T::Boolean, S::Bool(false), Format::Text), "f");
         assert_eq!(
-            &f(&T::Timestamptz, S::Int64(-1), Format::Text),
+            &f(
+                &T::Timestamptz,
+                S::Timestamptz(Timestamptz::from_micros(-1)),
+                Format::Text
+            ),
             "1969-12-31 23:59:59.999999+00:00"
         );
     }

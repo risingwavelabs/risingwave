@@ -12,24 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use itertools::{enumerate, Itertools};
 use prost::Message;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    object_size_map, HummockVersionExt,
+    object_size_map, BranchedSstInfo, HummockVersionExt,
 };
-use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId, HummockEpoch, HummockVersionId};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, HummockContextId, HummockSstableObjectId, HummockVersionId,
+};
 use risingwave_pb::hummock::hummock_version::Levels;
+use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     CompactionConfig, HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion,
     HummockVersionCheckpoint, HummockVersionStats, LevelType,
 };
 
-use super::compaction::{get_compression_algorithm, DynamicLevelSelectorCore};
+use super::compaction::get_compression_algorithm;
+use super::compaction::selector::DynamicLevelSelectorCore;
 use crate::hummock::compaction::CompactStatus;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -61,6 +66,26 @@ pub fn trigger_version_stat(
             .version_stats
             .with_label_values(&[&table_id, "total_value_size"])
             .set(stats.total_value_size);
+    }
+}
+
+pub fn trigger_mv_stat(
+    metrics: &MetaMetrics,
+    version_stats: &HummockVersionStats,
+    mv_id_to_all_table_ids: Vec<(u32, Vec<u32>)>,
+) {
+    metrics.materialized_view_stats.reset();
+    for (mv_id, all_table_ids) in mv_id_to_all_table_ids {
+        let total_size = all_table_ids
+            .iter()
+            .filter_map(|&table_id| version_stats.table_stats.get(&table_id))
+            .map(|stats| stats.total_key_size + stats.total_value_size)
+            .sum();
+
+        metrics
+            .materialized_view_stats
+            .with_label_values(&[&mv_id.to_string(), "materialized_view_total_size"])
+            .set(total_size);
     }
 }
 
@@ -131,12 +156,19 @@ pub fn trigger_sst_stat(
     }
 
     tracing::debug!("LSM Compacting STAT {:?}", compacting_task_stat);
-    for ((select, target), compacting_task_count) in compacting_task_stat {
+    for ((select, target), compacting_task_count) in &compacting_task_stat {
         let label_str = format!("cg{} L{} -> L{}", compaction_group_id, select, target);
         metrics
             .level_compact_task_cnt
             .with_label_values(&[&label_str])
-            .set(compacting_task_count as _);
+            .set(*compacting_task_count as _);
+    }
+
+    if compacting_task_stat.is_empty() {
+        if let Some(levels) = current_version.levels.get(&compaction_group_id) {
+            let max_level = levels.levels.len();
+            remove_compacting_task_stat(metrics, compaction_group_id, max_level);
+        }
     }
 
     {
@@ -186,7 +218,7 @@ pub fn trigger_sst_stat(
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    if current_time - previous_time > 600
+    if current_time > 600 + previous_time
         && metrics
             .time_after_last_observation
             .compare_exchange(
@@ -217,6 +249,7 @@ pub fn trigger_sst_stat(
 pub fn remove_compaction_group_in_sst_stat(
     metrics: &MetaMetrics,
     compaction_group_id: CompactionGroupId,
+    max_level: usize,
 ) {
     let mut idx = 0;
     loop {
@@ -225,10 +258,12 @@ pub fn remove_compaction_group_in_sst_stat(
             .level_sst_num
             .remove_label_values(&[&level_label])
             .is_ok();
+
         metrics
             .level_file_size
             .remove_label_values(&[&level_label])
             .ok();
+
         metrics
             .level_compact_cnt
             .remove_label_values(&[&level_label])
@@ -248,6 +283,41 @@ pub fn remove_compaction_group_in_sst_stat(
     metrics
         .level_sst_num
         .remove_label_values(&[&non_overlap_level_label])
+        .ok();
+
+    remove_compacting_task_stat(metrics, compaction_group_id, max_level);
+    remove_split_stat(metrics, compaction_group_id);
+}
+
+pub fn remove_compacting_task_stat(
+    metrics: &MetaMetrics,
+    compaction_group_id: CompactionGroupId,
+    max_level: usize,
+) {
+    for select_level in 0..=max_level {
+        for target_level in 0..=max_level {
+            let label_str = format!(
+                "cg{} L{} -> L{}",
+                compaction_group_id, select_level, target_level
+            );
+            metrics
+                .level_compact_task_cnt
+                .remove_label_values(&[&label_str])
+                .ok();
+        }
+    }
+}
+
+pub fn remove_split_stat(metrics: &MetaMetrics, compaction_group_id: CompactionGroupId) {
+    let label_str = compaction_group_id.to_string();
+    metrics
+        .state_table_count
+        .remove_label_values(&[&label_str])
+        .ok();
+
+    metrics
+        .branched_sst_count
+        .remove_label_values(&[&label_str])
         .ok();
 }
 
@@ -275,7 +345,7 @@ pub fn trigger_pin_unpin_snapshot_state(
     {
         metrics.min_pinned_epoch.set(m as i64);
     } else {
-        metrics.min_pinned_epoch.set(HummockEpoch::MAX as _);
+        metrics.min_pinned_epoch.set(MAX_EPOCH as _);
     }
 }
 
@@ -384,4 +454,49 @@ pub fn trigger_lsm_stat(
                 .set(compression_ratio);
         }
     }
+}
+
+pub fn trigger_write_stop_stats(
+    metrics: &MetaMetrics,
+    write_limit: &HashMap<CompactionGroupId, WriteLimit>,
+) {
+    metrics.write_stop_compaction_groups.reset();
+    for cg in write_limit.keys() {
+        metrics
+            .write_stop_compaction_groups
+            .with_label_values(&[&cg.to_string()])
+            .set(1);
+    }
+}
+
+pub fn trigger_split_stat(
+    metrics: &MetaMetrics,
+    compaction_group_id: CompactionGroupId,
+    member_table_id_len: usize,
+    branched_ssts: &BTreeMap<
+        // SST object id
+        HummockSstableObjectId,
+        BranchedSstInfo,
+    >,
+) {
+    let group_label = compaction_group_id.to_string();
+    metrics
+        .state_table_count
+        .with_label_values(&[&group_label])
+        .set(member_table_id_len as _);
+
+    let branched_sst_count: usize = branched_ssts
+        .values()
+        .map(|branched_map| {
+            branched_map
+                .keys()
+                .filter(|group_id| **group_id == compaction_group_id)
+                .count()
+        })
+        .sum();
+
+    metrics
+        .branched_sst_count
+        .with_label_values(&[&group_label])
+        .set(branched_sst_count as _);
 }

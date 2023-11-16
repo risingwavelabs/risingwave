@@ -24,10 +24,10 @@ use crate::session::SessionImpl;
 
 mod distributed;
 pub use distributed::*;
-mod hummock_snapshot_manager;
-pub use hummock_snapshot_manager::*;
 pub mod plan_fragmenter;
 pub use plan_fragmenter::BatchPlanFragmenter;
+mod snapshot;
+pub use snapshot::*;
 mod local;
 pub use local::*;
 

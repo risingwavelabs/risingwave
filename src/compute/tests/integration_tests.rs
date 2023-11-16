@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 
 use std::sync::atomic::AtomicU64;
@@ -31,14 +31,16 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{
     ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
 };
-use risingwave_common::column_nonnull;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::OwnedRow;
+use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_connector::source::SourceCtrlOpts;
+use risingwave_connector::ConnectorParams;
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::PbRowFormatType;
@@ -54,7 +56,7 @@ use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
 use risingwave_stream::executor::source_executor::SourceExecutor;
 use risingwave_stream::executor::{
-    ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices,
+    ActorContext, Barrier, Executor, ExecutorInfo, MaterializeExecutor, Message, PkIndices,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -102,7 +104,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     use risingwave_common::types::DataType;
 
     let memory_state_store = MemoryStateStore::new();
-    let dml_manager = Arc::new(DmlManager::default());
+    let dml_manager = Arc::new(DmlManager::for_test());
     let table_id = TableId::default();
     let schema = Schema {
         fields: vec![
@@ -121,11 +123,16 @@ async fn test_table_materialize() -> StreamResult<()> {
         "fields.v1.seed" => "12345",
     ));
     let row_id_index: usize = 0;
-    let source_builder =
-        create_source_desc_builder(&schema, Some(row_id_index), source_info, properties);
+    let source_builder = create_source_desc_builder(
+        &schema,
+        Some(row_id_index),
+        source_info,
+        properties,
+        vec![row_id_index],
+    );
 
     // Ensure the source exists.
-    let source_desc = source_builder.build().await.unwrap();
+    let source_desc = source_builder.build().unwrap();
     let get_schema = |column_ids: &[ColumnId]| {
         let mut fields = Vec::with_capacity(column_ids.len());
         for &column_id in column_ids {
@@ -152,31 +159,39 @@ async fn test_table_materialize() -> StreamResult<()> {
             field_descs: vec![],
             type_name: "".to_string(),
             generated_or_default_column: None,
+            description: None,
         })
         .collect_vec();
     let (barrier_tx, barrier_rx) = unbounded_channel();
     let vnodes = Bitmap::from_bytes(&[0b11111111]);
 
     let actor_ctx = ActorContext::create(0x3f3f3f);
+    let system_params_manager = LocalSystemParamsManager::for_test();
 
     // Create a `SourceExecutor` to read the changes.
     let source_executor = SourceExecutor::<PanicStateStore>::new(
         actor_ctx.clone(),
-        all_schema.clone(),
-        pk_indices.clone(),
+        ExecutorInfo {
+            schema: all_schema.clone(),
+            pk_indices: pk_indices.clone(),
+            identity: format!("SourceExecutor {:X}", 1),
+        },
         None, // There is no external stream source.
         Arc::new(StreamingMetrics::unused()),
         barrier_rx,
-        u64::MAX,
-        1,
+        system_params_manager.get_params(),
+        SourceCtrlOpts::default(),
+        ConnectorParams::default(),
     );
 
     // Create a `DmlExecutor` to accept data change from users.
     let dml_executor = DmlExecutor::new(
+        ExecutorInfo {
+            schema: all_schema.clone(),
+            pk_indices: pk_indices.clone(),
+            identity: format!("DmlExecutor {:X}", 2),
+        },
         Box::new(source_executor),
-        all_schema.clone(),
-        pk_indices.clone(),
-        2,
         dml_manager.clone(),
         table_id,
         INITIAL_TABLE_VERSION_ID,
@@ -185,10 +200,12 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     let row_id_gen_executor = RowIdGenExecutor::new(
         actor_ctx,
+        ExecutorInfo {
+            schema: all_schema.clone(),
+            pk_indices: pk_indices.clone(),
+            identity: format!("RowIdGenExecutor {:X}", 3),
+        },
         Box::new(dml_executor),
-        all_schema.clone(),
-        pk_indices.clone(),
-        3,
         row_id_index,
         vnodes,
     );
@@ -285,14 +302,14 @@ async fn test_table_materialize() -> StreamResult<()> {
     let mut col_row_ids = vec![];
     match message {
         Message::Watermark(_) => {
-            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
         }
         Message::Chunk(c) => {
-            let col_row_id = c.columns()[0].array_ref().as_serial();
+            let col_row_id = c.columns()[0].as_serial();
             col_row_ids.push(col_row_id.value_at(0).unwrap());
             col_row_ids.push(col_row_id.value_at(1).unwrap());
 
-            let col_data = c.columns()[1].array_ref().as_float64();
+            let col_data = c.columns()[1].as_float64();
             assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
             assert_eq!(col_data.value_at(1).unwrap(), 5.14.into_ordered());
         }
@@ -328,7 +345,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let mut stream = scan.execute();
     let result = stream.next().await.unwrap().unwrap();
 
-    let col_data = result.columns()[1].array_ref().as_float64();
+    let col_data = result.columns()[1].as_float64();
     assert_eq!(col_data.len(), 2);
     assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
     assert_eq!(col_data.value_at(1).unwrap(), 5.14.into_ordered());
@@ -339,8 +356,8 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     // Delete some data using `DeleteExecutor`, assuming we are inserting into the "mv".
     let columns = vec![
-        column_nonnull! { SerialArray, [ col_row_ids[0]] }, // row id column
-        column_nonnull! { F64Array, [1.14] },
+        SerialArray::from_iter([col_row_ids[0]]).into_ref(), // row id column
+        F64Array::from_iter([1.14]).into_ref(),
     ];
     let chunk = DataChunk::new(columns.clone(), 1);
     let delete_inner: BoxedExecutor = Box::new(SingleChunkExecutor::new(chunk, all_schema.clone()));
@@ -364,13 +381,13 @@ async fn test_table_materialize() -> StreamResult<()> {
     let message = materialize.next().await.unwrap()?;
     match message {
         Message::Watermark(_) => {
-            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+            // TODO: https://github.com/risingwavelabs/risingwave/issues/6042
         }
         Message::Chunk(c) => {
-            let col_row_id = c.columns()[0].array_ref().as_serial();
+            let col_row_id = c.columns()[0].as_serial();
             assert_eq!(col_row_id.value_at(0).unwrap(), col_row_ids[0]);
 
-            let col_data = c.columns()[1].array_ref().as_float64();
+            let col_data = c.columns()[1].as_float64();
             assert_eq!(col_data.value_at(0).unwrap(), 1.14.into_ordered());
         }
         Message::Barrier(_) => panic!(),
@@ -403,7 +420,7 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     let mut stream = scan.execute();
     let result = stream.next().await.unwrap().unwrap();
-    let col_data = result.columns()[1].array_ref().as_float64();
+    let col_data = result.columns()[1].as_float64();
     assert_eq!(col_data.len(), 1);
     assert_eq!(col_data.value_at(0).unwrap(), 5.14.into_ordered());
 
@@ -420,7 +437,7 @@ async fn test_row_seq_scan() -> Result<()> {
         Field::unnamed(DataType::Int32),
         Field::unnamed(DataType::Int64),
     ]);
-    let _column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let _column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
 
     let column_descs = vec![
         ColumnDesc::unnamed(ColumnId::from(0), schema[0].data_type.clone()),
@@ -478,21 +495,11 @@ async fn test_row_seq_scan() -> Result<()> {
 
     assert_eq!(res_chunk.dimension(), 3);
     assert_eq!(
-        res_chunk
-            .column_at(0)
-            .array()
-            .as_int32()
-            .iter()
-            .collect::<Vec<_>>(),
+        res_chunk.column_at(0).as_int32().iter().collect::<Vec<_>>(),
         vec![Some(1)]
     );
     assert_eq!(
-        res_chunk
-            .column_at(1)
-            .array()
-            .as_int32()
-            .iter()
-            .collect::<Vec<_>>(),
+        res_chunk.column_at(1).as_int32().iter().collect::<Vec<_>>(),
         vec![Some(4)]
     );
 
@@ -501,7 +508,6 @@ async fn test_row_seq_scan() -> Result<()> {
     assert_eq!(
         res_chunk2
             .column_at(0)
-            .array()
             .as_int32()
             .iter()
             .collect::<Vec<_>>(),
@@ -510,7 +516,6 @@ async fn test_row_seq_scan() -> Result<()> {
     assert_eq!(
         res_chunk2
             .column_at(1)
-            .array()
             .as_int32()
             .iter()
             .collect::<Vec<_>>(),

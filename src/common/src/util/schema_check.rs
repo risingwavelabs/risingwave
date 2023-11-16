@@ -14,8 +14,7 @@
 
 use itertools::Itertools;
 
-use crate::array::column::Column;
-use crate::array::ArrayImpl;
+use crate::array::{ArrayImpl, ArrayRef};
 use crate::for_all_type_pairs;
 use crate::types::DataType;
 
@@ -23,11 +22,11 @@ use crate::types::DataType;
 pub fn schema_check<'a, T, C>(data_types: T, columns: C) -> Result<(), String>
 where
     T: IntoIterator<Item = &'a DataType>,
-    C: IntoIterator<Item = &'a Column>,
+    C: IntoIterator<Item = &'a ArrayRef>,
 {
     for (i, pair) in data_types
         .into_iter()
-        .zip_longest(columns.into_iter().map(|c| c.array_ref()))
+        .zip_longest(columns.into_iter().map(|c| &**c))
         .enumerate()
     {
         macro_rules! matches {

@@ -32,18 +32,18 @@ pub enum BoundStatement {
 impl BoundStatement {
     pub fn output_fields(&self) -> Vec<Field> {
         match self {
-            BoundStatement::Insert(i) => i.returning_schema.as_ref().map_or(
-                vec![Field::unnamed(risingwave_common::types::DataType::Int64)],
-                |s| s.fields().into(),
-            ),
-            BoundStatement::Delete(d) => d.returning_schema.as_ref().map_or(
-                vec![Field::unnamed(risingwave_common::types::DataType::Int64)],
-                |s| s.fields().into(),
-            ),
-            BoundStatement::Update(u) => u.returning_schema.as_ref().map_or(
-                vec![Field::unnamed(risingwave_common::types::DataType::Int64)],
-                |s| s.fields().into(),
-            ),
+            BoundStatement::Insert(i) => i
+                .returning_schema
+                .as_ref()
+                .map_or(vec![], |s| s.fields().into()),
+            BoundStatement::Delete(d) => d
+                .returning_schema
+                .as_ref()
+                .map_or(vec![], |s| s.fields().into()),
+            BoundStatement::Update(u) => u
+                .returning_schema
+                .as_ref()
+                .map_or(vec![], |s| s.fields().into()),
             BoundStatement::Query(q) => q.schema().fields().into(),
         }
     }

@@ -23,12 +23,14 @@ pub mod addr;
 pub mod chunk_coalesce;
 pub mod column_index_mapping;
 pub mod compress;
+pub mod deployment;
 pub mod env_var;
 pub mod epoch;
 mod future_utils;
 pub mod hash_util;
 pub mod iter_util;
 pub mod memcmp_encoding;
+pub mod panic;
 pub mod pretty_bytes;
 pub mod prost;
 pub mod resource_util;
@@ -38,12 +40,14 @@ pub mod runtime;
 pub mod scan_range;
 pub mod schema_check;
 pub mod sort_util;
-pub mod stream_cancel;
 pub mod stream_graph_visitor;
+pub mod tracing;
 pub mod value_encoding;
 pub mod worker_util;
 
-pub use future_utils::select_all;
+pub use future_utils::{
+    await_future_with_monitor_error_stream, drop_either_future, pending_on_none, select_all,
+};
 #[macro_use]
 pub mod match_util;
 

@@ -24,11 +24,7 @@ use crate::cluster::{Cluster, KillOpts};
 use crate::utils::TimedExt;
 
 fn is_create_table_as(sql: &str) -> bool {
-    let parts: Vec<String> = sql
-        .trim_start()
-        .split_whitespace()
-        .map(|s| s.to_lowercase())
-        .collect();
+    let parts: Vec<String> = sql.split_whitespace().map(|s| s.to_lowercase()).collect();
 
     parts.len() >= 4 && parts[0] == "create" && parts[1] == "table" && parts[3] == "as"
 }
@@ -39,17 +35,22 @@ enum SqlCmd {
     Drop,
     Dml,
     Flush,
+    Alter,
     Others,
 }
 
 impl SqlCmd {
-    // We won't kill during insert/update/delete since the atomicity is not guaranteed.
+    // We won't kill during insert/update/delete/alter since the atomicity is not guaranteed.
     // Notice that `create table as` is also not atomic in our system.
+    // TODO: For `SqlCmd::Alter`, since table fragment and catalog commit for table schema change
+    // are not transactional, we can't kill during `alter table add/drop columns` for now, will
+    // remove it until transactional commit of table fragment and catalog is supported.
     fn ignore_kill(&self) -> bool {
         matches!(
             self,
             SqlCmd::Dml
                 | SqlCmd::Flush
+                | SqlCmd::Alter
                 | SqlCmd::Create {
                     is_create_table_as: true
                 }
@@ -71,6 +72,7 @@ fn extract_sql_command(sql: &str) -> SqlCmd {
         "drop" => SqlCmd::Drop,
         "insert" | "update" | "delete" => SqlCmd::Dml,
         "flush" => SqlCmd::Flush,
+        "alter" => SqlCmd::Alter,
         _ => SqlCmd::Others,
     }
 }
@@ -79,8 +81,13 @@ const KILL_IGNORE_FILES: &[&str] = &[
     // TPCH queries are too slow for recovery.
     "tpch_snapshot.slt",
     "tpch_upstream.slt",
-    // This depends on session config.
-    "session_timezone.slt",
+    // Drop is not retryable in search path test.
+    "search_path.slt",
+    // Transaction statements are not retryable.
+    "transaction/now.slt",
+    "transaction/read_only_multi_conn.slt",
+    "transaction/read_only.slt",
+    "transaction/tolerance.slt",
 ];
 
 /// Run the sqllogictest files in `glob`.
@@ -89,10 +96,8 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
     let files = glob::glob(glob).expect("failed to read glob pattern");
     for file in files {
         // use a session per file
-        let risingwave = RisingWave::connect("frontend".into(), "dev".into())
-            .await
-            .unwrap();
-        let mut tester = sqllogictest::Runner::new(risingwave);
+        let mut tester =
+            sqllogictest::Runner::new(|| RisingWave::connect("frontend".into(), "dev".into()));
 
         let file = file.unwrap();
         let path = file.as_path();
@@ -220,10 +225,8 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
 }
 
 pub async fn run_parallel_slt_task(glob: &str, jobs: usize) -> Result<(), ParallelTestError> {
-    let db = RisingWave::connect("frontend".into(), "dev".into())
-        .await
-        .unwrap();
-    let mut tester = sqllogictest::Runner::new(db);
+    let mut tester =
+        sqllogictest::Runner::new(|| RisingWave::connect("frontend".into(), "dev".into()));
     tester
         .run_parallel_async(
             glob,
@@ -246,6 +249,9 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
             .expect("failed to get schema path");
     let proto_full_path = std::fs::canonicalize("src/connector/src/test_data/complex-schema")
         .expect("failed to get schema path");
+    let json_schema_full_path =
+        std::fs::canonicalize("src/connector/src/test_data/complex-schema.json")
+            .expect("failed to get schema path");
     let content = content
         .replace("127.0.0.1:29092", "192.168.11.1:29092")
         .replace(
@@ -259,6 +265,10 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
         .replace(
             "/risingwave/proto-complex-schema",
             proto_full_path.to_str().unwrap(),
+        )
+        .replace(
+            "/risingwave/json-complex-schema",
+            json_schema_full_path.to_str().unwrap(),
         );
     let file = tempfile::NamedTempFile::new().expect("failed to create temp file");
     std::fs::write(file.path(), content).expect("failed to write file");

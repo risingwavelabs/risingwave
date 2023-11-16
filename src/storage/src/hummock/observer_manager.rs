@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeHummock};
+use risingwave_hummock_trace::TraceSpan;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::version_update_payload;
 use risingwave_pb::meta::relation::RelationInfo;
@@ -43,6 +44,9 @@ impl ObserverState for HummockObserverNode {
         let Some(info) = resp.info.as_ref() else {
             return;
         };
+
+        let _span: risingwave_hummock_trace::MayTraceSpan =
+            TraceSpan::new_meta_message_span(resp.clone());
 
         match info.to_owned() {
             Info::RelationGroup(relation_group) => {
@@ -91,6 +95,9 @@ impl ObserverState for HummockObserverNode {
     }
 
     fn handle_initialization_notification(&mut self, resp: SubscribeResponse) {
+        let _span: risingwave_hummock_trace::MayTraceSpan =
+            TraceSpan::new_meta_message_span(resp.clone());
+
         let Some(Info::Snapshot(snapshot)) = resp.info else {
             unreachable!();
         };

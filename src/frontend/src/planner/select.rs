@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -37,7 +36,7 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::Order;
 use crate::planner::Planner;
-use crate::utils::Condition;
+use crate::utils::{Condition, IndexSet};
 
 impl Planner {
     pub(super) fn plan_select(
@@ -68,7 +67,9 @@ impl Planner {
                 exprs.iter().map(|expr| (expr.clone(), false)).collect();
             let mut uncovered_distinct_on_exprs_cnt = distinct_on_exprs.len();
             let mut order_iter = order.iter().map(|o| &select_items[o.column_index]);
-            while uncovered_distinct_on_exprs_cnt > 0 && let Some(order_expr) = order_iter.next() {
+            while uncovered_distinct_on_exprs_cnt > 0
+                && let Some(order_expr) = order_iter.next()
+            {
                 match distinct_on_exprs.get_mut(order_expr) {
                     Some(has_been_covered) => {
                         if !*has_been_covered {
@@ -150,11 +151,7 @@ impl Planner {
 
         let need_restore_select_items = select_items.len() > original_select_items_len;
 
-        if select_items.iter().any(|e| e.has_table_function()) {
-            root = LogicalProjectSet::create(root, select_items)
-        } else {
-            root = LogicalProject::create(root, select_items);
-        }
+        root = LogicalProjectSet::create(root, select_items);
 
         if matches!(&distinct, BoundDistinct::DistinctOn(_)) {
             root = if order.is_empty() {
@@ -162,7 +159,7 @@ impl Planner {
                 // clause now.
                 LogicalDedup::new(root, distinct_list_index_to_select_items_index).into()
             } else {
-                LogicalTopN::with_group(
+                LogicalTopN::new(
                     root,
                     1,
                     0,
@@ -184,7 +181,9 @@ impl Planner {
 
         if let BoundDistinct::Distinct = distinct {
             let fields = root.schema().fields();
-            let group_key = if let Some(field) = fields.get(0) && field.name == "projected_row_id" {
+            let group_key = if let Some(field) = fields.get(0)
+                && field.name == "projected_row_id"
+            {
                 // Do not group by projected_row_id hidden column.
                 (1..fields.len()).collect()
             } else {
@@ -205,7 +204,7 @@ impl Planner {
     /// Helper to create an `EXISTS` boolean operator with the given `input`.
     /// It is represented by `Project([$0 >= 1]) -> Agg(count(*)) -> input`
     fn create_exists(&self, input: PlanRef) -> Result<PlanRef> {
-        let count_star = Agg::new(vec![PlanAggCall::count_star()], FixedBitSet::new(), input);
+        let count_star = Agg::new(vec![PlanAggCall::count_star()], IndexSet::empty(), input);
         let ge = FunctionCall::new(
             ExprType::GreaterThanOrEqual,
             vec![
@@ -221,7 +220,11 @@ impl Planner {
     /// `LeftSemi/LeftAnti` [`LogicalApply`]
     /// For other subqueries, we plan it as `LeftOuter` [`LogicalApply`] using
     /// [`Self::substitute_subqueries`].
-    fn plan_where(&mut self, mut input: PlanRef, where_clause: ExprImpl) -> Result<PlanRef> {
+    pub(super) fn plan_where(
+        &mut self,
+        mut input: PlanRef,
+        where_clause: ExprImpl,
+    ) -> Result<PlanRef> {
         if !where_clause.has_subquery() {
             return Ok(LogicalFilter::create_with_expr(input, where_clause));
         }
@@ -230,7 +233,7 @@ impl Planner {
                 .group_by::<_, 3>(|expr| match expr {
                     ExprImpl::Subquery(_) => 0,
                     ExprImpl::FunctionCall(func_call)
-                        if func_call.get_expr_type() == ExprType::Not
+                        if func_call.func_type() == ExprType::Not
                             && matches!(func_call.inputs()[0], ExprImpl::Subquery(_)) =>
                     {
                         1

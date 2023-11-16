@@ -79,7 +79,7 @@ pub struct BTreeMapMemtable {
     mem: BTreeMap<Bytes, Bytes>,
 }
 
-#[expect(unused_variables, dead_code)]
+#[expect(unused_variables)]
 impl BTreeMapMemtable {
     fn insert(&mut self, key: Bytes, val: Bytes, epoch: u64) {
         unimplemented!()

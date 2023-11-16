@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Borrow;
-
 use itertools::Itertools;
 use risingwave_hummock_sdk::CompactionGroupId;
 
@@ -34,7 +32,7 @@ impl MetadataModel for CompactStatus {
     }
 
     fn from_protobuf(prost: Self::PbType) -> Self {
-        prost.borrow().into()
+        (&prost).into()
     }
 
     fn key(&self) -> MetadataModelResult<Self::KeyType> {
@@ -53,7 +51,7 @@ impl From<&CompactStatus> for risingwave_pb::hummock::CompactStatus {
 
 impl From<CompactStatus> for risingwave_pb::hummock::CompactStatus {
     fn from(status: CompactStatus) -> Self {
-        status.borrow().into()
+        (&status).into()
     }
 }
 

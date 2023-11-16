@@ -16,21 +16,22 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use num_integer::Integer;
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::key::{FullKey, UserKey};
-use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_common::util::epoch::MAX_EPOCH;
+use risingwave_hummock_sdk::key::{FullKey, PointRange, UserKey};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use tokio::task::JoinHandle;
 
-use super::{CompactionDeleteRanges, MonotonicDeleteEvent};
+use super::MonotonicDeleteEvent;
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::sstable::filter::FilterBuilder;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BatchUploadWriter, CachePolicy, HummockResult, MemoryLimiter, SstableBuilder,
-    SstableBuilderOptions, SstableWriter, SstableWriterOptions, XorFilterBuilder,
+    BatchUploadWriter, BlockMeta, CachePolicy, HummockResult, MemoryLimiter, SstableBuilder,
+    SstableBuilderOptions, SstableWriter, SstableWriterOptions, Xor16FilterBuilder,
 };
 use crate::monitor::CompactorMetrics;
 
@@ -69,9 +70,6 @@ where
     /// Update the number of sealed Sstables.
     task_progress: Option<Arc<TaskProgress>>,
 
-    last_sealed_key: UserKey<Vec<u8>>,
-    pub del_agg: Arc<CompactionDeleteRanges>,
-    key_range: KeyRange,
     last_table_id: u32,
     is_target_level_l0_or_lbase: bool,
     split_by_table: bool,
@@ -79,6 +77,7 @@ where
     /// When vnode of the coming key is greater than `largest_vnode_in_current_partition`, we will
     /// switch SST.
     largest_vnode_in_current_partition: usize,
+    last_vnode: usize,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -91,18 +90,10 @@ where
         builder_factory: F,
         compactor_metrics: Arc<CompactorMetrics>,
         task_progress: Option<Arc<TaskProgress>>,
-        del_agg: Arc<CompactionDeleteRanges>,
-        key_range: KeyRange,
         is_target_level_l0_or_lbase: bool,
         mut split_by_table: bool,
         mut split_weight_by_vnode: u32,
     ) -> Self {
-        let start_key = if key_range.left.is_empty() {
-            UserKey::default()
-        } else {
-            FullKey::decode(&key_range.left).user_key.to_vec()
-        };
-
         if !is_target_level_l0_or_lbase {
             split_weight_by_vnode = 0;
         }
@@ -117,14 +108,12 @@ where
             current_builder: None,
             compactor_metrics,
             task_progress,
-            del_agg,
-            last_sealed_key: start_key,
-            key_range,
             last_table_id: 0,
             is_target_level_l0_or_lbase,
             split_by_table,
             split_weight_by_vnode,
             largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
+            last_vnode: 0,
         }
     }
 
@@ -135,14 +124,12 @@ where
             current_builder: None,
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
             task_progress: None,
-            last_sealed_key: UserKey::default(),
-            del_agg: Arc::new(CompactionDeleteRanges::for_test()),
-            key_range: KeyRange::inf(),
             last_table_id: 0,
             is_target_level_l0_or_lbase: false,
             split_by_table: false,
             split_weight_by_vnode: 0,
             largest_vnode_in_current_partition: VirtualNode::MAX.to_index(),
+            last_vnode: 0,
         }
     }
 
@@ -165,6 +152,30 @@ where
         self.add_full_key(full_key, value, is_new_user_key).await
     }
 
+    pub async fn add_raw_block(
+        &mut self,
+        buf: Bytes,
+        filter_data: Vec<u8>,
+        smallest_key: FullKey<Vec<u8>>,
+        largest_key: Vec<u8>,
+        block_meta: BlockMeta,
+    ) -> HummockResult<bool> {
+        if self.current_builder.is_none() {
+            if let Some(progress) = &self.task_progress {
+                progress
+                    .num_pending_write_io
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            let builder = self.builder_factory.open_builder().await?;
+            self.current_builder = Some(builder);
+        }
+
+        let builder = self.current_builder.as_mut().unwrap();
+        builder
+            .add_raw_block(buf, filter_data, smallest_key, largest_key, block_meta)
+            .await
+    }
+
     /// Adds a key-value pair to the underlying builders.
     ///
     /// If `allow_split` and the current builder reaches its capacity, this function will create a
@@ -178,19 +189,100 @@ where
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
-        let mut switch_builder = false;
-        if self.split_by_table && full_key.user_key.table_id.table_id != self.last_table_id {
-            self.last_table_id = full_key.user_key.table_id.table_id;
-            switch_builder = true;
+        let (switch_builder, vnode_changed) = self.check_table_and_vnode_change(&full_key.user_key);
 
+        // We use this `need_seal_current` flag to store whether we need to call `seal_current` and
+        // then call `seal_current` later outside the `if let` instead of calling
+        // `seal_current` at where we set `need_seal_current = true`. This is because
+        // `seal_current` is an async method, and if we call `seal_current` within the `if let`,
+        // this temporary reference to `current_builder` will be captured in the future generated
+        // from the current method. Since this generated future is usually required to be `Send`,
+        // the captured reference to `current_builder` is also required to be `Send`, and then
+        // `current_builder` itself is required to be `Sync`, which is unnecessary.
+        let mut need_seal_current = false;
+        let mut last_range_tombstone_epoch = MAX_EPOCH;
+        if let Some(builder) = self.current_builder.as_mut() {
+            if is_new_user_key {
+                if switch_builder {
+                    need_seal_current = true;
+                } else if builder.reach_capacity() {
+                    if self.split_weight_by_vnode == 0 || builder.reach_max_sst_size() {
+                        need_seal_current = true;
+                    } else {
+                        need_seal_current = self.is_target_level_l0_or_lbase && vnode_changed;
+                    }
+                }
+            }
+            if need_seal_current
+                && let Some(event) = builder.last_range_tombstone()
+                && event.new_epoch != MAX_EPOCH
+            {
+                last_range_tombstone_epoch = event.new_epoch;
+                if event
+                    .event_key
+                    .left_user_key
+                    .as_ref()
+                    .eq(&full_key.user_key)
+                {
+                    // If the last range tombstone equals the new key, we can not create new file because we must keep the new key in origin file.
+                    need_seal_current = false;
+                } else {
+                    builder.add_monotonic_delete(MonotonicDeleteEvent {
+                        event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
+                        new_epoch: MAX_EPOCH,
+                    });
+                }
+            }
+        }
+
+        if need_seal_current {
+            self.seal_current().await?;
+        }
+
+        if self.current_builder.is_none() {
+            if let Some(progress) = &self.task_progress {
+                progress
+                    .num_pending_write_io
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            let mut builder = self.builder_factory.open_builder().await?;
+            // If last_range_tombstone_epoch is not MAX, it means that we cut one range-tombstone to
+            // two half and add the right half as a new range to next sstable.
+            if need_seal_current && last_range_tombstone_epoch != MAX_EPOCH {
+                builder.add_monotonic_delete(MonotonicDeleteEvent {
+                    event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
+                    new_epoch: last_range_tombstone_epoch,
+                });
+            }
+            self.current_builder = Some(builder);
+        }
+
+        let builder = self.current_builder.as_mut().unwrap();
+        builder.add(full_key, value).await
+    }
+
+    pub fn check_table_and_vnode_change(&mut self, user_key: &UserKey<&[u8]>) -> (bool, bool) {
+        let mut switch_builder = false;
+        let mut vnode_changed = false;
+        if self.split_by_table && user_key.table_id.table_id != self.last_table_id {
+            // table_id change
+            self.last_table_id = user_key.table_id.table_id;
+            switch_builder = true;
+            self.last_vnode = 0;
+            vnode_changed = true;
             if self.split_weight_by_vnode > 1 {
                 self.largest_vnode_in_current_partition =
                     VirtualNode::COUNT / (self.split_weight_by_vnode as usize) - 1;
             }
         }
         if self.largest_vnode_in_current_partition != VirtualNode::MAX.to_index() {
-            let key_vnode = full_key.user_key.get_vnode_id();
+            let key_vnode = user_key.get_vnode_id();
+            if key_vnode != self.last_vnode {
+                self.last_vnode = key_vnode;
+                vnode_changed = true;
+            }
             if key_vnode > self.largest_vnode_in_current_partition {
+                // vnode partition change
                 switch_builder = true;
 
                 // SAFETY: `self.split_weight_by_vnode > 1` here.
@@ -203,58 +295,55 @@ where
                     ((key_vnode - small_segments_area) / (basic + 1) + 1) * (basic + 1)
                         + small_segments_area
                 }) - 1;
+                self.last_vnode = key_vnode;
                 debug_assert!(key_vnode <= self.largest_vnode_in_current_partition);
             }
         }
-        // We use this `need_seal_current` flag to store whether we need to call `seal_current` and
-        // then call `seal_current` later outside the `if let` instead of calling
-        // `seal_current` at where we set `need_seal_current = true`. This is because
-        // `seal_current` is an async method, and if we call `seal_current` within the `if let`,
-        // this temporary reference to `current_builder` will be captured in the future generated
-        // from the current method. Since this generated future is usually required to be `Send`,
-        // the captured reference to `current_builder` is also required to be `Send`, and then
-        // `current_builder` itself is required to be `Sync`, which is unnecessary.
-        let mut need_seal_current = false;
-        if let Some(builder) = self.current_builder.as_ref() {
-            if is_new_user_key
-                && (switch_builder
-                    || (!(self.is_target_level_l0_or_lbase && self.split_by_table)
-                        && builder.reach_capacity()))
-            {
-                need_seal_current = true;
+        (switch_builder, vnode_changed)
+    }
+
+    /// Add kv pair to sstable.
+    pub async fn add_monotonic_delete(&mut self, event: MonotonicDeleteEvent) -> HummockResult<()> {
+        if let Some(builder) = self.current_builder.as_mut()
+            && builder.reach_capacity()
+            && event.new_epoch != MAX_EPOCH
+        {
+            if builder.last_range_tombstone_epoch() != MAX_EPOCH {
+                builder.add_monotonic_delete(MonotonicDeleteEvent {
+                    event_key: event.event_key.clone(),
+                    new_epoch: MAX_EPOCH,
+                });
             }
-        }
-        if need_seal_current {
-            let monotonic_deletes = self
-                .del_agg
-                .get_tombstone_between(self.last_sealed_key.as_ref(), full_key.user_key);
-            self.seal_current(monotonic_deletes).await?;
-            self.last_sealed_key.extend_from_other(&full_key.user_key);
+            self.seal_current().await?;
         }
 
         if self.current_builder.is_none() {
+            if event.new_epoch == MAX_EPOCH {
+                return Ok(());
+            }
+
+            if let Some(progress) = &self.task_progress {
+                progress
+                    .num_pending_write_io
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
             let builder = self.builder_factory.open_builder().await?;
             self.current_builder = Some(builder);
         }
-
         let builder = self.current_builder.as_mut().unwrap();
-        builder.add(full_key, value, is_new_user_key).await
+        builder.add_monotonic_delete(event);
+        Ok(())
     }
 
     /// Marks the current builder as sealed. Next call of `add` will always create a new table.
     ///
     /// If there's no builder created, or current one is already sealed before, then this function
     /// will be no-op.
-    pub async fn seal_current(
-        &mut self,
-        monotonic_deletes: Vec<MonotonicDeleteEvent>,
-    ) -> HummockResult<()> {
-        if let Some(mut builder) = self.current_builder.take() {
-            builder.add_monotonic_deletes(monotonic_deletes);
+    pub async fn seal_current(&mut self) -> HummockResult<()> {
+        if let Some(builder) = self.current_builder.take() {
             let builder_output = builder.finish().await?;
             {
                 // report
-
                 if let Some(progress) = &self.task_progress {
                     progress.inc_ssts_sealed();
                 }
@@ -299,19 +388,7 @@ where
 
     /// Finalizes all the tables to be ids, blocks and metadata.
     pub async fn finish(mut self) -> HummockResult<Vec<SplitTableOutput>> {
-        let largest_user_key = if self.key_range.right.is_empty() {
-            UserKey::default()
-        } else {
-            FullKey::decode(&self.key_range.right).user_key.to_vec()
-        };
-        let monotonic_deletes = self
-            .del_agg
-            .get_tombstone_between(self.last_sealed_key.as_ref(), largest_user_key.as_ref());
-        if !monotonic_deletes.is_empty() && self.current_builder.is_none() {
-            let builder = self.builder_factory.open_builder().await?;
-            self.current_builder = Some(builder);
-        }
-        self.seal_current(monotonic_deletes).await?;
+        self.seal_current().await?;
         Ok(self.sst_outputs)
     }
 }
@@ -343,12 +420,12 @@ impl LocalTableBuilderFactory {
 
 #[async_trait::async_trait]
 impl TableBuilderFactory for LocalTableBuilderFactory {
-    type Filter = XorFilterBuilder;
+    type Filter = Xor16FilterBuilder;
     type Writer = BatchUploadWriter;
 
     async fn open_builder(
         &mut self,
-    ) -> HummockResult<SstableBuilder<BatchUploadWriter, XorFilterBuilder>> {
+    ) -> HummockResult<SstableBuilder<BatchUploadWriter, Xor16FilterBuilder>> {
         let id = self.next_id.fetch_add(1, SeqCst);
         let tracker = self.limiter.require_memory(1).await;
         let writer_options = SstableWriterOptions {
@@ -368,17 +445,20 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Bound;
+
+    use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_hummock_sdk::can_concat;
+    use risingwave_hummock_sdk::key::PointRange;
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::sstable::utils::CompressionAlgorithm;
-    use crate::hummock::test_utils::{default_builder_opt_for_test, test_key_of, test_user_key_of};
-    use crate::hummock::{
-        create_monotonic_events, CompactionDeleteRangesBuilder, DeleteRangeTombstone,
-        SstableBuilderOptions, DEFAULT_RESTART_INTERVAL,
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, test_key_of, test_user_key_of, CompactionDeleteRangesBuilder,
     };
+    use crate::hummock::{SstableBuilderOptions, DEFAULT_RESTART_INTERVAL};
 
     #[tokio::test]
     async fn test_empty() {
@@ -389,7 +469,7 @@ mod tests {
             block_capacity: block_size,
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
-            compression_algorithm: CompressionAlgorithm::None,
+            ..Default::default()
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let builder = CapacitySplitTableBuilder::for_test(builder_factory);
@@ -406,7 +486,7 @@ mod tests {
             block_capacity: block_size,
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
-            compression_algorithm: CompressionAlgorithm::None,
+            ..Default::default()
         };
         let builder_factory = LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts);
         let mut builder = CapacitySplitTableBuilder::for_test(builder_factory);
@@ -454,19 +534,19 @@ mod tests {
         }
 
         assert_eq!(builder.len(), 0);
-        builder.seal_current(vec![]).await.unwrap();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 0);
         add!();
         assert_eq!(builder.len(), 1);
         add!();
         assert_eq!(builder.len(), 1);
-        builder.seal_current(vec![]).await.unwrap();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 1);
         add!();
         assert_eq!(builder.len(), 2);
-        builder.seal_current(vec![]).await.unwrap();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 2);
-        builder.seal_current(vec![]).await.unwrap();
+        builder.seal_current().await.unwrap();
         assert_eq!(builder.len(), 2);
 
         let results = builder.finish().await.unwrap();
@@ -492,55 +572,72 @@ mod tests {
         let opts = default_builder_opt_for_test();
         let table_id = TableId::default();
         let mut builder = CompactionDeleteRangesBuilder::default();
-        let events = create_monotonic_events(vec![
-            DeleteRangeTombstone::new(
-                table_id,
-                [VirtualNode::ZERO.to_be_bytes().as_slice(), b"k"]
-                    .concat()
-                    .to_vec(),
-                false,
-                [VirtualNode::ZERO.to_be_bytes().as_slice(), b"kkk"]
-                    .concat()
-                    .to_vec(),
-                false,
-                100,
-            ),
-            DeleteRangeTombstone::new(
-                table_id,
-                [VirtualNode::ZERO.to_be_bytes().as_slice(), b"aaa"]
-                    .concat()
-                    .to_vec(),
-                false,
-                [VirtualNode::ZERO.to_be_bytes().as_slice(), b"ddd"]
-                    .concat()
-                    .to_vec(),
-                false,
-                200,
-            ),
-        ]);
-        builder.add_delete_events(events);
+        builder.add_delete_events(
+            100,
+            table_id,
+            vec![(
+                Bound::Included(Bytes::copy_from_slice(
+                    &[VirtualNode::ZERO.to_be_bytes().as_slice(), b"k"].concat(),
+                )),
+                Bound::Excluded(Bytes::copy_from_slice(
+                    &[VirtualNode::ZERO.to_be_bytes().as_slice(), b"kkk"].concat(),
+                )),
+            )],
+        );
+        builder.add_delete_events(
+            200,
+            table_id,
+            vec![(
+                Bound::Included(Bytes::copy_from_slice(
+                    &[VirtualNode::ZERO.to_be_bytes().as_slice(), b"aaa"].concat(),
+                )),
+                Bound::Excluded(Bytes::copy_from_slice(
+                    &[VirtualNode::ZERO.to_be_bytes().as_slice(), b"ddd"].concat(),
+                )),
+            )],
+        );
+        let mut del_iter = builder.build_for_compaction();
+        del_iter.rewind().await.unwrap();
         let mut builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
             Arc::new(CompactorMetrics::unused()),
             None,
-            builder.build_for_compaction(false),
-            KeyRange::inf(),
             false,
             false,
             0,
         );
+        let full_key = FullKey::for_test(
+            table_id,
+            [VirtualNode::ZERO.to_be_bytes().as_slice(), b"k"].concat(),
+            233,
+        );
+        let target_extended_user_key = PointRange::from_user_key(full_key.user_key.as_ref(), false);
+        while del_iter.is_valid() && del_iter.key().as_ref().le(&target_extended_user_key) {
+            let event_key = del_iter.key().to_vec();
+            del_iter.next().await.unwrap();
+            builder
+                .add_monotonic_delete(MonotonicDeleteEvent {
+                    new_epoch: del_iter.earliest_epoch(),
+                    event_key,
+                })
+                .await
+                .unwrap();
+        }
         builder
-            .add_full_key(
-                FullKey::for_test(
-                    table_id,
-                    &[VirtualNode::ZERO.to_be_bytes().as_slice(), b"k"].concat(),
-                    233,
-                ),
-                HummockValue::put(b"v"),
-                false,
-            )
+            .add_full_key(full_key.to_ref(), HummockValue::put(b"v"), false)
             .await
             .unwrap();
+        while del_iter.is_valid() {
+            let event_key = del_iter.key().to_vec();
+            del_iter.next().await.unwrap();
+            builder
+                .add_monotonic_delete(MonotonicDeleteEvent {
+                    event_key,
+                    new_epoch: del_iter.earliest_epoch(),
+                })
+                .await
+                .unwrap();
+        }
         let mut sst_infos = builder.finish().await.unwrap();
         let key_range = sst_infos
             .pop()
@@ -554,7 +651,7 @@ mod tests {
             FullKey::for_test(
                 table_id,
                 &[VirtualNode::ZERO.to_be_bytes().as_slice(), b"aaa"].concat(),
-                u64::MAX,
+                MAX_EPOCH,
             )
             .encode()
         );
@@ -563,7 +660,7 @@ mod tests {
             FullKey::for_test(
                 table_id,
                 &[VirtualNode::ZERO.to_be_bytes().as_slice(), b"kkk"].concat(),
-                u64::MAX
+                MAX_EPOCH
             )
             .encode()
         );
@@ -578,25 +675,164 @@ mod tests {
             block_capacity: block_size,
             restart_interval: DEFAULT_RESTART_INTERVAL,
             bloom_false_positive: 0.1,
-            compression_algorithm: CompressionAlgorithm::None,
+            ..Default::default()
         };
         let table_id = TableId::new(1);
         let mut builder = CompactionDeleteRangesBuilder::default();
-        builder.add_delete_events(create_monotonic_events(vec![
-            DeleteRangeTombstone::new_for_test(table_id, b"k".to_vec(), b"kkk".to_vec(), 100),
-            DeleteRangeTombstone::new_for_test(table_id, b"aaa".to_vec(), b"ddd".to_vec(), 200),
-        ]));
-        let builder = CapacitySplitTableBuilder::new(
+        builder.add_delete_events(
+            100,
+            table_id,
+            vec![(
+                Bound::Included(Bytes::copy_from_slice(b"k")),
+                (Bound::Excluded(Bytes::copy_from_slice(b"kkk"))),
+            )],
+        );
+        builder.add_delete_events(
+            200,
+            table_id,
+            vec![(
+                Bound::Included(Bytes::copy_from_slice(b"aaa")),
+                (Bound::Excluded(Bytes::copy_from_slice(b"ddd"))),
+            )],
+        );
+        let mut del_iter = builder.build_for_compaction();
+        let mut builder = CapacitySplitTableBuilder::new(
             LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
             Arc::new(CompactorMetrics::unused()),
             None,
-            builder.build_for_compaction(false),
-            KeyRange::inf(),
             false,
             false,
             0,
         );
+        del_iter.rewind().await.unwrap();
+        assert_eq!(del_iter.earliest_epoch(), MAX_EPOCH);
+        while del_iter.is_valid() {
+            let event_key = del_iter.key().to_vec();
+            del_iter.next().await.unwrap();
+            builder
+                .add_monotonic_delete(MonotonicDeleteEvent {
+                    new_epoch: del_iter.earliest_epoch(),
+                    event_key,
+                })
+                .await
+                .unwrap();
+        }
+
         let results = builder.finish().await.unwrap();
         assert_eq!(results[0].sst_info.sst_info.table_ids, vec![1]);
+    }
+
+    #[tokio::test]
+    async fn test_delete_range_cut_sst() {
+        let block_size = 256;
+        let table_capacity = 2 * block_size;
+        let opts = SstableBuilderOptions {
+            capacity: table_capacity,
+            block_capacity: block_size,
+            restart_interval: DEFAULT_RESTART_INTERVAL,
+            bloom_false_positive: 0.1,
+            ..Default::default()
+        };
+        let table_id = TableId::new(1);
+        let mut builder = CapacitySplitTableBuilder::new(
+            LocalTableBuilderFactory::new(1001, mock_sstable_store(), opts),
+            Arc::new(CompactorMetrics::unused()),
+            None,
+            false,
+            false,
+            0,
+        );
+        builder
+            .add_monotonic_delete(MonotonicDeleteEvent {
+                event_key: PointRange::from_user_key(
+                    UserKey::for_test(table_id, b"aaaa".to_vec()),
+                    false,
+                ),
+                new_epoch: 10,
+            })
+            .await
+            .unwrap();
+        let v = vec![5u8; 220];
+        let epoch = 12;
+        builder
+            .add_full_key(
+                FullKey::from_user_key(UserKey::for_test(table_id, b"bbbb"), epoch),
+                HummockValue::put(v.as_slice()),
+                true,
+            )
+            .await
+            .unwrap();
+        builder
+            .add_full_key(
+                FullKey::from_user_key(UserKey::for_test(table_id, b"cccc"), epoch),
+                HummockValue::put(v.as_slice()),
+                true,
+            )
+            .await
+            .unwrap();
+        builder
+            .add_monotonic_delete(MonotonicDeleteEvent {
+                event_key: PointRange::from_user_key(
+                    UserKey::for_test(table_id, b"eeee".to_vec()),
+                    false,
+                ),
+                new_epoch: 11,
+            })
+            .await
+            .unwrap();
+        builder
+            .add_monotonic_delete(MonotonicDeleteEvent {
+                event_key: PointRange::from_user_key(
+                    UserKey::for_test(table_id, b"ffff".to_vec()),
+                    false,
+                ),
+                new_epoch: 10,
+            })
+            .await
+            .unwrap();
+        builder
+            .add_full_key(
+                FullKey::from_user_key(UserKey::for_test(table_id, b"ffff"), epoch),
+                HummockValue::put(v.as_slice()),
+                true,
+            )
+            .await
+            .unwrap();
+        builder
+            .add_monotonic_delete(MonotonicDeleteEvent {
+                event_key: PointRange::from_user_key(
+                    UserKey::for_test(table_id, b"gggg".to_vec()),
+                    false,
+                ),
+                new_epoch: MAX_EPOCH,
+            })
+            .await
+            .unwrap();
+        let ret = builder.finish().await.unwrap();
+        assert_eq!(ret.len(), 2);
+        assert_eq!(ret[0].sst_info.sst_info.range_tombstone_count, 2);
+        let ssts = ret
+            .iter()
+            .map(|output| output.sst_info.sst_info.clone())
+            .collect_vec();
+        assert!(can_concat(&ssts));
+
+        let key_range = ssts[0].key_range.as_ref().unwrap();
+        let expected_left =
+            FullKey::from_user_key(UserKey::for_test(table_id, b"aaaa"), MAX_EPOCH).encode();
+        let expected_right =
+            FullKey::from_user_key(UserKey::for_test(table_id, b"eeee"), MAX_EPOCH).encode();
+        assert_eq!(key_range.left, expected_left);
+        assert_eq!(key_range.right, expected_right);
+        assert!(key_range.right_exclusive);
+
+        let key_range = ssts[1].key_range.as_ref().unwrap();
+        let expected_left =
+            FullKey::from_user_key(UserKey::for_test(table_id, b"eeee"), MAX_EPOCH).encode();
+        let expected_right =
+            FullKey::from_user_key(UserKey::for_test(table_id, b"gggg"), MAX_EPOCH).encode();
+        assert_eq!(key_range.left, expected_left);
+        assert_eq!(key_range.right, expected_right);
+        assert!(key_range.right_exclusive);
     }
 }

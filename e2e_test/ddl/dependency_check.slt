@@ -36,7 +36,7 @@ create source src (v int) with (
     fields.v.end  = '10',
     datagen.rows.per.second='15',
     datagen.split.num = '1'
-) row format json;
+) FORMAT PLAIN ENCODE JSON;
 
 # Currently we don't support query on non-kafka source, we only check dependency here.
 statement ok

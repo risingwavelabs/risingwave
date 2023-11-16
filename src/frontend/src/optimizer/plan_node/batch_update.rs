@@ -12,13 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::UpdateNode;
 
+use super::batch::prelude::*;
+use super::generic::GenericPlanRef;
+use super::utils::impl_distill_by_unit;
 use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
@@ -26,40 +28,36 @@ use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
-/// `BatchUpdate` implements [`LogicalUpdate`]
+/// `BatchUpdate` implements [`super::LogicalUpdate`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchUpdate {
-    pub base: PlanBase,
-    pub logical: generic::Update<PlanRef>,
+    pub base: PlanBase<Batch>,
+    pub core: generic::Update<PlanRef>,
 }
 
 impl BatchUpdate {
-    pub fn new(logical: generic::Update<PlanRef>, schema: Schema) -> Self {
-        let ctx = logical.input.ctx();
+    pub fn new(core: generic::Update<PlanRef>, schema: Schema) -> Self {
+        assert_eq!(core.input.distribution(), &Distribution::Single);
+        let ctx = core.input.ctx();
         let base = PlanBase::new_batch(ctx, schema, Distribution::Single, Order::any());
-        Self { base, logical }
-    }
-}
-
-impl fmt::Display for BatchUpdate {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchUpdate")
+        Self { base, core }
     }
 }
 
 impl PlanTreeNodeUnary for BatchUpdate {
     fn input(&self) -> PlanRef {
-        self.logical.input.clone()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        let mut logical = self.logical.clone();
-        logical.input = input;
-        Self::new(logical, self.schema().clone())
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core, self.schema().clone())
     }
 }
 
 impl_plan_tree_node_for_unary! { BatchUpdate }
+impl_distill_by_unit!(BatchUpdate, core, "BatchUpdate");
 
 impl ToDistributedBatch for BatchUpdate {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -71,18 +69,20 @@ impl ToDistributedBatch for BatchUpdate {
 
 impl ToBatchPb for BatchUpdate {
     fn to_batch_prost_body(&self) -> NodeBody {
-        let exprs = self
-            .logical
-            .exprs
-            .iter()
-            .map(|x| x.to_expr_proto())
-            .collect();
+        let exprs = self.core.exprs.iter().map(|x| x.to_expr_proto()).collect();
 
+        let update_column_indices = self
+            .core
+            .update_column_indices
+            .iter()
+            .map(|i| *i as _)
+            .collect_vec();
         NodeBody::Update(UpdateNode {
             exprs,
-            table_id: self.logical.table_id.table_id(),
-            table_version_id: self.logical.table_version_id,
-            returning: self.logical.returning,
+            table_id: self.core.table_id.table_id(),
+            table_version_id: self.core.table_version_id,
+            returning: self.core.returning,
+            update_column_indices,
         })
     }
 }
@@ -101,8 +101,8 @@ impl ExprRewritable for BatchUpdate {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut logical = self.logical.clone();
-        logical.rewrite_exprs(r);
-        Self::new(logical, self.schema().clone()).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::new(core, self.schema().clone()).into()
     }
 }

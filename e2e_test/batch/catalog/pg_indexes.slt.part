@@ -1,0 +1,17 @@
+statement ok
+create table t(a int, b int);
+
+statement ok
+create index idx1 on t(a);
+
+statement ok
+create index idx2 on t(b);
+
+query TTTTT rowsort
+select schemaname, tablename, indexname, tablespace, indexdef from pg_catalog.pg_indexes where tablename = 't';
+----
+public t idx1 NULL CREATE INDEX idx1 ON t(a)
+public t idx2 NULL CREATE INDEX idx2 ON t(b)
+
+statement ok
+drop table t;

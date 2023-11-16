@@ -19,20 +19,19 @@ import static io.grpc.Status.UNIMPLEMENTED;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.SinkBase;
+import com.risingwave.connector.api.sink.SinkCoordinator;
 import com.risingwave.connector.api.sink.SinkFactory;
+import com.risingwave.connector.api.sink.SinkWriter;
 import com.risingwave.connector.common.S3Utils;
 import com.risingwave.java.utils.UrlParser;
 import com.risingwave.proto.Catalog.SinkType;
 import io.grpc.Status;
 import java.util.Map;
-import java.util.Set;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.FileFormat;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.hadoop.HadoopCatalog;
-import org.apache.iceberg.types.Types;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,7 +47,8 @@ public class IcebergSinkFactory implements SinkFactory {
     private static final String s3FileIOImpl = "org.apache.iceberg.aws.s3.S3FileIO";
 
     @Override
-    public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
+    public SinkCoordinator createCoordinator(
+            TableSchema tableSchema, Map<String, String> tableProperties) {
         ObjectMapper mapper = new ObjectMapper();
         IcebergSinkConfig config = mapper.convertValue(tableProperties, IcebergSinkConfig.class);
         String warehousePath = getWarehousePath(config);
@@ -58,16 +58,42 @@ public class IcebergSinkFactory implements SinkFactory {
         TableIdentifier tableIdentifier =
                 TableIdentifier.of(config.getDatabaseName(), config.getTableName());
         Configuration hadoopConf = createHadoopConf(scheme, config);
-        SinkBase sink = null;
+
+        try (HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath); ) {
+            Table icebergTable = hadoopCatalog.loadTable(tableIdentifier);
+            return new IcebergSinkCoordinator(icebergTable);
+        } catch (Exception e) {
+            throw Status.FAILED_PRECONDITION
+                    .withDescription(
+                            String.format("failed to load iceberg table: %s", e.getMessage()))
+                    .withCause(e)
+                    .asRuntimeException();
+        }
+    }
+
+    @Override
+    public SinkWriter createWriter(TableSchema tableSchema, Map<String, String> tableProperties) {
+        ObjectMapper mapper = new ObjectMapper();
+        IcebergSinkConfig config = mapper.convertValue(tableProperties, IcebergSinkConfig.class);
+        String warehousePath = getWarehousePath(config);
+        config.setWarehousePath(warehousePath);
+
+        String scheme = UrlParser.parseLocationScheme(warehousePath);
+        TableIdentifier tableIdentifier =
+                TableIdentifier.of(config.getDatabaseName(), config.getTableName());
+        Configuration hadoopConf = createHadoopConf(scheme, config);
+        SinkWriter sink = null;
 
         try (HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath); ) {
             Table icebergTable = hadoopCatalog.loadTable(tableIdentifier);
             String sinkType = config.getSinkType();
             if (sinkType.equals("append-only")) {
-                sink = new IcebergSink(tableSchema, hadoopCatalog, icebergTable, FILE_FORMAT);
+                sink =
+                        new AppendOnlyIcebergSinkWriter(
+                                tableSchema, hadoopCatalog, icebergTable, FILE_FORMAT);
             } else if (sinkType.equals("upsert")) {
                 sink =
-                        new UpsertIcebergSink(
+                        new UpsertIcebergSinkWriter(
                                 tableSchema, hadoopCatalog,
                                 icebergTable, FILE_FORMAT);
             }
@@ -101,32 +127,8 @@ public class IcebergSinkFactory implements SinkFactory {
         Configuration hadoopConf = createHadoopConf(scheme, config);
 
         try (HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath); ) {
-
             Table icebergTable = hadoopCatalog.loadTable(tableIdentifier);
-
-            // Check that all columns in tableSchema exist in the iceberg table.
-            for (String columnName : tableSchema.getColumnNames()) {
-                if (icebergTable.schema().findField(columnName) == null) {
-                    throw Status.FAILED_PRECONDITION
-                            .withDescription(
-                                    String.format(
-                                            "table schema does not match. Column %s not found in iceberg table",
-                                            columnName))
-                            .asRuntimeException();
-                }
-            }
-
-            // Check that all required columns in the iceberg table exist in tableSchema.
-            Set<String> columnNames = Set.of(tableSchema.getColumnNames());
-            for (Types.NestedField column : icebergTable.schema().columns()) {
-                if (column.isRequired() && !columnNames.contains(column.name())) {
-                    throw Status.FAILED_PRECONDITION
-                            .withDescription(
-                                    String.format("missing a required field %s", column.name()))
-                            .asRuntimeException();
-                }
-            }
-
+            IcebergSinkUtil.checkSchema(tableSchema, icebergTable.schema());
         } catch (Exception e) {
             throw Status.INTERNAL
                     .withDescription(
@@ -142,7 +144,7 @@ public class IcebergSinkFactory implements SinkFactory {
         }
 
         switch (sinkType) {
-            case UPSERT:
+            case SINK_TYPE_UPSERT:
                 // For upsert iceberg sink, the user must specify its primary key explicitly.
                 if (tableSchema.getPrimaryKeys().isEmpty()) {
                     throw Status.INVALID_ARGUMENT
@@ -150,8 +152,8 @@ public class IcebergSinkFactory implements SinkFactory {
                             .asRuntimeException();
                 }
                 break;
-            case APPEND_ONLY:
-            case FORCE_APPEND_ONLY:
+            case SINK_TYPE_APPEND_ONLY:
+            case SINK_TYPE_FORCE_APPEND_ONLY:
                 break;
             default:
                 throw Status.INTERNAL.asRuntimeException();

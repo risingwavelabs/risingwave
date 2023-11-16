@@ -20,18 +20,21 @@ use std::sync::Arc;
 #[cfg(enable_task_local_alloc)]
 use std::time::Duration;
 
-use futures::{FutureExt, StreamExt};
-use minitrace::prelude::*;
+use futures::StreamExt;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_common::util::tracing::TracingContext;
 use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use tokio::select;
+use tokio::task::JoinHandle;
 use tokio_metrics::TaskMonitor;
+use tracing::Instrument;
 
 use crate::error::BatchError::SenderError;
 use crate::error::{to_rw_error, BatchError, Result as BatchResult};
@@ -97,6 +100,7 @@ where
 /// status (Failed/Finished) update. `StateReporter::Mock` is only used in test and do not takes any
 /// effect. Local sender only report Failed update, Distributed sender will also report
 /// Finished/Pending/Starting/Aborted etc.
+#[derive(Clone)]
 pub enum StateReporter {
     Distributed(tokio::sync::mpsc::Sender<TaskInfoResponseResult>),
     Mock(),
@@ -264,13 +268,78 @@ impl TaskOutput {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum ShutdownMsg {
     /// Used in init, it never occur in receiver later.
     Init,
     Abort(String),
     Cancel,
 }
+
+/// A token which can be used to signal a shutdown request.
+pub struct ShutdownSender(tokio::sync::watch::Sender<ShutdownMsg>);
+
+impl ShutdownSender {
+    /// Send a cancel message. Return true if the message is sent successfully.
+    pub fn cancel(&self) -> bool {
+        self.0.send(ShutdownMsg::Cancel).is_ok()
+    }
+
+    /// Send an abort message. Return true if the message is sent successfully.
+    pub fn abort(&self, msg: impl Into<String>) -> bool {
+        self.0.send(ShutdownMsg::Abort(msg.into())).is_ok()
+    }
+}
+
+/// A token which can be used to receive a shutdown signal.
+#[derive(Clone)]
+pub struct ShutdownToken(tokio::sync::watch::Receiver<ShutdownMsg>);
+
+impl ShutdownToken {
+    /// Create an empty token.
+    pub fn empty() -> Self {
+        Self::new().1
+    }
+
+    /// Create a new token.
+    pub fn new() -> (ShutdownSender, Self) {
+        let (tx, rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
+        (ShutdownSender(tx), ShutdownToken(rx))
+    }
+
+    /// Return error if the shutdown token has been triggered.
+    pub fn check(&self) -> Result<()> {
+        match &*self.0.borrow() {
+            ShutdownMsg::Init => Ok(()),
+            msg => {
+                Err(ErrorCode::BatchError(format!("Receive shutdown msg: {msg:?}").into()).into())
+            }
+        }
+    }
+
+    /// Wait until cancellation is requested.
+    ///
+    /// # Cancel safety
+    /// This method is cancel safe.
+    pub async fn cancelled(&mut self) {
+        if matches!(*self.0.borrow(), ShutdownMsg::Init) {
+            if let Err(_err) = self.0.changed().await {
+                std::future::pending::<()>().await;
+            }
+        }
+    }
+
+    /// Return true if the shutdown token has been triggered.
+    pub fn is_cancelled(&self) -> bool {
+        !matches!(*self.0.borrow(), ShutdownMsg::Init)
+    }
+
+    /// Return the current shutdown message.
+    pub fn message(&self) -> ShutdownMsg {
+        self.0.borrow().clone()
+    }
+}
+
 /// `BatchTaskExecution` represents a single task execution.
 pub struct BatchTaskExecution<C> {
     /// Task id.
@@ -294,17 +363,14 @@ pub struct BatchTaskExecution<C> {
     /// The execution failure.
     failure: Arc<Mutex<Option<RwError>>>,
 
-    /// State receivers. Will be moved out by `.state_receivers()`. Returned back to client.
-    /// This is a hack, cuz there is no easy way to get out the receiver.
-    state_rx: Mutex<Option<tokio::sync::mpsc::Receiver<TaskInfoResponse>>>,
-
     epoch: BatchQueryEpoch,
 
     /// Runtime for the batch tasks.
     runtime: Arc<BackgroundShutdownRuntime>,
 
-    shutdown_tx: tokio::sync::watch::Sender<ShutdownMsg>,
-    shutdown_rx: tokio::sync::watch::Receiver<ShutdownMsg>,
+    shutdown_tx: ShutdownSender,
+    shutdown_rx: ShutdownToken,
+    heartbeat_join_handle: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl<C: BatchTaskContext> BatchTaskExecution<C> {
@@ -325,7 +391,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         let mut rts = Vec::new();
         rts.extend(receivers.into_iter().map(Some));
 
-        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(ShutdownMsg::Init);
+        let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
         Ok(Self {
             task_id,
             plan,
@@ -333,12 +399,12 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             receivers: Mutex::new(rts),
             failure: Arc::new(Mutex::new(None)),
             epoch,
-            state_rx: Mutex::new(None),
             context,
             runtime,
             sender,
             shutdown_tx,
             shutdown_rx,
+            heartbeat_join_handle: Mutex::new(None),
         })
     }
 
@@ -352,7 +418,11 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     /// hash partitioned across multiple channels.
     /// To obtain the result, one must pick one of the channels to consume via [`TaskOutputId`]. As
     /// such, parallel consumers are able to consume the result independently.
-    pub async fn async_execute(self: Arc<Self>, state_tx: Option<StateReporter>) -> Result<()> {
+    pub async fn async_execute(
+        self: Arc<Self>,
+        state_tx: Option<StateReporter>,
+        tracing_context: TracingContext,
+    ) -> Result<()> {
         let mut state_tx = state_tx;
         trace!(
             "Prepare executing plan [{:?}]: {}",
@@ -390,23 +460,25 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             let batch_metrics = t_1.context.batch_metrics();
 
             let task = |task_id: TaskId| async move {
+                let span = tracing_context.attach(tracing::info_span!(
+                    "batch_execute",
+                    task_id = task_id.task_id,
+                    stage_id = task_id.stage_id,
+                    query_id = task_id.query_id,
+                ));
+
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
                 t_1.run(exec, sender, state_tx.as_mut())
-                    .in_span({
-                        let mut span = Span::enter_with_local_parent("batch_execute");
-                        span.add_property(|| ("task_id", task_id.task_id.to_string()));
-                        span.add_property(|| ("stage_id", task_id.stage_id.to_string()));
-                        span.add_property(|| ("query_id", task_id.query_id.to_string()));
-                        span
-                    })
+                    .instrument(span)
                     .await;
             };
 
             if let Some(batch_metrics) = batch_metrics {
                 let monitor = TaskMonitor::new();
-                let instrumented_task = AssertUnwindSafe(monitor.instrument(task(task_id.clone())));
-                if let Err(error) = instrumented_task.catch_unwind().await {
+                let instrumented_task =
+                    AssertUnwindSafe(TaskMonitor::instrument(&monitor, task(task_id.clone())));
+                if let Err(error) = instrumented_task.rw_catch_unwind().await {
                     error!("Batch task {:?} panic: {:?}", task_id, error);
                 }
                 let cumulative = monitor.cumulative();
@@ -436,7 +508,9 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     .task_slow_poll_duration
                     .with_label_values(labels)
                     .set(cumulative.total_slow_poll_duration.as_secs_f64());
-            } else if let Err(error) = AssertUnwindSafe(task(task_id.clone())).catch_unwind().await
+            } else if let Err(error) = AssertUnwindSafe(task(task_id.clone()))
+                .rw_catch_unwind()
+                .await
             {
                 error!("Batch task {:?} panic: {:?}", task_id, error);
             }
@@ -513,8 +587,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             select! {
                 biased;
                 // `shutdown_rx` can't be removed here to avoid `sender.send(data_chunk)` blocked whole execution.
-                _ = shutdown_rx.changed() => {
-                    match self.shutdown_rx.borrow().clone() {
+                _ = shutdown_rx.cancelled() => {
+                    match self.shutdown_rx.message() {
                         ShutdownMsg::Abort(e) => {
                             error = Some(BatchError::Aborted(e));
                             state = TaskStatus::Aborted;
@@ -551,7 +625,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                                 }
                             }
                         }
-                        Some(Err(e)) => match self.shutdown_rx.borrow().clone() {
+                        Some(Err(e)) => match self.shutdown_rx.message() {
                             ShutdownMsg::Init => {
                                 // There is no message received from shutdown channel, which means it caused
                                 // task failed.
@@ -582,7 +656,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
         let error = error.map(Arc::new);
         *self.failure.lock() = error.clone().map(to_rw_error);
-        let err_str = error.as_ref().map(|e| format!("{:?}", e));
+        let err_str = error.as_ref().map(|e| e.to_string());
         if let Err(e) = sender.close(error).await {
             match e {
                 SenderError => {
@@ -609,15 +683,15 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     pub fn abort(&self, err_msg: String) {
         // No need to set state to be Aborted here cuz it will be set by shutdown receiver.
         // Stop task execution.
-        if self.shutdown_tx.send(ShutdownMsg::Abort(err_msg)).is_err() {
-            debug!("The task has already died before this request.")
-        } else {
+        if self.shutdown_tx.abort(err_msg) {
             info!("Abort task {:?} done", self.task_id);
+        } else {
+            debug!("The task has already died before this request.")
         }
     }
 
     pub fn cancel(&self) {
-        if self.shutdown_tx.send(ShutdownMsg::Cancel).is_err() {
+        if !self.shutdown_tx.cancel() {
             debug!("The task has already died before this request.");
         }
     }
@@ -664,13 +738,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         }
     }
 
-    pub fn state_receiver(&self) -> tokio::sync::mpsc::Receiver<TaskInfoResponse> {
-        self.state_rx
-            .lock()
-            .take()
-            .expect("The state receivers must have been inited!")
-    }
-
     pub fn mem_usage(&self) -> usize {
         self.context.mem_usage()
     }
@@ -679,6 +746,16 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     pub fn is_end(&self) -> bool {
         let guard = self.state.lock();
         !(*guard == TaskStatus::Running || *guard == TaskStatus::Pending)
+    }
+}
+
+impl<C> BatchTaskExecution<C> {
+    pub(crate) fn set_heartbeat_join_handle(&self, join_handle: JoinHandle<()>) {
+        *self.heartbeat_join_handle.lock() = Some(join_handle);
+    }
+
+    pub(crate) fn heartbeat_join_handle(&self) -> Option<JoinHandle<()>> {
+        self.heartbeat_join_handle.lock().take()
     }
 }
 

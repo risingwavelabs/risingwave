@@ -1,0 +1,5 @@
+[meta]
+vacuum_interval_sec = 2147483647000
+
+[system]
+data_directory = "hummock_001"

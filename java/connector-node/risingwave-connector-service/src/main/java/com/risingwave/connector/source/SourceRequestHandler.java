@@ -34,7 +34,8 @@ public class SourceRequestHandler {
                         SourceTypeE.valueOf(request.getSourceType()),
                         request.getSourceId(),
                         request.getStartOffset(),
-                        request.getPropertiesMap());
+                        request.getPropertiesMap(),
+                        request.getSnapshotDone());
         handler.startSource(
                 (ServerCallStreamObserver<ConnectorServiceProto.GetEventStreamResponse>)
                         responseObserver);

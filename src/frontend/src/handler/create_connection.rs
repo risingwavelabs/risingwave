@@ -29,6 +29,7 @@ use crate::handler::HandlerArgs;
 pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
 pub(crate) const CONNECTION_PROVIDER_PROP: &str = "provider";
 pub(crate) const CONNECTION_SERVICE_NAME_PROP: &str = "service.name";
+pub(crate) const CONNECTION_TAGS_PROP: &str = "tags";
 
 pub(crate) const CLOUD_PROVIDER_MOCK: &str = "mock"; // fake privatelink provider for testing
 pub(crate) const CLOUD_PROVIDER_AWS: &str = "aws";
@@ -41,9 +42,11 @@ fn get_connection_property_required(
     with_properties
         .get(property)
         .map(|s| s.to_lowercase())
-        .ok_or(RwError::from(ProtocolError(format!(
-            "Required property \"{property}\" is not provided"
-        ))))
+        .ok_or_else(|| {
+            RwError::from(ProtocolError(format!(
+                "Required property \"{property}\" is not provided"
+            )))
+        })
 }
 
 fn resolve_private_link_properties(
@@ -65,6 +68,7 @@ fn resolve_private_link_properties(
         PrivateLinkProvider::Mock => Ok(create_connection_request::PrivateLink {
             provider: provider.into(),
             service_name: String::new(),
+            tags: None,
         }),
         PrivateLinkProvider::Aws => {
             let service_name =
@@ -72,6 +76,7 @@ fn resolve_private_link_properties(
             Ok(create_connection_request::PrivateLink {
                 provider: provider.into(),
                 service_name,
+                tags: with_properties.get(CONNECTION_TAGS_PROP).cloned(),
             })
         }
         PrivateLinkProvider::Unspecified => Err(RwError::from(ProtocolError(
@@ -108,10 +113,12 @@ pub async fn handle_create_connection(
 
     if let Err(e) = session.check_connection_name_duplicated(stmt.connection_name) {
         return if stmt.if_not_exists {
-            Ok(PgResponse::empty_result_with_notice(
-                StatementType::CREATE_CONNECTION,
-                format!("connection \"{}\" exists, skipping", connection_name),
-            ))
+            Ok(PgResponse::builder(StatementType::CREATE_CONNECTION)
+                .notice(format!(
+                    "connection \"{}\" exists, skipping",
+                    connection_name
+                ))
+                .into())
         } else {
             Err(e)
         };
@@ -126,7 +133,7 @@ pub async fn handle_create_connection(
 
     let create_connection_payload = resolve_create_connection_payload(&with_properties)?;
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_connection(
             connection_name,

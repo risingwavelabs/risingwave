@@ -10,33 +10,29 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-bytes = "1"
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
-itertools = "0.10"
-jni = "0.20.0"
-once_cell = "1"
-prost = "0.11"
-risingwave_common = { path = "../common" }
-risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
-risingwave_object_store = { path = "../object_store" }
-risingwave_pb = { path = "../prost" }
-risingwave_storage = { path = "../storage" }
-thiserror = "1"
-tokio = { version = "0.2", package = "madsim-tokio", features = [
-    "fs",
-    "rt",
-    "rt-multi-thread",
-    "sync",
-    "macros",
-    "time",
-    "signal",
-] }
-tracing = "0.1"
+jni = "0.21.1"
+prost = { workspace = true }
+risingwave_common = { workspace = true }
+risingwave_jni_core = { workspace = true }
+risingwave_pb = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+risingwave_expr = { workspace = true }
 
 [lib]
-crate_type = ["cdylib"]
+crate-type = ["cdylib"]
 
 [[bin]]
 name = "data-chunk-payload-generator"
 test = false
 bench = false
+
+[[bin]]
+name = "data-chunk-payload-convert-generator"
+test = false
+bench = false
+
+[lints]
+workspace = true

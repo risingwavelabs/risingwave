@@ -21,6 +21,7 @@ use crate::binder::{Binder, BoundQuery, UNNAMED_SUBQUERY};
 #[derive(Debug, Clone)]
 pub struct BoundSubquery {
     pub query: BoundQuery,
+    pub lateral: bool,
 }
 
 impl RewriteExprsRecursive for BoundSubquery {
@@ -38,6 +39,7 @@ impl Binder {
         &mut self,
         query: Query,
         alias: Option<TableAlias>,
+        lateral: bool,
     ) -> Result<BoundSubquery> {
         let query = self.bind_query(query)?;
         let sub_query_id = self.next_subquery_id();
@@ -52,6 +54,6 @@ impl Binder {
             format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id),
             alias,
         )?;
-        Ok(BoundSubquery { query })
+        Ok(BoundSubquery { query, lateral })
     }
 }

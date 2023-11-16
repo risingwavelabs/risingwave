@@ -1,0 +1,21 @@
+statement ok
+create source my_source (a int, b int) with (
+    connector = 'datagen',
+    datagen.rows.per.second = '15',
+    datagen.split.num = '1'
+);
+
+statement ok
+create view v as select * from my_source;
+
+statement ok
+create materialized view mv as select * from v;
+
+statement ok
+CREATE SINK my_sink AS select * from mv WITH (
+    connector = 'blackhole'
+);
+
+statement ok
+drop source my_source cascade;
+

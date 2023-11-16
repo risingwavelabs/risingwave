@@ -27,6 +27,7 @@ use rand::{Rng, SeedableRng};
 use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, StructValue};
 use crate::types::{
     Date, Decimal, Int256, Interval, JsonbVal, NativeType, Scalar, Serial, Time, Timestamp,
+    Timestamptz,
 };
 
 pub trait RandValue {
@@ -105,6 +106,12 @@ impl RandValue for Timestamp {
     }
 }
 
+impl RandValue for Timestamptz {
+    fn rand_value<R: Rng>(rand: &mut R) -> Self {
+        Timestamptz::from_micros(rand.gen())
+    }
+}
+
 impl RandValue for bool {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
         rand.gen::<bool>()
@@ -128,7 +135,7 @@ impl RandValue for Int256 {
 
 impl RandValue for JsonbVal {
     fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
-        JsonbVal::dummy()
+        JsonbVal::null()
     }
 }
 
@@ -185,9 +192,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::array::interval_array::IntervalArray;
-    use crate::array::*;
-    use crate::for_all_variants;
+    use crate::for_all_array_variants;
 
     #[test]
     fn test_create_array() {
@@ -202,6 +207,6 @@ mod tests {
         };
     }
 
-        for_all_variants! { gen_rand_array }
+        for_all_array_variants! { gen_rand_array }
     }
 }

@@ -19,7 +19,7 @@ use futures::Future;
 use hyper::Body;
 use tower::{Layer, Service};
 
-use super::metrics::MetaMetrics;
+use crate::rpc::metrics::MetaMetrics;
 
 #[derive(Clone)]
 pub struct MetricsMiddlewareLayer {

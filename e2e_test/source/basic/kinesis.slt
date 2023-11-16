@@ -1,0 +1,11 @@
+# reject kinesis source if the start up mode is not sequence number but sequence number is provided
+statement error
+create source s ( a int, b varchar )
+with (
+  connector = 'kinesis',
+  stream = 'my_stream',
+  scan.startup.sequence_number = '4950',
+  aws.region = 'us-east-1',
+  kinesis.credentials.access = 'my_access_key_id',
+  kinesis.credentials.secret = 'my_secret_access_key',
+) format plain encode json;

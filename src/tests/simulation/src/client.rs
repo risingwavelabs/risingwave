@@ -18,6 +18,7 @@ use itertools::Itertools;
 use lru::{Iter, LruCache};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
+use sqllogictest::{DBOutput, DefaultColumnType};
 
 /// A RisingWave client.
 pub struct RisingWave {
@@ -63,7 +64,7 @@ impl<'a, 'b> SetStmtsIterator<'a, 'b> {
 
 impl SetStmts {
     fn push(&mut self, sql: &str) {
-        let ast = Parser::parse_sql(&sql).expect("a set statement should be parsed successfully");
+        let ast = Parser::parse_sql(sql).expect("a set statement should be parsed successfully");
         match ast
             .into_iter()
             .exactly_one()
@@ -133,7 +134,7 @@ impl RisingWave {
             .simple_query("SET RW_IMPLICIT_FLUSH TO true;")
             .await?;
         // replay all SET statements
-        for stmt in SetStmtsIterator::new(&set_stmts) {
+        for stmt in SetStmtsIterator::new(set_stmts) {
             client.simple_query(&stmt).await?;
         }
         Ok((client, task))
@@ -160,10 +161,11 @@ impl Drop for RisingWave {
 
 #[async_trait::async_trait]
 impl sqllogictest::AsyncDB for RisingWave {
+    type ColumnType = DefaultColumnType;
     type Error = tokio_postgres::error::Error;
 
-    async fn run(&mut self, sql: &str) -> Result<sqllogictest::DBOutput, Self::Error> {
-        use sqllogictest::{ColumnType, DBOutput};
+    async fn run(&mut self, sql: &str) -> Result<DBOutput<Self::ColumnType>, Self::Error> {
+        use sqllogictest::DBOutput;
 
         if self.client.is_closed() {
             // connection error, reset the client
@@ -208,7 +210,7 @@ impl sqllogictest::AsyncDB for RisingWave {
             Ok(DBOutput::StatementComplete(cnt))
         } else {
             Ok(DBOutput::Rows {
-                types: vec![ColumnType::Any; output[0].len()],
+                types: vec![DefaultColumnType::Any; output[0].len()],
                 rows: output,
             })
         }
@@ -220,5 +222,11 @@ impl sqllogictest::AsyncDB for RisingWave {
 
     async fn sleep(dur: Duration) {
         tokio::time::sleep(dur).await
+    }
+
+    async fn run_command(
+        _command: std::process::Command,
+    ) -> std::io::Result<std::process::ExitStatus> {
+        unimplemented!("spawning process is not supported in simulation mode")
     }
 }

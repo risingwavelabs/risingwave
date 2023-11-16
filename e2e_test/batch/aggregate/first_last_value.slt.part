@@ -1,0 +1,21 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t(v1 int, v2 int);
+
+statement ok
+insert into t values (1, 2), (5, null), (4, 0);
+
+query iiii
+select
+    first_value(v1 order by v1)
+  , first_value(v1 order by v2 desc)
+  , last_value(v1 order by v1)
+  , last_value(v1 order by v2 asc nulls first)
+from t;
+----
+1  5  5  1
+
+statement ok
+drop table t;

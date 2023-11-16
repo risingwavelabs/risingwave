@@ -18,22 +18,22 @@
 // (found in the LICENSE.Apache file in the root directory).
 
 use std::collections::BTreeMap;
+use std::vec;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_expr::agg::AggKind;
+use risingwave_expr::aggregate::AggKind;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::generic::Agg;
+use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalFilter, LogicalScan, LogicalTopN, PlanAggCall, PlanTreeNodeUnary,
 };
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
-use crate::utils::Condition;
+use crate::utils::{Condition, IndexSet};
 
 pub struct MinMaxOnIndexRule {}
 
@@ -107,7 +107,8 @@ impl MinMaxOnIndexRule {
                     .into(),
                 );
 
-                let topn = LogicalTopN::new(non_null_filter, 1, 0, false, required_order.clone());
+                let topn =
+                    LogicalTopN::new(non_null_filter, 1, 0, false, required_order.clone(), vec![]);
 
                 let formatting_agg = Agg::new(
                     vec![PlanAggCall {
@@ -122,8 +123,9 @@ impl MinMaxOnIndexRule {
                         filter: Condition {
                             conjunctions: vec![],
                         },
+                        direct_args: vec![],
                     }],
-                    FixedBitSet::new(),
+                    IndexSet::empty(),
                     topn.into(),
                 );
 
@@ -176,7 +178,7 @@ impl MinMaxOnIndexRule {
                 .into(),
             );
 
-            let topn = LogicalTopN::new(non_null_filter, 1, 0, false, order.clone());
+            let topn = LogicalTopN::new(non_null_filter, 1, 0, false, order.clone(), vec![]);
 
             let formatting_agg = Agg::new(
                 vec![PlanAggCall {
@@ -191,8 +193,9 @@ impl MinMaxOnIndexRule {
                     filter: Condition {
                         conjunctions: vec![],
                     },
+                    direct_args: vec![],
                 }],
-                FixedBitSet::new(),
+                IndexSet::empty(),
                 topn.into(),
             );
 

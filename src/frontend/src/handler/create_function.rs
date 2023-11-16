@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::anyhow;
+use arrow_schema::Fields;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
@@ -52,19 +53,23 @@ pub async fn handle_create_function(
         .into());
     }
     let language = match params.language {
-        Some(lang) => lang.real_value().to_lowercase(),
-        None => {
-            return Err(
-                ErrorCode::InvalidParameterValue("LANGUAGE must be specified".to_string()).into(),
-            )
+        Some(lang) => {
+            let lang = lang.real_value().to_lowercase();
+            match &*lang {
+                "python" | "java" => lang,
+                _ => {
+                    return Err(ErrorCode::InvalidParameterValue(format!(
+                        "language {} is not supported",
+                        lang
+                    ))
+                    .into())
+                }
+            }
         }
+        // Empty language is acceptable since we only require the external server implements the
+        // correct protocol.
+        None => "".to_string(),
     };
-    if language != "python" {
-        return Err(ErrorCode::InvalidParameterValue(
-            "LANGUAGE should be one of: python".to_string(),
-        )
-        .into());
-    }
     let Some(FunctionDefinition::SingleQuotedDef(identifier)) = params.as_ else {
         return Err(ErrorCode::InvalidParameterValue("AS must be specified".to_string()).into());
     };
@@ -131,30 +136,24 @@ pub async fn handle_create_function(
     let client = ArrowFlightUdfClient::connect(&link)
         .await
         .map_err(|e| anyhow!(e))?;
+    /// A helper function to create a unnamed field from data type.
+    fn to_field(data_type: arrow_schema::DataType) -> arrow_schema::Field {
+        arrow_schema::Field::new("", data_type, true)
+    }
     let args = arrow_schema::Schema::new(
         arg_types
             .iter()
-            .map(|t| arrow_schema::Field::new("", t.into(), true))
-            .collect(),
+            .map::<Result<_>, _>(|t| Ok(to_field(t.try_into()?)))
+            .try_collect::<_, Fields, _>()?,
     );
-    let returns = match kind {
-        Kind::Scalar(_) => arrow_schema::Schema::new(vec![arrow_schema::Field::new(
-            "",
-            return_type.clone().into(),
-            true,
-        )]),
-        Kind::Table(_) => arrow_schema::Schema::new(match &return_type {
-            DataType::Struct(s) => (s.fields.iter())
-                .map(|t| arrow_schema::Field::new("", t.clone().into(), true))
-                .collect(),
-            _ => vec![arrow_schema::Field::new(
-                "",
-                return_type.clone().into(),
-                true,
-            )],
-        }),
+    let returns = arrow_schema::Schema::new(match kind {
+        Kind::Scalar(_) => vec![to_field(return_type.clone().try_into()?)],
+        Kind::Table(_) => vec![
+            arrow_schema::Field::new("row_index", arrow_schema::DataType::Int32, true),
+            to_field(return_type.clone().try_into()?),
+        ],
         _ => unreachable!(),
-    };
+    });
     client
         .check(&identifier, &args, &returns)
         .await
@@ -174,7 +173,7 @@ pub async fn handle_create_function(
         owner: session.user_id(),
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_function(function).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_FUNCTION))

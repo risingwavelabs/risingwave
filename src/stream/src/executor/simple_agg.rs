@@ -17,17 +17,19 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::aggregate::{build_retractable, AggCall, BoxedAggregateFunction};
+use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
 use super::agg_common::{AggExecutorArgs, SimpleAggExecutorExtraArgs};
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, AlwaysOutput, DistinctDeduplicater,
 };
+use super::monitor::StreamingMetrics;
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::aggregation::{generate_agg_schema, AggGroup};
+use crate::executor::aggregation::AggGroup;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{BoxedMessageStream, Message};
 use crate::task::AtomicU64Ref;
@@ -51,11 +53,11 @@ pub struct SimpleAggExecutor<S: StateStore> {
 }
 
 struct ExecutorInner<S: StateStore> {
+    /// Version of aggregation executors.
+    version: PbAggNodeVersion,
+
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
-
-    /// Pk indices from input.
-    input_pk_indices: Vec<usize>,
 
     /// Schema from input.
     input_schema: Schema,
@@ -63,16 +65,19 @@ struct ExecutorInner<S: StateStore> {
     /// An operator will support multiple aggregation calls.
     agg_calls: Vec<AggCall>,
 
+    /// Aggregate functions.
+    agg_funcs: Vec<BoxedAggregateFunction>,
+
     /// Index of row count agg call (`count(*)`) in the call list.
     row_count_index: usize,
 
     /// State storage for each agg calls.
     storages: Vec<AggStateStorage<S>>,
 
-    /// State table for the previous result of all agg calls.
-    /// The outputs of all managed agg states are collected and stored in this
+    /// Intermediate state table for value-state agg calls.
+    /// The state of all value-state aggregates are collected and stored in this
     /// table when `flush_data` is called.
-    result_table: StateTable<S>,
+    intermediate_state_table: StateTable<S>,
 
     /// State tables for deduplicating rows on distinct key for distinct agg calls.
     /// One table per distinct column (may be shared by multiple agg calls).
@@ -83,17 +88,15 @@ struct ExecutorInner<S: StateStore> {
 
     /// Extreme state cache size
     extreme_cache_size: usize,
+
+    metrics: Arc<StreamingMetrics>,
 }
 
 impl<S: StateStore> ExecutorInner<S> {
     fn all_state_tables_mut(&mut self) -> impl Iterator<Item = &mut StateTable<S>> {
         iter_table_storage(&mut self.storages)
             .chain(self.distinct_dedup_tables.values_mut())
-            .chain(std::iter::once(&mut self.result_table))
-    }
-
-    fn all_state_tables_except_result_mut(&mut self) -> impl Iterator<Item = &mut StateTable<S>> {
-        iter_table_storage(&mut self.storages).chain(self.distinct_dedup_tables.values_mut())
+            .chain(std::iter::once(&mut self.intermediate_state_table))
     }
 }
 
@@ -129,25 +132,22 @@ impl<S: StateStore> Executor for SimpleAggExecutor<S> {
 impl<S: StateStore> SimpleAggExecutor<S> {
     pub fn new(args: AggExecutorArgs<S, SimpleAggExecutorExtraArgs>) -> StreamResult<Self> {
         let input_info = args.input.info();
-        let schema = generate_agg_schema(args.input.as_ref(), &args.agg_calls, None);
         Ok(Self {
             input: args.input,
             inner: ExecutorInner {
+                version: args.version,
                 actor_ctx: args.actor_ctx,
-                info: ExecutorInfo {
-                    schema,
-                    pk_indices: args.pk_indices,
-                    identity: format!("SimpleAggExecutor-{:X}", args.executor_id),
-                },
-                input_pk_indices: input_info.pk_indices,
+                info: args.info,
                 input_schema: input_info.schema,
+                agg_funcs: args.agg_calls.iter().map(build_retractable).try_collect()?,
                 agg_calls: args.agg_calls,
                 row_count_index: args.row_count_index,
                 storages: args.storages,
-                result_table: args.result_table,
+                intermediate_state_table: args.intermediate_state_table,
                 distinct_dedup_tables: args.distinct_dedup_tables,
                 watermark_epoch: args.watermark_epoch,
                 extreme_cache_size: args.extreme_cache_size,
+                metrics: args.metrics,
             },
         })
     }
@@ -162,59 +162,38 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             return Ok(());
         }
 
-        // Decompose the input chunk.
-        let capacity = chunk.capacity();
-        let (ops, columns, visibility) = chunk.into_inner();
-
         // Calculate the row visibility for every agg call.
-        let mut visibilities = Vec::with_capacity(this.agg_calls.len());
+        let mut call_visibilities = Vec::with_capacity(this.agg_calls.len());
         for agg_call in &this.agg_calls {
-            let result = agg_call_filter_res(
-                &this.actor_ctx,
-                &this.info.identity,
-                agg_call,
-                &columns,
-                visibility.as_ref(),
-                capacity,
-            )
-            .await?;
-            visibilities.push(result);
+            let vis = agg_call_filter_res(agg_call, &chunk).await?;
+            call_visibilities.push(vis);
         }
-
-        // Materialize input chunk if needed.
-        this.storages
-            .iter_mut()
-            .zip_eq_fast(visibilities.iter().map(Option::as_ref))
-            .for_each(|(storage, visibility)| {
-                if let AggStateStorage::MaterializedInput { table, mapping } = storage {
-                    let needed_columns = mapping
-                        .upstream_columns()
-                        .iter()
-                        .map(|col_idx| columns[*col_idx].clone())
-                        .collect();
-                    table.write_chunk(StreamChunk::new(
-                        ops.clone(),
-                        needed_columns,
-                        visibility.cloned(),
-                    ));
-                }
-            });
 
         // Deduplicate for distinct columns.
         let visibilities = vars
             .distinct_dedup
             .dedup_chunk(
-                &ops,
-                &columns,
-                visibilities,
+                chunk.ops(),
+                chunk.columns(),
+                call_visibilities,
                 &mut this.distinct_dedup_tables,
                 None,
+                this.actor_ctx.clone(),
             )
             .await?;
 
+        // Materialize input chunk if needed and possible.
+        for (storage, visibility) in this.storages.iter_mut().zip_eq_fast(visibilities.iter()) {
+            if let AggStateStorage::MaterializedInput { table, mapping, .. } = storage {
+                let chunk = chunk.project_with_vis(mapping.upstream_columns(), visibility.clone());
+                table.write_chunk(chunk);
+            }
+        }
+
         // Apply chunk to each of the state (per agg_call).
         vars.agg_group
-            .apply_chunk(&mut this.storages, &ops, &columns, visibilities)?;
+            .apply_chunk(&chunk, &this.agg_calls, &this.agg_funcs, visibilities)
+            .await?;
 
         // Mark state as changed.
         vars.state_changed = true;
@@ -228,35 +207,26 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         epoch: EpochPair,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         let chunk = if vars.state_changed || vars.agg_group.is_uninitialized() {
-            // Flush agg states.
-            vars.agg_group
-                .flush_state_if_needed(&mut this.storages)
-                .await?;
-
             // Flush distinct dedup state.
-            vars.distinct_dedup.flush(&mut this.distinct_dedup_tables)?;
+            vars.distinct_dedup
+                .flush(&mut this.distinct_dedup_tables, this.actor_ctx.clone())?;
 
-            // Commit all state tables except for result table.
+            // Flush states into intermediate state table.
+            let encoded_states = vars.agg_group.encode_states(&this.agg_funcs)?;
+            this.intermediate_state_table
+                .update_without_old_value(encoded_states);
+
+            // Commit all state tables.
             futures::future::try_join_all(
-                this.all_state_tables_except_result_mut()
-                    .map(|table| table.commit(epoch)),
+                this.all_state_tables_mut().map(|table| table.commit(epoch)),
             )
             .await?;
 
             // Retrieve modified states and put the changes into the builders.
-            let curr_outputs = vars.agg_group.get_outputs(&this.storages).await?;
-            match vars.agg_group.build_change(curr_outputs) {
-                Some(change) => {
-                    this.result_table.write_record(change.as_ref());
-                    this.result_table.commit(epoch).await?;
-                    Some(change.to_stream_chunk(&this.info.schema.data_types()))
-                }
-                None => {
-                    // Agg result is not changed.
-                    this.result_table.commit_no_data_expected(epoch);
-                    None
-                }
-            }
+            vars.agg_group
+                .build_change(&this.storages, &this.agg_funcs)
+                .await?
+                .map(|change| change.to_stream_chunk(&this.info.schema.data_types()))
         } else {
             // No state is changed.
             // Call commit on state table to increment the epoch.
@@ -283,28 +253,36 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             table.init_epoch(barrier.epoch);
         });
 
+        let mut distinct_dedup = DistinctDeduplicater::new(
+            &this.agg_calls,
+            &this.watermark_epoch,
+            &this.distinct_dedup_tables,
+            this.actor_ctx.id,
+            this.metrics.clone(),
+        );
+        distinct_dedup.dedup_caches_mut().for_each(|cache| {
+            cache.update_epoch(barrier.epoch.curr);
+        });
+
+        yield Message::Barrier(barrier);
+
         let mut vars = ExecutionVars {
-            // Create `AggGroup`. This will fetch previous agg result from the result table.
+            // This will fetch previous agg states from the intermediate state table.
             agg_group: AggGroup::create(
+                this.version,
                 None,
                 &this.agg_calls,
+                &this.agg_funcs,
                 &this.storages,
-                &this.result_table,
-                &this.input_pk_indices,
+                &this.intermediate_state_table,
                 this.row_count_index,
                 this.extreme_cache_size,
                 &this.input_schema,
             )
             .await?,
-            distinct_dedup: DistinctDeduplicater::new(&this.agg_calls, &this.watermark_epoch),
+            distinct_dedup,
             state_changed: false,
         };
-
-        vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
-            cache.update_epoch(barrier.epoch.curr);
-        });
-
-        yield Message::Barrier(barrier);
 
         #[for_await]
         for msg in input {
@@ -336,7 +314,7 @@ mod tests {
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::Field;
     use risingwave_common::types::*;
-    use risingwave_expr::agg::{AggArgs, AggCall, AggKind};
+    use risingwave_expr::aggregate::AggCall;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
 
@@ -378,38 +356,10 @@ mod tests {
         tx.push_barrier(4, false);
 
         let agg_calls = vec![
-            AggCall {
-                kind: AggKind::Count, // as row count, index: 0
-                args: AggArgs::None,
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-            AggCall {
-                kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 0),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-            AggCall {
-                kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 1),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
-            AggCall {
-                kind: AggKind::Min,
-                args: AggArgs::Unary(DataType::Int64, 0),
-                return_type: DataType::Int64,
-                column_orders: vec![],
-                filter: None,
-                distinct: false,
-            },
+            AggCall::from_pretty("(count:int8)"),
+            AggCall::from_pretty("(sum:int8 $0:int8)"),
+            AggCall::from_pretty("(sum:int8 $1:int8)"),
+            AggCall::from_pretty("(min:int8 $0:int8)"),
         ];
 
         let simple_agg = new_boxed_simple_agg_executor(

@@ -12,15 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// *** NOTICE: TO BE DEPRECATED *** //
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use futures::stream::pending;
+use futures::StreamExt;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::ErrorCode::ConnectorError;
-use risingwave_common::error::{internal_error, Result, RwError};
+use risingwave_common::error::{internal_error, Result};
+use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use risingwave_connector::source::{
-    ConnectorProperties, ConnectorState, SourceColumnDesc, SourceContext, SplitReaderImpl,
+    create_split_reader, BoxSourceWithStateStream, ConnectorProperties, ConnectorState,
+    SourceColumnDesc, SourceContext, SplitReader,
 };
 
 #[derive(Clone, Debug)]
@@ -40,8 +46,7 @@ impl FsConnectorSource {
         parser_config: SpecificParserConfig,
     ) -> Result<Self> {
         // Store the connector node address to properties for later use.
-        let mut source_props: HashMap<String, String> =
-            HashMap::from_iter(properties.clone().into_iter());
+        let mut source_props: HashMap<String, String> = HashMap::from_iter(properties.clone());
         connector_node_addr
             .map(|addr| source_props.insert("connector_node_addr".to_string(), addr));
         let config =
@@ -78,7 +83,7 @@ impl FsConnectorSource {
         state: ConnectorState,
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
-    ) -> Result<SplitReaderImpl> {
+    ) -> Result<BoxSourceWithStateStream> {
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
 
@@ -88,8 +93,16 @@ impl FsConnectorSource {
                 rw_columns: columns,
             },
         };
-        SplitReaderImpl::create(config, state, parser_config, source_ctx, None)
-            .await
-            .map_err(RwError::from)
+        let stream = match state {
+            None => pending().boxed(),
+            Some(splits) => {
+                dispatch_source_prop!(config, prop, {
+                    create_split_reader(*prop, splits, parser_config, source_ctx, None)
+                        .await?
+                        .into_stream()
+                })
+            }
+        };
+        Ok(stream)
     }
 }

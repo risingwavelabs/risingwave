@@ -24,11 +24,12 @@ use crate::binder::Binder;
 use crate::catalog::{CatalogError, DatabaseId};
 use crate::handler::HandlerArgs;
 use crate::user::user_authentication::encrypted_password;
+use crate::user::user_catalog::UserCatalog;
 
 fn make_prost_user_info(
     user_name: String,
     options: &UserOptions,
-    session_user: &UserInfo,
+    session_user: &UserCatalog,
     database_id: DatabaseId,
 ) -> Result<UserInfo> {
     if !session_user.is_super {
@@ -84,7 +85,9 @@ fn make_prost_user_info(
             }
             UserOption::Password(opt) => {
                 // TODO: Behaviour of PostgreSQL: Notice when password is empty string.
-                if let Some(password) = opt && !password.0.is_empty() {
+                if let Some(password) = opt
+                    && !password.0.is_empty()
+                {
                     user_info.auth_info = encrypted_password(&user_info.name, &password.0);
                 }
             }
@@ -120,7 +123,7 @@ pub async fn handle_create_user(
         make_prost_user_info(user_name, &stmt.with_options, session_user, database_id)?
     };
 
-    let user_info_writer = session.env().user_info_writer();
+    let user_info_writer = session.user_info_writer()?;
     user_info_writer.create_user(user_info).await?;
     Ok(PgResponse::empty_result(StatementType::CREATE_USER))
 }

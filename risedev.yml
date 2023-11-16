@@ -25,28 +25,22 @@ profile:
       # If you want to use aws-s3, configure AK and SK in env var and enable the following lines:
       # - use: aws-s3
       #   bucket: test-bucket
-      # If you want to use other s3 compatible object store, open this flag:
-      #   s3-compatible: false
-
-      # If you want to create CDC source table, uncomment the following line
-      # - use: connector-node
 
       # if you want to enable etcd backend, uncomment the following lines.
       # - use: etcd
       #   unsafe-no-fsync: true
+
+      # If you want to enable metrics or tracing, uncomment the following lines.
+      # - use: prometheus  # metrics
+      # - use: tempo       # tracing
+      # - use: grafana     # visualization
+
       - use: meta-node
       - use: compute-node
       - use: frontend
 
       # If you want to enable compactor, uncomment the following line, and enable either minio or aws-s3 as well.
       # - use: compactor
-
-      # If you want to enable metrics, uncomment those two lines.
-      # - use: prometheus
-      # - use: grafana
-
-      # If you want to enable tracing, uncomment the following line.
-      # - use: jaeger
 
       # If you want to create source from Kafka, uncomment the following lines
       # Note that kafka depends on zookeeper, so zookeeper must be started beforehand.
@@ -113,17 +107,60 @@ profile:
       - use: kafka
         persist-data: true
 
+  standalone-full-peripherals:
+    steps:
+      - use: minio
+      - use: etcd
+      - use: meta-node
+        user-managed: true
+      - use: compute-node
+        user-managed: true
+      - use: frontend
+        user-managed: true
+      - use: compactor
+        user-managed: true
+      - use: prometheus
+      - use: grafana
+      - use: zookeeper
+        persist-data: true
+      - use: kafka
+        persist-data: true
+
+  standalone-minio-etcd:
+    steps:
+      - use: minio
+      - use: etcd
+      - use: meta-node
+        user-managed: true
+      - use: compute-node
+        user-managed: true
+      - use: frontend
+        user-managed: true
+      - use: compactor
+        user-managed: true
+
+  standalone-minio-etcd-compactor:
+    steps:
+      - use: minio
+      - use: etcd
+      - use: meta-node
+        user-managed: true
+      - use: compute-node
+        user-managed: true
+      - use: frontend
+        user-managed: true
+      - use: compactor
+
   hdfs:
     steps:
       # - use: etcd
       - use: meta-node
       - use: compute-node
       - use: frontend
-      # If you want to use hdfs as storage backend, configure hdfs namenode and root path:
+      # If you want to use hdfs as storage backend, configure hdfs namenode:
       - use: opendal
         engine: hdfs
         namenode: "127.0.0.1:9000"
-        root: risingwave
       - use: compactor
       # - use: prometheus
       # - use: grafana
@@ -133,11 +170,10 @@ profile:
       - use: meta-node
       - use: compute-node
       - use: frontend
-      # If you want to use webhdfs as storage backend, configure hdfs namenode and root path:
+      # If you want to use webhdfs as storage backend, configure hdfs namenode:
       - use: opendal
         engine: webhdfs
         namenode: "127.0.0.1:9870"
-        root: risingwave
       - use: compactor
       # - use: prometheus
       # - use: grafana
@@ -148,11 +184,10 @@ profile:
       - use: meta-node
       - use: compute-node
       - use: frontend
-      # If you want to use google cloud stoage as storage backend, configure bucket name and root path:
+      # If you want to use google cloud storage as storage backend, configure bucket name:
       - use: opendal
         engine: gcs
         bucket: bucket-name
-        root: risingwave
       - use: compactor
       # - use: prometheus
       # - use: grafana
@@ -163,11 +198,10 @@ profile:
       - use: meta-node
       - use: compute-node
       - use: frontend
-      # If you want to use oss as storage backend, configure bucket name and root path:
+      # If you want to use oss as storage backend, configure bucket name:
       - use: opendal
         engine: oss
-        bucket: test-bucket
-        root: risingwave
+        bucket: bucket-name
       - use: compactor
       # - use: prometheus
       # - use: grafana
@@ -178,11 +212,10 @@ profile:
       - use: meta-node
       - use: compute-node
       - use: frontend
-      # If you want to use azblob as storage backend, configure bucket(container) name and root path:
+      # If you want to use azblob as storage backend, configure bucket(container) name:
       - use: opendal
         engine: azblob
         bucket: test-bucket
-        root: risingwave
       - use: compactor
       # - use: prometheus
       # - use: grafana
@@ -236,6 +269,21 @@ profile:
         dashboard-port: 25691
         exporter-port: 21250
       - use: compactor
+
+  3meta:
+    steps:
+      - use: meta-node
+        port: 5690
+        dashboard-port: 5691
+        exporter-port: 1250
+      - use: meta-node
+        port: 15690
+        dashboard-port: 15691
+        exporter-port: 11250
+      - use: meta-node
+        port: 25690
+        dashboard-port: 25691
+        exporter-port: 21250
 
   3etcd-3meta-1cn-1fe:
     steps:
@@ -358,6 +406,11 @@ profile:
         address: ${id}
         id: grafana-0
 
+      - use: tempo
+        listen-address: "0.0.0.0"
+        address: ${id}
+        id: tempo-0
+
       - use: etcd
         listen-address: "0.0.0.0"
         address: ${id}
@@ -422,7 +475,6 @@ profile:
         id: compactor-0
         listen-address: "0.0.0.0"
         address: ${dns-host:rw-source-0}
-        max-concurrent-task-number: 15
         compaction-worker-threads-number: 15
 
       - use: redpanda
@@ -510,10 +562,8 @@ profile:
       - use: compactor
 
   ci-3cn-3fe-in-memory:
-    config-path: src/config/ci.toml
+    config-path: src/config/ci-mem.toml
     steps:
-      - use: etcd
-        unsafe-no-fsync: true
       - use: meta-node
         enable-in-memory-kv-state-backend: true
       - use: compute-node
@@ -547,7 +597,6 @@ profile:
       - use: opendal
         engine: fs
         bucket: ""
-        root: /tmp/rw_ci
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -601,13 +650,13 @@ profile:
         exporter-port: 1225
         enable-tiered-cache: true
         role: serving
-        parallelism: 6
+        parallelism: 4
       - use: compute-node
         port: 5686
         exporter-port: 1226
         enable-tiered-cache: true
         role: serving
-        parallelism: 6
+        parallelism: 8
       - use: frontend
         port: 4565
         exporter-port: 2222
@@ -633,40 +682,6 @@ profile:
         enable-tiered-cache: true
       - use: frontend
       - use: compactor
-      - use: pubsub
-        persist-data: true
-
-  ci-kafka:
-    config-path: src/config/ci.toml
-    steps:
-      - use: minio
-      - use: etcd
-        unsafe-no-fsync: true
-      - use: meta-node
-      - use: compute-node
-        enable-tiered-cache: true
-      - use: frontend
-      - use: compactor
-      - use: zookeeper
-        persist-data: true
-      - use: kafka
-        persist-data: true
-
-  ci-kafka-plus-pubsub:
-    config-path: src/config/ci.toml
-    steps:
-      - use: minio
-      - use: etcd
-        unsafe-no-fsync: true
-      - use: meta-node
-      - use: compute-node
-        enable-tiered-cache: true
-      - use: frontend
-      - use: compactor
-      - use: zookeeper
-        persist-data: true
-      - use: kafka
-        persist-data: true
       - use: pubsub
         persist-data: true
 
@@ -738,6 +753,58 @@ profile:
       - use: frontend
       - use: compactor
 
+  ci-clickhouse-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
+  ci-pulsar-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
+  hummock-trace:
+    config-path: src/config/hummock-trace.toml
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+
+  ci-backfill:
+    config-path: "src/config/ci-backfill.toml"
+    steps:
+      - use: minio
+      - use: etcd
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+
+  full-iceberg-bench:
+    config-path: src/config/full-iceberg-bench.toml
+    steps:
+      - use: aws-s3
+        bucket: renjie-iceberg-bench
+      - use: etcd
+      - use: meta-node
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+      - use: prometheus
+      - use: grafana
+
 compose:
   risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
   prometheus: "prom/prometheus:latest"
@@ -745,6 +812,7 @@ compose:
   redpanda: "docker.vectorized.io/vectorized/redpanda:latest"
   grafana: "grafana/grafana-oss:latest"
   etcd: "quay.io/coreos/etcd:latest"
+  tempo: "grafana/tempo:latest"
 
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
@@ -822,13 +890,10 @@ template:
 
     # Whether to enable async stack trace for this compute node, `off`, `on`, or `verbose`.
     # Considering the performance, `verbose` mode only effect under `release` profile with `debug_assertions` off.
-    async-stack-trace: on
+    async-stack-trace: verbose
 
     # If `enable-tiered-cache` is true, hummock will use data directory as file cache.
     enable-tiered-cache: false
-
-    # RPC endpoint for connector node
-    connector-rpc-endpoint: "127.0.0.1:50051"
 
     # Minio instances used by this compute node
     provide-minio: "minio*"
@@ -842,8 +907,8 @@ template:
     # Meta-nodes used by this compute node
     provide-meta-node: "meta-node*"
 
-    # Jaeger used by this compute node
-    provide-jaeger: "jaeger*"
+    # Tempo used by this compute node
+    provide-tempo: "tempo*"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
@@ -875,9 +940,6 @@ template:
     # Id of this instance
     id: meta-node-${port}
 
-    # RPC endpoint for connector node colocated with Meta
-    connector-rpc-endpoint: "127.0.0.1:50051"
-
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
 
@@ -901,6 +963,9 @@ template:
 
     # AWS s3 bucket used by the cluster
     provide-aws-s3: "aws-s3*"
+
+    # Tempo used by this meta node
+    provide-tempo: "tempo*"
 
     # Whether to enable in-memory pure KV state backend
     enable-in-memory-kv-state-backend: false
@@ -948,9 +1013,6 @@ template:
     # Frontend used by this Prometheus instance
     provide-frontend: "frontend*"
 
-    # Connector-node used by this Prometheus instance
-    provide-connector-node: "connector*"
-
   frontend:
     # Advertise address of frontend
     address: "127.0.0.1"
@@ -972,6 +1034,9 @@ template:
 
     # Meta-nodes used by this frontend instance
     provide-meta-node: "meta-node*"
+
+    # Tempo used by this frontend instance
+    provide-tempo: "tempo*"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
@@ -995,27 +1060,14 @@ template:
     # Minio instances used by this compactor
     provide-minio: "minio*"
 
-    # Meta-nodes used by this compute node
+    # Meta-nodes used by this compactor
     provide-meta-node: "meta-node*"
+
+    # Tempo used by this compator
+    provide-tempo: "tempo*"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
-
-    # Hint used by meta node
-    max-concurrent-task-number: 15
-
-  connector-node:
-    # Connector node advertise address
-    address: "127.0.0.1"
-
-    # Connector node listen port
-    port: 50051
-
-    # Prometheus exporter listen port
-    exporter-port: 50052
-
-    # Id of this instance
-    id: connector-${port}
 
   grafana:
     # Listen address of Grafana
@@ -1033,20 +1085,25 @@ template:
     # Prometheus used by this Grafana instance
     provide-prometheus: "prometheus*"
 
-  jaeger:
+    # Tempo used by this Grafana instance
+    provide-tempo: "tempo*"
+
+  tempo:
     # Id of this instance
-    id: jaeger
+    id: tempo
 
-    # Dashboard listen address of Jaeger
-    dashboard-address: "127.0.0.1"
+    # Listen address of HTTP server and OTLP gRPC collector
+    listen-address: "127.0.0.1"
 
-    # Dashboard listen port of Jaeger
-    dashboard-port: 16680
+    # Advertise address of Tempo
+    address: "127.0.0.1"
 
-    # Jaeger has a lot of ports open, and we don't want to make this config more complex.
-    # So we keep the default value of jaeger instead of making it part of RiseDev config.
+    # HTTP server listen port
+    port: 3200
 
-  # opendal:
+    # gRPC listen port of the OTLP collector
+    otlp-port: 4317
+
   opendal:
     id: opendal
 
@@ -1055,8 +1112,6 @@ template:
     namenode: 127.0.0.1:9000
 
     bucket: risingwave-test
-
-    root: risingwave
 
   # aws-s3 is a placeholder service to provide configurations
   aws-s3:
@@ -1067,9 +1122,6 @@ template:
     bucket: test-bucket
 
     # access key, secret key and region should be set in aws config (either by env var or .aws/config)
-
-    # used to support other s3 compatible object store.
-    s3-compatible: false
 
   # Apache Kafka service
   kafka:

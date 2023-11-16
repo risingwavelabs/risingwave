@@ -14,15 +14,14 @@
 
 use std::ops::Bound::{Excluded, Included};
 use std::ops::{Deref, DerefMut};
+use std::sync::atomic::Ordering;
 
 use function_name::named;
-use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     object_size_map, summarize_group_deltas,
 };
-use risingwave_hummock_sdk::version_checkpoint_dir;
 use risingwave_pb::hummock::hummock_version_checkpoint::StaleObjects;
-use risingwave_pb::hummock::HummockVersionCheckpoint;
+use risingwave_pb::hummock::{HummockVersion, HummockVersionCheckpoint};
 
 use crate::hummock::error::Result;
 use crate::hummock::manager::{read_lock, write_lock};
@@ -34,31 +33,29 @@ const HUMMOCK_INIT_FLAG_KEY: &[u8] = b"hummock_init_flag";
 
 /// A hummock version checkpoint compacts previous hummock version delta logs, and stores stale
 /// objects from those delta logs.
-impl<S> HummockManager<S>
-where
-    S: MetaStore,
-{
-    pub(crate) async fn read_checkpoint(&self) -> Result<Option<HummockVersionCheckpoint>> {
-        // We `list` then `read`. Because from `read`'s error, we cannot tell whether it's "object
-        // not found" or other kind of error.
+impl HummockManager {
+    /// # Panics
+    /// if checkpoint is not found.
+    pub async fn read_checkpoint(&self) -> Result<HummockVersionCheckpoint> {
         use prost::Message;
-        let metadata = self
+        let data = match self
             .object_store
-            .list(&version_checkpoint_dir(&self.version_checkpoint_path))
-            .await?
-            .into_iter()
-            .filter(|o| o.key == self.version_checkpoint_path)
-            .collect_vec();
-        assert!(metadata.len() <= 1);
-        if metadata.is_empty() {
-            return Ok(None);
-        }
-        let data = self
-            .object_store
-            .read(&self.version_checkpoint_path, None)
-            .await?;
+            .read(&self.version_checkpoint_path, ..)
+            .await
+        {
+            Ok(data) => data,
+            Err(e) => {
+                if e.is_object_not_found_error() {
+                    panic!(
+                        "Hummock version checkpoints do not exist in object store, path: {}",
+                        self.version_checkpoint_path
+                    );
+                }
+                return Err(e.into());
+            }
+        };
         let ckpt = HummockVersionCheckpoint::decode(data).map_err(|e| anyhow::anyhow!(e))?;
-        Ok(Some(ckpt))
+        Ok(ckpt)
     }
 
     pub(super) async fn write_checkpoint(
@@ -131,7 +128,7 @@ where
         self.write_checkpoint(&new_checkpoint).await?;
         // 3. hold write lock and update in memory state
         let mut versioning_guard = write_lock!(self, versioning).await;
-        let mut versioning = versioning_guard.deref_mut();
+        let versioning = versioning_guard.deref_mut();
         assert!(
             versioning.checkpoint.version.is_none()
                 || new_checkpoint.version.as_ref().unwrap().id
@@ -174,5 +171,31 @@ where
             )
             .await
             .map_err(Into::into)
+    }
+
+    pub fn pause_version_checkpoint(&self) {
+        self.pause_version_checkpoint.store(true, Ordering::Relaxed);
+        tracing::info!("hummock version checkpoint is paused.");
+    }
+
+    pub fn resume_version_checkpoint(&self) {
+        self.pause_version_checkpoint
+            .store(false, Ordering::Relaxed);
+        tracing::info!("hummock version checkpoint is resumed.");
+    }
+
+    pub fn is_version_checkpoint_paused(&self) -> bool {
+        self.pause_version_checkpoint.load(Ordering::Relaxed)
+    }
+
+    #[named]
+    pub async fn get_checkpoint_version(&self) -> HummockVersion {
+        let versioning_guard = read_lock!(self, versioning).await;
+        versioning_guard
+            .checkpoint
+            .version
+            .as_ref()
+            .unwrap()
+            .clone()
     }
 }

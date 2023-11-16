@@ -20,16 +20,13 @@ use std::io::Error as IoError;
 use std::time::{Duration, SystemTime};
 
 use memcomparable::Error as MemComparableError;
+use risingwave_error::tonic::{ToTonicStatus, TonicStatusWrapper};
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
 use tokio::task::JoinError;
-use tonic::Code;
 
 use crate::array::ArrayError;
 use crate::util::value_encoding::error::ValueEncodingError;
-
-/// Header used to store serialized [`RwError`] in grpc status.
-pub const RW_ERROR_GRPC_HEADER: &str = "risingwave-error-bin";
 
 const ERROR_SUPPRESSOR_RESET_DURATION: Duration = Duration::from_millis(60 * 60 * 1000); // 1h
 
@@ -76,15 +73,26 @@ impl Display for TrackingIssue {
 pub enum ErrorCode {
     #[error("internal error: {0}")]
     InternalError(String),
+    // TODO: unify with the above
+    #[error(transparent)]
+    InternalErrorAnyhow(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("connector error: {0}")]
-    ConnectorError(BoxedError),
+    ConnectorError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("Feature is not yet implemented: {0}\n{1}")]
     NotImplemented(String, TrackingIssue),
     // Tips: Use this only if it's intended to reject the query
     #[error("Not supported: {0}\nHINT: {1}")]
     NotSupported(String, String),
     #[error(transparent)]
-    IoError(IoError),
+    IoError(#[from] IoError),
     #[error("Storage error: {0}")]
     StorageError(
         #[backtrace]
@@ -92,27 +100,60 @@ pub enum ErrorCode {
         BoxedError,
     ),
     #[error("Expr error: {0}")]
-    ExprError(BoxedError),
+    ExprError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("BatchError: {0}")]
-    BatchError(BoxedError),
+    BatchError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("Array error: {0}")]
-    ArrayError(ArrayError),
+    ArrayError(
+        #[from]
+        #[backtrace]
+        ArrayError,
+    ),
     #[error("Stream error: {0}")]
     StreamError(
         #[backtrace]
         #[source]
         BoxedError,
     ),
-    #[error("RPC error: {0}")]
-    RpcError(BoxedError),
+    #[error(transparent)]
+    RpcError(
+        // #[backtrace] // TODO(error-handling): there's a limitation that `#[transparent]` can't be used with `#[backtrace]` if no `#[from]`
+        // `tonic::transport::Error`, `TonicStatusWrapper`, or `RpcError`
+        BoxedError,
+    ),
+    // TODO: use a new type for bind error
     #[error("Bind error: {0}")]
     BindError(String),
+    // TODO: only keep this one
+    #[error("Failed to bind expression: {expr}: {error}")]
+    BindErrorRoot {
+        expr: String,
+        #[source]
+        #[backtrace]
+        error: BoxedError,
+    },
     #[error("Catalog error: {0}")]
-    CatalogError(BoxedError),
+    CatalogError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("Protocol error: {0}")]
     ProtocolError(String),
     #[error("Scheduler error: {0}")]
-    SchedulerError(BoxedError),
+    SchedulerError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("Task not found")]
     TaskNotFound,
     #[error("Item not found: {0}")]
@@ -120,9 +161,13 @@ pub enum ErrorCode {
     #[error("Invalid input syntax: {0}")]
     InvalidInputSyntax(String),
     #[error("Can not compare in memory: {0}")]
-    MemComparableError(MemComparableError),
+    MemComparableError(#[from] MemComparableError),
     #[error("Error while de/se values: {0}")]
-    ValueEncodingError(ValueEncodingError),
+    ValueEncodingError(
+        #[from]
+        #[backtrace]
+        ValueEncodingError,
+    ),
     #[error("Invalid value [{config_value:?}] for [{config_entry:?}]")]
     InvalidConfigValue {
         config_entry: String,
@@ -131,7 +176,11 @@ pub enum ErrorCode {
     #[error("Invalid Parameter Value: {0}")]
     InvalidParameterValue(String),
     #[error("Sink error: {0}")]
-    SinkError(BoxedError),
+    SinkError(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
     #[error("unrecognized configuration parameter \"{0}\"")]
@@ -152,12 +201,41 @@ pub struct RwError {
 
 impl From<RwError> for tonic::Status {
     fn from(err: RwError) -> Self {
-        match &*err.inner {
-            ErrorCode::ExprError(e) => tonic::Status::invalid_argument(e.to_string()),
-            ErrorCode::PermissionDenied(e) => tonic::Status::permission_denied(e),
-            ErrorCode::InternalError(e) => tonic::Status::internal(e),
-            _ => tonic::Status::internal(err.to_string()),
+        use tonic::Code;
+
+        let code = match &*err.inner {
+            ErrorCode::ExprError(_) => Code::InvalidArgument,
+            ErrorCode::PermissionDenied(_) => Code::PermissionDenied,
+            ErrorCode::InternalError(_) => Code::Internal,
+            _ => Code::Internal,
+        };
+
+        err.to_status_unnamed(code)
+    }
+}
+
+impl From<TonicStatusWrapper> for RwError {
+    fn from(status: TonicStatusWrapper) -> Self {
+        use tonic::Code;
+
+        let message = status.inner().message();
+
+        // TODO(error-handling): `message` loses the source chain.
+        match status.inner().code() {
+            Code::InvalidArgument => ErrorCode::InvalidParameterValue(message.to_string()),
+            Code::NotFound | Code::AlreadyExists => ErrorCode::CatalogError(status.into()),
+            Code::PermissionDenied => ErrorCode::PermissionDenied(message.to_string()),
+            Code::Cancelled => ErrorCode::SchedulerError(status.into()),
+            _ => ErrorCode::RpcError(status.into()),
         }
+        .into()
+    }
+}
+
+impl From<tonic::Status> for RwError {
+    fn from(status: tonic::Status) -> Self {
+        // Always wrap the status.
+        Self::from(TonicStatusWrapper::new(status))
     }
 }
 
@@ -211,7 +289,7 @@ impl From<std::net::AddrParseError> for RwError {
 
 impl From<anyhow::Error> for RwError {
     fn from(e: anyhow::Error) -> Self {
-        ErrorCode::InternalError(e.to_error_str()).into()
+        ErrorCode::InternalErrorAnyhow(e).into()
     }
 }
 
@@ -234,25 +312,8 @@ impl Debug for RwError {
             "{}\n{}",
             self.inner,
             // Use inner error's backtrace by default, otherwise use the generated one in `From`.
-            (&self.inner as &dyn std::error::Error)
-                .request_ref::<Backtrace>()
-                .unwrap_or(&*self.backtrace)
+            std::error::request_ref::<Backtrace>(&self.inner).unwrap_or(&*self.backtrace)
         )
-    }
-}
-
-impl PartialEq for RwError {
-    fn eq(&self, other: &Self) -> bool {
-        self.inner == other.inner
-    }
-}
-
-impl PartialEq for ErrorCode {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (ErrorCode::InternalError(msg), ErrorCode::InternalError(msg2)) => msg == msg2,
-            (_, _) => false,
-        }
     }
 }
 
@@ -263,22 +324,6 @@ impl From<PbFieldNotFound> for RwError {
             err.0
         ))
         .into()
-    }
-}
-
-impl From<tonic::Status> for RwError {
-    fn from(err: tonic::Status) -> Self {
-        match err.code() {
-            Code::InvalidArgument => {
-                ErrorCode::InvalidParameterValue(err.message().to_string()).into()
-            }
-            Code::NotFound | Code::AlreadyExists => {
-                ErrorCode::CatalogError(err.message().to_string().into()).into()
-            }
-            Code::PermissionDenied => ErrorCode::PermissionDenied(err.message().to_string()).into(),
-            Code::Cancelled => ErrorCode::SchedulerError(err.message().to_string().into()).into(),
-            _ => ErrorCode::InternalError(err.message().to_string()).into(),
-        }
     }
 }
 
@@ -325,12 +370,6 @@ impl<T> ToErrorStr for std::sync::mpsc::SendError<T> {
 }
 
 impl<T> ToErrorStr for tokio::sync::mpsc::error::SendError<T> {
-    fn to_error_str(self) -> String {
-        self.to_string()
-    }
-}
-
-impl ToErrorStr for anyhow::Error {
     fn to_error_str(self) -> String {
         self.to_string()
     }
@@ -477,8 +516,10 @@ mod tests {
     use std::convert::Into;
     use std::result::Result::Err;
 
+    use anyhow::anyhow;
+
     use super::*;
-    use crate::error::ErrorCode::InternalError;
+    use crate::error::ErrorCode::InternalErrorAnyhow;
 
     #[test]
     fn test_display_internal_error() {
@@ -494,12 +535,13 @@ mod tests {
             let err_msg = "a < 0";
             let error = (|| {
                 ensure!(a < 0);
-                Ok(())
-            })();
+                Ok::<_, RwError>(())
+            })()
+            .unwrap_err();
 
             assert_eq!(
-                Err(RwError::from(InternalError(err_msg.to_string()))),
-                error
+                RwError::from(InternalErrorAnyhow(anyhow!(err_msg))).to_string(),
+                error.to_string(),
             );
         }
 
@@ -507,25 +549,28 @@ mod tests {
             let err_msg = "error msg without args";
             let error = (|| {
                 ensure!(a < 0, "error msg without args");
-                Ok(())
-            })();
+                Ok::<_, RwError>(())
+            })()
+            .unwrap_err();
             assert_eq!(
-                Err(RwError::from(InternalError(err_msg.to_string()))),
-                error
+                RwError::from(InternalErrorAnyhow(anyhow!(err_msg))).to_string(),
+                error.to_string()
             );
         }
 
         {
             let error = (|| {
                 ensure!(a < 0, "error msg with args: {}", "xx");
-                Ok(())
-            })();
+                Ok::<_, RwError>(())
+            })()
+            .unwrap_err();
             assert_eq!(
-                Err(RwError::from(InternalError(format!(
+                RwError::from(InternalErrorAnyhow(anyhow!(
                     "error msg with args: {}",
                     "xx"
-                )))),
-                error
+                )))
+                .to_string(),
+                error.to_string()
             );
         }
     }
@@ -539,10 +584,7 @@ mod tests {
             Ok(())
         }
         let err = ensure_a_equals_b().unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "internal error: a == b assertion failed (a is 1, b is 2)"
-        );
+        assert_eq!(err.to_string(), "a == b assertion failed (a is 1, b is 2)");
     }
 
     #[test]
@@ -561,13 +603,14 @@ mod tests {
     }
 
     #[test]
-    fn test_to_rw_result() {
-        let res: core::result::Result<(), anyhow::Error> = Err(anyhow::Error::new(
-            std::io::Error::new(std::io::ErrorKind::Interrupted, "abc"),
-        ));
-        assert_eq!(
-            res.to_rw_result().unwrap_err().to_string(),
-            "internal error: abc"
-        );
+    #[ignore] // it's not a good practice to include error source in `Display`, see #13248
+    fn test_internal_sources() {
+        use anyhow::Context;
+
+        let res: Result<()> = Err(anyhow::anyhow!("inner"))
+            .context("outer")
+            .map_err(Into::into);
+
+        assert_eq!(res.unwrap_err().to_string(), "internal error: outer: inner");
     }
 }

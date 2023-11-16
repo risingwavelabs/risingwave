@@ -1,6 +1,6 @@
 query TTR
-select	 n_name, 
-         extract(year from o_entry_d::timestamp) as l_year, 
+select	 n_name,
+         extract(year from o_entry_d::timestamp) as l_year,
          round(sum(ol_amount)::decimal, 0) as sum_profit
 from	 item, stock, supplier, orderline, orders, nation
 where	 ol_i_id = s_i_id

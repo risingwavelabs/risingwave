@@ -15,7 +15,6 @@
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::HashKey;
@@ -29,6 +28,7 @@ use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
 use super::{ManagedTopNState, TopNCache};
 use crate::cache::{new_unbounded, ManagedLruCache};
+use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
@@ -43,27 +43,26 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
     pub fn new(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
         order_by: Vec<ColumnOrder>,
-        executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
     ) -> StreamResult<Self> {
-        let info = input.info();
         Ok(TopNExecutorWrapper {
             input,
-            ctx,
+            ctx: ctx.clone(),
             inner: InnerGroupTopNExecutor::new(
                 info,
                 storage_key,
                 offset_and_limit,
                 order_by,
-                executor_id,
                 group_by,
                 state_table,
                 watermark_epoch,
+                ctx,
             )?,
         })
     }
@@ -91,41 +90,43 @@ pub struct InnerGroupTopNExecutor<K: HashKey, S: StateStore, const WITH_TIES: bo
 
     /// Used for serializing pk into CacheKey.
     cache_key_serde: CacheKeySerde,
+
+    ctx: ActorContextRef,
 }
 
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K, S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        input_info: ExecutorInfo,
+        info: ExecutorInfo,
         storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
         order_by: Vec<ColumnOrder>,
-        executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
         watermark_epoch: AtomicU64Ref,
+        ctx: ActorContextRef,
     ) -> StreamResult<Self> {
-        let ExecutorInfo {
-            pk_indices, schema, ..
-        } = input_info;
+        let metrics_info = MetricsInfo::new(
+            ctx.streaming_metrics.clone(),
+            state_table.table_id(),
+            ctx.id,
+            "GroupTopN",
+        );
 
         let cache_key_serde =
-            create_cache_key_serde(&storage_key, &pk_indices, &schema, &order_by, &group_by);
+            create_cache_key_serde(&storage_key, &info.schema, &order_by, &group_by);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
 
         Ok(Self {
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: format!("GroupTopNExecutor {:X}", executor_id),
-            },
+            info,
             offset: offset_and_limit.0,
             limit: offset_and_limit.1,
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             group_by,
-            caches: GroupTopNCache::new(watermark_epoch),
+            caches: GroupTopNCache::new(watermark_epoch, metrics_info),
             cache_key_serde,
+            ctx,
         })
     }
 }
@@ -135,8 +136,8 @@ pub struct GroupTopNCache<K: HashKey, const WITH_TIES: bool> {
 }
 
 impl<K: HashKey, const WITH_TIES: bool> GroupTopNCache<K, WITH_TIES> {
-    pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
-        let cache = new_unbounded(watermark_epoch);
+    pub fn new(watermark_epoch: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
+        let cache = new_unbounded(watermark_epoch, metrics_info);
         Self { data: cache }
     }
 }
@@ -155,7 +156,6 @@ impl<K: HashKey, const WITH_TIES: bool> DerefMut for GroupTopNCache<K, WITH_TIES
     }
 }
 
-#[async_trait]
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool> TopNExecutorBase
     for InnerGroupTopNExecutor<K, S, WITH_TIES>
 where
@@ -164,26 +164,40 @@ where
     async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let mut res_ops = Vec::with_capacity(self.limit);
         let mut res_rows = Vec::with_capacity(self.limit);
-        let chunk = chunk.compact();
         let keys = K::build(&self.group_by, chunk.data_chunk())?;
-
-        for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq_debug(keys.iter()) {
+        let table_id_str = self.managed_state.state_table.table_id().to_string();
+        let actor_id_str = self.ctx.id.to_string();
+        let fragment_id_str = self.ctx.fragment_id.to_string();
+        for (r, group_cache_key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
+            let Some((op, row_ref)) = r else {
+                continue;
+            };
             // The pk without group by
             let pk_row = row_ref.project(&self.storage_key_indices[self.group_by.len()..]);
             let cache_key = serialize_pk_to_cache_key(pk_row, &self.cache_key_serde);
 
             let group_key = row_ref.project(&self.group_by);
-
+            self.ctx
+                .streaming_metrics
+                .group_top_n_total_query_cache_count
+                .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                .inc();
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
             if !self.caches.contains(group_cache_key) {
+                self.ctx
+                    .streaming_metrics
+                    .group_top_n_cache_miss_count
+                    .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+                    .inc();
                 let mut topn_cache =
-                    TopNCache::new(self.offset, self.limit, self.schema().data_types());
+                    TopNCache::new(self.offset, self.limit, self.info().schema.data_types());
                 self.managed_state
                     .init_topn_cache(Some(group_key), &mut topn_cache)
                     .await?;
                 self.caches.push(group_cache_key.clone(), topn_cache);
             }
+
             let mut cache = self.caches.get_mut(group_cache_key).unwrap();
 
             // apply the chunk to state table
@@ -208,8 +222,12 @@ where
                 }
             }
         }
-
-        generate_output(res_rows, res_ops, self.schema())
+        self.ctx
+            .streaming_metrics
+            .group_top_n_cached_entry_count
+            .with_label_values(&[&table_id_str, &actor_id_str, &fragment_id_str])
+            .set(self.caches.len() as i64);
+        generate_output(res_rows, res_ops, &self.info().schema)
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
@@ -371,19 +389,25 @@ mod tests {
             &pk_indices(),
         )
         .await;
-        let a = GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
-            source as Box<dyn Executor>,
-            ActorContext::create(0),
-            storage_key(),
-            (0, 2),
-            order_by_1(),
-            1,
-            vec![1],
-            state_table,
-            Arc::new(AtomicU64::new(0)),
-        )
-        .unwrap();
-        let top_n_executor = Box::new(a);
+        let info = ExecutorInfo {
+            schema: source.schema().clone(),
+            pk_indices: source.pk_indices().to_vec(), // this includes group key as prefix
+            identity: "GroupTopNExecutor 1".to_string(),
+        };
+        let top_n_executor = Box::new(
+            GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
+                source as Box<dyn Executor>,
+                ActorContext::create(0),
+                info,
+                storage_key(),
+                (0, 2),
+                order_by_1(),
+                vec![1],
+                state_table,
+                Arc::new(AtomicU64::new(0)),
+            )
+            .unwrap(),
+        );
         let mut top_n_executor = top_n_executor.execute();
 
         // consume the init barrier
@@ -467,14 +491,19 @@ mod tests {
             &pk_indices(),
         )
         .await;
+        let info = ExecutorInfo {
+            schema: source.schema().clone(),
+            pk_indices: source.pk_indices().to_vec(), // this includes group key as prefix
+            identity: "GroupTopNExecutor 1".to_string(),
+        };
         let top_n_executor = Box::new(
             GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
+                info,
                 storage_key(),
                 (1, 2),
                 order_by_1(),
-                1,
                 vec![1],
                 state_table,
                 Arc::new(AtomicU64::new(0)),
@@ -557,14 +586,19 @@ mod tests {
             &pk_indices(),
         )
         .await;
+        let info = ExecutorInfo {
+            schema: source.schema().clone(),
+            pk_indices: source.pk_indices().to_vec(), // this includes group key as prefix
+            identity: "GroupTopNExecutor 1".to_string(),
+        };
         let top_n_executor = Box::new(
             GroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
                 source as Box<dyn Executor>,
                 ActorContext::create(0),
+                info,
                 storage_key(),
                 (0, 2),
                 order_by_2(),
-                1,
                 vec![1, 2],
                 state_table,
                 Arc::new(AtomicU64::new(0)),

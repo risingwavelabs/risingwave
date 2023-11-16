@@ -10,6 +10,7 @@ ETCD_DOWNLOAD_PATH_OTHER = "${PREFIX_TMP}/etcd.zip"
 ETCD_RELEASE = "etcd-${ETCD_VER}-${ETCD_SYSTEM}"
 
 [tasks.download-etcd]
+private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_ETCD" ] }
@@ -37,7 +38,8 @@ mv "${PREFIX_TMP}/${ETCD_RELEASE}" "${PREFIX_BIN}/etcd"
 '''
 
 [tasks.clean-etcd-data]
-category = "RiseDev - Components"
+private = true
+category = "Misc"
 description = "Clean etcd data"
 condition = { env_set = [ "PREFIX_DATA" ] }
 script = '''

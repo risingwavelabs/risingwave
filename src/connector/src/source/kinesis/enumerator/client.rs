@@ -14,12 +14,12 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use aws_sdk_kinesis::model::Shard;
+use aws_sdk_kinesis::types::Shard;
 use aws_sdk_kinesis::Client as kinesis_client;
 
 use crate::source::kinesis::split::{KinesisOffset, KinesisSplit};
 use crate::source::kinesis::*;
-use crate::source::SplitEnumerator;
+use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 pub struct KinesisSplitEnumerator {
     stream_name: String,
@@ -33,7 +33,10 @@ impl SplitEnumerator for KinesisSplitEnumerator {
     type Properties = KinesisProperties;
     type Split = KinesisSplit;
 
-    async fn new(properties: KinesisProperties) -> Result<Self> {
+    async fn new(
+        properties: KinesisProperties,
+        _context: SourceEnumeratorContextRef,
+    ) -> Result<Self> {
         let client = properties.common.build_client().await?;
         let stream_name = properties.common.stream_name.clone();
         Ok(Self {
@@ -72,7 +75,8 @@ impl SplitEnumerator for KinesisSplitEnumerator {
         Ok(shard_collect
             .into_iter()
             .map(|x| KinesisSplit {
-                shard_id: x.shard_id().unwrap_or_default().to_string().into(),
+                shard_id: x.shard_id().to_string().into(),
+                // handle start with position in reader part
                 start_position: KinesisOffset::None,
                 end_position: KinesisOffset::None,
             })
@@ -82,7 +86,7 @@ impl SplitEnumerator for KinesisSplitEnumerator {
 
 #[cfg(test)]
 mod tests {
-    use aws_sdk_kinesis::Region;
+    use aws_sdk_kinesis::config::Region;
 
     use super::*;
 

@@ -13,4 +13,3 @@ providers:
     options:
       path: /dashboards
       foldersFromFilesStructure: false
-    

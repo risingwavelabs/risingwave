@@ -24,8 +24,15 @@ import java.util.Map;
 import java.util.Properties;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.text.StringSubstitutor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class DbzConnectorConfig {
+    private static final Logger LOG = LoggerFactory.getLogger(DbzConnectorConfig.class);
+
+    /* Debezium private configs */
+    public static final String WAIT_FOR_CONNECTOR_EXIT_BEFORE_INTERRUPT_MS =
+            "debezium.embedded.shutdown.pause.before.interrupt.ms";
 
     /* Common configs */
     public static final String HOST = "hostname";
@@ -38,30 +45,39 @@ public class DbzConnectorConfig {
 
     public static final String DB_SERVERS = "database.servers";
 
-    /* MySQL specified configs */
+    /* MySQL configs */
     public static final String MYSQL_SERVER_ID = "server.id";
 
-    /* Postgres specified configs */
+    /* Postgres configs */
     public static final String PG_SLOT_NAME = "slot.name";
+    public static final String PG_PUB_NAME = "publication.name";
+    public static final String PG_PUB_CREATE = "publication.create.enable";
     public static final String PG_SCHEMA_NAME = "schema.name";
+
+    /* RisingWave configs */
+    public static final String CDC_SHARING_MODE = "rw.sharing.mode.enable";
 
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
     private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
 
-    public static Map<String, String> extractDebeziumProperties(Map<String, String> properties) {
+    private static final String DBZ_PROPERTY_PREFIX = "debezium.";
+
+    private static final String SNAPSHOT_MODE_KEY = "debezium.snapshot.mode";
+    private static final String SNAPSHOT_MODE_BACKFILL = "rw_cdc_backfill";
+
+    private static Map<String, String> extractDebeziumProperties(
+            Map<String, String> userProperties) {
         // retain only debezium properties if any
-        var userProps = new HashMap<>(properties);
-        userProps.remove(DbzConnectorConfig.HOST);
-        userProps.remove(DbzConnectorConfig.PORT);
-        userProps.remove(DbzConnectorConfig.USER);
-        userProps.remove(DbzConnectorConfig.PASSWORD);
-        userProps.remove(DbzConnectorConfig.DB_NAME);
-        userProps.remove(DbzConnectorConfig.TABLE_NAME);
-        userProps.remove(DbzConnectorConfig.MYSQL_SERVER_ID);
-        userProps.remove(DbzConnectorConfig.PG_SLOT_NAME);
-        userProps.remove(DbzConnectorConfig.PG_SCHEMA_NAME);
-        return userProps;
+        var dbzProps = new HashMap<String, String>();
+        for (var entry : userProperties.entrySet()) {
+            var key = entry.getKey();
+            if (key.startsWith(DBZ_PROPERTY_PREFIX)) {
+                // remove the prefix
+                dbzProps.put(key.substring(DBZ_PROPERTY_PREFIX.length()), entry.getValue());
+            }
+        }
+        return dbzProps;
     }
 
     private final long sourceId;
@@ -83,23 +99,57 @@ public class DbzConnectorConfig {
     }
 
     public DbzConnectorConfig(
-            SourceTypeE source, long sourceId, String startOffset, Map<String, String> userProps) {
+            SourceTypeE source,
+            long sourceId,
+            String startOffset,
+            Map<String, String> userProps,
+            boolean snapshotDone) {
+
         StringSubstitutor substitutor = new StringSubstitutor(userProps);
         var dbzProps = initiateDbConfig(DBZ_CONFIG_FILE, substitutor);
+        var isCdcBackfill =
+                null != userProps.get(SNAPSHOT_MODE_KEY)
+                        && userProps.get(SNAPSHOT_MODE_KEY).equals(SNAPSHOT_MODE_BACKFILL);
+
+        LOG.info(
+                "DbzConnectorConfig: source={}, sourceId={}, startOffset={}, snapshotDone={}, isCdcBackfill={}",
+                source,
+                sourceId,
+                startOffset,
+                snapshotDone,
+                isCdcBackfill);
+
         if (source == SourceTypeE.MYSQL) {
             var mysqlProps = initiateDbConfig(MYSQL_CONFIG_FILE, substitutor);
-            // if offset is specified, we will continue binlog reading from the specified offset
-            if (null != startOffset && !startOffset.isBlank()) {
-                // 'snapshot.mode=schema_only_recovery' must be configured if binlog offset is
-                // specified.
-                // It only snapshots the schemas, not the data, and continue binlog reading from the
-                // specified offset
-                mysqlProps.setProperty("snapshot.mode", "schema_only_recovery");
-                mysqlProps.setProperty(
-                        ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+            if (isCdcBackfill) {
+                // disable snapshot locking at all
+                mysqlProps.setProperty("snapshot.locking.mode", "none");
+
+                // If cdc backfill enabled, the source only emit incremental changes, so we must
+                // rewind to the given offset and continue binlog reading from there
+                if (null != startOffset && !startOffset.isBlank()) {
+                    mysqlProps.setProperty("snapshot.mode", "schema_only_recovery");
+                    mysqlProps.setProperty(
+                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+                } else {
+                    // read upstream table schemas and emit incremental changes only
+                    mysqlProps.setProperty("snapshot.mode", "schema_only");
+                }
+            } else {
+                // if snapshot phase is finished and offset is specified, we will continue binlog
+                // reading from the given offset
+                if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
+                    // 'snapshot.mode=schema_only_recovery' must be configured if binlog offset is
+                    // specified. It only snapshots the schemas, not the data, and continue binlog
+                    // reading from the specified offset
+                    mysqlProps.setProperty("snapshot.mode", "schema_only_recovery");
+                    mysqlProps.setProperty(
+                            ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
+                }
             }
 
             dbzProps.putAll(mysqlProps);
+
         } else if (source == SourceTypeE.POSTGRES || source == SourceTypeE.CITUS) {
             var postgresProps = initiateDbConfig(POSTGRES_CONFIG_FILE, substitutor);
 
@@ -108,8 +158,17 @@ public class DbzConnectorConfig {
                 postgresProps.setProperty("publication.autocreate.mode", "all_tables");
             }
 
-            // if offset is specified, we will continue reading changes from the specified offset
-            if (null != startOffset && !startOffset.isBlank()) {
+            // disable publication auto creation if needed
+            var pubAutoCreate =
+                    Boolean.parseBoolean(
+                            userProps.getOrDefault(DbzConnectorConfig.PG_PUB_CREATE, "true"));
+
+            if (!pubAutoCreate) {
+                postgresProps.setProperty("publication.autocreate.mode", "disabled");
+            }
+            // if snapshot phase is finished and offset is specified, we will continue reading
+            // changes from the given offset
+            if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
                 postgresProps.setProperty("snapshot.mode", "never");
                 postgresProps.setProperty(
                         ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
@@ -120,11 +179,23 @@ public class DbzConnectorConfig {
         }
 
         var otherProps = extractDebeziumProperties(userProps);
-        dbzProps.putAll(otherProps);
+        for (var entry : otherProps.entrySet()) {
+            dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
+        }
+
+        if (Utils.getCdcSourceMode(userProps) == CdcSourceMode.SHARING_MODE) {
+            adjustConfigForSharedCdcStream(dbzProps);
+        }
 
         this.sourceId = sourceId;
         this.sourceType = source;
         this.resolvedDbzProps = dbzProps;
+    }
+
+    private void adjustConfigForSharedCdcStream(Properties dbzProps) {
+        // disable table filtering for the shared cdc stream
+        LOG.info("Disable table filtering for the shared cdc stream");
+        dbzProps.remove("table.include.list");
     }
 
     private Properties initiateDbConfig(String fileName, StringSubstitutor substitutor) {

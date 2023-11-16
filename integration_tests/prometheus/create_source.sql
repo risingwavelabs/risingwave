@@ -10,4 +10,4 @@ CREATE SOURCE prometheus (
     topic = 'prometheus',
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
-) ROW FORMAT JSON;
+) FORMAT PLAIN ENCODE JSON;

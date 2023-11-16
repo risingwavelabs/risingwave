@@ -17,11 +17,21 @@ use std::convert::TryFrom;
 use std::num::NonZeroU32;
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, RwError};
-use risingwave_sqlparser::ast::{
-    CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement, SqlOption, Statement,
-    Value,
+use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
+use risingwave_connector::source::kafka::{
+    insert_privatelink_broker_rewrite_map, PRIVATELINK_ENDPOINT_KEY,
 };
+use risingwave_connector::source::KAFKA_CONNECTOR;
+use risingwave_sqlparser::ast::{
+    CompatibleSourceSchema, CreateConnectionStatement, CreateSinkStatement, CreateSourceStatement,
+    SqlOption, Statement, Value,
+};
+
+use crate::catalog::connection_catalog::resolve_private_link_connection;
+use crate::catalog::ConnectionId;
+use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
+use crate::handler::util::get_connection_name;
+use crate::session::SessionImpl;
 
 mod options {
     use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
@@ -49,6 +59,10 @@ impl WithOptions {
         Self {
             inner: inner.into_iter().collect(),
         }
+    }
+
+    pub fn from_inner(inner: BTreeMap<String, String>) -> Self {
+        Self { inner }
     }
 
     /// Get the reference of the inner map.
@@ -103,6 +117,57 @@ impl WithOptions {
     }
 }
 
+#[inline(always)]
+fn is_kafka_connector(with_options: &WithOptions) -> bool {
+    let Some(connector) = with_options
+        .inner()
+        .get(UPSTREAM_SOURCE_KEY)
+        .map(|s| s.to_lowercase())
+    else {
+        return false;
+    };
+    connector == KAFKA_CONNECTOR
+}
+
+pub(crate) fn resolve_privatelink_in_with_option(
+    with_options: &mut WithOptions,
+    schema_name: &Option<String>,
+    session: &SessionImpl,
+) -> RwResult<Option<ConnectionId>> {
+    let is_kafka = is_kafka_connector(with_options);
+    let privatelink_endpoint = with_options.get(PRIVATELINK_ENDPOINT_KEY).cloned();
+
+    // if `privatelink.endpoint` is provided in WITH, use it to rewrite broker address directly
+    if let Some(endpoint) = privatelink_endpoint {
+        if !is_kafka {
+            return Err(RwError::from(ErrorCode::ProtocolError(
+                "Privatelink is only supported in kafka connector".to_string(),
+            )));
+        }
+        insert_privatelink_broker_rewrite_map(with_options.inner_mut(), None, Some(endpoint))
+            .map_err(RwError::from)?;
+        return Ok(None);
+    }
+
+    let connection_name = get_connection_name(with_options);
+    let connection_id = match connection_name {
+        Some(connection_name) => {
+            let connection = session
+                .get_connection_by_name(schema_name.clone(), &connection_name)
+                .map_err(|_| ErrorCode::ItemNotFound(connection_name))?;
+            if !is_kafka {
+                return Err(RwError::from(ErrorCode::ProtocolError(
+                    "Connection is only supported in kafka connector".to_string(),
+                )));
+            }
+            resolve_private_link_connection(&connection, with_options.inner_mut())?;
+            Some(connection.id)
+        }
+        None => None,
+    };
+    Ok(connection_id)
+}
+
 impl TryFrom<&[SqlOption]> for WithOptions {
     type Error = RwError;
 
@@ -111,11 +176,12 @@ impl TryFrom<&[SqlOption]> for WithOptions {
             .iter()
             .cloned()
             .map(|x| match x.value {
+                Value::CstyleEscapedString(s) => Ok((x.name.real_value(), s.value)),
                 Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
                 Value::Number(n) => Ok((x.name.real_value(), n)),
                 Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
                 _ => Err(ErrorCode::InvalidParameterValue(
-                    "`with options` or `with properties` only support single quoted string value"
+                    "`with options` or `with properties` only support single quoted string value and C style escaped string"
                         .to_owned(),
                 )),
             })
@@ -134,19 +200,11 @@ impl TryFrom<&Statement> for WithOptions {
             // Explain: forward to the inner statement.
             Statement::Explain { statement, .. } => Self::try_from(statement.as_ref()),
 
-            // Table & View
-            Statement::CreateTable { with_options, .. }
-            | Statement::CreateView { with_options, .. } => Self::try_from(with_options.as_slice()),
+            // View
+            Statement::CreateView { with_options, .. } => Self::try_from(with_options.as_slice()),
 
-            // Source & Sink
-            Statement::CreateSource {
-                stmt:
-                    CreateSourceStatement {
-                        with_properties, ..
-                    },
-                ..
-            }
-            | Statement::CreateSink {
+            // Sink
+            Statement::CreateSink {
                 stmt:
                     CreateSinkStatement {
                         with_properties, ..
@@ -158,6 +216,32 @@ impl TryFrom<&Statement> for WithOptions {
                         with_properties, ..
                     },
             } => Self::try_from(with_properties.0.as_slice()),
+            Statement::CreateSource {
+                stmt:
+                    CreateSourceStatement {
+                        with_properties,
+                        source_schema,
+                        ..
+                    },
+                ..
+            } => {
+                let mut options = with_properties.0.clone();
+                if let CompatibleSourceSchema::V2(source_schema) = source_schema {
+                    options.extend_from_slice(source_schema.row_options());
+                }
+                Self::try_from(options.as_slice())
+            }
+            Statement::CreateTable {
+                with_options,
+                source_schema,
+                ..
+            } => {
+                let mut options = with_options.clone();
+                if let Some(CompatibleSourceSchema::V2(source_schema)) = source_schema {
+                    options.extend_from_slice(source_schema.row_options());
+                }
+                Self::try_from(options.as_slice())
+            }
 
             _ => Ok(Default::default()),
         }

@@ -187,7 +187,7 @@ impl TestSuite {
             );
         }
 
-        let timestamptz = DateTime::<Utc>::from_utc(
+        let timestamptz = DateTime::<Utc>::from_naive_utc_and_offset(
             NaiveDate::from_ymd_opt(2022, 1, 1)
                 .unwrap()
                 .and_hms_opt(10, 0, 0)
@@ -390,7 +390,6 @@ impl TestSuite {
 
     async fn simple_cancel(&self, is_distributed: bool) -> anyhow::Result<()> {
         let client = self.create_client(is_distributed).await?;
-
         client.execute("create table t(id int)", &[]).await?;
 
         let insert_statement = client
@@ -513,7 +512,7 @@ impl TestSuite {
         let rows = new_client
             .query(&format!("{} LIMIT 10", query_sql), &[])
             .await?;
-        let expect_ans = vec![
+        let expect_ans = [
             (1, 1, 1),
             (10, 10, 10),
             (100, 100, 100),

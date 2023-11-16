@@ -4,7 +4,7 @@ CREATE TABLE s1 (v1 int, v2 varchar) WITH (
     pubsub.subscription = 'test-subscription-1',
     pubsub.emulator_host = 'localhost:5981',
     pubsub.split_count = 3
-) row format json;
+) FORMAT PLAIN ENCODE JSON;
 
 statement ok
 CREATE TABLE s1 (v1 int, v2 varchar) WITH (
@@ -12,7 +12,7 @@ CREATE TABLE s1 (v1 int, v2 varchar) WITH (
     pubsub.subscription = 'test-subscription-1',
     pubsub.emulator_host = 'localhost:5980',
     pubsub.split_count = 3
-) row format json;
+) FORMAT PLAIN ENCODE JSON;
 
 statement ok
 SELECT * FROM s1;
@@ -27,7 +27,7 @@ CREATE TABLE s2 (v1 int, v2 varchar) WITH (
     pubsub.subscription = 'test-subscription-not-2',
     pubsub.emulator_host = 'localhost:5980',
     pubsub.split_count = 3
-) row format json;
+) FORMAT PLAIN ENCODE JSON;
 
 statement ok
 CREATE TABLE s2 (v1 int, v2 varchar) WITH (
@@ -35,7 +35,7 @@ CREATE TABLE s2 (v1 int, v2 varchar) WITH (
     pubsub.subscription = 'test-subscription-2',
     pubsub.emulator_host = 'localhost:5980',
     pubsub.split_count = 3
-) row format json;
+) FORMAT PLAIN ENCODE JSON;
 
 # fail with invalid split count
 statement error
@@ -44,7 +44,7 @@ CREATE TABLE s3 (v1 int, v2 varchar) WITH (
     pubsub.subscription = 'test-subscription-3',
     pubsub.emulator_host = 'localhost:5980',
     pubsub.split_count = 0
-) row format json;
+) FORMAT PLAIN ENCODE JSON;
 
 # fail if both start_offset and start_snapshot are provided
 statement error
@@ -55,7 +55,7 @@ CREATE TABLE s3 (v1 int, v2 varchar) WITH (
     pubsub.split_count = 2,
     pubsub.start_offset = "121212",
     pubsub.start_snapshot = "snapshot-that-doesnt-exist"
-) row format json;
+) FORMAT PLAIN ENCODE JSON;
 
 # wait for source
 sleep 10s

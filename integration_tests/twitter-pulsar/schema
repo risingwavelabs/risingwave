@@ -1,0 +1,19 @@
+
+‰
+twitter.prototwitter.schema"d
+Event-
+data (2.twitter.schema.TweetDataRdata,
+author (2.twitter.schema.UserRauthor"b
+	TweetData
+id (	Rid
+text (	Rtext
+lang (	Rlang
+
+created_at (	R	createdAt"„
+User
+id (	Rid
+name (	Rname
+	user_name (	RuserName
+
+created_at (	R	createdAt
+	followers (R	followersBZtwitter/protobproto3

@@ -29,11 +29,11 @@ mod tests {
     fn simulated_parallel_unit_nums(min: Option<usize>, max: Option<usize>) -> Vec<usize> {
         let mut raw = vec![1, 3, 12, 42, VirtualNode::COUNT];
         if let Some(min) = min {
-            raw.drain_filter(|n| *n <= min);
+            raw.retain(|n| *n > min);
             raw.push(min);
         }
         if let Some(max) = max {
-            raw.drain_filter(|n| *n >= max);
+            raw.retain(|n| *n < max);
             raw.push(max);
         }
         raw

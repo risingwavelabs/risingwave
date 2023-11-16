@@ -17,6 +17,7 @@ import (
 	"datagen/sink/mysql"
 	"datagen/sink/postgres"
 	"datagen/sink/pulsar"
+	"datagen/sink/s3"
 	"datagen/twitter"
 	"fmt"
 	"log"
@@ -36,6 +37,8 @@ func createSink(ctx context.Context, cfg gen.GeneratorConfig) (sink.Sink, error)
 		return pulsar.OpenPulsarSink(ctx, cfg.Pulsar)
 	} else if cfg.Sink == "kinesis" {
 		return kinesis.OpenKinesisSink(cfg.Kinesis)
+	} else if cfg.Sink == "s3" {
+		return s3.OpenS3Sink(cfg.S3)
 	} else {
 		return nil, fmt.Errorf("invalid sink type: %s", cfg.Sink)
 	}
@@ -113,8 +116,17 @@ func generateLoad(ctx context.Context, cfg gen.GeneratorConfig) error {
 			if time.Since(prevTime) >= 10*time.Second {
 				log.Printf("Sent %d records in total (Elapsed: %s)", count, time.Since(initTime).String())
 				prevTime = time.Now()
+
+				// Flush the sink every 10 seconds.
+				if err := sinkImpl.Flush(ctx); err != nil {
+					return err
+				}
 			}
 		case record := <-outCh:
+			// Filter records if topic is specified
+			if cfg.Topic != "" && record.Topic() != cfg.Topic {
+				continue
+			}
 			if cfg.PrintInsert {
 				fmt.Println(record.ToPostgresSql())
 			}
@@ -127,6 +139,11 @@ func generateLoad(ctx context.Context, cfg gen.GeneratorConfig) error {
 			if time.Since(prevTime) >= 10*time.Second {
 				log.Printf("Sent %d records in total (Elapsed: %s)", count, time.Since(initTime).String())
 				prevTime = time.Now()
+
+				// Flush the sink every 10 seconds.
+				if err := sinkImpl.Flush(ctx); err != nil {
+					return err
+				}
 			}
 		}
 	}

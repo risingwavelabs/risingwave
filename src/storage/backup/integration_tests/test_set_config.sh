@@ -9,11 +9,11 @@ start_cluster
 
 execute_sql_and_expect \
 "SHOW parameters;" \
-"backup_storage_directory | backup"
+"| backup"
 
 execute_sql_and_expect \
 "SHOW parameters;" \
-"backup_storage_url       | minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001"
+"| minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001"
 
 backup
 

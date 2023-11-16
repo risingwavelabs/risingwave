@@ -14,32 +14,24 @@
 
 use std::collections::hash_map::Entry;
 use std::ops::Deref;
-use std::str::FromStr;
 
-use itertools::Itertools;
-use risingwave_common::catalog::{
-    Field, Schema, TableId, DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
-    RW_INTERNAL_TABLE_FUNCTION_NAME,
-};
+use itertools::{EitherOrBoth, Itertools};
+use risingwave_common::catalog::{Field, TableId, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
     Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor,
 };
+use thiserror::Error;
 
-use self::watermark::is_watermark_func;
 use super::bind_context::ColumnBinding;
 use super::statement::RewriteExprsRecursive;
 use crate::binder::Binder;
-use crate::catalog::function_catalog::FunctionKind;
-use crate::catalog::system_catalog::pg_catalog::{
-    PG_GET_KEYWORDS_FUNC_NAME, PG_KEYWORDS_TABLE_NAME,
-};
-use crate::expr::{Expr, ExprImpl, InputRef, TableFunction, TableFunctionType};
+use crate::expr::{ExprImpl, InputRef};
 
 mod join;
 mod share;
 mod subquery;
+mod table_function;
 mod table_or_source;
 mod watermark;
 mod window_table_function;
@@ -62,8 +54,13 @@ pub enum Relation {
     SystemTable(Box<BoundSystemTable>),
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
+    Apply(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
-    TableFunction(Box<TableFunction>),
+    /// Table function or scalar function.
+    TableFunction {
+        expr: ExprImpl,
+        with_ordinality: bool,
+    },
     Watermark(Box<BoundWatermark>),
     Share(Box<BoundShare>),
 }
@@ -73,15 +70,12 @@ impl RewriteExprsRecursive for Relation {
         match self {
             Relation::Subquery(inner) => inner.rewrite_exprs_recursive(rewriter),
             Relation::Join(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::Apply(inner) => inner.rewrite_exprs_recursive(rewriter),
             Relation::WindowTableFunction(inner) => inner.rewrite_exprs_recursive(rewriter),
             Relation::Watermark(inner) => inner.rewrite_exprs_recursive(rewriter),
             Relation::Share(inner) => inner.rewrite_exprs_recursive(rewriter),
-            Relation::TableFunction(inner) => {
-                let new_args = std::mem::take(&mut inner.args)
-                    .into_iter()
-                    .map(|expr| rewriter.rewrite_expr(expr))
-                    .collect();
-                inner.args = new_args;
+            Relation::TableFunction { expr: inner, .. } => {
+                *inner = rewriter.rewrite_expr(inner.take())
             }
             _ => {}
         }
@@ -92,7 +86,7 @@ impl Relation {
     pub fn is_correlated(&self, depth: Depth) -> bool {
         match self {
             Relation::Subquery(subquery) => subquery.query.is_correlated(depth),
-            Relation::Join(join) => {
+            Relation::Join(join) | Relation::Apply(join) => {
                 join.cond.has_correlated_input_ref_by_depth(depth)
                     || join.left.is_correlated(depth)
                     || join.right.is_correlated(depth)
@@ -110,7 +104,7 @@ impl Relation {
             Relation::Subquery(subquery) => subquery
                 .query
                 .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
-            Relation::Join(join) => {
+            Relation::Join(join) | Relation::Apply(join) => {
                 let mut correlated_indices = vec![];
                 correlated_indices.extend(
                     join.cond
@@ -126,8 +120,55 @@ impl Relation {
                 );
                 correlated_indices
             }
+            Relation::TableFunction {
+                expr: table_function,
+                with_ordinality: _,
+            } => table_function
+                .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
             _ => vec![],
         }
+    }
+}
+
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum ResolveQualifiedNameErrorKind {
+    QualifiedNameTooLong,
+    NotCurrentDatabase,
+}
+
+#[derive(Debug, Error)]
+pub struct ResolveQualifiedNameError {
+    qualified: String,
+    kind: ResolveQualifiedNameErrorKind,
+}
+
+impl std::fmt::Display for ResolveQualifiedNameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.kind {
+            ResolveQualifiedNameErrorKind::QualifiedNameTooLong => write!(
+                f,
+                "improper qualified name (too many dotted names): {}",
+                self.qualified
+            ),
+            ResolveQualifiedNameErrorKind::NotCurrentDatabase => write!(
+                f,
+                "cross-database references are not implemented: \"{}\"",
+                self.qualified
+            ),
+        }
+    }
+}
+
+impl ResolveQualifiedNameError {
+    pub fn new(qualified: String, kind: ResolveQualifiedNameErrorKind) -> Self {
+        Self { qualified, kind }
+    }
+}
+
+impl From<ResolveQualifiedNameError> for RwError {
+    fn from(e: ResolveQualifiedNameError) -> Self {
+        ErrorCode::InvalidInputSyntax(format!("{}", e)).into()
     }
 }
 
@@ -136,25 +177,29 @@ impl Binder {
     pub fn resolve_schema_qualified_name(
         db_name: &str,
         name: ObjectName,
-    ) -> Result<(Option<String>, String)> {
-        let mut indentifiers = name.0;
+    ) -> std::result::Result<(Option<String>, String), ResolveQualifiedNameError> {
+        let formatted_name = name.to_string();
+        let mut identifiers = name.0;
 
-        if indentifiers.len() > 3 {
-            return Err(internal_error(
-                "schema qualified name can contain at most 3 arguments".to_string(),
+        if identifiers.len() > 3 {
+            return Err(ResolveQualifiedNameError::new(
+                formatted_name,
+                ResolveQualifiedNameErrorKind::QualifiedNameTooLong,
             ));
         }
 
-        let name = indentifiers.pop().unwrap().real_value();
+        let name = identifiers.pop().unwrap().real_value();
 
-        let schema_name = indentifiers.pop().map(|ident| ident.real_value());
-        let database_name = indentifiers.pop().map(|ident| ident.real_value());
+        let schema_name = identifiers.pop().map(|ident| ident.real_value());
+        let database_name = identifiers.pop().map(|ident| ident.real_value());
 
-        if let Some(database_name) = database_name && database_name != db_name {
-            return Err(internal_error(format!(
-                "database in schema qualified name {}.{}.{} is not equal to current database name {}",
-                database_name, schema_name.unwrap(), name, db_name
-            )));
+        if let Some(database_name) = database_name
+            && database_name != db_name
+        {
+            return Err(ResolveQualifiedNameError::new(
+                formatted_name,
+                ResolveQualifiedNameErrorKind::NotCurrentDatabase,
+            ));
         }
 
         Ok((schema_name, name))
@@ -287,7 +332,9 @@ impl Binder {
         for_system_time_as_of_proctime: bool,
     ) -> Result<Relation> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
-        if schema_name.is_none() && let Some(item) = self.context.cte_to_relation.get(&table_name) {
+        if schema_name.is_none()
+            && let Some(item) = self.context.cte_to_relation.get(&table_name)
+        {
             // Handles CTE
 
             let (share_id, query, mut original_alias) = item.deref().clone();
@@ -295,11 +342,11 @@ impl Binder {
 
             if let Some(from_alias) = alias {
                 original_alias.name = from_alias.name;
-                let mut alias_iter = from_alias.columns.into_iter();
                 original_alias.columns = original_alias
                     .columns
                     .into_iter()
-                    .map(|ident| alias_iter.next().unwrap_or(ident))
+                    .zip_longest(from_alias.columns)
+                    .map(EitherOrBoth::into_right)
                     .collect();
             }
 
@@ -315,7 +362,10 @@ impl Binder {
             )?;
 
             // Share the CTE.
-            let input_relation = Relation::Subquery(Box::new(BoundSubquery { query }));
+            let input_relation = Relation::Subquery(Box::new(BoundSubquery {
+                query,
+                lateral: false,
+            }));
             let share_relation = Relation::Share(Box::new(BoundShare {
                 share_id,
                 input: input_relation,
@@ -404,73 +454,16 @@ impl Binder {
                 alias,
                 for_system_time_as_of_proctime,
             } => self.bind_relation_by_name(name, alias, for_system_time_as_of_proctime),
-            TableFactor::TableFunction { name, alias, args } => {
-                let func_name = &name.0[0].real_value();
-                if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
-                    return self.bind_internal_table(args, alias);
-                }
-                if func_name.eq_ignore_ascii_case(PG_GET_KEYWORDS_FUNC_NAME)
-                    || name.real_value().eq_ignore_ascii_case(
-                        format!("{}.{}", PG_CATALOG_SCHEMA_NAME, PG_GET_KEYWORDS_FUNC_NAME)
-                            .as_str(),
-                    )
-                {
-                    return self.bind_relation_by_name_inner(
-                        Some(PG_CATALOG_SCHEMA_NAME),
-                        PG_KEYWORDS_TABLE_NAME,
-                        alias,
-                        false,
-                    );
-                }
-                if let Ok(kind) = WindowTableFunctionKind::from_str(func_name) {
-                    return Ok(Relation::WindowTableFunction(Box::new(
-                        self.bind_window_table_function(alias, kind, args)?,
-                    )));
-                }
-                if is_watermark_func(func_name) {
-                    return Ok(Relation::Watermark(Box::new(
-                        self.bind_watermark(alias, args)?,
-                    )));
-                };
-
-                let args: Vec<ExprImpl> = args
-                    .into_iter()
-                    .map(|arg| self.bind_function_arg(arg))
-                    .flatten_ok()
-                    .try_collect()?;
-                let tf = if let Some(func) = self
-                    .catalog
-                    .first_valid_schema(
-                        &self.db_name,
-                        &self.search_path,
-                        &self.auth_context.user_name,
-                    )?
-                    .get_function_by_name_args(
-                        func_name,
-                        &args.iter().map(|arg| arg.return_type()).collect_vec(),
-                    )
-                    && matches!(func.kind, FunctionKind::Table { .. })
-                {
-                    TableFunction::new_user_defined(func.clone(), args)
-                } else if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
-                    TableFunction::new(table_function_type, args)?
-                } else {
-                    return Err(ErrorCode::NotImplemented(
-                        format!("unknown table function: {}", func_name),
-                        1191.into(),
-                    )
-                    .into());
-                };
-                let columns = if let DataType::Struct(s) = tf.return_type() {
-                    let schema = Schema::from(&*s);
-                    schema.fields.into_iter().map(|f| (false, f)).collect_vec()
-                } else {
-                    vec![(false, Field::with_name(tf.return_type(), tf.name()))]
-                };
-
-                self.bind_table_to_context(columns, tf.name().to_string(), alias)?;
-
-                Ok(Relation::TableFunction(Box::new(tf)))
+            TableFactor::TableFunction {
+                name,
+                alias,
+                args,
+                with_ordinality,
+            } => {
+                self.try_mark_lateral_as_visible();
+                let result = self.bind_table_function(name, alias, args, with_ordinality);
+                self.try_mark_lateral_as_invisible();
+                result
             }
             TableFactor::Derived {
                 lateral,
@@ -482,18 +475,15 @@ impl Binder {
                     self.try_mark_lateral_as_visible();
 
                     // Bind lateral subquery here.
+                    let bound_subquery = self.bind_subquery_relation(*subquery, alias, true)?;
 
                     // Mark the lateral context as invisible once again.
                     self.try_mark_lateral_as_invisible();
-                    Err(ErrorCode::NotImplemented(
-                        "lateral subqueries are not yet supported".into(),
-                        Some(3815).into(),
-                    )
-                    .into())
+                    Ok(Relation::Subquery(Box::new(bound_subquery)))
                 } else {
                     // Non-lateral subqueries to not have access to the join-tree context.
                     self.push_lateral_context();
-                    let bound_subquery = self.bind_subquery_relation(*subquery, alias)?;
+                    let bound_subquery = self.bind_subquery_relation(*subquery, alias, false)?;
                     self.pop_and_merge_lateral_context()?;
                     Ok(Relation::Subquery(Box::new(bound_subquery)))
                 }

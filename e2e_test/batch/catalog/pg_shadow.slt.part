@@ -1,0 +1,4 @@
+query ITTTTTTT
+select * from pg_shadow where usename = 'root';
+----
+root 1 t t f f NULL NULL NULL

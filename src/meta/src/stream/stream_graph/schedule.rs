@@ -38,7 +38,7 @@ use crate::manager::{WorkerId, WorkerLocations};
 use crate::model::ActorId;
 use crate::stream::stream_graph::fragment::CompleteStreamFragmentGraph;
 use crate::stream::stream_graph::id::GlobalFragmentId as Id;
-use crate::{MetaError, MetaResult};
+use crate::MetaResult;
 
 type HashMappingId = usize;
 
@@ -104,12 +104,17 @@ crepe::crepe! {
 
     // Requirements from the facts.
     Requirement(x, d) <- ExternalReq(x, d);
-    // Requirements of `NoShuffle` edges.
+    // Requirements propagate through `NoShuffle` edges.
     Requirement(x, d) <- Edge(x, y, NoShuffle), Requirement(y, d);
     Requirement(y, d) <- Edge(x, y, NoShuffle), Requirement(x, d);
 
     // The downstream fragment of a `Simple` edge must be singleton.
     SingletonReq(y) <- Edge(_, y, Simple);
+    // The downstream fragment of a `CdcTablename` edge must be singleton.
+    SingletonReq(y) <- Edge(_, y, CdcTablename);
+    // Singleton requirements propagate through `NoShuffle` edges.
+    SingletonReq(x) <- Edge(x, y, NoShuffle), SingletonReq(y);
+    SingletonReq(y) <- Edge(x, y, NoShuffle), SingletonReq(x);
 
     // Multiple requirements conflict.
     Failed(x) <- Requirement(x, d1), Requirement(x, d2), (d1 != d2);
@@ -199,8 +204,8 @@ impl Scheduler {
     /// `None`, all parallel units will be used.
     pub fn new(
         parallel_units: impl IntoIterator<Item = ParallelUnit>,
-        default_parallelism: Option<NonZeroUsize>,
-    ) -> MetaResult<Self> {
+        default_parallelism: NonZeroUsize,
+    ) -> Self {
         // Group parallel units with worker node.
         let mut parallel_units_map = BTreeMap::new();
         for p in parallel_units {
@@ -210,18 +215,6 @@ impl Scheduler {
                 .push(p);
         }
 
-        if parallel_units_map.is_empty() {
-            return Err(MetaError::unavailable(
-                "No available parallel units to schedule".to_string(),
-            ));
-        }
-
-        // Use all parallel units if no default parallelism is specified.
-        let default_parallelism = default_parallelism.map_or_else(
-            || parallel_units_map.values().map(|p| p.len()).sum::<usize>(),
-            NonZeroUsize::get,
-        );
-
         let mut parallel_units: LinkedList<_> = parallel_units_map
             .into_values()
             .map(|v| v.into_iter().sorted_by_key(|p| p.id))
@@ -230,23 +223,19 @@ impl Scheduler {
         // Visit the parallel units in a round-robin manner on each worker.
         let mut round_robin = Vec::new();
         while !parallel_units.is_empty() {
-            parallel_units.drain_filter(|ps| {
-                if let Some(p) = ps.next() {
-                    round_robin.push(p);
-                    false
-                } else {
-                    true
-                }
-            });
+            parallel_units
+                .extract_if(|ps| {
+                    if let Some(p) = ps.next() {
+                        round_robin.push(p);
+                        false
+                    } else {
+                        true
+                    }
+                })
+                .for_each(drop);
         }
-        round_robin.truncate(default_parallelism);
-
-        if round_robin.len() < default_parallelism {
-            return Err(MetaError::unavailable(format!(
-                "Not enough parallel units to schedule {} parallelism",
-                default_parallelism
-            )));
-        }
+        round_robin.truncate(default_parallelism.get());
+        assert_eq!(round_robin.len(), default_parallelism.get());
 
         // Sort all parallel units by ID to achieve better vnode locality.
         round_robin.sort_unstable_by_key(|p| p.id);
@@ -256,10 +245,10 @@ impl Scheduler {
         // Randomly choose a parallel unit as the default singleton parallel unit.
         let default_singleton_parallel_unit = round_robin.choose(&mut thread_rng()).unwrap().id;
 
-        Ok(Self {
+        Self {
             default_hash_mapping,
             default_singleton_parallel_unit,
-        })
+        }
     }
 
     /// Schedule the given complete graph and returns the distribution of each **building
@@ -341,6 +330,8 @@ impl Scheduler {
                 (id, distribution)
             })
             .collect();
+
+        tracing::debug!(?distributions, "schedule fragments");
 
         Ok(distributions)
     }

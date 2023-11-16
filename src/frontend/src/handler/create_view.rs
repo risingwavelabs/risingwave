@@ -14,6 +14,7 @@
 
 //! Handle creation of logical (non-materialized) views.
 
+use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
@@ -28,6 +29,7 @@ use crate::optimizer::OptimizerContext;
 
 pub async fn handle_create_view(
     handler_args: HandlerArgs,
+    if_not_exists: bool,
     name: ObjectName,
     columns: Vec<Ident>,
     query: Query,
@@ -40,7 +42,13 @@ pub async fn handle_create_view(
 
     let properties = handler_args.with_options.clone();
 
-    session.check_relation_name_duplicated(name.clone())?;
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        name.clone(),
+        StatementType::CREATE_VIEW,
+        if_not_exists,
+    )? {
+        return Ok(resp);
+    }
 
     // plan the query to validate it and resolve dependencies
     let (dependent_relations, schema) = {
@@ -94,7 +102,7 @@ pub async fn handle_create_view(
         columns: columns.into_iter().map(|f| f.to_prost()).collect(),
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer.create_view(view).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_VIEW))

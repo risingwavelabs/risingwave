@@ -15,17 +15,20 @@
  *
  */
 
-module.exports = () => {
-  const rewrites = () => {
+/**
+ * @type {import('next').NextConfig}
+ */
+const nextConfig = {
+  trailingSlash: true,
+
+  rewrites: () => {
     return [
       {
         source: "/api/:path*",
         destination: "http://localhost:32333/:path*",
       },
     ]
-  }
-  return {
-    rewrites,
-    trailingSlash: true,
-  }
+  },
 }
+
+module.exports = nextConfig

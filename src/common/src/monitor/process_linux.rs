@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io::{Error, ErrorKind, Result};
-
 use prometheus::core::{Collector, Desc};
 use prometheus::{proto, IntCounter, IntGauge, Opts, Registry};
 
@@ -22,15 +20,13 @@ use super::{CLOCK_TICK, PAGESIZE};
 use crate::util::resource_util;
 
 /// Monitors current process.
-pub fn monitor_process(registry: &Registry) -> Result<()> {
+pub fn monitor_process(registry: &Registry) {
     let pc = ProcessCollector::new();
-    registry
-        .register(Box::new(pc))
-        .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))
+    registry.register(Box::new(pc)).unwrap()
 }
 
 /// A collector to collect process metrics.
-pub struct ProcessCollector {
+struct ProcessCollector {
     descs: Vec<Desc>,
     cpu_total: IntCounter,
     vsize: IntGauge,
@@ -45,7 +41,7 @@ impl Default for ProcessCollector {
 }
 
 impl ProcessCollector {
-    pub fn new() -> Self {
+    fn new() -> Self {
         let mut descs = Vec::new();
 
         let cpu_total = IntCounter::with_opts(Opts::new(
@@ -98,14 +94,21 @@ impl Collector for ProcessCollector {
                 return Vec::new();
             }
         };
+        let stat = match p.stat() {
+            Ok(stat) => stat,
+            Err(..) => {
+                // we can't get the stat, so there's no stats to gather
+                return Vec::new();
+            }
+        };
 
         // memory
-        self.vsize.set(p.stat.vsize as i64);
-        self.rss.set(p.stat.rss * *PAGESIZE);
+        self.vsize.set(stat.vsize as i64);
+        self.rss.set(stat.rss as i64 * *PAGESIZE);
 
         // cpu
         let cpu_total_mfs = {
-            let total = (p.stat.utime + p.stat.stime) / *CLOCK_TICK;
+            let total = (stat.utime + stat.stime) / *CLOCK_TICK;
             let past = self.cpu_total.get();
             self.cpu_total.inc_by(total - past);
             self.cpu_total.collect()

@@ -825,6 +825,28 @@ fn parse_create_function() {
 }
 
 #[test]
+fn parse_create_aggregate() {
+    let sql =
+        "CREATE OR REPLACE AGGREGATE sum(INT) RETURNS BIGINT APPEND ONLY LANGUAGE python AS 'sum' USING LINK 'xxx'";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::CreateAggregate {
+            or_replace: true,
+            name: ObjectName(vec![Ident::new_unchecked("sum")]),
+            args: vec![OperateFunctionArg::unnamed(DataType::Int)],
+            returns: Some(DataType::BigInt),
+            append_only: true,
+            params: CreateFunctionBody {
+                language: Some("python".into()),
+                as_: Some(FunctionDefinition::SingleQuotedDef("sum".into())),
+                using: Some(CreateFunctionUsing::Link("xxx".into())),
+                ..Default::default()
+            },
+        }
+    );
+}
+
+#[test]
 fn parse_drop_function() {
     let sql = "DROP FUNCTION IF EXISTS test_func";
     assert_eq!(
@@ -1025,7 +1047,7 @@ fn parse_array() {
     assert_eq!(
         parse_sql_statements(sql),
         Err(ParserError::ParserError(
-            "syntax error at or near '[ at line:1, column:28'".to_string()
+            "syntax error at or near [ at line:1, column:28".to_string()
         ))
     );
 
@@ -1033,7 +1055,7 @@ fn parse_array() {
     assert_eq!(
         parse_sql_statements(sql),
         Err(ParserError::ParserError(
-            "syntax error at or near '[ at line:1, column:24'".to_string()
+            "syntax error at or near [ at line:1, column:24".to_string()
         ))
     );
 
@@ -1041,7 +1063,7 @@ fn parse_array() {
     assert_eq!(
         parse_sql_statements(sql),
         Err(ParserError::ParserError(
-            "syntax error at or near 'ARRAY at line:1, column:27'".to_string()
+            "syntax error at or near ARRAY at line:1, column:27".to_string()
         ))
     );
 
@@ -1049,7 +1071,7 @@ fn parse_array() {
     assert_eq!(
         parse_sql_statements(sql),
         Err(ParserError::ParserError(
-            "syntax error at or near 'ARRAY at line:1, column:23'".to_string()
+            "syntax error at or near ARRAY at line:1, column:23".to_string()
         ))
     );
 

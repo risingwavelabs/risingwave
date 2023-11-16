@@ -47,6 +47,7 @@ use std::fmt;
 use std::fmt::Debug;
 
 use fixedbitset::FixedBitSet;
+use generic::PhysicalPlanRef;
 use itertools::Itertools;
 use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
 use risingwave_common::error::Result;
@@ -59,7 +60,6 @@ use risingwave_pb::batch_plan::ExchangeInfo;
 use super::super::plan_node::*;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::FragmentId;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
@@ -80,7 +80,7 @@ pub enum Distribution {
     /// [`Distribution::HashShard`], but may have different vnode mapping.
     ///
     /// It exists because the upstream MV can be scaled independently. So we use
-    /// `UpstreamHashShard` to force an exchange is inserted.
+    /// `UpstreamHashShard` to **force an exchange to be inserted**.
     ///
     /// Alternatively, [`Distribution::SomeShard`] can also be used to insert an exchange, but
     /// `UpstreamHashShard` contains distribution keys, which might be useful in some cases, e.g.,
@@ -245,13 +245,13 @@ impl DistributionDisplay<'_> {
                 } else {
                     f.write_str("UpstreamHashShard(")?;
                 }
-                for key in vec.iter().copied().with_position() {
+                for (pos, key) in vec.iter().copied().with_position() {
                     std::fmt::Debug::fmt(
-                        &FieldDisplay(self.input_schema.fields.get(key.into_inner()).unwrap()),
+                        &FieldDisplay(self.input_schema.fields.get(key).unwrap()),
                         f,
                     )?;
-                    match key {
-                        itertools::Position::First(_) | itertools::Position::Middle(_) => {
+                    match pos {
+                        itertools::Position::First | itertools::Position::Middle => {
                             f.write_str(", ")?;
                         }
                         _ => {}
@@ -285,11 +285,8 @@ impl RequiredDist {
         for i in key {
             cols.insert(*i);
         }
-        if cols.count_ones(..) == 0 {
-            Self::Any
-        } else {
-            Self::ShardByKey(cols)
-        }
+        assert!(!cols.is_clear());
+        Self::ShardByKey(cols)
     }
 
     pub fn hash_shard(key: &[usize]) -> Self {
@@ -299,9 +296,12 @@ impl RequiredDist {
 
     pub fn enforce_if_not_satisfies(
         &self,
-        plan: PlanRef,
+        mut plan: PlanRef,
         required_order: &Order,
     ) -> Result<PlanRef> {
+        if let Convention::Batch = plan.convention() {
+            plan = required_order.enforce_if_not_satisfies(plan)?;
+        }
         if !plan.distribution().satisfies(self) {
             Ok(self.enforce(plan, required_order))
         } else {
@@ -313,23 +313,6 @@ impl RequiredDist {
         match plan.convention() {
             Convention::Stream => StreamExchange::new_no_shuffle(plan).into(),
             Convention::Logical | Convention::Batch => unreachable!(),
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn enforce_stream_if_not_satisfies(
-        &self,
-        plan: stream::PlanRef,
-    ) -> Result<stream::PlanRef> {
-        if !plan.distribution().satisfies(self) {
-            // FIXME(st1page);
-            Ok(stream::Exchange {
-                dist: self.to_dist(),
-                input: plan,
-            }
-            .into())
-        } else {
-            Ok(plan)
         }
     }
 
@@ -349,7 +332,7 @@ impl RequiredDist {
         }
     }
 
-    fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
+    pub fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
         let dist = self.to_dist();
         match plan.convention() {
             Convention::Batch => BatchExchange::new(plan, required_order.clone(), dist).into(),

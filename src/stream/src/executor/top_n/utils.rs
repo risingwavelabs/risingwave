@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::future::Future;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -28,37 +27,27 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::ColumnOrder;
 
-use super::top_n_cache::CacheKey;
+use super::CacheKey;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
     ExecutorInfo, Message, PkIndicesRef, Watermark,
 };
 
-#[async_trait]
 pub trait TopNExecutorBase: Send + 'static {
     /// Apply the chunk to the dirty state and get the diffs.
-    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk>;
+    fn apply_chunk(
+        &mut self,
+        chunk: StreamChunk,
+    ) -> impl Future<Output = StreamExecutorResult<StreamChunk>> + Send;
 
     /// Flush the buffered chunk to the storage backend.
-    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
+    fn flush_data(
+        &mut self,
+        epoch: EpochPair,
+    ) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 
     fn info(&self) -> &ExecutorInfo;
-
-    /// See [`Executor::schema`].
-    fn schema(&self) -> &Schema {
-        &self.info().schema
-    }
-
-    /// See [`Executor::pk_indices`].
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        self.info().pk_indices.as_ref()
-    }
-
-    /// See [`Executor::identity`].
-    fn identity(&self) -> &str {
-        &self.info().identity
-    }
 
     /// Update the vnode bitmap for the state table and manipulate the cache if necessary, only used
     /// by Group Top-N since it's distributed.
@@ -69,10 +58,13 @@ pub trait TopNExecutorBase: Send + 'static {
     fn evict(&mut self) {}
     fn update_epoch(&mut self, _epoch: u64) {}
 
-    async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
+    fn init(&mut self, epoch: EpochPair) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 
     /// Handle incoming watermarks
-    async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark>;
+    fn handle_watermark(
+        &mut self,
+        watermark: Watermark,
+    ) -> impl Future<Output = Option<Watermark>> + Send;
 }
 
 /// The struct wraps a [`TopNExecutorBase`]
@@ -91,15 +83,15 @@ where
     }
 
     fn schema(&self) -> &Schema {
-        self.inner.schema()
+        &self.inner.info().schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        self.inner.pk_indices()
+        &self.inner.info().pk_indices
     }
 
     fn identity(&self) -> &str {
-        self.inner.identity()
+        &self.inner.info().identity
     }
 
     fn info(&self) -> ExecutorInfo {
@@ -165,7 +157,7 @@ pub fn generate_output(
         }
         // since `new_rows` is not empty, we unwrap directly
         let new_data_chunk = data_chunk_builder.consume_all().unwrap();
-        let new_stream_chunk = StreamChunk::new(new_ops, new_data_chunk.columns().to_vec(), None);
+        let new_stream_chunk = StreamChunk::new(new_ops, new_data_chunk.columns().to_vec());
         Ok(new_stream_chunk)
     } else {
         let columns = schema
@@ -173,7 +165,7 @@ pub fn generate_output(
             .into_iter()
             .map(|x| x.finish().into())
             .collect_vec();
-        Ok(StreamChunk::new(vec![], columns, None))
+        Ok(StreamChunk::new(vec![], columns))
     }
 }
 
@@ -196,7 +188,6 @@ pub type CacheKeySerde = (OrderedRowSerde, OrderedRowSerde, usize);
 
 pub fn create_cache_key_serde(
     storage_key: &[ColumnOrder],
-    pk_indices: PkIndicesRef<'_>,
     schema: &Schema,
     order_by: &[ColumnOrder],
     group_by: &[usize],
@@ -208,15 +199,6 @@ pub fn create_cache_key_serde(
         }
         for i in group_by.len()..(group_by.len() + order_by.len()) {
             assert_eq!(storage_key[i], order_by[i - group_by.len()]);
-        }
-        let pk_indices = pk_indices.iter().copied().collect::<HashSet<_>>();
-        for i in (group_by.len() + order_by.len())..storage_key.len() {
-            assert!(
-                pk_indices.contains(&storage_key[i].column_index),
-                "storage_key = {:?}, pk_indices = {:?}",
-                storage_key,
-                pk_indices
-            );
         }
     }
 

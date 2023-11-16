@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::env;
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::Path;
@@ -20,32 +21,9 @@ use std::sync::LazyLock;
 use anyhow::Result;
 use clap::Parser;
 use tempfile::TempPath;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::Command;
 use tokio::signal;
 
-pub enum RisingWaveService {
-    Compute(Vec<OsString>),
-    Meta(Vec<OsString>),
-    Frontend(Vec<OsString>),
-    Compactor(Vec<OsString>),
-    ConnectorNode(Vec<OsString>),
-}
-
-impl RisingWaveService {
-    /// Extend additional arguments to the service.
-    fn extend_args(&mut self, args: &[&str]) {
-        match self {
-            RisingWaveService::Compute(args0)
-            | RisingWaveService::Meta(args0)
-            | RisingWaveService::Frontend(args0)
-            | RisingWaveService::Compactor(args0)
-            | RisingWaveService::ConnectorNode(args0) => {
-                args0.extend(args.iter().map(|s| s.into()))
-            }
-        }
-    }
-}
+use crate::common::{osstrs as common_osstrs, RisingWaveService};
 
 const IDLE_EXIT_SECONDS: u64 = 1800;
 
@@ -63,6 +41,10 @@ max_heartbeat_interval_secs = 600",
     file.into_temp_path()
 });
 
+fn osstrs<const N: usize>(s: [&str; N]) -> Vec<OsString> {
+    common_osstrs(s)
+}
+
 fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
     let mut services = match profile {
         "playground" => vec![
@@ -75,12 +57,9 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "hummock_001",
                 "--advertise-addr",
                 "127.0.0.1:5690",
-                "--connector-rpc-endpoint",
-                "127.0.0.1:50051",
             ])),
-            RisingWaveService::Compute(osstrs(["--connector-rpc-endpoint", "127.0.0.1:50051"])),
+            RisingWaveService::Compute(osstrs([])),
             RisingWaveService::Frontend(osstrs([])),
-            RisingWaveService::ConnectorNode(osstrs([])),
         ],
         "playground-3cn" => vec![
             RisingWaveService::Meta(osstrs([
@@ -113,39 +92,32 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
             ])),
             RisingWaveService::Frontend(osstrs([])),
         ],
-        "online-docker-playground" | "docker-playground" => {
-            vec![
-                RisingWaveService::Meta(osstrs([
-                    "--listen-addr",
-                    "0.0.0.0:5690",
-                    "--advertise-addr",
-                    "127.0.0.1:5690",
-                    "--dashboard-host",
-                    "0.0.0.0:5691",
-                    "--state-store",
-                    "hummock+memory",
-                    "--data-directory",
-                    "hummock_001",
-                    "--connector-rpc-endpoint",
-                    "127.0.0.1:50051",
-                ])),
-                RisingWaveService::Compute(osstrs([
-                    "--listen-addr",
-                    "0.0.0.0:5688",
-                    "--advertise-addr",
-                    "127.0.0.1:5688",
-                    "--connector-rpc-endpoint",
-                    "127.0.0.1:50051",
-                ])),
-                RisingWaveService::Frontend(osstrs([
-                    "--listen-addr",
-                    "0.0.0.0:4566",
-                    "--advertise-addr",
-                    "127.0.0.1:4566",
-                ])),
-                RisingWaveService::ConnectorNode(osstrs([])),
-            ]
-        }
+        "online-docker-playground" | "docker-playground" => vec![
+            RisingWaveService::Meta(osstrs([
+                "--listen-addr",
+                "0.0.0.0:5690",
+                "--advertise-addr",
+                "127.0.0.1:5690",
+                "--dashboard-host",
+                "0.0.0.0:5691",
+                "--state-store",
+                "hummock+memory",
+                "--data-directory",
+                "hummock_001",
+            ])),
+            RisingWaveService::Compute(osstrs([
+                "--listen-addr",
+                "0.0.0.0:5688",
+                "--advertise-addr",
+                "127.0.0.1:5688",
+            ])),
+            RisingWaveService::Frontend(osstrs([
+                "--listen-addr",
+                "0.0.0.0:4566",
+                "--advertise-addr",
+                "127.0.0.1:4566",
+            ])),
+        ],
         _ => {
             tracing::warn!("Unknown playground profile. All components will be started using the default command line options.");
             return get_services("playground");
@@ -163,18 +135,18 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
     (services, idle_exit)
 }
 
-fn osstrs<const N: usize>(s: [&str; N]) -> Vec<OsString> {
-    s.iter().map(OsString::from).collect()
+#[derive(Debug, Clone, Parser)]
+#[command(about = "The quick way to start a RisingWave cluster for playing around")]
+pub struct PlaygroundOpts {
+    /// The profile to use.
+    #[clap(short, long, env = "PLAYGROUND_PROFILE", default_value = "playground")]
+    profile: String,
 }
 
-pub async fn playground() -> Result<()> {
-    tracing::info!("launching playground");
+pub async fn playground(opts: PlaygroundOpts) -> Result<()> {
+    let profile = opts.profile;
 
-    let profile = if let Ok(profile) = std::env::var("PLAYGROUND_PROFILE") {
-        profile.to_string()
-    } else {
-        "playground".to_string()
-    };
+    tracing::info!("launching playground with profile `{}`", profile);
 
     let (services, idle_exit) = get_services(&profile);
 
@@ -183,9 +155,9 @@ pub async fn playground() -> Result<()> {
             RisingWaveService::Meta(mut opts) => {
                 opts.insert(0, "meta-node".into());
                 tracing::info!("starting meta-node thread with cli args: {:?}", opts);
-                let opts = risingwave_meta::MetaNodeOpts::parse_from(opts);
+                let opts = risingwave_meta_node::MetaNodeOpts::parse_from(opts);
                 let _meta_handle = tokio::spawn(async move {
-                    risingwave_meta::start(opts).await;
+                    risingwave_meta_node::start(opts).await;
                     tracing::warn!("meta is stopped, shutdown all nodes");
                     // As a playground, it's fine to just kill everything.
                     if idle_exit {
@@ -220,44 +192,6 @@ pub async fn playground() -> Result<()> {
                 let _compactor_handle =
                     tokio::spawn(async move { risingwave_compactor::start(opts).await });
             }
-            // connector node only supports in docker-playground profile
-            RisingWaveService::ConnectorNode(_) => {
-                let prefix_bin = match profile.as_str() {
-                    "docker-playground" | "online-docker-playground" => {
-                        "/risingwave/bin".to_string()
-                    }
-                    "playground" => std::env::var("PREFIX_BIN").unwrap_or_default(),
-                    _ => "".to_string(),
-                };
-                let cmd_path = Path::new(&prefix_bin)
-                    .join("connector-node")
-                    .join("start-service.sh");
-                if cmd_path.exists() {
-                    tracing::info!("start connector-node with prefix_bin {}", prefix_bin);
-                    let mut child = Command::new(cmd_path)
-                        .arg("-p")
-                        .arg("50051")
-                        .stderr(std::process::Stdio::piped())
-                        .spawn()?;
-                    let stderr = child.stderr.take().unwrap();
-
-                    let _child_handle = tokio::spawn(async move {
-                        signal::ctrl_c().await.unwrap();
-                        let _ = child.start_kill();
-                    });
-                    let _stderr_handle = tokio::spawn(async move {
-                        let mut reader = BufReader::new(stderr).lines();
-                        while let Ok(Some(line)) = reader.next_line().await {
-                            tracing::info!(target: "risingwave_connector_node", "{}", line);
-                        }
-                    });
-                } else {
-                    tracing::warn!(
-                        "Will not start connector node since `{}` does not exist.",
-                        cmd_path.display()
-                    );
-                }
-            }
         }
     }
 
@@ -277,15 +211,32 @@ pub async fn playground() -> Result<()> {
     } else {
         eprintln!();
     }
-    eprintln!(
-        "* Use {} instead if you want to start a full cluster.",
-        console::style("./risedev d").blue().bold()
-    );
+    let psql_cmd = if let Ok("1") = env::var("RISEDEV").as_deref() {
+        // Started with `./risedev playground`.
+        eprintln!(
+            "* Use {} instead if you want to start a full cluster.",
+            console::style("./risedev d").blue().bold()
+        );
+
+        // This is a specialization of `generate_risedev_env` in
+        // `src/risedevtool/src/risedev_env.rs`.
+        let risedev_env = r#"
+            RW_META_ADDR="http://0.0.0.0:5690"
+            RW_FRONTEND_LISTEN_ADDRESS="0.0.0.0"
+            RW_FRONTEND_PORT="4566"
+        "#;
+        std::fs::write(
+            Path::new(&env::var("PREFIX_CONFIG")?).join("risedev-env"),
+            risedev_env,
+        )?;
+
+        "./risedev psql"
+    } else {
+        "psql -h localhost -p 4566 -d dev -U root"
+    };
     eprintln!(
         "* Run {} in a different terminal to start Postgres interactive shell.",
-        console::style(format_args!("psql -h localhost -p 4566 -d dev -U root"))
-            .blue()
-            .bold()
+        console::style(psql_cmd).blue().bold()
     );
     eprintln!("-------------------------------");
 

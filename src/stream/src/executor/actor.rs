@@ -19,12 +19,13 @@ use anyhow::anyhow;
 use await_tree::InstrumentAwait;
 use futures::future::join_all;
 use hytra::TrAdder;
-use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::error::ErrorSuppressor;
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::ExprError;
 use tokio_stream::StreamExt;
+use tracing::Instrument;
 
 use super::monitor::StreamingMetrics;
 use super::subtask::SubtaskHandle;
@@ -37,10 +38,12 @@ pub struct ActorContext {
     pub id: ActorId,
     pub fragment_id: u32,
 
+    // TODO(eric): these seem to be useless now?
     last_mem_val: Arc<AtomicUsize>,
     cur_mem_val: Arc<AtomicUsize>,
     total_mem_val: Arc<TrAdder<i64>>,
-    streaming_metrics: Arc<StreamingMetrics>,
+
+    pub streaming_metrics: Arc<StreamingMetrics>,
     pub error_suppressor: Arc<Mutex<ErrorSuppressor>>,
 }
 
@@ -78,7 +81,8 @@ impl ActorContext {
     }
 
     pub fn on_compute_error(&self, err: ExprError, identity: &str) {
-        tracing::error!("Compute error: {}, executor: {identity}", err);
+        tracing::error!(identity, %err, "failed to evaluate expression");
+
         let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
         let mut err_str = err.to_string();
 
@@ -88,15 +92,12 @@ impl ActorContext {
                 self.error_suppressor.lock().max()
             );
         }
-        self.streaming_metrics
-            .user_compute_error_count
-            .with_label_values(&[
-                "ExprError",
-                &err_str,
-                executor_name,
-                &self.fragment_id.to_string(),
-            ])
-            .inc();
+        GLOBAL_ERROR_METRICS.user_compute_error.report([
+            "ExprError".to_owned(),
+            err_str,
+            executor_name.to_owned(),
+            self.fragment_id.to_string(),
+        ]);
     }
 
     pub fn store_mem_usage(&self, val: usize) {
@@ -162,15 +163,19 @@ where
     async fn run_consumer(self) -> StreamResult<()> {
         let id = self.actor_context.id;
 
-        let span_name = format!("actor_poll_{:03}", id);
-        let mut span = {
-            let mut span = Span::enter_with_local_parent("actor_poll");
-            span.add_property(|| ("otel.name", span_name.to_string()));
-            span.add_property(|| ("next", id.to_string()));
-            span.add_property(|| ("next", "Outbound".to_string()));
-            span.add_property(|| ("epoch", (-1).to_string()));
-            span
+        let span_name = format!("Actor {id}");
+
+        let new_span = |epoch: Option<EpochPair>| {
+            tracing::info_span!(
+                parent: None,
+                "actor",
+                "otel.name" = span_name,
+                actor_id = id,
+                prev_epoch = epoch.map(|e| e.prev),
+                curr_epoch = epoch.map(|e| e.curr),
+            )
         };
+        let mut span = new_span(None);
 
         let mut last_epoch: Option<EpochPair> = None;
         let mut stream = Box::pin(Box::new(self.consumer).execute());
@@ -179,7 +184,7 @@ where
         let result = loop {
             let barrier = match stream
                 .try_next()
-                .in_span(span)
+                .instrument(span.clone())
                 .instrument_await(
                     last_epoch.map_or("Epoch <initial>".into(), |e| format!("Epoch {}", e.curr)),
                 )
@@ -200,14 +205,7 @@ where
 
             // Tracing related work
             last_epoch = Some(barrier.epoch);
-            span = {
-                let mut span = Span::enter_with_local_parent("actor_poll");
-                span.add_property(|| ("otel.name", span_name.to_string()));
-                span.add_property(|| ("next", id.to_string()));
-                span.add_property(|| ("next", "Outbound".to_string()));
-                span.add_property(|| ("epoch", barrier.epoch.curr.to_string()));
-                span
-            };
+            span = barrier.tracing_context().attach(new_span(last_epoch));
         };
 
         spawn_blocking_drop_stream(stream).await;
@@ -220,7 +218,7 @@ where
 /// Drop the stream in a blocking task to avoid interfering with other actors.
 ///
 /// Logically the actor is dropped after we send the barrier with `Drop` mutation to the
-/// downstream，thus making the `drop`'s progress asynchronous. However, there might be a
+/// downstream, thus making the `drop`'s progress asynchronous. However, there might be a
 /// considerable amount of data in the executors' in-memory cache, dropping these structures might
 /// be a CPU-intensive task. This may lead to the runtime being unable to schedule other actors if
 /// the `drop` is called on the current thread.

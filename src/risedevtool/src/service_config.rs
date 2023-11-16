@@ -35,9 +35,8 @@ pub struct ComputeNodeConfig {
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_opendal: Option<Vec<OpendalConfig>>,
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
-    pub provide_jaeger: Option<Vec<JaegerConfig>>,
+    pub provide_tempo: Option<Vec<TempoConfig>>,
     pub user_managed: bool,
-    pub connector_rpc_endpoint: String,
 
     pub total_memory_bytes: usize,
     pub parallelism: usize,
@@ -61,12 +60,13 @@ pub struct MetaNodeConfig {
 
     pub user_managed: bool,
 
-    pub connector_rpc_endpoint: String,
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 
     pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
     pub provide_compactor: Option<Vec<CompactorConfig>>,
+
+    pub provide_tempo: Option<Vec<TempoConfig>>,
 
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_minio: Option<Vec<MinioConfig>>,
@@ -90,6 +90,8 @@ pub struct FrontendConfig {
     pub health_check_port: u16,
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
+    pub provide_tempo: Option<Vec<TempoConfig>>,
+
     pub user_managed: bool,
 }
 
@@ -110,8 +112,9 @@ pub struct CompactorConfig {
     pub provide_minio: Option<Vec<MinioConfig>>,
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
+    pub provide_tempo: Option<Vec<TempoConfig>>,
+
     pub user_managed: bool,
-    pub max_concurrent_task_number: u64,
     pub compaction_worker_threads_number: Option<usize>,
 }
 
@@ -185,7 +188,6 @@ pub struct PrometheusConfig {
     pub provide_etcd: Option<Vec<EtcdConfig>>,
     pub provide_redpanda: Option<Vec<RedPandaConfig>>,
     pub provide_frontend: Option<Vec<FrontendConfig>>,
-    pub provide_connector_node: Option<Vec<ConnectorNodeConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -198,18 +200,23 @@ pub struct GrafanaConfig {
     pub address: String,
     pub listen_address: String,
     pub port: u16,
+
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
+    pub provide_tempo: Option<Vec<TempoConfig>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
-pub struct JaegerConfig {
+pub struct TempoConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
     pub id: String,
-    pub dashboard_address: String,
-    pub dashboard_port: u16,
+
+    pub listen_address: String,
+    pub address: String,
+    pub port: u16,
+    pub otlp_port: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -220,9 +227,6 @@ pub struct AwsS3Config {
     phantom_use: Option<String>,
     pub id: String,
     pub bucket: String,
-    // 's3_compatible' is true means using other s3 compatible object store, and the access key
-    // id and access key secret is configured in a specific profile.
-    pub s3_compatible: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -236,7 +240,6 @@ pub struct OpendalConfig {
     pub engine: String,
     pub namenode: String,
     pub bucket: String,
-    pub root: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -312,18 +315,6 @@ pub struct RedisConfig {
     pub address: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-#[serde(deny_unknown_fields)]
-pub struct ConnectorNodeConfig {
-    #[serde(rename = "use")]
-    phantom_use: Option<String>,
-    pub id: String,
-    pub port: u16,
-    pub exporter_port: u16,
-    pub address: String,
-}
-
 /// All service configuration
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
@@ -335,7 +326,7 @@ pub enum ServiceConfig {
     Etcd(EtcdConfig),
     Prometheus(PrometheusConfig),
     Grafana(GrafanaConfig),
-    Jaeger(JaegerConfig),
+    Tempo(TempoConfig),
     OpenDal(OpendalConfig),
     AwsS3(AwsS3Config),
     Kafka(KafkaConfig),
@@ -343,7 +334,6 @@ pub enum ServiceConfig {
     Redis(RedisConfig),
     ZooKeeper(ZooKeeperConfig),
     RedPanda(RedPandaConfig),
-    ConnectorNode(ConnectorNodeConfig),
 }
 
 impl ServiceConfig {
@@ -357,14 +347,13 @@ impl ServiceConfig {
             Self::Etcd(c) => &c.id,
             Self::Prometheus(c) => &c.id,
             Self::Grafana(c) => &c.id,
-            Self::Jaeger(c) => &c.id,
+            Self::Tempo(c) => &c.id,
             Self::AwsS3(c) => &c.id,
             Self::ZooKeeper(c) => &c.id,
             Self::Kafka(c) => &c.id,
             Self::Pubsub(c) => &c.id,
             Self::Redis(c) => &c.id,
             Self::RedPanda(c) => &c.id,
-            Self::ConnectorNode(c) => &c.id,
             Self::OpenDal(c) => &c.id,
         }
     }

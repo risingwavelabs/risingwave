@@ -25,7 +25,9 @@ struct ExprVis<'a> {
     schema: &'a Schema,
 }
 
-impl ExprVisitor<Option<String>> for ExprVis<'_> {
+impl ExprVisitor for ExprVis<'_> {
+    type Result = Option<String>;
+
     fn visit_input_ref(&mut self, input_ref: &crate::expr::InputRef) -> Option<String> {
         if input_ref.data_type != self.schema[input_ref.index].data_type {
             Some(format!(
@@ -55,7 +57,7 @@ impl InputRefValidator {
             panic!(
                 "Input references are inconsistent with the input schema: {}, plan:\n{}",
                 err,
-                plan.explain_to_string().expect("failed to explain")
+                plan.explain_to_string()
             );
         }
     }
@@ -101,8 +103,10 @@ macro_rules! visit_project {
     };
 }
 
-impl PlanVisitor<Option<String>> for InputRefValidator {
-    type DefaultBehavior = impl DefaultBehavior<Option<String>>;
+impl PlanVisitor for InputRefValidator {
+    type Result = Option<String>;
+
+    type DefaultBehavior = impl DefaultBehavior<Self::Result>;
 
     visit_filter!(logical, batch, stream);
 

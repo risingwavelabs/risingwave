@@ -20,7 +20,9 @@ import com.risingwave.proto.Data;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 
 public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
@@ -51,7 +53,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
             // TODO: check database server version
             validateBinlogConfig();
         } catch (SQLException e) {
-            throw ValidatorUtils.internalError(e);
+            throw ValidatorUtils.internalError(e.getMessage());
         }
     }
 
@@ -95,16 +97,19 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         try {
             validatePrivileges();
         } catch (SQLException e) {
-            throw ValidatorUtils.internalError(e);
+            throw ValidatorUtils.internalError(e.getMessage());
         }
     }
 
     @Override
     public void validateTable() {
         try {
-            validateTableSchema();
+            // validate table schema only when not running in cdc streaming mode
+            if (Utils.getCdcSourceMode(userProps) == CdcSourceMode.SINGLE_MODE) {
+                validateTableSchema();
+            }
         } catch (SQLException e) {
-            throw ValidatorUtils.internalError(e);
+            throw ValidatorUtils.internalError(e.getMessage());
         }
     }
 
@@ -127,30 +132,36 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 jdbcConnection.prepareStatement(ValidatorUtils.getSql("mysql.table_schema"))) {
             stmt.setString(1, userProps.get(DbzConnectorConfig.DB_NAME));
             stmt.setString(2, userProps.get(DbzConnectorConfig.TABLE_NAME));
-            var res = stmt.executeQuery();
+
+            // Field name in lower case -> data type
+            var schema = new HashMap<String, String>();
             var pkFields = new HashSet<String>();
-            int index = 0;
+            var res = stmt.executeQuery();
             while (res.next()) {
                 var field = res.getString(1);
                 var dataType = res.getString(2);
                 var key = res.getString(3);
-
-                if (index >= tableSchema.getNumColumns()) {
-                    throw ValidatorUtils.invalidArgument("The number of columns mismatch");
-                }
-
-                var srcColName = tableSchema.getColumnNames()[index++];
-                if (!srcColName.equals(field)) {
-                    throw ValidatorUtils.invalidArgument(
-                            String.format("column name mismatch: %s, [%s]", field, srcColName));
-                }
-
-                if (!isDataTypeCompatible(dataType, tableSchema.getColumnType(srcColName))) {
-                    throw ValidatorUtils.invalidArgument(
-                            String.format("incompatible data type of column %s", srcColName));
-                }
+                schema.put(field.toLowerCase(), dataType);
                 if (key.equalsIgnoreCase("PRI")) {
-                    pkFields.add(field);
+                    // RisingWave always use lower case for column name
+                    pkFields.add(field.toLowerCase());
+                }
+            }
+
+            // All columns defined must exist in upstream database
+            for (var e : tableSchema.getColumnTypes().entrySet()) {
+                // skip validate internal columns
+                if (e.getKey().startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
+                    continue;
+                }
+                var dataType = schema.get(e.getKey().toLowerCase());
+                if (dataType == null) {
+                    throw ValidatorUtils.invalidArgument(
+                            "Column '" + e.getKey() + "' not found in the upstream database");
+                }
+                if (!isDataTypeCompatible(dataType, e.getValue())) {
+                    throw ValidatorUtils.invalidArgument(
+                            "Incompatible data type of column " + e.getKey());
                 }
             }
 
@@ -162,30 +173,28 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
 
     private void validatePrivileges() throws SQLException {
         String[] privilegesRequired = {
-            "SELECT",
-            "RELOAD",
-            "SHOW DATABASES",
-            "REPLICATION SLAVE",
-            "REPLICATION CLIENT",
-            "LOCK TABLES"
+            "SELECT", "RELOAD", "SHOW DATABASES", "REPLICATION SLAVE", "REPLICATION CLIENT",
         };
+
+        var hashSet = new HashSet<>(List.of(privilegesRequired));
         try (var stmt = jdbcConnection.createStatement()) {
             var res = stmt.executeQuery(ValidatorUtils.getSql("mysql.grants"));
             while (res.next()) {
-                String grants = res.getString(1).toUpperCase();
+                String granted = res.getString(1).toUpperCase();
                 // all privileges granted, check passed
-                if (grants.contains("ALL")) {
+                if (granted.contains("ALL")) {
                     break;
                 }
-                // check whether each privilege is granted
-                for (String privilege : privilegesRequired) {
-                    if (!grants.contains(privilege)) {
-                        throw ValidatorUtils.invalidArgument(
-                                String.format(
-                                        "MySQL user does not have privilege %s, which is needed for debezium connector",
-                                        privilege));
-                    }
+
+                // remove granted privilege from the set
+                hashSet.removeIf(granted::contains);
+                if (hashSet.isEmpty()) {
+                    break;
                 }
+            }
+            if (!hashSet.isEmpty()) {
+                throw ValidatorUtils.invalidArgument(
+                        "MySQL user doesn't have enough privileges: " + hashSet);
             }
         }
     }
@@ -224,6 +233,8 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                 return val == Data.DataType.TypeName.DECIMAL_VALUE;
             case "varchar":
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "timestamp":
+                return val == Data.DataType.TypeName.TIMESTAMPTZ_VALUE;
             default:
                 return true; // true for other uncovered types
         }

@@ -26,6 +26,7 @@ pub async fn handle_drop_table(
     handler_args: HandlerArgs,
     table_name: ObjectName,
     if_exists: bool,
+    cascade: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = session.database();
@@ -42,10 +43,9 @@ pub async fn handle_drop_table(
             Ok((t, s)) => (t, s),
             Err(e) => {
                 return if if_exists {
-                    Ok(RwPgResponse::empty_result_with_notice(
-                        StatementType::DROP_TABLE,
-                        format!("table \"{}\" does not exist, skipping", table_name),
-                    ))
+                    Ok(RwPgResponse::builder(StatementType::DROP_TABLE)
+                        .notice(format!("table \"{}\" does not exist, skipping", table_name))
+                        .into())
                 } else {
                     Err(e.into())
                 }
@@ -61,9 +61,9 @@ pub async fn handle_drop_table(
         (table.associated_source_id(), table.id())
     };
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .drop_table(source_id.map(|id| id.table_id), table_id)
+        .drop_table(source_id.map(|id| id.table_id), table_id, cascade)
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_TABLE))

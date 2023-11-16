@@ -1,6 +1,6 @@
 [[test]]
 name = "window_hash_agg"
-# Prepare the tesing table & mviews.
+# Prepare the testing table & mviews.
 init_sqls = [
     # Set up the base table.
     """
@@ -11,7 +11,7 @@ init_sqls = [
         WATERMARK FOR created_at AS created_at - interval '9' second
     ) APPEND ONLY WITH (
         connector = 'datagen',
-        rows_per_second = 100,
+        datagen.rows.per.second = 100,
         datagen.split.num = 16,
         fields.created_at.max_past_mode = 'relative',
         fields.created_at.max_past = '10s',

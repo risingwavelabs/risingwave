@@ -15,11 +15,11 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
-use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk, Vis};
+use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::expr::NonStrictExpression;
 
 use super::*;
 
@@ -28,25 +28,25 @@ use super::*;
 /// `FilterExecutor` will insert, delete or update element into next executor according
 /// to the result of the expression.
 pub struct FilterExecutor {
-    ctx: ActorContextRef,
+    _ctx: ActorContextRef,
     info: ExecutorInfo,
     input: BoxedExecutor,
 
     /// Expression of the current filter, note that the filter must always have the same output for
     /// the same input.
-    expr: BoxedExpression,
+    expr: NonStrictExpression,
 }
 
 impl FilterExecutor {
     pub fn new(
         ctx: ActorContextRef,
         input: Box<dyn Executor>,
-        expr: BoxedExpression,
+        expr: NonStrictExpression,
         executor_id: u64,
     ) -> Self {
         let input_info = input.info();
         Self {
-            ctx,
+            _ctx: ctx,
             input,
             info: ExecutorInfo {
                 schema: input_info.schema,
@@ -72,63 +72,59 @@ impl FilterExecutor {
         let mut new_visibility = BitmapBuilder::with_capacity(n);
         let mut last_res = false;
 
-        assert!(match vis {
-            Vis::Compact(c) => c == n,
-            Vis::Bitmap(ref m) => m.len() == n,
-        });
+        assert_eq!(vis.len(), n);
 
-        if let ArrayImpl::Bool(bool_array) = &*filter {
-            for (op, res) in ops.into_iter().zip_eq_fast(bool_array.iter()) {
-                // SAFETY: ops.len() == pred_output.len() == visibility.len()
-                let res = res.unwrap_or(false);
-                match op {
-                    Op::Insert | Op::Delete => {
-                        new_ops.push(op);
-                        if res {
-                            new_visibility.append(true);
-                        } else {
-                            new_visibility.append(false);
-                        }
-                    }
-                    Op::UpdateDelete => {
-                        last_res = res;
-                    }
-                    Op::UpdateInsert => match (last_res, res) {
-                        (true, false) => {
-                            new_ops.push(Op::Delete);
-                            new_ops.push(Op::UpdateInsert);
-                            new_visibility.append(true);
-                            new_visibility.append(false);
-                        }
-                        (false, true) => {
-                            new_ops.push(Op::UpdateDelete);
-                            new_ops.push(Op::Insert);
-                            new_visibility.append(false);
-                            new_visibility.append(true);
-                        }
-                        (true, true) => {
-                            new_ops.push(Op::UpdateDelete);
-                            new_ops.push(Op::UpdateInsert);
-                            new_visibility.append(true);
-                            new_visibility.append(true);
-                        }
-                        (false, false) => {
-                            new_ops.push(Op::UpdateDelete);
-                            new_ops.push(Op::UpdateInsert);
-                            new_visibility.append(false);
-                            new_visibility.append(false);
-                        }
-                    },
-                }
-            }
-        } else {
+        let ArrayImpl::Bool(bool_array) = &*filter else {
             panic!("unmatched type: filter expr returns a non-null array");
+        };
+        for (&op, res) in ops.iter().zip_eq_fast(bool_array.iter()) {
+            // SAFETY: ops.len() == pred_output.len() == visibility.len()
+            let res = res.unwrap_or(false);
+            match op {
+                Op::Insert | Op::Delete => {
+                    new_ops.push(op);
+                    if res {
+                        new_visibility.append(true);
+                    } else {
+                        new_visibility.append(false);
+                    }
+                }
+                Op::UpdateDelete => {
+                    last_res = res;
+                }
+                Op::UpdateInsert => match (last_res, res) {
+                    (true, false) => {
+                        new_ops.push(Op::Delete);
+                        new_ops.push(Op::UpdateInsert);
+                        new_visibility.append(true);
+                        new_visibility.append(false);
+                    }
+                    (false, true) => {
+                        new_ops.push(Op::UpdateDelete);
+                        new_ops.push(Op::Insert);
+                        new_visibility.append(false);
+                        new_visibility.append(true);
+                    }
+                    (true, true) => {
+                        new_ops.push(Op::UpdateDelete);
+                        new_ops.push(Op::UpdateInsert);
+                        new_visibility.append(true);
+                        new_visibility.append(true);
+                    }
+                    (false, false) => {
+                        new_ops.push(Op::UpdateDelete);
+                        new_ops.push(Op::UpdateInsert);
+                        new_visibility.append(false);
+                        new_visibility.append(false);
+                    }
+                },
+            }
         }
 
         let new_visibility = new_visibility.finish();
 
         Ok(if new_visibility.count_ones() > 0 {
-            let new_chunk = StreamChunk::new(new_ops, columns, Some(new_visibility));
+            let new_chunk = StreamChunk::with_visibility(new_ops, columns, new_visibility);
             Some(new_chunk)
         } else {
             None
@@ -174,12 +170,7 @@ impl FilterExecutor {
                 Message::Chunk(chunk) => {
                     let chunk = chunk.compact();
 
-                    let pred_output = self
-                        .expr
-                        .eval_infallible(chunk.data_chunk(), |err| {
-                            self.ctx.on_compute_error(err, &self.info.identity)
-                        })
-                        .await;
+                    let pred_output = self.expr.eval_infallible(chunk.data_chunk()).await;
 
                     match Self::filter(chunk, pred_output)? {
                         Some(new_chunk) => yield Message::Chunk(new_chunk),
@@ -199,8 +190,8 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::build_from_pretty;
 
+    use super::super::test_utils::expr::build_from_pretty;
     use super::super::test_utils::MockSource;
     use super::super::*;
     use super::*;

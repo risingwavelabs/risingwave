@@ -20,11 +20,16 @@ import com.google.gson.Gson;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.*;
 import com.risingwave.proto.ConnectorServiceProto;
-import com.risingwave.proto.ConnectorServiceProto.SinkStreamRequest.WriteBatch.JsonPayload;
+import com.risingwave.proto.ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch.JsonPayload;
 import com.risingwave.proto.Data;
 import java.math.BigDecimal;
+import java.sql.Date;
+import java.sql.Time;
 import java.sql.Timestamp;
+import java.time.LocalDate;
+import java.util.Base64;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 public class JsonDeserializer implements Deserializer {
     private final TableSchema tableSchema;
@@ -36,15 +41,15 @@ public class JsonDeserializer implements Deserializer {
     // Encoding here should be consistent with `datum_to_json_object()` in
     // src/connector/src/sink/mod.rs
     @Override
-    public CloseableIterator<SinkRow> deserialize(
-            ConnectorServiceProto.SinkStreamRequest.WriteBatch writeBatch) {
+    public CloseableIterable<SinkRow> deserialize(
+            ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch writeBatch) {
         if (!writeBatch.hasJsonPayload()) {
             throw INVALID_ARGUMENT
                     .withDescription("expected JsonPayload, got " + writeBatch.getPayloadCase())
                     .asRuntimeException();
         }
         JsonPayload jsonPayload = writeBatch.getJsonPayload();
-        return new TrivialCloseIterator<>(
+        return new TrivialCloseIterable<>(
                 jsonPayload.getRowOpsList().stream()
                         .map(
                                 rowOp -> {
@@ -68,7 +73,7 @@ public class JsonDeserializer implements Deserializer {
                                     }
                                     return (SinkRow) new ArraySinkRow(rowOp.getOpType(), values);
                                 })
-                        .iterator());
+                        .collect(Collectors.toList()));
     }
 
     private static Long castLong(Object value) {
@@ -130,7 +135,33 @@ public class JsonDeserializer implements Deserializer {
         }
     }
 
+    private static Time castTime(Object value) {
+        try {
+            Long milli = castLong(value);
+            return new Time(milli);
+        } catch (RuntimeException e) {
+            throw io.grpc.Status.INVALID_ARGUMENT
+                    .withDescription("unable to cast into time from " + value.getClass())
+                    .asRuntimeException();
+        }
+    }
+
+    private static Date castDate(Object value) {
+        try {
+            Long days = castLong(value) - 1;
+            return Date.valueOf(LocalDate.of(1, 1, 1).plusDays(days));
+        } catch (RuntimeException e) {
+            throw io.grpc.Status.INVALID_ARGUMENT
+                    .withDescription("unable to cast into date from " + value.getClass())
+                    .asRuntimeException();
+        }
+    }
+
     private static Object validateJsonDataTypes(Data.DataType.TypeName typeName, Object value) {
+        // value might be null
+        if (value == null) {
+            return null;
+        }
         switch (typeName) {
             case INT16:
                 return castLong(value).shortValue();
@@ -167,6 +198,38 @@ public class JsonDeserializer implements Deserializer {
                             .asRuntimeException();
                 }
                 return Timestamp.valueOf((String) value);
+            case TIME:
+                return castTime(value);
+            case DATE:
+                return castDate(value);
+            case INTERVAL:
+                if (!(value instanceof String)) {
+                    throw io.grpc.Status.INVALID_ARGUMENT
+                            .withDescription("Expected interval, got " + value.getClass())
+                            .asRuntimeException();
+                }
+                return value;
+            case JSONB:
+                if (!(value instanceof String)) {
+                    throw io.grpc.Status.INVALID_ARGUMENT
+                            .withDescription("Expected jsonb, got " + value.getClass())
+                            .asRuntimeException();
+                }
+                return value;
+            case BYTEA:
+                if (!(value instanceof String)) {
+                    throw io.grpc.Status.INVALID_ARGUMENT
+                            .withDescription("Expected bytea, got " + value.getClass())
+                            .asRuntimeException();
+                }
+                return Base64.getDecoder().decode((String) value);
+            case LIST:
+                if (!(value instanceof java.util.ArrayList<?>)) {
+                    throw io.grpc.Status.INVALID_ARGUMENT
+                            .withDescription("Expected list, got " + value.getClass())
+                            .asRuntimeException();
+                }
+                return ((java.util.ArrayList<?>) value).toArray();
             default:
                 throw io.grpc.Status.INVALID_ARGUMENT
                         .withDescription("unsupported type " + typeName)

@@ -21,7 +21,7 @@ use itertools::Itertools;
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_hummock_backend, HummockInMemoryStrategy, MetaNodeConfig};
+use crate::{add_hummock_backend, add_tempo_endpoint, HummockInMemoryStrategy, MetaNodeConfig};
 
 pub struct MetaNodeService {
     config: MetaNodeConfig,
@@ -35,7 +35,9 @@ impl MetaNodeService {
     fn meta_node(&self) -> Result<Command> {
         let prefix_bin = env::var("PREFIX_BIN")?;
 
-        if let Ok(x) = env::var("ENABLE_ALL_IN_ONE") && x == "true" {
+        if let Ok(x) = env::var("ENABLE_ALL_IN_ONE")
+            && x == "true"
+        {
             Ok(Command::new(
                 Path::new(&prefix_bin).join("risingwave").join("meta-node"),
             ))
@@ -60,13 +62,10 @@ impl MetaNodeService {
                 config.listen_address, config.dashboard_port
             ));
 
-        cmd.arg("--prometheus-host")
-            .arg(format!(
-                "{}:{}",
-                config.listen_address, config.exporter_port
-            ))
-            .arg("--connector-rpc-endpoint")
-            .arg(&config.connector_rpc_endpoint);
+        cmd.arg("--prometheus-host").arg(format!(
+            "{}:{}",
+            config.listen_address, config.exporter_port
+        ));
 
         match config.provide_prometheus.as_ref().unwrap().as_slice() {
             [] => {}
@@ -82,11 +81,13 @@ impl MetaNodeService {
             }
         }
 
+        let mut is_persistent_meta_store = false;
         match config.provide_etcd_backend.as_ref().unwrap().as_slice() {
             [] => {
                 cmd.arg("--backend").arg("mem");
             }
             etcds => {
+                is_persistent_meta_store = true;
                 cmd.arg("--backend")
                     .arg("etcd")
                     .arg("--etcd-endpoints")
@@ -106,7 +107,7 @@ impl MetaNodeService {
         let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
         let provide_compactor = config.provide_compactor.as_ref().unwrap();
 
-        let is_shared_backend = match (
+        let (is_shared_backend, is_persistent_backend) = match (
             config.enable_in_memory_kv_state_backend,
             provide_minio.as_slice(),
             provide_aws_s3.as_slice(),
@@ -114,7 +115,7 @@ impl MetaNodeService {
         ) {
             (true, [], [], []) => {
                 cmd.arg("--state-store").arg("in-memory");
-                false
+                (false, false)
             }
             (true, _, _, _) => {
                 return Err(anyhow!(
@@ -149,8 +150,16 @@ impl MetaNodeService {
                 "When using a shared backend (minio, aws-s3, or shared in-memory with `risedev playground`), at least one compactor is required. Consider adding `use: compactor` in risedev config."
             ));
         }
+        if is_persistent_meta_store && !is_persistent_backend {
+            return Err(anyhow!(
+                "When using a persistent meta store (etcd), a persistent state store is required (e.g. minio, aws-s3, etc.)."
+            ));
+        }
 
         cmd.arg("--data-directory").arg("hummock_001");
+
+        let provide_tempo = config.provide_tempo.as_ref().unwrap();
+        add_tempo_endpoint(provide_tempo, cmd)?;
 
         Ok(())
     }
@@ -164,8 +173,6 @@ impl Task for MetaNodeService {
         let mut cmd = self.meta_node()?;
 
         cmd.env("RUST_BACKTRACE", "1");
-        // FIXME: Otherwise, CI will throw log size too large error
-        // cmd.env("RW_QUERY_LOG_PATH", DEFAULT_QUERY_LOG_PATH);
 
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
@@ -176,9 +183,16 @@ impl Task for MetaNodeService {
 
         if crate::util::is_env_set("RISEDEV_ENABLE_HEAP_PROFILE") {
             // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
+            let conf = "prof:true,lg_prof_interval:32,lg_prof_sample:19,prof_prefix:meta-node";
+            cmd.env("_RJEM_MALLOC_CONF", conf); // prefixed for macos
+            cmd.env("MALLOC_CONF", conf); // unprefixed for linux
+        }
+
+        if crate::util::is_env_set("ENABLE_BUILD_RW_CONNECTOR") {
+            let prefix_bin = env::var("PREFIX_BIN")?;
             cmd.env(
-                "_RJEM_MALLOC_CONF",
-                "prof:true,lg_prof_interval:32,lg_prof_sample:19,prof_prefix:meta-node",
+                "CONNECTOR_LIBS_PATH",
+                Path::new(&prefix_bin).join("connector-node/libs/"),
             );
         }
 

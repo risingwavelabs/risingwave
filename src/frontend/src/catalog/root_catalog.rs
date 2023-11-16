@@ -23,16 +23,18 @@ use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::catalog::{
     PbConnection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
+use risingwave_pb::hummock::HummockVersionStats;
 
 use super::function_catalog::FunctionCatalog;
 use super::source_catalog::SourceCatalog;
-use super::system_catalog::get_sys_catalogs_in_schema;
 use super::view_catalog::ViewCatalog;
 use super::{CatalogError, CatalogResult, ConnectionId, SinkId, SourceId, ViewId};
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::system_catalog::SystemCatalog;
+use crate::catalog::system_catalog::{
+    get_sys_tables_in_schema, get_sys_views_in_schema, SystemTableCatalog,
+};
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{DatabaseId, IndexCatalog, SchemaId};
 
@@ -95,6 +97,7 @@ pub struct Catalog {
     db_name_by_id: HashMap<DatabaseId, String>,
     /// all table catalogs in the cluster identified by universal unique table id.
     table_by_id: HashMap<TableId, Arc<TableCatalog>>,
+    table_stats: HummockVersionStats,
 }
 
 #[expect(clippy::derivable_impls)]
@@ -105,6 +108,7 @@ impl Default for Catalog {
             database_by_name: HashMap::new(),
             db_name_by_id: HashMap::new(),
             table_by_id: HashMap::new(),
+            table_stats: HummockVersionStats::default(),
         }
     }
 }
@@ -136,13 +140,22 @@ impl Catalog {
             .unwrap()
             .create_schema(proto);
 
-        if let Some(sys_tables) = get_sys_catalogs_in_schema(proto.name.as_str()) {
+        if let Some(sys_tables) = get_sys_tables_in_schema(proto.name.as_str()) {
             sys_tables.into_iter().for_each(|sys_table| {
                 self.get_database_mut(proto.database_id)
                     .unwrap()
                     .get_schema_mut(proto.id)
                     .unwrap()
                     .create_sys_table(sys_table);
+            });
+        }
+        if let Some(sys_views) = get_sys_views_in_schema(proto.name.as_str()) {
+            sys_views.into_iter().for_each(|sys_view| {
+                self.get_database_mut(proto.database_id)
+                    .unwrap()
+                    .get_schema_mut(proto.id)
+                    .unwrap()
+                    .create_sys_view(sys_view);
             });
         }
     }
@@ -247,6 +260,18 @@ impl Catalog {
             .unwrap()
             .update_table(proto);
         self.table_by_id.insert(proto.id.into(), table);
+    }
+
+    pub fn update_database(&mut self, proto: &PbDatabase) {
+        self.get_database_mut(proto.id).unwrap().update_self(proto);
+    }
+
+    pub fn update_schema(&mut self, proto: &PbSchema) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.id)
+            .unwrap()
+            .update_self(proto);
     }
 
     pub fn update_index(&mut self, proto: &PbIndex) {
@@ -361,6 +386,10 @@ impl Catalog {
         self.database_by_name.keys().cloned().collect_vec()
     }
 
+    pub fn iter_databases(&self) -> impl Iterator<Item = &DatabaseCatalog> {
+        self.database_by_name.values()
+    }
+
     pub fn get_schema_by_name(
         &self,
         db_name: &str,
@@ -384,6 +413,17 @@ impl Catalog {
         self.get_database_by_id(db_id)?
             .get_schema_by_id(schema_id)
             .ok_or_else(|| CatalogError::NotFound("schema_id", schema_id.to_string()))
+    }
+
+    pub fn get_source_by_id(
+        &self,
+        db_id: &DatabaseId,
+        schema_id: &SchemaId,
+        source_id: &SourceId,
+    ) -> CatalogResult<&Arc<SourceCatalog>> {
+        self.get_schema_by_id(db_id, schema_id)?
+            .get_source_by_id(source_id)
+            .ok_or_else(|| CatalogError::NotFound("source_id", source_id.to_string()))
     }
 
     /// Refer to [`SearchPath`].
@@ -430,6 +470,17 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("table id", table_id.to_string()))
     }
 
+    pub fn get_schema_by_table_id(
+        &self,
+        db_name: &str,
+        table_id: &TableId,
+    ) -> CatalogResult<&SchemaCatalog> {
+        self.database_by_name
+            .get(db_name)
+            .and_then(|db| db.find_schema_containing_table_id(table_id))
+            .ok_or_else(|| CatalogError::NotFound("schema with table", table_id.to_string()))
+    }
+
     // Used by test_utils only.
     pub fn alter_table_name_by_id(&mut self, table_id: &TableId, table_name: &str) {
         let (mut database_id, mut schema_id) = (0, 0);
@@ -473,7 +524,7 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         table_name: &str,
-    ) -> CatalogResult<&SystemCatalog> {
+    ) -> CatalogResult<&Arc<SystemTableCatalog>> {
         self.get_schema_by_name(db_name, schema_name)
             .unwrap()
             .get_system_table_by_name(table_name)
@@ -657,6 +708,14 @@ impl Catalog {
     /// Set the catalog cache's catalog version.
     pub fn set_version(&mut self, catalog_version: CatalogVersion) {
         self.version = catalog_version;
+    }
+
+    pub fn table_stats(&self) -> &HummockVersionStats {
+        &self.table_stats
+    }
+
+    pub fn set_table_stats(&mut self, table_stats: HummockVersionStats) {
+        self.table_stats = table_stats;
     }
 
     pub fn get_all_indexes_related_to_object(

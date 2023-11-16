@@ -14,14 +14,12 @@
 
 #![feature(allocator_api)]
 #![feature(arc_unwrap_or_clone)]
-#![feature(binary_heap_drain_sorted)]
 #![feature(bound_as_ref)]
 #![feature(bound_map)]
-#![feature(build_hasher_simple_hash_one)]
 #![feature(custom_test_frameworks)]
-#![feature(drain_filter)]
-#![feature(generators)]
-#![feature(hash_drain_filter)]
+#![feature(extract_if)]
+#![feature(coroutines)]
+#![feature(hash_extract_if)]
 #![feature(lint_reasons)]
 #![feature(proc_macro_hygiene)]
 #![feature(result_option_inspect)]
@@ -34,17 +32,16 @@
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
 #![feature(assert_matches)]
 #![feature(is_sorted)]
-#![feature(btree_drain_filter)]
+#![feature(btree_extract_if)]
 #![feature(exact_size_is_empty)]
 #![feature(lazy_cell)]
-#![cfg_attr(coverage, feature(no_coverage))]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 #![recursion_limit = "256"]
 #![feature(error_generic_member_access)]
-#![feature(provide_any)]
 #![feature(let_chains)]
 #![feature(associated_type_bounds)]
-#![feature(local_key_cell_methods)]
 #![feature(exclusive_range_pattern)]
+#![feature(impl_trait_in_assoc_type)]
 
 pub mod hummock;
 pub mod memory;
@@ -58,7 +55,6 @@ pub mod error;
 pub mod opts;
 pub mod store_impl;
 pub mod table;
-pub mod write_batch;
 
 pub mod filter_key_extractor;
 pub mod mem_table;
@@ -66,7 +62,7 @@ pub mod mem_table;
 #[cfg(feature = "failpoints")]
 mod storage_failpoints;
 
-pub use store::{StateStore, StateStoreIter};
+pub use store::{StateStore, StateStoreIter, StateStoreReadIterStream};
 pub use store_impl::StateStoreImpl;
 
 pub enum TableScanOptions {

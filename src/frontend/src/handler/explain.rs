@@ -23,13 +23,12 @@ use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
 use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::gen_sink_plan;
-use super::create_table::{
-    check_create_table_with_source, gen_create_table_plan, gen_create_table_plan_with_source,
-    ColumnIdGenerator,
-};
+use super::create_table::ColumnIdGenerator;
 use super::query::gen_batch_plan_by_statement;
 use super::RwPgResponse;
+use crate::handler::create_table::handle_create_table_plan;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Convention, Explain};
 use crate::optimizer::OptimizerContext;
 use crate::scheduler::worker_node_manager::WorkerNodeSelector;
@@ -60,39 +59,35 @@ async fn do_handle_explain(
                 source_schema,
                 source_watermarks,
                 append_only,
+                cdc_table_info,
                 ..
             } => {
-                let with_options = context.with_options();
-                let plan = match check_create_table_with_source(with_options, source_schema)? {
+                let col_id_gen = ColumnIdGenerator::new_initial();
+                // TODO(st1page): refactor it
+                let (source_schema, notice) = match source_schema {
                     Some(s) => {
-                        gen_create_table_plan_with_source(
-                            context,
-                            name,
-                            columns,
-                            constraints,
-                            s,
-                            source_watermarks,
-                            ColumnIdGenerator::new_initial(),
-                            append_only,
-                        )
-                        .await?
-                        .0
+                        let (s, notice) = s.into_source_schema_v2();
+                        (Some(s), notice)
                     }
-                    None => {
-                        gen_create_table_plan(
-                            context,
-                            name,
-                            columns,
-                            constraints,
-                            ColumnIdGenerator::new_initial(),
-                            source_watermarks,
-                            append_only,
-                        )?
-                        .0
-                    }
+                    None => (None, None),
                 };
-                let context = plan.ctx();
 
+                let (plan, _source, _table, _job_type) = handle_create_table_plan(
+                    context,
+                    col_id_gen,
+                    source_schema,
+                    cdc_table_info,
+                    name.clone(),
+                    columns,
+                    constraints,
+                    source_watermarks,
+                    append_only,
+                )
+                .await?;
+                let context = plan.ctx();
+                if let Some(notice) = notice {
+                    context.warn_to_user(notice);
+                }
                 (Ok(plan), context)
             }
 
@@ -122,7 +117,7 @@ async fn do_handle_explain(
                     .map(|x| x.0),
 
                     Statement::CreateSink { stmt } => {
-                        gen_sink_plan(&session, context.clone(), stmt).map(|x| x.0)
+                        gen_sink_plan(&session, context.clone(), stmt).map(|x| x.1)
                     }
 
                     Statement::CreateIndex {
@@ -181,7 +176,7 @@ async fn do_handle_explain(
                         Convention::Batch => {
                             let worker_node_manager_reader = WorkerNodeSelector::new(
                                 session.env().worker_node_manager_ref(),
-                                !session.config().only_checkpoint_visible(),
+                                session.is_barrier_read(),
                             );
                             batch_plan_fragmenter = Some(BatchPlanFragmenter::new(
                                 worker_node_manager_reader,
@@ -200,8 +195,7 @@ async fn do_handle_explain(
             ExplainType::Physical => {
                 // if explain trace is on, the plan has been in the rows
                 if !explain_trace && let Ok(plan) = &plan {
-                    let output = plan.explain_to_string()?;
-                    blocks.push(output);
+                    blocks.push(plan.explain_to_string());
                 }
             }
             ExplainType::Logical => {
@@ -263,14 +257,14 @@ pub async fn handle_explain(
         .map(|l| Row::new(vec![Some(l.into())]))
         .collect_vec();
 
-    Ok(PgResponse::new_for_stream(
-        StatementType::EXPLAIN,
-        None,
-        rows.into(),
-        vec![PgFieldDescriptor::new(
-            "QUERY PLAN".to_owned(),
-            DataType::Varchar.to_oid(),
-            DataType::Varchar.type_len(),
-        )],
-    ))
+    Ok(PgResponse::builder(StatementType::EXPLAIN)
+        .values(
+            rows.into(),
+            vec![PgFieldDescriptor::new(
+                "QUERY PLAN".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            )],
+        )
+        .into())
 }

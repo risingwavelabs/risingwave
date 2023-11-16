@@ -3,7 +3,7 @@ create table tmp(id1 int, id2 int);
 
 query TIII
 select a.attname, a.atttypid, a.attlen, a.attnum from pg_catalog.pg_class t
-    join pg_catalog.pg_attribute a on t.oid = a.attrelid 
+    join pg_catalog.pg_attribute a on t.oid = a.attrelid
     where t.relname = 'tmp' order by a.attnum;
 ----
 id1 23 4 1
@@ -14,7 +14,7 @@ create view view1 as select id2 from tmp;
 
 query TIII
 select a.attname, a.atttypid, a.attlen, a.attnum from pg_catalog.pg_class t
-    join pg_catalog.pg_attribute a on t.oid = a.attrelid 
+    join pg_catalog.pg_attribute a on t.oid = a.attrelid
     where t.relname = 'view1';
 ----
 id2 23 4 1
@@ -32,7 +32,7 @@ statement ok
 create index tmp_idx on tmp(id2) include(id1, id3);
 
 query TT
-select i.relname, a.attname, ix.indkey from pg_catalog.pg_class t 
+select i.relname, a.attname, ix.indkey from pg_catalog.pg_class t
     join pg_catalog.pg_index ix on t.oid = ix.indrelid
     join pg_catalog.pg_class i on i.oid = ix.indexrelid
     join pg_catalog.pg_attribute a on t.oid = a.attrelid and a.attnum = ANY(ix.indkey)

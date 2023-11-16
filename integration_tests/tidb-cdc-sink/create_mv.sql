@@ -22,11 +22,20 @@ GROUP BY
 ORDER BY
     hashtag_occurrences;
 
+CREATE MATERIALIZED VIEW datatype_c0_boolean AS
+SELECT
+    c0_boolean,
+    COUNT(*) as c0_count
+FROM
+    datatype
+GROUP BY
+    c0_boolean;
 
 CREATE SINK hot_hashtags_sink FROM hot_hashtags
 WITH (
    connector='jdbc',
    jdbc.url='jdbc:mysql://tidb:4000/test?user=root&password=',
    table.name='hot_hashtags',
-   type='upsert'
+   type='upsert',
+   primary_key='window_start,hashtag'
 );

@@ -65,10 +65,18 @@ impl GrafanaService {
         let config_datasources_dir = config_root.join("provisioning").join("datasources");
         fs_err::remove_dir_all(&config_datasources_dir)?;
         fs_err::create_dir_all(&config_datasources_dir)?;
+
         fs_err::write(
             config_datasources_dir.join("risedev-prometheus.yml"),
-            GrafanaGen.gen_datasource_yml(config)?,
+            GrafanaGen.gen_prometheus_datasource_yml(config)?,
         )?;
+
+        if !config.provide_tempo.as_ref().unwrap().is_empty() {
+            fs_err::write(
+                config_datasources_dir.join("risedev-tempo.yml"),
+                GrafanaGen.gen_tempo_datasource_yml(config)?,
+            )?;
+        }
 
         let prefix_config = prefix_config.as_ref();
         let config_dashboards_dir = config_root.join("provisioning").join("dashboards");

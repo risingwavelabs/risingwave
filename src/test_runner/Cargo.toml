@@ -17,4 +17,9 @@ normal = ["workspace-hack"]
 [dependencies]
 fail = "0.5"
 sync-point = { path = "../utils/sync-point" }
+
+[target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
+
+[lints]
+workspace = true

@@ -15,35 +15,45 @@
 use std::sync::LazyLock;
 
 use itertools::Itertools;
-use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
+use risingwave_common::types::DataType;
 
-use crate::catalog::system_catalog::SystemCatalogColumnsDef;
+use crate::catalog::system_catalog::BuiltinView;
 use crate::expr::cast_map_array;
 
-/// The catalog `pg_cast` stores data type conversion paths.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-cast.html`]
-pub const PG_CAST_TABLE_NAME: &str = "pg_cast";
-pub const PG_CAST_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
-    (DataType::Int32, "oid"),
-    (DataType::Int32, "castsource"),
-    (DataType::Int32, "casttarget"),
-    (DataType::Varchar, "castcontext"),
-];
-
-pub static PG_CAST_DATA_ROWS: LazyLock<Vec<OwnedRow>> = LazyLock::new(|| {
+pub static PG_CAST_DATA: LazyLock<Vec<String>> = LazyLock::new(|| {
     let mut cast_array = cast_map_array();
     cast_array.sort();
     cast_array
         .iter()
         .enumerate()
         .map(|(idx, (src, target, ctx))| {
-            OwnedRow::new(vec![
-                Some(ScalarImpl::Int32(idx as i32)),
-                Some(ScalarImpl::Int32(DataType::from(*src).to_oid())),
-                Some(ScalarImpl::Int32(DataType::from(*target).to_oid())),
-                Some(ScalarImpl::Utf8(ctx.to_string().into())),
-            ])
+            format!(
+                "({}, {}, {}, \'{}\')",
+                idx,
+                DataType::from(*src).to_oid(),
+                DataType::from(*target).to_oid(),
+                ctx
+            )
         })
         .collect_vec()
+});
+
+/// The catalog `pg_cast` stores data type conversion paths.
+/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-cast.html`]
+pub static PG_CAST: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
+    name: "pg_cast",
+    schema: PG_CATALOG_SCHEMA_NAME,
+    columns: &[
+        (DataType::Int32, "oid"),
+        (DataType::Int32, "castsource"),
+        (DataType::Int32, "casttarget"),
+        (DataType::Varchar, "castcontext"),
+    ],
+    sql: format!(
+        "SELECT oid, castsource, casttarget, castcontext \
+            FROM (VALUES {}) AS _(oid, castsource, casttarget, castcontext)\
+    ",
+        PG_CAST_DATA.join(",")
+    ),
 });

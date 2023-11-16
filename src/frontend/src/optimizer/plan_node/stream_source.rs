@@ -12,70 +12,58 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 
+use super::stream::prelude::*;
+use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, StreamNode};
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSource {
-    pub base: PlanBase,
-    logical: generic::Source,
+    pub base: PlanBase<Stream>,
+    pub(crate) core: generic::Source,
 }
 
 impl StreamSource {
-    pub fn new(logical: generic::Source) -> Self {
-        let mut watermark_columns = FixedBitSet::with_capacity(logical.column_catalog.len());
-        if let Some(catalog) = &logical.catalog {
-            catalog
-                .watermark_descs
-                .iter()
-                .for_each(|desc| watermark_columns.insert(desc.watermark_idx as usize))
-        }
-
-        let base = PlanBase::new_stream_with_logical(
-            &logical,
+    pub fn new(core: generic::Source) -> Self {
+        let base = PlanBase::new_stream_with_core(
+            &core,
             Distribution::SomeShard,
-            logical.catalog.as_ref().map_or(true, |s| s.append_only),
+            core.catalog.as_ref().map_or(true, |s| s.append_only),
             false,
-            watermark_columns,
+            FixedBitSet::with_capacity(core.column_catalog.len()),
         );
-        Self { base, logical }
+        Self { base, core }
     }
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
-        self.logical.catalog.clone()
-    }
-
-    pub fn column_names(&self) -> Vec<String> {
-        self.schema()
-            .fields()
-            .iter()
-            .map(|f| f.name.clone())
-            .collect()
+        self.core.catalog.clone()
     }
 }
 
 impl_plan_tree_node_for_leaf! { StreamSource }
 
-impl fmt::Display for StreamSource {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("StreamSource");
-        if let Some(catalog) = self.source_catalog() {
-            builder
-                .field("source", &catalog.name)
-                .field("columns", &self.column_names());
-        }
-        builder.finish()
+impl Distill for StreamSource {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let fields = if let Some(catalog) = self.source_catalog() {
+            let src = Pretty::from(catalog.name.clone());
+            let col = column_names_pretty(self.schema());
+            vec![("source", src), ("columns", col)]
+        } else {
+            vec![]
+        };
+        childless_record("StreamSource", fields)
     }
 }
 
@@ -91,14 +79,20 @@ impl StreamNode for StreamSource {
                     .to_internal_table_prost(),
             ),
             info: Some(source_catalog.info.clone()),
-            row_id_index: self.logical.row_id_index.map(|index| index as _),
+            row_id_index: self.core.row_id_index.map(|index| index as _),
             columns: self
-                .logical
+                .core
                 .column_catalog
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
             properties: source_catalog.properties.clone().into_iter().collect(),
+            rate_limit: self
+                .base
+                .ctx()
+                .session_ctx()
+                .config()
+                .get_streaming_rate_limit(),
         });
         PbNodeBody::Source(SourceNode { source_inner })
     }

@@ -23,8 +23,12 @@ use crate::session_config::VISIBILITY_MODE;
 
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 pub enum VisibilityMode {
+    // apply frontend config.
     #[default]
+    Default,
+    // read barrier from streaming compute node.
     All,
+    // read checkpoint from serving compute node.
     Checkpoint,
 }
 
@@ -51,6 +55,8 @@ impl TryFrom<&[&str]> for VisibilityMode {
             Ok(Self::All)
         } else if s.eq_ignore_ascii_case("checkpoint") {
             Ok(Self::Checkpoint)
+        } else if s.eq_ignore_ascii_case("default") {
+            Ok(Self::Default)
         } else {
             Err(InvalidConfigValue {
                 config_entry: Self::entry_name().to_string(),
@@ -63,6 +69,7 @@ impl TryFrom<&[&str]> for VisibilityMode {
 impl std::fmt::Display for VisibilityMode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Default => write!(f, "default"),
             Self::All => write!(f, "all"),
             Self::Checkpoint => write!(f, "checkpoint"),
         }
@@ -90,6 +97,10 @@ mod tests {
         assert_eq!(
             VisibilityMode::try_from(["checkPoint"].as_slice()).unwrap(),
             VisibilityMode::Checkpoint
+        );
+        assert_eq!(
+            VisibilityMode::try_from(["default"].as_slice()).unwrap(),
+            VisibilityMode::Default
         );
         assert!(VisibilityMode::try_from(["ab"].as_slice()).is_err());
     }

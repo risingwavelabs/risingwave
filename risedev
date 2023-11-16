@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
 
 if [ -z "$(which cargo-binstall)" ]; then
-    cargo install cargo-quickinstall --locked
-    cargo quickinstall cargo-binstall
+    echo "Installing cargo-binstall..."
+    curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 fi
 
 if [ -z "$(which cargo-make)" ]; then
     echo "Installing cargo-make..."
-    cargo binstall cargo-make --version "^0.36.6" --locked # >= 0.36.6, < 0.37.0
+    cargo binstall cargo-make --version "^0.36.10" --locked # >= 0.36.10, < 0.37.0
 fi
 
 touch risedev-components.user.env
 
 if [ $# -eq 0 ] || [ "$1" == "-h" ] || [ "$1" ==  "--help" ]; then
-    cargo make --list-all-steps
+    cargo make --list-all-steps --hide-uninteresting
     exit 0
 fi
 
-cargo make configure-if-not-configured
-cargo make "$@"
+cargo make --allow-private configure-if-not-configured
+# We marked many tasks as private, so we can have a more concise output when listing all tasks.
+# But we allow private tasks to be executed.
+cargo make --allow-private "$@"

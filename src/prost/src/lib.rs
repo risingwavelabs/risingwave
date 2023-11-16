@@ -13,9 +13,13 @@
 // limitations under the License.
 
 #![expect(clippy::all)]
-#![expect(rustdoc::bare_urls)]
 #![expect(clippy::doc_markdown)]
+#![allow(non_snake_case)] // for derived code of `Message`
 #![feature(lint_reasons)]
+
+use std::str::FromStr;
+
+use thiserror::Error;
 
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/catalog.rs")]
@@ -26,6 +30,9 @@ pub mod common;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/compute.rs")]
 pub mod compute;
+#[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/cloud_service.rs")]
+pub mod cloud_service;
 #[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/data.rs")]
 pub mod data;
@@ -93,6 +100,9 @@ pub mod common_serde;
 #[path = "compute.serde.rs"]
 pub mod compute_serde;
 #[rustfmt::skip]
+#[path = "cloud_service.serde.rs"]
+pub mod cloud_service_serde;
+#[rustfmt::skip]
 #[path = "data.serde.rs"]
 pub mod data_serde;
 #[rustfmt::skip]
@@ -141,12 +151,21 @@ pub mod backup_service_serde;
 #[path = "java_binding.serde.rs"]
 pub mod java_binding_serde;
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Error)]
+#[error("field `{0}` not found")]
 pub struct PbFieldNotFound(pub &'static str);
 
 impl From<PbFieldNotFound> for tonic::Status {
     fn from(e: PbFieldNotFound) -> Self {
-        tonic::Status::new(tonic::Code::Internal, e.0)
+        tonic::Status::new(tonic::Code::Internal, e.to_string())
+    }
+}
+
+impl FromStr for crate::expr::table_function::PbType {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::from_str_name(&s.to_uppercase()).ok_or(())
     }
 }
 

@@ -27,6 +27,11 @@ public final class ValidatorUtils {
     static final Logger LOG = LoggerFactory.getLogger(ValidatorUtils.class);
 
     static final String VALIDATE_SQL_FILE = "validate_sql.properties";
+    static final String INTERNAL_COLUMN_PREFIX = "_rw_";
+
+    public static RuntimeException failedPrecondition(String description) {
+        return Status.FAILED_PRECONDITION.withDescription(description).asRuntimeException();
+    }
 
     public static RuntimeException invalidArgument(String description) {
         return Status.INVALID_ARGUMENT.withDescription(description).asRuntimeException();
@@ -34,10 +39,6 @@ public final class ValidatorUtils {
 
     public static RuntimeException internalError(String description) {
         return Status.INTERNAL.withDescription(description).asRuntimeException();
-    }
-
-    public static RuntimeException internalError(Throwable cause) {
-        return Status.INTERNAL.withCause(cause).asRuntimeException();
     }
 
     private static final Properties storedSqls;

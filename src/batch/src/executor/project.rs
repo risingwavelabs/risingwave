@@ -16,12 +16,10 @@ use std::sync::Arc;
 
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
-use risingwave_expr::ExprError;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::{
@@ -61,15 +59,11 @@ impl ProjectExecutor {
                 async move {
                     let data_chunk = data_chunk?;
                     let arrays = {
-                        let data_chunk = &data_chunk;
-                        let expr_futs = expr.iter().map(|expr| async move {
-                            Ok::<_, ExprError>(Column::new(expr.eval(data_chunk).await?))
-                        });
-                        let arrays: Vec<Column> = futures::future::join_all(expr_futs)
+                        let expr_futs = expr.iter().map(|expr| expr.eval(&data_chunk));
+                        futures::future::join_all(expr_futs)
                             .await
                             .into_iter()
-                            .try_collect()?;
-                        arrays
+                            .try_collect()?
                     };
                     let (_, vis) = data_chunk.into_parts();
                     Ok::<_, RwError>(DataChunk::new(arrays, vis))
@@ -169,7 +163,6 @@ mod tests {
         assert_eq!(
             result_chunk
                 .column_at(0)
-                .array()
                 .as_int32()
                 .iter()
                 .collect::<Vec<_>>(),
@@ -197,9 +190,6 @@ mod tests {
         });
         let mut stream = proj_executor.execute();
         let chunk = stream.next().await.unwrap().unwrap();
-        assert_eq!(
-            *chunk.column_at(0).array(),
-            array_nonnull!(I32Array, [1]).into()
-        );
+        assert_eq!(*chunk.column_at(0), I32Array::from_iter([1]).into_ref());
     }
 }

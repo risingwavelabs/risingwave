@@ -42,7 +42,7 @@ fn gen_dataset(vsize: usize) -> Vec<Vec<u8>> {
 
 fn gen_data(dataset: &[Vec<u8>]) -> Vec<u8> {
     let mut data = vec![];
-    for entry in dataset.iter() {
+    for entry in dataset {
         data.put_slice(entry);
     }
     data

@@ -1,0 +1,28 @@
+version: "3"
+
+services:
+  spark:
+    image: apache/spark:3.4.1
+    container_name: spark
+    user: root
+    healthcheck:
+      test: netstat -ltn | grep -c ":15002"
+      interval: 5s
+      retries: 120
+    ports:
+      - "15002:15002"
+    networks:
+      iceberg_net:
+    environment:
+      - SPARK_HOME=/opt/spark
+      - PYSPARK_PYTHON=/usr/bin/python3.9
+      - PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/spark/bin:/opt/spark/sbin
+      - AWS_ACCESS_KEY_ID=admin
+      - AWS_SECRET_ACCESS_KEY=password
+      - AWS_REGION=us-east-1
+    volumes:
+      - './spark-script:/spark-script'
+    command: [ "bash", "/spark-script/spark-connect-server.sh" ]
+
+networks:
+  iceberg_net:

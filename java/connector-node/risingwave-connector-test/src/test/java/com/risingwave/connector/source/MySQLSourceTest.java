@@ -21,6 +21,7 @@ import com.risingwave.connector.ConnectorServiceImpl;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.*;
 import com.risingwave.proto.Data;
+import com.risingwave.proto.PlanCommon;
 import io.grpc.*;
 import java.io.IOException;
 import java.sql.Connection;
@@ -123,10 +124,12 @@ public class MySQLSourceTest {
                     int count = 0;
                     while (eventStream.hasNext()) {
                         List<CdcMessage> messages = eventStream.next().getEventsList();
-                        for (CdcMessage ignored : messages) {
-                            count++;
+                        for (CdcMessage msg : messages) {
+                            if (!msg.getPayload().isBlank()) {
+                                count++;
+                            }
                         }
-                        if (count == 10000) {
+                        if (count >= 10000) {
                             return count;
                         }
                     }
@@ -163,14 +166,20 @@ public class MySQLSourceTest {
         ConnectorServiceProto.TableSchema tableSchema =
                 ConnectorServiceProto.TableSchema.newBuilder()
                         .addColumns(
-                                ConnectorServiceProto.TableSchema.Column.newBuilder()
+                                PlanCommon.ColumnDesc.newBuilder()
                                         .setName("o_key")
-                                        .setDataType(Data.DataType.TypeName.INT64)
+                                        .setColumnType(
+                                                Data.DataType.newBuilder()
+                                                        .setTypeName(Data.DataType.TypeName.INT64)
+                                                        .build())
                                         .build())
                         .addColumns(
-                                ConnectorServiceProto.TableSchema.Column.newBuilder()
+                                PlanCommon.ColumnDesc.newBuilder()
                                         .setName("o_val")
-                                        .setDataType(Data.DataType.TypeName.INT32)
+                                        .setColumnType(
+                                                Data.DataType.newBuilder()
+                                                        .setTypeName(Data.DataType.TypeName.INT32)
+                                                        .build())
                                         .build())
                         .addPkIndices(0)
                         .build();
@@ -186,9 +195,7 @@ public class MySQLSourceTest {
                             tableSchema,
                             "test",
                             "orders");
-            assertEquals(
-                    "INVALID_ARGUMENT: MySQL user does not have privilege LOCK TABLES, which is needed for debezium connector",
-                    resp.getError().getErrorMessage());
+            assertEquals("", resp.getError().getErrorMessage());
         } catch (Exception e) {
             Assert.fail("validate rpc fail: " + e.getMessage());
         } finally {

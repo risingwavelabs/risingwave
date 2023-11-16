@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt;
+use std::fmt::Formatter;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -33,6 +35,7 @@ use crate::session::SessionImpl;
 /// store them as `PureStatement`.
 #[derive(Clone)]
 pub enum PrepareStatement {
+    Empty,
     Prepared(PreparedResult),
     PureStatement(Statement),
 }
@@ -45,8 +48,19 @@ pub struct PreparedResult {
 
 #[derive(Clone)]
 pub enum Portal {
+    Empty,
     Portal(PortalResult),
     PureStatement(Statement),
+}
+
+impl std::fmt::Display for Portal {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match &self {
+            Portal::Empty => write!(f, "Empty"),
+            Portal::Portal(portal) => portal.fmt(f),
+            Portal::PureStatement(stmt) => write!(f, "{}", stmt),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -56,14 +70,24 @@ pub struct PortalResult {
     pub result_formats: Vec<Format>,
 }
 
+impl std::fmt::Display for PortalResult {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}, params = {:?}",
+            self.statement, self.bound_result.parsed_params
+        )
+    }
+}
+
 pub fn handle_parse(
     session: Arc<SessionImpl>,
     statement: Statement,
-    specific_param_types: Vec<DataType>,
+    specific_param_types: Vec<Option<DataType>>,
 ) -> Result<PrepareStatement> {
     session.clear_cancel_query_flag();
-    let str_sql = statement.to_string();
-    let handler_args = HandlerArgs::new(session, &statement, &str_sql)?;
+    let sql: Arc<str> = Arc::from(statement.to_string());
+    let handler_args = HandlerArgs::new(session, &statement, sql)?;
     match &statement {
         Statement::Query(_)
         | Statement::Insert { .. }
@@ -82,7 +106,9 @@ pub fn handle_parse(
             Ok(PrepareStatement::PureStatement(statement))
         }
         Statement::CreateTable { query, .. } => {
-            if let Some(query) = query && have_parameter_in_query(query) {
+            if let Some(query) = query
+                && have_parameter_in_query(query)
+            {
                 Err(ErrorCode::NotImplemented(
                     "CREATE TABLE AS SELECT with parameters".to_string(),
                     None.into(),
@@ -93,7 +119,9 @@ pub fn handle_parse(
             }
         }
         Statement::CreateSink { stmt } => {
-            if let CreateSink::AsQuery(query) = &stmt.sink_from && have_parameter_in_query(query) {
+            if let CreateSink::AsQuery(query) = &stmt.sink_from
+                && have_parameter_in_query(query)
+            {
                 Err(ErrorCode::NotImplemented(
                     "CREATE SINK AS SELECT with parameters".to_string(),
                     None.into(),
@@ -109,11 +137,12 @@ pub fn handle_parse(
 
 pub fn handle_bind(
     prepare_statement: PrepareStatement,
-    params: Vec<Bytes>,
+    params: Vec<Option<Bytes>>,
     param_formats: Vec<Format>,
     result_formats: Vec<Format>,
 ) -> Result<Portal> {
     match prepare_statement {
+        PrepareStatement::Empty => Ok(Portal::Empty),
         PrepareStatement::Prepared(prepared_result) => {
             let PreparedResult {
                 bound_result,
@@ -125,13 +154,15 @@ pub fn handle_bind(
                 bound,
                 param_types,
                 dependent_relations,
+                ..
             } = bound_result;
 
-            let new_bound = bound.bind_parameter(params, param_formats)?;
+            let (new_bound, parsed_params) = bound.bind_parameter(params, param_formats)?;
             let new_bound_result = BoundResult {
                 stmt_type,
                 must_dist,
                 param_types,
+                parsed_params: Some(parsed_params),
                 dependent_relations,
                 bound: new_bound,
             };
@@ -142,10 +173,7 @@ pub fn handle_bind(
             }))
         }
         PrepareStatement::PureStatement(stmt) => {
-            assert!(
-                params.is_empty(),
-                "params should be empty for pure statement"
-            );
+            // Jdbc might send set statements in a prepare statement, so params could be not empty.
             Ok(Portal::PureStatement(stmt))
         }
     }
@@ -153,10 +181,14 @@ pub fn handle_bind(
 
 pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result<RwPgResponse> {
     match portal {
+        Portal::Empty => Ok(RwPgResponse::empty_result(
+            pgwire::pg_response::StatementType::EMPTY,
+        )),
         Portal::Portal(portal) => {
             session.clear_cancel_query_flag();
-            let str_sql = portal.statement.to_string();
-            let handler_args = HandlerArgs::new(session, &portal.statement, &str_sql)?;
+            let _guard = session.txn_begin_implicit(); // TODO(bugen): is this behavior correct?
+            let sql: Arc<str> = Arc::from(portal.statement.to_string());
+            let handler_args = HandlerArgs::new(session, &portal.statement, sql)?;
             match &portal.statement {
                 Statement::Query(_)
                 | Statement::Insert { .. }
@@ -166,8 +198,8 @@ pub async fn handle_execute(session: Arc<SessionImpl>, portal: Portal) -> Result
             }
         }
         Portal::PureStatement(stmt) => {
-            let sql = stmt.to_string();
-            handle(session, stmt, &sql, vec![]).await
+            let sql: Arc<str> = Arc::from(stmt.to_string());
+            handle(session, stmt, sql, vec![]).await
         }
     }
 }

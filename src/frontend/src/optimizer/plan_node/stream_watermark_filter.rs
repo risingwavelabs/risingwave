@@ -13,18 +13,17 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::fmt;
 
-use fixedbitset::FixedBitSet;
-use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::RwError;
+use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::{Field, FieldDisplay};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::WatermarkDesc;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::utils::TableCatalogBuilder;
+use super::stream::prelude::*;
+use super::stream::StreamPlanRef;
+use super::utils::{childless_record, watermark_pretty, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{ExprDisplay, ExprImpl};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -32,21 +31,21 @@ use crate::{TableCatalog, WithOptions};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamWatermarkFilter {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     input: PlanRef,
     watermark_descs: Vec<WatermarkDesc>,
 }
 
 impl StreamWatermarkFilter {
     pub fn new(input: PlanRef, watermark_descs: Vec<WatermarkDesc>) -> Self {
-        let mut watermark_columns = FixedBitSet::with_capacity(input.schema().len());
+        let mut watermark_columns = input.watermark_columns().clone();
         for i in &watermark_descs {
             watermark_columns.insert(i.get_watermark_idx() as usize)
         }
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
-            input.logical_pk().to_vec(),
+            input.stream_key().map(|v| v.to_vec()),
             input.functional_dependency().clone(),
             input.distribution().clone(),
             input.append_only(),
@@ -56,7 +55,11 @@ impl StreamWatermarkFilter {
         Self::with_base(base, input, watermark_descs)
     }
 
-    fn with_base(base: PlanBase, input: PlanRef, watermark_descs: Vec<WatermarkDesc>) -> Self {
+    fn with_base(
+        base: PlanBase<Stream>,
+        input: PlanRef,
+        watermark_descs: Vec<WatermarkDesc>,
+    ) -> Self {
         Self {
             base,
             input,
@@ -65,41 +68,35 @@ impl StreamWatermarkFilter {
     }
 }
 
-impl fmt::Display for StreamWatermarkFilter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        struct DisplayWatermarkDesc<'a> {
-            watermark_idx: u32,
-            expr: ExprImpl,
-            input_schema: &'a Schema,
-        }
-
-        impl fmt::Debug for DisplayWatermarkDesc<'_> {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                let expr_display = ExprDisplay {
-                    expr: &self.expr,
-                    input_schema: self.input_schema,
-                };
-                write!(f, "idx: {}, expr: {}", self.watermark_idx, expr_display)
-            }
-        }
-
-        let mut builder = f.debug_struct("StreamWatermarkFilter");
+impl Distill for StreamWatermarkFilter {
+    fn distill<'a>(&self) -> XmlNode<'a> {
         let input_schema = self.input.schema();
 
-        let display_watermark_descs: Vec<_> = self
-            .watermark_descs
-            .iter()
+        let display_watermark_descs = (self.watermark_descs.iter())
             .map(|desc| {
-                Ok::<_, RwError>(DisplayWatermarkDesc {
-                    watermark_idx: desc.watermark_idx,
-                    expr: ExprImpl::from_expr_proto(desc.get_expr()?)?,
+                let expr = ExprDisplay {
+                    expr: &ExprImpl::from_expr_proto(desc.get_expr().unwrap()).unwrap(),
                     input_schema,
-                })
+                };
+                let fields = vec![
+                    (
+                        "column",
+                        Pretty::display(&FieldDisplay(
+                            &self.input.schema()[desc.watermark_idx as usize],
+                        )),
+                    ),
+                    ("expr", Pretty::display(&expr)),
+                ];
+                Pretty::childless_record("Desc", fields)
             })
-            .try_collect()
-            .map_err(|_| fmt::Error)?;
-        builder.field("watermark_descs", &display_watermark_descs);
-        builder.finish()
+            .collect();
+        let display_output_watermarks =
+            watermark_pretty(self.base.watermark_columns(), input_schema).unwrap();
+        let fields = vec![
+            ("watermark_descs", Pretty::Array(display_watermark_descs)),
+            ("output_watermarks", display_output_watermarks),
+        ];
+        childless_record("StreamWatermarkFilter", fields)
     }
 }
 

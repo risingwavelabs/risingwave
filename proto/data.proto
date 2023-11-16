@@ -94,6 +94,7 @@ enum ArrayType {
   DATE = 9;
   TIME = 10;
   TIMESTAMP = 11;
+  TIMESTAMPTZ = 19;
   INTERVAL = 12;
   STRUCT = 13;
   LIST = 14;
@@ -119,16 +120,9 @@ message Datum {
   bytes body = 1;
 }
 
-// New column proto def to replace fixed width column. This def
-// aims to include all column type. Currently it do not support struct/array
-// but capable of extending in future by add other fields.
-message Column {
-  Array array = 2;
-}
-
 message DataChunk {
   uint32 cardinality = 1;
-  repeated Column columns = 2;
+  repeated Array columns = 2;
 }
 
 enum Op {
@@ -140,10 +134,10 @@ enum Op {
 }
 
 message StreamChunk {
-  // for Column::from_protobuf(), may not need later
+  // for Array::from_protobuf(), may not need later
   uint32 cardinality = 1;
   repeated Op ops = 2;
-  repeated Column columns = 3;
+  repeated Array columns = 3;
 }
 
 message Epoch {

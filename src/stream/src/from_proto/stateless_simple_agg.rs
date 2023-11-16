@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::agg::AggCall;
+use risingwave_expr::aggregate::AggCall;
 use risingwave_pb::stream_plan::SimpleAggNode;
 
 use super::*;
@@ -20,7 +20,6 @@ use crate::executor::StatelessSimpleAggExecutor;
 
 pub struct StatelessSimpleAggExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for StatelessSimpleAggExecutorBuilder {
     type Node = SimpleAggNode;
 
@@ -40,9 +39,12 @@ impl ExecutorBuilder for StatelessSimpleAggExecutorBuilder {
         Ok(StatelessSimpleAggExecutor::new(
             params.actor_context,
             input,
+            ExecutorInfo {
+                schema: params.schema,
+                pk_indices: params.pk_indices,
+                identity: params.identity,
+            },
             agg_calls,
-            params.pk_indices,
-            params.executor_id,
         )?
         .boxed())
     }

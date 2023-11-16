@@ -17,7 +17,7 @@ use std::time::Duration;
 
 use clap::Parser as ClapParser;
 use risingwave_sqlsmith::print_function_table;
-use risingwave_sqlsmith::runner::{generate, run};
+use risingwave_sqlsmith::runner::{generate, run, run_differential_testing};
 use tokio_postgres::NoTls;
 
 #[derive(ClapParser, Debug, Clone)]
@@ -61,6 +61,10 @@ struct TestOptions {
     /// query while testing.
     #[clap(long)]
     generate: Option<String>,
+
+    /// Whether to run differential testing mode.
+    #[clap(long)]
+    differential_testing: bool,
 }
 
 #[derive(clap::Subcommand, Clone, Debug)]
@@ -101,6 +105,11 @@ async fn main() {
             tracing::error!("Postgres connection error: {:?}", e);
         }
     });
+    if opt.differential_testing {
+        return run_differential_testing(&client, &opt.testdata, opt.count, None)
+            .await
+            .unwrap();
+    }
     if let Some(outdir) = opt.generate {
         generate(&client, &opt.testdata, opt.count, &outdir, None).await;
     } else {

@@ -18,16 +18,17 @@ use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::{Add, Neg, Sub};
+use std::sync::LazyLock;
 
 use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
 use chrono::Timelike;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
-use risingwave_common_proc_macro::EstimateSize;
+use regex::Regex;
 use risingwave_pb::data::PbInterval;
+use rust_decimal::prelude::Decimal;
 
-use super::ops::IsNegative;
 use super::to_binary::ToBinary;
 use super::*;
 use crate::error::{ErrorCode, Result, RwError};
@@ -569,6 +570,22 @@ impl Interval {
             usecs: 0,
         }
     }
+
+    // Assuming 1 day = 24 hours, adjust `abs(usecs)` to be less than 24 hours, and has the same
+    // sign with `days`.
+    pub fn justify_hour(self) -> Option<Self> {
+        let whole_day = (self.usecs / USECS_PER_DAY) as i32;
+        let mut usecs = self.usecs % USECS_PER_DAY;
+        let mut days = self.days.checked_add(whole_day)?;
+        if days > 0 && usecs < 0 {
+            usecs += USECS_PER_DAY;
+            days -= 1;
+        } else if days < 0 && usecs > 0 {
+            usecs -= USECS_PER_DAY;
+            days += 1;
+        }
+        Some(Self::from_month_day_usec(self.months, days, usecs))
+    }
 }
 
 /// A separate mod so that `use types::*` or `use interval::*` does not `use IntervalTestExt` by
@@ -589,7 +606,6 @@ pub mod test_utils {
         #[must_use]
         fn from_ymd(year: i32, month: i32, days: i32) -> Self {
             let months = year * 12 + month;
-            let days = days;
             let usecs = 0;
             Interval {
                 months,
@@ -824,17 +840,22 @@ impl<'de> Deserialize<'de> for Interval {
     }
 }
 
-impl crate::hash::HashKeySerDe<'_> for Interval {
-    type S = [u8; 16];
-
-    fn serialize(self) -> Self::S {
+impl crate::hash::HashKeySer<'_> for Interval {
+    fn serialize_into(self, mut buf: impl BufMut) {
         let cmp_value = IntervalCmpValue::from(self);
-        cmp_value.0.to_ne_bytes()
+        let b = cmp_value.0.to_ne_bytes();
+        buf.put_slice(&b);
     }
 
-    fn deserialize<R: std::io::Read>(source: &mut R) -> Self {
-        let value = Self::read_fixed_size_bytes::<R, 16>(source);
-        let cmp_value = IntervalCmpValue(i128::from_ne_bytes(value));
+    fn exact_size() -> Option<usize> {
+        Some(16)
+    }
+}
+
+impl crate::hash::HashKeyDe for Interval {
+    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+        let value = buf.get_i128_ne();
+        let cmp_value = IntervalCmpValue(value);
         cmp_value
             .as_justified()
             .or_else(|| cmp_value.as_alternate())
@@ -955,12 +976,6 @@ impl Zero for Interval {
     }
 }
 
-impl IsNegative for Interval {
-    fn is_negative(&self) -> bool {
-        self < &Self::from_month_day_usec(0, 0, 0)
-    }
-}
-
 impl Neg for Interval {
     type Output = Self;
 
@@ -1005,6 +1020,48 @@ impl Interval {
             ""
         };
         format!("P{years}Y{months}M{days}DT{hours}H{minutes}M{seconds}{fract_str}S")
+    }
+
+    /// Converts str to interval
+    ///
+    /// The input str must have the following format:
+    /// `P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S`
+    ///
+    /// Example
+    /// - P1Y2M3DT4H5M6.78S
+    pub fn from_iso_8601(s: &str) -> Result<Self> {
+        // ISO pattern - PnYnMnDTnHnMnS
+        static ISO_8601_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(r"P([0-9]+)Y([0-9]+)M([0-9]+)DT([0-9]+)H([0-9]+)M([0-9]+(?:\.[0-9]+)?)S")
+                .unwrap()
+        });
+        // wrap into a closure to simplify error handling
+        let f = || {
+            let caps = ISO_8601_REGEX.captures(s)?;
+            let years: i32 = caps[1].parse().ok()?;
+            let months: i32 = caps[2].parse().ok()?;
+            let days = caps[3].parse().ok()?;
+            let hours: i64 = caps[4].parse().ok()?;
+            let minutes: i64 = caps[5].parse().ok()?;
+            // usecs = sec * 1000000, use decimal to be exact
+            let usecs: i64 = (Decimal::from_str_exact(&caps[6])
+                .ok()?
+                .checked_mul(Decimal::from_str_exact("1000000").unwrap()))?
+            .try_into()
+            .ok()?;
+            Some(Interval::from_month_day_usec(
+                // months = years * 12 + months
+                years.checked_mul(12)?.checked_add(months)?,
+                days,
+                // usecs = (hours * 3600 + minutes * 60) * 1000000 + usecs
+                (hours
+                    .checked_mul(3_600)?
+                    .checked_add(minutes.checked_mul(60)?))?
+                .checked_mul(USECS_PER_SEC)?
+                .checked_add(usecs)?,
+            ))
+        };
+        f().ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval: {}, expected format P<years>Y<months>M<days>DT<hours>H<minutes>M<seconds>S", s)).into())
     }
 }
 
@@ -1205,7 +1262,7 @@ fn parse_interval(s: &str) -> Result<Vec<TimeStrToken>> {
         convert_digit(&mut num_buf, &mut tokens)?;
     }
     convert_unit(&mut char_buf, &mut tokens)?;
-    convert_hms(&mut hour_min_sec, &mut tokens).ok_or_else(|| {
+    convert_hms(&hour_min_sec, &mut tokens).ok_or_else(|| {
         ErrorCode::InvalidInputSyntax(format!("Invalid interval: {:?}", hour_min_sec))
     })?;
 
@@ -1243,7 +1300,7 @@ fn convert_unit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
 /// [`TimeStrToken::Num(1)`, `TimeStrToken::TimeUnit(DateTimeField::Hour)`,
 ///  `TimeStrToken::Num(2)`, `TimeStrToken::TimeUnit(DateTimeField::Minute)`,
 ///  `TimeStrToken::Second("3")`, `TimeStrToken::TimeUnit(DateTimeField::Second)`]
-fn convert_hms(c: &mut Vec<String>, t: &mut Vec<TimeStrToken>) -> Option<()> {
+fn convert_hms(c: &Vec<String>, t: &mut Vec<TimeStrToken>) -> Option<()> {
     if c.len() > 3 {
         return None;
     }
@@ -1329,7 +1386,9 @@ impl Interval {
     fn parse_postgres(s: &str) -> Result<Self> {
         use DateTimeField::*;
         let mut tokens = parse_interval(s)?;
-        if tokens.len() % 2 != 0 && let Some(TimeStrToken::Num(_)) = tokens.last() {
+        if tokens.len() % 2 != 0
+            && let Some(TimeStrToken::Num(_)) = tokens.last()
+        {
             tokens.push(TimeStrToken::TimeUnit(DateTimeField::Second));
         }
         if tokens.len() % 2 != 0 {
@@ -1337,7 +1396,9 @@ impl Interval {
         }
         let mut token_iter = tokens.into_iter();
         let mut result = Interval::from_month_day_usec(0, 0, 0);
-        while let Some(num) = token_iter.next() && let Some(interval_unit) = token_iter.next() {
+        while let Some(num) = token_iter.next()
+            && let Some(interval_unit) = token_iter.next()
+        {
             match (num, interval_unit) {
                 (TimeStrToken::Num(num), TimeStrToken::TimeUnit(interval_unit)) => {
                     result = (|| match interval_unit {
@@ -1414,6 +1475,7 @@ mod tests {
 
     use super::*;
     use crate::types::ordered_float::OrderedFloat;
+    use crate::util::panic::rw_catch_unwind;
 
     #[test]
     fn test_parse() {
@@ -1514,7 +1576,7 @@ mod tests {
         for (lhs, rhs, expected) in cases {
             let lhs = Interval::from_month_day_usec(lhs.0, lhs.1, lhs.2 as i64);
             let rhs = Interval::from_month_day_usec(rhs.0, rhs.1, rhs.2 as i64);
-            let result = std::panic::catch_unwind(|| {
+            let result = rw_catch_unwind(|| {
                 let actual = lhs.exact_div(&rhs);
                 assert_eq!(actual, expected);
             });
@@ -1695,8 +1757,8 @@ mod tests {
         assert!(Interval::deserialize(&mut deserializer).is_err());
 
         let buf = i128::MIN.to_ne_bytes();
-        std::panic::catch_unwind(|| {
-            <Interval as crate::hash::HashKeySerDe>::deserialize(&mut &buf[..])
+        rw_catch_unwind(|| {
+            <Interval as crate::hash::HashKeyDe>::deserialize(&DataType::Interval, &mut &buf[..])
         })
         .unwrap_err();
     }
@@ -1705,5 +1767,14 @@ mod tests {
     fn test_interval_estimate_size() {
         let interval = Interval::MIN;
         assert_eq!(interval.estimated_size(), 16);
+    }
+
+    #[test]
+    fn test_iso_8601() {
+        let iso_8601_str = "P1Y2M3DT4H5M6.789123S";
+        let lhs = Interval::from_month_day_usec(14, 3, 14706789123);
+        let rhs = Interval::from_iso_8601(iso_8601_str).unwrap();
+        assert_eq!(rhs.as_iso_8601().as_str(), iso_8601_str);
+        assert_eq!(lhs, rhs);
     }
 }

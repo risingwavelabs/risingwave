@@ -138,12 +138,11 @@ impl BoxedExecutorBuilder for ValuesExecutor {
 mod tests {
 
     use futures::stream::StreamExt;
-    use risingwave_common::array;
     use risingwave_common::array::{
-        ArrayImpl, I16Array, I32Array, I64Array, StructArray, StructValue,
+        Array, ArrayImpl, I16Array, I32Array, I64Array, StructArray, StructValue,
     };
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::{DataType, ScalarImpl, StructType};
     use risingwave_expr::expr::{BoxedExpression, LiteralExpression};
 
     use crate::executor::{Executor, ValuesExecutor};
@@ -201,31 +200,22 @@ mod tests {
 
         let mut stream = values_executor.execute();
         let result = stream.next().await.unwrap();
-        let array: ArrayImpl = StructArray::from_slices(
-            &[true],
+        let array: ArrayImpl = StructArray::new(
+            StructType::unnamed(vec![DataType::Int32, DataType::Int32, DataType::Int32]),
             vec![
-                array! { I32Array, [Some(1)] }.into(),
-                array! { I32Array, [Some(2)] }.into(),
-                array! { I32Array, [Some(3)] }.into(),
+                I32Array::from_iter([1]).into_ref(),
+                I32Array::from_iter([2]).into_ref(),
+                I32Array::from_iter([3]).into_ref(),
             ],
-            vec![DataType::Int32, DataType::Int32, DataType::Int32],
+            [true].into_iter().collect(),
         )
         .into();
 
         if let Ok(result) = result {
-            assert_eq!(
-                *result.column_at(0).array(),
-                array! {I16Array, [Some(1_i16)]}.into()
-            );
-            assert_eq!(
-                *result.column_at(1).array(),
-                array! {I32Array, [Some(2)]}.into()
-            );
-            assert_eq!(
-                *result.column_at(2).array(),
-                array! {I64Array, [Some(3)]}.into()
-            );
-            assert_eq!(*result.column_at(3).array(), array);
+            assert_eq!(*result.column_at(0), I16Array::from_iter([1]).into_ref());
+            assert_eq!(*result.column_at(1), I32Array::from_iter([2]).into_ref());
+            assert_eq!(*result.column_at(2), I64Array::from_iter([3]).into_ref());
+            assert_eq!(*result.column_at(3), array.into());
         }
     }
 

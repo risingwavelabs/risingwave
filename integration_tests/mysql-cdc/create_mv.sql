@@ -1,8 +1,5 @@
-CREATE MATERIALIZED VIEW product_count AS
+CREATE MATERIALIZED VIEW lineitem_rw_count AS
 SELECT
-    product_id,
-    COUNT(*) as product_count
+    COUNT(*) as cnt
 FROM
-    orders
-GROUP BY
-    product_id;
+    lineitem_rw;

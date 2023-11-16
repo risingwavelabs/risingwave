@@ -15,6 +15,7 @@
 use std::rc::Rc;
 
 use itertools::Itertools;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
 
@@ -22,12 +23,15 @@ use crate::binder::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
-use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, TableFunction};
+use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{
-    LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare, LogicalSource,
-    LogicalTableFunction, PlanRef,
+    LogicalApply, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
+    LogicalSource, LogicalTableFunction, LogicalValues, PlanRef,
 };
+use crate::optimizer::property::Cardinality;
 use crate::planner::Planner;
+use crate::utils::Condition;
 
 const ERROR_WINDOW_SIZE_ARG: &str =
     "The size arg of window table function should be an interval literal.";
@@ -35,14 +39,18 @@ const ERROR_WINDOW_SIZE_ARG: &str =
 impl Planner {
     pub fn plan_relation(&mut self, relation: Relation) -> Result<PlanRef> {
         match relation {
-            Relation::BaseTable(t) => self.plan_base_table(*t),
+            Relation::BaseTable(t) => self.plan_base_table(&t),
             Relation::SystemTable(st) => self.plan_sys_table(*st),
             // TODO: order is ignored in the subquery
             Relation::Subquery(q) => Ok(self.plan_query(q.query)?.into_subplan()),
             Relation::Join(join) => self.plan_join(*join),
+            Relation::Apply(join) => self.plan_apply(*join),
             Relation::WindowTableFunction(tf) => self.plan_window_table_function(*tf),
             Relation::Source(s) => self.plan_source(*s),
-            Relation::TableFunction(tf) => self.plan_table_function(*tf),
+            Relation::TableFunction {
+                expr: tf,
+                with_ordinality,
+            } => self.plan_table_function(tf, with_ordinality),
             Relation::Watermark(tf) => self.plan_watermark(*tf),
             Relation::Share(share) => self.plan_share(*share),
         }
@@ -51,19 +59,20 @@ impl Planner {
     pub(crate) fn plan_sys_table(&mut self, sys_table: BoundSystemTable) -> Result<PlanRef> {
         Ok(LogicalScan::create(
             sys_table.sys_table_catalog.name().to_string(),
-            true,
+            ScanTableType::SysTable,
             Rc::new(sys_table.sys_table_catalog.table_desc()),
             vec![],
             self.ctx(),
             false,
+            Cardinality::unknown(), // TODO(card): cardinality of system table
         )
         .into())
     }
 
-    pub(super) fn plan_base_table(&mut self, base_table: BoundBaseTable) -> Result<PlanRef> {
+    pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
         Ok(LogicalScan::create(
             base_table.table_catalog.name().to_string(),
-            false,
+            ScanTableType::default(),
             Rc::new(base_table.table_catalog.table_desc()),
             base_table
                 .table_indexes
@@ -72,12 +81,13 @@ impl Planner {
                 .collect(),
             self.ctx(),
             base_table.for_system_time_as_of_proctime,
+            base_table.table_catalog.cardinality,
         )
         .into())
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        Ok(LogicalSource::with_catalog(Rc::new(source.catalog), false, self.ctx()).into())
+        Ok(LogicalSource::with_catalog(Rc::new(source.catalog), false, self.ctx())?.into())
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {
@@ -94,6 +104,35 @@ impl Planner {
         } else {
             Ok(LogicalJoin::create(left, right, join_type, on_clause))
         }
+    }
+
+    pub(super) fn plan_apply(&mut self, mut join: BoundJoin) -> Result<PlanRef> {
+        let join_type = join.join_type;
+        let on_clause = join.cond;
+        if on_clause.has_subquery() {
+            return Err(ErrorCode::NotImplemented(
+                "Subquery in join on condition is unsupported".into(),
+                None.into(),
+            )
+            .into());
+        }
+
+        let correlated_id = self.ctx.next_correlated_id();
+        let correlated_indices = join
+            .right
+            .collect_correlated_indices_by_depth_and_assign_id(0, correlated_id);
+        let left = self.plan_relation(join.left)?;
+        let right = self.plan_relation(join.right)?;
+
+        Ok(LogicalApply::create(
+            left,
+            right,
+            join_type,
+            Condition::with_expr(on_clause),
+            correlated_id,
+            correlated_indices,
+            false,
+        ))
     }
 
     pub(super) fn plan_window_table_function(
@@ -115,8 +154,35 @@ impl Planner {
         }
     }
 
-    pub(super) fn plan_table_function(&mut self, table_function: TableFunction) -> Result<PlanRef> {
-        Ok(LogicalTableFunction::new(table_function, self.ctx()).into())
+    pub(super) fn plan_table_function(
+        &mut self,
+        table_function: ExprImpl,
+        with_ordinality: bool,
+    ) -> Result<PlanRef> {
+        // TODO: maybe we can unify LogicalTableFunction with LogicalValues
+        match table_function {
+            ExprImpl::TableFunction(tf) => {
+                Ok(LogicalTableFunction::new(*tf, with_ordinality, self.ctx()).into())
+            }
+            expr => {
+                let mut schema = Schema {
+                    // TODO: should be named
+                    fields: vec![Field::unnamed(expr.return_type())],
+                };
+                if with_ordinality {
+                    schema
+                        .fields
+                        .push(Field::with_name(DataType::Int64, "ordinality"));
+                    Ok(LogicalValues::create(
+                        vec![vec![expr, ExprImpl::literal_bigint(1)]],
+                        schema,
+                        self.ctx(),
+                    ))
+                } else {
+                    Ok(LogicalValues::create(vec![vec![expr]], schema, self.ctx()))
+                }
+            }
+        }
     }
 
     pub(super) fn plan_share(&mut self, share: BoundShare) -> Result<PlanRef> {

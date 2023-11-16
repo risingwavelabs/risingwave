@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::future::Future;
 
 use futures::StreamExt;
 use risingwave_common::array::DataChunk;
@@ -50,6 +49,7 @@ impl GrpcExchangeSource {
                     task_id: Some(task_id),
                     plan: plan.plan,
                     epoch: plan.epoch,
+                    tracing_context: plan.tracing_context,
                 };
                 client.execute(execute_request).await?
             }
@@ -72,26 +72,22 @@ impl Debug for GrpcExchangeSource {
 }
 
 impl ExchangeSource for GrpcExchangeSource {
-    type TakeDataFuture<'a> = impl Future<Output = Result<Option<DataChunk>>> + 'a;
+    async fn take_data(&mut self) -> Result<Option<DataChunk>> {
+        let res = match self.stream.next().await {
+            None => {
+                return Ok(None);
+            }
+            Some(r) => r,
+        };
+        let task_data = res?;
+        let data = DataChunk::from_protobuf(task_data.get_record_batch()?)?.compact();
+        trace!(
+            "Receiver taskOutput = {:?}, data = {:?}",
+            self.task_output_id,
+            data
+        );
 
-    fn take_data(&mut self) -> Self::TakeDataFuture<'_> {
-        async {
-            let res = match self.stream.next().await {
-                None => {
-                    return Ok(None);
-                }
-                Some(r) => r,
-            };
-            let task_data = res?;
-            let data = DataChunk::from_protobuf(task_data.get_record_batch()?)?.compact();
-            trace!(
-                "Receiver taskOutput = {:?}, data = {:?}",
-                self.task_output_id,
-                data
-            );
-
-            Ok(Some(data))
-        }
+        Ok(Some(data))
     }
 
     fn get_task_id(&self) -> TaskId {

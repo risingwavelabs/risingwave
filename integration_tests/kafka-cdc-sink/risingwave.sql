@@ -10,7 +10,7 @@ CREATE TABLE metrics (
     fields.num.min= '-100',
     fields.num.max= '100000',
     datagen.rows.per.second = '10'
-) ROW FORMAT JSON;
+) FORMAT PLAIN ENCODE JSON;
 
 CREATE MATERIALIZED VIEW counts as select id, sum(num) from metrics group by id;
 
@@ -22,6 +22,5 @@ connector = 'kafka',
 properties.bootstrap.server='message_queue:29092',
 topic = 'counts',
 type = 'debezium',
-use_transaction = 'false',
 primary_key = 'id'
 );

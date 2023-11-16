@@ -1,0 +1,65 @@
+# wrong strategy name
+statement error
+create source s1 () with (
+  connector = 'kafka',
+  topic = 'upsert_avro_json-record',
+  properties.bootstrap.server = 'message_queue:29092'
+) format plain encode avro (
+  schema.registry = 'http://message_queue:8081',
+  schema.registry.name.strategy = 'no sense',
+  message = 'CPLM.OBJ_ATTRIBUTE_VALUE',
+);
+
+# redundant field key.message
+statement error
+create source s1 () with (
+  connector = 'kafka',
+  topic = 'upsert_avro_json-record',
+  properties.bootstrap.server = 'message_queue:29092'
+) format plain encode avro (
+  schema.registry = 'http://message_queue:8081',
+  schema.registry.name.strategy = 'record_name_strategy',
+  message = 'CPLM.OBJ_ATTRIBUTE_VALUE',
+  key.message = 'string'
+);
+
+statement ok
+create source s1 () with (
+  connector = 'kafka',
+  topic = 'upsert_avro_json-record',
+  properties.bootstrap.server = 'message_queue:29092'
+) format plain encode avro (
+  schema.registry = 'http://message_queue:8081',
+  schema.registry.name.strategy = 'record_name_strategy',
+  message = 'CPLM.OBJ_ATTRIBUTE_VALUE',
+);
+
+# lack field key.message
+statement error
+create table t1 () with (
+    connector = 'kafka',
+    topic = 'upsert_avro_json-topic-record',
+    properties.bootstrap.server = 'message_queue:29092'
+) format upsert encode avro (
+    schema.registry = 'http://message_queue:8081',
+    schema.registry.name.strategy = 'topic_record_name_strategy',
+    message = 'CPLM.OBJ_ATTRIBUTE_VALUE'
+);
+
+statement ok
+create table t1 () with (
+    connector = 'kafka',
+    topic = 'upsert_avro_json-topic-record',
+    properties.bootstrap.server = 'message_queue:29092'
+) format upsert encode avro (
+    schema.registry = 'http://message_queue:8081',
+    schema.registry.name.strategy = 'topic_record_name_strategy',
+    message = 'CPLM.OBJ_ATTRIBUTE_VALUE',
+    key.message = 'string'
+);
+
+statement ok
+drop source s1;
+
+statement ok
+drop table t1;

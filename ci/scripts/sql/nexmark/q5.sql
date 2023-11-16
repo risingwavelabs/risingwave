@@ -16,22 +16,22 @@ FROM (
         window_start
 ) AS AuctionBids
 JOIN (
-	SELECT
+    SELECT
         max(CountBids.num) AS maxn,
         CountBids.starttime_c
-	FROM (
-		SELECT
+    FROM (
+        SELECT
             count(*) AS num,
             window_start AS starttime_c
-		FROM
+        FROM
             HOP(bid, date_time, INTERVAL '2' SECOND, INTERVAL '10' SECOND)
         GROUP BY
             bid.auction,
             window_start
-		) AS CountBids
-	GROUP BY
+        ) AS CountBids
+    GROUP BY
         CountBids.starttime_c
-	) AS MaxBids
+    ) AS MaxBids
 ON
     AuctionBids.starttime = MaxBids.starttime_c AND
     AuctionBids.num >= MaxBids.maxn

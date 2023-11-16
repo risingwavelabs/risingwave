@@ -1,0 +1,14 @@
+sleep 5s
+
+statement ok
+flush;
+
+query IT rowsort
+select * from t
+----
+1 NULL NULL
+2 22 NULL
+3 33 333
+
+statement ok
+drop table t;

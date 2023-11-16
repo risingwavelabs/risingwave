@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::ops::AddAssign;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -48,22 +49,22 @@ pub struct TableFragments {
     state: State,
 
     /// The table fragments.
-    pub(crate) fragments: BTreeMap<FragmentId, Fragment>,
+    pub fragments: BTreeMap<FragmentId, Fragment>,
 
     /// The status of actors
-    pub(crate) actor_status: BTreeMap<ActorId, ActorStatus>,
+    pub actor_status: BTreeMap<ActorId, ActorStatus>,
 
     /// The splits of actors
-    pub(crate) actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
+    pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
     /// The environment associated with this stream plan and its fragments
-    pub(crate) env: StreamEnvironment,
+    pub env: StreamEnvironment,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct StreamEnvironment {
     /// The timezone used to interpret timestamps and dates for conversion
-    pub(crate) timezone: Option<String>,
+    pub timezone: Option<String>,
 }
 
 impl StreamEnvironment {
@@ -238,6 +239,18 @@ impl TableFragments {
             .collect()
     }
 
+    pub fn actor_fragment_mapping(&self) -> HashMap<ActorId, FragmentId> {
+        self.fragments
+            .values()
+            .flat_map(|fragment| {
+                fragment
+                    .actors
+                    .iter()
+                    .map(|actor| (actor.actor_id, fragment.fragment_id))
+            })
+            .collect()
+    }
+
     /// Returns actors associated with this table.
     pub fn actors(&self) -> Vec<StreamActor> {
         self.fragments
@@ -291,10 +304,19 @@ impl TableFragments {
             .cloned()
     }
 
-    /// Returns actors that contains Chain node.
-    pub fn chain_actor_ids(&self) -> HashSet<ActorId> {
+    pub fn source_fragment(&self) -> Option<Fragment> {
+        self.fragments
+            .values()
+            .find(|fragment| {
+                (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0
+            })
+            .cloned()
+    }
+
+    /// Returns actors that contains backfill executors.
+    pub fn backfill_actor_ids(&self) -> HashSet<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
-            (fragment_type_mask & FragmentTypeFlag::ChainNode as u32) != 0
+            (fragment_type_mask & FragmentTypeFlag::StreamScan as u32) != 0
         })
         .into_iter()
         .collect()
@@ -341,9 +363,12 @@ impl TableFragments {
     }
 
     /// Resolve dependent table
-    fn resolve_dependent_table(stream_node: &StreamNode, table_ids: &mut HashSet<TableId>) {
-        if let Some(NodeBody::Chain(chain)) = stream_node.node_body.as_ref() {
-            table_ids.insert(TableId::new(chain.table_id));
+    fn resolve_dependent_table(stream_node: &StreamNode, table_ids: &mut HashMap<TableId, usize>) {
+        if let Some(NodeBody::StreamScan(stream_scan)) = stream_node.node_body.as_ref() {
+            table_ids
+                .entry(TableId::new(stream_scan.table_id))
+                .or_default()
+                .add_assign(1);
         }
 
         for child in &stream_node.input {
@@ -351,9 +376,10 @@ impl TableFragments {
         }
     }
 
-    /// Returns dependent table ids.
-    pub fn dependent_table_ids(&self) -> HashSet<TableId> {
-        let mut table_ids = HashSet::new();
+    /// Returns a mapping of dependent table ids of the `TableFragments`
+    /// to their corresponding count.
+    pub fn dependent_table_ids(&self) -> HashMap<TableId, usize> {
+        let mut table_ids = HashMap::new();
         self.fragments.values().for_each(|fragment| {
             let actor = &fragment.actors[0];
             Self::resolve_dependent_table(actor.nodes.as_ref().unwrap(), &mut table_ids);
@@ -384,16 +410,24 @@ impl TableFragments {
         map
     }
 
+    pub fn worker_parallel_units(&self) -> HashMap<WorkerId, HashSet<ParallelUnitId>> {
+        let mut map = HashMap::new();
+        for actor_status in self.actor_status.values() {
+            map.entry(actor_status.get_parallel_unit().unwrap().worker_node_id)
+                .or_insert_with(HashSet::new)
+                .insert(actor_status.get_parallel_unit().unwrap().id);
+        }
+        map
+    }
+
     pub fn update_vnode_mapping(&mut self, migrate_map: &HashMap<ParallelUnitId, ParallelUnit>) {
         for fragment in self.fragments.values_mut() {
-            if fragment.vnode_mapping.is_some() {
-                if let Some(ref mut mapping) = fragment.vnode_mapping {
-                    mapping.data.iter_mut().for_each(|id| {
-                        if migrate_map.contains_key(id) {
-                            *id = migrate_map.get(id).unwrap().id;
-                        }
-                    });
-                }
+            if let Some(mapping) = &mut fragment.vnode_mapping {
+                mapping.data.iter_mut().for_each(|id| {
+                    if migrate_map.contains_key(id) {
+                        *id = migrate_map.get(id).unwrap().id;
+                    }
+                });
             }
         }
     }

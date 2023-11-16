@@ -128,14 +128,14 @@ pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
     fragment_graph
 }
 
-#[expect(dead_code)]
+#[cfg(any())]
 fn is_stateful_executor(stream_node: &StreamNode) -> bool {
     matches!(
         stream_node.get_node_body().unwrap(),
         NodeBody::HashAgg(_)
             | NodeBody::HashJoin(_)
             | NodeBody::DeltaIndexJoin(_)
-            | NodeBody::Chain(_)
+            | NodeBody::StreamScan(_)
             | NodeBody::DynamicFilter(_)
     )
 }
@@ -144,7 +144,7 @@ fn is_stateful_executor(stream_node: &StreamNode) -> bool {
 /// Currently, it will split the fragment with multiple stateful operators (those have high I/O
 /// throughput) into multiple fragments, which may help improve the I/O concurrency.
 /// Known as "no-shuffle exchange" or "1v1 exchange".
-#[expect(dead_code)]
+#[cfg(any())]
 fn rewrite_stream_node(
     state: &mut BuildFragmentGraphState,
     stream_node: StreamNode,
@@ -211,7 +211,7 @@ fn generate_fragment_graph(
 }
 
 /// Use the given `stream_node` to create a fragment and add it to graph.
-pub(self) fn build_and_add_fragment(
+fn build_and_add_fragment(
     state: &mut BuildFragmentGraphState,
     stream_node: StreamNode,
 ) -> Result<Rc<StreamFragment>> {
@@ -257,8 +257,18 @@ fn build_fragment(
             current_fragment.fragment_type_mask |= FragmentTypeFlag::BarrierRecv as u32
         }
 
-        NodeBody::Source(_) => {
+        NodeBody::Source(node) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32;
+
+            if let Some(source) = node.source_inner.as_ref() &&
+                let Some(source_info) = source.info.as_ref() && source_info.cdc_source_job {
+                tracing::debug!("mark cdc source job as singleton");
+                current_fragment.requires_singleton = true;
+            }
+        }
+
+        NodeBody::Dml(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::Dml as u32;
         }
 
         NodeBody::Materialize(_) => {
@@ -269,9 +279,10 @@ fn build_fragment(
 
         NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
-        NodeBody::Chain(node) => {
-            current_fragment.fragment_type_mask |= FragmentTypeFlag::ChainNode as u32;
+        NodeBody::StreamScan(node) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
             // memorize table id for later use
+            // The table id could be a upstream CDC source
             state
                 .dependent_table_ids
                 .insert(TableId::new(node.table_id));
@@ -352,6 +363,7 @@ fn build_fragment(
                             r#type: DispatcherType::NoShuffle as i32,
                             dist_key_indices: vec![],
                             output_indices: (0..ref_fragment_node.fields.len() as u32).collect(),
+                            downstream_table_name: None,
                         };
 
                         let no_shuffle_exchange_operator_id = state.gen_operator_id() as u64;

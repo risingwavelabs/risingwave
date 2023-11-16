@@ -29,8 +29,8 @@ mod compose;
 pub use compose::*;
 mod compose_deploy;
 pub use compose_deploy::*;
-mod risectl_env;
-pub use risectl_env::*;
+mod risedev_env;
+pub use risedev_env::*;
 
 mod task;
 pub mod util;

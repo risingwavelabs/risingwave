@@ -20,6 +20,7 @@ use crate::row::Row;
 use crate::types::DataType;
 
 /// Type of a row change, without row data.
+#[derive(Debug, Copy, Clone)]
 pub enum RecordType {
     Insert,
     Delete,

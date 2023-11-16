@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// Wrapper and helper functions to help implement [`Executor`] for `TopN` variants
+/// Wrapper and helper functions to help implement [`crate::executor::Executor`] for `TopN` variants
 mod utils;
 use utils::*;
 
 mod top_n_cache;
 mod top_n_state;
-use top_n_cache::{CacheKey, TopNCache, TopNCacheTrait};
+use top_n_cache::{TopNCache, TopNCacheTrait};
+mod topn_cache_state;
 use top_n_state::ManagedTopNState;
+use topn_cache_state::CacheKey;
 
 // `TopN` variants
 mod group_top_n;

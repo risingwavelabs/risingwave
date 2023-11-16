@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Deref;
 use std::sync::Arc;
 
 use educe::Educe;
 use itertools::Itertools;
 use risingwave_common::catalog::IndexId;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::PbIndex;
+use risingwave_pb::catalog::{PbIndex, PbStreamJobStatus};
 
 use super::ColumnId;
 use crate::catalog::{DatabaseId, OwnedByUserCatalog, SchemaId, TableCatalog};
@@ -58,6 +59,10 @@ pub struct IndexCatalog {
     pub function_mapping: HashMap<FunctionCall, usize>,
 
     pub original_columns: Vec<ColumnId>,
+
+    pub created_at_epoch: Option<Epoch>,
+
+    pub initialized_at_epoch: Option<Epoch>,
 }
 
 impl IndexCatalog {
@@ -117,6 +122,8 @@ impl IndexCatalog {
             secondary_to_primary_mapping,
             function_mapping,
             original_columns,
+            created_at_epoch: index_prost.created_at_epoch.map(Epoch::from),
+            initialized_at_epoch: index_prost.initialized_at_epoch.map(Epoch::from),
         }
     }
 
@@ -175,8 +182,57 @@ impl IndexCatalog {
                 .map(|expr| expr.to_expr_proto())
                 .collect_vec(),
             original_columns: self.original_columns.iter().map(Into::into).collect_vec(),
+            initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
+            created_at_epoch: self.created_at_epoch.map(|e| e.0),
+            stream_job_status: PbStreamJobStatus::Creating.into(),
         }
     }
+
+    pub fn display(&self) -> IndexDisplay {
+        let index_table = self.index_table.clone();
+        let index_columns_with_ordering = index_table
+            .pk
+            .iter()
+            .filter(|x| !index_table.columns[x.column_index].is_hidden)
+            .map(|x| {
+                let index_column_name = index_table.columns[x.column_index].name().to_string();
+                format!("{} {}", index_column_name, x.order_type)
+            })
+            .collect_vec();
+
+        let pk_column_index_set = index_table
+            .pk
+            .iter()
+            .map(|x| x.column_index)
+            .collect::<HashSet<_>>();
+
+        let include_columns = index_table
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !pk_column_index_set.contains(i))
+            .filter(|(_, x)| !x.is_hidden)
+            .map(|(_, x)| x.name().to_string())
+            .collect_vec();
+
+        let distributed_by_columns = index_table
+            .distribution_key
+            .iter()
+            .map(|&x| index_table.columns[x].name().to_string())
+            .collect_vec();
+
+        IndexDisplay {
+            index_columns_with_ordering,
+            include_columns,
+            distributed_by_columns,
+        }
+    }
+}
+
+pub struct IndexDisplay {
+    pub index_columns_with_ordering: Vec<String>,
+    pub include_columns: Vec<String>,
+    pub distributed_by_columns: Vec<String>,
 }
 
 impl OwnedByUserCatalog for IndexCatalog {

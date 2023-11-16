@@ -12,17 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
+use super::generic::GenericPlanRef;
+use super::utils::impl_distill_by_unit;
 use super::{
-    generic, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
@@ -37,7 +37,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// If the condition allows nulls, then a null value is treated the same as false.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalFilter {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Filter<PlanRef>,
 }
 
@@ -117,12 +117,7 @@ impl PlanTreeNodeUnary for LogicalFilter {
 }
 
 impl_plan_tree_node_for_unary! {LogicalFilter}
-
-impl fmt::Display for LogicalFilter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.core.fmt_with_name(f, "LogicalFilter")
-    }
-}
+impl_distill_by_unit!(LogicalFilter, core, "LogicalFilter");
 
 impl ColPrunable for LogicalFilter {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
@@ -308,7 +303,6 @@ mod tests {
         assert_eq!(filter.schema().fields().len(), 2);
         assert_eq!(filter.schema().fields()[0], fields[1]);
         assert_eq!(filter.schema().fields()[1], fields[2]);
-        assert_eq!(filter.id().0, 4);
 
         let expr: ExprImpl = filter.predicate().clone().into();
         let call = expr.as_function_call().unwrap();
@@ -469,7 +463,7 @@ mod tests {
         // 3 --> 1, 2
         values
             .base
-            .functional_dependency
+            .functional_dependency_mut()
             .add_functional_dependency_by_column_indices(&[3], &[1, 2]);
         // v1 = 0 AND v2 = v3
         let predicate = ExprImpl::FunctionCall(Box::new(

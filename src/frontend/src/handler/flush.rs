@@ -27,9 +27,14 @@ pub(super) async fn handle_flush(handler_args: HandlerArgs) -> Result<RwPgRespon
 pub(crate) async fn do_flush(session: &SessionImpl) -> Result<()> {
     let client = session.env().meta_client();
     let snapshot = client.flush(true).await?;
+
+    // Wait for the snapshot to be synchronized, so that future reads in this session can see
+    // previous writes.
     session
         .env()
         .hummock_snapshot_manager()
-        .update_epoch(snapshot);
+        .wait(snapshot)
+        .await;
+
     Ok(())
 }

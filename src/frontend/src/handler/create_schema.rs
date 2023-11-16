@@ -13,14 +13,15 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::RESERVED_PG_SCHEMA_PREFIX;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::user::grant_privilege::{Action, Object};
+use risingwave_pb::user::grant_privilege::Object;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::CatalogError;
+use crate::catalog::{CatalogError, OwnedByUserCatalog};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
 
@@ -50,10 +51,9 @@ pub async fn handle_create_schema(
         {
             // If `if_not_exist` is true, not return error.
             return if if_not_exist {
-                Ok(PgResponse::empty_result_with_notice(
-                    StatementType::CREATE_SCHEMA,
-                    format!("schema \"{}\" exists, skipping", schema_name),
-                ))
+                Ok(PgResponse::builder(StatementType::CREATE_SCHEMA)
+                    .notice(format!("schema \"{}\" exists, skipping", schema_name))
+                    .into())
             } else {
                 Err(CatalogError::Duplicated("schema", schema_name).into())
             };
@@ -64,11 +64,11 @@ pub async fn handle_create_schema(
 
     session.check_privileges(&[ObjectCheckItem::new(
         db_owner,
-        Action::Create,
+        AclMode::Create,
         Object::DatabaseId(db_id),
     )])?;
 
-    let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .create_schema(db_id, &schema_name, session.user_id())
         .await?;

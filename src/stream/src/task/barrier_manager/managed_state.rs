@@ -17,13 +17,15 @@ use std::iter::once;
 
 use anyhow::anyhow;
 use risingwave_common::bail;
+use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::oneshot;
 
-use super::progress::ChainState;
+use super::progress::BackfillState;
 use super::CollectResult;
 use crate::error::{StreamError, StreamResult};
+use crate::executor::monitor::GLOBAL_STREAMING_METRICS;
 use crate::executor::Barrier;
 use crate::task::ActorId;
 
@@ -51,7 +53,7 @@ enum ManagedBarrierStateInner {
 pub(super) struct BarrierState {
     prev_epoch: u64,
     inner: ManagedBarrierStateInner,
-    checkpoint: bool,
+    kind: BarrierKind,
 }
 
 #[derive(Debug)]
@@ -62,7 +64,7 @@ pub(super) struct ManagedBarrierState {
     epoch_barrier_state_map: BTreeMap<u64, BarrierState>,
 
     /// Record the progress updates of creating mviews for each epoch of concurrent checkpoints.
-    pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, ChainState>>,
+    pub(super) create_mview_progress: HashMap<u64, HashMap<ActorId, BackfillState>>,
 
     /// Record all unexpected exited actors.
     failure_actors: HashMap<ActorId, StreamError>,
@@ -83,74 +85,73 @@ impl ManagedBarrierState {
 
     /// Notify if we have collected barriers from all actor ids. The state must be `Issued`.
     fn may_notify(&mut self, curr_epoch: u64) {
-        let to_notify = match self.epoch_barrier_state_map.get(&curr_epoch) {
-            Some(BarrierState {
-                inner:
-                    ManagedBarrierStateInner::Issued {
-                        remaining_actors, ..
+        // Report if there's progress on the earliest in-flight barrier.
+        if self.epoch_barrier_state_map.keys().next() == Some(&curr_epoch) {
+            if let Some(metrics) = GLOBAL_STREAMING_METRICS.get() {
+                metrics.barrier_manager_progress.inc();
+            }
+        }
+
+        while let Some(entry) = self.epoch_barrier_state_map.first_entry() {
+            let to_notify = matches!(
+                &entry.get().inner,
+                ManagedBarrierStateInner::Issued {
+                    remaining_actors, ..
+                } if remaining_actors.is_empty(),
+            );
+
+            if !to_notify {
+                break;
+            }
+
+            let (epoch, barrier_state) = entry.remove_entry();
+            let create_mview_progress = self
+                .create_mview_progress
+                .remove(&epoch)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(actor, state)| CreateMviewProgress {
+                    backfill_actor_id: actor,
+                    done: matches!(state, BackfillState::Done(_)),
+                    consumed_epoch: match state {
+                        BackfillState::ConsumingUpstream(consumed_epoch, _) => consumed_epoch,
+                        BackfillState::Done(_) => epoch,
                     },
-                ..
-            }) => remaining_actors.is_empty(),
-            _ => unreachable!(),
-        };
+                    consumed_rows: match state {
+                        BackfillState::ConsumingUpstream(_, consumed_rows) => consumed_rows,
+                        BackfillState::Done(consumed_rows) => consumed_rows,
+                    },
+                })
+                .collect();
 
-        if to_notify {
-            while let Some((
-                _,
-                BarrierState {
-                    inner: barrier_inner,
-                    ..
-                },
-            )) = self.epoch_barrier_state_map.first_key_value()
-            {
-                match barrier_inner {
-                    ManagedBarrierStateInner::Issued {
-                        remaining_actors, ..
-                    } => {
-                        if !remaining_actors.is_empty() {
-                            break;
-                        }
-                    }
-                    _ => break,
+            let kind = barrier_state.kind;
+            match kind {
+                BarrierKind::Unspecified => unreachable!(),
+                BarrierKind::Initial => tracing::info!(
+                    epoch = barrier_state.prev_epoch,
+                    "ignore sealing data for the first barrier"
+                ),
+                BarrierKind::Barrier | BarrierKind::Checkpoint => {
+                    dispatch_state_store!(&self.state_store, state_store, {
+                        state_store.seal_epoch(barrier_state.prev_epoch, kind.is_checkpoint());
+                    });
                 }
-                let (epoch, barrier_state) = self.epoch_barrier_state_map.pop_first().unwrap();
-                let create_mview_progress = self
-                    .create_mview_progress
-                    .remove(&epoch)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|(actor, state)| CreateMviewProgress {
-                        chain_actor_id: actor,
-                        done: matches!(state, ChainState::Done),
-                        consumed_epoch: match state {
-                            ChainState::ConsumingUpstream(consumed_epoch, _) => consumed_epoch,
-                            ChainState::Done => epoch,
-                        },
-                        consumed_rows: match state {
-                            ChainState::ConsumingUpstream(_, consumed_rows) => consumed_rows,
-                            ChainState::Done => 0,
-                        },
-                    })
-                    .collect();
+            }
 
-                dispatch_state_store!(&self.state_store, state_store, {
-                    state_store.seal_epoch(barrier_state.prev_epoch, barrier_state.checkpoint);
-                });
-
-                match barrier_state.inner {
-                    ManagedBarrierStateInner::Issued {
-                        collect_notifier, ..
-                    } => {
-                        // Notify about barrier finishing.
-                        let result = CollectResult {
-                            create_mview_progress,
-                        };
-                        if collect_notifier.unwrap().send(Ok(result)).is_err() {
-                            warn!("failed to notify barrier collection with epoch {}", epoch)
-                        }
+            match barrier_state.inner {
+                ManagedBarrierStateInner::Issued {
+                    collect_notifier, ..
+                } => {
+                    // Notify about barrier finishing.
+                    let result = CollectResult {
+                        create_mview_progress,
+                        kind,
+                    };
+                    if collect_notifier.unwrap().send(Ok(result)).is_err() {
+                        warn!("failed to notify barrier collection with epoch {}", epoch)
                     }
-                    _ => unreachable!(),
                 }
+                _ => unreachable!(),
             }
         }
     }
@@ -158,9 +159,8 @@ impl ManagedBarrierState {
     /// Clear and reset all states.
     pub(crate) fn clear_all_states(&mut self) {
         tracing::debug!("clear all states in local barrier manager");
-        self.epoch_barrier_state_map.clear();
-        self.create_mview_progress.clear();
-        self.failure_actors.clear();
+
+        *self = Self::new(self.state_store.clone());
     }
 
     /// Notify unexpected actor exit with given `actor_id`.
@@ -193,12 +193,10 @@ impl ManagedBarrierState {
 
     /// Collect a `barrier` from the actor with `actor_id`.
     pub(super) fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) {
-        tracing::trace!(
-            target: "events::stream::barrier::collect_barrier",
-            "collect_barrier: epoch = {}, actor_id = {}, state = {:#?}",
-            barrier.epoch.curr,
-            actor_id,
-            self
+        tracing::debug!(
+            target: "events::stream::barrier::manager::collect",
+            epoch = barrier.epoch.curr, actor_id, state = ?self,
+            "collect_barrier",
         );
 
         match self.epoch_barrier_state_map.get_mut(&barrier.epoch.curr) {
@@ -240,7 +238,7 @@ impl ManagedBarrierState {
                         inner: ManagedBarrierStateInner::Stashed {
                             collected_actors: once(actor_id).collect(),
                         },
-                        checkpoint: barrier.checkpoint,
+                        kind: barrier.kind,
                     },
                 );
             }
@@ -288,7 +286,15 @@ impl ManagedBarrierState {
                 );
             }
             None => {
-                let remaining_actors = actor_ids_to_collect.into_iter().collect();
+                let remaining_actors: HashSet<ActorId> = actor_ids_to_collect.into_iter().collect();
+                // The failure actors could exit before the barrier is issued, while their
+                // up-downstream actors could be stuck somehow. Return error directly to trigger the
+                // recovery.
+                for (actor_id, err) in &self.failure_actors {
+                    if remaining_actors.contains(actor_id) {
+                        bail!("Actor {actor_id} exit unexpectedly: {:?}", err);
+                    }
+                }
                 ManagedBarrierStateInner::Issued {
                     remaining_actors,
                     collect_notifier: Some(collect_notifier),
@@ -300,7 +306,7 @@ impl ManagedBarrierState {
             BarrierState {
                 prev_epoch: barrier.epoch.prev,
                 inner,
-                checkpoint: barrier.checkpoint,
+                kind: barrier.kind,
             },
         );
         self.may_notify(barrier.epoch.curr);

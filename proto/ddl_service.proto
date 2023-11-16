@@ -49,6 +49,7 @@ message DropSchemaResponse {
 
 message CreateSourceRequest {
   catalog.Source source = 1;
+  stream_plan.StreamFragmentGraph fragment_graph = 2;
 }
 
 message CreateSourceResponse {
@@ -59,9 +60,19 @@ message CreateSourceResponse {
 
 message DropSourceRequest {
   uint32 source_id = 1;
+  bool cascade = 2;
 }
 
 message DropSourceResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message AlterSourceRequest {
+  catalog.Source source = 1;
+}
+
+message AlterSourceResponse {
   common.Status status = 1;
   uint64 version = 2;
 }
@@ -79,6 +90,7 @@ message CreateSinkResponse {
 
 message DropSinkRequest {
   uint32 sink_id = 1;
+  bool cascade = 2;
 }
 
 message DropSinkResponse {
@@ -99,6 +111,7 @@ message CreateMaterializedViewResponse {
 
 message DropMaterializedViewRequest {
   uint32 table_id = 1;
+  bool cascade = 2;
 }
 
 message DropMaterializedViewResponse {
@@ -118,11 +131,24 @@ message CreateViewResponse {
 
 message DropViewRequest {
   uint32 view_id = 1;
+  bool cascade = 2;
 }
 
 message DropViewResponse {
   common.Status status = 1;
   uint64 version = 2;
+}
+
+// An enum to distinguish different types of the Table streaming job.
+// - GENERAL: Table streaming jobs w/ or w/o a connector
+// - SHARED_CDC_SOURCE: The table streaming job is created based on a shared CDC source job (risingwavelabs/rfcs#73).
+// And one may add other types to support Table jobs that based on other backfill-able sources (risingwavelabs/rfcs#72).
+enum TableJobType {
+  TABLE_JOB_TYPE_UNSPECIFIED = 0;
+  // table streaming jobs excepts the `SHARED_CDC_SOURCE` type
+  TABLE_JOB_TYPE_GENERAL = 1;
+  // table streaming job sharing a CDC source job
+  TABLE_JOB_TYPE_SHARED_CDC_SOURCE = 2;
 }
 
 message CreateTableRequest {
@@ -131,6 +157,7 @@ message CreateTableRequest {
   catalog.Source source = 1;
   catalog.Table materialized_view = 2;
   stream_plan.StreamFragmentGraph fragment_graph = 3;
+  TableJobType job_type = 4;
 }
 
 message CreateTableResponse {
@@ -151,6 +178,23 @@ message AlterRelationNameRequest {
 }
 
 message AlterRelationNameResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message AlterOwnerRequest {
+  oneof object {
+    uint32 table_id = 1;
+    uint32 view_id = 2;
+    uint32 source_id = 3;
+    uint32 sink_id = 4;
+    uint32 schema_id = 5;
+    uint32 database_id = 6;
+  }
+  uint32 owner_id = 20;
+}
+
+message AlterOwnerResponse {
   common.Status status = 1;
   uint64 version = 2;
 }
@@ -179,6 +223,7 @@ message DropTableRequest {
     uint32 id = 1;
   }
   uint32 table_id = 2;
+  bool cascade = 3;
 }
 
 message DropTableResponse {
@@ -208,6 +253,7 @@ message CreateIndexResponse {
 
 message DropIndexRequest {
   uint32 index_id = 1;
+  bool cascade = 2;
 }
 
 message DropIndexResponse {
@@ -224,6 +270,8 @@ message ReplaceTablePlanRequest {
   stream_plan.StreamFragmentGraph fragment_graph = 2;
   // The mapping from the old columns to the new columns of the table.
   catalog.ColIndexMapping table_col_index_mapping = 3;
+  // Source catalog of table's associated source
+  catalog.Source source = 4;
 }
 
 message ReplaceTablePlanResponse {
@@ -257,6 +305,7 @@ message CreateConnectionRequest {
   message PrivateLink {
     catalog.Connection.PrivateLinkService.PrivateLinkProvider provider = 1;
     string service_name = 2;
+    optional string tags = 3;
   }
   string name = 1;
   uint32 database_id = 2;
@@ -296,6 +345,19 @@ message GetTablesResponse {
   map<uint32, catalog.Table> tables = 1;
 }
 
+message WaitRequest {}
+
+message WaitResponse {}
+
+message CommentOnRequest {
+  catalog.Comment comment = 1;
+}
+
+message CommentOnResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -309,6 +371,8 @@ service DdlService {
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
   rpc AlterRelationName(AlterRelationNameRequest) returns (AlterRelationNameResponse);
+  rpc AlterSource(AlterSourceRequest) returns (AlterSourceResponse);
+  rpc AlterOwner(AlterOwnerRequest) returns (AlterOwnerResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);
@@ -324,4 +388,6 @@ service DdlService {
   rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
   rpc DropConnection(DropConnectionRequest) returns (DropConnectionResponse);
   rpc GetTables(GetTablesRequest) returns (GetTablesResponse);
+  rpc Wait(WaitRequest) returns (WaitResponse);
+  rpc CommentOn(CommentOnRequest) returns (CommentOnResponse);
 }

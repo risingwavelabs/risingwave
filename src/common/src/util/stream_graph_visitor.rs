@@ -44,9 +44,12 @@ where
     visit_stream_node(fragment.node.as_mut().unwrap(), f)
 }
 
-/// Visit the internal tables of a [`StreamNode`].
-pub fn visit_stream_node_internal_tables<F>(stream_node: &mut StreamNode, mut f: F)
-where
+/// Visit the tables of a [`StreamNode`].
+fn visit_stream_node_tables_inner<F>(
+    stream_node: &mut StreamNode,
+    internal_tables_only: bool,
+    mut f: F,
+) where
     F: FnMut(&mut Table, &str),
 {
     macro_rules! always {
@@ -58,7 +61,6 @@ where
         }};
     }
 
-    #[allow(unused_macros)]
     macro_rules! optional {
         ($table:expr, $name:expr) => {
             if let Some(table) = &mut $table {
@@ -93,12 +95,13 @@ where
             // Aggregation
             NodeBody::HashAgg(node) => {
                 assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
-                always!(node.result_table, "HashAggResult");
-                for state in &mut node.agg_call_states {
-                    if let agg_call_state::Inner::MaterializedInputState(s) =
-                        state.inner.as_mut().unwrap()
-                    {
-                        always!(s.table, "HashAgg");
+                always!(node.intermediate_state_table, "HashAggState");
+                for (call_idx, state) in node.agg_call_states.iter_mut().enumerate() {
+                    match state.inner.as_mut().unwrap() {
+                        agg_call_state::Inner::ValueState(_) => {}
+                        agg_call_state::Inner::MaterializedInputState(s) => {
+                            always!(s.table, &format!("HashAggCall{}", call_idx));
+                        }
                     }
                 }
                 for (distinct_col, dedup_table) in &mut node.distinct_dedup_tables {
@@ -107,12 +110,13 @@ where
             }
             NodeBody::SimpleAgg(node) => {
                 assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
-                always!(node.result_table, "SimpleAggResult");
-                for state in &mut node.agg_call_states {
-                    if let agg_call_state::Inner::MaterializedInputState(s) =
-                        state.inner.as_mut().unwrap()
-                    {
-                        always!(s.table, "SimpleAgg");
+                always!(node.intermediate_state_table, "SimpleAggState");
+                for (call_idx, state) in node.agg_call_states.iter_mut().enumerate() {
+                    match state.inner.as_mut().unwrap() {
+                        agg_call_state::Inner::ValueState(_) => {}
+                        agg_call_state::Inner::MaterializedInputState(s) => {
+                            always!(s.table, &format!("SimpleAggCall{}", call_idx));
+                        }
                     }
                 }
                 for (distinct_col, dedup_table) in &mut node.distinct_dedup_tables {
@@ -143,6 +147,17 @@ where
                     always!(source.state_table, "Source");
                 }
             }
+            NodeBody::StreamFsFetch(node) => {
+                if let Some(source) = &mut node.node_inner {
+                    always!(source.state_table, "FsFetch");
+                }
+            }
+
+            // Sink
+            NodeBody::Sink(node) => {
+                // A sink with a kv log store should have a state table.
+                optional!(node.table, "Sink")
+            }
 
             // Now
             NodeBody::Now(node) => {
@@ -170,15 +185,42 @@ where
                 always!(node.state_table, "EowcOverWindow");
             }
 
+            NodeBody::OverWindow(node) => {
+                always!(node.state_table, "OverWindow");
+            }
+
             // Sort
             NodeBody::Sort(node) => {
                 always!(node.state_table, "Sort");
             }
 
+            // Stream Scan
+            NodeBody::StreamScan(node) => {
+                optional!(node.state_table, "StreamScan")
+            }
+
             // Note: add internal tables for new nodes here.
+            NodeBody::Materialize(node) if !internal_tables_only => {
+                always!(node.table, "Materialize")
+            }
             _ => {}
         }
     })
+}
+
+pub fn visit_stream_node_internal_tables<F>(stream_node: &mut StreamNode, f: F)
+where
+    F: FnMut(&mut Table, &str),
+{
+    visit_stream_node_tables_inner(stream_node, true, f)
+}
+
+#[allow(dead_code)]
+pub fn visit_stream_node_tables<F>(stream_node: &mut StreamNode, f: F)
+where
+    F: FnMut(&mut Table, &str),
+{
+    visit_stream_node_tables_inner(stream_node, false, f)
 }
 
 /// Visit the internal tables of a [`StreamFragment`].

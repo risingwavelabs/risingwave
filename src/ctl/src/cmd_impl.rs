@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod await_tree;
 pub mod bench;
 pub mod compute;
+pub mod debug;
 pub mod hummock;
 pub mod meta;
 pub mod profile;
+pub mod scale;
 pub mod table;
-pub mod trace;

@@ -15,7 +15,9 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::TableVersionId;
-use risingwave_pb::catalog::{Index, Sink, Source, Table};
+use risingwave_common::util::epoch::Epoch;
+use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
+use risingwave_pb::ddl_service::TableJobType;
 
 use crate::model::FragmentId;
 
@@ -25,8 +27,53 @@ use crate::model::FragmentId;
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink),
-    Table(Option<Source>, Table),
+    Table(Option<PbSource>, Table, TableJobType),
     Index(Index, Table),
+    Source(PbSource),
+}
+
+impl StreamingJob {
+    pub fn mark_created(&mut self) {
+        let created_at_epoch = Some(Epoch::now().0);
+        match self {
+            StreamingJob::MaterializedView(table) => table.created_at_epoch = created_at_epoch,
+            StreamingJob::Sink(table) => table.created_at_epoch = created_at_epoch,
+            StreamingJob::Table(source, table, ..) => {
+                table.created_at_epoch = created_at_epoch;
+                if let Some(source) = source {
+                    source.created_at_epoch = created_at_epoch;
+                }
+            }
+            StreamingJob::Index(index, _) => {
+                index.created_at_epoch = created_at_epoch;
+            }
+            StreamingJob::Source(source) => {
+                source.created_at_epoch = created_at_epoch;
+            }
+        }
+    }
+
+    pub fn mark_initialized(&mut self) {
+        let initialized_at_epoch = Some(Epoch::now().0);
+        match self {
+            StreamingJob::MaterializedView(table) => {
+                table.initialized_at_epoch = initialized_at_epoch
+            }
+            StreamingJob::Sink(table) => table.initialized_at_epoch = initialized_at_epoch,
+            StreamingJob::Table(source, table, ..) => {
+                table.initialized_at_epoch = initialized_at_epoch;
+                if let Some(source) = source {
+                    source.initialized_at_epoch = initialized_at_epoch;
+                }
+            }
+            StreamingJob::Index(index, _) => {
+                index.initialized_at_epoch = initialized_at_epoch;
+            }
+            StreamingJob::Source(source) => {
+                source.initialized_at_epoch = initialized_at_epoch;
+            }
+        }
+    }
 }
 
 impl StreamingJob {
@@ -34,11 +81,16 @@ impl StreamingJob {
         match self {
             Self::MaterializedView(table) => table.id = id,
             Self::Sink(sink) => sink.id = id,
-            Self::Table(_, table) => table.id = id,
+            Self::Table(_, table, ..) => table.id = id,
             Self::Index(index, index_table) => {
                 index.id = id;
                 index.index_table_id = id;
                 index_table.id = id;
+            }
+            StreamingJob::Source(_) => {
+                // The id of source is set in `DdlServiceImpl::create_source`,
+                // so do nothing here.
+                unreachable!()
             }
         }
     }
@@ -46,10 +98,21 @@ impl StreamingJob {
     /// Set the fragment id where the table is materialized.
     pub fn set_table_fragment_id(&mut self, id: FragmentId) {
         match self {
-            Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table) => {
+            Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table, ..) => {
                 table.fragment_id = id;
             }
-            Self::Sink(_) => {}
+            Self::Sink(_) | Self::Source(_) => {}
+        }
+    }
+
+    /// Set the fragment id where the table dml is received.
+    pub fn set_dml_fragment_id(&mut self, id: Option<FragmentId>) {
+        match self {
+            Self::Table(_, table, ..) => {
+                table.dml_fragment_id = id;
+            }
+            Self::MaterializedView(_) | Self::Index(_, _) | Self::Sink(_) => {}
+            Self::Source(_) => {}
         }
     }
 
@@ -57,8 +120,9 @@ impl StreamingJob {
         match self {
             Self::MaterializedView(table) => table.id,
             Self::Sink(sink) => sink.id,
-            Self::Table(_, table) => table.id,
+            Self::Table(_, table, ..) => table.id,
             Self::Index(index, _) => index.id,
+            Self::Source(source) => source.id,
         }
     }
 
@@ -66,18 +130,19 @@ impl StreamingJob {
         match self {
             Self::MaterializedView(table) => Some(table.id),
             Self::Sink(_sink) => None,
-            Self::Table(_, table) => Some(table.id),
+            Self::Table(_, table, ..) => Some(table.id),
             Self::Index(_, table) => Some(table.id),
+            Self::Source(_) => None,
         }
     }
 
     /// Returns the reference to the [`Table`] of the job if it exists.
     pub fn table(&self) -> Option<&Table> {
         match self {
-            Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table) => {
+            Self::MaterializedView(table) | Self::Index(_, table) | Self::Table(_, table, ..) => {
                 Some(table)
             }
-            Self::Sink(_) => None,
+            Self::Sink(_) | Self::Source(_) => None,
         }
     }
 
@@ -85,8 +150,9 @@ impl StreamingJob {
         match self {
             Self::MaterializedView(table) => table.schema_id,
             Self::Sink(sink) => sink.schema_id,
-            Self::Table(_, table) => table.schema_id,
+            Self::Table(_, table, ..) => table.schema_id,
             Self::Index(index, _) => index.schema_id,
+            Self::Source(source) => source.schema_id,
         }
     }
 
@@ -94,8 +160,9 @@ impl StreamingJob {
         match self {
             Self::MaterializedView(table) => table.database_id,
             Self::Sink(sink) => sink.database_id,
-            Self::Table(_, table) => table.database_id,
+            Self::Table(_, table, ..) => table.database_id,
             Self::Index(index, _) => index.database_id,
+            Self::Source(source) => source.database_id,
         }
     }
 
@@ -103,17 +170,29 @@ impl StreamingJob {
         match self {
             Self::MaterializedView(table) => table.name.clone(),
             Self::Sink(sink) => sink.name.clone(),
-            Self::Table(_, table) => table.name.clone(),
+            Self::Table(_, table, ..) => table.name.clone(),
             Self::Index(index, _) => index.name.clone(),
+            Self::Source(source) => source.name.clone(),
+        }
+    }
+
+    pub fn owner(&self) -> u32 {
+        match self {
+            StreamingJob::MaterializedView(mv) => mv.owner,
+            StreamingJob::Sink(sink) => sink.owner,
+            StreamingJob::Table(_, table, ..) => table.owner,
+            StreamingJob::Index(index, _) => index.owner,
+            StreamingJob::Source(source) => source.owner,
         }
     }
 
     pub fn definition(&self) -> String {
         match self {
             Self::MaterializedView(table) => table.definition.clone(),
-            Self::Table(_, table) => table.definition.clone(),
+            Self::Table(_, table, ..) => table.definition.clone(),
             Self::Index(_, table) => table.definition.clone(),
             Self::Sink(sink) => sink.definition.clone(),
+            Self::Source(source) => source.definition.clone(),
         }
     }
 
@@ -121,14 +200,15 @@ impl StreamingJob {
         match self {
             Self::MaterializedView(table) => table.properties.clone(),
             Self::Sink(sink) => sink.properties.clone(),
-            Self::Table(_, table) => table.properties.clone(),
+            Self::Table(_, table, ..) => table.properties.clone(),
             Self::Index(_, index_table) => index_table.properties.clone(),
+            Self::Source(source) => source.properties.clone(),
         }
     }
 
     /// Returns the [`TableVersionId`] if this job is `Table`.
     pub fn table_version_id(&self) -> Option<TableVersionId> {
-        if let Self::Table(_, table) = self {
+        if let Self::Table(_, table, ..) = self {
             Some(
                 table
                     .get_version()
@@ -138,5 +218,26 @@ impl StreamingJob {
         } else {
             None
         }
+    }
+
+    pub fn create_type(&self) -> CreateType {
+        match self {
+            Self::MaterializedView(table) => {
+                table.get_create_type().unwrap_or(CreateType::Foreground)
+            }
+            _ => CreateType::Foreground,
+        }
+    }
+
+    pub fn table_job_type(&self) -> Option<TableJobType> {
+        if let Self::Table(.., sub_type) = self {
+            Some(*sub_type)
+        } else {
+            None
+        }
+    }
+
+    pub fn is_source_job(&self) -> bool {
+        matches!(self, StreamingJob::Source(_))
     }
 }

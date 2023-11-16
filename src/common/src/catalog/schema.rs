@@ -21,7 +21,6 @@ use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
 use crate::types::{DataType, StructType};
 use crate::util::iter_util::ZipEqFast;
-
 /// The field in the schema of the executor's return data
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Field {
@@ -138,6 +137,10 @@ impl Schema {
 
     pub fn names(&self) -> Vec<String> {
         self.fields().iter().map(|f| f.name.clone()).collect()
+    }
+
+    pub fn names_str(&self) -> Vec<&str> {
+        self.fields().iter().map(|f| f.name.as_str()).collect()
     }
 
     pub fn data_types(&self) -> Vec<DataType> {
@@ -278,10 +281,8 @@ impl FromIterator<Field> for Schema {
 impl From<&StructType> for Schema {
     fn from(t: &StructType) -> Self {
         Schema::new(
-            t.fields
-                .iter()
-                .zip_eq_fast(t.field_names.iter())
-                .map(|(d, s)| Field::with_name(d.clone(), s))
+            t.iter()
+                .map(|(s, d)| Field::with_name(d.clone(), s))
                 .collect(),
         )
     }

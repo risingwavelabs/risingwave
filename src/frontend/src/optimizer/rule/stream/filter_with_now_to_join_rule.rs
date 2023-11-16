@@ -16,7 +16,9 @@ use risingwave_common::types::DataType;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::JoinType;
 
-use crate::expr::{try_derive_watermark, ExprRewriter, FunctionCall, InputRef};
+use crate::expr::{
+    try_derive_watermark, ExprRewriter, FunctionCall, InputRef, WatermarkDerivation,
+};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalNow};
 use crate::optimizer::rule::{BoxedRule, Rule};
@@ -44,7 +46,10 @@ impl Rule for FilterWithNowToJoinRule {
 
                 // as a sanity check, ensure that this expression will derive a watermark
                 // on the output of the now executor
-                debug_assert_eq!(try_derive_watermark(&now_expr), Some(lhs_len));
+                debug_assert_eq!(
+                    try_derive_watermark(&now_expr),
+                    WatermarkDerivation::Watermark(lhs_len)
+                );
 
                 now_filters.push(FunctionCall::new(cmp, vec![input_expr, now_expr]).unwrap());
             } else {
@@ -55,12 +60,12 @@ impl Rule for FilterWithNowToJoinRule {
         // We want to put `input_expr >/>= now_expr` before `input_expr </<= now_expr` as the former
         // will introduce a watermark that can reduce state (since `now_expr` is monotonically
         // increasing)
-        now_filters.sort_by_key(|l| rank_cmp(l.get_expr_type()));
+        now_filters.sort_by_key(|l| rank_cmp(l.func_type()));
 
         // Ignore no now filter & forbid now filters that do not create a watermark
         if now_filters.is_empty()
             || !matches!(
-                now_filters[0].get_expr_type(),
+                now_filters[0].func_type(),
                 Type::GreaterThan | Type::GreaterThanOrEqual
             )
         {

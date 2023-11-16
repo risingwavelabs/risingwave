@@ -1,6 +1,5 @@
 [meta]
 disable_recovery = true
-enable_committed_sst_sanity_check = true
 max_heartbeat_interval_secs = 600
 
 [streaming]
@@ -15,3 +14,4 @@ imm_merge_threshold = 2
 [system]
 barrier_interval_ms = 250
 checkpoint_frequency = 5
+max_concurrent_creating_streaming_jobs = 0

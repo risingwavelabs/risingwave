@@ -7,6 +7,7 @@ FROM
 GROUP BY
     city;
 
+-- Join on a Kafka stream and a CDC table
 CREATE MATERIALIZED VIEW nexmark_q8 AS
 SELECT
     P.id,
@@ -26,3 +27,9 @@ FROM
             window_start,
             window_end
     ) A ON P.id = A.seller;
+
+CREATE MATERIALIZED VIEW orders_rw_count AS
+SELECT
+    COUNT(*) as cnt
+FROM
+    orders_rw;

@@ -19,11 +19,15 @@ use std::sync::Arc;
 use parse_display::Display;
 use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
 
-use crate::array::{Array, ArrayImpl, DataChunk};
+use super::iter_util::ZipEqDebug;
+use crate::array::{Array, DataChunk};
 use crate::catalog::{FieldDisplay, Schema};
+use crate::dispatch_array_variants;
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
-use crate::types::ToDatumRef;
+use crate::estimate_size::EstimateSize;
+use crate::row::Row;
+use crate::types::{DefaultOrdered, ToDatumRef};
 
 /// Sort direction, ascending/descending.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
@@ -48,6 +52,15 @@ impl Direction {
         match self {
             Self::Ascending => PbDirection::Ascending,
             Self::Descending => PbDirection::Descending,
+        }
+    }
+}
+
+impl Direction {
+    fn reverse(self) -> Self {
+        match self {
+            Self::Ascending => Self::Descending,
+            Self::Descending => Self::Ascending,
         }
     }
 }
@@ -198,6 +211,10 @@ impl OrderType {
     pub fn nulls_are_last(&self) -> bool {
         !self.nulls_are_first()
     }
+
+    pub fn reverse(self) -> Self {
+        Self::new(self.direction.reverse(), self.nulls_are)
+    }
 }
 
 impl fmt::Display for OrderType {
@@ -289,15 +306,54 @@ impl fmt::Display for ColumnOrderDisplay<'_> {
 
 #[derive(Clone, Debug)]
 pub struct HeapElem {
-    pub column_orders: Arc<Vec<ColumnOrder>>,
-    pub chunk: DataChunk,
-    pub chunk_idx: usize,
-    pub elem_idx: usize,
+    column_orders: Arc<Vec<ColumnOrder>>,
+    chunk: DataChunk,
+    chunk_idx: usize,
+    elem_idx: usize,
     /// DataChunk can be encoded to accelerate the comparison.
     /// Use `risingwave_common::util::encoding_for_comparison::encode_chunk`
     /// to perform encoding, otherwise the comparison will be performed
     /// column by column.
-    pub encoded_chunk: Option<Arc<Vec<Vec<u8>>>>,
+    encoded_chunk: Option<Arc<Vec<Vec<u8>>>>,
+    estimated_size: usize,
+}
+
+impl HeapElem {
+    pub fn new(
+        column_orders: Arc<Vec<ColumnOrder>>,
+        chunk: DataChunk,
+        chunk_idx: usize,
+        elem_idx: usize,
+        encoded_chunk: Option<Arc<Vec<Vec<u8>>>>,
+    ) -> Self {
+        let estimated_size = encoded_chunk
+            .as_ref()
+            .map(|inner| inner.iter().map(|i| i.capacity()).sum())
+            .unwrap_or(0);
+
+        Self {
+            column_orders,
+            chunk,
+            chunk_idx,
+            elem_idx,
+            encoded_chunk,
+            estimated_size,
+        }
+    }
+
+    #[inline(always)]
+    pub fn chunk_idx(&self) -> usize {
+        self.chunk_idx
+    }
+
+    #[inline(always)]
+    pub fn elem_idx(&self) -> usize {
+        self.elem_idx
+    }
+
+    pub fn chunk(&self) -> &DataChunk {
+        &self.chunk
+    }
 }
 
 impl Ord for HeapElem {
@@ -322,6 +378,12 @@ impl Ord for HeapElem {
     }
 }
 
+impl EstimateSize for HeapElem {
+    fn estimated_heap_size(&self) -> usize {
+        self.estimated_size
+    }
+}
+
 impl PartialOrd for HeapElem {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
@@ -336,23 +398,26 @@ impl PartialEq for HeapElem {
 
 impl Eq for HeapElem {}
 
-fn compare_values<T>(lhs: Option<&T>, rhs: Option<&T>, order_type: OrderType) -> Ordering
-where
-    T: Ord,
-{
+fn generic_partial_cmp<T: PartialOrd>(
+    lhs: Option<&T>,
+    rhs: Option<&T>,
+    order_type: OrderType,
+) -> Option<Ordering> {
     let ord = match (lhs, rhs, order_type.nulls_are) {
-        (Some(l), Some(r), _) => l.cmp(r),
-        (None, None, _) => Ordering::Equal,
-        (Some(_), None, NullsAre::Largest) => Ordering::Less,
-        (Some(_), None, NullsAre::Smallest) => Ordering::Greater,
-        (None, Some(_), NullsAre::Largest) => Ordering::Greater,
-        (None, Some(_), NullsAre::Smallest) => Ordering::Less,
+        (Some(l), Some(r), _) => l.partial_cmp(r),
+        (None, None, _) => Some(Ordering::Equal),
+        (Some(_), None, NullsAre::Largest) => Some(Ordering::Less),
+        (Some(_), None, NullsAre::Smallest) => Some(Ordering::Greater),
+        (None, Some(_), NullsAre::Largest) => Some(Ordering::Greater),
+        (None, Some(_), NullsAre::Smallest) => Some(Ordering::Less),
     };
-    if order_type.is_descending() {
-        ord.reverse()
-    } else {
-        ord
-    }
+    ord.map(|o| {
+        if order_type.is_descending() {
+            o.reverse()
+        } else {
+            o
+        }
+    })
 }
 
 fn compare_values_in_array<'a, T>(
@@ -364,13 +429,14 @@ fn compare_values_in_array<'a, T>(
 ) -> Ordering
 where
     T: Array,
-    <T as Array>::RefItem<'a>: Ord,
+    <T as Array>::RefItem<'a>: PartialOrd,
 {
-    compare_values(
+    generic_partial_cmp(
         lhs_array.value_at(lhs_idx).as_ref(),
         rhs_array.value_at(rhs_idx).as_ref(),
         order_type,
     )
+    .expect("items in the same `Array` type should be able to compare")
 }
 
 pub fn compare_rows_in_chunk(
@@ -380,18 +446,27 @@ pub fn compare_rows_in_chunk(
     rhs_idx: usize,
     column_orders: &[ColumnOrder],
 ) -> Result<Ordering> {
-    for column_order in column_orders.iter() {
-        let lhs_array = lhs_data_chunk.column_at(column_order.column_index).array();
-        let rhs_array = rhs_data_chunk.column_at(column_order.column_index).array();
-        macro_rules! gen_match {
-            ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-                match (lhs_array.as_ref(), rhs_array.as_ref()) {
-                    $((ArrayImpl::$variant_name(lhs_inner), ArrayImpl::$variant_name(rhs_inner)) => Ok(compare_values_in_array(lhs_inner, lhs_idx, rhs_inner, rhs_idx, column_order.order_type)),)*
-                    (l_arr, r_arr) => Err(InternalError(format!("Unmatched array types, lhs array is: {}, rhs array is: {}", l_arr.get_ident(), r_arr.get_ident()))),
-                }?
-            }
-        }
-        let res = for_all_variants! { gen_match };
+    for column_order in column_orders {
+        let lhs_array = lhs_data_chunk.column_at(column_order.column_index);
+        let rhs_array = rhs_data_chunk.column_at(column_order.column_index);
+
+        let res = dispatch_array_variants!(&**lhs_array, lhs_inner, {
+            let rhs_inner = (&**rhs_array).try_into().map_err(|_| {
+                InternalError(format!(
+                    "Unmatched array types, lhs array is: {}, rhs array is: {}",
+                    lhs_array.get_ident(),
+                    rhs_array.get_ident(),
+                ))
+            })?;
+            compare_values_in_array(
+                lhs_inner,
+                lhs_idx,
+                rhs_inner,
+                rhs_idx,
+                column_order.order_type,
+            )
+        });
+
         if res != Ordering::Equal {
             return Ok(res);
         }
@@ -399,17 +474,99 @@ pub fn compare_rows_in_chunk(
     Ok(Ordering::Equal)
 }
 
-/// Compare two `Datum`s with specified order type.
-pub fn compare_datum(
+/// Partial compare two `Datum`s with specified order type.
+pub fn partial_cmp_datum(
     lhs: impl ToDatumRef,
     rhs: impl ToDatumRef,
     order_type: OrderType,
+) -> Option<Ordering> {
+    let lhs = lhs.to_datum_ref().map(DefaultOrdered);
+    let rhs = rhs.to_datum_ref().map(DefaultOrdered);
+    generic_partial_cmp(lhs.as_ref(), rhs.as_ref(), order_type)
+}
+
+/// Compare two `Datum`s with specified order type.
+///
+/// # Panics
+///
+/// Panics if the data types of `lhs` and `rhs` are not matched.
+pub fn cmp_datum(lhs: impl ToDatumRef, rhs: impl ToDatumRef, order_type: OrderType) -> Ordering {
+    let lhs = lhs.to_datum_ref();
+    let rhs = rhs.to_datum_ref();
+    partial_cmp_datum(lhs, rhs, order_type)
+        .unwrap_or_else(|| panic!("cannot compare {lhs:?} with {rhs:?}"))
+}
+
+/// Compare two `Datum` iterators with specified order types.
+pub fn partial_cmp_datum_iter(
+    lhs: impl IntoIterator<Item = impl ToDatumRef>,
+    rhs: impl IntoIterator<Item = impl ToDatumRef>,
+    order_types: impl IntoIterator<Item = OrderType>,
+) -> Option<Ordering> {
+    let mut order_types_iter = order_types.into_iter();
+    lhs.into_iter().partial_cmp_by(rhs, |x, y| {
+        let Some(order_type) = order_types_iter.next() else {
+            return None;
+        };
+        partial_cmp_datum(x, y, order_type)
+    })
+}
+
+/// Compare two `Datum` iterators with specified order types.
+///
+/// # Panics
+///
+/// Panics if the number of `OrderType`s is smaller than the number of `Datum`s,
+/// or if the data types of `lhs` and `rhs` are not matched.
+pub fn cmp_datum_iter(
+    lhs: impl IntoIterator<Item = impl ToDatumRef>,
+    rhs: impl IntoIterator<Item = impl ToDatumRef>,
+    order_types: impl IntoIterator<Item = OrderType>,
 ) -> Ordering {
-    compare_values(
-        lhs.to_datum_ref().as_ref(),
-        rhs.to_datum_ref().as_ref(),
-        order_type,
-    )
+    let mut order_types_iter = order_types.into_iter();
+    lhs.into_iter().cmp_by(rhs, |x, y| {
+        let order_type = order_types_iter
+            .next()
+            .expect("number of `OrderType`s is not enough");
+        cmp_datum(x, y, order_type)
+    })
+}
+
+/// Partial compare two `Row`s with specified order types.
+///
+/// NOTE: This function returns `None` if two rows have different schema.
+pub fn partial_cmp_rows(
+    lhs: impl Row,
+    rhs: impl Row,
+    order_types: &[OrderType],
+) -> Option<Ordering> {
+    if lhs.len() != rhs.len() {
+        return None;
+    }
+    lhs.iter()
+        .zip_eq_debug(rhs.iter())
+        .zip_eq_debug(order_types)
+        .try_fold(Ordering::Equal, |acc, ((l, r), order_type)| match acc {
+            Ordering::Equal => partial_cmp_datum(l, r, *order_type),
+            acc => Some(acc),
+        })
+}
+
+/// Compare two `Row`s with specified order types.
+///
+/// # Panics
+///
+/// Panics if the length of `lhs`, `rhs` and `order_types` are not equal,
+/// or, if the schemas of `lhs` and `rhs` are not matched.
+pub fn cmp_rows(lhs: impl Row, rhs: impl Row, order_types: &[OrderType]) -> Ordering {
+    assert_eq!(lhs.len(), rhs.len());
+    lhs.iter()
+        .zip_eq_debug(rhs.iter())
+        .zip_eq_debug(order_types)
+        .fold(Ordering::Equal, |acc, ((l, r), order_type)| match acc {
+            Ordering::Equal => cmp_datum(l, r, *order_type),
+            acc => acc,
+        })
 }
 
 #[cfg(test)]
@@ -459,6 +616,17 @@ mod tests {
         assert!(OrderType::descending_nulls_last().is_descending());
         assert!(OrderType::descending_nulls_last().nulls_are_smallest());
         assert!(OrderType::descending_nulls_last().nulls_are_last());
+
+        assert_eq!(OrderType::ascending().reverse(), OrderType::descending());
+        assert_eq!(OrderType::descending().reverse(), OrderType::ascending());
+        assert_eq!(
+            OrderType::ascending_nulls_first().reverse(),
+            OrderType::descending_nulls_last()
+        );
+        assert_eq!(
+            OrderType::ascending_nulls_last().reverse(),
+            OrderType::descending_nulls_first()
+        );
     }
 
     #[test]
@@ -571,59 +739,104 @@ mod tests {
         );
     }
 
+    fn common_compare_datum<CmpFn>(compare: CmpFn)
+    where
+        CmpFn: Fn(Datum, Datum, OrderType) -> Ordering,
+    {
+        assert_eq!(
+            Ordering::Equal,
+            compare(Some(42.into()), Some(42.into()), OrderType::default(),)
+        );
+        assert_eq!(Ordering::Equal, compare(None, None, OrderType::default(),));
+        assert_eq!(
+            Ordering::Less,
+            compare(Some(42.into()), Some(100.into()), OrderType::ascending(),)
+        );
+        assert_eq!(
+            Ordering::Greater,
+            compare(Some(42.into()), None, OrderType::ascending_nulls_first(),)
+        );
+        assert_eq!(
+            Ordering::Less,
+            compare(Some(42.into()), None, OrderType::ascending_nulls_last(),)
+        );
+        assert_eq!(
+            Ordering::Greater,
+            compare(Some(42.into()), None, OrderType::descending_nulls_first(),)
+        );
+        assert_eq!(
+            Ordering::Less,
+            compare(Some(42.into()), None, OrderType::descending_nulls_last(),)
+        );
+    }
+
+    fn common_compare_rows<CmpFn>(compare: CmpFn)
+    where
+        CmpFn: Fn(OwnedRow, OwnedRow, &[OrderType]) -> Ordering,
+    {
+        assert_eq!(
+            Ordering::Equal,
+            compare(
+                OwnedRow::new(vec![Some(42.into()), Some(42.into())]),
+                OwnedRow::new(vec![Some(42.into()), Some(42.into())]),
+                &[OrderType::ascending(), OrderType::ascending()],
+            )
+        );
+
+        assert_eq!(
+            Ordering::Greater,
+            compare(
+                OwnedRow::new(vec![Some(42.into()), Some(42.into())]),
+                OwnedRow::new(vec![Some(42.into()), Some(100.into())]),
+                &[OrderType::ascending(), OrderType::descending()],
+            )
+        );
+
+        assert_eq!(
+            Ordering::Less,
+            compare(
+                OwnedRow::new(vec![Some(42.into()), Some(42.into())]),
+                OwnedRow::new(vec![Some(42.into()), Some(100.into())]),
+                &[OrderType::ascending(), OrderType::ascending()],
+            )
+        );
+    }
+
     #[test]
     fn test_compare_datum() {
+        common_compare_datum(cmp_datum);
+    }
+
+    #[test]
+    fn test_compare_rows() {
+        common_compare_rows(cmp_rows);
+    }
+
+    #[test]
+    fn test_partial_compare_datum() {
+        common_compare_datum(|lhs, rhs, order| partial_cmp_datum(lhs, rhs, order).unwrap());
+
         assert_eq!(
-            Ordering::Equal,
-            compare_datum(
+            None,
+            partial_cmp_datum(
                 Some(ScalarImpl::from(42)),
-                Some(ScalarImpl::from(42)),
-                OrderType::default(),
+                Some(ScalarImpl::from("abc")),
+                OrderType::default()
             )
-        );
+        )
+    }
+
+    #[test]
+    fn test_partial_compare_rows() {
+        common_compare_rows(|lhs, rhs, orders| partial_cmp_rows(lhs, rhs, orders).unwrap());
+
         assert_eq!(
-            Ordering::Equal,
-            compare_datum(None as Datum, None as Datum, OrderType::default(),)
-        );
-        assert_eq!(
-            Ordering::Less,
-            compare_datum(
-                Some(ScalarImpl::from(42)),
-                Some(ScalarImpl::from(100)),
-                OrderType::ascending(),
+            None,
+            partial_cmp_rows(
+                OwnedRow::new(vec![Some(42.into())]),
+                OwnedRow::new(vec![Some("abc".into())]),
+                &[OrderType::default()]
             )
-        );
-        assert_eq!(
-            Ordering::Greater,
-            compare_datum(
-                Some(ScalarImpl::from(42)),
-                None as Datum,
-                OrderType::ascending_nulls_first(),
-            )
-        );
-        assert_eq!(
-            Ordering::Less,
-            compare_datum(
-                Some(ScalarImpl::from(42)),
-                None as Datum,
-                OrderType::ascending_nulls_last(),
-            )
-        );
-        assert_eq!(
-            Ordering::Greater,
-            compare_datum(
-                Some(ScalarImpl::from(42)),
-                None as Datum,
-                OrderType::descending_nulls_first(),
-            )
-        );
-        assert_eq!(
-            Ordering::Less,
-            compare_datum(
-                Some(ScalarImpl::from(42)),
-                None as Datum,
-                OrderType::descending_nulls_last(),
-            )
-        );
+        )
     }
 }

@@ -18,35 +18,39 @@ use risingwave_common::buffer::{Bitmap, BitmapIter};
 
 fn bench_bitmap(c: &mut Criterion) {
     const CHUNK_SIZE: usize = 1024;
-    let x = Bitmap::zeros(CHUNK_SIZE);
-    let y = Bitmap::ones(CHUNK_SIZE);
+    let bytes = vec![0b00110011; CHUNK_SIZE / 8];
+    let zeros = Bitmap::zeros(CHUNK_SIZE);
+    let ones = Bitmap::ones(CHUNK_SIZE);
+    let sparse = Bitmap::from_bytes(&[0x01; CHUNK_SIZE / 8]); // 1/16 set
+    let dense = Bitmap::from_bytes(&[0x7f; CHUNK_SIZE / 8]); // 15/16 set
+    let x = sparse.clone();
+    let y = dense.clone();
     let i = 0x123;
     c.bench_function("zeros", |b| b.iter(|| Bitmap::zeros(CHUNK_SIZE)));
     c.bench_function("ones", |b| b.iter(|| Bitmap::ones(CHUNK_SIZE)));
-    c.bench_function("get", |b| {
-        b.iter(|| {
-            for _ in 0..1000 {
-                black_box(x.is_set(i));
-            }
-        })
-    });
-    c.bench_function("get_1000", |b| {
-        b.iter(|| {
-            for _ in 0..1000 {
-                black_box(x.is_set(i));
-            }
-        })
-    });
-    c.bench_function("get_1000_000", |b| {
-        b.iter(|| {
-            for _ in 0..1_000_000 {
-                black_box(x.is_set(i));
-            }
-        })
-    });
+    c.bench_function("from_bytes", |b| b.iter(|| Bitmap::from_bytes(&bytes)));
+    c.bench_function("get_from_ones", |b| b.iter(|| ones.is_set(i)));
+    c.bench_function("get", |b| b.iter(|| x.is_set(i)));
     c.bench_function("and", |b| b.iter(|| &x & &y));
     c.bench_function("or", |b| b.iter(|| &x | &y));
     c.bench_function("not", |b| b.iter(|| !&x));
+    c.bench_function("eq", |b| b.iter(|| x == sparse));
+    c.bench_function("iter", |b| b.iter(|| iter_all(x.iter())));
+    c.bench_function("iter_on_ones", |b| b.iter(|| iter_all(ones.iter())));
+    c.bench_function("iter_ones_on_zeros", |b| {
+        b.iter(|| iter_all(zeros.iter_ones()))
+    });
+    c.bench_function("iter_ones_on_ones", |b| {
+        b.iter(|| iter_all(ones.iter_ones()))
+    });
+    c.bench_function("iter_ones_on_sparse", |b| {
+        b.iter(|| iter_all(sparse.iter_ones()))
+    });
+    c.bench_function("iter_ones_on_dense", |b| {
+        b.iter(|| iter_all(dense.iter_ones()))
+    });
+    // target for iter_ones_on_ones
+    c.bench_function("iter_range", |b| b.iter(|| iter_all(0..CHUNK_SIZE)));
 }
 
 /// Bench ~10 million records
@@ -77,6 +81,13 @@ fn bench_bitmap_iter(c: &mut Criterion) {
     bench_bitmap_iter_inner("zeros_iter", zeros, c);
     let ones = Bitmap::ones(CHUNK_SIZE);
     bench_bitmap_iter_inner("ones_iter", ones, c);
+}
+
+/// Consume the iterator with blackbox.
+fn iter_all(iter: impl Iterator) {
+    for x in iter {
+        black_box(x);
+    }
 }
 
 criterion_group!(benches, bench_bitmap, bench_bitmap_iter);

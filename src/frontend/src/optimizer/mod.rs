@@ -1,3 +1,4 @@
+use std::assert_matches::assert_matches;
 use std::collections::HashMap;
 // Copyright 2023 RisingWave Labs
 //
@@ -16,6 +17,7 @@ use std::ops::DerefMut;
 
 pub mod plan_node;
 pub use plan_node::{Explain, PlanRef};
+
 pub mod property;
 
 mod delta_join_solver;
@@ -29,6 +31,7 @@ pub use plan_visitor::{
 mod logical_optimization;
 mod optimizer_context;
 mod plan_expr_rewriter;
+mod plan_expr_visitor;
 mod rule;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
@@ -40,22 +43,22 @@ use risingwave_common::catalog::{ColumnCatalog, ColumnId, ConflictBehavior, Fiel
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_connector::sink::catalog::SinkFormatDesc;
 use risingwave_pb::catalog::WatermarkDesc;
 
 use self::heuristic_optimizer::ApplyOrder;
+use self::plan_node::generic::{self, PhysicalPlanRef};
 use self::plan_node::{
-    generic, stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject,
-    LogicalSource, StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink,
-    StreamWatermarkFilter, ToStreamContext,
+    stream_enforce_eowc_requirement, BatchProject, Convention, LogicalProject, LogicalSource,
+    StreamDml, StreamMaterialize, StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
+    ToStreamContext,
 };
-use self::plan_visitor::has_batch_exchange;
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
-use self::property::RequiredDist;
+use self::plan_visitor::{has_batch_exchange, CardinalityVisitor};
+use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
-use crate::expr::InputRef;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive,
 };
@@ -174,16 +177,29 @@ impl PlanRoot {
             .into());
         }
 
+        let ctx = plan.ctx();
+        // Inline session timezone mainly for rewriting now()
+        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
+
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
+        if ctx.is_explain_trace() {
+            ctx.trace("To Batch Plan:");
+            ctx.trace(plan.explain_to_string());
+        }
 
-        let ctx = plan.ctx();
+        plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Merge BatchProject",
+            vec![BatchProjectMergeRule::create()],
+            ApplyOrder::BottomUp,
+        ));
+
         // Inline session timezone
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
 
         if ctx.is_explain_trace() {
             ctx.trace("Inline Session Timezone:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
 
         // Const eval of exprs at the last minute
@@ -191,18 +207,26 @@ impl PlanRoot {
 
         if ctx.is_explain_trace() {
             ctx.trace("Const eval exprs:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
-        assert!(*plan.distribution() == Distribution::Single, "{}", plan);
-        assert!(!has_batch_exchange(plan.clone()), "{}", plan);
+        assert!(
+            *plan.distribution() == Distribution::Single,
+            "{}",
+            plan.explain_to_string()
+        );
+        assert!(
+            !has_batch_exchange(plan.clone()),
+            "{}",
+            plan.explain_to_string()
+        );
 
         let ctx = plan.ctx();
         if ctx.is_explain_trace() {
             ctx.trace("To Batch Physical Plan:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
 
         Ok(plan)
@@ -225,7 +249,7 @@ impl PlanRoot {
         let ctx = plan.ctx();
         if ctx.is_explain_trace() {
             ctx.trace("To Batch Distributed Plan:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
         if require_additional_exchange_on_root_in_distributed_mode(plan.clone()) {
             plan =
@@ -262,7 +286,7 @@ impl PlanRoot {
         let ctx = plan.ctx();
         if ctx.is_explain_trace() {
             ctx.trace("To Batch Local Plan:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
 
         Ok(plan)
@@ -296,7 +320,7 @@ impl PlanRoot {
 
         if ctx.is_explain_trace() {
             ctx.trace("Inline session timezone:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
 
         // Const eval of exprs at the last minute
@@ -304,7 +328,7 @@ impl PlanRoot {
 
         if ctx.is_explain_trace() {
             ctx.trace("Const eval exprs:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
 
         #[cfg(debug_assertions)]
@@ -354,14 +378,14 @@ impl PlanRoot {
                         }
                         let plan =
                             LogicalProject::with_out_col_idx(plan, output_indices.into_iter());
-                        let out_col_change = ColIndexMapping::with_target_size(map, target_size);
+                        let out_col_change = ColIndexMapping::new(map, target_size);
                         (plan.into(), out_col_change)
                     }
                 };
 
                 if explain_trace {
                     ctx.trace("Logical Rewrite For Stream:");
-                    ctx.trace(plan.explain_to_string().unwrap());
+                    ctx.trace(plan.explain_to_string());
                 }
 
                 self.required_dist =
@@ -381,9 +405,17 @@ impl PlanRoot {
 
         if explain_trace {
             ctx.trace("To Stream Plan:");
-            ctx.trace(plan.explain_to_string().unwrap());
+            ctx.trace(plan.explain_to_string());
         }
         Ok(plan)
+    }
+
+    /// Visit the plan root and compute the cardinality.
+    ///
+    /// Panics if not called on a logical plan.
+    fn compute_cardinality(&self) -> Cardinality {
+        assert_matches!(self.plan.convention(), Convention::Logical);
+        CardinalityVisitor.visit(self.plan.clone())
     }
 
     /// Optimize and generate a create table plan.
@@ -408,17 +440,17 @@ impl PlanRoot {
             append_only,
             columns
                 .iter()
-                .filter_map(|c| (!c.is_generated()).then(|| c.column_desc.clone()))
+                .filter(|&c| (!c.is_generated()))
+                .map(|c| c.column_desc.clone())
                 .collect(),
         )
         .into();
 
         // Add generated columns.
-        let exprs = LogicalSource::gen_optional_generated_column_project_exprs(
-            columns.iter().map(|c| c.column_desc.clone()).collect(),
-        )?;
+        let exprs = LogicalSource::derive_output_exprs_from_generated_columns(&columns)?;
         if let Some(exprs) = exprs {
             let logical_project = generic::Project::new(exprs, stream_plan);
+            // The project node merges a chunk if it has an ungenerated row id as stream key.
             stream_plan = StreamProject::new(logical_project).into();
         }
 
@@ -480,6 +512,7 @@ impl PlanRoot {
         definition: String,
         emit_on_window_close: bool,
     ) -> Result<StreamMaterialize> {
+        let cardinality = self.compute_cardinality();
         let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
         StreamMaterialize::create(
@@ -491,6 +524,7 @@ impl PlanRoot {
             self.out_names.clone(),
             definition,
             TableType::MaterializedView,
+            cardinality,
         )
     }
 
@@ -500,6 +534,7 @@ impl PlanRoot {
         index_name: String,
         definition: String,
     ) -> Result<StreamMaterialize> {
+        let cardinality = self.compute_cardinality();
         let stream_plan = self.gen_optimized_stream_plan(false)?;
 
         StreamMaterialize::create(
@@ -511,6 +546,7 @@ impl PlanRoot {
             self.out_names.clone(),
             definition,
             TableType::Index,
+            cardinality,
         )
     }
 
@@ -520,35 +556,25 @@ impl PlanRoot {
         sink_name: String,
         definition: String,
         properties: WithOptions,
+        emit_on_window_close: bool,
+        db_name: String,
+        sink_from_table_name: String,
+        format_desc: Option<SinkFormatDesc>,
     ) -> Result<StreamSink> {
-        let mut stream_plan = self.gen_optimized_stream_plan(false)?;
-
-        // Add a project node if there is hidden column(s).
-        let input_fields = stream_plan.schema().fields();
-        if input_fields.len() != self.out_fields.count_ones(..) {
-            let exprs = input_fields
-                .iter()
-                .enumerate()
-                .filter_map(|(idx, field)| {
-                    if self.out_fields.contains(idx) {
-                        Some(InputRef::new(idx, field.data_type.clone()).into())
-                    } else {
-                        None
-                    }
-                })
-                .collect_vec();
-            stream_plan = StreamProject::new(generic::Project::new(exprs, stream_plan)).into();
-        }
+        let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close)?;
 
         StreamSink::create(
             stream_plan,
             sink_name,
+            db_name,
+            sink_from_table_name,
             self.required_dist.clone(),
             self.required_order.clone(),
             self.out_fields.clone(),
             self.out_names.clone(),
             definition,
             properties,
+            format_desc,
         )
     }
 
@@ -592,7 +618,7 @@ fn exist_and_no_exchange_before(plan: &PlanRef, is_candidate: fn(&PlanRef) -> bo
 fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> bool {
     fn is_user_table(plan: &PlanRef) -> bool {
         plan.as_batch_seq_scan()
-            .map(|node| !node.logical().is_sys_table)
+            .map(|node| !node.core().is_sys_table())
             .unwrap_or(false)
     }
 
@@ -625,7 +651,7 @@ fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> boo
 fn require_additional_exchange_on_root_in_local_mode(plan: PlanRef) -> bool {
     fn is_user_table(plan: &PlanRef) -> bool {
         plan.as_batch_seq_scan()
-            .map(|node| !node.logical().is_sys_table)
+            .map(|node| !node.core().is_sys_table())
             .unwrap_or(false)
     }
 

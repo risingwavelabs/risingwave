@@ -21,9 +21,17 @@ type auction struct {
 	Category int    `json:"category"`
 }
 
-func (r *auction) ToJson() (topic string, key string, data []byte) {
-	data, _ = json.Marshal(r)
-	return "auction", fmt.Sprint(r.Id), data
+func (r *auction) Topic() string {
+	return "auction"
+}
+
+func (r *auction) Key() string {
+	return fmt.Sprint(r.Id)
+}
+
+func (r *auction) ToJson() []byte {
+	data, _ := json.Marshal(r)
+	return data
 }
 
 type auctionGen struct {

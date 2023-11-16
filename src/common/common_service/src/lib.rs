@@ -15,8 +15,11 @@
 // This is a stub lib.rs.
 
 #![feature(lint_reasons)]
+#![feature(impl_trait_in_assoc_type)]
 
 pub mod metrics_manager;
 pub mod observer_manager;
 
 pub use metrics_manager::MetricsManager;
+
+pub mod tracing;

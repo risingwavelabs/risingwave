@@ -1,0 +1,26 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table items_sold (brand varchar, size varchar, sales int);
+
+statement ok
+insert into items_sold values ('Foo', 'L', 10),('Foo', 'M', 20),('Bar', 'M', 15),('Bar', 'L', '5');
+
+statement ok
+create materialized view v as SELECT brand, size, sum(sales), grouping(brand) g1, grouping(size) g2, grouping(brand,size) g3, count(distinct sales) FROM items_sold GROUP BY GROUPING SETS ((brand), (size), ());
+
+query TTIIIII rowsort
+select * from v;
+----
+Bar NULL 20 0 1 1 2
+Foo NULL 30 0 1 1 2
+NULL L 15 1 0 2 2
+NULL M 35 1 0 2 2
+NULL NULL 50 1 1 3 4
+
+statement ok
+drop materialized view v;
+
+statement ok
+drop table items_sold;

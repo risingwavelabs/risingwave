@@ -17,6 +17,7 @@ use std::cell::RefCell;
 use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use futures::executor::block_on;
+use risingwave_hummock_sdk::key::TableKey;
 use risingwave_storage::hummock::iterator::{
     Forward, HummockIterator, HummockIteratorUnion, OrderedMergeIteratorInner,
     UnorderedMergeIteratorInner,
@@ -35,7 +36,9 @@ fn gen_interleave_shared_buffer_batch_iter(
         let mut batch_data = vec![];
         for j in 0..batch_size {
             batch_data.push((
-                Bytes::copy_from_slice(format!("test_key_{:08}", j * batch_count + i).as_bytes()),
+                TableKey(Bytes::copy_from_slice(
+                    format!("test_key_{:08}", j * batch_count + i).as_bytes(),
+                )),
                 HummockValue::put(Bytes::copy_from_slice("value".as_bytes())),
             ));
         }
@@ -63,7 +66,9 @@ fn gen_interleave_shared_buffer_batch_enum_iter(
         let mut batch_data = vec![];
         for j in 0..batch_size {
             batch_data.push((
-                Bytes::copy_from_slice(format!("test_key_{:08}", j * batch_count + i).as_bytes()),
+                TableKey(Bytes::copy_from_slice(
+                    format!("test_key_{:08}", j * batch_count + i).as_bytes(),
+                )),
                 HummockValue::put(Bytes::copy_from_slice("value".as_bytes())),
             ));
         }

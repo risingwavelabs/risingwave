@@ -21,6 +21,7 @@ import static org.junit.Assert.*;
 import com.risingwave.connector.ConnectorServiceImpl;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data;
+import com.risingwave.proto.PlanCommon;
 import io.grpc.*;
 import java.io.IOException;
 import java.sql.Connection;
@@ -129,10 +130,12 @@ public class PostgresSourceTest {
                     while (eventStream.hasNext()) {
                         List<ConnectorServiceProto.CdcMessage> messages =
                                 eventStream.next().getEventsList();
-                        for (ConnectorServiceProto.CdcMessage ignored : messages) {
-                            count++;
+                        for (ConnectorServiceProto.CdcMessage msg : messages) {
+                            if (!msg.getPayload().isBlank()) {
+                                count++;
+                            }
                         }
-                        if (count == 10000) {
+                        if (count >= 10000) {
                             return count;
                         }
                     }
@@ -173,19 +176,25 @@ public class PostgresSourceTest {
                 "CREATE TABLE IF NOT EXISTS orders (o_key BIGINT NOT NULL, o_val INT, PRIMARY KEY (o_key))";
         SourceTestClient.performQuery(connDbz, query);
         // create a partial publication, check whether error is reported
-        query = "CREATE PUBLICATION dbz_publication FOR TABLE orders (o_key)";
+        query = "CREATE PUBLICATION rw_publication FOR TABLE orders (o_key)";
         SourceTestClient.performQuery(connDbz, query);
         ConnectorServiceProto.TableSchema tableSchema =
                 ConnectorServiceProto.TableSchema.newBuilder()
                         .addColumns(
-                                ConnectorServiceProto.TableSchema.Column.newBuilder()
+                                PlanCommon.ColumnDesc.newBuilder()
                                         .setName("o_key")
-                                        .setDataType(Data.DataType.TypeName.INT64)
+                                        .setColumnType(
+                                                Data.DataType.newBuilder()
+                                                        .setTypeName(Data.DataType.TypeName.INT64)
+                                                        .build())
                                         .build())
                         .addColumns(
-                                ConnectorServiceProto.TableSchema.Column.newBuilder()
+                                PlanCommon.ColumnDesc.newBuilder()
                                         .setName("o_val")
-                                        .setDataType(Data.DataType.TypeName.INT32)
+                                        .setColumnType(
+                                                Data.DataType.newBuilder()
+                                                        .setTypeName(Data.DataType.TypeName.INT32)
+                                                        .build())
                                         .build())
                         .addPkIndices(0)
                         .build();
@@ -202,7 +211,7 @@ public class PostgresSourceTest {
                             "test",
                             "orders");
             assertEquals(
-                    "INVALID_ARGUMENT: The publication 'dbz_publication' does not cover all necessary columns in table orders",
+                    "INVALID_ARGUMENT: The publication 'rw_publication' does not cover all columns of the table 'public.orders'",
                     resp.getError().getErrorMessage());
             query = "DROP PUBLICATION dbz_publication";
             SourceTestClient.performQuery(connDbz, query);
@@ -240,48 +249,137 @@ public class PostgresSourceTest {
     // generates test cases for the risingwave debezium parser
     @Ignore
     @Test
-    public void getTestJson() throws InterruptedException, SQLException {
-        Connection connection = SourceTestClient.connect(pgDataSource);
-        String query =
-                "CREATE TABLE IF NOT EXISTS orders ("
-                        + "O_KEY BIGINT NOT NULL, "
-                        + "O_BOOL BOOLEAN, "
-                        + "O_BITS BIT(3), "
-                        + "O_TINY SMALLINT, "
-                        + "O_INT INT, "
-                        + "O_REAL REAL, "
-                        + "O_DOUBLE DOUBLE PRECISION, "
-                        + "O_DECIMAL DECIMAL(15, 2), "
-                        + "O_CHAR CHAR(15), "
-                        + "O_DATE DATE, "
-                        + "O_TIME TIME, "
-                        + "O_TIMESTAMP TIMESTAMP, "
-                        + "O_JSON JSON, "
-                        + "O_TEXT_ARR TEXT[][], "
-                        + "PRIMARY KEY (O_KEY))";
-        SourceTestClient.performQuery(connection, query);
-        Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
-                testClient.getEventStreamStart(
-                        pg, ConnectorServiceProto.SourceType.POSTGRES, "test", "orders");
-        Thread t1 =
-                new Thread(
-                        () -> {
-                            while (eventStream.hasNext()) {
-                                List<ConnectorServiceProto.CdcMessage> messages =
-                                        eventStream.next().getEventsList();
-                                for (ConnectorServiceProto.CdcMessage msg : messages) {
-                                    LOG.info("{}", msg.getPayload());
-                                }
-                            }
-                        });
-        // Q1: ordinary insert (read)
-        Thread.sleep(1000);
-        t1.start();
-        query =
-                "INSERT INTO orders (O_KEY, O_BOOL, O_BITS, O_TINY, O_INT, O_REAL, O_DOUBLE, O_DECIMAL, O_CHAR, O_DATE, O_TIME, O_TIMESTAMP, O_JSON, O_TEXT_ARR)"
-                        + "VALUES(111, TRUE, b'111', -1, -1111, -11.11, -111.11111, -111.11, 'yes please', '2011-11-11', '11:11:11', '2011-11-11 11:11:11.123456', '{\"k1\": \"v1\", \"k2\": 11}', ARRAY[['meeting', 'lunch'], ['training', 'presentation']])";
-        SourceTestClient.performQuery(connection, query);
-        Thread.sleep(1000);
-        connection.close();
+    public void getTestJson() throws SQLException {
+        try (Connection connection = SourceTestClient.connect(pgDataSource)) {
+            String query =
+                    "CREATE TABLE IF NOT EXISTS orders ("
+                            + "O_KEY BIGINT NOT NULL, "
+                            + "O_BOOL BOOLEAN, "
+                            + "O_BITS BIT(3), "
+                            + "O_TINY SMALLINT, "
+                            + "O_INT INT, "
+                            + "O_REAL REAL, "
+                            + "O_DOUBLE DOUBLE PRECISION, "
+                            + "O_DECIMAL DECIMAL(15, 2), "
+                            + "O_CHAR CHAR(15), "
+                            + "O_DATE DATE, "
+                            + "O_TIME TIME, "
+                            + "O_TIMESTAMP TIMESTAMP, "
+                            + "O_JSON JSON, "
+                            + "O_TEXT_ARR TEXT[][], "
+                            + "PRIMARY KEY (O_KEY))";
+            SourceTestClient.performQuery(connection, query);
+            Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
+                    testClient.getEventStreamStart(
+                            pg, ConnectorServiceProto.SourceType.POSTGRES, "test", "orders");
+            query =
+                    "INSERT INTO orders (O_KEY, O_BOOL, O_BITS, O_TINY, O_INT, O_REAL, O_DOUBLE, O_DECIMAL, O_CHAR, O_DATE, O_TIME, O_TIMESTAMP, O_JSON, O_TEXT_ARR)"
+                            + "VALUES(111, TRUE, b'111', -1, -1111, -11.11, -111.11111, -111.11, 'yes please', '2011-11-11', '11:11:11', '2011-11-11 11:11:11.123456', '{\"k1\": \"v1\", \"k2\": 11}', ARRAY[['meeting', 'lunch'], ['training', 'presentation']])";
+            SourceTestClient.performQuery(connection, query);
+            if (eventStream.hasNext()) {
+                List<ConnectorServiceProto.CdcMessage> messages =
+                        eventStream.next().getEventsList();
+                for (ConnectorServiceProto.CdcMessage msg : messages) {
+                    System.out.printf("%s\n", msg.getPayload());
+                }
+            }
+        }
+    }
+
+    @Ignore
+    @Test
+    public void getTestJsonDateTime() throws SQLException {
+        try (Connection connection = SourceTestClient.connect(pgDataSource)) {
+            String query =
+                    "CREATE TABLE orders ("
+                            + "o_key integer, "
+                            + "o_time_0 time(0), "
+                            + "o_time_6 time(6), "
+                            + "o_timez_0 time(0) with time zone, "
+                            + "o_timez_6 time(6) with time zone, "
+                            + "o_timestamp_0 timestamp(0), "
+                            + "o_timestamp_6 timestamp(6), "
+                            + "o_timestampz_0 timestamp(0) with time zone, "
+                            + "o_timestampz_6 timestamp(6) with time zone, "
+                            + "o_interval interval, "
+                            + "o_date date, "
+                            + "PRIMARY KEY (o_key))";
+            SourceTestClient.performQuery(connection, query);
+            query =
+                    "INSERT INTO orders VALUES (0, '11:11:11', '11:11:11.00001', '11:11:11Z', '11:11:11.00001Z', '2011-11-11 11:11:11', '2011-11-11 11:11:11.123456', '2011-11-11 11:11:11',  '2011-11-11 11:11:11.123456', INTERVAL '1 years 2 months 3 days 4 hours 5 minutes 6.78 seconds', '1999-09-09')";
+            SourceTestClient.performQuery(connection, query);
+            Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
+                    testClient.getEventStreamStart(
+                            pg, ConnectorServiceProto.SourceType.POSTGRES, "test", "orders");
+            if (eventStream.hasNext()) {
+                List<ConnectorServiceProto.CdcMessage> messages =
+                        eventStream.next().getEventsList();
+                for (ConnectorServiceProto.CdcMessage msg : messages) {
+                    System.out.printf("%s\n", msg.getPayload());
+                }
+            }
+        }
+    }
+
+    @Ignore
+    @Test
+    public void getTestJsonNumeric() throws SQLException {
+        try (Connection connection = SourceTestClient.connect(pgDataSource)) {
+            String query =
+                    "CREATE TABLE orders (o_key integer, o_smallint smallint, o_integer integer, o_bigint bigint, o_real real, o_double double precision, o_numeric numeric, o_numeric_6_3 numeric(6,3), o_money money, PRIMARY KEY (o_key))";
+            SourceTestClient.performQuery(connection, query);
+            query =
+                    "INSERT INTO orders VALUES (0, 32767, 2147483647, 9223372036854775807, 9.999, 9.999999, 123456.7890, 123.456, 123.12)";
+            SourceTestClient.performQuery(connection, query);
+            Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
+                    testClient.getEventStreamStart(
+                            pg, ConnectorServiceProto.SourceType.POSTGRES, "test", "orders");
+            if (eventStream.hasNext()) {
+                List<ConnectorServiceProto.CdcMessage> messages =
+                        eventStream.next().getEventsList();
+                for (ConnectorServiceProto.CdcMessage msg : messages) {
+                    System.out.printf("%s", msg.getPayload());
+                }
+            }
+        }
+    }
+
+    @Ignore
+    @Test
+    public void getTestJsonOther() throws SQLException {
+        try (Connection connection = SourceTestClient.connect(pgDataSource)) {
+            String query = "create type bear as enum ('polar', 'brown', 'panda')";
+            SourceTestClient.performQuery(connection, query);
+            query =
+                    "CREATE TABLE orders ("
+                            + "o_key integer,"
+                            + "o_boolean boolean,"
+                            + "o_bit bit,"
+                            + "o_bytea bytea,"
+                            + "o_json jsonb,"
+                            + "o_xml xml,"
+                            + "o_uuid uuid,"
+                            + "o_point point,"
+                            + "o_enum bear,"
+                            + "o_char char,"
+                            + "o_varchar varchar,"
+                            + "o_character character,"
+                            + "o_character_varying character varying,"
+                            + "PRIMARY KEY (o_key))";
+            SourceTestClient.performQuery(connection, query);
+            query =
+                    "INSERT INTO orders VALUES (1, 'false', b'1', decode('0123456789ABCDEF', 'hex'), '{\"k1\": \"v1\", \"k2\": 11}', xmlcomment('hahaha'), gen_random_uuid(), point(1, 2), 'polar', 'h', 'ha', 'h', 'hahaha')";
+            SourceTestClient.performQuery(connection, query);
+            Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
+                    testClient.getEventStreamStart(
+                            pg, ConnectorServiceProto.SourceType.POSTGRES, "test", "orders");
+            if (eventStream.hasNext()) {
+                List<ConnectorServiceProto.CdcMessage> messages =
+                        eventStream.next().getEventsList();
+                for (ConnectorServiceProto.CdcMessage msg : messages) {
+                    System.out.printf("%s\n", msg.getPayload());
+                }
+            }
+        }
     }
 }

@@ -11,16 +11,18 @@ if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhoo
 fi
 
 echo "--- Install java and maven"
-yum install -y java-11-openjdk wget python3
+yum install -y java-11-openjdk java-11-openjdk-devel wget python3 cyrus-sasl-devel
 pip3 install toml-cli
-wget https://dlcdn.apache.org/maven/maven-3/3.9.1/binaries/apache-maven-3.9.1-bin.tar.gz && tar -zxvf apache-maven-3.9.1-bin.tar.gz
-export PATH="${REPO_ROOT}/apache-maven-3.9.1/bin:$PATH"
+wget https://ci-deps-dist.s3.amazonaws.com/apache-maven-3.9.3-bin.tar.gz && tar -zxvf apache-maven-3.9.3-bin.tar.gz
+export PATH="${REPO_ROOT}/apache-maven-3.9.3/bin:$PATH"
 mvn -v
 
 echo "--- Install rust"
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain $(cat ./rust-toolchain) -y
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
 source "$HOME/.cargo/env"
+rustup show
 source ci/scripts/common.sh
+unset RUSTC_WRAPPER # disable sccache
 
 echo "--- Install protoc3"
 curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v3.15.8/protoc-3.15.8-linux-x86_64.zip
@@ -37,9 +39,15 @@ echo "--- Install aws cli"
 curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 
-echo "--- Update risingwave release version"
-if [[ -n "${BUILDKITE_TAG+x}" ]]; then
-  toml set --toml-path Cargo.toml workspace.package.version ${BUILDKITE_TAG#*v}
+echo "--- Check risingwave release version"
+if [[ -n "${BUILDKITE_TAG}" ]]; then
+  CARGO_PKG_VERSION="$(toml get --toml-path Cargo.toml workspace.package.version)"
+  if [[ "${CARGO_PKG_VERSION}" != "${BUILDKITE_TAG#*v}" ]]; then
+    echo "CARGO_PKG_VERSION: ${CARGO_PKG_VERSION}"
+    echo "BUILDKITE_TAG: ${BUILDKITE_TAG}"
+    echo "CARGO_PKG_VERSION and BUILDKITE_TAG are not equal"
+    exit 1
+  fi
 fi
 
 echo "--- Build risingwave release binary"
@@ -56,7 +64,17 @@ elif [[ -n "${BINARY_NAME+x}" ]]; then
     aws s3 cp risingwave-${BINARY_NAME}-x86_64-unknown-linux.tar.gz s3://risingwave-nightly-pre-built-binary
 fi
 
-if [[ -n "${BUILDKITE_TAG+x}" ]]; then
+echo "--- Build connector node"
+cd ${REPO_ROOT}/java && mvn -B package -Dmaven.test.skip=true -Dno-build-rust
+
+if [[ -n "${BUILDKITE_TAG}" ]]; then
+  echo "--- Collect all release assets"
+  cd ${REPO_ROOT} && mkdir release-assets && cd release-assets
+  cp -r ${REPO_ROOT}/target/release/* .
+  mv ${REPO_ROOT}/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
+  tar -zxvf risingwave-connector-"${BUILDKITE_TAG}".tar.gz libs
+  ls -l
+
   echo "--- Install gh cli"
   yum install -y dnf
   dnf install -y 'dnf-command(config-manager)'
@@ -70,14 +88,17 @@ if [[ -n "${BUILDKITE_TAG+x}" ]]; then
   tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risingwave
   gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
 
+  echo "--- Release upload risingwave debug info"
+  tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.dwp.tar.gz risingwave.dwp
+  gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.dwp.tar.gz
+
   echo "--- Release upload risectl asset"
   tar -czvf risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risectl
   gh release upload "${BUILDKITE_TAG}" risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
 
-  echo "--- Release build and upload risingwave connector node jar asset"
-  cd ${REPO_ROOT}/java && mvn -B package -Dmaven.test.skip=true
-  cd connector-node/assembly/target && mv risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
-  gh release upload "${BUILDKITE_TAG}" risingwave-connector-"${BUILDKITE_TAG}".tar.gz
+  echo "--- Release upload risingwave-all-in-one asset"
+  tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux-all-in-one.tar.gz risingwave libs
+  gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux-all-in-one.tar.gz
 fi
 
 

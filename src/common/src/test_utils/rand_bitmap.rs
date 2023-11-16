@@ -19,6 +19,9 @@ use rand::SeedableRng;
 use crate::buffer::{Bitmap, BitmapBuilder};
 
 pub fn gen_rand_bitmap(num_bits: usize, count_ones: usize, seed: u64) -> Bitmap {
+    if count_ones == num_bits {
+        return Bitmap::ones(num_bits);
+    }
     let mut builder = BitmapBuilder::zeroed(num_bits);
     let mut range = (0..num_bits).collect_vec();
     range.shuffle(&mut rand::rngs::StdRng::seed_from_u64(seed));

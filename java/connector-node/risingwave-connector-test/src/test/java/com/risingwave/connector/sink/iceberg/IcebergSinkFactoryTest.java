@@ -16,9 +16,13 @@ package com.risingwave.connector.sink.iceberg;
 
 import static org.junit.Assert.*;
 
-import com.risingwave.connector.IcebergSink;
+import com.google.common.collect.Lists;
+import com.risingwave.connector.AppendOnlyIcebergSinkWriter;
 import com.risingwave.connector.IcebergSinkFactory;
+import com.risingwave.connector.TestUtils;
 import com.risingwave.connector.api.TableSchema;
+import com.risingwave.proto.Catalog.SinkType;
+import com.risingwave.proto.Data;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -61,10 +65,10 @@ public class IcebergSinkFactoryTest {
     public void testCreate() throws IOException {
         createMockTable();
         IcebergSinkFactory sinkFactory = new IcebergSinkFactory();
-        IcebergSink sink =
-                (IcebergSink)
-                        sinkFactory.create(
-                                TableSchema.getMockTableSchema(),
+        AppendOnlyIcebergSinkWriter sink =
+                (AppendOnlyIcebergSinkWriter)
+                        sinkFactory.createWriter(
+                                TestUtils.getMockTableSchema(),
                                 Map.of(
                                         "type",
                                         sinkMode,
@@ -86,5 +90,61 @@ public class IcebergSinkFactoryTest {
         } finally {
             sink.drop();
         }
+    }
+
+    @Test(expected = RuntimeException.class)
+    public void testValidateSchemaName() throws IOException {
+        createMockTable();
+        IcebergSinkFactory sinkFactory = new IcebergSinkFactory();
+        Map<String, String> tableProperties =
+                Map.of(
+                        "type",
+                        sinkMode,
+                        "warehouse.path",
+                        warehousePath,
+                        "database.name",
+                        databaseName,
+                        "table.name",
+                        tableName);
+        TableSchema diffTypeTableSchema =
+                new TableSchema(
+                        Lists.newArrayList("id", "names"),
+                        Lists.newArrayList(
+                                Data.DataType.newBuilder()
+                                        .setTypeName(Data.DataType.TypeName.INT32)
+                                        .build(),
+                                Data.DataType.newBuilder()
+                                        .setTypeName(Data.DataType.TypeName.VARCHAR)
+                                        .build()),
+                        Lists.newArrayList("id"));
+        sinkFactory.validate(diffTypeTableSchema, tableProperties, SinkType.SINK_TYPE_APPEND_ONLY);
+    }
+
+    @Test(expected = RuntimeException.class)
+    public void testValidateSchemaType() throws IOException {
+        createMockTable();
+        IcebergSinkFactory sinkFactory = new IcebergSinkFactory();
+        Map<String, String> tableProperties =
+                Map.of(
+                        "type",
+                        sinkMode,
+                        "warehouse.path",
+                        warehousePath,
+                        "database.name",
+                        databaseName,
+                        "table.name",
+                        tableName);
+        TableSchema diffTypeTableSchema =
+                new TableSchema(
+                        Lists.newArrayList("id", "name"),
+                        Lists.newArrayList(
+                                Data.DataType.newBuilder()
+                                        .setTypeName(Data.DataType.TypeName.INT32)
+                                        .build(),
+                                Data.DataType.newBuilder()
+                                        .setTypeName(Data.DataType.TypeName.INT32)
+                                        .build()),
+                        Lists.newArrayList("id"));
+        sinkFactory.validate(diffTypeTableSchema, tableProperties, SinkType.SINK_TYPE_APPEND_ONLY);
     }
 }

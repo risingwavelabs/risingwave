@@ -13,11 +13,10 @@
 // limitations under the License.
 
 use bytes::{Bytes, BytesMut};
-use chrono::{TimeZone, Utc};
 use postgres_types::{ToSql, Type};
 
 use super::{DataType, DatumRef, ScalarRefImpl, F32, F64};
-use crate::error::Result;
+use crate::error::{ErrorCode, Result};
 // Used to convert ScalarRef to text format
 pub trait ToBinary {
     fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>>;
@@ -32,6 +31,7 @@ macro_rules! implement_using_to_sql {
                     match ty {
                         DataType::$data_type => {
                             let mut output = BytesMut::new();
+                            #[allow(clippy::redundant_closure_call)]
                             $accessor(self).to_sql(&Type::ANY, &mut output).unwrap();
                             Ok(Some(output.freeze()))
                         },
@@ -46,35 +46,12 @@ macro_rules! implement_using_to_sql {
 implement_using_to_sql! {
     { i16, Int16, |x| x },
     { i32, Int32, |x| x },
+    { i64, Int64, |x| x },
     { &str, Varchar, |x| x },
     { F32, Float32, |x: &F32| x.0 },
     { F64, Float64, |x: &F64| x.0 },
     { bool, Boolean, |x| x },
     { &[u8], Bytea, |x| x }
-}
-
-impl ToBinary for i64 {
-    fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>> {
-        match ty {
-            DataType::Int64 => {
-                let mut output = BytesMut::new();
-                self.to_sql(&Type::ANY, &mut output).unwrap();
-                Ok(Some(output.freeze()))
-            }
-            DataType::Timestamptz => {
-                let secs = self.div_euclid(1_000_000);
-                let nsecs = self.rem_euclid(1_000_000) * 1000;
-                let instant = Utc.timestamp_opt(secs, nsecs as u32).unwrap();
-                let mut out = BytesMut::new();
-                // postgres_types::Type::ANY is only used as a placeholder.
-                instant
-                    .to_sql(&postgres_types::Type::ANY, &mut out)
-                    .unwrap();
-                Ok(Some(out.freeze()))
-            }
-            _ => unreachable!(),
-        }
-    }
 }
 
 impl ToBinary for ScalarRefImpl<'_> {
@@ -93,11 +70,18 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Interval(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Date(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Timestamp(v) => v.to_binary_with_type(ty),
+            ScalarRefImpl::Timestamptz(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Time(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Bytea(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Jsonb(v) => v.to_binary_with_type(ty),
-            ScalarRefImpl::Struct(_) => todo!(),
-            ScalarRefImpl::List(_) => todo!(),
+            ScalarRefImpl::Struct(_) | ScalarRefImpl::List(_) => Err(ErrorCode::NotImplemented(
+                format!(
+                    "the pgwire extended-mode encoding for {} is unsupported",
+                    ty
+                ),
+                Some(7949).into(),
+            )
+            .into()),
         }
     }
 }

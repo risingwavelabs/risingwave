@@ -39,20 +39,24 @@ values(round(42.4382));
 statement ok
 create table t3 (v1 int, v2 int, v3 int);
 
-query TT
+query TTTT
 describe t3;
 ----
-v1 integer
-v2 integer
-v3 integer
-primary key _row_id
+v1                integer  false  NULL
+v2                integer  false  NULL
+v3                integer  false  NULL
+_row_id           serial    true  NULL
+primary key       _row_id   NULL  NULL
+distribution key  _row_id   NULL  NULL
+table description t3        NULL  NULL
 
-query TT
+query TTT
 show columns from t3;
 ----
-v1 integer
-v2 integer
-v3 integer
+v1 integer false NULL
+v2 integer false NULL
+v3 integer false NULL
+_row_id serial true NULL
 
 statement ok
 drop table t3;

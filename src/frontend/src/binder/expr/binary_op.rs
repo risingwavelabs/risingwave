@@ -78,24 +78,101 @@ impl Binder {
                 func_types.push(ExprType::Not);
                 ExprType::Like
             }
+            BinaryOperator::ILike => ExprType::ILike,
+            BinaryOperator::NotILike => {
+                func_types.push(ExprType::Not);
+                ExprType::ILike
+            }
             BinaryOperator::BitwiseOr => ExprType::BitwiseOr,
             BinaryOperator::BitwiseAnd => ExprType::BitwiseAnd,
             BinaryOperator::BitwiseXor => ExprType::Pow,
             BinaryOperator::PGBitwiseXor => ExprType::BitwiseXor,
             BinaryOperator::PGBitwiseShiftLeft => ExprType::BitwiseShiftLeft,
             BinaryOperator::PGBitwiseShiftRight => ExprType::BitwiseShiftRight,
-            BinaryOperator::Arrow => ExprType::JsonbAccessInner,
+            BinaryOperator::Arrow => ExprType::JsonbAccess,
             BinaryOperator::LongArrow => ExprType::JsonbAccessStr,
+            BinaryOperator::HashMinus => ExprType::JsonbDeletePath,
+            BinaryOperator::HashArrow => ExprType::JsonbExtractPath,
+            BinaryOperator::HashLongArrow => ExprType::JsonbExtractPathText,
+            BinaryOperator::Prefix => ExprType::StartsWith,
+            BinaryOperator::Contains => {
+                let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
+                let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
+                match (left_type, right_type) {
+                    (Some(DataType::List { .. }), Some(DataType::List { .. }))
+                    | (Some(DataType::List { .. }), None)
+                    | (None, Some(DataType::List { .. })) => ExprType::ArrayContains,
+                    (Some(DataType::Jsonb), Some(DataType::Jsonb))
+                    | (Some(DataType::Jsonb), None)
+                    | (None, Some(DataType::Jsonb)) => ExprType::JsonbContains,
+                    (left, right) => {
+                        return Err(ErrorCode::BindError(format!(
+                            "operator does not exist: {} @> {}",
+                            left.map_or_else(|| String::from("unknown"), |x| x.to_string()),
+                            right.map_or_else(|| String::from("unknown"), |x| x.to_string()),
+                        ))
+                        .into());
+                    }
+                }
+            }
+            BinaryOperator::Contained => {
+                let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
+                let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
+                match (left_type, right_type) {
+                    (Some(DataType::List { .. }), Some(DataType::List { .. }))
+                    | (Some(DataType::List { .. }), None)
+                    | (None, Some(DataType::List { .. })) => ExprType::ArrayContained,
+                    (Some(DataType::Jsonb), Some(DataType::Jsonb))
+                    | (Some(DataType::Jsonb), None)
+                    | (None, Some(DataType::Jsonb)) => ExprType::JsonbContained,
+                    (left, right) => {
+                        return Err(ErrorCode::BindError(format!(
+                            "operator does not exist: {} <@ {}",
+                            left.map_or_else(|| String::from("unknown"), |x| x.to_string()),
+                            right.map_or_else(|| String::from("unknown"), |x| x.to_string()),
+                        ))
+                        .into());
+                    }
+                }
+            }
+            BinaryOperator::Exists => ExprType::JsonbExists,
+            BinaryOperator::ExistsAny => ExprType::JsonbExistsAny,
+            BinaryOperator::ExistsAll => ExprType::JsonbExistsAll,
             BinaryOperator::Concat => {
-                match (bound_left.return_type(), bound_right.return_type()) {
+                let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
+                let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());
+                match (left_type, right_type) {
                     // array concatenation
-                    (DataType::List { .. }, DataType::List { .. }) => ExprType::ArrayCat,
-                    (DataType::List { .. }, _) => ExprType::ArrayAppend,
-                    (_, DataType::List { .. }) => ExprType::ArrayPrepend,
+                    (Some(DataType::List { .. }), Some(DataType::List { .. }))
+                    | (Some(DataType::List { .. }), None)
+                    | (None, Some(DataType::List { .. })) => ExprType::ArrayCat,
+                    (Some(DataType::List { .. }), Some(_)) => ExprType::ArrayAppend,
+                    (Some(_), Some(DataType::List { .. })) => ExprType::ArrayPrepend,
+
                     // string concatenation
-                    (DataType::Varchar, _) | (_, DataType::Varchar) => ExprType::ConcatOp,
+                    (Some(DataType::Varchar), _) | (_, Some(DataType::Varchar)) => {
+                        ExprType::ConcatOp
+                    }
+
+                    (Some(DataType::Jsonb), Some(DataType::Jsonb))
+                    | (Some(DataType::Jsonb), None)
+                    | (None, Some(DataType::Jsonb)) => ExprType::JsonbCat,
+
+                    // bytea (and varbit, tsvector, tsquery)
+                    (Some(t @ DataType::Bytea), Some(DataType::Bytea))
+                    | (Some(t @ DataType::Bytea), None)
+                    | (None, Some(t @ DataType::Bytea)) => {
+                        return Err(ErrorCode::BindError(format!(
+                            "operator not implemented yet: {t} || {t}"
+                        ))
+                        .into())
+                    }
+
+                    // string concatenation
+                    (None, _) | (_, None) => ExprType::ConcatOp,
+
                     // invalid
-                    (left_type, right_type) => {
+                    (Some(left_type), Some(right_type)) => {
                         return Err(ErrorCode::BindError(format!(
                             "operator does not exist: {} || {}",
                             left_type, right_type
@@ -104,13 +181,10 @@ impl Binder {
                     }
                 }
             }
-            BinaryOperator::PGRegexMatch => {
-                func_types.push(ExprType::IsNotNull);
-                ExprType::RegexpMatch
-            }
+            BinaryOperator::PGRegexMatch => ExprType::RegexpEq,
             BinaryOperator::PGRegexNotMatch => {
-                func_types.push(ExprType::IsNull);
-                ExprType::RegexpMatch
+                func_types.push(ExprType::Not);
+                ExprType::RegexpEq
             }
             _ => {
                 return Err(

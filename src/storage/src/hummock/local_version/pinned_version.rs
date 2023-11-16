@@ -13,13 +13,16 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::iter::empty;
 use std::ops::Deref;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use auto_enums::auto_enum;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
+use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{HummockVersion, Level};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
@@ -125,21 +128,25 @@ impl PinnedVersion {
         self.version.id != INVALID_VERSION_ID
     }
 
-    fn levels_by_compaction_groups_id(
-        &self,
-        compaction_group_id: CompactionGroupId,
-    ) -> Vec<&Level> {
-        let mut ret = vec![];
-        let levels = self.version.levels.get(&compaction_group_id).unwrap();
-        ret.extend(levels.l0.as_ref().unwrap().sub_levels.iter().rev());
-        ret.extend(levels.levels.iter());
-        ret
+    fn levels_by_compaction_groups_id(&self, compaction_group_id: CompactionGroupId) -> &Levels {
+        self.version.levels.get(&compaction_group_id).unwrap()
     }
 
-    pub fn levels(&self, table_id: TableId) -> Vec<&Level> {
+    pub fn levels(&self, table_id: TableId) -> impl Iterator<Item = &Level> {
+        #[auto_enum(Iterator)]
         match self.compaction_group_index.get(&table_id) {
-            Some(compaction_group_id) => self.levels_by_compaction_groups_id(*compaction_group_id),
-            None => vec![],
+            Some(compaction_group_id) => {
+                let levels = self.levels_by_compaction_groups_id(*compaction_group_id);
+                levels
+                    .l0
+                    .as_ref()
+                    .unwrap()
+                    .sub_levels
+                    .iter()
+                    .rev()
+                    .chain(levels.levels.iter())
+            }
+            None => empty(),
         }
     }
 
@@ -160,6 +167,7 @@ impl PinnedVersion {
 pub(crate) async fn start_pinned_version_worker(
     mut rx: UnboundedReceiver<PinVersionAction>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
+    max_version_pinning_duration_sec: u64,
 ) {
     let min_execute_interval = Duration::from_millis(1000);
     let max_retry_interval = Duration::from_secs(10);
@@ -173,21 +181,34 @@ pub(crate) async fn start_pinned_version_worker(
     min_execute_interval_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut need_unpin = false;
 
-    let mut version_ids_in_use: BTreeMap<u64, usize> = BTreeMap::new();
-
+    let mut version_ids_in_use: BTreeMap<u64, (usize, Instant)> = BTreeMap::new();
+    let max_version_pinning_duration_sec = Duration::from_secs(max_version_pinning_duration_sec);
     // For each run in the loop, accumulate versions to unpin and call unpin RPC once.
     loop {
         min_execute_interval_tick.tick().await;
+        // 0. Expire versions.
+        while version_ids_in_use.len() > 1 && let Some(e) = version_ids_in_use.first_entry() {
+            if e.get().1.elapsed() < max_version_pinning_duration_sec {
+                break;
+            }
+            need_unpin = true;
+            e.remove();
+        }
+
         // 1. Collect new versions to unpin.
         let mut versions_to_unpin = vec![];
+        let inst = Instant::now();
         'collect: loop {
             match rx.try_recv() {
                 Ok(version_action) => match version_action {
                     PinVersionAction::Pin(version_id) => {
                         version_ids_in_use
                             .entry(version_id)
-                            .and_modify(|counter| *counter += 1)
-                            .or_insert(1);
+                            .and_modify(|e| {
+                                e.0 += 1;
+                                e.1 = inst;
+                            })
+                            .or_insert((1, inst));
                     }
                     PinVersionAction::Unpin(version_id) => {
                         versions_to_unpin.push(version_id);
@@ -213,13 +234,16 @@ pub(crate) async fn start_pinned_version_worker(
 
         for version in &versions_to_unpin {
             match version_ids_in_use.get_mut(version) {
-                Some(counter) => {
+                Some((counter, _)) => {
                     *counter -= 1;
                     if *counter == 0 {
                         version_ids_in_use.remove(version);
                     }
                 }
-                None => tracing::warn!("version {} to unpin dose not exist", version),
+                None => tracing::warn!(
+                    "version {} to unpin does not exist, may already be unpinned due to expiration",
+                    version
+                ),
             }
         }
 

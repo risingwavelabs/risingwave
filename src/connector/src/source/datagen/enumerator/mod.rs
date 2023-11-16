@@ -15,7 +15,7 @@
 use async_trait::async_trait;
 
 use crate::source::datagen::{DatagenProperties, DatagenSplit};
-use crate::source::SplitEnumerator;
+use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct DatagenSplitEnumerator {
@@ -27,7 +27,10 @@ impl SplitEnumerator for DatagenSplitEnumerator {
     type Properties = DatagenProperties;
     type Split = DatagenSplit;
 
-    async fn new(properties: DatagenProperties) -> anyhow::Result<DatagenSplitEnumerator> {
+    async fn new(
+        properties: DatagenProperties,
+        _context: SourceEnumeratorContextRef,
+    ) -> anyhow::Result<DatagenSplitEnumerator> {
         let split_num = properties.split_num.unwrap_or_else(|| "1".to_string());
         let split_num = split_num.parse::<i32>()?;
         Ok(Self { split_num })

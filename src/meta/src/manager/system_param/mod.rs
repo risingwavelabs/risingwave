@@ -21,7 +21,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::{check_missing_params, set_system_param};
-use risingwave_common::{for_all_undeprecated_params, key_of};
+use risingwave_common::{for_all_params, key_of};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SystemParams;
 use tokio::sync::oneshot::Sender;
@@ -32,30 +32,30 @@ use tracing::info;
 use self::model::SystemParamsModel;
 use super::NotificationManagerRef;
 use crate::model::{ValTransaction, VarTransaction};
-use crate::storage::{MetaStore, Transaction};
+use crate::storage::{MetaStore, MetaStoreRef, Transaction};
 use crate::{MetaError, MetaResult};
 
-pub type SystemParamsManagerRef<S> = Arc<SystemParamsManager<S>>;
+pub type SystemParamsManagerRef = Arc<SystemParamsManager>;
 
-pub struct SystemParamsManager<S: MetaStore> {
-    meta_store: Arc<S>,
+pub struct SystemParamsManager {
+    meta_store: MetaStoreRef,
     // Notify workers and local subscribers of parameter change.
-    notification_manager: NotificationManagerRef<S>,
+    notification_manager: NotificationManagerRef,
     // Cached parameters.
     params: RwLock<SystemParams>,
 }
 
-impl<S: MetaStore> SystemParamsManager<S> {
+impl SystemParamsManager {
     /// Return error if `init_params` conflict with persisted system params.
     pub async fn new(
-        meta_store: Arc<S>,
-        notification_manager: NotificationManagerRef<S>,
+        meta_store: MetaStoreRef,
+        notification_manager: NotificationManagerRef,
         init_params: SystemParams,
         cluster_first_launch: bool,
     ) -> MetaResult<Self> {
         let params = if cluster_first_launch {
             init_params
-        } else if let Some(persisted) = SystemParams::get(meta_store.as_ref()).await? {
+        } else if let Some(persisted) = SystemParams::get(&meta_store).await? {
             merge_params(persisted, init_params)
         } else {
             return Err(MetaError::system_param(
@@ -81,7 +81,7 @@ impl<S: MetaStore> SystemParamsManager<S> {
         self.params.read().await.clone().into()
     }
 
-    pub async fn set_param(&self, name: &str, value: Option<String>) -> MetaResult<()> {
+    pub async fn set_param(&self, name: &str, value: Option<String>) -> MetaResult<SystemParams> {
         let mut params_guard = self.params.write().await;
         let params = params_guard.deref_mut();
         let mut mem_txn = VarTransaction::new(params);
@@ -89,7 +89,7 @@ impl<S: MetaStore> SystemParamsManager<S> {
         set_system_param(mem_txn.deref_mut(), name, value).map_err(MetaError::system_param)?;
 
         let mut store_txn = Transaction::default();
-        mem_txn.apply_to_txn(&mut store_txn)?;
+        mem_txn.apply_to_txn(&mut store_txn).await?;
         self.meta_store.txn(store_txn).await?;
 
         mem_txn.commit();
@@ -104,21 +104,16 @@ impl<S: MetaStore> SystemParamsManager<S> {
         // Sync params to worker nodes.
         self.notify_workers(params).await;
 
-        Ok(())
+        Ok(params.clone())
     }
 
     /// Flush the cached params to meta store.
     pub async fn flush_params(&self) -> MetaResult<()> {
-        Ok(
-            SystemParams::insert(self.params.read().await.deref(), self.meta_store.as_ref())
-                .await?,
-        )
+        Ok(SystemParams::insert(self.params.read().await.deref(), &self.meta_store).await?)
     }
 
     // Periodically sync params to worker nodes.
-    pub async fn start_params_notifier(
-        system_params_manager: Arc<Self>,
-    ) -> (JoinHandle<()>, Sender<()>) {
+    pub fn start_params_notifier(system_params_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
         const NOTIFY_INTERVAL: Duration = Duration::from_millis(5000);
 
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
@@ -187,4 +182,4 @@ macro_rules! impl_merge_params {
     };
 }
 
-for_all_undeprecated_params!(impl_merge_params);
+for_all_params!(impl_merge_params);

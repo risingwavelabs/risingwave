@@ -1,7 +1,7 @@
-DROP DATABASE IF EXISTS mydb;
-CREATE DATABASE mydb;
+DROP DATABASE IF EXISTS `my@db`;
+CREATE DATABASE `my@db`;
 
-USE mydb;
+USE `my@db`;
 
 CREATE TABLE products (
     id INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -48,3 +48,10 @@ VALUES (1,1,'no'),
        (2,2,'no'),
        (3,3,'no'),
        (4,4,'no');
+
+CREATE USER 'dbz'@'%' IDENTIFIED BY '123456';
+GRANT SELECT, RELOAD, SHOW DATABASES, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'dbz'@'%';
+
+CREATE TABLE tt3 (v1 int primary key, v2 timestamp);
+INSERT INTO tt3 VALUES (1, '2020-07-30 10:08:22');
+INSERT INTO tt3 VALUES (2, '2020-07-31 10:09:22');

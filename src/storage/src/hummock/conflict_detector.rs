@@ -94,7 +94,7 @@ impl ConflictDetector {
             .entry(epoch)
             .or_insert(Some(HashSet::new()));
 
-        for (key, value) in kv_pairs.iter() {
+        for (key, value) in kv_pairs {
             assert!(
                 written_key
                     .as_mut()

@@ -99,6 +99,7 @@ impl ColIndexMapping {
     pub fn rewrite_required_distribution(&self, dist: &RequiredDist) -> RequiredDist {
         match dist {
             RequiredDist::ShardByKey(keys) => {
+                assert!(!keys.is_clear());
                 let keys = self.rewrite_bitset(keys);
                 if keys.count_ones(..) == 0 {
                     RequiredDist::Any
@@ -108,15 +109,29 @@ impl ColIndexMapping {
             }
             RequiredDist::PhysicalDist(dist) => match dist {
                 Distribution::HashShard(keys) => {
+                    assert!(!keys.is_empty());
                     let keys = self.rewrite_dist_key(keys);
                     match keys {
                         Some(keys) => RequiredDist::PhysicalDist(Distribution::HashShard(keys)),
                         None => RequiredDist::Any,
                     }
                 }
-                _ => RequiredDist::PhysicalDist(dist.clone()),
+                Distribution::UpstreamHashShard(keys, table_id) => {
+                    assert!(!keys.is_empty());
+                    let keys = self.rewrite_dist_key(keys);
+                    match keys {
+                        Some(keys) => RequiredDist::PhysicalDist(Distribution::UpstreamHashShard(
+                            keys, *table_id,
+                        )),
+                        None => RequiredDist::Any,
+                    }
+                }
+                Distribution::Single => RequiredDist::PhysicalDist(Distribution::Single),
+                Distribution::Broadcast => RequiredDist::PhysicalDist(Distribution::Broadcast),
+                Distribution::SomeShard => RequiredDist::PhysicalDist(Distribution::SomeShard),
             },
-            _ => dist.clone(),
+            RequiredDist::Any => RequiredDist::Any,
+            RequiredDist::AnyShard => RequiredDist::AnyShard,
         }
     }
 

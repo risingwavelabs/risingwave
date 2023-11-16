@@ -18,10 +18,8 @@ use std::task::{Context, Poll};
 
 use futures::stream::{self, BoxStream};
 use futures::{Stream, StreamExt};
-use pgwire::pg_response::StatementType::{
-    ABORT, BEGIN, COMMIT, ROLLBACK, SET_TRANSACTION, START_TRANSACTION,
-};
-use pgwire::pg_response::{PgResponse, RowSetResult};
+use pgwire::pg_response::StatementType::{self, ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
+use pgwire::pg_response::{PgResponse, PgResponseBuilder, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
 use risingwave_common::error::{ErrorCode, Result};
@@ -30,14 +28,19 @@ use risingwave_sqlparser::ast::*;
 use self::util::DataChunkToRowSetAdapter;
 use self::variable::handle_set_time_zone;
 use crate::catalog::table_catalog::TableType;
+use crate::handler::cancel_job::handle_cancel;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_owner;
 mod alter_relation_rename;
+mod alter_source_column;
 mod alter_system;
 mod alter_table_column;
 pub mod alter_user;
+pub mod cancel_job;
+mod comment;
 pub mod create_connection;
 mod create_database;
 pub mod create_function;
@@ -69,10 +72,15 @@ pub mod handle_privilege;
 pub mod privilege;
 pub mod query;
 mod show;
+mod transaction;
 pub mod util;
 pub mod variable;
+mod wait;
 
-/// The [`PgResponse`] used by Risingwave.
+/// The [`PgResponseBuilder`] used by RisingWave.
+pub type RwPgResponseBuilder = PgResponseBuilder<PgResponseStream>;
+
+/// The [`PgResponse`] used by RisingWave.
 pub type RwPgResponse = PgResponse<PgResponseStream>;
 
 pub enum PgResponseStream {
@@ -102,16 +110,16 @@ impl From<Vec<Row>> for PgResponseStream {
 #[derive(Clone)]
 pub struct HandlerArgs {
     pub session: Arc<SessionImpl>,
-    pub sql: String,
+    pub sql: Arc<str>,
     pub normalized_sql: String,
     pub with_options: WithOptions,
 }
 
 impl HandlerArgs {
-    pub fn new(session: Arc<SessionImpl>, stmt: &Statement, sql: &str) -> Result<Self> {
+    pub fn new(session: Arc<SessionImpl>, stmt: &Statement, sql: Arc<str>) -> Result<Self> {
         Ok(Self {
             session,
-            sql: sql.into(),
+            sql,
             with_options: WithOptions::try_from(stmt)?,
             normalized_sql: Self::normalize_sql(stmt),
         })
@@ -164,11 +172,13 @@ impl HandlerArgs {
 pub async fn handle(
     session: Arc<SessionImpl>,
     stmt: Statement,
-    sql: &str,
+    sql: Arc<str>,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     session.clear_cancel_query_flag();
+    let _guard = session.txn_begin_implicit();
     let handler_args = HandlerArgs::new(session, &stmt, sql)?;
+
     match stmt {
         Statement::Explain {
             statement,
@@ -214,6 +224,7 @@ pub async fn handle(
             source_schema,
             source_watermarks,
             append_only,
+            cdc_table_info,
         } => {
             if or_replace {
                 return Err(ErrorCode::NotImplemented(
@@ -240,6 +251,13 @@ pub async fn handle(
                 )
                 .await;
             }
+            let (source_schema, notice) = match source_schema {
+                Some(s) => {
+                    let (s, notice) = s.into_source_schema_v2();
+                    (Some(s), notice)
+                }
+                None => (None, None),
+            };
             create_table::handle_create_table(
                 handler_args,
                 name,
@@ -249,6 +267,8 @@ pub async fn handle(
                 source_schema,
                 source_watermarks,
                 append_only,
+                notice,
+                cdc_table_info,
             )
             .await
         }
@@ -269,7 +289,10 @@ pub async fn handle(
             handle_privilege::handle_revoke_privilege(handler_args, stmt).await
         }
         Statement::Describe { name } => describe::handle_describe(handler_args, name),
-        Statement::ShowObjects(show_object) => show::handle_show_object(handler_args, show_object),
+        Statement::ShowObjects {
+            object: show_object,
+            filter,
+        } => show::handle_show_object(handler_args, show_object, filter).await,
         Statement::ShowCreateObject { create_type, name } => {
             show::handle_show_create_object(handler_args, create_type, name)
         }
@@ -278,51 +301,86 @@ pub async fn handle(
             object_name,
             if_exists,
             drop_mode,
-        }) => match object_type {
-            ObjectType::Table => {
-                drop_table::handle_drop_table(handler_args, object_name, if_exists).await
-            }
-            ObjectType::MaterializedView => {
-                drop_mv::handle_drop_mv(handler_args, object_name, if_exists).await
-            }
-            ObjectType::Index => {
-                drop_index::handle_drop_index(handler_args, object_name, if_exists).await
-            }
-            ObjectType::Source => {
-                drop_source::handle_drop_source(handler_args, object_name, if_exists).await
-            }
-            ObjectType::Sink => {
-                drop_sink::handle_drop_sink(handler_args, object_name, if_exists).await
-            }
-            ObjectType::Database => {
-                drop_database::handle_drop_database(
-                    handler_args,
-                    object_name,
-                    if_exists,
-                    drop_mode.into(),
-                )
-                .await
-            }
-            ObjectType::Schema => {
-                drop_schema::handle_drop_schema(
-                    handler_args,
-                    object_name,
-                    if_exists,
-                    drop_mode.into(),
-                )
-                .await
-            }
-            ObjectType::User => {
-                drop_user::handle_drop_user(handler_args, object_name, if_exists, drop_mode.into())
+        }) => {
+            let mut cascade = false;
+            if let AstOption::Some(DropMode::Cascade) = drop_mode {
+                match object_type {
+                    ObjectType::MaterializedView
+                    | ObjectType::View
+                    | ObjectType::Sink
+                    | ObjectType::Source
+                    | ObjectType::Index
+                    | ObjectType::Table => {
+                        cascade = true;
+                    }
+                    ObjectType::Schema
+                    | ObjectType::Database
+                    | ObjectType::User
+                    | ObjectType::Connection => {
+                        return Err(ErrorCode::NotImplemented(
+                            "DROP CASCADE".to_string(),
+                            None.into(),
+                        )
+                        .into());
+                    }
+                };
+            };
+            match object_type {
+                ObjectType::Table => {
+                    drop_table::handle_drop_table(handler_args, object_name, if_exists, cascade)
+                        .await
+                }
+                ObjectType::MaterializedView => {
+                    drop_mv::handle_drop_mv(handler_args, object_name, if_exists, cascade).await
+                }
+                ObjectType::Index => {
+                    drop_index::handle_drop_index(handler_args, object_name, if_exists, cascade)
+                        .await
+                }
+                ObjectType::Source => {
+                    drop_source::handle_drop_source(handler_args, object_name, if_exists, cascade)
+                        .await
+                }
+                ObjectType::Sink => {
+                    drop_sink::handle_drop_sink(handler_args, object_name, if_exists, cascade).await
+                }
+                ObjectType::Database => {
+                    drop_database::handle_drop_database(
+                        handler_args,
+                        object_name,
+                        if_exists,
+                        drop_mode.into(),
+                    )
                     .await
+                }
+                ObjectType::Schema => {
+                    drop_schema::handle_drop_schema(
+                        handler_args,
+                        object_name,
+                        if_exists,
+                        drop_mode.into(),
+                    )
+                    .await
+                }
+                ObjectType::User => {
+                    drop_user::handle_drop_user(
+                        handler_args,
+                        object_name,
+                        if_exists,
+                        drop_mode.into(),
+                    )
+                    .await
+                }
+                ObjectType::View => {
+                    drop_view::handle_drop_view(handler_args, object_name, if_exists, cascade).await
+                }
+                ObjectType::Connection => {
+                    drop_connection::handle_drop_connection(handler_args, object_name, if_exists)
+                        .await
+                }
             }
-            ObjectType::View => {
-                drop_view::handle_drop_view(handler_args, object_name, if_exists).await
-            }
-            ObjectType::Connection => {
-                drop_connection::handle_drop_connection(handler_args, object_name, if_exists).await
-            }
-        },
+        }
+        // XXX: should we reuse Statement::Drop for DROP FUNCTION?
         Statement::DropFunction {
             if_exists,
             func_desc,
@@ -334,6 +392,7 @@ pub async fn handle(
         | Statement::Update { .. } => query::handle_query(handler_args, stmt, formats).await,
         Statement::CreateView {
             materialized,
+            if_not_exists,
             name,
             columns,
             query,
@@ -349,12 +408,22 @@ pub async fn handle(
                 .into());
             }
             if materialized {
-                create_mv::handle_create_mv(handler_args, name, *query, columns, emit_mode).await
+                create_mv::handle_create_mv(
+                    handler_args,
+                    if_not_exists,
+                    name,
+                    *query,
+                    columns,
+                    emit_mode,
+                )
+                .await
             } else {
-                create_view::handle_create_view(handler_args, name, columns, *query).await
+                create_view::handle_create_view(handler_args, if_not_exists, name, columns, *query)
+                    .await
             }
         }
         Statement::Flush => flush::handle_flush(handler_args).await,
+        Statement::Wait => wait::handle_wait(handler_args).await,
         Statement::SetVariable {
             local: _,
             variable,
@@ -388,6 +457,30 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterDatabase {
+            name,
+            operation: AlterDatabaseOperation::ChangeOwner { new_owner_name },
+        } => {
+            alter_owner::handle_alter_owner(
+                handler_args,
+                name,
+                new_owner_name,
+                StatementType::ALTER_DATABASE,
+            )
+            .await
+        }
+        Statement::AlterSchema {
+            name,
+            operation: AlterSchemaOperation::ChangeOwner { new_owner_name },
+        } => {
+            alter_owner::handle_alter_owner(
+                handler_args,
+                name,
+                new_owner_name,
+                StatementType::ALTER_SCHEMA,
+            )
+            .await
+        }
         Statement::AlterTable {
             name,
             operation:
@@ -403,6 +496,18 @@ pub async fn handle(
                 TableType::Table,
                 name,
                 table_name,
+            )
+            .await
+        }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::ChangeOwner { new_owner_name },
+        } => {
+            alter_owner::handle_alter_owner(
+                handler_args,
+                name,
+                new_owner_name,
+                StatementType::ALTER_TABLE,
             )
             .await
         }
@@ -427,46 +532,90 @@ pub async fn handle(
                 alter_relation_rename::handle_rename_view(handler_args, name, view_name).await
             }
         }
+        Statement::AlterView {
+            materialized,
+            name,
+            operation: AlterViewOperation::ChangeOwner { new_owner_name },
+        } => {
+            if materialized {
+                alter_owner::handle_alter_owner(
+                    handler_args,
+                    name,
+                    new_owner_name,
+                    StatementType::ALTER_MATERIALIZED_VIEW,
+                )
+                .await
+            } else {
+                alter_owner::handle_alter_owner(
+                    handler_args,
+                    name,
+                    new_owner_name,
+                    StatementType::ALTER_VIEW,
+                )
+                .await
+            }
+        }
         Statement::AlterSink {
             name,
             operation: AlterSinkOperation::RenameSink { sink_name },
         } => alter_relation_rename::handle_rename_sink(handler_args, name, sink_name).await,
+        Statement::AlterSink {
+            name,
+            operation: AlterSinkOperation::ChangeOwner { new_owner_name },
+        } => {
+            alter_owner::handle_alter_owner(
+                handler_args,
+                name,
+                new_owner_name,
+                StatementType::ALTER_SINK,
+            )
+            .await
+        }
         Statement::AlterSource {
             name,
             operation: AlterSourceOperation::RenameSource { source_name },
         } => alter_relation_rename::handle_rename_source(handler_args, name, source_name).await,
+        Statement::AlterSource {
+            name,
+            operation: operation @ AlterSourceOperation::AddColumn { .. },
+        } => alter_source_column::handle_alter_source_column(handler_args, name, operation).await,
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::ChangeOwner { new_owner_name },
+        } => {
+            alter_owner::handle_alter_owner(
+                handler_args,
+                name,
+                new_owner_name,
+                StatementType::ALTER_SOURCE,
+            )
+            .await
+        }
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }
-        // Ignore `StartTransaction` and `BEGIN`,`Abort`,`Rollback`,`Commit`temporarily.Its not
-        // final implementation.
-        // 1. Fully support transaction is too hard and gives few benefits to us.
-        // 2. Some client e.g. psycopg2 will use this statement.
-        // TODO: Track issues #2595 #2541
-        Statement::StartTransaction { .. } => Ok(PgResponse::empty_result_with_notice(
-            START_TRANSACTION,
-            "Ignored temporarily. See detail in issue#2541".to_string(),
-        )),
-        Statement::BEGIN { .. } => Ok(PgResponse::empty_result_with_notice(
-            BEGIN,
-            "Ignored temporarily. See detail in issue#2541".to_string(),
-        )),
-        Statement::Abort { .. } => Ok(PgResponse::empty_result_with_notice(
-            ABORT,
-            "Ignored temporarily. See detail in issue#2541".to_string(),
-        )),
-        Statement::Commit { .. } => Ok(PgResponse::empty_result_with_notice(
-            COMMIT,
-            "Ignored temporarily. See detail in issue#2541".to_string(),
-        )),
-        Statement::Rollback { .. } => Ok(PgResponse::empty_result_with_notice(
-            ROLLBACK,
-            "Ignored temporarily. See detail in issue#2541".to_string(),
-        )),
-        Statement::SetTransaction { .. } => Ok(PgResponse::empty_result_with_notice(
-            SET_TRANSACTION,
-            "Ignored temporarily. See detail in issue#2541".to_string(),
-        )),
+        Statement::StartTransaction { modes } => {
+            transaction::handle_begin(handler_args, START_TRANSACTION, modes).await
+        }
+        Statement::Begin { modes } => transaction::handle_begin(handler_args, BEGIN, modes).await,
+        Statement::Commit { chain } => {
+            transaction::handle_commit(handler_args, COMMIT, chain).await
+        }
+        Statement::Abort => transaction::handle_rollback(handler_args, ABORT, false).await,
+        Statement::Rollback { chain } => {
+            transaction::handle_rollback(handler_args, ROLLBACK, chain).await
+        }
+        Statement::SetTransaction {
+            modes,
+            snapshot,
+            session,
+        } => transaction::handle_set(handler_args, modes, snapshot, session).await,
+        Statement::CancelJobs(jobs) => handle_cancel(handler_args, jobs).await,
+        Statement::Comment {
+            object_type,
+            object_name,
+            comment,
+        } => comment::handle_comment(handler_args, object_type, object_name, comment).await,
         _ => Err(
             ErrorCode::NotImplemented(format!("Unhandled statement: {}", stmt), None.into()).into(),
         ),

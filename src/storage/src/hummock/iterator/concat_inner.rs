@@ -79,6 +79,7 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
             if let Some(old_iter) = self.sstable_iter.take() {
                 old_iter.collect_local_statistic(&mut self.stats);
             }
+            self.cur_idx = self.tables.len();
         } else {
             let table = self
                 .sstable_store
@@ -120,7 +121,12 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
                 Ok(())
             } else {
                 // seek to next table
-                self.seek_idx(self.cur_idx + 1, None).await
+                let mut table_idx = self.cur_idx + 1;
+                while !self.is_valid() && table_idx < self.tables.len() {
+                    self.seek_idx(table_idx, None).await?;
+                    table_idx += 1;
+                }
+                Ok(())
             }
         }
     }
@@ -138,12 +144,21 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
     }
 
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
-        async move { self.seek_idx(0, None).await }
+        async move {
+            self.seek_idx(0, None).await?;
+            let mut table_idx = 1;
+            while !self.is_valid() && table_idx < self.tables.len() {
+                // Seek to next table
+                self.seek_idx(table_idx, None).await?;
+                table_idx += 1;
+            }
+            Ok(())
+        }
     }
 
     fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
-            let table_idx = self
+            let mut table_idx = self
                 .tables
                 .partition_point(|table| match Self::Direction::direction() {
                     DirectionEnum::Forward => {
@@ -160,9 +175,11 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
                 .saturating_sub(1); // considering the boundary of 0
 
             self.seek_idx(table_idx, Some(key)).await?;
-            if !self.is_valid() {
+            table_idx += 1;
+            while !self.is_valid() && table_idx < self.tables.len() {
                 // Seek to next table
-                self.seek_idx(table_idx + 1, None).await?;
+                self.seek_idx(table_idx, None).await?;
+                table_idx += 1;
             }
             Ok(())
         }

@@ -393,8 +393,8 @@ mod tests {
         fd.add_functional_dependency_by_column_indices(&[1, 2], &[0]); // (1, 2) --> (0)
         fd.add_functional_dependency_by_column_indices(&[0, 1], &[3]); // (0, 1) --> (3)
         fd.add_functional_dependency_by_column_indices(&[3], &[4]); // (3) --> (4)
-        let from = FixedBitSet::from_iter([1usize, 2usize].into_iter());
-        let to = FixedBitSet::from_iter([4usize].into_iter());
+        let from = FixedBitSet::from_iter([1usize, 2usize]);
+        let to = FixedBitSet::from_iter([4usize]);
         assert!(fd.is_determined_by(&from, &to)); // (1, 2) --> (4) holds
     }
 }

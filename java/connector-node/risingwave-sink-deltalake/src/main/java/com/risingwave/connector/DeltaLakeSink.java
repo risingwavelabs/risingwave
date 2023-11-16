@@ -17,8 +17,8 @@ package com.risingwave.connector;
 import static io.grpc.Status.*;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.connector.api.sink.SinkWriterBase;
 import io.delta.standalone.DeltaLog;
 import io.delta.standalone.Operation;
 import io.delta.standalone.OptimisticTransaction;
@@ -36,7 +36,7 @@ import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
 
-public class DeltaLakeSink extends SinkBase {
+public class DeltaLakeSink extends SinkWriterBase {
     private static final CompressionCodecName codecName = CompressionCodecName.SNAPPY;
     private final String uuid = UUID.randomUUID().toString();
     private final Configuration conf;
@@ -75,27 +75,24 @@ public class DeltaLakeSink extends SinkBase {
             }
         }
         while (rows.hasNext()) {
-            try (SinkRow row = rows.next()) {
-                switch (row.getOp()) {
-                    case INSERT:
-                        GenericRecord record = new GenericData.Record(this.sinkSchema);
-                        for (int i = 0; i < this.sinkSchema.getFields().size(); i++) {
-                            record.put(i, row.get(i));
-                        }
-                        try {
-                            this.parquetWriter.write(record);
-                            this.numOutputRows += 1;
-                        } catch (IOException ioException) {
-                            throw INTERNAL.withCause(ioException).asRuntimeException();
-                        }
-                        break;
-                    default:
-                        throw UNIMPLEMENTED
-                                .withDescription("unsupported operation: " + row.getOp())
-                                .asRuntimeException();
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(e);
+            SinkRow row = rows.next();
+            switch (row.getOp()) {
+                case INSERT:
+                    GenericRecord record = new GenericData.Record(this.sinkSchema);
+                    for (int i = 0; i < this.sinkSchema.getFields().size(); i++) {
+                        record.put(i, row.get(i));
+                    }
+                    try {
+                        this.parquetWriter.write(record);
+                        this.numOutputRows += 1;
+                    } catch (IOException ioException) {
+                        throw INTERNAL.withCause(ioException).asRuntimeException();
+                    }
+                    break;
+                default:
+                    throw UNIMPLEMENTED
+                            .withDescription("unsupported operation: " + row.getOp())
+                            .asRuntimeException();
             }
         }
     }

@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 
 use risingwave_common::array::Op;
-use risingwave_common::estimate_size::EstimateSize;
+use risingwave_common::estimate_size::{EstimateSize, KvSize};
 
 use super::{StateCache, StateCacheFiller};
 
@@ -24,13 +24,14 @@ use super::{StateCache, StateCacheFiller};
 pub struct OrderedStateCache<K: Ord + EstimateSize, V: EstimateSize> {
     cache: BTreeMap<K, V>,
     synced: bool,
-    kv_heap_size: usize,
+    kv_heap_size: KvSize,
 }
 
 impl<K: Ord + EstimateSize, V: EstimateSize> EstimateSize for OrderedStateCache<K, V> {
     fn estimated_heap_size(&self) -> usize {
         // TODO: Add btreemap internal size
-        self.kv_heap_size
+        // https://github.com/risingwavelabs/risingwave/issues/9713
+        self.kv_heap_size.size()
     }
 }
 
@@ -39,20 +40,17 @@ impl<K: Ord + EstimateSize, V: EstimateSize> OrderedStateCache<K, V> {
         Self {
             cache: BTreeMap::new(),
             synced: false,
-            kv_heap_size: 0,
+            kv_heap_size: KvSize::new(),
         }
     }
 
     fn insert_cache(&mut self, key: K, value: V) -> Option<V> {
-        let key_size = key.estimated_heap_size();
-        self.kv_heap_size = self
-            .kv_heap_size
-            .saturating_add(key_size + value.estimated_heap_size());
+        let key_size = self.kv_heap_size.add_val(&key);
+        self.kv_heap_size.add_val(&value);
         let old_val = self.cache.insert(key, value);
         if let Some(old_val) = &old_val {
-            self.kv_heap_size = self
-                .kv_heap_size
-                .saturating_sub(key_size + old_val.estimated_heap_size());
+            self.kv_heap_size.sub_size(key_size);
+            self.kv_heap_size.sub_val(old_val);
         }
         old_val
     }
@@ -60,9 +58,7 @@ impl<K: Ord + EstimateSize, V: EstimateSize> OrderedStateCache<K, V> {
     fn delete_cache(&mut self, key: &K) -> Option<V> {
         let old_val = self.cache.remove(key);
         if let Some(old_val) = &old_val {
-            self.kv_heap_size = self
-                .kv_heap_size
-                .saturating_sub(key.estimated_heap_size() + old_val.estimated_heap_size());
+            self.kv_heap_size.sub(key, old_val);
         }
         old_val
     }

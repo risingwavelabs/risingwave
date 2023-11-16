@@ -25,6 +25,7 @@ pub async fn handle_drop_sink(
     handler_args: HandlerArgs,
     sink_name: ObjectName,
     if_exists: bool,
+    cascade: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = session.database();
@@ -40,10 +41,9 @@ pub async fn handle_drop_sink(
                 Ok((sink, schema)) => (sink.clone(), schema),
                 Err(e) => {
                     return if if_exists {
-                        Ok(RwPgResponse::empty_result_with_notice(
-                            StatementType::DROP_SINK,
-                            format!("sink \"{}\" does not exist, skipping", sink_name),
-                        ))
+                        Ok(RwPgResponse::builder(StatementType::DROP_SINK)
+                            .notice(format!("sink \"{}\" does not exist, skipping", sink_name))
+                            .into())
                     } else {
                         Err(e.into())
                     }
@@ -55,8 +55,8 @@ pub async fn handle_drop_sink(
         sink.id
     };
 
-    let catalog_writer = session.env().catalog_writer();
-    catalog_writer.drop_sink(sink_id.sink_id).await?;
+    let catalog_writer = session.catalog_writer()?;
+    catalog_writer.drop_sink(sink_id.sink_id, cascade).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SINK))
 }
@@ -72,7 +72,7 @@ mod tests {
     async fn test_drop_sink_handler() {
         let sql_create_table = "create table t (v1 smallint primary key);";
         let sql_create_mv = "create materialized view mv as select v1 from t;";
-        let sql_create_sink = "create sink snk from mv with( connector = 'mysql')";
+        let sql_create_sink = "create sink snk from mv with( connector = 'kafka')";
         let sql_drop_sink = "drop sink snk;";
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql_create_table).await.unwrap();

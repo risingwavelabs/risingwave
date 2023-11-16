@@ -28,7 +28,7 @@ impl NoOpExecutor {
     pub fn new(ctx: ActorContextRef, input: BoxedExecutor, executor_id: u64) -> Self {
         Self {
             _ctx: ctx,
-            identity: format!("BarrierRecvExecutor {:X}", executor_id),
+            identity: format!("NoOpExecutor {:X}", executor_id),
             input,
         }
     }

@@ -17,21 +17,37 @@ package com.risingwave.connector;
 import static io.grpc.Status.*;
 
 import com.risingwave.connector.api.sink.SinkFactory;
+import com.risingwave.proto.ConnectorServiceProto;
+import java.util.Optional;
 
 public class SinkUtils {
-    public static SinkFactory getSinkFactory(String sinkType) {
-        switch (sinkType) {
+    public static String getConnectorName(ConnectorServiceProto.SinkParam sinkParam) {
+        return Optional.ofNullable(sinkParam.getPropertiesMap().get("connector"))
+                .orElseThrow(
+                        () -> {
+                            return INVALID_ARGUMENT
+                                    .withDescription("connector not specified prop map")
+                                    .asRuntimeException();
+                        });
+    }
+
+    public static SinkFactory getSinkFactory(String sinkName) {
+        switch (sinkName) {
             case "file":
                 return new FileSinkFactory();
             case "jdbc":
                 return new JDBCSinkFactory();
-            case "iceberg":
+            case "iceberg_java":
                 return new IcebergSinkFactory();
             case "deltalake":
                 return new DeltaLakeSinkFactory();
+            case "elasticsearch":
+                return new EsSinkFactory();
+            case "cassandra":
+                return new CassandraFactory();
             default:
                 throw UNIMPLEMENTED
-                        .withDescription("unknown sink type: " + sinkType)
+                        .withDescription("unknown sink type: " + sinkName)
                         .asRuntimeException();
         }
     }

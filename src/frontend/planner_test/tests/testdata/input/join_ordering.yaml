@@ -1,0 +1,47 @@
+- name: left deep tree join ordering
+  sql: |
+    set rw_streaming_enable_bushy_join = false;
+    create table t1 (v1 int, v2 int);
+    create table t2 (v3 int, v4 int);
+    create table t3 (v5 int, v6 int);
+    create table t4 (v7 int, v8 int);
+    select * from t1, t2, t3, t4 where v1 = v3 and v2 = v6 and v5 = v7
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+- name: bushy tree join ordering
+  sql: |
+    create table t1 (v1 int, v2 int);
+    create table t2 (v3 int, v4 int);
+    create table t3 (v5 int, v6 int);
+    create table t4 (v7 int, v8 int);
+    select * from t1, t2, t3, t4 where v1 = v3 and v2 = v6 and v5 = v7
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+- name: bushy tree join ordering manually
+  sql: |
+    set rw_enable_join_ordering = false;
+    create table t1 (v1 int, v2 int);
+    create table t2 (v3 int, v4 int);
+    create table t3 (v5 int, v6 int);
+    create table t4 (v7 int, v8 int);
+    select * from t1 join t2 on v1 = v3 join (t3 join t4 on v5 = v7) on v2 = v6;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+- name: right deep tree join ordering manually
+  sql: |
+    set rw_enable_join_ordering = false;
+    create table t1 (v1 int, v2 int);
+    create table t2 (v3 int, v4 int);
+    create table t3 (v5 int, v6 int);
+    create table t4 (v7 int, v8 int);
+    select * from t1 join (t2 join (t3 join t4 on v5 = v7) on v4 = v6) on v1 = v3;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan

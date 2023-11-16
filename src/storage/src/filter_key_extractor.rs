@@ -25,7 +25,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::info_in_release;
 use risingwave_hummock_sdk::key::{get_table_id, TABLE_PREFIX_LEN};
 use risingwave_pb::catalog::Table;
-use risingwave_rpc_client::error::{anyhow, Result as RpcResult, RpcError};
+use risingwave_rpc_client::error::{Result as RpcResult, RpcError};
 use risingwave_rpc_client::MetaClient;
 
 use crate::hummock::{HummockError, HummockResult};
@@ -50,7 +50,7 @@ impl FilterKeyExtractorImpl {
         if read_prefix_len == 0 || read_prefix_len > table_catalog.get_pk().len() {
             // for now frontend had not infer the table_id_to_filter_key_extractor, so we
             // use FullKeyFilterKeyExtractor
-            FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor::default())
+            FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor)
         } else {
             FilterKeyExtractorImpl::Schema(SchemaFilterKeyExtractor::new(table_catalog))
         }
@@ -88,8 +88,8 @@ for_all_filter_key_extractor_variants! { impl_filter_key_extractor }
 pub struct FullKeyFilterKeyExtractor;
 
 impl FilterKeyExtractor for FullKeyFilterKeyExtractor {
-    fn extract<'a>(&self, full_key: &'a [u8]) -> &'a [u8] {
-        full_key
+    fn extract<'a>(&self, user_key: &'a [u8]) -> &'a [u8] {
+        user_key
     }
 }
 
@@ -200,7 +200,7 @@ impl MultiFilterKeyExtractor {
         self.id_to_filter_key_extractor.len()
     }
 
-    pub fn get_exsting_table_ids(&self) -> HashSet<u32> {
+    pub fn get_existing_table_ids(&self) -> HashSet<u32> {
         self.id_to_filter_key_extractor.keys().cloned().collect()
     }
 }
@@ -253,12 +253,11 @@ impl StateTableAccessor for RemoteTableAccessor {
 #[async_trait::async_trait]
 impl StateTableAccessor for FakeRemoteTableAccessor {
     async fn get_tables(&self, _table_ids: &[u32]) -> RpcResult<HashMap<u32, Table>> {
-        Err(RpcError::Internal(anyhow!(
+        Err(RpcError::Internal(anyhow::anyhow!(
             "fake accessor does not support fetch remote table"
         )))
     }
 }
-
 struct FilterKeyExtractorManagerInner {
     table_id_to_filter_key_extractor: RwLock<HashMap<u32, Arc<FilterKeyExtractorImpl>>>,
     table_accessor: Box<dyn StateTableAccessor>,
@@ -292,21 +291,19 @@ impl FilterKeyExtractorManagerInner {
             // the table in sst has been deleted
 
             // use full key as default
-            return Ok(FilterKeyExtractorImpl::FullKey(
-                FullKeyFilterKeyExtractor::default(),
-            ));
+            return Ok(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor));
         }
 
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
         {
             let guard = self.table_id_to_filter_key_extractor.read();
-            table_id_set.drain_filter(|table_id| match guard.get(table_id) {
+            table_id_set.retain(|table_id| match guard.get(table_id) {
                 Some(filter_key_extractor) => {
                     multi_filter_key_extractor.register(*table_id, filter_key_extractor.clone());
-                    true
+                    false
                 }
 
-                None => false,
+                None => true,
             });
         }
 
@@ -336,19 +333,19 @@ impl FilterKeyExtractorManagerInner {
     }
 }
 
-/// `FilterKeyExtractorManager` is a wrapper for inner, and provide a protected read and write
+/// `RpcFilterKeyExtractorManager` is a wrapper for inner, and provide a protected read and write
 /// interface, its thread safe
-pub struct FilterKeyExtractorManager {
+pub struct RpcFilterKeyExtractorManager {
     inner: FilterKeyExtractorManagerInner,
 }
 
-impl Default for FilterKeyExtractorManager {
+impl Default for RpcFilterKeyExtractorManager {
     fn default() -> Self {
         Self::new(Box::<FakeRemoteTableAccessor>::default())
     }
 }
 
-impl FilterKeyExtractorManager {
+impl RpcFilterKeyExtractorManager {
     pub fn new(table_accessor: Box<dyn StateTableAccessor>) -> Self {
         Self {
             inner: FilterKeyExtractorManagerInner {
@@ -378,15 +375,60 @@ impl FilterKeyExtractorManager {
     /// Acquire a `MultiFilterKeyExtractor` by `table_id_set`
     /// Internally, try to get all `filter_key_extractor` from `hashmap`. Will block the caller if
     /// `table_id` does not util version update (notify), and retry to get
-    pub async fn acquire(
-        &self,
-        table_id_set: HashSet<u32>,
-    ) -> HummockResult<FilterKeyExtractorImpl> {
+    async fn acquire(&self, table_id_set: HashSet<u32>) -> HummockResult<FilterKeyExtractorImpl> {
         self.inner.acquire(table_id_set).await
     }
 }
 
-pub type FilterKeyExtractorManagerRef = Arc<FilterKeyExtractorManager>;
+#[derive(Clone)]
+pub enum FilterKeyExtractorManager {
+    RpcFilterKeyExtractorManager(Arc<RpcFilterKeyExtractorManager>),
+    StaticFilterKeyExtractorManager(Arc<StaticFilterKeyExtractorManager>),
+}
+
+impl FilterKeyExtractorManager {
+    pub async fn acquire(
+        &self,
+        table_id_set: HashSet<u32>,
+    ) -> HummockResult<FilterKeyExtractorImpl> {
+        match self {
+            FilterKeyExtractorManager::RpcFilterKeyExtractorManager(
+                rpc_filter_key_exactor_manager,
+            ) => rpc_filter_key_exactor_manager.acquire(table_id_set).await,
+            FilterKeyExtractorManager::StaticFilterKeyExtractorManager(
+                static_filter_key_extractor_manager,
+            ) => static_filter_key_extractor_manager.acquire(table_id_set),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct StaticFilterKeyExtractorManager {
+    id_to_table: HashMap<u32, Table>,
+}
+
+impl StaticFilterKeyExtractorManager {
+    pub fn new(id_to_table: HashMap<u32, Table>) -> Self {
+        Self { id_to_table }
+    }
+
+    fn acquire(&self, table_id_set: HashSet<u32>) -> HummockResult<FilterKeyExtractorImpl> {
+        let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
+        for table_id in table_id_set {
+            if let Some(table) = self.id_to_table.get(&table_id) {
+                let key_extractor = Arc::new(FilterKeyExtractorImpl::from_table(table));
+                multi_filter_key_extractor.register(table_id, key_extractor);
+            } else {
+                return Err(HummockError::other(format!(
+                    "table {} is absent in id_to_table, need to request rpc list_tables to get the schema", table_id,
+                )));
+            }
+        }
+        Ok(FilterKeyExtractorImpl::Multi(multi_filter_key_extractor))
+    }
+}
+
+pub type FilterKeyExtractorManagerRef = Arc<RpcFilterKeyExtractorManager>;
 
 #[cfg(test)]
 mod tests {
@@ -406,29 +448,28 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
     use risingwave_pb::catalog::table::TableType;
-    use risingwave_pb::catalog::PbTable;
+    use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
     use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
     use risingwave_pb::plan_common::PbColumnCatalog;
 
     use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
     use crate::filter_key_extractor::{
-        FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
-        MultiFilterKeyExtractor,
+        FilterKeyExtractorImpl, FullKeyFilterKeyExtractor, MultiFilterKeyExtractor,
+        RpcFilterKeyExtractorManager,
     };
-
     const fn dummy_vnode() -> [u8; VirtualNode::SIZE] {
         VirtualNode::from_index(233).to_be_bytes()
     }
 
     #[test]
     fn test_default_filter_key_extractor() {
-        let dummy_filter_key_extractor = DummyFilterKeyExtractor::default();
+        let dummy_filter_key_extractor = DummyFilterKeyExtractor;
         let full_key = "full_key".as_bytes();
         let output_key = dummy_filter_key_extractor.extract(full_key);
 
         assert_eq!("".as_bytes(), output_key);
 
-        let full_key_filter_key_extractor = FullKeyFilterKeyExtractor::default();
+        let full_key_filter_key_extractor = FullKeyFilterKeyExtractor;
         let output_key = full_key_filter_key_extractor.extract(full_key);
 
         assert_eq!(full_key, output_key);
@@ -494,6 +535,8 @@ mod tests {
                 String::from("300"),
             )]),
             fragment_id: 0,
+            dml_fragment_id: None,
+            initialized_at_epoch: None,
             vnode_col_index: None,
             row_id_index: Some(0),
             value_indices: vec![0],
@@ -503,6 +546,12 @@ mod tests {
             version: None,
             watermark_indices: vec![],
             dist_key_in_pk: vec![],
+            cardinality: None,
+            created_at_epoch: None,
+            cleaned_by_watermark: false,
+            stream_job_status: PbStreamJobStatus::Created.into(),
+            create_type: PbCreateType::Foreground.into(),
+            description: None,
         }
     }
 
@@ -615,13 +664,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_filter_key_extractor_manager() {
-        let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+        let filter_key_extractor_manager = Arc::new(RpcFilterKeyExtractorManager::default());
 
         filter_key_extractor_manager.update(
             1,
-            Arc::new(FilterKeyExtractorImpl::Dummy(
-                DummyFilterKeyExtractor::default(),
-            )),
+            Arc::new(FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor)),
         );
 
         let remaining_table_id_set = HashSet::from([1]);

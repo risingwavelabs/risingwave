@@ -25,6 +25,7 @@ pub async fn handle_drop_view(
     handler_args: HandlerArgs,
     table_name: ObjectName,
     if_exists: bool,
+    cascade: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = session.database();
@@ -41,10 +42,9 @@ pub async fn handle_drop_view(
                 Ok((t, s)) => (t, s),
                 Err(e) => {
                     return if if_exists {
-                        Ok(RwPgResponse::empty_result_with_notice(
-                            StatementType::DROP_MATERIALIZED_VIEW,
-                            format!("view \"{}\" does not exist, skipping", table_name),
-                        ))
+                        Ok(RwPgResponse::builder(StatementType::DROP_MATERIALIZED_VIEW)
+                            .notice(format!("view \"{}\" does not exist, skipping", table_name))
+                            .into())
                     } else {
                         Err(e.into())
                     }
@@ -56,8 +56,8 @@ pub async fn handle_drop_view(
         view.id
     };
 
-    let catalog_writer = session.env().catalog_writer();
-    catalog_writer.drop_view(view_id).await?;
+    let catalog_writer = session.catalog_writer()?;
+    catalog_writer.drop_view(view_id, cascade).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_VIEW))
 }

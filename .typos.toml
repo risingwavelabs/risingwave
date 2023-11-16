@@ -1,13 +1,16 @@
 [default.extend-words]
-indexs = "indices"
-Stichting = "Stichting"
-fo = "fo"
-FPR = "FPR"
+indexs = "indices"      # Both are valid, just pick one.
+Stichting = "Stichting" # This is Dutch for "Foundation". From DuckDB.
+FPR = "FPR"             # False Positive Rate
+inout = "inout"         # This is a SQL keyword!
+numer = "numer"         # numerator
+nd = "nd"               # N-dimentional / 2nd
+steam = "stream"        # You played with Steam games too much.
+# Some weird short variable names
 ot = "ot"
-inout = "inout"
-numer = "numer"
-nd = "nd"
-steam = "stream"
+bui = "bui"
+
+[default.extend-identifiers]
 
 [files]
 extend-exclude = [

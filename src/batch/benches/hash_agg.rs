@@ -15,17 +15,19 @@ pub mod utils;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use itertools::Itertools;
+use risingwave_batch::executor::aggregation::build as build_agg;
 use risingwave_batch::executor::{BoxedExecutor, HashAggExecutor};
+use risingwave_batch::task::ShutdownToken;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::memory::MemoryContext;
 use risingwave_common::types::DataType;
-use risingwave_common::{enable_jemalloc_on_unix, hash};
-use risingwave_expr::agg;
-use risingwave_expr::agg::{AggCall, AggKind};
+use risingwave_common::{enable_jemalloc, hash};
+use risingwave_expr::aggregate::{AggCall, AggKind};
 use risingwave_pb::expr::{PbAggCall, PbInputRef};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
-enable_jemalloc_on_unix!();
+enable_jemalloc!();
 
 fn create_agg_call(
     input_schema: &Schema,
@@ -46,6 +48,7 @@ fn create_agg_call(
         distinct: false,
         order_by: vec![],
         filter: None,
+        direct_args: vec![],
     }
 }
 
@@ -74,7 +77,7 @@ fn create_hash_agg_executor(
 
     let agg_init_states: Vec<_> = agg_calls
         .iter()
-        .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(agg::build))
+        .map(|agg_call| AggCall::from_protobuf(agg_call).and_then(|agg| build_agg(&agg)))
         .try_collect()
         .unwrap();
 
@@ -99,6 +102,8 @@ fn create_hash_agg_executor(
         input,
         "HashAggExecutor".to_string(),
         CHUNK_SIZE,
+        MemoryContext::none(),
+        ShutdownToken::empty(),
     ))
 }
 
@@ -137,7 +142,7 @@ fn bench_hash_agg(c: &mut Criterion) {
                                 chunk_num,
                             )
                         },
-                        |e| execute_executor(e),
+                        execute_executor,
                         BatchSize::SmallInput,
                     );
                 },

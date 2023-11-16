@@ -12,130 +12,103 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
-use fixedbitset::FixedBitSet;
-use itertools::Itertools;
-use risingwave_common::catalog::{FieldDisplay, Schema};
+use pretty_xmlish::{Pretty, XmlNode};
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
-use super::utils::IndicesDisplay;
+use super::generic::{DynamicFilter, GenericPlanRef};
+use super::stream::prelude::*;
+use super::stream::StreamPlanRef;
+use super::utils::{childless_record, column_names_pretty, watermark_pretty, Distill};
 use super::{generic, ExprRewritable};
-use crate::expr::Expr;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
 use crate::optimizer::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::ConditionDisplay;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDynamicFilter {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::DynamicFilter<PlanRef>,
+    cleaned_by_watermark: bool,
 }
 
 impl StreamDynamicFilter {
-    pub fn new(left_index: usize, comparator: ExprType, left: PlanRef, right: PlanRef) -> Self {
-        assert_eq!(right.schema().len(), 1);
-
-        let watermark_columns = {
-            let mut watermark_columns = FixedBitSet::with_capacity(left.schema().len());
-            if right.watermark_columns()[0] {
-                match comparator {
-                    ExprType::Equal | ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
-                        watermark_columns.set(left_index, true)
-                    }
-                    _ => {}
-                }
-            }
-            watermark_columns
-        };
+    pub fn new(core: DynamicFilter<PlanRef>) -> Self {
+        let watermark_columns = core.watermark_columns(core.right().watermark_columns()[0]);
 
         // TODO: derive from input
-        let base = PlanBase::new_stream(
-            left.ctx(),
-            left.schema().clone(),
-            left.logical_pk().to_vec(),
-            left.functional_dependency().clone(),
-            left.distribution().clone(),
+        let base = PlanBase::new_stream_with_core(
+            &core,
+            core.left().distribution().clone(),
             false, /* we can have a new abstraction for append only and monotonically increasing
                     * in the future */
             false, // TODO(rc): decide EOWC property
             watermark_columns,
         );
-        let core = generic::DynamicFilter {
-            comparator,
-            left_index,
-            left,
-            right,
-        };
-        Self { base, core }
+        let cleaned_by_watermark = Self::cleaned_by_watermark(&core);
+        Self {
+            base,
+            core,
+            cleaned_by_watermark,
+        }
     }
 
     pub fn left_index(&self) -> usize {
-        self.core.left_index
+        self.core.left_index()
+    }
+
+    /// 1. Check the comparator.
+    /// 2. RHS input should only have 1 columns, which is the watermark column.
+    ///    We check that the watermark should be set.
+    pub fn cleaned_by_watermark(core: &DynamicFilter<PlanRef>) -> bool {
+        let expr = core.predicate();
+        if let Some(ExprImpl::FunctionCall(function_call)) = expr.as_expr_unless_true() {
+            match function_call.func_type() {
+                ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
+                    let rhs_input = core.right();
+                    rhs_input.watermark_columns().contains(0)
+                }
+                _ => false,
+            }
+        } else {
+            false
+        }
     }
 }
 
-impl fmt::Display for StreamDynamicFilter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let verbose = self.base.ctx.is_explain_verbose();
-        let mut builder = f.debug_struct("StreamDynamicFilter");
-
-        let mut concat_schema = self.left().schema().fields.clone();
-        concat_schema.extend(self.right().schema().fields.clone());
-        let concat_schema = Schema::new(concat_schema);
-
-        let predicate = self.core.predicate();
-
-        builder.field(
-            "predicate",
-            &ConditionDisplay {
-                condition: &predicate,
-                input_schema: &concat_schema,
-            },
-        );
-
-        let watermark_columns = &self.base.watermark_columns;
-        if self.base.watermark_columns.count_ones(..) > 0 {
-            let schema = self.schema();
-            builder.field(
-                "output_watermarks",
-                &watermark_columns
-                    .ones()
-                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
-                    .collect_vec(),
-            );
-        };
-
-        if verbose {
-            // For now, output all columns from the left side. Make it explicit here.
-            builder.field(
-                "output",
-                &IndicesDisplay {
-                    indices: &(0..self.schema().fields.len()).collect_vec(),
-                    input_schema: self.schema(),
-                },
-            );
+impl Distill for StreamDynamicFilter {
+    fn distill<'a>(&self) -> XmlNode<'a> {
+        let verbose = self.base.ctx().is_explain_verbose();
+        let pred = self.core.pretty_field();
+        let mut vec = Vec::with_capacity(if verbose { 3 } else { 2 });
+        vec.push(("predicate", pred));
+        if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
+            vec.push(("output_watermarks", ow));
         }
-
-        builder.finish()
+        vec.push(("output", column_names_pretty(self.schema())));
+        if self.cleaned_by_watermark {
+            vec.push((
+                "cleaned_by_watermark",
+                Pretty::display(&self.cleaned_by_watermark),
+            ));
+        }
+        childless_record("StreamDynamicFilter", vec)
     }
 }
 
 impl PlanTreeNodeBinary for StreamDynamicFilter {
     fn left(&self) -> PlanRef {
-        self.core.left.clone()
+        self.core.left().clone()
     }
 
     fn right(&self) -> PlanRef {
-        self.core.right.clone()
+        self.core.right().clone()
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(self.core.left_index, self.core.comparator, left, right)
+        Self::new(self.core.clone_with_left_right(left, right))
     }
 }
 
@@ -144,14 +117,16 @@ impl_plan_tree_node_for_binary! { StreamDynamicFilter }
 impl StreamNode for StreamDynamicFilter {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         use generic::dynamic_filter::*;
+        let cleaned_by_watermark = self.cleaned_by_watermark;
         let condition = self
             .core
             .predicate()
             .as_expr_unless_true()
             .map(|x| x.to_expr_proto());
-        let left_index = self.core.left_index;
+        let left_index = self.core.left_index();
         let left_table = infer_left_internal_table_catalog(&self.base, left_index)
-            .with_id(state.gen_table_id_wrapped());
+            .with_id(state.gen_table_id_wrapped())
+            .with_cleaned_by_watermark(cleaned_by_watermark);
         let right = self.right();
         let right_table = infer_right_internal_table_catalog(right.plan_base())
             .with_id(state.gen_table_id_wrapped());

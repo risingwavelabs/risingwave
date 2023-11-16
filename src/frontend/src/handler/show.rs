@@ -12,45 +12,66 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
+use pgwire::pg_protocol::truncated_fmt;
 use pgwire::pg_response::{PgResponse, StatementType};
+use pgwire::pg_server::Session;
 use pgwire::types::Row;
-use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{ColumnCatalog, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
+use risingwave_expr::scalar::like::{i_like_default, like_default};
 use risingwave_pb::catalog::connection;
-use risingwave_sqlparser::ast::{Ident, ObjectName, ShowCreateType, ShowObject};
+use risingwave_sqlparser::ast::{
+    Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter,
+};
 use serde_json;
 
 use super::RwPgResponse;
 use crate::binder::{Binder, Relation};
-use crate::catalog::CatalogError;
-use crate::handler::util::col_descs_to_rows;
+use crate::catalog::{CatalogError, IndexCatalog};
+use crate::handler::util::{col_descs_to_rows, indexes_to_rows};
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
+use crate::utils::infer_stmt_row_desc::infer_show_object;
 
 pub fn get_columns_from_table(
     session: &SessionImpl,
     table_name: ObjectName,
-) -> Result<Vec<ColumnDesc>> {
+) -> Result<Vec<ColumnCatalog>> {
     let mut binder = Binder::new_for_system(session);
     let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
-    let catalogs = match relation {
+    let column_catalogs = match relation {
         Relation::Source(s) => s.catalog.columns,
         Relation::BaseTable(t) => t.table_catalog.columns,
-        Relation::SystemTable(t) => t.sys_table_catalog.columns,
+        Relation::SystemTable(t) => t.sys_table_catalog.columns.clone(),
         _ => {
             return Err(CatalogError::NotFound("table or source", table_name.to_string()).into());
         }
     };
 
-    Ok(catalogs
-        .iter()
-        .filter(|c| !c.is_hidden)
-        .map(|c| c.column_desc.clone())
-        .collect())
+    Ok(column_catalogs)
+}
+
+pub fn get_indexes_from_table(
+    session: &SessionImpl,
+    table_name: ObjectName,
+) -> Result<Vec<Arc<IndexCatalog>>> {
+    let mut binder = Binder::new_for_system(session);
+    let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
+    let indexes = match relation {
+        Relation::BaseTable(t) => t.table_indexes,
+        _ => {
+            return Err(CatalogError::NotFound("table or source", table_name.to_string()).into());
+        }
+    };
+
+    Ok(indexes)
 }
 
 fn schema_or_default(schema: &Option<Ident>) -> String {
@@ -59,41 +80,63 @@ fn schema_or_default(schema: &Option<Ident>) -> String {
         .map_or_else(|| DEFAULT_SCHEMA_NAME.to_string(), |s| s.real_value())
 }
 
-pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Result<RwPgResponse> {
+pub async fn handle_show_object(
+    handler_args: HandlerArgs,
+    command: ShowObject,
+    filter: Option<ShowStatementFilter>,
+) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let catalog_reader = session.env().catalog_reader().read_guard();
+
+    if let Some(ShowStatementFilter::Where(..)) = filter {
+        return Err(ErrorCode::NotImplemented(
+            "WHERE clause in SHOW statement".to_string(),
+            None.into(),
+        )
+        .into());
+    }
+    let row_desc = infer_show_object(&command);
+
+    let catalog_reader = session.env().catalog_reader();
 
     let names = match command {
         // If not include schema name, use default schema name
         ShowObject::Table { schema } => catalog_reader
+            .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_table()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::InternalTable { schema } => catalog_reader
+            .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_internal_table()
             .map(|t| t.name.clone())
             .collect(),
-        ShowObject::Database => catalog_reader.get_all_database_names(),
-        ShowObject::Schema => catalog_reader.get_all_schema_names(session.database())?,
+        ShowObject::Database => catalog_reader.read_guard().get_all_database_names(),
+        ShowObject::Schema => catalog_reader
+            .read_guard()
+            .get_all_schema_names(session.database())?,
         ShowObject::View { schema } => catalog_reader
+            .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_view()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::MaterializedView { schema } => catalog_reader
+            .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_mv()
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::Source { schema } => catalog_reader
+            .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_source()
             .filter(|t| t.associated_table_id.is_none())
             .map(|t| t.name.clone())
             .collect(),
         ShowObject::Sink { schema } => catalog_reader
+            .read_guard()
             .get_schema_by_name(session.database(), &schema_or_default(&schema))?
             .iter_sink()
             .map(|t| t.name.clone())
@@ -102,27 +145,22 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
             let columns = get_columns_from_table(&session, table)?;
             let rows = col_descs_to_rows(columns);
 
-            return Ok(PgResponse::new_for_stream(
-                StatementType::SHOW_COMMAND,
-                None,
-                rows.into(),
-                vec![
-                    PgFieldDescriptor::new(
-                        "Name".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Type".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                ],
-            ));
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(rows.into(), row_desc)
+                .into());
+        }
+        ShowObject::Indexes { table } => {
+            let indexes = get_indexes_from_table(&session, table)?;
+            let rows = indexes_to_rows(indexes);
+
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(rows.into(), row_desc)
+                .into());
         }
         ShowObject::Connection { schema } => {
-            let schema = catalog_reader
-                .get_schema_by_name(session.database(), &schema_or_default(&schema))?;
+            let reader = catalog_reader.read_guard();
+            let schema =
+                reader.get_schema_by_name(session.database(), &schema_or_default(&schema))?;
             let rows = schema
                 .iter_connections()
                 .map(|c| {
@@ -164,31 +202,13 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                     ])
                 })
                 .collect_vec();
-            return Ok(PgResponse::new_for_stream(
-                StatementType::SHOW_COMMAND,
-                None,
-                rows.into(),
-                vec![
-                    PgFieldDescriptor::new(
-                        "Name".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Type".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Properties".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                ],
-            ));
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(rows.into(), row_desc)
+                .into());
         }
         ShowObject::Function { schema } => {
             let rows = catalog_reader
+                .read_guard()
                 .get_schema_by_name(session.database(), &schema_or_default(&schema))?
                 .iter_function()
                 .map(|t| {
@@ -201,56 +221,103 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                     ])
                 })
                 .collect_vec();
-            return Ok(PgResponse::new_for_stream(
-                StatementType::SHOW_COMMAND,
-                None,
-                rows.into(),
-                vec![
-                    PgFieldDescriptor::new(
-                        "Name".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Arguments".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Return Type".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Language".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                    PgFieldDescriptor::new(
-                        "Link".to_owned(),
-                        DataType::Varchar.to_oid(),
-                        DataType::Varchar.type_len(),
-                    ),
-                ],
-            ));
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(rows.into(), row_desc)
+                .into());
+        }
+        ShowObject::Cluster => {
+            let workers = session.env().worker_node_manager().list_worker_nodes();
+            let rows = workers
+                .into_iter()
+                .map(|worker| {
+                    let addr: HostAddr = worker.host.as_ref().unwrap().into();
+                    let property = worker.property.as_ref().unwrap();
+                    Row::new(vec![
+                        Some(addr.to_string().into()),
+                        Some(worker.get_state().unwrap().as_str_name().into()),
+                        Some(
+                            worker
+                                .parallel_units
+                                .into_iter()
+                                .map(|pu| pu.id)
+                                .join(", ")
+                                .into(),
+                        ),
+                        Some(property.is_streaming.to_string().into()),
+                        Some(property.is_serving.to_string().into()),
+                        Some(property.is_unschedulable.to_string().into()),
+                    ])
+                })
+                .collect_vec();
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(rows.into(), row_desc)
+                .into());
+        }
+        ShowObject::Jobs => {
+            let resp = session.env().meta_client().list_ddl_progress().await?;
+            let rows = resp
+                .into_iter()
+                .map(|job| {
+                    Row::new(vec![
+                        Some(job.id.to_string().into()),
+                        Some(job.statement.into()),
+                        Some(job.progress.into()),
+                    ])
+                })
+                .collect_vec();
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(rows.into(), row_desc)
+                .into());
+        }
+        ShowObject::ProcessList => {
+            let rows = {
+                let sessions_map = session.env().sessions_map();
+                sessions_map
+                    .read()
+                    .values()
+                    .map(|s| {
+                        Row::new(vec![
+                            Some(format!("{}-{}", s.id().0, s.id().1).into()),
+                            Some(s.user_name().to_owned().into()),
+                            Some(format!("{}", s.peer_addr()).into()),
+                            Some(s.database().to_owned().into()),
+                            s.elapse_since_running_sql()
+                                .map(|mills| format!("{}ms", mills).into()),
+                            s.running_sql().map(|sql| {
+                                format!("{}", truncated_fmt::TruncatedFmt(&sql, 1024)).into()
+                            }),
+                        ])
+                    })
+                    .collect_vec()
+            };
+
+            return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+                .values(rows.into(), row_desc)
+                .into());
         }
     };
 
     let rows = names
         .into_iter()
+        .filter(|arg| match &filter {
+            Some(ShowStatementFilter::Like(pattern)) => like_default(arg, pattern),
+            Some(ShowStatementFilter::ILike(pattern)) => i_like_default(arg, pattern),
+            Some(ShowStatementFilter::Where(..)) => unreachable!(),
+            None => true,
+        })
         .map(|n| Row::new(vec![Some(n.into())]))
         .collect_vec();
 
-    Ok(PgResponse::new_for_stream(
-        StatementType::SHOW_COMMAND,
-        None,
-        rows.into(),
-        vec![PgFieldDescriptor::new(
-            "Name".to_owned(),
-            DataType::Varchar.to_oid(),
-            DataType::Varchar.type_len(),
-        )],
-    ))
+    Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+        .values(
+            rows.into(),
+            vec![PgFieldDescriptor::new(
+                "Name".to_owned(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
+            )],
+        )
+        .into())
 }
 
 pub fn handle_show_create_object(
@@ -298,7 +365,14 @@ pub fn handle_show_create_object(
                 .ok_or_else(|| CatalogError::NotFound("source", name.to_string()))?;
             source.create_sql()
         }
-        _ => {
+        ShowCreateType::Index => {
+            let index = schema
+                .get_table_by_name(&object_name)
+                .filter(|t| t.is_index())
+                .ok_or_else(|| CatalogError::NotFound("index", name.to_string()))?;
+            index.create_sql()
+        }
+        ShowCreateType::Function => {
             return Err(ErrorCode::NotImplemented(
                 format!("show create on: {}", show_create_type),
                 None.into(),
@@ -308,23 +382,23 @@ pub fn handle_show_create_object(
     };
     let name = format!("{}.{}", schema_name, object_name);
 
-    Ok(PgResponse::new_for_stream(
-        StatementType::SHOW_COMMAND,
-        None,
-        vec![Row::new(vec![Some(name.into()), Some(sql.into())])].into(),
-        vec![
-            PgFieldDescriptor::new(
-                "Name".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-            PgFieldDescriptor::new(
-                "Create Sql".to_owned(),
-                DataType::Varchar.to_oid(),
-                DataType::Varchar.type_len(),
-            ),
-        ],
-    ))
+    Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
+        .values(
+            vec![Row::new(vec![Some(name.into()), Some(sql.into())])].into(),
+            vec![
+                PgFieldDescriptor::new(
+                    "Name".to_owned(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+                PgFieldDescriptor::new(
+                    "Create Sql".to_owned(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
+                ),
+            ],
+        )
+        .into())
 }
 
 #[cfg(test)]
@@ -340,9 +414,9 @@ mod tests {
     async fn test_show_source() {
         let frontend = LocalFrontend::new(Default::default()).await;
 
-        let sql = r#"CREATE SOURCE t1
+        let sql = r#"CREATE SOURCE t1 (column1 varchar)
         WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
-        ROW FORMAT JSON"#;
+        FORMAT PLAIN ENCODE JSON"#;
         frontend.run_sql(sql).await.unwrap();
 
         let mut rows = frontend.query_formatted_result("SHOW SOURCES").await;
@@ -356,7 +430,7 @@ mod tests {
         let sql = format!(
             r#"CREATE SOURCE t
     WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
-    ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
+    FORMAT PLAIN ENCODE PROTOBUF (message = '.test.TestRecord', schema.location = 'file://{}')"#,
             proto_file.path().to_str().unwrap()
         );
         let frontend = LocalFrontend::new(Default::default()).await;
@@ -383,14 +457,17 @@ mod tests {
 
         let expected_columns: HashMap<String, String> = maplit::hashmap! {
             "id".into() => "integer".into(),
-            "country.zipcode".into() => "varchar".into(),
+            "country.zipcode".into() => "character varying".into(),
             "zipcode".into() => "bigint".into(),
-            "country.city.address".into() => "varchar".into(),
-            "country.address".into() => "varchar".into(),
+            "country.city.address".into() => "character varying".into(),
+            "country.address".into() => "character varying".into(),
             "country.city".into() => "test.City".into(),
-            "country.city.zipcode".into() => "varchar".into(),
+            "country.city.zipcode".into() => "character varying".into(),
             "rate".into() => "real".into(),
             "country".into() => "test.Country".into(),
+            "_rw_kafka_timestamp".into() => "timestamp with time zone".into(),
+            "_row_id".into() => "serial".into(),
+            "_rw_key".into() => "bytea".into()
         };
 
         assert_eq!(columns, expected_columns);

@@ -71,6 +71,7 @@ fn dispatch_no_shuffle(output_indices: Vec<u32>) -> DispatchStrategy {
         r#type: DispatcherType::NoShuffle.into(),
         dist_key_indices: vec![],
         output_indices,
+        downstream_table_name: None,
     }
 }
 
@@ -83,6 +84,7 @@ fn dispatch_consistent_hash_shuffle(
         r#type: DispatcherType::Hash.into(),
         dist_key_indices,
         output_indices,
+        downstream_table_name: None,
     }
 }
 
@@ -108,7 +110,7 @@ fn build_lookup_for_delta_join(
 
 fn build_delta_join_inner(
     state: &mut BuildFragmentGraphState,
-    current_fragment: &mut StreamFragment,
+    current_fragment: &StreamFragment,
     arrange_0_frag: Rc<StreamFragment>,
     arrange_1_frag: Rc<StreamFragment>,
     node: &StreamNode,
@@ -315,7 +317,7 @@ fn build_delta_join_inner(
 
 pub(crate) fn build_delta_join_without_arrange(
     state: &mut BuildFragmentGraphState,
-    current_fragment: &mut StreamFragment,
+    current_fragment: &StreamFragment,
     mut node: StreamNode,
 ) -> Result<StreamNode> {
     match &node.node_body {

@@ -14,9 +14,10 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{ArrayBuilder, Op, SerialArrayBuilder, StreamChunk};
+use risingwave_common::array::{
+    Array, ArrayBuilder, ArrayRef, Op, SerialArrayBuilder, StreamChunk,
+};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VnodeBitmapExt;
@@ -25,21 +26,16 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_id::RowIdGenerator;
 
 use super::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, PkIndices, PkIndicesRef,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, PkIndicesRef,
 };
 use crate::executor::{Message, StreamExecutorError};
 
 /// [`RowIdGenExecutor`] generates row id for data, where the user has not specified a pk.
 pub struct RowIdGenExecutor {
     ctx: ActorContextRef,
+    info: ExecutorInfo,
 
     upstream: Option<BoxedExecutor>,
-
-    schema: Schema,
-
-    pk_indices: PkIndices,
-
-    identity: String,
 
     row_id_index: usize,
 
@@ -49,19 +45,15 @@ pub struct RowIdGenExecutor {
 impl RowIdGenExecutor {
     pub fn new(
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         upstream: BoxedExecutor,
-        schema: Schema,
-        pk_indices: PkIndices,
-        executor_id: u64,
         row_id_index: usize,
         vnodes: Bitmap,
     ) -> Self {
         Self {
             ctx,
+            info,
             upstream: Some(upstream),
-            schema,
-            pk_indices,
-            identity: format!("RowIdGenExecutor {:X}", executor_id),
             row_id_index,
             row_id_generator: Self::new_generator(&vnodes),
         }
@@ -73,11 +65,11 @@ impl RowIdGenExecutor {
     }
 
     /// Generate a row ID column according to ops.
-    fn gen_row_id_column_by_op(&mut self, column: &Column, ops: Ops<'_>) -> Column {
-        let len = column.array_ref().len();
+    fn gen_row_id_column_by_op(&mut self, column: &ArrayRef, ops: Ops<'_>) -> ArrayRef {
+        let len = column.len();
         let mut builder = SerialArrayBuilder::new(len);
 
-        for (datum, op) in column.array_ref().iter().zip_eq_fast(ops) {
+        for (datum, op) in column.iter().zip_eq_fast(ops) {
             // Only refill row_id for insert operation.
             match op {
                 Op::Insert => builder.append(Some(self.row_id_generator.next().into())),
@@ -85,7 +77,7 @@ impl RowIdGenExecutor {
             }
         }
 
-        builder.finish().into()
+        builder.finish().into_ref()
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -106,7 +98,7 @@ impl RowIdGenExecutor {
                     let (ops, mut columns, bitmap) = chunk.into_inner();
                     columns[self.row_id_index] =
                         self.gen_row_id_column_by_op(&columns[self.row_id_index], &ops);
-                    yield Message::Chunk(StreamChunk::new(ops, columns, bitmap));
+                    yield Message::Chunk(StreamChunk::with_visibility(ops, columns, bitmap));
                 }
                 Message::Barrier(barrier) => {
                     // Update row id generator if vnode mapping changes.
@@ -129,15 +121,15 @@ impl Executor for RowIdGenExecutor {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        &self.identity
+        &self.info.identity
     }
 }
 
@@ -165,10 +157,12 @@ mod tests {
         let (mut tx, upstream) = MockSource::channel(schema.clone(), pk_indices.clone());
         let row_id_gen_executor = Box::new(RowIdGenExecutor::new(
             ActorContext::create(233),
+            ExecutorInfo {
+                schema,
+                pk_indices,
+                identity: "RowIdGenExecutor".to_string(),
+            },
             Box::new(upstream),
-            schema,
-            pk_indices,
-            1,
             row_id_index,
             row_id_generator,
         ));
@@ -195,7 +189,7 @@ mod tests {
             .unwrap()
             .into_chunk()
             .unwrap();
-        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).array_ref().into();
+        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).as_serial();
         row_id_col.iter().for_each(|row_id| {
             // Should generate row id for insert operations.
             assert!(row_id.is_some());
@@ -215,7 +209,7 @@ mod tests {
             .unwrap()
             .into_chunk()
             .unwrap();
-        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).array_ref().into();
+        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).as_serial();
         // Should not generate row id for update operations.
         assert_eq!(row_id_col.value_at(0).unwrap(), Serial::from(32874283748));
         assert_eq!(row_id_col.value_at(1).unwrap(), Serial::from(32874283748));
@@ -233,7 +227,7 @@ mod tests {
             .unwrap()
             .into_chunk()
             .unwrap();
-        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).array_ref().into();
+        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).as_serial();
         // Should not generate row id for delete operations.
         assert_eq!(row_id_col.value_at(0).unwrap(), Serial::from(84629409685));
     }

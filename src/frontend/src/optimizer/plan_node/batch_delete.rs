@@ -12,56 +12,49 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt;
-
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::DeleteNode;
 
+use super::batch::prelude::*;
+use super::utils::impl_distill_by_unit;
 use super::{
-    ExprRewritable, LogicalDelete, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb,
-    ToDistributedBatch,
+    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
+use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
-/// `BatchDelete` implements [`LogicalDelete`]
+/// `BatchDelete` implements [`super::LogicalDelete`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchDelete {
-    pub base: PlanBase,
-    pub logical: LogicalDelete,
+    pub base: PlanBase<Batch>,
+    pub core: generic::Delete<PlanRef>,
 }
 
 impl BatchDelete {
-    pub fn new(logical: LogicalDelete) -> Self {
-        let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            Distribution::Single,
-            Order::any(),
-        );
-        Self { base, logical }
-    }
-}
-
-impl fmt::Display for BatchDelete {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "BatchDelete")
+    pub fn new(core: generic::Delete<PlanRef>) -> Self {
+        assert_eq!(core.input.distribution(), &Distribution::Single);
+        let base =
+            PlanBase::new_batch_with_core(&core, core.input.distribution().clone(), Order::any());
+        Self { base, core }
     }
 }
 
 impl PlanTreeNodeUnary for BatchDelete {
     fn input(&self) -> PlanRef {
-        self.logical.input()
+        self.core.input.clone()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        let mut core = self.core.clone();
+        core.input = input;
+        Self::new(core)
     }
 }
 
 impl_plan_tree_node_for_unary! { BatchDelete }
+impl_distill_by_unit!(BatchDelete, core, "BatchDelete");
 
 impl ToDistributedBatch for BatchDelete {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -74,9 +67,9 @@ impl ToDistributedBatch for BatchDelete {
 impl ToBatchPb for BatchDelete {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Delete(DeleteNode {
-            table_id: self.logical.table_id().table_id(),
-            table_version_id: self.logical.table_version_id(),
-            returning: self.logical.has_returning(),
+            table_id: self.core.table_id.table_id(),
+            table_version_id: self.core.table_version_id,
+            returning: self.core.returning,
         })
     }
 }

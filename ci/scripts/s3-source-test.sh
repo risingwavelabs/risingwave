@@ -30,7 +30,7 @@ cargo make ci-start ci-1cn-1fe
 
 echo "--- Run test"
 python3 -m pip install minio psycopg2-binary
-python3 e2e_test/s3/$script.py
+python3 e2e_test/s3/$script
 
 echo "--- Kill cluster"
 cargo make ci-kill

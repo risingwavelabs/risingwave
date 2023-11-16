@@ -201,12 +201,15 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
         // create the collector
         let source_id = source.get_task_id();
         let counter = metrics.as_ref().map(|metrics| {
-            metrics.create_collector_for_exchange_recv_row_number(vec![
-                identity,
-                source_id.query_id,
-                source_id.stage_id.to_string(),
-                source_id.task_id.to_string(),
-            ])
+            metrics
+                .executor_metrics()
+                .exchange_recv_row_number
+                .with_label_values(&[
+                    source_id.query_id.as_str(),
+                    format!("{}", source_id.stage_id).as_str(),
+                    format!("{}", source_id.task_id).as_str(),
+                    identity.as_str(),
+                ])
         });
 
         loop {
@@ -232,8 +235,7 @@ mod tests {
 
     use futures::StreamExt;
     use rand::Rng;
-    use risingwave_common::array::{DataChunk, I32Array};
-    use risingwave_common::array_nonnull;
+    use risingwave_common::array::{Array, DataChunk, I32Array};
     use risingwave_common::types::DataType;
 
     use super::*;
@@ -247,7 +249,7 @@ mod tests {
         for _ in 0..2 {
             let mut rng = rand::thread_rng();
             let i = rng.gen_range(1..=100000);
-            let chunk = DataChunk::new(vec![array_nonnull! { I32Array, [i] }.into()], 1);
+            let chunk = DataChunk::new(vec![I32Array::from_iter([i]).into_ref()], 1);
             let chunks = vec![Some(chunk); 100];
             let fake_exchange_source = FakeExchangeSource::new(chunks);
             let fake_create_source = FakeCreateSource::new(fake_exchange_source);

@@ -25,6 +25,7 @@ pub async fn handle_drop_source(
     handler_args: HandlerArgs,
     name: ObjectName,
     if_exists: bool,
+    cascade: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = session.database();
@@ -46,10 +47,12 @@ pub async fn handle_drop_source(
             Ok((s, schema)) => (s.clone(), schema),
             Err(e) => {
                 return if if_exists {
-                    Ok(RwPgResponse::empty_result_with_notice(
-                        StatementType::DROP_SOURCE,
-                        format!("source \"{}\" does not exist, skipping", source_name),
-                    ))
+                    Ok(RwPgResponse::builder(StatementType::DROP_SOURCE)
+                        .notice(format!(
+                            "source \"{}\" does not exist, skipping",
+                            source_name
+                        ))
+                        .into())
                 } else {
                     Err(e.into())
                 }
@@ -59,8 +62,8 @@ pub async fn handle_drop_source(
 
     session.check_privilege_for_drop_alter(schema_name, &*source)?;
 
-    let catalog_writer = session.env().catalog_writer();
-    catalog_writer.drop_source(source.id).await?;
+    let catalog_writer = session.catalog_writer()?;
+    catalog_writer.drop_source(source.id, cascade).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SOURCE))
 }

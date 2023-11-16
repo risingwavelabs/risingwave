@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_common::error::Result;
 
-use super::select::LogicalFilter;
 use super::Planner;
 use crate::binder::BoundUpdate;
 use crate::optimizer::plan_node::{generic, LogicalProject, LogicalUpdate};
@@ -24,13 +24,22 @@ use crate::optimizer::{PlanRef, PlanRoot};
 
 impl Planner {
     pub(super) fn plan_update(&mut self, update: BoundUpdate) -> Result<PlanRoot> {
-        let scan = self.plan_relation(update.table)?;
+        let scan = self.plan_base_table(&update.table)?;
         let input = if let Some(expr) = update.selection {
-            LogicalFilter::create_with_expr(scan, expr)
+            self.plan_where(scan, expr)?
         } else {
             scan
         };
         let returning = !update.returning_list.is_empty();
+        let update_column_indices = update
+            .table
+            .table_catalog
+            .columns()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| (!c.is_generated()).then_some(i))
+            .collect_vec();
+
         let mut plan: PlanRef = LogicalUpdate::from(generic::Update::new(
             input,
             update.table_name.clone(),
@@ -38,6 +47,7 @@ impl Planner {
             update.table_version_id,
             update.exprs,
             returning,
+            update_column_indices,
         ))
         .into();
 

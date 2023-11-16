@@ -15,20 +15,21 @@
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_expr::agg::AggKind;
-use risingwave_expr::sig::agg::AGG_FUNC_SIG_MAP;
+use risingwave_expr::aggregate::AggKind;
+use risingwave_expr::sig::FUNCTION_REGISTRY;
 
-use super::{Expr, ExprImpl, OrderBy};
+use super::{Expr, ExprImpl, Literal, OrderBy};
 use crate::utils::Condition;
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct AggCall {
     agg_kind: AggKind,
     return_type: DataType,
-    inputs: Vec<ExprImpl>,
+    args: Vec<ExprImpl>,
     distinct: bool,
     order_by: OrderBy,
     filter: Condition,
+    direct_args: Vec<Literal>,
 }
 
 impl std::fmt::Debug for AggCall {
@@ -37,12 +38,12 @@ impl std::fmt::Debug for AggCall {
             f.debug_struct("AggCall")
                 .field("agg_kind", &self.agg_kind)
                 .field("return_type", &self.return_type)
-                .field("inputs", &self.inputs)
+                .field("args", &self.args)
                 .field("filter", &self.filter)
                 .finish()
         } else {
             let mut builder = f.debug_tuple(&format!("{}", self.agg_kind));
-            self.inputs.iter().for_each(|child| {
+            self.args.iter().for_each(|child| {
                 builder.field(child);
             });
             builder.finish()
@@ -53,7 +54,7 @@ impl std::fmt::Debug for AggCall {
 impl AggCall {
     /// Infer the return type for the given agg call.
     /// Returns error if not supported or the arguments are invalid.
-    pub fn infer_return_type(agg_kind: AggKind, inputs: &[DataType]) -> Result<DataType> {
+    pub fn infer_return_type(agg_kind: AggKind, args: &[DataType]) -> Result<DataType> {
         // The function signatures are aligned with postgres, see
         // https://www.postgresql.org/docs/current/functions-aggregate.html.
         use DataType::*;
@@ -61,15 +62,14 @@ impl AggCall {
             RwError::from(ErrorCode::InvalidInputSyntax(format!(
                 "Invalid aggregation: {}({})",
                 agg_kind,
-                inputs.iter().map(|t| format!("{}", t)).join(", ")
+                args.iter().map(|t| format!("{}", t)).join(", ")
             )))
         };
-        Ok(match (agg_kind, inputs) {
+        Ok(match (agg_kind, args) {
             // XXX: some special cases that can not be handled by signature map.
 
-            // may return list or struct type
-            (AggKind::Min | AggKind::Max | AggKind::FirstValue, [input]) => input.clone(),
-            (AggKind::ArrayAgg, [input]) => List(Box::new(input.clone())),
+            // min/max allowed for all types except for bool and jsonb (#7981)
+            (AggKind::Min | AggKind::Max, [DataType::Jsonb]) => return Err(err()),
             // functions that are rewritten in the frontend and don't exist in the expr crate
             (AggKind::Avg, [input]) => match input {
                 Int16 | Int32 | Int64 | Decimal => Decimal,
@@ -85,15 +85,9 @@ impl AggCall {
                 Float32 | Float64 | Int256 => Float64,
                 _ => return Err(err()),
             },
-
+            (AggKind::Grouping, _) => Int32,
             // other functions are handled by signature map
-            _ => {
-                let args = inputs.iter().map(|t| t.into()).collect::<Vec<_>>();
-                return match AGG_FUNC_SIG_MAP.get_return_type(agg_kind, &args) {
-                    Some(t) => Ok(t.into()),
-                    None => Err(err()),
-                };
-            }
+            _ => FUNCTION_REGISTRY.get_return_type(agg_kind, args)?,
         })
     }
 
@@ -101,30 +95,42 @@ impl AggCall {
     /// but with illegal arguments.
     pub fn new(
         agg_kind: AggKind,
-        inputs: Vec<ExprImpl>,
+        args: Vec<ExprImpl>,
         distinct: bool,
         order_by: OrderBy,
         filter: Condition,
+        direct_args: Vec<Literal>,
     ) -> Result<Self> {
-        let data_types = inputs.iter().map(ExprImpl::return_type).collect_vec();
+        let data_types = args.iter().map(ExprImpl::return_type).collect_vec();
         let return_type = Self::infer_return_type(agg_kind, &data_types)?;
         Ok(AggCall {
             agg_kind,
             return_type,
-            inputs,
+            args,
             distinct,
             order_by,
             filter,
+            direct_args,
         })
     }
 
-    pub fn decompose(self) -> (AggKind, Vec<ExprImpl>, bool, OrderBy, Condition) {
+    pub fn decompose(
+        self,
+    ) -> (
+        AggKind,
+        Vec<ExprImpl>,
+        bool,
+        OrderBy,
+        Condition,
+        Vec<Literal>,
+    ) {
         (
             self.agg_kind,
-            self.inputs,
+            self.args,
             self.distinct,
             self.order_by,
             self.filter,
+            self.direct_args,
         )
     }
 
@@ -132,13 +138,13 @@ impl AggCall {
         self.agg_kind
     }
 
-    /// Get a reference to the agg call's inputs.
-    pub fn inputs(&self) -> &[ExprImpl] {
-        self.inputs.as_ref()
+    /// Get a reference to the agg call's arguments.
+    pub fn args(&self) -> &[ExprImpl] {
+        self.args.as_ref()
     }
 
-    pub fn inputs_mut(&mut self) -> &mut [ExprImpl] {
-        self.inputs.as_mut()
+    pub fn args_mut(&mut self) -> &mut [ExprImpl] {
+        self.args.as_mut()
     }
 
     pub fn order_by(&self) -> &OrderBy {

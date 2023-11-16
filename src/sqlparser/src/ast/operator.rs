@@ -15,6 +15,8 @@ use core::fmt;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use super::Ident;
+
 /// Unary operators
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -34,10 +36,15 @@ pub enum UnaryOperator {
     PGPrefixFactorial,
     /// Absolute value, e.g. `@ -9` (PostgreSQL-specific)
     PGAbs,
+    /// Qualified, e.g. `OPERATOR(pg_catalog.+) 9` (PostgreSQL-specific)
+    PGQualified(Box<QualifiedOperator>),
 }
 
 impl fmt::Display for UnaryOperator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let UnaryOperator::PGQualified(op) = self {
+            return op.fmt(f);
+        }
         f.write_str(match self {
             UnaryOperator::Plus => "+",
             UnaryOperator::Minus => "-",
@@ -48,6 +55,7 @@ impl fmt::Display for UnaryOperator {
             UnaryOperator::PGPostfixFactorial => "!",
             UnaryOperator::PGPrefixFactorial => "!!",
             UnaryOperator::PGAbs => "@",
+            UnaryOperator::PGQualified(_) => unreachable!(),
         })
     }
 }
@@ -62,6 +70,7 @@ pub enum BinaryOperator {
     Divide,
     Modulo,
     Concat,
+    Prefix,
     Gt,
     Lt,
     GtEq,
@@ -90,10 +99,20 @@ pub enum BinaryOperator {
     LongArrow,
     HashArrow,
     HashLongArrow,
+    HashMinus,
+    Contains,
+    Contained,
+    Exists,
+    ExistsAny,
+    ExistsAll,
+    PGQualified(Box<QualifiedOperator>),
 }
 
 impl fmt::Display for BinaryOperator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let BinaryOperator::PGQualified(op) = self {
+            return op.fmt(f);
+        }
         f.write_str(match self {
             BinaryOperator::Plus => "+",
             BinaryOperator::Minus => "-",
@@ -101,6 +120,7 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::Divide => "/",
             BinaryOperator::Modulo => "%",
             BinaryOperator::Concat => "||",
+            BinaryOperator::Prefix => "^@",
             BinaryOperator::Gt => ">",
             BinaryOperator::Lt => "<",
             BinaryOperator::GtEq => ">=",
@@ -129,6 +149,33 @@ impl fmt::Display for BinaryOperator {
             BinaryOperator::LongArrow => "->>",
             BinaryOperator::HashArrow => "#>",
             BinaryOperator::HashLongArrow => "#>>",
+            BinaryOperator::HashMinus => "#-",
+            BinaryOperator::Contains => "@>",
+            BinaryOperator::Contained => "<@",
+            BinaryOperator::Exists => "?",
+            BinaryOperator::ExistsAny => "?|",
+            BinaryOperator::ExistsAll => "?&",
+            BinaryOperator::PGQualified(_) => unreachable!(),
         })
+    }
+}
+
+/// Qualified custom operator
+/// <https://www.postgresql.org/docs/15/sql-expressions.html#SQL-EXPRESSIONS-OPERATOR-CALLS>
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct QualifiedOperator {
+    pub schema: Option<Ident>,
+    pub name: String,
+}
+
+impl fmt::Display for QualifiedOperator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("OPERATOR(")?;
+        if let Some(ident) = &self.schema {
+            write!(f, "{ident}.")?;
+        }
+        f.write_str(&self.name)?;
+        f.write_str(")")
     }
 }

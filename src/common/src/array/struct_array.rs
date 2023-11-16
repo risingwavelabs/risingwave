@@ -23,12 +23,12 @@ use either::Either;
 use itertools::Itertools;
 use risingwave_pb::data::{PbArray, PbArrayType, StructArrayData};
 
-use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult};
+use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataChunk};
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::estimate_size::EstimateSize;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, StructType, ToDatumRef, ToText,
+    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, StructType, ToDatumRef, ToText,
 };
 use crate::util::iter_util::ZipEqFast;
 use crate::util::memcmp_encoding;
@@ -57,7 +57,7 @@ macro_rules! iter_fields_ref {
 pub struct StructArrayBuilder {
     bitmap: BitmapBuilder,
     pub(super) children_array: Vec<ArrayBuilderImpl>,
-    type_: Arc<StructType>,
+    type_: StructType,
     len: usize,
 }
 
@@ -71,10 +71,7 @@ impl ArrayBuilder for StructArrayBuilder {
 
     #[cfg(test)]
     fn new(capacity: usize) -> Self {
-        Self::with_type(
-            capacity,
-            DataType::Struct(Arc::new(StructType::new(vec![]))),
-        )
+        Self::with_type(capacity, DataType::Struct(StructType::empty()))
     }
 
     fn with_type(capacity: usize, ty: DataType) -> Self {
@@ -82,8 +79,7 @@ impl ArrayBuilder for StructArrayBuilder {
             panic!("must be DataType::Struct");
         };
         let children_array = ty
-            .fields
-            .iter()
+            .types()
             .map(|a| a.create_array_builder(capacity))
             .collect();
         Self {
@@ -99,14 +95,14 @@ impl ArrayBuilder for StructArrayBuilder {
             None => {
                 self.bitmap.append_n(n, false);
                 for child in &mut self.children_array {
-                    child.append_datum_n(n, Datum::None);
+                    child.append_n(n, Datum::None);
                 }
             }
             Some(v) => {
                 self.bitmap.append_n(n, true);
                 iter_fields_ref!(v, fields, {
                     for (child, f) in self.children_array.iter_mut().zip_eq_fast(fields) {
-                        child.append_datum_n(n, f);
+                        child.append_n(n, f);
                     }
                 });
             }
@@ -135,37 +131,26 @@ impl ArrayBuilder for StructArrayBuilder {
         }
     }
 
+    fn len(&self) -> usize {
+        self.bitmap.len()
+    }
+
     fn finish(self) -> StructArray {
         let children = self
             .children_array
             .into_iter()
             .map(|b| Arc::new(b.finish()))
             .collect::<Vec<ArrayRef>>();
-        StructArray::new(self.bitmap.finish(), children, self.type_.clone(), self.len)
+        StructArray::new(self.type_, children, self.bitmap.finish())
     }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructArray {
-    // TODO: the same bitmap is also stored in each child array, which is redundant.
     bitmap: Bitmap,
     children: Vec<ArrayRef>,
-    type_: Arc<StructType>,
-    len: usize,
-
+    type_: StructType,
     heap_size: usize,
-}
-
-impl StructArrayBuilder {
-    pub fn append_array_refs(&mut self, refs: Vec<ArrayRef>, len: usize) {
-        for _ in 0..len {
-            self.bitmap.append(true);
-        }
-        self.len += len;
-        for (a, r) in self.children_array.iter_mut().zip_eq_fast(refs.iter()) {
-            a.append_array(r);
-        }
-    }
 }
 
 impl Array for StructArray {
@@ -178,12 +163,12 @@ impl Array for StructArray {
     }
 
     fn len(&self) -> usize {
-        self.len
+        self.bitmap.len()
     }
 
     fn to_protobuf(&self) -> PbArray {
         let children_array = self.children.iter().map(|a| a.to_protobuf()).collect();
-        let children_type = self.type_.fields.iter().map(|t| t.to_protobuf()).collect();
+        let children_type = self.type_.types().map(|t| t.to_protobuf()).collect();
         PbArray {
             array_type: PbArrayType::Struct as i32,
             struct_array_data: Some(StructArrayData {
@@ -214,7 +199,7 @@ impl Array for StructArray {
 }
 
 impl StructArray {
-    fn new(bitmap: Bitmap, children: Vec<ArrayRef>, type_: Arc<StructType>, len: usize) -> Self {
+    pub fn new(type_: StructType, children: Vec<ArrayRef>, bitmap: Bitmap) -> Self {
         let heap_size = bitmap.estimated_heap_size()
             + children
                 .iter()
@@ -225,7 +210,6 @@ impl StructArray {
             bitmap,
             children,
             type_,
-            len,
             heap_size,
         }
     }
@@ -243,64 +227,23 @@ impl StructArray {
             .iter()
             .map(|child| Ok(Arc::new(ArrayImpl::from_protobuf(child, cardinality)?)))
             .collect::<ArrayResult<Vec<ArrayRef>>>()?;
-        let type_ = Arc::new(StructType::unnamed(
+        let type_ = StructType::unnamed(
             array_data
                 .children_type
                 .iter()
                 .map(DataType::from)
                 .collect(),
-        ));
-        let arr = Self::new(bitmap, children, type_, cardinality);
-        Ok(arr.into())
-    }
-
-    pub fn children_array_types(&self) -> &[DataType] {
-        &self.type_.fields
+        );
+        Ok(Self::new(type_, children, bitmap).into())
     }
 
     /// Returns an iterator over the field array.
-    pub fn fields(&self) -> impl ExactSizeIterator<Item = &ArrayImpl> {
-        self.children.iter().map(|f| &(**f))
+    pub fn fields(&self) -> impl ExactSizeIterator<Item = &ArrayRef> {
+        self.children.iter()
     }
 
-    pub fn field_at(&self, index: usize) -> ArrayRef {
-        self.children[index].clone()
-    }
-
-    pub fn children_names(&self) -> &[String] {
-        &self.type_.field_names
-    }
-
-    pub fn from_slices(
-        null_bitmap: &[bool],
-        children: Vec<ArrayImpl>,
-        children_type: Vec<DataType>,
-    ) -> StructArray {
-        let cardinality = null_bitmap.len();
-        let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
-        let children = children.into_iter().map(Arc::new).collect();
-        Self::new(
-            bitmap,
-            children,
-            Arc::new(StructType::unnamed(children_type)),
-            cardinality,
-        )
-    }
-
-    pub fn from_slices_with_field_names(
-        null_bitmap: &[bool],
-        children: Vec<ArrayImpl>,
-        children_type: Vec<DataType>,
-        children_name: Vec<String>,
-    ) -> StructArray {
-        let cardinality = null_bitmap.len();
-        let bitmap = Bitmap::from_iter(null_bitmap.to_vec());
-        let children = children.into_iter().map(Arc::new).collect_vec();
-        let type_ = Arc::new(StructType {
-            fields: children_type,
-            field_names: children_name,
-        });
-        Self::new(bitmap, children, type_, cardinality)
+    pub fn field_at(&self, index: usize) -> &ArrayRef {
+        &self.children[index]
     }
 
     #[cfg(test)]
@@ -319,6 +262,16 @@ impl EstimateSize for StructArray {
     }
 }
 
+impl From<DataChunk> for StructArray {
+    fn from(chunk: DataChunk) -> Self {
+        Self::new(
+            StructType::unnamed(chunk.columns().iter().map(|c| c.data_type()).collect()),
+            chunk.columns().to_vec(),
+            chunk.visibility().clone(),
+        )
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Default, Hash)]
 pub struct StructValue {
     fields: Box<[Datum]>,
@@ -326,13 +279,13 @@ pub struct StructValue {
 
 impl PartialOrd for StructValue {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.as_scalar_ref().partial_cmp(&other.as_scalar_ref())
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for StructValue {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap()
+        self.as_scalar_ref().cmp(&other.as_scalar_ref())
     }
 }
 
@@ -357,12 +310,12 @@ impl StructValue {
         &self.fields
     }
 
-    pub fn memcmp_deserialize(
-        fields: &[DataType],
+    pub fn memcmp_deserialize<'a>(
+        fields: impl IntoIterator<Item = &'a DataType>,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
         fields
-            .iter()
+            .into_iter()
             .map(|field| memcmp_encoding::deserialize_datum_in_composite(field, deserializer))
             .try_collect()
             .map(Self::new)
@@ -420,27 +373,22 @@ impl PartialEq for StructRef<'_> {
     }
 }
 
+impl Eq for StructRef<'_> {}
+
 impl PartialOrd for StructRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        iter_fields_ref!(*self, l, {
-            iter_fields_ref!(*other, r, {
-                if l.len() != r.len() {
-                    return None;
-                }
-                Some(l.cmp_by(r, |lv, rv| cmp_struct_field(&lv, &rv)))
-            })
-        })
+        Some(self.cmp(other))
     }
 }
 
-fn cmp_struct_field(l: &Option<ScalarRefImpl<'_>>, r: &Option<ScalarRefImpl<'_>>) -> Ordering {
-    match (l, r) {
-        // Comparability check was performed by frontend beforehand.
-        (Some(sl), Some(sr)) => sl.partial_cmp(sr).unwrap(),
-        // Nulls are larger than everything, (1, null) > (1, 2) for example.
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
+impl Ord for StructRef<'_> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        iter_fields_ref!(*self, lhs, {
+            iter_fields_ref!(*other, rhs, {
+                assert_eq!(lhs.len(), rhs.len());
+                lhs.cmp_by(rhs, |lv, rv| lv.default_cmp(&rv))
+            })
+        })
     }
 }
 
@@ -486,28 +434,19 @@ impl ToText for StructRef<'_> {
     }
 }
 
-impl Eq for StructRef<'_> {}
-
-impl Ord for StructRef<'_> {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // The order between two structs is deterministic.
-        self.partial_cmp(other).unwrap()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use more_asserts::assert_gt;
 
     use super::*;
+    use crate::try_match_expand;
     use crate::types::{F32, F64};
-    use crate::{array, try_match_expand};
 
     // Empty struct is allowed in postgres.
     // `CREATE TYPE foo_empty as ();`, e.g.
     #[test]
     fn test_struct_new_empty() {
-        let arr = StructArray::from_slices(&[true, false, true, false], vec![], vec![]);
+        let arr = StructArray::new(StructType::empty(), vec![], Bitmap::ones(0));
         let actual = StructArray::from_protobuf(&arr.to_protobuf()).unwrap();
         assert_eq!(ArrayImpl::Struct(arr), actual);
     }
@@ -515,13 +454,13 @@ mod tests {
     #[test]
     fn test_struct_with_fields() {
         use crate::array::*;
-        let arr = StructArray::from_slices(
-            &[false, true, false, true],
+        let arr = StructArray::new(
+            StructType::unnamed(vec![DataType::Int32, DataType::Float32]),
             vec![
-                array! { I32Array, [None, Some(1), None, Some(2)] }.into(),
-                array! { F32Array, [None, Some(3.0), None, Some(4.0)] }.into(),
+                I32Array::from_iter([None, Some(1), None, Some(2)]).into_ref(),
+                F32Array::from_iter([None, Some(3.0), None, Some(4.0)]).into_ref(),
             ],
-            vec![DataType::Int32, DataType::Float32],
+            [false, true, false, true].into_iter().collect(),
         );
         let actual = StructArray::from_protobuf(&arr.to_protobuf()).unwrap();
         assert_eq!(ArrayImpl::Struct(arr), actual);
@@ -546,10 +485,10 @@ mod tests {
 
         let mut builder = StructArrayBuilder::with_type(
             4,
-            DataType::Struct(Arc::new(StructType::unnamed(vec![
+            DataType::Struct(StructType::unnamed(vec![
                 DataType::Int32,
                 DataType::Float32,
-            ]))),
+            ])),
         );
         for v in &struct_values {
             builder.append(v.as_ref().map(|s| s.as_scalar_ref()));
@@ -562,13 +501,13 @@ mod tests {
     #[test]
     fn test_struct_create_builder() {
         use crate::array::*;
-        let arr = StructArray::from_slices(
-            &[true],
+        let arr = StructArray::new(
+            StructType::unnamed(vec![DataType::Int32, DataType::Float32]),
             vec![
-                array! { I32Array, [Some(1)] }.into(),
-                array! { F32Array, [Some(2.0)] }.into(),
+                I32Array::from_iter([Some(1)]).into_ref(),
+                F32Array::from_iter([Some(2.0)]).into_ref(),
             ],
-            vec![DataType::Int32, DataType::Float32],
+            Bitmap::ones(1),
         );
         let builder = arr.create_builder(4);
         let arr2 = builder.finish();
@@ -583,9 +522,9 @@ mod tests {
             StructValue::new(vec![Some(1.into()), Some(1.0.into())]),
         );
         // null > 1
-        assert_eq!(
-            cmp_struct_field(&None, &Some(ScalarRefImpl::Int32(1))),
-            Ordering::Greater
+        assert_gt!(
+            StructValue::new(vec![None]),
+            StructValue::new(vec![Some(1.into())]),
         );
         // (1, null, 3) > (1, 1.0, 2)
         assert_gt!(
@@ -649,7 +588,7 @@ mod tests {
 
         let mut builder = StructArrayBuilder::with_type(
             0,
-            DataType::Struct(Arc::new(StructType::unnamed(fields.to_vec()))),
+            DataType::Struct(StructType::unnamed(fields.to_vec())),
         );
 
         builder.append(Some(struct_ref));
@@ -746,7 +685,7 @@ mod tests {
 
             let mut builder = StructArrayBuilder::with_type(
                 0,
-                DataType::Struct(Arc::new(StructType::unnamed(fields.to_vec()))),
+                DataType::Struct(StructType::unnamed(fields.to_vec())),
             );
             builder.append(Some(StructRef::ValueRef { val: &lhs }));
             builder.append(Some(StructRef::ValueRef { val: &rhs }));

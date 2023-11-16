@@ -12,16 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod connection;
 pub mod my_stats;
 pub mod process_linux;
 pub mod rwlock;
 
+use std::sync::LazyLock;
+
 use prometheus::core::{
     AtomicI64, AtomicU64, Collector, GenericCounter, GenericCounterVec, GenericGauge, Metric,
 };
-use prometheus::{Histogram, HistogramVec};
+use prometheus::{Histogram, HistogramVec, Registry};
 
 use crate::monitor::my_stats::MyHistogram;
+use crate::monitor::process_linux::monitor_process;
 
 #[cfg(target_os = "linux")]
 static PAGESIZE: std::sync::LazyLock<i64> =
@@ -81,3 +85,9 @@ impl Print for GenericCounterVec<AtomicU64> {
         println!("{desc} {:?}", self);
     }
 }
+
+pub static GLOBAL_METRICS_REGISTRY: LazyLock<Registry> = LazyLock::new(|| {
+    let registry = Registry::new();
+    monitor_process(&registry);
+    registry
+});

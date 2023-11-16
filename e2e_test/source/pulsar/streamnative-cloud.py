@@ -28,7 +28,7 @@ def do_test(config):
                     access_key='{config['STREAMNATIVE_CLOUD_ACCESS_KEY']}',
                     secret_access='{config['STREAMNATIVE_CLOUD_SECRET_ACCESS']}'
                     )
-                    ROW FORMAT JSON''')
+                    FORMAT PLAIN ENCODE JSON''')
     sleep(5)
 
     # Do test with slt
