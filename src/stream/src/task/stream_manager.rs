@@ -583,6 +583,12 @@ impl LocalStreamManagerCore {
             "`pk_indices` of {} not consistent with what derived by optimizer",
             executor.identity()
         );
+        assert_eq!(
+            executor.schema(),
+            &schema,
+            "`schema` of {} not consistent with what derived by optimizer",
+            executor.identity()
+        );
 
         // Wrap the executor for debug purpose.
         let executor = WrapperExecutor::new(

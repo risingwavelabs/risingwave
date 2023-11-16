@@ -239,7 +239,7 @@ insert into t values (1), (2), (3);
 statement ok
 flush;
 
-query II
+query II rowsort
 select * from mv;
 ----
 1 0
