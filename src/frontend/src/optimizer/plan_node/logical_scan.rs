@@ -19,7 +19,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, TableDesc};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};

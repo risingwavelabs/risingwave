@@ -21,8 +21,7 @@ use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::row_seq_scan_node::ChunkSize;
-use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
-use risingwave_pb::plan_common::PbColumnDesc;
+use risingwave_pb::batch_plan::RowSeqScanNode;
 
 use super::batch::prelude::*;
 use super::utils::{childless_record, Distill};

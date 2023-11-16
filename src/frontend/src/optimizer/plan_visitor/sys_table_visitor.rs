@@ -13,9 +13,7 @@
 // limitations under the License.
 
 use super::{DefaultBehavior, Merge};
-use crate::optimizer::plan_node::{
-    BatchSeqScan, BatchSysSeqScan, LogicalScan, LogicalSysScan, StreamTableScan,
-};
+use crate::optimizer::plan_node::{BatchSysSeqScan, LogicalSysScan, StreamTableScan};
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::PlanRef;
 
@@ -38,11 +36,11 @@ impl PlanVisitor for SysTableVisitor {
         Merge(|a, b| a | b)
     }
 
-    fn visit_batch_sys_seq_scan(&mut self, batch_seq_scan: &BatchSysSeqScan) -> bool {
+    fn visit_batch_sys_seq_scan(&mut self, _batch_seq_scan: &BatchSysSeqScan) -> bool {
         true
     }
 
-    fn visit_logical_sys_scan(&mut self, logical_scan: &LogicalSysScan) -> bool {
+    fn visit_logical_sys_scan(&mut self, _logical_scan: &LogicalSysScan) -> bool {
         true
     }
 
