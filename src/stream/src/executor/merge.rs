@@ -34,20 +34,20 @@ use crate::task::{FragmentId, SharedContext};
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.
 pub struct MergeExecutor {
-    /// Upstream channels.
-    upstreams: Vec<BoxedInput>,
-
     /// The context of the actor.
     actor_context: ActorContextRef,
+
+    /// Logical Operator Info
+    info: ExecutorInfo,
+
+    /// Upstream channels.
+    upstreams: Vec<BoxedInput>,
 
     /// Belonged fragment id.
     fragment_id: FragmentId,
 
     /// Upstream fragment id.
     upstream_fragment_id: FragmentId,
-
-    /// Logical Operator Info
-    info: ExecutorInfo,
 
     /// Shared context of the stream manager.
     context: Arc<SharedContext>,
@@ -59,27 +59,21 @@ pub struct MergeExecutor {
 impl MergeExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        schema: Schema,
-        pk_indices: PkIndices,
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         fragment_id: FragmentId,
         upstream_fragment_id: FragmentId,
-        executor_id: u64,
         inputs: Vec<BoxedInput>,
         context: Arc<SharedContext>,
         _receiver_id: u64,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
         Self {
-            upstreams: inputs,
             actor_context: ctx,
+            info,
+            upstreams: inputs,
             fragment_id,
             upstream_fragment_id,
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: format!("MergeExecutor {:X}", executor_id),
-            },
             context,
             metrics,
         }
@@ -91,12 +85,14 @@ impl MergeExecutor {
         use crate::executor::exchange::input::Input;
 
         Self::new(
-            schema,
-            vec![],
             ActorContext::create(114),
+            ExecutorInfo {
+                schema,
+                pk_indices: vec![],
+                identity: "MergeExecutor".to_string(),
+            },
             514,
             1919,
-            1024,
             inputs
                 .into_iter()
                 .enumerate()
@@ -590,12 +586,14 @@ mod tests {
             .unwrap();
 
         let merge = MergeExecutor::new(
-            schema,
-            vec![],
             ActorContext::create(actor_id),
+            ExecutorInfo {
+                schema,
+                pk_indices: vec![],
+                identity: "MergeExecutor".to_string(),
+            },
             fragment_id,
             upstream_fragment_id,
-            1024,
             inputs,
             ctx.clone(),
             233,
