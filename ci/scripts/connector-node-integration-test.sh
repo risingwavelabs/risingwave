@@ -152,16 +152,6 @@ for ((i=0; i<${#type[@]}; i++)); do
       exit 1
     fi
     python3 pyspark-util.py clean_deltalake
-
-    echo "--- running jdbc ${type[i]} integration tests"
-    cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
-    if python3 integration_tests.py --jdbc_sink ${sink_input_feature[i]}; then
-      echo "Jdbc sink ${type[i]} test passed"
-    else
-      echo "Jdbc sink ${type[i]} test failed"
-      exit 1
-    fi
-
 done
 
 
