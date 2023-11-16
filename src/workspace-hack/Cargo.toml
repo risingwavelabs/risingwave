@@ -26,8 +26,8 @@ aws-credential-types = { version = "0.57", default-features = false, features = 
 aws-runtime = { version = "0.57", default-features = false, features = ["event-stream", "sigv4a"] }
 aws-sdk-s3 = { version = "0.35" }
 aws-sigv4 = { version = "0.57", features = ["http0-compat", "sign-eventstream", "sigv4a"] }
-aws-smithy-runtime = { version = "0.57", default-features = false, features = ["client", "rt-tokio", "tls-rustls"] }
-aws-smithy-types = { version = "0.57", default-features = false, features = ["byte-stream-poll-next", "http-body-0-4-x", "hyper-0-14-x", "rt-tokio"] }
+aws-smithy-runtime = { version = "0.58", default-features = false, features = ["client", "rt-tokio", "tls-rustls"] }
+aws-smithy-types = { version = "0.100", default-features = false, features = ["byte-stream-poll-next", "http-body-0-4-x", "hyper-0-14-x", "rt-tokio"] }
 base64 = { version = "0.21", features = ["alloc"] }
 bit-vec = { version = "0.6" }
 bitflags = { version = "2", default-features = false, features = ["serde", "std"] }

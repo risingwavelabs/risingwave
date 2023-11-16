@@ -93,8 +93,8 @@ aws-sdk-sqs = { version = "0.35", default-features = false, features = [
 ] }
 aws-smithy-http = "0.57"
 aws-smithy-runtime-api = "0.57"
-aws-smithy-runtime = "0.57"
-aws-smithy-types = { version = "0.57", default-features = false, features = ["hyper-0-14-x"] }
+aws-smithy-runtime = "0.58"
+aws-smithy-types = { version = "0.100", default-features = false, features = ["hyper-0-14-x"] }
 aws-endpoint = "0.57"
 aws-types = "0.57"
 etcd-client = { package = "madsim-etcd-client", version = "0.4" }
