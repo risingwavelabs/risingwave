@@ -34,6 +34,8 @@ pub enum Action {
     Create,
     #[sea_orm(string_value = "CONNECT")]
     Connect,
+    #[sea_orm(string_value = "EXECUTE")]
+    Execute,
 }
 
 impl From<PbAction> for Action {
@@ -47,6 +49,7 @@ impl From<PbAction> for Action {
             PbAction::Usage => Self::Usage,
             PbAction::Create => Self::Create,
             PbAction::Connect => Self::Connect,
+            PbAction::Execute => Self::Execute,
         }
     }
 }
@@ -61,6 +64,7 @@ impl From<Action> for PbAction {
             Action::Usage => Self::Usage,
             Action::Create => Self::Create,
             Action::Connect => Self::Connect,
+            Action::Execute => Self::Execute,
         }
     }
 }
