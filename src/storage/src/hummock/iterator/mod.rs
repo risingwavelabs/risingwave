@@ -396,6 +396,9 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
             self.iter = None;
             return Ok(());
         }
+        if self.table_id > key.user_key.table_id {
+            return self.rewind().await;
+        }
         let mut iter = B::seek(self.inner, key.user_key.table_key);
         match iter.next() {
             Some((first_key, first_value)) => {
@@ -412,6 +415,7 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
                     // Therefore, when `first_full_key` < `key`, the only possibility is that
                     // `first_key` == table_key of `key`, and `self.table_id` == table_id of `key`,
                     // the `self.epoch` < epoch of `key`.
+                    assert_eq!(first_key, key.user_key.table_key);
                     match iter.next() {
                         Some((next_key, next_value)) => {
                             assert_gt!(next_key, first_key);

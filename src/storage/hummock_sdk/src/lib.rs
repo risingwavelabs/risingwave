@@ -278,7 +278,7 @@ pub struct EpochWithGap(u64);
 
 impl EpochWithGap {
     #[allow(unused_variables)]
-    pub fn new(epoch: u64, spill_offset: u16) -> Self {
+    pub const fn new(epoch: u64, spill_offset: u16) -> Self {
         #[cfg(not(feature = "enable_test_epoch"))]
         {
             debug_assert_eq!(epoch & EPOCH_MASK, 0);
@@ -291,7 +291,7 @@ impl EpochWithGap {
         }
     }
 
-    pub fn new_from_epoch(epoch: u64) -> Self {
+    pub const fn new_from_epoch(epoch: u64) -> Self {
         EpochWithGap::new(epoch, 0)
     }
 

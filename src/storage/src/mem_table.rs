@@ -621,10 +621,18 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
-    use risingwave_hummock_sdk::key::TableKey;
+    use bytes::{BufMut, Bytes, BytesMut};
+    use itertools::Itertools;
+    use rand::seq::SliceRandom;
+    use rand::{thread_rng, Rng};
+    use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+    use risingwave_hummock_sdk::EpochWithGap;
 
-    use crate::mem_table::{KeyOp, MemTable};
+    use crate::hummock::iterator::HummockIterator;
+    use crate::hummock::value::HummockValue;
+    use crate::mem_table::{KeyOp, MemTable, MemTableHummockIterator};
 
     #[tokio::test]
     async fn test_mem_table_memory_size() {
@@ -793,5 +801,148 @@ mod tests {
                 + Bytes::from("value44").len()
                 + Bytes::from("value4444").len()
         );
+    }
+
+    #[tokio::test]
+    async fn test_mem_table_hummock_iterator() {
+        let mut rng = thread_rng();
+
+        fn get_key(i: usize) -> TableKey<Bytes> {
+            let mut bytes = BytesMut::new();
+            bytes.put(&VirtualNode::ZERO.to_be_bytes()[..]);
+            bytes.put(format!("key_{:20}", i).as_bytes());
+            TableKey(bytes.freeze())
+        }
+
+        let ordered_test_data = (0..10000)
+            .map(|i| {
+                let key_op = match rng.gen::<usize>() % 3 {
+                    0 => KeyOp::Insert(Bytes::from("insert")),
+                    1 => KeyOp::Delete(Bytes::from("delete")),
+                    2 => KeyOp::Update((Bytes::from("old_value"), Bytes::from("new_value"))),
+                    _ => unreachable!(),
+                };
+                (get_key(i), key_op)
+            })
+            .collect_vec();
+
+        let mut test_data = ordered_test_data.clone();
+
+        test_data.shuffle(&mut rng);
+        let mut mem_table = MemTable::new(true);
+        for (key, op) in test_data {
+            match op {
+                KeyOp::Insert(value) => {
+                    mem_table.insert(key, value).unwrap();
+                }
+                KeyOp::Delete(value) => mem_table.delete(key, value).unwrap(),
+                KeyOp::Update((old_value, new_value)) => {
+                    mem_table.update(key, old_value, new_value).unwrap();
+                }
+            }
+        }
+
+        const TEST_TABLE_ID: TableId = TableId::new(233);
+        const TEST_EPOCH: EpochWithGap = EpochWithGap::new_from_epoch(10);
+
+        async fn check_data(
+            iter: &mut MemTableHummockIterator<'_>,
+            test_data: &[(TableKey<Bytes>, KeyOp)],
+        ) {
+            let mut idx = 0;
+            while iter.is_valid() {
+                let key = iter.key();
+                let value = iter.value();
+
+                let (expected_key, expected_value) = test_data[idx].clone();
+                assert_eq!(key.epoch_with_gap, TEST_EPOCH);
+                assert_eq!(key.user_key.table_id, TEST_TABLE_ID);
+                assert_eq!(key.user_key.table_key.0, expected_key.0.as_ref());
+                match expected_value {
+                    KeyOp::Insert(expected_value) | KeyOp::Update((_, expected_value)) => {
+                        assert_eq!(value, HummockValue::Put(expected_value.as_ref()));
+                    }
+                    KeyOp::Delete(_) => {
+                        assert_eq!(value, HummockValue::Delete);
+                    }
+                }
+
+                idx += 1;
+                iter.next().await.unwrap();
+            }
+            assert_eq!(idx, test_data.len());
+        }
+
+        let mut iter = MemTableHummockIterator::new(&mem_table.buffer, TEST_EPOCH, TEST_TABLE_ID);
+
+        // Test rewind
+        iter.rewind().await.unwrap();
+        check_data(&mut iter, &ordered_test_data).await;
+
+        // Test seek with a later epoch, the first key is not skipped
+        let later_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.pure_epoch() + 1);
+        let seek_idx = 500;
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: TEST_TABLE_ID,
+                table_key: TableKey(&get_key(seek_idx)),
+            },
+            epoch_with_gap: later_epoch,
+        })
+        .await
+        .unwrap();
+        check_data(&mut iter, &ordered_test_data[seek_idx..]).await;
+
+        // Test seek with a earlier epoch, the first key is skipped
+        let early_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.pure_epoch() - 1);
+        let seek_idx = 500;
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: TEST_TABLE_ID,
+                table_key: TableKey(&get_key(seek_idx)),
+            },
+            epoch_with_gap: early_epoch,
+        })
+        .await
+        .unwrap();
+        check_data(&mut iter, &ordered_test_data[seek_idx + 1..]).await;
+
+        // Test seek to over the end
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: TEST_TABLE_ID,
+                table_key: TableKey(&get_key(ordered_test_data.len() + 10)),
+            },
+            epoch_with_gap: early_epoch,
+        })
+        .await
+        .unwrap();
+        check_data(&mut iter, &[]).await;
+
+        // Test seek with a smaller table id
+        let smaller_table_id = TableId::new(TEST_TABLE_ID.table_id() - 1);
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: smaller_table_id,
+                table_key: TableKey(&get_key(ordered_test_data.len() + 10)),
+            },
+            epoch_with_gap: early_epoch,
+        })
+        .await
+        .unwrap();
+        check_data(&mut iter, &ordered_test_data).await;
+
+        // Test seek with a greater table id
+        let greater_table_id = TableId::new(TEST_TABLE_ID.table_id() + 1);
+        iter.seek(FullKey {
+            user_key: UserKey {
+                table_id: greater_table_id,
+                table_key: TableKey(&get_key(0)),
+            },
+            epoch_with_gap: early_epoch,
+        })
+        .await
+        .unwrap();
+        check_data(&mut iter, &[]).await;
     }
 }
