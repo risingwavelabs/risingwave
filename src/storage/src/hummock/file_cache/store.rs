@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut, Bytes};
-use foyer::common::code::{Key, Value};
+use foyer::common::code::{CodingResult, Key, Value};
 use foyer::intrusive::eviction::lfu::LfuConfig;
 use foyer::storage::admission::rated_ticket::RatedTicketAdmissionPolicy;
 use foyer::storage::admission::AdmissionPolicy;
@@ -48,6 +48,7 @@ pub type DeviceConfig = foyer::storage::device::fs::FsDeviceConfig;
 
 pub type FileCacheResult<T> = foyer::storage::error::Result<T>;
 pub type FileCacheError = foyer::storage::error::Error;
+pub type FileCacheCompression = foyer::storage::compress::Compression;
 
 #[derive(Debug)]
 pub struct FileCacheConfig<K, V>
@@ -178,6 +179,20 @@ where
         match self {
             FileCacheWriter::Foyer { writer } => writer.finish(value).await,
             FileCacheWriter::None { writer } => writer.finish(value).await,
+        }
+    }
+
+    fn compression(&self) -> Compression {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.compression(),
+            FileCacheWriter::None { writer } => writer.compression(),
+        }
+    }
+
+    fn set_compression(&mut self, compression: Compression) {
+        match self {
+            FileCacheWriter::Foyer { writer } => writer.set_compression(compression),
+            FileCacheWriter::None { writer } => writer.set_compression(compression),
         }
     }
 }
@@ -336,15 +351,95 @@ impl Key for SstableBlockIndex {
         8 + 8 // sst_id (8B) + block_idx (8B)
     }
 
-    fn write(&self, mut buf: &mut [u8]) {
+    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
         buf.put_u64(self.sst_id);
         buf.put_u64(self.block_idx);
+        Ok(())
     }
 
-    fn read(mut buf: &[u8]) -> Self {
+    fn read(mut buf: &[u8]) -> CodingResult<Self> {
         let sst_id = buf.get_u64();
         let block_idx = buf.get_u64();
-        Self { sst_id, block_idx }
+        Ok(Self { sst_id, block_idx })
+    }
+}
+
+/// [`CachedBlock`] uses different coding for writing to use/bypass compression.
+///
+/// But when reading, it will always be `Loaded`.
+#[derive(Debug)]
+pub enum CachedBlock {
+    Loaded {
+        block: Box<Block>,
+    },
+    Fetched {
+        bytes: Bytes,
+        uncompressed_capacity: usize,
+    },
+}
+
+impl CachedBlock {
+    pub fn should_compress(&self) -> bool {
+        match self {
+            CachedBlock::Loaded { .. } => true,
+            // TODO(MrCroxx): based on block original compression algorithm?
+            CachedBlock::Fetched { .. } => false,
+        }
+    }
+
+    pub fn into_inner(self) -> Box<Block> {
+        match self {
+            CachedBlock::Loaded { block } => block,
+            CachedBlock::Fetched { .. } => unreachable!(),
+        }
+    }
+}
+
+impl Value for CachedBlock {
+    fn serialized_len(&self) -> usize {
+        1 /* type */ + match self {
+            CachedBlock::Loaded { block } => block.raw_data().len(),
+            CachedBlock::Fetched { bytes, uncompressed_capacity: _ } => 8 + bytes.len(),
+        }
+    }
+
+    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
+        match self {
+            CachedBlock::Loaded { block } => {
+                buf.put_u8(0);
+                buf.put_slice(block.raw_data())
+            }
+            CachedBlock::Fetched {
+                bytes,
+                uncompressed_capacity,
+            } => {
+                buf.put_u8(1);
+                buf.put_u64(*uncompressed_capacity as u64);
+                buf.put_slice(bytes);
+            }
+        }
+        Ok(())
+    }
+
+    fn read(mut buf: &[u8]) -> CodingResult<Self> {
+        let v = buf.get_u8();
+        let res = match v {
+            0 => {
+                let data = Bytes::copy_from_slice(buf);
+                let block = Block::decode_from_raw(data);
+                let block = Box::new(block);
+                Self::Loaded { block }
+            }
+            1 => {
+                let uncompressed_capacity = buf.get_u64() as usize;
+                let data = Bytes::copy_from_slice(buf);
+                let block = Block::decode(data, uncompressed_capacity)?;
+                let block = Box::new(block);
+                Self::Loaded { block }
+            }
+            _ => unreachable!(),
+        };
+        Ok(res)
     }
 }
 
@@ -353,14 +448,16 @@ impl Value for Box<Block> {
         self.raw_data().len()
     }
 
-    fn write(&self, mut buf: &mut [u8]) {
-        buf.put_slice(self.raw_data())
+    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
+        buf.put_slice(self.raw_data());
+        Ok(())
     }
 
-    fn read(buf: &[u8]) -> Self {
+    fn read(buf: &[u8]) -> CodingResult<Self> {
         let data = Bytes::copy_from_slice(buf);
         let block = Block::decode_from_raw(data);
-        Box::new(block)
+        let block = Box::new(block);
+        Ok(block)
     }
 }
 
@@ -369,18 +466,20 @@ impl Value for Box<Sstable> {
         8 + self.meta.encoded_size() // id (8B) + meta size
     }
 
-    fn write(&self, mut buf: &mut [u8]) {
+    fn write(&self, mut buf: &mut [u8]) -> CodingResult<()> {
         buf.put_u64(self.id);
         // TODO(MrCroxx): avoid buffer copy
         let mut buffer = vec![];
         self.meta.encode_to(&mut buffer);
-        buf.put_slice(&buffer[..])
+        buf.put_slice(&buffer[..]);
+        Ok(())
     }
 
-    fn read(mut buf: &[u8]) -> Self {
+    fn read(mut buf: &[u8]) -> CodingResult<Self> {
         let id = buf.get_u64();
         let meta = SstableMeta::decode(buf).unwrap();
-        Box::new(Sstable::new(id, meta))
+        let sstable = Box::new(Sstable::new(id, meta));
+        Ok(sstable)
     }
 }
 
@@ -416,9 +515,9 @@ mod tests {
         );
 
         let mut buf = vec![0; block.serialized_len()];
-        block.write(&mut buf[..]);
+        block.write(&mut buf[..]).unwrap();
 
-        let block = <Box<Block> as Value>::read(&buf[..]);
+        let block = <Box<Block> as Value>::read(&buf[..]).unwrap();
 
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 

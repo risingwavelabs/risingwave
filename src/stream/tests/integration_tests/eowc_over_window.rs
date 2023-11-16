@@ -14,7 +14,9 @@
 
 use risingwave_expr::aggregate::{AggArgs, AggKind};
 use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncCall, WindowFuncKind};
-use risingwave_stream::executor::{EowcOverWindowExecutor, EowcOverWindowExecutorArgs};
+use risingwave_stream::executor::{
+    EowcOverWindowExecutor, EowcOverWindowExecutorArgs, ExecutorInfo,
+};
 
 use crate::prelude::*;
 
@@ -45,6 +47,13 @@ async fn create_executor<S: StateStore>(
         OrderType::ascending(),
     ];
 
+    let output_schema = {
+        let mut fields = input_schema.fields.clone();
+        calls.iter().for_each(|call| {
+            fields.push(Field::unnamed(call.return_type.clone()));
+        });
+        Schema { fields }
+    };
     let output_pk_indices = vec![2];
 
     let state_table = StateTable::new_without_distribution_inconsistent_op(
@@ -58,10 +67,15 @@ async fn create_executor<S: StateStore>(
 
     let (tx, source) = MockSource::channel(input_schema, input_pk_indices.clone());
     let executor = EowcOverWindowExecutor::new(EowcOverWindowExecutorArgs {
-        input: source.boxed(),
         actor_ctx: ActorContext::create(123),
-        pk_indices: output_pk_indices,
-        executor_id: 1,
+        info: ExecutorInfo {
+            schema: output_schema,
+            pk_indices: output_pk_indices,
+            identity: "EowcOverWindowExecutor".to_string(),
+        },
+
+        input: source.boxed(),
+
         calls,
         partition_key_indices,
         order_key_index,
