@@ -426,9 +426,6 @@ impl LogicalOptimizer {
         explain_trace: bool,
         ctx: &OptimizerContextRef,
     ) -> Result<PlanRef> {
-        // In order to unnest a table function, we need to convert it into a `project_set` first.
-        // However, the table function is expected to be converted into a project set, so it must be applied.
-        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_PROJECT_SET);
         // Bail our if no apply operators.
         if !has_logical_apply(plan.clone()) {
             return Ok(plan);
@@ -540,6 +537,8 @@ impl LogicalOptimizer {
         }
         plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
         plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
+        // In order to unnest a table function, we need to convert it into a `project_set` first.
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_PROJECT_SET);
 
         plan = Self::subquery_unnesting(plan, enable_share_plan, explain_trace, &ctx)?;
 
@@ -633,6 +632,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&SET_OPERATION_MERGE);
         plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN);
         plan = plan.optimize_by_rules(&ALWAYS_FALSE_FILTER);
+        // In order to unnest a table function, we need to convert it into a `project_set` first.
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_PROJECT_SET);
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
 
