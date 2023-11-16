@@ -17,7 +17,7 @@ use std::borrow::Cow;
 use bytes::BufMut;
 
 use crate::row::{OwnedRow, Row};
-use crate::types::{DataType, ToDatumRef};
+use crate::types::{DataType, Datum, ToDatumRef};
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::util::memcmp_encoding;
 use crate::util::sort_util::OrderType;
@@ -69,7 +69,7 @@ impl OrderedRowSerde {
         }
     }
 
-    pub fn deserialize(&self, data: &[u8]) -> memcomparable::Result<OwnedRow> {
+    fn deserialize_impl(&self, data: &[u8]) -> memcomparable::Result<Vec<Datum>> {
         let mut values = Vec::with_capacity(self.schema.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
         for (data_type, order) in self
@@ -80,7 +80,25 @@ impl OrderedRowSerde {
             let datum = memcmp_encoding::deserialize_datum(data_type, order, &mut deserializer)?;
             values.push(datum);
         }
+        Ok(values)
+    }
+
+    pub fn deserialize(&self, data: &[u8]) -> memcomparable::Result<OwnedRow> {
+        let values = self.deserialize_impl(data)?;
         Ok(OwnedRow::new(values))
+    }
+
+    pub fn deserialize_by_indices(
+        &self,
+        data: &[u8],
+        output_indices: &[usize],
+    ) -> memcomparable::Result<OwnedRow> {
+        let mut values = self.deserialize_impl(data)?;
+        let mut rows = Vec::with_capacity(output_indices.len());
+        for pos in output_indices {
+            rows.push(values[*pos].take());
+        }
+        Ok(OwnedRow::new(rows))
     }
 
     pub fn get_order_types(&self) -> &[OrderType] {
