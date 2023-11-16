@@ -41,5 +41,5 @@ DROP FUNCTION test_schema.test_func(INT);
 statement ok
 DROP SCHEMA test_schema;
 
-statement ok
+system ok
 pkill python

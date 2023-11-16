@@ -100,5 +100,5 @@ DROP SOURCE test_schema.test_source;
 statement ok
 DROP TABLE test_schema.test_table;
 
-system ok
+statement ok
 DROP SCHEMA test_schema;
