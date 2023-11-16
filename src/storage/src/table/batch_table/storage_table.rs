@@ -695,11 +695,11 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
             row_deserializer,
             pk_serializer,
             output_indices,
+            exist_index_duplicate,
             key_output_indices,
+            exist_key_index_duplicate,
             value_output_indices,
             output_row_in_key_indices,
-            exist_index_duplicate,
-            exist_key_index_duplicate,
         };
         Ok(iter)
     }
