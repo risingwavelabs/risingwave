@@ -134,7 +134,6 @@ opentelemetry_sdk = { version = "0.21", default-features = false, features = ["r
 tracing-opentelemetry = "0.22"
 opentelemetry-semantic-conventions = "0.13"
 
-
 risingwave_backup = { path = "./src/storage/backup" }
 risingwave_batch = { path = "./src/batch" }
 risingwave_cmd = { path = "./src/cmd" }
