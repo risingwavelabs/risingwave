@@ -99,6 +99,7 @@ use crate::user::UserId;
 use crate::utils::infer_stmt_row_desc::{infer_show_object, infer_show_variable};
 use crate::{FrontendOpts, PgResponseStream};
 
+pub(crate) mod current;
 pub(crate) mod transaction;
 
 /// The global environment for the frontend server.
