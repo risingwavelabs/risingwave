@@ -43,7 +43,7 @@ macro_rules! assert_count_range_scan {
                 map_table_key_range(bounds),
                 $epoch,
                 ReadOptions {
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    prefetch_options: PrefetchOptions::new_for_large_range_scan(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
                 },

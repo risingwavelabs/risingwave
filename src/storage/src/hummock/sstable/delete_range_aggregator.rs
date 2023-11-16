@@ -315,6 +315,7 @@ mod tests {
         mock_sstable_store,
     };
     use crate::hummock::test_utils::{test_user_key, CompactionDeleteRangesBuilder};
+    use crate::monitor::StoreLocalStatistic;
 
     #[tokio::test]
     pub async fn test_compaction_delete_range_iterator() {
@@ -524,35 +525,39 @@ mod tests {
     async fn test_delete_range_get() {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
-        let sstable = gen_iterator_test_sstable_with_range_tombstones(
+        let sst_info = gen_iterator_test_sstable_with_range_tombstones(
             0,
             vec![],
             vec![(0, 2, 300), (1, 4, 150), (3, 6, 50), (5, 8, 150)],
-            sstable_store,
+            sstable_store.clone(),
         )
         .await;
+        let sstable = sstable_store
+            .sstable(&sst_info, &mut StoreLocalStatistic::default())
+            .await
+            .unwrap();
         let ret = get_min_delete_range_epoch_from_sstable(
-            &sstable,
+            sstable.value(),
             iterator_test_user_key_of(0).as_ref(),
         );
         assert_eq!(ret, 300);
         let ret = get_min_delete_range_epoch_from_sstable(
-            &sstable,
+            sstable.value(),
             iterator_test_user_key_of(1).as_ref(),
         );
         assert_eq!(ret, 150);
         let ret = get_min_delete_range_epoch_from_sstable(
-            &sstable,
+            sstable.value(),
             iterator_test_user_key_of(3).as_ref(),
         );
         assert_eq!(ret, 50);
         let ret = get_min_delete_range_epoch_from_sstable(
-            &sstable,
+            sstable.value(),
             iterator_test_user_key_of(6).as_ref(),
         );
         assert_eq!(ret, 150);
         let ret = get_min_delete_range_epoch_from_sstable(
-            &sstable,
+            sstable.value(),
             iterator_test_user_key_of(8).as_ref(),
         );
         assert_eq!(ret, MAX_EPOCH);

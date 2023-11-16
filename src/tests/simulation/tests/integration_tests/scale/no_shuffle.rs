@@ -15,7 +15,7 @@
 use anyhow::Result;
 use itertools::Itertools;
 use risingwave_simulation::cluster::{Cluster, Configuration};
-use risingwave_simulation::ctl_ext::predicate::identity_contains;
+use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 use risingwave_simulation::utils::AssertResult;
 
 #[tokio::test]
@@ -48,7 +48,10 @@ async fn test_delta_join() -> Result<()> {
         .await?;
     assert_eq!(lookup_fragments.len(), 2, "failed to plan delta join");
     let union_fragment = cluster
-        .locate_one_fragment([identity_contains("union")])
+        .locate_one_fragment([
+            identity_contains("union"),
+            no_identity_contains("materialize"), // skip union for table
+        ])
         .await?;
 
     let mut test_times = 0;

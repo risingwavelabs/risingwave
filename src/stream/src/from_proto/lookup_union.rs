@@ -28,6 +28,6 @@ impl ExecutorBuilder for LookupUnionExecutorBuilder {
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        Ok(LookupUnionExecutor::new(params.pk_indices, params.input, node.order.clone()).boxed())
+        Ok(LookupUnionExecutor::new(params.info, params.input, node.order.clone()).boxed())
     }
 }

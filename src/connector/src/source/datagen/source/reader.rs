@@ -215,7 +215,7 @@ fn generator_from_data_type(
     match data_type {
         DataType::Timestamp => {
             let max_past_key = format!("fields.{}.max_past", name);
-            let max_past_value = fields_option_map.get(&max_past_key).map(|s| s.to_string());
+            let max_past_value = fields_option_map.get(&max_past_key).cloned();
             let max_past_mode_key = format!("fields.{}.max_past_mode", name);
             let max_past_mode_value = fields_option_map
                 .get(&max_past_mode_key)
