@@ -4,11 +4,12 @@
     explain create table t1 (v1 int as v2-1, v2 int, v3 int as v2+1);
   explain_output: |
     StreamMaterialize { columns: [v1, v2, v3, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite }
-    └─StreamExchange { dist: HashShard(_row_id) }
-      └─StreamRowIdGen { row_id_index: 3 }
-        └─StreamProject { exprs: [(v2 - 1:Int32) as $expr1, v2, (v2 + 1:Int32) as $expr2, _row_id] }
-          └─StreamDml { columns: [v2, _row_id] }
-            └─StreamSource
+    └─StreamRowIdGen { row_id_index: 3 }
+      └─StreamUnion { all: true }
+        └─StreamExchange { dist: HashShard(_row_id) }
+          └─StreamProject { exprs: [(v2 - 1:Int32) as $expr1, v2, (v2 + 1:Int32) as $expr2, _row_id] }
+            └─StreamDml { columns: [v2, _row_id] }
+              └─StreamSource
 - name: source with generated columns
   sql: |
     create source s1 (v1 int as v2-1, v2 int, v3 int as v2+1) with (connector = 'kinesis') FORMAT PLAIN ENCODE JSON;
@@ -30,11 +31,12 @@
     explain create table t1 (proc_time TIMESTAMP AS proctime());
   explain_output: |
     StreamMaterialize { columns: [proc_time, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: Overwrite, watermark_columns: [proc_time] }
-    └─StreamExchange { dist: HashShard(_row_id) }
-      └─StreamRowIdGen { row_id_index: 1 }
-        └─StreamProject { exprs: [AtTimeZone(Proctime, 'UTC':Varchar) as $expr1, _row_id], output_watermarks: [$expr1] }
-          └─StreamDml { columns: [_row_id] }
-            └─StreamSource
+    └─StreamRowIdGen { row_id_index: 1 }
+      └─StreamUnion { all: true, output_watermarks: [$expr1] }
+        └─StreamExchange { dist: HashShard(_row_id) }
+          └─StreamProject { exprs: [AtTimeZone(Proctime, 'UTC':Varchar) as $expr1, _row_id], output_watermarks: [$expr1] }
+            └─StreamDml { columns: [_row_id] }
+              └─StreamSource
 - name: watermark on generated column
   sql: |
     explain create table t (v int, w int as v+1, watermark for w as w) append only
@@ -42,6 +44,8 @@
     StreamMaterialize { columns: [v, w, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [w] }
     └─StreamRowIdGen { row_id_index: 2 }
       └─StreamWatermarkFilter { watermark_descs: [Desc { column: $expr1, expr: $expr1 }], output_watermarks: [$expr1] }
-        └─StreamProject { exprs: [v, (v + 1:Int32) as $expr1, _row_id] }
-          └─StreamDml { columns: [v, _row_id] }
-            └─StreamSource
+        └─StreamUnion { all: true }
+          └─StreamExchange [no_shuffle] { dist: SomeShard }
+            └─StreamProject { exprs: [v, (v + 1:Int32) as $expr1, _row_id] }
+              └─StreamDml { columns: [v, _row_id] }
+                └─StreamSource

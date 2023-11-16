@@ -98,6 +98,9 @@ echo "check mviews after cluster recovery"
 # check results
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
 
+# drop relations
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc_share_stream_drop.slt'
+
 echo "--- Kill cluster"
 cargo make ci-kill
 

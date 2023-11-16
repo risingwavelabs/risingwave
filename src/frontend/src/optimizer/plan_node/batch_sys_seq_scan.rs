@@ -20,27 +20,26 @@ use risingwave_common::error::Result;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::row_seq_scan_node::ChunkSize;
-use risingwave_pb::batch_plan::RowSeqScanNode;
+use risingwave_pb::batch_plan::SysRowSeqScanNode;
+use risingwave_pb::plan_common::PbColumnDesc;
 
 use super::batch::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
-use crate::catalog::ColumnId;
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 
-/// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
+/// `BatchSysSeqScan` implements [`super::LogicalSysScan`] to scan from a row-oriented table
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct BatchSeqScan {
+pub struct BatchSysSeqScan {
     pub base: PlanBase<Batch>,
-    core: generic::Scan,
+    core: generic::SysScan,
     scan_ranges: Vec<ScanRange>,
 }
 
-impl BatchSeqScan {
-    fn new_inner(core: generic::Scan, dist: Distribution, scan_ranges: Vec<ScanRange>) -> Self {
+impl BatchSysSeqScan {
+    fn new_inner(core: generic::SysScan, dist: Distribution, scan_ranges: Vec<ScanRange>) -> Self {
         let order = if scan_ranges.len() > 1 {
             Order::any()
         } else {
@@ -69,7 +68,7 @@ impl BatchSeqScan {
         }
     }
 
-    pub fn new(core: generic::Scan, scan_ranges: Vec<ScanRange>) -> Self {
+    pub fn new(core: generic::SysScan, scan_ranges: Vec<ScanRange>) -> Self {
         // Use `Single` by default, will be updated later with `clone_with_dist`.
         Self::new_inner(core, Distribution::Single, scan_ranges)
     }
@@ -77,35 +76,14 @@ impl BatchSeqScan {
     fn clone_with_dist(&self) -> Self {
         Self::new_inner(
             self.core.clone(),
-            match self.core.distribution_key() {
-                None => Distribution::SomeShard,
-                Some(distribution_key) => {
-                    if distribution_key.is_empty() {
-                        Distribution::Single
-                    } else {
-                        // For other batch operators, `HashShard` is a simple hashing, i.e.,
-                        // `target_shard = hash(dist_key) % shard_num`
-                        //
-                        // But MV is actually sharded by consistent hashing, i.e.,
-                        // `target_shard = vnode_mapping.map(hash(dist_key) % vnode_num)`
-                        //
-                        // They are incompatible, so we just specify its distribution as
-                        // `SomeShard` to force an exchange is
-                        // inserted.
-                        Distribution::UpstreamHashShard(
-                            distribution_key,
-                            self.core.table_desc.table_id,
-                        )
-                    }
-                }
-            },
+            Distribution::Single,
             self.scan_ranges.clone(),
         )
     }
 
     /// Get a reference to the batch seq scan's logical.
     #[must_use]
-    pub fn core(&self) -> &generic::Scan {
+    pub fn core(&self) -> &generic::SysScan {
         &self.core
     }
 
@@ -145,7 +123,7 @@ impl BatchSeqScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! { BatchSeqScan }
+impl_plan_tree_node_for_leaf! { BatchSysSeqScan }
 
 fn lb_to_string(name: &str, lb: &Bound<ScalarImpl>) -> String {
     let (op, v) = match lb {
@@ -174,7 +152,7 @@ fn range_to_string(name: &str, range: &(Bound<ScalarImpl>, Bound<ScalarImpl>)) -
     }
 }
 
-impl Distill for BatchSeqScan {
+impl Distill for BatchSysSeqScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(4);
@@ -201,50 +179,39 @@ impl Distill for BatchSeqScan {
     }
 }
 
-impl ToDistributedBatch for BatchSeqScan {
+impl ToDistributedBatch for BatchSysSeqScan {
     fn to_distributed(&self) -> Result<PlanRef> {
         Ok(self.clone_with_dist().into())
     }
 }
 
-impl ToBatchPb for BatchSeqScan {
+impl ToBatchPb for BatchSysSeqScan {
     fn to_batch_prost_body(&self) -> NodeBody {
-        NodeBody::RowSeqScan(RowSeqScanNode {
-            table_desc: Some(self.core.table_desc.to_protobuf()),
-            column_ids: self
-                .core
-                .output_column_ids()
-                .iter()
-                .map(ColumnId::get_id)
-                .collect(),
-            scan_ranges: self.scan_ranges.iter().map(|r| r.to_protobuf()).collect(),
-            // To be filled by the scheduler.
-            vnode_bitmap: None,
-            ordered: !self.order().is_any(),
-            chunk_size: self
-                .core
-                .chunk_size
-                .map(|chunk_size| ChunkSize { chunk_size }),
+        let column_descs = self
+            .core
+            .column_descs()
+            .iter()
+            .map(PbColumnDesc::from)
+            .collect();
+        NodeBody::SysRowSeqScan(SysRowSeqScanNode {
+            table_id: self.core.table_desc.table_id.table_id,
+            column_descs,
         })
     }
 }
 
-impl ToLocalBatch for BatchSeqScan {
+impl ToLocalBatch for BatchSysSeqScan {
     fn to_local(&self) -> Result<PlanRef> {
-        let dist = if let Some(distribution_key) = self.core.distribution_key()
-            && !distribution_key.is_empty()
-        {
-            Distribution::UpstreamHashShard(distribution_key, self.core.table_desc.table_id)
-        } else {
-            // NOTE(kwannoel): This is a hack to force an exchange to always be inserted before
-            // scan.
-            Distribution::SomeShard
-        };
-        Ok(Self::new_inner(self.core.clone(), dist, self.scan_ranges.clone()).into())
+        Ok(Self::new_inner(
+            self.core.clone(),
+            Distribution::Single,
+            self.scan_ranges.clone(),
+        )
+        .into())
     }
 }
 
-impl ExprRewritable for BatchSeqScan {
+impl ExprRewritable for BatchSysSeqScan {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

@@ -50,12 +50,12 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
             StateTable::from_table_catalog_inconsistent_op(&table, store, Some(vnodes)).await;
 
         Ok(WatermarkFilterExecutor::new(
+            params.actor_context,
+            params.info,
             input,
             watermark_expr,
             event_time_col_idx,
-            params.actor_context,
             table,
-            params.executor_id,
         )
         .boxed())
     }
