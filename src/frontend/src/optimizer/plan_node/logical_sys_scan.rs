@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
@@ -28,7 +28,7 @@ use super::{
     generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
     PredicatePushdown, ToBatch, ToStream,
 };
-use crate::catalog::{ColumnId, IndexCatalog};
+use crate::catalog::{ColumnId};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::generic::SysScanTableType;
@@ -37,7 +37,7 @@ use crate::optimizer::plan_node::{
     RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{Cardinality, Order};
-use crate::optimizer::rule::IndexSelectionRule;
+
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalSysScan` returns contents of a table or other equivalent object
@@ -64,22 +64,18 @@ impl LogicalSysScan {
     /// Create a [`LogicalSysScan`] node. Used by planner.
     pub fn create(
         table_name: String, // explain-only
-        scan_table_type: SysScanTableType,
         table_desc: Rc<TableDesc>,
-        indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
-        for_system_time_as_of_proctime: bool,
         table_cardinality: Cardinality,
     ) -> Self {
         generic::SysScan::new(
             table_name,
-            scan_table_type,
+            SysScanTableType::SysTable,
             (0..table_desc.columns.len()).collect(),
             table_desc,
-            indexes,
             ctx,
             Condition::true_cond(),
-            for_system_time_as_of_proctime,
+            false,
             table_cardinality,
         )
         .into()
@@ -117,11 +113,6 @@ impl LogicalSysScan {
         self.core.output_column_ids()
     }
 
-    /// Get all indexes on this table
-    pub fn indexes(&self) -> &[Rc<IndexCatalog>] {
-        &self.core.indexes
-    }
-
     /// Get the logical scan's filter predicate
     pub fn predicate(&self) -> &Condition {
         &self.core.predicate
@@ -139,67 +130,6 @@ impl LogicalSysScan {
 
     pub fn watermark_columns(&self) -> FixedBitSet {
         self.core.watermark_columns()
-    }
-
-    /// Return indexes can satisfy the required order.
-    pub fn indexes_satisfy_order(&self, required_order: &Order) -> Vec<&Rc<IndexCatalog>> {
-        let output_col_map = self
-            .output_col_idx()
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(id, col)| (col, id))
-            .collect::<BTreeMap<_, _>>();
-        let unmatched_idx = output_col_map.len();
-        self.indexes()
-            .iter()
-            .filter(|idx| {
-                let s2p_mapping = idx.secondary_to_primary_mapping();
-                Order {
-                    column_orders: idx
-                        .index_table
-                        .pk()
-                        .iter()
-                        .map(|idx_item| {
-                            ColumnOrder::new(
-                                *output_col_map
-                                    .get(
-                                        s2p_mapping
-                                            .get(&idx_item.column_index)
-                                            .expect("should be in s2p mapping"),
-                                    )
-                                    .unwrap_or(&unmatched_idx),
-                                idx_item.order_type,
-                            )
-                        })
-                        .collect(),
-                }
-                .satisfies(required_order)
-            })
-            .collect()
-    }
-
-    /// If the index can cover the scan, transform it to the index scan.
-    pub fn to_index_scan_if_index_covered(
-        &self,
-        index: &Rc<IndexCatalog>,
-    ) -> Option<LogicalSysScan> {
-        let p2s_mapping = index.primary_to_secondary_mapping();
-        if self
-            .required_col_idx()
-            .iter()
-            .all(|x| p2s_mapping.contains_key(x))
-        {
-            let index_scan = self.core.to_index_scan(
-                &index.name,
-                index.index_table.table_desc().into(),
-                p2s_mapping,
-                index.function_mapping(),
-            );
-            Some(index_scan.into())
-        } else {
-            None
-        }
     }
 
     /// used by optimizer (currently `top_n_on_index_rule`) to help reduce useless `chunk_size` at
@@ -256,7 +186,6 @@ impl LogicalSysScan {
             self.scan_table_type().clone(),
             self.required_col_idx().to_vec(),
             self.core.table_desc.clone(),
-            self.indexes().to_vec(),
             self.ctx(),
             Condition::true_cond(),
             self.for_system_time_as_of_proctime(),
@@ -277,7 +206,6 @@ impl LogicalSysScan {
             self.output_col_idx().to_vec(),
             self.core.table_desc.clone(),
             self.core.cdc_table_desc.clone(),
-            self.indexes().to_vec(),
             self.base.ctx().clone(),
             predicate,
             self.for_system_time_as_of_proctime(),
@@ -293,7 +221,6 @@ impl LogicalSysScan {
             output_col_idx,
             self.core.table_desc.clone(),
             self.core.cdc_table_desc.clone(),
-            self.indexes().to_vec(),
             self.base.ctx().clone(),
             self.predicate().clone(),
             self.for_system_time_as_of_proctime(),
@@ -395,6 +322,7 @@ impl ExprRewritable for LogicalSysScan {
 }
 
 impl PredicatePushdown for LogicalSysScan {
+    // TODO(kwannoel): Unify this with logical_scan.
     fn predicate_pushdown(
         &self,
         mut predicate: Condition,
@@ -438,6 +366,7 @@ impl PredicatePushdown for LogicalSysScan {
 }
 
 impl LogicalSysScan {
+    // TODO(kwannoel): Unify this with logical_scan.
     fn to_batch_inner_with_required(&self, required_order: &Order) -> Result<PlanRef> {
         if self.predicate().always_true() {
             required_order
@@ -473,26 +402,6 @@ impl LogicalSysScan {
             required_order.enforce_if_not_satisfies(plan)
         }
     }
-
-    // For every index, check if the order of the index satisfies the required_order
-    // If yes, use an index scan
-    fn use_index_scan_if_order_is_satisfied(
-        &self,
-        required_order: &Order,
-    ) -> Option<Result<PlanRef>> {
-        if required_order.column_orders.is_empty() {
-            return None;
-        }
-
-        let order_satisfied_index = self.indexes_satisfy_order(required_order);
-        for index in order_satisfied_index {
-            if let Some(index_scan) = self.to_index_scan_if_index_covered(index) {
-                return Some(index_scan.to_batch());
-            }
-        }
-
-        None
-    }
 }
 
 impl ToBatch for LogicalSysScan {
@@ -502,27 +411,6 @@ impl ToBatch for LogicalSysScan {
 
     fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
         let new = self.clone_with_predicate(self.predicate().clone());
-
-        if !new.indexes().is_empty() {
-            let index_selection_rule = IndexSelectionRule::create();
-            if let Some(applied) = index_selection_rule.apply(new.clone().into()) {
-                if let Some(scan) = applied.as_logical_scan() {
-                    // covering index
-                    return required_order.enforce_if_not_satisfies(scan.to_batch()?);
-                } else if let Some(join) = applied.as_logical_join() {
-                    // index lookup join
-                    return required_order
-                        .enforce_if_not_satisfies(join.index_lookup_join_to_batch_lookup_join()?);
-                } else {
-                    unreachable!();
-                }
-            } else {
-                // Try to make use of index if it satisfies the required order
-                if let Some(plan_ref) = new.use_index_scan_if_order_is_satisfied(required_order) {
-                    return plan_ref;
-                }
-            }
-        }
         new.to_batch_inner_with_required(required_order)
     }
 }

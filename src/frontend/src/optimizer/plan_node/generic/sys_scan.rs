@@ -245,7 +245,6 @@ impl SysScan {
             SysScanTableType::default(),
             new_output_col_idx,
             index_table_desc,
-            vec![],
             self.ctx.clone(),
             new_predicate,
             self.for_system_time_as_of_proctime,
@@ -260,7 +259,6 @@ impl SysScan {
         scan_table_type: SysScanTableType,
         output_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
-        indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
         for_system_time_as_of_proctime: bool,
@@ -272,7 +270,6 @@ impl SysScan {
             output_col_idx,
             table_desc,
             Rc::new(CdcTableDesc::default()),
-            indexes,
             ctx,
             predicate,
             for_system_time_as_of_proctime,
@@ -287,7 +284,6 @@ impl SysScan {
         output_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
         cdc_table_desc: Rc<CdcTableDesc>,
-        indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
         for_system_time_as_of_proctime: bool,
@@ -316,7 +312,7 @@ impl SysScan {
             output_col_idx,
             table_desc,
             cdc_table_desc,
-            indexes,
+            indexes: vec![],
             predicate,
             chunk_size: None,
             for_system_time_as_of_proctime,
