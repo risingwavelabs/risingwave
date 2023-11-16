@@ -670,6 +670,19 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterConnection {
+            name,
+            operation: AlterConnectionOperation::SetSchema { new_schema_name },
+        } => {
+            alter_set_schema::handle_alter_set_schema(
+                handler_args,
+                name,
+                new_schema_name,
+                StatementType::ALTER_CONNECTION,
+                None,
+            )
+            .await
+        }
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }

@@ -26,8 +26,8 @@ use itertools::Itertools;
 use tracing::{debug, instrument};
 
 use crate::ast::ddl::{
-    AlterDatabaseOperation, AlterFunctionOperation, AlterIndexOperation, AlterSchemaOperation,
-    AlterSinkOperation, AlterViewOperation, SourceWatermark,
+    AlterConnectionOperation, AlterDatabaseOperation, AlterFunctionOperation, AlterIndexOperation,
+    AlterSchemaOperation, AlterSinkOperation, AlterViewOperation, SourceWatermark,
 };
 use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};
@@ -2802,6 +2802,8 @@ impl Parser {
             self.parse_alter_source()
         } else if self.parse_keyword(Keyword::FUNCTION) {
             self.parse_alter_function()
+        } else if self.parse_keyword(Keyword::CONNECTION) {
+            self.parse_alter_connection()
         } else if self.parse_keyword(Keyword::USER) {
             self.parse_alter_user()
         } else if self.parse_keyword(Keyword::SYSTEM) {
@@ -3106,6 +3108,27 @@ impl Parser {
         Ok(Statement::AlterFunction {
             name,
             args,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_connection(&mut self) -> Result<Statement, ParserError> {
+        let connection_name = self.parse_object_name()?;
+        let operation = if self.parse_keyword(Keyword::SET) {
+            if self.parse_keyword(Keyword::SCHEMA) {
+                let schema_name = self.parse_object_name()?;
+                AlterConnectionOperation::SetSchema {
+                    new_schema_name: schema_name,
+                }
+            } else {
+                return self.expected("SCHEMA after SET", self.peek_token());
+            }
+        } else {
+            return self.expected("SET after ALTER CONNECTION", self.peek_token());
+        };
+
+        Ok(Statement::AlterConnection {
+            name: connection_name,
             operation,
         })
     }

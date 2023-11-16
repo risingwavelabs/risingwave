@@ -395,6 +395,22 @@ impl SchemaCatalog {
             .unwrap();
     }
 
+    pub fn update_connection(&mut self, prost: &PbConnection) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let connection = ConnectionCatalog::from(prost);
+        let connection_ref = Arc::new(connection);
+
+        let old_connection = self.connection_by_id.get(&id).unwrap();
+        // check if connection name get updated.
+        if old_connection.name != name {
+            self.connection_by_name.remove(&old_connection.name);
+        }
+
+        self.connection_by_name.insert(name, connection_ref.clone());
+        self.connection_by_id.insert(id, connection_ref);
+    }
+
     pub fn drop_connection(&mut self, connection_id: ConnectionId) {
         let connection_ref = self
             .connection_by_id
@@ -542,6 +558,13 @@ impl SchemaCatalog {
             return None;
         }
         Some(functions.values().collect())
+    }
+
+    pub fn get_connection_by_id(
+        &self,
+        connection_id: &ConnectionId,
+    ) -> Option<&Arc<ConnectionCatalog>> {
+        self.connection_by_id.get(connection_id)
     }
 
     pub fn get_connection_by_name(&self, connection_name: &str) -> Option<&Arc<ConnectionCatalog>> {

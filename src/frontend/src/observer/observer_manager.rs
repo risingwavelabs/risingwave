@@ -308,6 +308,7 @@ impl FrontendObserverNode {
                     connection.schema_id,
                     connection.id,
                 ),
+                Operation::Update => catalog_guard.update_connection(connection),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             _ => unreachable!(),

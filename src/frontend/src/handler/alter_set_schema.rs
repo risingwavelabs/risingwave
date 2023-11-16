@@ -26,7 +26,7 @@ use crate::{bind_data_type, Binder};
 // 2. Check duplicate name in the new schema.
 // 3. Check permission to create in the new schema.
 
-/// Handle `ALTER [TABLE | [MATERIALIZED] VIEW | SOURCE | SINK | FUNCTION] <name> SET SCHEMA <schema_name>` statements.
+/// Handle `ALTER [TABLE | [MATERIALIZED] VIEW | SOURCE | SINK | CONNECTION | FUNCTION] <name> SET SCHEMA <schema_name>` statements.
 pub async fn handle_alter_set_schema(
     handler_args: HandlerArgs,
     obj_name: ObjectName,
@@ -90,6 +90,17 @@ pub async fn handle_alter_set_schema(
                     &sink.name,
                 )?;
                 (Object::SinkId(sink.id.sink_id), old_schema_name)
+            }
+            StatementType::ALTER_CONNECTION => {
+                let (connection, old_schema_name) =
+                    catalog_reader.get_connection_by_name(db_name, schema_path, &real_obj_name)?;
+                session.check_privilege_for_drop_alter(old_schema_name, &**connection)?;
+                catalog_reader.check_connection_name_duplicated(
+                    db_name,
+                    &new_schema_name,
+                    &connection.name,
+                )?;
+                (Object::ConnectionId(connection.id), old_schema_name)
             }
             StatementType::ALTER_FUNCTION => {
                 let (function, old_schema_name) = if let Some(args) = func_args {

@@ -32,9 +32,9 @@ use serde::{Deserialize, Serialize};
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
-    AlterColumnOperation, AlterDatabaseOperation, AlterFunctionOperation, AlterSchemaOperation,
-    AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef, ReferentialAction,
-    SourceWatermark, TableConstraint,
+    AlterColumnOperation, AlterConnectionOperation, AlterDatabaseOperation, AlterFunctionOperation,
+    AlterSchemaOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
+    ReferentialAction, SourceWatermark, TableConstraint,
 };
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
@@ -1186,6 +1186,12 @@ pub enum Statement {
         args: Option<Vec<OperateFunctionArg>>,
         operation: AlterFunctionOperation,
     },
+    /// ALTER CONNECTION
+    AlterConnection {
+        /// Connection name
+        name: ObjectName,
+        operation: AlterConnectionOperation,
+    },
     /// DESCRIBE TABLE OR SOURCE
     Describe {
         /// Table or Source name
@@ -1648,6 +1654,9 @@ impl fmt::Display for Statement {
                     write!(f, "({})", display_comma_separated(args))?;
                 }
                 write!(f, " {}", operation)
+            }
+            Statement::AlterConnection { name, operation } => {
+                write!(f, "ALTER CONNECTION {} {}", name, operation)
             }
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),
             Statement::DropFunction {

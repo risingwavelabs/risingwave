@@ -76,6 +76,7 @@ pub enum StatementType {
     ALTER_SINK,
     ALTER_SOURCE,
     ALTER_FUNCTION,
+    ALTER_CONNECTION,
     ALTER_SYSTEM,
     REVOKE_PRIVILEGE,
     // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note

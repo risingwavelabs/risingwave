@@ -201,6 +201,7 @@ message AlterSetSchemaRequest {
     uint32 source_id = 3;
     uint32 sink_id = 4;
     uint32 function_id = 5;
+    uint32 connection_id = 6;
   }
   uint32 new_schema_id = 20;
 }

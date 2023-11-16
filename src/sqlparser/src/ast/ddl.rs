@@ -124,6 +124,13 @@ pub enum AlterFunctionOperation {
     SetSchema { new_schema_name: ObjectName },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterConnectionOperation {
+    SetSchema { new_schema_name: ObjectName },
+}
+
 impl fmt::Display for AlterDatabaseOperation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -268,6 +275,16 @@ impl fmt::Display for AlterFunctionOperation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             AlterFunctionOperation::SetSchema { new_schema_name } => {
+                write!(f, "SET SCHEMA {new_schema_name}")
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterConnectionOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterConnectionOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {new_schema_name}")
             }
         }

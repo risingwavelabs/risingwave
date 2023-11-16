@@ -231,6 +231,25 @@ impl Catalog {
             .drop_connection(connection_id);
     }
 
+    pub fn update_connection(&mut self, proto: &PbConnection) {
+        let database = self.get_database_mut(proto.database_id).unwrap();
+        let schema = database.get_schema_mut(proto.schema_id).unwrap();
+        if schema.get_connection_by_id(&proto.id).is_some() {
+            schema.update_connection(proto);
+        } else {
+            // Enter this branch when schema is changed by `ALTER ... SET SCHEMA ...` statement.
+            schema.create_connection(proto);
+            database
+                .iter_schemas_mut()
+                .find(|schema| {
+                    schema.id() != proto.schema_id
+                        && schema.get_connection_by_id(&proto.id).is_some()
+                })
+                .unwrap()
+                .drop_connection(proto.id);
+        }
+    }
+
     pub fn drop_database(&mut self, db_id: DatabaseId) {
         let name = self.db_name_by_id.remove(&db_id).unwrap();
         let database = self.database_by_name.remove(&name).unwrap();

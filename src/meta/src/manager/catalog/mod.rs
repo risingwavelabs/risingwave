@@ -2142,6 +2142,29 @@ impl CatalogManager {
 
                 commit_meta!(self, sinks, tables)?;
             }
+            alter_set_schema_request::Object::ConnectionId(connection_id) => {
+                database_core.ensure_connection_id(connection_id)?;
+                let Connection {
+                    name, schema_id, ..
+                } = database_core.connections.get(&connection_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                database_core.check_connection_name_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                ))?;
+
+                let mut connections = BTreeMapTransaction::new(&mut database_core.connections);
+                let mut connection = connections.get_mut(connection_id).unwrap();
+                connection.schema_id = new_schema_id;
+                let notify_info = Info::Connection(connection.clone());
+                commit_meta!(self, connections)?;
+                let version = self.notify_frontend(Operation::Update, notify_info).await;
+                return Ok(version);
+            }
             alter_set_schema_request::Object::FunctionId(function_id) => {
                 database_core.ensure_function_id(function_id)?;
                 let Function {
