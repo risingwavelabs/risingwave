@@ -210,6 +210,7 @@ def test_sink(prop, format, payload_input, table_schema, is_coordinated=False):
                 print("Integration test failed: ", e)
                 exit(1)
 
+
 def test_file_sink(param):
     prop = {
         "connector": "file",
