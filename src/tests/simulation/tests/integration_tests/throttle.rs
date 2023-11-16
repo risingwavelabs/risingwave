@@ -17,7 +17,6 @@ use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration};
 
 const SET_PARALLELISM: &str = "SET STREAMING_PARALLELISM = 1;";
 
-#[cfg(madsim)]
 #[tokio::test]
 async fn test_throttle_mv() {
     let mut cluster = Cluster::start(Configuration::for_backfill()).await.unwrap();
@@ -37,5 +36,4 @@ async fn test_throttle_mv() {
         .throttle_mv(TableId::from(1002), Some(200))
         .await
         .unwrap();
-    cluster.locate_random_fragment()
 }
