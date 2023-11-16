@@ -14,6 +14,7 @@ import (
 )
 
 type organization struct {
+	Id              int64   `json:"organization_id"`
 	Name            string  `json:"name"`
 	Address         address `json:"address"`
 	Industry        string  `json:"industry"`           // TODO: write generator for that
@@ -53,17 +54,20 @@ func (r userEvent) Topic() string {
 }
 
 func getRandRole() string {
+
 	roles := []string{"developer", "sales representative", "customer support agent", "human resources specialist", "marketing coordinator", "financial analyst", "project manager", "data scientist", "operations coordinator", "quality assurance tester"}
 	return roles[rand.Intn(len(roles))]
 }
 
 func getRandIndustry() string {
+
 	i := []string{"technology", "healthcare", "finance", "education", "retail", "entertainment", "automotive", "energy", "hospitality", "telecommunications", "real estate", "agriculture", "construction", "fashion", "media", "pharmaceuticals", "aviation", "sports", "logistics", "consulting"}
 	return i[rand.Intn(len(i))]
 }
 
 // likelihood in percentage
 func getRandIsOutOfBusiness(likelihood uint) string {
+
 	if rand.Intn(100) < int(likelihood) {
 		return "True"
 	}
@@ -93,6 +97,7 @@ func NewUserGen(maxId *atomic.Pointer[int64]) *userGen {
 	for i := 0; i < 1000; i++ {
 		ug.users = append(ug.users, ug.getUser())
 		ug.orgs = append(ug.orgs, organization{
+			Id:              ug.seqUserId,
 			Name:            ug.faker.Company(),
 			Address:         getAddress(ug.faker),
 			Industry:        getRandIndustry(),
@@ -115,6 +120,7 @@ func (g *userGen) getUser() user {
 }
 
 func (g *userGen) getUserEvent() userEvent {
+
 	r := rand.Intn(len(g.users))
 	user := g.users[r]
 	org := g.orgs[r]
