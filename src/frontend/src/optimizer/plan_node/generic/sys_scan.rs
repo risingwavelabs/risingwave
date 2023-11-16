@@ -280,27 +280,6 @@ impl SysScan {
         )
     }
 
-    /// Create a logical scan node for CDC backfill
-    pub(crate) fn new_for_cdc(
-        table_name: String,
-        output_col_idx: Vec<usize>, // the column index in the table
-        cdc_table_desc: Rc<CdcTableDesc>,
-        ctx: OptimizerContextRef,
-    ) -> Self {
-        Self::new_inner(
-            table_name,
-            SysScanTableType::CdcTable,
-            output_col_idx,
-            Rc::new(TableDesc::default()),
-            cdc_table_desc,
-            vec![],
-            ctx,
-            Condition::true_cond(),
-            false,
-            Cardinality::unknown(),
-        )
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_inner(
         table_name: String,
