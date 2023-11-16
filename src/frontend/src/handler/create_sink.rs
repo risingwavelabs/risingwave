@@ -47,6 +47,7 @@ use crate::expr::{ExprImpl, InputRef, Literal};
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_table::{generate_stream_graph_for_table, ColumnIdGenerator};
 use crate::handler::privilege::resolve_query_privileges;
+use crate::handler::util::SourceSchemaCompatExt;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{generic, Explain, LogicalSource, StreamProject};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
@@ -383,7 +384,7 @@ pub async fn handle_create_sink(
         };
         let source_schema = source_schema
             .clone()
-            .map(|source_schema| source_schema.into_source_schema_v2().0);
+            .map(|source_schema| source_schema.into_v2_with_warning());
 
         // Create handler args as if we're creating a new table with the altered definition.
         let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
@@ -415,29 +416,14 @@ pub async fn handle_create_sink(
 
         table.incoming_sinks = table_catalog.incoming_sinks.clone();
 
-        fn insert_merger_to_union(node: &mut StreamNode) {
-            if let Some(NodeBody::Union(_union_node)) = &mut node.node_body {
-                node.input.push(StreamNode {
-                    identity: "Merge (sink into table)".to_string(),
-                    fields: node.fields.clone(),
-                    node_body: Some(NodeBody::Merge(MergeNode {
-                        upstream_dispatcher_type: DispatcherType::Hash as _,
-                        ..Default::default()
-                    })),
-                    ..Default::default()
-                });
+        // for now we only support one incoming sink
+        assert!(table.incoming_sinks.is_empty());
 
-                return;
-            }
-
-            for input in &mut node.input {
-                insert_merger_to_union(input);
-            }
-        }
-
-        for fragment in graph.fragments.values_mut() {
-            if let Some(node) = &mut fragment.node {
-                insert_merger_to_union(node);
+        for _ in 0..(table_catalog.incoming_sinks.len() + 1) {
+            for fragment in graph.fragments.values_mut() {
+                if let Some(node) = &mut fragment.node {
+                    insert_merger_to_union(node);
+                }
             }
         }
 
@@ -590,6 +576,25 @@ pub async fn handle_create_sink(
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
 }
 
+pub(crate) fn insert_merger_to_union(node: &mut StreamNode) {
+    if let Some(NodeBody::Union(_union_node)) = &mut node.node_body {
+        node.input.push(StreamNode {
+            identity: "Merge (sink into table)".to_string(),
+            fields: node.fields.clone(),
+            node_body: Some(NodeBody::Merge(MergeNode {
+                upstream_dispatcher_type: DispatcherType::Hash as _,
+                ..Default::default()
+            })),
+            ..Default::default()
+        });
+
+        return;
+    }
+
+    for input in &mut node.input {
+        insert_merger_to_union(input);
+    }
+}
 fn derive_default_column_project_for_sink(
     sink: &SinkCatalog,
     target_table_catalog: &Arc<TableCatalog>,

@@ -312,6 +312,12 @@ impl Barrier {
         match self.mutation.as_deref() {
             Some(Mutation::Stop(actors)) => Some(actors),
             Some(Mutation::Update { dropped_actors, .. }) => Some(dropped_actors),
+            Some(Mutation::Combined(mutations)) => match &mutations[..] {
+                [Mutation::Add { .. }, Mutation::Update { dropped_actors, .. }] => {
+                    Some(dropped_actors)
+                }
+                _ => unreachable!(),
+            },
             _ => None,
         }
     }

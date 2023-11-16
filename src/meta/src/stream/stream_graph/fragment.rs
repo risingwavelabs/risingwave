@@ -516,26 +516,6 @@ impl CompleteStreamFragmentGraph {
         }
     }
 
-    pub fn with_upstreams_and_downstreams(
-        graph: StreamFragmentGraph,
-        upstream_root_fragments: HashMap<TableId, Fragment>,
-        original_table_fragment_id: FragmentId,
-        downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
-        table_job_type: Option<TableJobType>,
-    ) -> MetaResult<Self> {
-        Self::build_helper(
-            graph,
-            Some(FragmentGraphUpstreamContext {
-                upstream_root_fragments,
-            }),
-            Some(FragmentGraphDownstreamContext {
-                original_table_fragment_id,
-                downstream_fragments,
-            }),
-            table_job_type,
-        )
-    }
-
     pub fn with_upstreams(
         graph: StreamFragmentGraph,
         upstream_root_fragments: HashMap<TableId, Fragment>,

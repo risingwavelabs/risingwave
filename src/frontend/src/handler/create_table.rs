@@ -55,9 +55,8 @@ use crate::handler::create_source::{
     check_source_schema, validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::generic::PhysicalPlanRef;
-use crate::optimizer::plan_node::{LogicalCdcScan, LogicalScan, LogicalSource};
-use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
+use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;

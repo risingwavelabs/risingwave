@@ -1099,6 +1099,16 @@ impl CatalogManager {
                 .collect()
         };
 
+        let check_sink_into_table_in_dependency = |relation_id: RelationId| -> Vec<Sink> {
+            let mut table_sinks = vec![];
+            for relation_info in relations_depend_on(relation_id) {
+                if let RelationInfo::Sink(s) = relation_info && s.target_table.is_some() {
+                    table_sinks.push(s);
+                }
+            }
+            table_sinks
+        };
+
         // Initial push into deque.
         match relation {
             RelationIdEnum::Table(table_id) => {
@@ -1158,6 +1168,15 @@ impl CatalogManager {
                     if !all_table_ids.insert(table_id) {
                         continue;
                     }
+
+                    let associated_sink_into_tables = check_sink_into_table_in_dependency(table_id);
+                    if !associated_sink_into_tables.is_empty() {
+                        bail!(
+                            "Found {} sink(s) into table in dependency, please drop them manually",
+                            associated_sink_into_tables.len()
+                        );
+                    }
+
                     let table_fragments = fragment_manager
                         .select_table_fragments_by_table_id(&table_id.into())
                         .await?;
@@ -1314,6 +1333,15 @@ impl CatalogManager {
                         continue;
                     }
 
+                    let associated_sink_into_tables =
+                        check_sink_into_table_in_dependency(source.id as RelationId);
+                    if !associated_sink_into_tables.is_empty() {
+                        bail!(
+                            "Found {} sink(s) into table in dependency, please drop them manually",
+                            associated_sink_into_tables.len()
+                        );
+                    }
+
                     // cdc source streaming job
                     if let Some(info) = source.info
                         && info.cdc_source_job
@@ -1352,6 +1380,15 @@ impl CatalogManager {
                     if !all_view_ids.insert(view.id) {
                         continue;
                     }
+
+                    let associated_sink_into_tables = check_sink_into_table_in_dependency(view.id);
+                    if !associated_sink_into_tables.is_empty() {
+                        bail!(
+                            "Found {} sink(s) into table in dependency, please drop them manually",
+                            associated_sink_into_tables.len()
+                        );
+                    }
+
                     if let Some(ref_count) = database_core.relation_ref_count.get(&view.id).cloned()
                     {
                         if ref_count > 0 {
@@ -2828,8 +2865,7 @@ impl CatalogManager {
         // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
         // occur after it's created. We may need to add a new tracker for `alter` procedure.
         if database_core.has_in_progress_creation(&key) {
-            // bail!("table is in altering procedure");
-            Ok(())
+            bail!("table is in altering procedure");
         } else {
             if let Some(source) = source {
                 let source_key = (source.database_id, source.schema_id, source.name.clone());
@@ -2905,12 +2941,10 @@ impl CatalogManager {
         database_core.in_progress_creation_tracker.remove(&key);
 
         let mut table = table.clone();
-
+        table.stream_job_status = PbStreamJobStatus::Created.into();
         if let Some(incoming_sink_id) = incoming_sink_id {
             table.incoming_sinks.push(incoming_sink_id);
         }
-
-        table.stream_job_status = PbStreamJobStatus::Created.into();
 
         tables.insert(table.id, table.clone());
 

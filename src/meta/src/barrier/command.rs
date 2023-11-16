@@ -76,12 +76,12 @@ pub struct Reschedule {
 }
 
 #[derive(Debug, Clone)]
-pub struct ReplaceTableCommand {
-    pub(crate) old_table_fragments: TableFragments,
-    pub(crate) new_table_fragments: TableFragments,
-    pub(crate) merge_updates: Vec<MergeUpdate>,
-    pub(crate) dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
-    pub(crate) init_split_assignment: SplitAssignment,
+pub struct ReplaceTablePlan {
+    pub old_table_fragments: TableFragments,
+    pub new_table_fragments: TableFragments,
+    pub merge_updates: Vec<MergeUpdate>,
+    pub dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
+    pub init_split_assignment: SplitAssignment,
 }
 
 /// [`Command`] is the action of [`crate::barrier::GlobalBarrierManager`]. For different commands,
@@ -129,7 +129,7 @@ pub enum Command {
         init_split_assignment: SplitAssignment,
         definition: String,
         ddl_type: DdlType,
-        replace_table: Option<ReplaceTableCommand>,
+        replace_table: Option<ReplaceTablePlan>,
     },
     /// `CancelStreamingJob` command generates a `Stop` barrier including the actors of the given
     /// table fragment.
@@ -152,13 +152,7 @@ pub enum Command {
     ///
     /// This can be treated as a special case of `RescheduleFragment`, while the upstream fragment
     /// of the Merge executors are changed additionally.
-    ReplaceTable {
-        old_table_fragments: TableFragments,
-        new_table_fragments: TableFragments,
-        merge_updates: Vec<MergeUpdate>,
-        dispatchers: HashMap<ActorId, Vec<Dispatcher>>,
-        init_split_assignment: SplitAssignment,
-    },
+    ReplaceTable(ReplaceTablePlan),
 
     /// `SourceSplitAssignment` generates Plain(Mutation::Splits) for pushing initialized splits or
     /// newly added splits.
@@ -193,7 +187,7 @@ impl Command {
                 replace_table,
                 ..
             } => {
-                if let Some(ReplaceTableCommand {
+                if let Some(ReplaceTablePlan {
                     old_table_fragments,
                     new_table_fragments,
                     ..
@@ -225,11 +219,11 @@ impl Command {
                     .collect();
                 CommandChanges::Actor { to_add, to_remove }
             }
-            Command::ReplaceTable {
+            Command::ReplaceTable(ReplaceTablePlan {
                 old_table_fragments,
                 new_table_fragments,
                 ..
-            } => {
+            }) => {
                 let to_add = new_table_fragments.actor_ids().into_iter().collect();
                 let to_remove = old_table_fragments.actor_ids().into_iter().collect();
                 CommandChanges::Actor { to_add, to_remove }
@@ -411,7 +405,7 @@ impl CommandContext {
                     pause: self.current_paused_reason.is_some(),
                 }));
 
-                if let Some(ReplaceTableCommand {
+                if let Some(ReplaceTablePlan {
                     old_table_fragments,
                     new_table_fragments: _,
                     merge_updates,
@@ -442,13 +436,13 @@ impl CommandContext {
                 Some(Mutation::Stop(StopMutation { actors }))
             }
 
-            Command::ReplaceTable {
+            Command::ReplaceTable(ReplaceTablePlan {
                 old_table_fragments,
                 merge_updates,
                 dispatchers,
                 init_split_assignment,
                 ..
-            } => Self::generate_update_mutation_for_replace_table(
+            }) => Self::generate_update_mutation_for_replace_table(
                 old_table_fragments,
                 merge_updates,
                 dispatchers,
@@ -857,7 +851,7 @@ impl CommandContext {
                     )
                     .await?;
 
-                if let Some(ReplaceTableCommand {
+                if let Some(ReplaceTablePlan {
                     old_table_fragments,
                     new_table_fragments,
                     merge_updates,
@@ -902,13 +896,13 @@ impl CommandContext {
                 self.clean_up(node_dropped_actors).await?;
             }
 
-            Command::ReplaceTable {
+            Command::ReplaceTable(ReplaceTablePlan {
                 old_table_fragments,
                 new_table_fragments,
                 merge_updates,
                 dispatchers,
                 ..
-            } => {
+            }) => {
                 let table_ids = HashSet::from_iter(std::iter::once(old_table_fragments.table_id()));
 
                 // Tell compute nodes to drop actors.

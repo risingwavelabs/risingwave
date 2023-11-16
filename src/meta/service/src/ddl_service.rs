@@ -93,6 +93,33 @@ impl DdlServiceImpl {
             sink_manager,
         }
     }
+
+    fn extract_replace_table_info(change: ReplaceTablePlan) -> ReplaceTableInfo {
+        let mut source = change.source;
+        let mut fragment_graph = change.fragment_graph.unwrap();
+        let mut table = change.table.unwrap();
+        if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
+            table.optional_associated_source_id
+        {
+            let source = source.as_mut().unwrap();
+            let table_id = table.id;
+            fill_table_stream_graph_info(
+                Some((source, source_id)),
+                (&mut table, table_id),
+                TableJobType::General,
+                &mut fragment_graph,
+            );
+        }
+        let table_col_index_mapping =
+            ColIndexMapping::from_protobuf(&change.table_col_index_mapping.unwrap());
+        let stream_job = StreamingJob::Table(source, table, TableJobType::General);
+
+        ReplaceTableInfo {
+            streaming_job: stream_job,
+            fragment_graph,
+            col_index_mapping: table_col_index_mapping,
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -267,43 +294,13 @@ impl DdlService for DdlServiceImpl {
 
         stream_job.set_id(id);
 
-        let command = if let Some(change) = affected_table_change {
-            let info = {
-                let mut source = change.source;
-                let mut fragment_graph = change.fragment_graph.unwrap();
-                let mut table = change.table.unwrap();
-                if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
-                    table.optional_associated_source_id
-                {
-                    let source = source.as_mut().unwrap();
-                    let table_id = table.id;
-                    fill_table_stream_graph_info(
-                        Some((source, source_id)),
-                        (&mut table, table_id),
-                        TableJobType::General,
-                        &mut fragment_graph,
-                    );
-                }
-                let table_col_index_mapping =
-                    ColIndexMapping::from_protobuf(&change.table_col_index_mapping.unwrap());
-                let stream_job = StreamingJob::Table(source, table, TableJobType::General);
+        let command = DdlCommand::CreateStreamingJob(
+            stream_job,
+            fragment_graph,
+            CreateType::Foreground,
+            affected_table_change.map(Self::extract_replace_table_info),
+        );
 
-                ReplaceTableInfo {
-                    streaming_job: stream_job,
-                    fragment_graph,
-                    col_index_mapping: table_col_index_mapping,
-                }
-            };
-
-            DdlCommand::CreateStreamingJob(
-                stream_job,
-                fragment_graph,
-                CreateType::Foreground,
-                Some(info),
-            )
-        } else {
-            DdlCommand::CreateStreamingJob(stream_job, fragment_graph, CreateType::Foreground, None)
-        };
         let version = self.ddl_controller.run_command(command).await?;
 
         Ok(Response::new(CreateSinkResponse {
@@ -321,38 +318,13 @@ impl DdlService for DdlServiceImpl {
         let sink_id = request.sink_id;
         let drop_mode = DropMode::from_request_setting(request.cascade);
 
-        let command = if let Some(change) = request.affected_table_change {
-            let info = {
-                let mut source = change.source;
-                let mut fragment_graph = change.fragment_graph.unwrap();
-                let mut table = change.table.unwrap();
-                if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
-                    table.optional_associated_source_id
-                {
-                    let source = source.as_mut().unwrap();
-                    let table_id = table.id;
-                    fill_table_stream_graph_info(
-                        Some((source, source_id)),
-                        (&mut table, table_id),
-                        TableJobType::General,
-                        &mut fragment_graph,
-                    );
-                }
-                let table_col_index_mapping =
-                    ColIndexMapping::from_protobuf(&change.table_col_index_mapping.unwrap());
-                let stream_job = StreamingJob::Table(source, table, TableJobType::General);
-
-                ReplaceTableInfo {
-                    streaming_job: stream_job,
-                    fragment_graph,
-                    col_index_mapping: table_col_index_mapping,
-                }
-            };
-
-            DdlCommand::DropStreamingJob(StreamingJobId::Sink(sink_id), drop_mode, Some(info))
-        } else {
-            DdlCommand::DropStreamingJob(StreamingJobId::Sink(sink_id), drop_mode, None)
-        };
+        let command = DdlCommand::DropStreamingJob(
+            StreamingJobId::Sink(sink_id),
+            drop_mode,
+            request
+                .affected_table_change
+                .map(Self::extract_replace_table_info),
+        );
 
         let version = self.ddl_controller.run_command(command).await?;
 
@@ -638,32 +610,11 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<ReplaceTablePlanResponse>, Status> {
         let req = request.into_inner().get_plan().cloned()?;
 
-        let mut source = req.source;
-        let mut fragment_graph = req.fragment_graph.unwrap();
-        let mut table = req.table.unwrap();
-        if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
-            table.optional_associated_source_id
-        {
-            let source = source.as_mut().unwrap();
-            let table_id = table.id;
-            fill_table_stream_graph_info(
-                Some((source, source_id)),
-                (&mut table, table_id),
-                TableJobType::General,
-                &mut fragment_graph,
-            );
-        }
-        let table_col_index_mapping =
-            ColIndexMapping::from_protobuf(&req.table_col_index_mapping.unwrap());
-        let stream_job = StreamingJob::Table(source, table, TableJobType::General);
-
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::ReplaceTable(
-                stream_job,
-                fragment_graph,
-                table_col_index_mapping,
-            ))
+            .run_command(DdlCommand::ReplaceTable(Self::extract_replace_table_info(
+                req,
+            )))
             .await?;
 
         Ok(Response::new(ReplaceTablePlanResponse {

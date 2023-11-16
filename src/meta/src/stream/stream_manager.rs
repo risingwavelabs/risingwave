@@ -18,6 +18,7 @@ use std::sync::Arc;
 use futures::future::{join_all, try_join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{CreateType, Table};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
@@ -32,10 +33,13 @@ use uuid::Uuid;
 use super::{
     Locations, ParallelUnitReschedule, RescheduleOptions, ScaleController, ScaleControllerRef,
 };
-use crate::barrier::{BarrierScheduler, Command, ReplaceTableCommand};
+use crate::barrier::{BarrierScheduler, Command, ReplaceTablePlan};
 use crate::hummock::HummockManagerRef;
-use crate::manager::{ClusterManagerRef, DdlType, FragmentManagerRef, MetaSrvEnv};
-use crate::model::{ActorId, TableFragments};
+use crate::manager::{
+    ClusterManagerRef, DdlType, FragmentManagerRef, FragmentManagerRef, MetaSrvEnv, MetaSrvEnv,
+    StreamingJob,
+};
+use crate::model::{ActorId, FragmentId, TableFragments, TableFragments};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
@@ -178,8 +182,10 @@ pub struct ReplaceTableContext {
 }
 
 pub struct ReplaceTableJob {
-    pub context: ReplaceTableContext,
-    pub table_fragments: TableFragments,
+    pub streaming_job: StreamingJob,
+    pub context: Option<ReplaceTableContext>,
+    pub table_fragments: Option<TableFragments>,
+    pub col_index_mapping: ColIndexMapping,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -248,7 +254,7 @@ impl GlobalStreamManager {
         self: &Arc<Self>,
         table_fragments: TableFragments,
         ctx: CreateStreamingJobContext,
-        replace_table_job: Option<ReplaceTableJob>,
+        replace_table_detail: Option<(ReplaceTableContext, TableFragments)>,
     ) -> MetaResult<()> {
         let table_id = table_fragments.table_id();
         let (sender, mut receiver) = tokio::sync::mpsc::channel(10);
@@ -263,7 +269,7 @@ impl GlobalStreamManager {
                     &mut revert_funcs,
                     table_fragments,
                     ctx,
-                    replace_table_job,
+                    replace_table_detail,
                 )
                 .await;
             match res {
@@ -458,7 +464,7 @@ impl GlobalStreamManager {
             create_type,
             ddl_type,
         }: CreateStreamingJobContext,
-        replace_table_job: Option<ReplaceTableJob>,
+        replace_table_detail: Option<(ReplaceTableContext, TableFragments)>,
     ) -> MetaResult<()> {
         let mut replace_table_command = None;
         let mut replace_table_id = None;
@@ -487,11 +493,7 @@ impl GlobalStreamManager {
         self.build_actors(&table_fragments, &building_locations, &existing_locations)
             .await?;
 
-        if let Some(ReplaceTableJob {
-            context,
-            table_fragments,
-        }) = replace_table_job
-        {
+        if let Some((context, table_fragments)) = replace_table_detail {
             self.build_actors(
                 &table_fragments,
                 &context.building_locations,
@@ -511,7 +513,7 @@ impl GlobalStreamManager {
                 .pre_allocate_splits(&dummy_table_id)
                 .await?;
 
-            replace_table_command = Some(ReplaceTableCommand {
+            replace_table_command = Some(ReplaceTablePlan {
                 old_table_fragments: context.old_table_fragments,
                 new_table_fragments: table_fragments,
                 merge_updates: context.merge_updates,
@@ -531,7 +533,7 @@ impl GlobalStreamManager {
 
         let init_split_assignment = self.source_manager.pre_allocate_splits(&table_id).await?;
 
-        let command = if let Some(ReplaceTableCommand {
+        let command = if let Some(ReplaceTablePlan {
             old_table_fragments,
             new_table_fragments,
             merge_updates,
@@ -546,7 +548,7 @@ impl GlobalStreamManager {
                 init_split_assignment,
                 definition: definition.to_string(),
                 ddl_type,
-                replace_table: Some(ReplaceTableCommand {
+                replace_table: Some(ReplaceTablePlan {
                     old_table_fragments,
                     new_table_fragments,
                     merge_updates,
@@ -615,13 +617,13 @@ impl GlobalStreamManager {
 
         if let Err(err) = self
             .barrier_scheduler
-            .run_config_change_command_with_pause(Command::ReplaceTable {
+            .run_config_change_command_with_pause(Command::ReplaceTable(ReplaceTablePlan {
                 old_table_fragments,
                 new_table_fragments: table_fragments,
                 merge_updates,
                 dispatchers,
                 init_split_assignment,
-            })
+            }))
             .await
         {
             self.fragment_manager

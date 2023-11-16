@@ -23,6 +23,7 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::handler::create_table::generate_stream_graph_for_table;
+use crate::handler::util::SourceSchemaCompatExt;
 use crate::handler::HandlerArgs;
 
 pub async fn handle_drop_sink(
@@ -95,7 +96,7 @@ pub async fn handle_drop_sink(
 
         let source_schema = source_schema
             .clone()
-            .map(|source_schema| source_schema.into_source_schema_v2().0);
+            .map(|source_schema| source_schema.into_v2_with_warning());
 
         // Create handler args as if we're creating a new table with the altered definition.
         let handler_args = HandlerArgs::new(session.clone(), &definition, Arc::from(""))?;
@@ -111,7 +112,7 @@ pub async fn handle_drop_sink(
             panic!("unexpected statement type: {:?}", definition);
         };
 
-        let (graph, table, source) = generate_stream_graph_for_table(
+        let (graph, mut table, source) = generate_stream_graph_for_table(
             &session,
             table_name,
             &table_catalog,
@@ -124,6 +125,11 @@ pub async fn handle_drop_sink(
             append_only,
         )
         .await?;
+
+        // for now we only support one incoming sink
+        assert_eq!(table_catalog.incoming_sinks.len(), 1);
+
+        table.incoming_sinks = vec![];
 
         // Calculate the mapping from the original columns to the new columns.
         let col_index_mapping = ColIndexMapping::new(
