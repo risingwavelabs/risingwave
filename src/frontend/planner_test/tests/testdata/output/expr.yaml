@@ -393,7 +393,7 @@
 - sql: |
     select 1 < ALL('{2,3}');
   logical_plan: |-
-    LogicalProject { exprs: [All((1:Int32 < '{2,3}':Varchar::List(Int32))) as $expr1] }
+    LogicalProject { exprs: [All((1:Int32 < ARRAY[2, 3]:List(Int32))) as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
 - sql: |
     select 1 < SOME(null::integer[]);

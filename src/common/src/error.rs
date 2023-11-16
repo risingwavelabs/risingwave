@@ -156,6 +156,8 @@ pub enum ErrorCode {
     ),
     #[error("Task not found")]
     TaskNotFound,
+    #[error("Session not found")]
+    SessionNotFound,
     #[error("Item not found: {0}")]
     ItemNotFound(String),
     #[error("Invalid input syntax: {0}")]
