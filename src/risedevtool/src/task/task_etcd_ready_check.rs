@@ -44,7 +44,7 @@ impl Task for EtcdReadyCheckTask {
             response.health == "true"
         };
 
-        ctx.wait_http_with_cb(health_check_addr, online_cb)?;
+        ctx.wait_http_with_text_cb(health_check_addr, online_cb)?;
         ctx.pb
             .set_message(format!("api {}:{}", self.config.address, self.config.port));
         ctx.complete_spin();

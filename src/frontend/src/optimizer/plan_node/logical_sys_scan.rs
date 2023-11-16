@@ -12,107 +12,69 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet};
 use std::rc::Rc;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, TableDesc};
-use risingwave_common::error::Result;
-use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::catalog::{ColumnDesc, TableDesc};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{childless_record, Distill};
 use super::{
     generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
-    PredicatePushdown, StreamTableScan, ToBatch, ToStream,
+    PredicatePushdown, ToBatch, ToStream,
 };
-use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{
-    BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
-    PredicatePushdownContext, RewriteStreamContext, StreamCdcTableScan, ToStreamContext,
+    BatchSysSeqScan, ColumnPruningContext, LogicalFilter, LogicalValues, PredicatePushdownContext,
+    RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{Cardinality, Order};
-use crate::optimizer::rule::IndexSelectionRule;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
-/// `LogicalScan` returns contents of a table or other equivalent object
+/// `LogicalSysScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LogicalScan {
+pub struct LogicalSysScan {
     pub base: PlanBase<Logical>,
-    core: generic::Scan,
+    core: generic::SysScan,
 }
 
-impl From<generic::Scan> for LogicalScan {
-    fn from(core: generic::Scan) -> Self {
+impl From<generic::SysScan> for LogicalSysScan {
+    fn from(core: generic::SysScan) -> Self {
         let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
     }
 }
 
-impl From<generic::Scan> for PlanRef {
-    fn from(core: generic::Scan) -> Self {
-        LogicalScan::from(core).into()
+impl From<generic::SysScan> for PlanRef {
+    fn from(core: generic::SysScan) -> Self {
+        LogicalSysScan::from(core).into()
     }
 }
 
-impl LogicalScan {
-    /// Create a [`LogicalScan`] node. Used by planner.
+impl LogicalSysScan {
+    /// Create a [`LogicalSysScan`] node. Used by planner.
     pub fn create(
         table_name: String, // explain-only
-        scan_table_type: ScanTableType,
         table_desc: Rc<TableDesc>,
-        indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
-        for_system_time_as_of_proctime: bool,
         table_cardinality: Cardinality,
     ) -> Self {
-        generic::Scan::new(
+        generic::SysScan::new(
             table_name,
-            scan_table_type,
             (0..table_desc.columns.len()).collect(),
             table_desc,
-            indexes,
             ctx,
             Condition::true_cond(),
-            for_system_time_as_of_proctime,
             table_cardinality,
-        )
-        .into()
-    }
-
-    pub fn create_for_cdc(
-        table_name: String, // explain-only
-        cdc_table_desc: Rc<CdcTableDesc>,
-        ctx: OptimizerContextRef,
-    ) -> Self {
-        generic::Scan::new_for_cdc(
-            table_name,
-            (0..cdc_table_desc.columns.len()).collect(),
-            cdc_table_desc,
-            ctx,
         )
         .into()
     }
 
     pub fn table_name(&self) -> &str {
         &self.core.table_name
-    }
-
-    pub fn scan_table_type(&self) -> &ScanTableType {
-        &self.core.scan_table_type
-    }
-
-    pub fn is_cdc_table(&self) -> bool {
-        matches!(self.core.scan_table_type, ScanTableType::CdcTable)
-    }
-
-    pub fn for_system_time_as_of_proctime(&self) -> bool {
-        self.core.for_system_time_as_of_proctime
     }
 
     /// The cardinality of the table **without** applying the predicate.
@@ -125,114 +87,14 @@ impl LogicalScan {
         self.core.table_desc.as_ref()
     }
 
-    pub fn cdc_table_desc(&self) -> &CdcTableDesc {
-        self.core.cdc_table_desc.as_ref()
-    }
-
     /// Get the descs of the output columns.
     pub fn column_descs(&self) -> Vec<ColumnDesc> {
         self.core.column_descs()
     }
 
-    /// Get the ids of the output columns.
-    pub fn output_column_ids(&self) -> Vec<ColumnId> {
-        self.core.output_column_ids()
-    }
-
-    /// Get all indexes on this table
-    pub fn indexes(&self) -> &[Rc<IndexCatalog>] {
-        &self.core.indexes
-    }
-
     /// Get the logical scan's filter predicate
     pub fn predicate(&self) -> &Condition {
         &self.core.predicate
-    }
-
-    /// Return indices of fields the output is ordered by and
-    /// corresponding direction
-    pub fn get_out_column_index_order(&self) -> Order {
-        self.core.get_out_column_index_order()
-    }
-
-    pub fn distribution_key(&self) -> Option<Vec<usize>> {
-        self.core.distribution_key()
-    }
-
-    pub fn watermark_columns(&self) -> FixedBitSet {
-        self.core.watermark_columns()
-    }
-
-    /// Return indexes can satisfy the required order.
-    pub fn indexes_satisfy_order(&self, required_order: &Order) -> Vec<&Rc<IndexCatalog>> {
-        let output_col_map = self
-            .output_col_idx()
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(id, col)| (col, id))
-            .collect::<BTreeMap<_, _>>();
-        let unmatched_idx = output_col_map.len();
-        self.indexes()
-            .iter()
-            .filter(|idx| {
-                let s2p_mapping = idx.secondary_to_primary_mapping();
-                Order {
-                    column_orders: idx
-                        .index_table
-                        .pk()
-                        .iter()
-                        .map(|idx_item| {
-                            ColumnOrder::new(
-                                *output_col_map
-                                    .get(
-                                        s2p_mapping
-                                            .get(&idx_item.column_index)
-                                            .expect("should be in s2p mapping"),
-                                    )
-                                    .unwrap_or(&unmatched_idx),
-                                idx_item.order_type,
-                            )
-                        })
-                        .collect(),
-                }
-                .satisfies(required_order)
-            })
-            .collect()
-    }
-
-    /// If the index can cover the scan, transform it to the index scan.
-    pub fn to_index_scan_if_index_covered(&self, index: &Rc<IndexCatalog>) -> Option<LogicalScan> {
-        let p2s_mapping = index.primary_to_secondary_mapping();
-        if self
-            .required_col_idx()
-            .iter()
-            .all(|x| p2s_mapping.contains_key(x))
-        {
-            let index_scan = self.core.to_index_scan(
-                &index.name,
-                index.index_table.table_desc().into(),
-                p2s_mapping,
-                index.function_mapping(),
-            );
-            Some(index_scan.into())
-        } else {
-            None
-        }
-    }
-
-    /// used by optimizer (currently `top_n_on_index_rule`) to help reduce useless `chunk_size` at
-    /// executor
-    pub fn set_chunk_size(&mut self, chunk_size: u32) {
-        self.core.chunk_size = Some(chunk_size);
-    }
-
-    pub fn chunk_size(&self) -> Option<u32> {
-        self.core.chunk_size
-    }
-
-    pub fn primary_key(&self) -> &[ColumnOrder] {
-        self.core.primary_key()
     }
 
     /// a vec of `InputRef` corresponding to `output_col_idx`, which can represent a pulled project.
@@ -249,7 +111,7 @@ impl LogicalScan {
     }
 
     /// Undo predicate push down when predicate in scan is not supported.
-    pub fn predicate_pull_up(&self) -> (generic::Scan, Condition, Option<Vec<ExprImpl>>) {
+    pub fn predicate_pull_up(&self) -> (generic::SysScan, Condition, Option<Vec<ExprImpl>>) {
         let mut predicate = self.predicate().clone();
         if predicate.always_true() {
             return (self.core.clone(), Condition::true_cond(), None);
@@ -270,15 +132,12 @@ impl LogicalScan {
 
         predicate = predicate.rewrite_expr(&mut inverse_mapping);
 
-        let scan_without_predicate = generic::Scan::new(
+        let scan_without_predicate = generic::SysScan::new(
             self.table_name().to_string(),
-            self.scan_table_type().clone(),
             self.required_col_idx().to_vec(),
             self.core.table_desc.clone(),
-            self.indexes().to_vec(),
             self.ctx(),
             Condition::true_cond(),
-            self.for_system_time_as_of_proctime(),
             self.table_cardinality(),
         );
         let project_expr = if self.required_col_idx() != self.output_col_idx() {
@@ -290,32 +149,24 @@ impl LogicalScan {
     }
 
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
-        generic::Scan::new_inner(
+        generic::SysScan::new_inner(
             self.table_name().to_string(),
-            self.scan_table_type().clone(),
             self.output_col_idx().to_vec(),
             self.core.table_desc.clone(),
-            self.core.cdc_table_desc.clone(),
-            self.indexes().to_vec(),
             self.base.ctx().clone(),
             predicate,
-            self.for_system_time_as_of_proctime(),
             self.table_cardinality(),
         )
         .into()
     }
 
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
-        generic::Scan::new_inner(
+        generic::SysScan::new_inner(
             self.table_name().to_string(),
-            self.scan_table_type().clone(),
             output_col_idx,
             self.core.table_desc.clone(),
-            self.core.cdc_table_desc.clone(),
-            self.indexes().to_vec(),
             self.base.ctx().clone(),
             self.predicate().clone(),
-            self.for_system_time_as_of_proctime(),
             self.table_cardinality(),
         )
         .into()
@@ -330,9 +181,9 @@ impl LogicalScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! {LogicalScan}
+impl_plan_tree_node_for_leaf! {LogicalSysScan}
 
-impl Distill for LogicalScan {
+impl Distill for LogicalSysScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(5);
@@ -379,11 +230,11 @@ impl Distill for LogicalScan {
             vec.push(("cardinality", Pretty::display(&self.table_cardinality())));
         }
 
-        childless_record("LogicalScan", vec)
+        childless_record("LogicalSysScan", vec)
     }
 }
 
-impl ColPrunable for LogicalScan {
+impl ColPrunable for LogicalSysScan {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let output_col_idx: Vec<usize> = required_cols
             .iter()
@@ -397,7 +248,7 @@ impl ColPrunable for LogicalScan {
     }
 }
 
-impl ExprRewritable for LogicalScan {
+impl ExprRewritable for LogicalSysScan {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -413,17 +264,13 @@ impl ExprRewritable for LogicalScan {
     }
 }
 
-impl PredicatePushdown for LogicalScan {
+impl PredicatePushdown for LogicalSysScan {
+    // TODO(kwannoel): Unify this with logical_scan.
     fn predicate_pushdown(
         &self,
         mut predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        // skip pushdown if the table is cdc table
-        if self.is_cdc_table() {
-            return self.clone().into();
-        }
-
         // If the predicate contains `CorrelatedInputRef` or `now()`. We don't push down.
         // This case could come from the predicate push down before the subquery unnesting.
         struct HasCorrelated {}
@@ -461,11 +308,12 @@ impl PredicatePushdown for LogicalScan {
     }
 }
 
-impl LogicalScan {
+impl LogicalSysScan {
+    // TODO(kwannoel): Unify this with logical_scan.
     fn to_batch_inner_with_required(&self, required_order: &Order) -> Result<PlanRef> {
         if self.predicate().always_true() {
             required_order
-                .enforce_if_not_satisfies(BatchSeqScan::new(self.core.clone(), vec![]).into())
+                .enforce_if_not_satisfies(BatchSysSeqScan::new(self.core.clone(), vec![]).into())
         } else {
             let (scan_ranges, predicate) = self.predicate().clone().split_to_scan_ranges(
                 self.core.table_desc.clone(),
@@ -483,7 +331,7 @@ impl LogicalScan {
             } else {
                 let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
-                let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges).into();
+                let mut plan: PlanRef = BatchSysSeqScan::new(scan, scan_ranges).into();
                 if !predicate.always_true() {
                     plan = BatchFilter::new(generic::Filter::new(predicate, plan)).into();
                 }
@@ -497,121 +345,34 @@ impl LogicalScan {
             required_order.enforce_if_not_satisfies(plan)
         }
     }
-
-    // For every index, check if the order of the index satisfies the required_order
-    // If yes, use an index scan
-    fn use_index_scan_if_order_is_satisfied(
-        &self,
-        required_order: &Order,
-    ) -> Option<Result<PlanRef>> {
-        if required_order.column_orders.is_empty() {
-            return None;
-        }
-
-        let order_satisfied_index = self.indexes_satisfy_order(required_order);
-        for index in order_satisfied_index {
-            if let Some(index_scan) = self.to_index_scan_if_index_covered(index) {
-                return Some(index_scan.to_batch());
-            }
-        }
-
-        None
-    }
 }
 
-impl ToBatch for LogicalScan {
+impl ToBatch for LogicalSysScan {
     fn to_batch(&self) -> Result<PlanRef> {
         self.to_batch_with_order_required(&Order::any())
     }
 
     fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
         let new = self.clone_with_predicate(self.predicate().clone());
-
-        if !new.indexes().is_empty() {
-            let index_selection_rule = IndexSelectionRule::create();
-            if let Some(applied) = index_selection_rule.apply(new.clone().into()) {
-                if let Some(scan) = applied.as_logical_scan() {
-                    // covering index
-                    return required_order.enforce_if_not_satisfies(scan.to_batch()?);
-                } else if let Some(join) = applied.as_logical_join() {
-                    // index lookup join
-                    return required_order
-                        .enforce_if_not_satisfies(join.index_lookup_join_to_batch_lookup_join()?);
-                } else {
-                    unreachable!();
-                }
-            } else {
-                // Try to make use of index if it satisfies the required order
-                if let Some(plan_ref) = new.use_index_scan_if_order_is_satisfied(required_order) {
-                    return plan_ref;
-                }
-            }
-        }
         new.to_batch_inner_with_required(required_order)
     }
 }
 
-impl ToStream for LogicalScan {
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        if self.predicate().always_true() {
-            if self.is_cdc_table() {
-                Ok(StreamCdcTableScan::new(self.core.clone()).into())
-            } else {
-                Ok(StreamTableScan::new(self.core.clone()).into())
-            }
-        } else {
-            let (scan, predicate, project_expr) = self.predicate_pull_up();
-            let mut plan = LogicalFilter::create(scan.into(), predicate);
-            if let Some(exprs) = project_expr {
-                plan = LogicalProject::create(plan, exprs)
-            }
-            plan.to_stream(ctx)
-        }
+impl ToStream for LogicalSysScan {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        Err(RwError::from(ErrorCode::NotImplemented(
+            "streaming on system table is not allowed".to_string(),
+            None.into(),
+        )))
     }
 
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        if self.is_cdc_table() {
-            return Ok((
-                self.clone().into(),
-                ColIndexMapping::identity(self.schema().len()),
-            ));
-        }
-
-        match self.base.stream_key().is_none() {
-            true => {
-                let mut col_ids = HashSet::new();
-
-                for &idx in self.output_col_idx() {
-                    col_ids.insert(self.table_desc().columns[idx].column_id);
-                }
-                let col_need_to_add = self
-                    .table_desc()
-                    .pk
-                    .iter()
-                    .filter_map(|c| {
-                        if !col_ids.contains(&self.table_desc().columns[c.column_index].column_id) {
-                            Some(c.column_index)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect_vec();
-
-                let mut output_col_idx = self.output_col_idx().clone();
-                output_col_idx.extend(col_need_to_add);
-                let new_len = output_col_idx.len();
-                Ok((
-                    self.clone_with_output_indices(output_col_idx).into(),
-                    ColIndexMapping::identity_or_none(self.schema().len(), new_len),
-                ))
-            }
-            false => Ok((
-                self.clone().into(),
-                ColIndexMapping::identity(self.schema().len()),
-            )),
-        }
+        Err(RwError::from(ErrorCode::NotImplemented(
+            "streaming on system table is not allowed".to_string(),
+            None.into(),
+        )))
     }
 }
