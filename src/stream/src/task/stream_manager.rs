@@ -127,11 +127,6 @@ pub struct ExecutorParams {
     /// Basic information about the executor.
     pub info: ExecutorInfo,
 
-    // TODO(rc): The following three fields will be removed. Executor builders should use `info` instead.
-    pub schema: Schema,
-    pub pk_indices: PkIndices,
-    pub identity: String,
-
     /// Executor id, unique across all actors.
     pub executor_id: u64,
 
@@ -573,11 +568,6 @@ impl LocalStreamManagerCore {
                 pk_indices: pk_indices.clone(),
                 identity: identity.clone(),
             },
-
-            // TODO(rc): The following three fields will be removed. Executor builders should use `info` instead.
-            schema: schema.clone(),
-            pk_indices: pk_indices.clone(),
-            identity: identity.clone(),
 
             executor_id,
             operator_id,

@@ -212,6 +212,7 @@ async fn compaction_test(
         storage_memory_config.block_cache_capacity_mb * (1 << 20),
         storage_memory_config.meta_cache_capacity_mb * (1 << 20),
         0,
+        storage_memory_config.large_query_memory_usage_mb * (1 << 20),
         FileCache::none(),
         FileCache::none(),
         None,
@@ -462,7 +463,7 @@ impl NormalState {
                     retention_seconds: None,
                     table_id: self.table_id,
                     read_version_from_backup: false,
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                 },
             )
@@ -494,7 +495,7 @@ impl CheckState for NormalState {
                         retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        prefetch_options: PrefetchOptions::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
                     },
                 )

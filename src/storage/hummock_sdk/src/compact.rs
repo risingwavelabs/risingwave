@@ -153,21 +153,25 @@ pub fn estimate_memory_for_compact_task(
     // The common size of SstableMeta in tests is no more than 1m (mainly from xor filters). Even
     // though SstableMeta is used for a shorter period of time, it is safe to use 3m for the
     // calculation.
-    // TODO: Note that this algorithm may fail when SstableMeta is occupied by a large number of
-    // range tombstones
     const ESTIMATED_META_SIZE: u64 = 3 * 1048576;
 
     // The memory usage of the SstableStreamIterator comes from SstableInfo with some state
     // information (use ESTIMATED_META_SIZE to estimate it), the BlockStream being read (one block),
     // and tcp recv_buffer_size.
-    let max_input_stream_estimated_memory = ESTIMATED_META_SIZE + block_size + recv_buffer_size;
+    let max_input_stream_estimated_memory = block_size + recv_buffer_size;
 
     // input
     for level in &task.input_ssts {
         if level.level_type() == LevelType::Nonoverlapping {
-            result += max_input_stream_estimated_memory;
+            let mut meta_size = 0;
+            for sst in &level.table_infos {
+                meta_size = std::cmp::max(meta_size, sst.file_size - sst.meta_offset);
+            }
+            result += max_input_stream_estimated_memory + meta_size;
         } else {
-            result += max_input_stream_estimated_memory * level.table_infos.len() as u64;
+            for sst in &level.table_infos {
+                result += max_input_stream_estimated_memory + sst.file_size - sst.meta_offset;
+            }
         }
     }
 

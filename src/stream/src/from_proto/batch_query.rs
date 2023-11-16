@@ -38,7 +38,9 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
     ) -> StreamResult<BoxedExecutor> {
         if node.table_desc.is_none() {
             // used in sharing cdc source backfill as a dummy batch plan node
-            return Ok(Box::new(DummyExecutor::new()));
+            let mut info = params.info;
+            info.identity = "DummyBatchQueryExecutor".to_string();
+            return Ok(Box::new(DummyExecutor::new(info)));
         }
 
         let table_desc: &StorageTableDesc = node
@@ -113,17 +115,10 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             prefix_hint_len,
             versioned,
         );
+        assert_eq!(table.schema().data_types(), params.info.schema.data_types());
 
-        let schema = table.schema().clone();
-        let executor = BatchQueryExecutor::new(
-            table,
-            stream.config.developer.chunk_size,
-            ExecutorInfo {
-                schema,
-                pk_indices: params.pk_indices,
-                identity: "BatchQuery".to_owned(),
-            },
-        );
+        let executor =
+            BatchQueryExecutor::new(table, stream.config.developer.chunk_size, params.info);
 
         Ok(executor.boxed())
     }

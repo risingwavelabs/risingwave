@@ -351,8 +351,13 @@ impl LocalStateStore for LocalHummockStorage {
                 self.table_id.table_id()
             );
 
+            let table_id_label = self.table_id.table_id().to_string();
             if self.spill_offset < MAX_SPILL_TIMES {
                 self.flush(vec![]).await?;
+                self.stats
+                    .mem_table_spill_counts
+                    .with_label_values(&[table_id_label.as_str()])
+                    .inc();
             } else {
                 tracing::warn!("No mem table spill occurs, the gap epoch exceeds available range.");
             }

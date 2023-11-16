@@ -43,8 +43,8 @@ impl ExecutorBuilder for NowExecutorBuilder {
             StateTable::from_table_catalog(node.get_state_table()?, store, None).await;
 
         Ok(Box::new(NowExecutor::new(
+            params.info,
             barrier_receiver,
-            params.executor_id,
             state_table,
         )))
     }

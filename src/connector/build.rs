@@ -26,4 +26,10 @@ fn main() {
         .out_dir("./src/parser/protobuf")
         .compile_protos(&protos, &Vec::<String>::new())
         .unwrap();
+
+    let proto_include_path = protobuf_src::include();
+    println!(
+        "cargo:rustc-env=PROTO_INCLUDE={}",
+        proto_include_path.to_str().unwrap()
+    );
 }

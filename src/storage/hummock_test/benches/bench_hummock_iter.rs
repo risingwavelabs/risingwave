@@ -109,7 +109,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                     epoch,
                     ReadOptions {
                         ignore_range_tombstone: true,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        prefetch_options: PrefetchOptions::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
                         ..Default::default()
                     },

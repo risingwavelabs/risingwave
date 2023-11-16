@@ -282,7 +282,7 @@ pub mod agg_executor {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::hash::SerializedKey;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_expr::aggregate::{AggCall, AggKind};
     use risingwave_pb::stream_plan::PbAggNodeVersion;
     use risingwave_storage::StateStore;
@@ -341,30 +341,34 @@ pub mod agg_executor {
                 let mut column_descs = Vec::new();
                 let mut order_types = Vec::new();
                 let mut upstream_columns = Vec::new();
+                let mut order_columns = Vec::new();
 
                 let mut next_column_id = 0;
-                let mut add_column = |upstream_idx: usize, data_type: DataType, order_type: OrderType| {
+                let mut add_column = |upstream_idx: usize, data_type: DataType, order_type: Option<OrderType>| {
                     upstream_columns.push(upstream_idx);
                     column_descs.push(ColumnDesc::unnamed(
                         ColumnId::new(next_column_id),
                         data_type,
                     ));
+                    if let Some(order_type) = order_type {
+                        order_columns.push(ColumnOrder::new(upstream_idx as _, order_type));
+                        order_types.push(order_type);
+                    }
                     next_column_id += 1;
-                    order_types.push(order_type);
                 };
 
                 for idx in group_key_indices {
-                    add_column(*idx, input_fields[*idx].data_type(), OrderType::ascending());
+                    add_column(*idx, input_fields[*idx].data_type(), None);
                 }
 
                 add_column(agg_call.args.val_indices()[0], agg_call.args.arg_types()[0].clone(), if agg_call.kind == AggKind::Max {
-                    OrderType::descending()
+                    Some(OrderType::descending())
                 } else {
-                    OrderType::ascending()
+                    Some(OrderType::ascending())
                 });
 
                 for idx in pk_indices {
-                    add_column(*idx, input_fields[*idx].data_type(), OrderType::ascending());
+                    add_column(*idx, input_fields[*idx].data_type(), Some(OrderType::ascending()));
                 }
 
                 let state_table = StateTable::new_without_distribution(
@@ -375,7 +379,7 @@ pub mod agg_executor {
                     (0..order_types.len()).collect(),
                 ).await;
 
-                AggStateStorage::MaterializedInput { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns, None) }
+                AggStateStorage::MaterializedInput { table: state_table, mapping: StateTableColumnMapping::new(upstream_columns, None), order_columns }
             }
             AggKind::Min /* append only */
             | AggKind::Max /* append only */

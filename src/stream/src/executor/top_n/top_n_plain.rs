@@ -162,7 +162,7 @@ where
                 }
             }
         }
-        generate_output(res_rows, res_ops, self.schema())
+        generate_output(res_rows, res_ops, &self.info().schema)
     }
 
     async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {

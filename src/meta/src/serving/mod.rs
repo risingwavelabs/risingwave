@@ -43,7 +43,7 @@ impl ServingVnodeMapping {
 
     /// Upsert mapping for given fragments according to the latest `workers`.
     /// Returns (successful updates, failed updates).
-    fn upsert(
+    pub fn upsert(
         &self,
         streaming_parallelisms: HashMap<FragmentId, usize>,
         workers: &[WorkerNode],
@@ -79,7 +79,7 @@ impl ServingVnodeMapping {
     }
 }
 
-fn to_fragment_parallel_unit_mapping(
+pub(crate) fn to_fragment_parallel_unit_mapping(
     mappings: &HashMap<FragmentId, ParallelUnitMapping>,
 ) -> Vec<FragmentParallelUnitMapping> {
     mappings
@@ -91,7 +91,7 @@ fn to_fragment_parallel_unit_mapping(
         .collect()
 }
 
-fn to_deleted_fragment_parallel_unit_mapping(
+pub(crate) fn to_deleted_fragment_parallel_unit_mapping(
     fragment_ids: &[FragmentId],
 ) -> Vec<FragmentParallelUnitMapping> {
     fragment_ids

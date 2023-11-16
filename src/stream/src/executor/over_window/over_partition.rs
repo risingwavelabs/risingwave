@@ -451,7 +451,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             .iter_with_prefix(
                 self.this_partition_key,
                 sub_range,
-                PrefetchOptions::new_for_exhaust_iter(),
+                PrefetchOptions::default(),
             )
             .await?;
 
@@ -565,7 +565,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
             .iter_with_prefix(
                 self.this_partition_key,
                 &table_sub_range,
-                PrefetchOptions::new_for_exhaust_iter(),
+                PrefetchOptions::default(),
             )
             .await?;
 
@@ -639,7 +639,7 @@ impl<'a, S: StateStore> OverPartition<'a, S> {
                 .iter_with_prefix(
                     self.this_partition_key,
                     &sub_range,
-                    PrefetchOptions::new_for_exhaust_iter(),
+                    PrefetchOptions::default(),
                 )
                 .await?;
 

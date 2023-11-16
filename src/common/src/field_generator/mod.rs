@@ -26,7 +26,7 @@ pub use timestamp::*;
 pub use varchar::*;
 
 use crate::array::{ListValue, StructValue};
-use crate::types::{DataType, Datum, ScalarImpl};
+use crate::types::{DataType, Datum, ScalarImpl, Timestamp};
 
 pub const DEFAULT_MIN: i16 = i16::MIN;
 pub const DEFAULT_MAX: i16 = i16::MAX;
@@ -95,7 +95,7 @@ pub enum FieldGeneratorImpl {
     VarcharRandomVariableLength(VarcharRandomVariableLengthField),
     VarcharRandomFixedLength(VarcharRandomFixedLengthField),
     VarcharConstant,
-    Timestamp(TimestampField),
+    Timestamp(ChronoField<Timestamp>),
     Struct(Vec<(String, FieldGeneratorImpl)>),
     List(Box<FieldGeneratorImpl>, usize),
 }
@@ -181,7 +181,7 @@ impl FieldGeneratorImpl {
         max_past_mode: Option<String>,
         seed: u64,
     ) -> Result<Self> {
-        Ok(FieldGeneratorImpl::Timestamp(TimestampField::new(
+        Ok(FieldGeneratorImpl::Timestamp(ChronoField::new(
             base,
             max_past,
             max_past_mode,
