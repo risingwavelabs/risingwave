@@ -50,6 +50,8 @@ pub struct OptimizerContext {
     session_timezone: RefCell<SessionTimezone>,
     /// Store expr display id.
     next_expr_display_id: RefCell<usize>,
+    /// Total number of optimization rules have been applied.
+    total_rule_applied: RefCell<usize>,
 }
 
 // Still not sure if we need to introduce "on_optimization_finish" or other common callback methods,
@@ -87,6 +89,7 @@ impl OptimizerContext {
             with_options: handler_args.with_options,
             session_timezone,
             next_expr_display_id: RefCell::new(RESERVED_ID_NUM.into()),
+            total_rule_applied: RefCell::new(0),
         }
     }
 
@@ -106,6 +109,7 @@ impl OptimizerContext {
             with_options: Default::default(),
             session_timezone: RefCell::new(SessionTimezone::new("UTC".into())),
             next_expr_display_id: RefCell::new(0),
+            total_rule_applied: RefCell::new(0),
         }
         .into()
     }
@@ -139,6 +143,14 @@ impl OptimizerContext {
     pub fn next_correlated_id(&self) -> CorrelatedId {
         *self.next_correlated_id.borrow_mut() += 1;
         *self.next_correlated_id.borrow()
+    }
+
+    pub fn add_rule_applied(&self, num: usize) {
+        *self.total_rule_applied.borrow_mut() += num;
+    }
+
+    pub fn total_rule_applied(&self) -> usize {
+        *self.total_rule_applied.borrow()
     }
 
     pub fn is_explain_verbose(&self) -> bool {
