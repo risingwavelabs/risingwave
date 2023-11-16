@@ -67,6 +67,7 @@ select * from mv;
 3  2
 3  3
 
+# seems failing
 query II rowsort
 select * from mv_with_expr_in_window;
 ----
