@@ -24,8 +24,7 @@ use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::session::SessionImpl;
-use crate::utils::OverwriteOptions;
-use crate::WithOptions;
+use crate::utils::{OverwriteOptions, WithOptions};
 
 const RESERVED_ID_NUM: u16 = 10000;
 

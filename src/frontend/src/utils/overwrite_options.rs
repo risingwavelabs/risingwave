@@ -17,10 +17,13 @@ use crate::handler::HandlerArgs;
 #[derive(Debug, Clone, Default)]
 pub struct OverwriteOptions {
     pub streaming_rate_limit: Option<u32>,
+    // ttl has been deprecated
+    pub ttl: Option<u32>,
 }
 
 impl OverwriteOptions {
     const STREAMING_RATE_LIMIT_KEY: &'static str = "streaming_rate_limit";
+    const TTL_KEY: &'static str = "ttl";
 
     pub fn new(args: &mut HandlerArgs) -> Self {
         let streaming_rate_limit = {
@@ -29,14 +32,21 @@ impl OverwriteOptions {
                 .inner_mut()
                 .remove(Self::STREAMING_RATE_LIMIT_KEY)
             {
-                // TODO: validate the value
+                // FIXME(tabVersion): validate the value
                 Some(x.parse::<u32>().unwrap())
             } else {
                 args.session.config().get_streaming_rate_limit()
             }
         };
+        let ttl = args
+            .with_options
+            .inner_mut()
+            .remove(Self::TTL_KEY)
+            // FIXME(tabVersion): validate the value
+            .map(|x| x.parse::<u32>().unwrap());
         Self {
             streaming_rate_limit,
+            ttl,
         }
     }
 }
