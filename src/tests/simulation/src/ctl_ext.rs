@@ -24,6 +24,7 @@ use clap::Parser;
 use itertools::Itertools;
 use rand::seq::{IteratorRandom, SliceRandom};
 use rand::{thread_rng, Rng};
+use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
@@ -422,6 +423,24 @@ impl Cluster {
             })
             .await??;
 
+        Ok(())
+    }
+
+    /// Throttle a Mv in the cluster
+    #[cfg_or_panic(madsim)]
+    pub async fn throttle_mv(&mut self, table_id: TableId, rate_limit: Option<u32>) -> Result<()> {
+        self.ctl
+            .spawn(async move {
+                let opts = risingwave_ctl::CliOpts::parse_from([
+                    "ctl",
+                    "throttle",
+                    "mv",
+                    table_id.table_id.to_string(),
+                    rate_limit.map(|r| r.to_string()).unwrap_or_default(),
+                ]);
+                risingwave_ctl::start(opts).await
+            })
+            .await??;
         Ok(())
     }
 

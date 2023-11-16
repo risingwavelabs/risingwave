@@ -65,11 +65,7 @@ impl FlowControlExecutor {
         };
         let mut rate_limiter = self.rate_limit.map(get_rate_limiter);
         if self.rate_limit.is_some() {
-            tracing::info!(
-                "actor {:?} starts with rate limit {:?}",
-                self.actor_ctx.id,
-                self.rate_limit
-            );
+            tracing::info!(id = self.actor_ctx.id, rate_limit = ?self.rate_limit, "actor starts with rate limit",);
         }
 
         #[for_await]
@@ -100,9 +96,9 @@ impl FlowControlExecutor {
                                 self.rate_limit = *limit;
                                 rate_limiter = self.rate_limit.map(get_rate_limiter);
                                 tracing::info!(
-                                    "actor {:?} rate limit changed to {:?}",
-                                    self.actor_ctx.id,
-                                    self.rate_limit
+                                    id = self.actor_ctx.id,
+                                    new_rate_limit = ?self.rate_limit,
+                                    "actor rate limit changed",
                                 );
                             }
                         }
