@@ -34,7 +34,6 @@ use crate::utils::{ColIndexMappingRewriteExt, Condition};
 pub enum ScanTableType {
     #[default]
     General,
-    SysTable,
     CdcTable,
 }
 
@@ -422,10 +421,6 @@ impl Scan {
         } else {
             &self.table_desc.columns
         }
-    }
-
-    pub fn is_sys_table(&self) -> bool {
-        matches!(self.scan_table_type, ScanTableType::SysTable)
     }
 
     pub fn is_cdc_table(&self) -> bool {

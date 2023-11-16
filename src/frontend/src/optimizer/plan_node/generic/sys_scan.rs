@@ -12,19 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use educe::Educe;
-
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::GenericPlanNode;
-use crate::catalog::{ColumnId};
-use crate::expr::{ExprRewriter};
+use crate::catalog::ColumnId;
+use crate::expr::ExprRewriter;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
