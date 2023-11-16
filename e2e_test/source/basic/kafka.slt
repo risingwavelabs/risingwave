@@ -372,6 +372,16 @@ create table s28 (id bytea, PRIMARY KEY(_rw_key)) with (
   scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE BYTES
 
+# throttle option
+statement ok
+create table s29 (id bytea, PRIMARY KEY(_rw_key)) with (
+  connector = 'kafka',
+  topic = 'kafka_source_format_bytes',
+  properties.bootstrap.server = 'message_queue:29092',
+  scan.startup.mode = 'earliest',
+  streaming_rate_limit = 200
+) FORMAT PLAIN ENCODE BYTES
+
 statement ok
 CREATE TABLE mongo_customers (
 	_id BIGINT PRIMARY KEY,
@@ -841,6 +851,9 @@ drop table s27
 
 statement ok
 drop table s28
+
+statement ok
+drop table s29
 
 statement ok
 DROP TABLE mongo_customers;
