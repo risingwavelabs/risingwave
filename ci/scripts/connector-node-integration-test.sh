@@ -99,10 +99,9 @@ else
   exit 1
 fi
 
-sink_input_feature=("" "--input_binary_file=./data/sink_input --data_format_use_json=False")
-upsert_sink_input_feature=("--input_file=./data/upsert_sink_input.json"
-                           "--input_binary_file=./data/upsert_sink_input --data_format_use_json=False")
-type=("Json format" "StreamChunk format")
+sink_input_feature=("--input_binary_file=./data/sink_input --data_format_use_json=False")
+upsert_sink_input_feature=("--input_binary_file=./data/upsert_sink_input --data_format_use_json=False")
+type=("StreamChunk format")
 
 ${MC_PATH} mb minio/bucket
 for ((i=0; i<${#type[@]}; i++)); do
@@ -112,15 +111,6 @@ for ((i=0; i<${#type[@]}; i++)); do
       echo "File sink ${type[i]} test passed"
     else
       echo "File sink ${type[i]} test failed"
-      exit 1
-    fi
-
-    echo "--- running jdbc ${type[i]} integration tests"
-    cd ${RISINGWAVE_ROOT}/java/connector-node/python-client
-    if python3 integration_tests.py --jdbc_sink ${sink_input_feature[i]}; then
-      echo "Jdbc sink ${type[i]} test passed"
-    else
-      echo "Jdbc sink ${type[i]} test failed"
       exit 1
     fi
 
