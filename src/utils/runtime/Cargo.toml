@@ -21,9 +21,6 @@ console-subscriber = "0.2.0"
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hostname = "0.3"
-opentelemetry-otlp = { workspace = true }
-opentelemetry-semantic-conventions = { workspace = true }
-opentelemetry_sdk = { workspace = true }
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 pprof = { version = "0.13", features = ["flamegraph"] }
 risingwave_common = { workspace = true }
@@ -45,6 +42,9 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "parking_lot", "std",
 
 [target.'cfg(not(madsim))'.dependencies]
 opentelemetry = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+opentelemetry-semantic-conventions = { workspace = true }
+opentelemetry_sdk = { workspace = true }
 workspace-hack = { path = "../../workspace-hack" }
 
 [lints]
