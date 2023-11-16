@@ -17,14 +17,14 @@ package com.risingwave.java.binding;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.risingwave.proto.ConnectorServiceProto;
 
-public class SinkWriterRequest implements AutoCloseable {
+public class JniSinkWriterStreamRequest implements AutoCloseable {
     private final ConnectorServiceProto.SinkWriterStreamRequest pbRequest;
     private final StreamChunk chunk;
     private final long epoch;
     private final long batchId;
     private final boolean isPb;
 
-    SinkWriterRequest(ConnectorServiceProto.SinkWriterStreamRequest pbRequest) {
+    JniSinkWriterStreamRequest(ConnectorServiceProto.SinkWriterStreamRequest pbRequest) {
         this.pbRequest = pbRequest;
         this.chunk = null;
         this.epoch = 0;
@@ -32,7 +32,7 @@ public class SinkWriterRequest implements AutoCloseable {
         this.isPb = true;
     }
 
-    SinkWriterRequest(StreamChunk chunk, long epoch, long batchId) {
+    JniSinkWriterStreamRequest(StreamChunk chunk, long epoch, long batchId) {
         this.pbRequest = null;
         this.chunk = chunk;
         this.epoch = epoch;
@@ -40,17 +40,19 @@ public class SinkWriterRequest implements AutoCloseable {
         this.isPb = false;
     }
 
-    public static SinkWriterRequest fromSerializedPayload(byte[] payload) {
+    public static JniSinkWriterStreamRequest fromSerializedPayload(byte[] payload) {
         try {
-            return new SinkWriterRequest(
+            return new JniSinkWriterStreamRequest(
                     ConnectorServiceProto.SinkWriterStreamRequest.parseFrom(payload));
         } catch (InvalidProtocolBufferException e) {
             throw new RuntimeException(e);
         }
     }
 
-    public static SinkWriterRequest fromStreamChunk(long pointer, long epoch, long batchId) {
-        return new SinkWriterRequest(StreamChunk.fromOwnedPointer(pointer), epoch, batchId);
+    public static JniSinkWriterStreamRequest fromStreamChunk(
+            long pointer, long epoch, long batchId) {
+        return new JniSinkWriterStreamRequest(
+                StreamChunk.fromOwnedPointer(pointer), epoch, batchId);
     }
 
     public ConnectorServiceProto.SinkWriterStreamRequest asPbRequest() {

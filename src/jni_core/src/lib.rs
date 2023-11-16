@@ -925,8 +925,8 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_recvSinkWriterRe
                     let bytes = env.byte_array_from_slice(&Message::encode_to_vec(&request))?;
                     call_static_method!(
                         env,
-                        {com.risingwave.java.binding.SinkWriterRequest},
-                        {com.risingwave.java.binding.SinkWriterRequest fromSerializedPayload(byte[] payload)},
+                        {com.risingwave.java.binding.JniSinkWriterStreamRequest},
+                        {com.risingwave.java.binding.JniSinkWriterStreamRequest fromSerializedPayload(byte[] payload)},
                         &JObject::from(bytes)
                     )?
                 }
@@ -938,8 +938,8 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_recvSinkWriterRe
                     let pointer = Box::into_raw(Box::new(chunk));
                     call_static_method!(
                         env,
-                        {com.risingwave.java.binding.SinkWriterRequest},
-                        {com.risingwave.java.binding.SinkWriterRequest fromStreamChunk(long pointer, long epoch, long batchId)},
+                        {com.risingwave.java.binding.JniSinkWriterStreamRequest},
+                        {com.risingwave.java.binding.JniSinkWriterStreamRequest fromStreamChunk(long pointer, long epoch, long batchId)},
                         pointer as u64, epoch, batch_id
                     )
                     .inspect_err(|_| unsafe {

@@ -15,7 +15,7 @@
 package com.risingwave.connector;
 
 import com.risingwave.java.binding.Binding;
-import com.risingwave.java.binding.SinkWriterRequest;
+import com.risingwave.java.binding.JniSinkWriterStreamRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,7 +32,7 @@ public class JniSinkWriterHandler {
                 new SinkWriterStreamObserver(responseObserver);
         try {
             while (true) {
-                try (SinkWriterRequest request =
+                try (JniSinkWriterStreamRequest request =
                         Binding.recvSinkWriterRequestFromChannel(requestRxPtr)) {
                     if (request == null) {
                         break;

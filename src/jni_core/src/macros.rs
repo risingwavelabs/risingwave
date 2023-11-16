@@ -499,7 +499,7 @@ macro_rules! for_all_plain_native_methods {
 
                 public static native boolean sendCdcSourceMsgToChannel(long channelPtr, byte[] msg);
 
-                public static native com.risingwave.java.binding.SinkWriterRequest
+                public static native com.risingwave.java.binding.JniSinkWriterStreamRequest
                     recvSinkWriterRequestFromChannel(long channelPtr);
 
                 public static native boolean sendSinkWriterResponseToChannel(long channelPtr, byte[] msg);
@@ -907,7 +907,7 @@ mod tests {
                 iteratorGetByteaValue                    (JI)[B,
                 iteratorGetArrayValue                    (JILjava/lang/Class;)Ljava/lang/Object;,
                 sendCdcSourceMsgToChannel                (J[B)Z,
-                recvSinkWriterRequestFromChannel         (J)Lcom/risingwave/java/binding/SinkWriterRequest;,
+                recvSinkWriterRequestFromChannel         (J)Lcom/risingwave/java/binding/JniSinkWriterStreamRequest;,
                 sendSinkWriterResponseToChannel          (J[B)Z,
                 sendSinkWriterErrorToChannel             (JLjava/lang/String;)Z,
                 recvSinkCoordinatorRequestFromChannel    (J)[B,
