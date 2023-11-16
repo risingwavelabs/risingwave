@@ -256,23 +256,19 @@ impl SysScan {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         table_name: String,
-        scan_table_type: SysScanTableType,
         output_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
-        for_system_time_as_of_proctime: bool,
         table_cardinality: Cardinality,
     ) -> Self {
         Self::new_inner(
             table_name,
-            scan_table_type,
             output_col_idx,
             table_desc,
             Rc::new(CdcTableDesc::default()),
             ctx,
             predicate,
-            for_system_time_as_of_proctime,
             table_cardinality,
         )
     }
@@ -280,13 +276,11 @@ impl SysScan {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_inner(
         table_name: String,
-        scan_table_type: SysScanTableType,
         output_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
         cdc_table_desc: Rc<CdcTableDesc>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
-        for_system_time_as_of_proctime: bool,
         table_cardinality: Cardinality,
     ) -> Self {
         // here we have 3 concepts
@@ -307,7 +301,7 @@ impl SysScan {
 
         Self {
             table_name,
-            scan_table_type,
+            scan_table_type: SysScanTableType::SysTable,
             required_col_idx,
             output_col_idx,
             table_desc,
@@ -315,7 +309,7 @@ impl SysScan {
             indexes: vec![],
             predicate,
             chunk_size: None,
-            for_system_time_as_of_proctime,
+            for_system_time_as_of_proctime: false,
             ctx,
             table_cardinality,
         }

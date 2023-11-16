@@ -85,14 +85,6 @@ impl LogicalSysScan {
         &self.core.table_name
     }
 
-    pub fn scan_table_type(&self) -> &SysScanTableType {
-        &self.core.scan_table_type
-    }
-
-    pub fn for_system_time_as_of_proctime(&self) -> bool {
-        self.core.for_system_time_as_of_proctime
-    }
-
     /// The cardinality of the table **without** applying the predicate.
     pub fn table_cardinality(&self) -> Cardinality {
         self.core.table_cardinality
@@ -108,42 +100,9 @@ impl LogicalSysScan {
         self.core.column_descs()
     }
 
-    /// Get the ids of the output columns.
-    pub fn output_column_ids(&self) -> Vec<ColumnId> {
-        self.core.output_column_ids()
-    }
-
     /// Get the logical scan's filter predicate
     pub fn predicate(&self) -> &Condition {
         &self.core.predicate
-    }
-
-    /// Return indices of fields the output is ordered by and
-    /// corresponding direction
-    pub fn get_out_column_index_order(&self) -> Order {
-        self.core.get_out_column_index_order()
-    }
-
-    pub fn distribution_key(&self) -> Option<Vec<usize>> {
-        self.core.distribution_key()
-    }
-
-    pub fn watermark_columns(&self) -> FixedBitSet {
-        self.core.watermark_columns()
-    }
-
-    /// used by optimizer (currently `top_n_on_index_rule`) to help reduce useless `chunk_size` at
-    /// executor
-    pub fn set_chunk_size(&mut self, chunk_size: u32) {
-        self.core.chunk_size = Some(chunk_size);
-    }
-
-    pub fn chunk_size(&self) -> Option<u32> {
-        self.core.chunk_size
-    }
-
-    pub fn primary_key(&self) -> &[ColumnOrder] {
-        self.core.primary_key()
     }
 
     /// a vec of `InputRef` corresponding to `output_col_idx`, which can represent a pulled project.
@@ -183,12 +142,10 @@ impl LogicalSysScan {
 
         let scan_without_predicate = generic::SysScan::new(
             self.table_name().to_string(),
-            self.scan_table_type().clone(),
             self.required_col_idx().to_vec(),
             self.core.table_desc.clone(),
             self.ctx(),
             Condition::true_cond(),
-            self.for_system_time_as_of_proctime(),
             self.table_cardinality(),
         );
         let project_expr = if self.required_col_idx() != self.output_col_idx() {
@@ -202,13 +159,11 @@ impl LogicalSysScan {
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
         generic::SysScan::new_inner(
             self.table_name().to_string(),
-            self.scan_table_type().clone(),
             self.output_col_idx().to_vec(),
             self.core.table_desc.clone(),
             self.core.cdc_table_desc.clone(),
             self.base.ctx().clone(),
             predicate,
-            self.for_system_time_as_of_proctime(),
             self.table_cardinality(),
         )
         .into()
@@ -217,13 +172,11 @@ impl LogicalSysScan {
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
         generic::SysScan::new_inner(
             self.table_name().to_string(),
-            self.scan_table_type().clone(),
             output_col_idx,
             self.core.table_desc.clone(),
             self.core.cdc_table_desc.clone(),
             self.base.ctx().clone(),
             self.predicate().clone(),
-            self.for_system_time_as_of_proctime(),
             self.table_cardinality(),
         )
         .into()
