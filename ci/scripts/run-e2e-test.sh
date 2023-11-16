@@ -71,8 +71,6 @@ cluster_stop
 echo "--- e2e, $mode, batch"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cluster_start
-python3 ./e2e_test/ddl/alter_function_set_schema.py &
-sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/background_ddl/basic.slt' --junit "batch-ddl-${profile}"
 sqllogictest -p 4566 -d dev './e2e_test/visibility_mode/*.slt' --junit "batch-${profile}"
@@ -88,6 +86,7 @@ sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/udf/udf.slt'
 pkill python3
 
+sqllogictest -p 4566 -d dev './e2e_test/udf/alter_function.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/graceful_shutdown_python.slt'
 
 echo "--- e2e, $mode, java udf"

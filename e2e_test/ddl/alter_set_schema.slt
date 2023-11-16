@@ -89,36 +89,6 @@ WHERE nspname = 'test_schema';
 test_conn test_schema
 
 statement ok
-CREATE FUNCTION test_func() RETURNS INT LANGUAGE python as echo_42 using link 'http://localhost:8816';
-
-statement ok
-CREATE FUNCTION test_func(INT) RETURNS INT LANGUAGE python as echo using link 'http://localhost:8816';
-
-statement error
-ALTER FUNCTION test_func SET SCHEMA test_schema;
-
-statement ok
-ALTER FUNCTION test_func() SET SCHEMA test_schema;
-
-statement ok
-ALTER FUNCTION test_func(INT) SET SCHEMA test_schema;
-
-query TT
-SELECT name AS funcname, nspname AS schemaname
-FROM rw_functions
-JOIN pg_namespace ON pg_namespace.oid = rw_functions.schema_id
-WHERE nspname = 'test_schema';
-----
-test_func test_schema
-test_func test_schema
-
-statement ok
-DROP FUNCTION test_schema.test_func();
-
-statement ok
-DROP FUNCTION test_schema.test_func(INT);
-
-statement ok
 DROP CONNECTION test_schema.test_conn;
 
 statement ok
