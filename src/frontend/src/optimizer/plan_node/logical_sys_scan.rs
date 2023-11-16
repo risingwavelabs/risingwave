@@ -12,15 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use std::rc::Rc;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{childless_record, Distill};
@@ -28,16 +25,13 @@ use super::{
     generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
     PredicatePushdown, ToBatch, ToStream,
 };
-use crate::catalog::{ColumnId};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::generic::SysScanTableType;
 use crate::optimizer::plan_node::{
     BatchSysSeqScan, ColumnPruningContext, LogicalFilter, LogicalValues, PredicatePushdownContext,
     RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{Cardinality, Order};
-
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalSysScan` returns contents of a table or other equivalent object
@@ -70,12 +64,10 @@ impl LogicalSysScan {
     ) -> Self {
         generic::SysScan::new(
             table_name,
-            SysScanTableType::SysTable,
             (0..table_desc.columns.len()).collect(),
             table_desc,
             ctx,
             Condition::true_cond(),
-            false,
             table_cardinality,
         )
         .into()

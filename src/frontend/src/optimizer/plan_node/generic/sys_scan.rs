@@ -78,10 +78,6 @@ impl SysScan {
     ///
     /// Return `None` if the table's distribution key are not all in the `output_col_idx`.
     pub fn distribution_key(&self) -> Option<Vec<usize>> {
-        if self.is_cdc_table() {
-            return None;
-        }
-
         let tb_idx_to_op_idx = self
             .output_col_idx
             .iter()
@@ -242,12 +238,10 @@ impl SysScan {
 
         Self::new(
             index_name.to_string(),
-            SysScanTableType::default(),
             new_output_col_idx,
             index_table_desc,
             self.ctx.clone(),
             new_predicate,
-            self.for_system_time_as_of_proctime,
             self.table_cardinality,
         )
     }
@@ -391,10 +385,6 @@ impl SysScan {
         } else {
             &self.table_desc.columns
         }
-    }
-
-    pub fn is_sys_table(&self) -> bool {
-        matches!(self.scan_table_type, SysScanTableType::SysTable)
     }
 
     pub fn is_cdc_table(&self) -> bool {

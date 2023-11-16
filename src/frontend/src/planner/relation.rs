@@ -24,7 +24,7 @@ use crate::binder::{
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::generic::{ScanTableType};
+use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
     LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
