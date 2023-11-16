@@ -49,8 +49,6 @@ pub struct SysScan {
     pub output_col_idx: Vec<usize>,
     /// Descriptor of the table
     pub table_desc: Rc<TableDesc>,
-    /// Descriptor of the external table for CDC
-    pub cdc_table_desc: Rc<CdcTableDesc>,
     /// Descriptors of all indexes on this table
     pub indexes: Vec<Rc<IndexCatalog>>,
     /// The pushed down predicates. It refers to column indexes of the table.
@@ -100,20 +98,12 @@ impl SysScan {
     }
 
     pub fn primary_key(&self) -> &[ColumnOrder] {
-        if self.is_cdc_table() {
-            &self.cdc_table_desc.pk
-        } else {
-            &self.table_desc.pk
-        }
+        &self.table_desc.pk
     }
 
     pub fn watermark_columns(&self) -> FixedBitSet {
-        if self.is_cdc_table() {
-            FixedBitSet::with_capacity(self.get_table_columns().len())
-        } else {
-            let watermark_columns = &self.table_desc.watermark_columns;
-            self.i2o_col_mapping().rewrite_bitset(watermark_columns)
-        }
+        let watermark_columns = &self.table_desc.watermark_columns;
+        self.i2o_col_mapping().rewrite_bitset(watermark_columns)
     }
 
     pub(crate) fn column_names_with_table_prefix(&self) -> Vec<String> {
@@ -260,7 +250,6 @@ impl SysScan {
             table_name,
             output_col_idx,
             table_desc,
-            Rc::new(CdcTableDesc::default()),
             ctx,
             predicate,
             table_cardinality,
@@ -272,7 +261,6 @@ impl SysScan {
         table_name: String,
         output_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
-        cdc_table_desc: Rc<CdcTableDesc>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
         table_cardinality: Cardinality,
@@ -299,7 +287,6 @@ impl SysScan {
             required_col_idx,
             output_col_idx,
             table_desc,
-            cdc_table_desc,
             indexes: vec![],
             predicate,
             chunk_size: None,
@@ -332,7 +319,6 @@ impl SysScan {
     }
 }
 
-// TODO: extend for cdc table
 impl GenericPlanNode for SysScan {
     fn schema(&self) -> Schema {
         let fields = self
@@ -347,21 +333,16 @@ impl GenericPlanNode for SysScan {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        if self.is_cdc_table() {
-            Some(self.cdc_table_desc.stream_key.clone())
-        } else {
-            let id_to_op_idx =
-                Self::get_id_to_op_idx_mapping(&self.output_col_idx, &self.table_desc);
-            self.table_desc
-                .stream_key
-                .iter()
-                .map(|&c| {
-                    id_to_op_idx
-                        .get(&self.table_desc.columns[c].column_id)
-                        .copied()
-                })
-                .collect::<Option<Vec<_>>>()
-        }
+        let id_to_op_idx = Self::get_id_to_op_idx_mapping(&self.output_col_idx, &self.table_desc);
+        self.table_desc
+            .stream_key
+            .iter()
+            .map(|&c| {
+                id_to_op_idx
+                    .get(&self.table_desc.columns[c].column_id)
+                    .copied()
+            })
+            .collect::<Option<Vec<_>>>()
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -380,22 +361,7 @@ impl GenericPlanNode for SysScan {
 
 impl SysScan {
     pub fn get_table_columns(&self) -> &[ColumnDesc] {
-        if self.is_cdc_table() {
-            &self.cdc_table_desc.columns
-        } else {
-            &self.table_desc.columns
-        }
-    }
-
-    pub fn is_cdc_table(&self) -> bool {
-        matches!(self.scan_table_type, SysScanTableType::CdcTable)
-    }
-
-    pub fn append_only(&self) -> bool {
-        if self.is_cdc_table() {
-            return false;
-        }
-        self.table_desc.append_only
+        &self.table_desc.columns
     }
 
     /// Get the descs of the output columns.
