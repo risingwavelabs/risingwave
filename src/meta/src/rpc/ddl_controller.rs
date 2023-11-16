@@ -768,7 +768,17 @@ impl DdlController {
         internal_tables: Vec<Table>,
         error: Option<&impl ToString>,
     ) -> MetaResult<()> {
-        let mut should_add_event_log = true;
+        let error = error.map(ToString::to_string).unwrap_or_default();
+        let info = serde_json::json!({"id": stream_job.id(), "name": stream_job.name(), "definition": stream_job.definition(), "error": error}).to_string();
+        let event_log = new_event_log(
+            risingwave_pb::meta::event_log::EventType::CreateStreamJobFail,
+            info,
+        );
+        let _ = self
+            .env
+            .event_log_manager_ref()
+            .add_event_logs(vec![event_log]);
+
         let mut creating_internal_table_ids =
             internal_tables.into_iter().map(|t| t.id).collect_vec();
         // 1. cancel create procedure.
@@ -780,13 +790,8 @@ impl DdlController {
                     .cancel_create_table_procedure(table.id, creating_internal_table_ids.clone())
                     .await;
                 creating_internal_table_ids.push(table.id);
-                match result {
-                    Ok(b) => {
-                        should_add_event_log = b;
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to cancel create table procedure, perhaps barrier manager has already cleaned it. Reason: {e:#?}");
-                    }
+                if let Err(e) = result {
+                    tracing::warn!("Failed to cancel create table procedure, perhaps barrier manager has already cleaned it. Reason: {e:#?}");
                 }
             }
             StreamingJob::Sink(sink) => {
@@ -807,13 +812,8 @@ impl DdlController {
                             creating_internal_table_ids.clone(),
                         )
                         .await;
-                    match result {
-                        Ok(b) => {
-                            should_add_event_log = b;
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to cancel create table procedure, perhaps barrier manager has already cleaned it. Reason: {e:#?}");
-                        }
+                    if let Err(e) = result {
+                        tracing::warn!("Failed to cancel create table procedure, perhaps barrier manager has already cleaned it. Reason: {e:#?}");
                     }
                 }
                 creating_internal_table_ids.push(table.id);
@@ -834,20 +834,6 @@ impl DdlController {
         self.catalog_manager
             .unmark_creating_tables(&creating_internal_table_ids, true)
             .await;
-
-        if should_add_event_log {
-            let error = error.map(ToString::to_string).unwrap_or_default();
-            let info = serde_json::json!({"id": stream_job.id(), "name": stream_job.name(), "definition": stream_job.definition(), "error": error}).to_string();
-            let event_log = new_event_log(
-                risingwave_pb::meta::event_log::EventType::CreateStreamJobFail,
-                info,
-            );
-            let _ = self
-                .env
-                .event_log_manager_ref()
-                .add_event_logs(vec![event_log]);
-        }
-
         Ok(())
     }
 

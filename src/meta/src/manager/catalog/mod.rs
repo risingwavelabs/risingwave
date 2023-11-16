@@ -867,7 +867,7 @@ impl CatalogManager {
                     serde_json::json!({"id": t.id, "name": t.name, "definition": t.definition, "error": "clear during recovery".to_string()})
                         .to_string();
                 let event_log = new_event_log(
-                    risingwave_pb::meta::event_log::EventType::CreateStreamJobFail,
+                    risingwave_pb::meta::event_log::EventType::DirtyStreamJobClear,
                     info,
                 );
                 Some(event_log)

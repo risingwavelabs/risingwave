@@ -553,6 +553,7 @@ message EventLog {
     UNSPECIFIED = 0;
     META_NODE_START = 1;
     CREATE_STREAM_JOB_FAIL = 2;
+    DIRTY_STREAM_JOB_CLEAR = 3;
   }
   // Event logs identifier, which should be populated by event log service.
   optional string unique_id = 1;

@@ -112,6 +112,8 @@ pub fn start_event_log_manager(
                     if event_log_batch.is_empty() {
                         continue;
                     }
+                    // Intentionally drop events on any error.
+                    let batch = event_log_batch.drain(..);
                     last_lease = match may_get_new_lease(client, last_lease, lease_ttl_sec).await {
                         Ok(last_lease) => last_lease,
                         Err(e) => {
@@ -121,7 +123,7 @@ pub fn start_event_log_manager(
                     };
                     if let Err(e) = add(
                         client,
-                        event_log_batch.drain(..).map(|e|(e.unique_id.to_owned().unwrap().as_bytes().into(),e.encode_to_vec())),
+                        batch.map(|e|(e.unique_id.to_owned().unwrap().as_bytes().into(),e.encode_to_vec())),
                         last_lease.as_ref().unwrap().0,
                         max_payload_size,
                     )
@@ -241,7 +243,7 @@ impl EventLogManger {
         for mut event_log in event_logs {
             event_log.unique_id = Some(uuid::Uuid::new_v4().to_string());
             event_log.timestamp = Some(processing_ts);
-            // Intentionally drop event if any error of buffer is full.
+            // Intentionally drop event logs if any error of buffer is full.
             if let Err(e) = self.event_tx.try_send(event_log.clone()) {
                 tracing::warn!(
                     "event log is not persisted: {}, error {}",

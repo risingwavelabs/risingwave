@@ -145,7 +145,7 @@ async fn test_create_stream_job_fail() -> Result<()> {
         &mut expect_failure_count,
         "create table t2 (c int primary key)",
         "t2",
-        "clear during recovery",
+        "intentional start_actors_err",
     )
     .await;
 
@@ -178,7 +178,7 @@ async fn test_create_stream_job_fail() -> Result<()> {
         &mut expect_failure_count,
         "create materialized view mv2 as select * from t1",
         "mv2",
-        "clear during recovery",
+        "intentional start_actors_err",
     )
     .await;
     tokio::time::sleep(Duration::from_secs(WAIT_RECOVERY_SEC)).await;
