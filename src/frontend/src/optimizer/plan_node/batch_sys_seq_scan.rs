@@ -20,19 +20,17 @@ use risingwave_common::error::Result;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::row_seq_scan_node::ChunkSize;
-use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
+use risingwave_pb::batch_plan::SysRowSeqScanNode;
 use risingwave_pb::plan_common::PbColumnDesc;
 
 use super::batch::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
-use crate::catalog::ColumnId;
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 
-/// `BatchSysSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
+/// `BatchSysSeqScan` implements [`super::LogicalSysScan`] to scan from a row-oriented table
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSysSeqScan {
     pub base: PlanBase<Batch>,
@@ -78,32 +76,7 @@ impl BatchSysSeqScan {
     fn clone_with_dist(&self) -> Self {
         Self::new_inner(
             self.core.clone(),
-            if self.core.is_sys_table() {
-                Distribution::Single
-            } else {
-                match self.core.distribution_key() {
-                    None => Distribution::SomeShard,
-                    Some(distribution_key) => {
-                        if distribution_key.is_empty() {
-                            Distribution::Single
-                        } else {
-                            // For other batch operators, `HashShard` is a simple hashing, i.e.,
-                            // `target_shard = hash(dist_key) % shard_num`
-                            //
-                            // But MV is actually sharded by consistent hashing, i.e.,
-                            // `target_shard = vnode_mapping.map(hash(dist_key) % vnode_num)`
-                            //
-                            // They are incompatible, so we just specify its distribution as
-                            // `SomeShard` to force an exchange is
-                            // inserted.
-                            Distribution::UpstreamHashShard(
-                                distribution_key,
-                                self.core.table_desc.table_id,
-                            )
-                        }
-                    }
-                }
-            },
+            Distribution::Single,
             self.scan_ranges.clone(),
         )
     }
@@ -220,48 +193,21 @@ impl ToBatchPb for BatchSysSeqScan {
             .iter()
             .map(PbColumnDesc::from)
             .collect();
-
-        if self.core.is_sys_table() {
-            NodeBody::SysRowSeqScan(SysRowSeqScanNode {
-                table_id: self.core.table_desc.table_id.table_id,
-                column_descs,
-            })
-        } else {
-            NodeBody::RowSeqScan(RowSeqScanNode {
-                table_desc: Some(self.core.table_desc.to_protobuf()),
-                column_ids: self
-                    .core
-                    .output_column_ids()
-                    .iter()
-                    .map(ColumnId::get_id)
-                    .collect(),
-                scan_ranges: self.scan_ranges.iter().map(|r| r.to_protobuf()).collect(),
-                // To be filled by the scheduler.
-                vnode_bitmap: None,
-                ordered: !self.order().is_any(),
-                chunk_size: self
-                    .core
-                    .chunk_size
-                    .map(|chunk_size| ChunkSize { chunk_size }),
-            })
-        }
+        NodeBody::SysRowSeqScan(SysRowSeqScanNode {
+            table_id: self.core.table_desc.table_id.table_id,
+            column_descs,
+        })
     }
 }
 
 impl ToLocalBatch for BatchSysSeqScan {
     fn to_local(&self) -> Result<PlanRef> {
-        let dist = if self.core.is_sys_table() {
-            Distribution::Single
-        } else if let Some(distribution_key) = self.core.distribution_key()
-            && !distribution_key.is_empty()
-        {
-            Distribution::UpstreamHashShard(distribution_key, self.core.table_desc.table_id)
-        } else {
-            // NOTE(kwannoel): This is a hack to force an exchange to always be inserted before
-            // scan.
-            Distribution::SomeShard
-        };
-        Ok(Self::new_inner(self.core.clone(), dist, self.scan_ranges.clone()).into())
+        Ok(Self::new_inner(
+            self.core.clone(),
+            Distribution::Single,
+            self.scan_ranges.clone(),
+        )
+        .into())
     }
 }
 
