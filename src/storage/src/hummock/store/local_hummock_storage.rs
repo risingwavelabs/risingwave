@@ -254,13 +254,13 @@ impl LocalStateStore for LocalHummockStorage {
         }
     }
 
-    #[allow(clippy::manual_async_fn)]
-    fn iter(
+    async fn iter(
         &self,
         key_range: TableKeyRange,
         read_options: ReadOptions,
-    ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
+    ) -> StorageResult<Self::IterStream<'_>> {
         self.iter_all(key_range.clone(), self.epoch(), read_options)
+            .await
     }
 
     fn insert(

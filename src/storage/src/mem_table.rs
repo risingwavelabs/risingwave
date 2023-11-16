@@ -843,7 +843,7 @@ mod tests {
         }
 
         const TEST_TABLE_ID: TableId = TableId::new(233);
-        const TEST_EPOCH: EpochWithGap = EpochWithGap::new_from_epoch(10);
+        const TEST_EPOCH: u64 = 10;
 
         async fn check_data(
             iter: &mut MemTableHummockIterator<'_>,
@@ -855,7 +855,7 @@ mod tests {
                 let value = iter.value();
 
                 let (expected_key, expected_value) = test_data[idx].clone();
-                assert_eq!(key.epoch_with_gap, TEST_EPOCH);
+                assert_eq!(key.epoch_with_gap, EpochWithGap::new_from_epoch(TEST_EPOCH));
                 assert_eq!(key.user_key.table_id, TEST_TABLE_ID);
                 assert_eq!(key.user_key.table_key.0, expected_key.0.as_ref());
                 match expected_value {
@@ -873,14 +873,18 @@ mod tests {
             assert_eq!(idx, test_data.len());
         }
 
-        let mut iter = MemTableHummockIterator::new(&mem_table.buffer, TEST_EPOCH, TEST_TABLE_ID);
+        let mut iter = MemTableHummockIterator::new(
+            &mem_table.buffer,
+            EpochWithGap::new_from_epoch(TEST_EPOCH),
+            TEST_TABLE_ID,
+        );
 
         // Test rewind
         iter.rewind().await.unwrap();
         check_data(&mut iter, &ordered_test_data).await;
 
         // Test seek with a later epoch, the first key is not skipped
-        let later_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.pure_epoch() + 1);
+        let later_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH + 1);
         let seek_idx = 500;
         iter.seek(FullKey {
             user_key: UserKey {
@@ -894,7 +898,7 @@ mod tests {
         check_data(&mut iter, &ordered_test_data[seek_idx..]).await;
 
         // Test seek with a earlier epoch, the first key is skipped
-        let early_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH.pure_epoch() - 1);
+        let early_epoch = EpochWithGap::new_from_epoch(TEST_EPOCH - 1);
         let seek_idx = 500;
         iter.seek(FullKey {
             user_key: UserKey {
@@ -913,7 +917,7 @@ mod tests {
                 table_id: TEST_TABLE_ID,
                 table_key: TableKey(&get_key(ordered_test_data.len() + 10)),
             },
-            epoch_with_gap: early_epoch,
+            epoch_with_gap: EpochWithGap::new_from_epoch(TEST_EPOCH),
         })
         .await
         .unwrap();
@@ -926,7 +930,7 @@ mod tests {
                 table_id: smaller_table_id,
                 table_key: TableKey(&get_key(ordered_test_data.len() + 10)),
             },
-            epoch_with_gap: early_epoch,
+            epoch_with_gap: EpochWithGap::new_from_epoch(TEST_EPOCH),
         })
         .await
         .unwrap();
@@ -939,7 +943,7 @@ mod tests {
                 table_id: greater_table_id,
                 table_key: TableKey(&get_key(0)),
             },
-            epoch_with_gap: early_epoch,
+            epoch_with_gap: EpochWithGap::new_from_epoch(TEST_EPOCH),
         })
         .await
         .unwrap();
