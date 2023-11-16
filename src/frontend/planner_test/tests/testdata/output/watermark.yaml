@@ -51,8 +51,12 @@
     StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
     └─StreamRowIdGen { row_id_index: 1 }
       └─StreamWatermarkFilter { watermark_descs: [Desc { column: v1, expr: (v1 - '00:00:01':Interval) }], output_watermarks: [v1] }
-        └─StreamDml { columns: [v1, _row_id] }
-          └─StreamSource { source: t, columns: [v1, _row_id] }
+        └─StreamUnion { all: true }
+          ├─StreamExchange [no_shuffle] { dist: SomeShard }
+          │ └─StreamSource { source: t, columns: [v1, _row_id] }
+          └─StreamExchange [no_shuffle] { dist: SomeShard }
+            └─StreamDml { columns: [v1, _row_id] }
+              └─StreamSource
 - name: watermark on append only table without source
   sql: |
     explain create table t (v1 timestamp with time zone, watermark for v1 as v1 - INTERVAL '1' SECOND) append only;
@@ -60,8 +64,10 @@
     StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
     └─StreamRowIdGen { row_id_index: 1 }
       └─StreamWatermarkFilter { watermark_descs: [Desc { column: v1, expr: (v1 - '00:00:01':Interval) }], output_watermarks: [v1] }
-        └─StreamDml { columns: [v1, _row_id] }
-          └─StreamSource
+        └─StreamUnion { all: true }
+          └─StreamExchange [no_shuffle] { dist: SomeShard }
+            └─StreamDml { columns: [v1, _row_id] }
+              └─StreamSource
 - name: hash agg
   sql: |
     create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;

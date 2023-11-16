@@ -19,7 +19,7 @@ pub mod catalog;
 pub mod clickhouse;
 pub mod coordinate;
 pub mod doris;
-pub mod doris_connector;
+pub mod doris_starrocks_connector;
 pub mod encoder;
 pub mod formatter;
 pub mod iceberg;
@@ -30,6 +30,7 @@ pub mod nats;
 pub mod pulsar;
 pub mod redis;
 pub mod remote;
+pub mod starrocks;
 pub mod test_sink;
 pub mod utils;
 pub mod writer;
@@ -79,6 +80,7 @@ macro_rules! for_all_sinks {
                 { ElasticSearch, $crate::sink::remote::ElasticSearchSink },
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { Doris, $crate::sink::doris::DorisSink },
+                { Starrocks, $crate::sink::starrocks::StarrocksSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { Test, $crate::sink::test_sink::TestSink }
             }
@@ -416,14 +418,16 @@ pub enum SinkError {
         #[backtrace]
         anyhow::Error,
     ),
-    #[error("Doris http error: {0}")]
-    Http(
+    #[error("Doris/Starrocks connect error: {0}")]
+    DorisStarrocksConnect(
         #[source]
         #[backtrace]
         anyhow::Error,
     ),
     #[error("Doris error: {0}")]
     Doris(String),
+    #[error("Starrocks error: {0}")]
+    Starrocks(String),
     #[error("Pulsar error: {0}")]
     Pulsar(
         #[source]

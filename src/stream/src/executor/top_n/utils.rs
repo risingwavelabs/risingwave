@@ -49,21 +49,6 @@ pub trait TopNExecutorBase: Send + 'static {
 
     fn info(&self) -> &ExecutorInfo;
 
-    /// See [`Executor::schema`].
-    fn schema(&self) -> &Schema {
-        &self.info().schema
-    }
-
-    /// See [`Executor::pk_indices`].
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        self.info().pk_indices.as_ref()
-    }
-
-    /// See [`Executor::identity`].
-    fn identity(&self) -> &str {
-        &self.info().identity
-    }
-
     /// Update the vnode bitmap for the state table and manipulate the cache if necessary, only used
     /// by Group Top-N since it's distributed.
     fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) {
@@ -98,15 +83,15 @@ where
     }
 
     fn schema(&self) -> &Schema {
-        self.inner.schema()
+        &self.inner.info().schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        self.inner.pk_indices()
+        &self.inner.info().pk_indices
     }
 
     fn identity(&self) -> &str {
-        self.inner.identity()
+        &self.inner.info().identity
     }
 
     fn info(&self) -> ExecutorInfo {

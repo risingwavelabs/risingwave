@@ -32,8 +32,8 @@ use serde::{Deserialize, Serialize};
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
-    AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
-    ReferentialAction, SourceWatermark, TableConstraint,
+    AlterColumnOperation, AlterDatabaseOperation, AlterSchemaOperation, AlterTableOperation,
+    ColumnDef, ColumnOption, ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint,
 };
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
@@ -858,6 +858,7 @@ pub enum ShowObject {
     Indexes { table: ObjectName },
     Cluster,
     Jobs,
+    ProcessList,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -899,6 +900,7 @@ impl fmt::Display for ShowObject {
                 write!(f, "CLUSTER")
             }
             ShowObject::Jobs => write!(f, "JOBS"),
+            ShowObject::ProcessList => write!(f, "PROCESSLIST"),
         }
     }
 }
@@ -1135,6 +1137,16 @@ pub enum Statement {
         append_only: bool,
         params: CreateFunctionBody,
     },
+    /// ALTER DATABASE
+    AlterDatabase {
+        name: ObjectName,
+        operation: AlterDatabaseOperation,
+    },
+    /// ALTER SCHEMA
+    AlterSchema {
+        name: ObjectName,
+        operation: AlterSchemaOperation,
+    },
     /// ALTER TABLE
     AlterTable {
         /// Table name
@@ -1185,6 +1197,9 @@ pub enum Statement {
     },
     /// CANCEL JOBS COMMAND
     CancelJobs(JobIdents),
+    /// KILL COMMAND
+    /// Kill process in the show processlist.
+    Kill(i32),
     /// DROP
     Drop(DropStatement),
     /// DROP Function
@@ -1561,7 +1576,7 @@ impl fmt::Display for Statement {
                 }
                 if let Some(info) = cdc_table_info {
                     write!(f, " FROM {}", info.source_name)?;
-                    write!(f, " TABLE {}", info.external_table_name)?;
+                    write!(f, " TABLE '{}'", info.external_table_name)?;
                 }
                 Ok(())
             }
@@ -1601,6 +1616,12 @@ impl fmt::Display for Statement {
             ),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
+            Statement::AlterDatabase { name, operation } => {
+                write!(f, "ALTER DATABASE {} {}", name, operation)
+            }
+            Statement::AlterSchema { name, operation } => {
+                write!(f, "ALTER SCHEMA {} {}", name, operation)
+            }
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
             }
@@ -1816,6 +1837,10 @@ impl fmt::Display for Statement {
             }
             Statement::CancelJobs(jobs) => {
                 write!(f, "CANCEL JOBS {}", display_comma_separated(&jobs.0))?;
+                Ok(())
+            }
+            Statement::Kill(process_id) => {
+                write!(f, "KILL {}", process_id)?;
                 Ok(())
             }
         }

@@ -125,13 +125,29 @@ public class SinkWriterStreamObserver
                             .asRuntimeException();
                 }
 
+                boolean batchWritten;
+
                 try (CloseableIterable<SinkRow> rowIter = deserializer.deserialize(batch)) {
-                    sink.write(
-                            new MonitoredRowIterable(
-                                    rowIter, connectorName, String.valueOf(sinkId)));
+                    batchWritten =
+                            sink.write(
+                                    new MonitoredRowIterable(
+                                            rowIter, connectorName, String.valueOf(sinkId)));
                 }
 
                 currentBatchId = batch.getBatchId();
+
+                if (batchWritten) {
+                    responseObserver.onNext(
+                            ConnectorServiceProto.SinkWriterStreamResponse.newBuilder()
+                                    .setBatch(
+                                            ConnectorServiceProto.SinkWriterStreamResponse
+                                                    .BatchWrittenResponse.newBuilder()
+                                                    .setEpoch(currentEpoch)
+                                                    .setBatchId(currentBatchId)
+                                                    .build())
+                                    .build());
+                }
+
                 LOG.debug("Batch {} written to epoch {}", currentBatchId, batch.getEpoch());
             } else if (sinkTask.hasBarrier()) {
                 if (!isInitialized()) {

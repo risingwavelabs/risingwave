@@ -27,6 +27,7 @@ use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvi
 use risingwave_pb::catalog::{
     connection, Comment, Connection, CreateType, Database, Function, Schema, Source, Table, View,
 };
+use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
@@ -39,7 +40,7 @@ use crate::barrier::BarrierManagerRef;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
     IdCategory, IndexId, LocalNotification, MetaSrvEnv, NotificationVersion, RelationIdEnum,
-    SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, ViewId,
+    SchemaId, SinkId, SourceId, StreamingClusterInfo, StreamingJob, TableId, UserId, ViewId,
     IGNORED_NOTIFICATION_VERSION,
 };
 use crate::model::{StreamEnvironment, TableFragments};
@@ -102,6 +103,7 @@ pub enum DdlCommand {
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterRelationName(Relation, String),
     AlterSourceColumn(Source),
+    AlterTableOwner(Object, UserId),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
     CommentOn(Comment),
@@ -254,6 +256,9 @@ impl DdlController {
                 }
                 DdlCommand::AlterRelationName(relation, name) => {
                     ctrl.alter_relation_name(relation, &name).await
+                }
+                DdlCommand::AlterTableOwner(object, owner_id) => {
+                    ctrl.alter_owner(object, owner_id).await
                 }
                 DdlCommand::CreateConnection(connection) => {
                     ctrl.create_connection(connection).await
@@ -1004,7 +1009,7 @@ impl DdlController {
         // Map the column indices in the dispatchers with the given mapping.
         let downstream_fragments = self
             .fragment_manager
-            .get_downstream_chain_fragments(id.into())
+            .get_downstream_fragments(id.into())
             .await?
             .into_iter()
             .map(|(d, f)| Some((table_col_index_mapping.rewrite_dispatch_strategy(&d)?, f)))
@@ -1125,6 +1130,16 @@ impl DdlController {
                     .await
             }
         }
+    }
+
+    async fn alter_owner(
+        &self,
+        object: Object,
+        owner_id: UserId,
+    ) -> MetaResult<NotificationVersion> {
+        self.catalog_manager
+            .alter_owner(self.fragment_manager.clone(), object, owner_id)
+            .await
     }
 
     pub async fn wait(&self) -> MetaResult<()> {

@@ -26,7 +26,7 @@ pub enum SchedulerError {
     #[error("Pin snapshot error: {0} fails to get epoch {1}")]
     PinSnapshot(QueryId, u64),
 
-    #[error("Rpc error: {0}")]
+    #[error(transparent)]
     RpcError(
         #[from]
         #[backtrace]

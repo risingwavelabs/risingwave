@@ -63,10 +63,9 @@ pub struct RdKafkaPropertiesConsumer {
     /// exceeded. This property may need to be decreased if the queue thresholds are set low
     /// and the application is experiencing long (~1s) delays between messages. Low values may
     /// increase CPU utilization.
-    // FIXME: need to upgrade rdkafka to v2.2.0 to use this property
-    // #[serde(rename = "properties.fetch.queue.backoff.ms")]
-    // #[serde_as(as = "Option<DisplayFromStr>")]
-    // pub fetch_queue_backoff_ms: Option<usize>,
+    #[serde(rename = "properties.fetch.queue.backoff.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub fetch_queue_backoff_ms: Option<usize>,
 
     /// Maximum amount of data the broker shall return for a Fetch request. Messages are fetched in
     /// batches by the consumer and if the first message batch in the first non-empty partition of
@@ -156,9 +155,9 @@ impl RdKafkaPropertiesConsumer {
         if let Some(v) = &self.fetch_wait_max_ms {
             c.set("fetch.wait.max.ms", v.to_string());
         }
-        // if let Some(v) = &self.fetch_queue_backoff_ms {
-        //     c.set("fetch.queue.backoff.ms", v.to_string());
-        // }
+        if let Some(v) = &self.fetch_queue_backoff_ms {
+            c.set("fetch.queue.backoff.ms", v.to_string());
+        }
         if let Some(v) = &self.fetch_max_bytes {
             c.set("fetch.max.bytes", v.to_string());
         }
@@ -193,6 +192,7 @@ mod test {
             "properties.fetch.wait.max.ms".to_string() => "114514".to_string(),
             "properties.fetch.max.bytes".to_string() => "114514".to_string(),
             "properties.enable.auto.commit".to_string() => "true".to_string(),
+            "properties.fetch.queue.backoff.ms".to_string() => "114514".to_string(),
         };
 
         let props: KafkaProperties =
@@ -215,5 +215,9 @@ mod test {
         assert_eq!(props.rdkafka_properties.fetch_wait_max_ms, Some(114514));
         assert_eq!(props.rdkafka_properties.fetch_max_bytes, Some(114514));
         assert_eq!(props.rdkafka_properties.enable_auto_commit, Some(true));
+        assert_eq!(
+            props.rdkafka_properties.fetch_queue_backoff_ms,
+            Some(114514)
+        );
     }
 }
