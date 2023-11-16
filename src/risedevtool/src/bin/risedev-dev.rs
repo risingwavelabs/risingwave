@@ -448,6 +448,7 @@ fn main() -> Result<()> {
                 style("ERROR").red().bold(),
                 err,
             );
+            println!();
             println!(
                 "* Use `{}` to enable new components, if they are missing.",
                 style("./risedev configure").blue().bold(),
@@ -467,9 +468,12 @@ fn main() -> Result<()> {
             );
             println!("---");
             println!();
-            println!();
 
-            Err(err)
+            // As we have already printed the error above, we don't need to print that error again.
+            // However, to return with a proper exit code, still return an error here.
+            Err(anyhow!(
+                "Failed to start all services. See details and instructions above."
+            ))
         }
     }
 }
