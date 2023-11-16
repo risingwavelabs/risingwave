@@ -59,6 +59,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (release)"
+    key: "e2e-test-release"
     command: "ci/scripts/cron-e2e-test.sh -p ci-release -m ci-3streaming-2serving-3fe"
     if: (!build.pull_request.labels includes "ci/main-cron/skip-ci" || build.pull_request.labels includes "ci/run-e2e-test")
     depends_on:
@@ -141,6 +142,7 @@ steps:
     retry: *auto-retry
 
   - label: "fuzz test"
+    key: "fuzz-test"
     command: "ci/scripts/cron-fuzz-test.sh -p ci-release"
     if: (!build.pull_request.labels includes "ci/main-cron/skip-ci" || build.pull_request.labels includes "ci/run-sqlsmith-fuzzing-tests")
     depends_on:
@@ -481,6 +483,7 @@ steps:
 
   # Backwards compatibility tests
   - label: "Backwards compatibility tests"
+    key: "backwards-compat-tests"
     command: "RW_COMMIT=$BUILDKITE_COMMIT ci/scripts/backwards-compat-test.sh -p ci-release"
     if: (!build.pull_request.labels includes "ci/main-cron/skip-ci" || build.pull_request.labels includes "ci/run-backwards-compat-tests")
     depends_on:
