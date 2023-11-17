@@ -25,7 +25,7 @@ use super::GenericPlanNode;
 use crate::catalog::ColumnId;
 use crate::expr::ExprRewriter;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::{Cardinality, FunctionalDependencySet};
+use crate::optimizer::property::FunctionalDependencySet;
 
 /// [`CdcScan`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone, Educe)]
@@ -36,12 +36,6 @@ pub struct CdcScan {
     pub output_col_idx: Vec<usize>,
     /// Descriptor of the external table for CDC
     pub cdc_table_desc: Rc<CdcTableDesc>,
-    /// Help RowSeqCdcScan executor use a better chunk size
-    pub chunk_size: Option<u32>,
-    /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
-    pub for_system_time_as_of_proctime: bool,
-    /// The cardinality of the table **without** applying the predicate.
-    pub table_cardinality: Cardinality,
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
@@ -107,40 +101,11 @@ impl CdcScan {
         cdc_table_desc: Rc<CdcTableDesc>,
         ctx: OptimizerContextRef,
     ) -> Self {
-        Self::new_inner(
-            table_name,
-            output_col_idx,
-            cdc_table_desc,
-            ctx,
-            false,
-            Cardinality::unknown(),
-        )
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new_inner(
-        table_name: String,
-        output_col_idx: Vec<usize>, // the column index in the table
-        cdc_table_desc: Rc<CdcTableDesc>,
-        ctx: OptimizerContextRef,
-        for_system_time_as_of_proctime: bool,
-        table_cardinality: Cardinality,
-    ) -> Self {
-        // here we have 3 concepts
-        // 1. column_id: ColumnId, stored in catalog and a ID to access data from storage.
-        // 2. table_idx: usize, column index in the TableDesc or tableCatalog.
-        // 3. operator_idx: usize, column index in the CdcScanOperator's schema.
-        // In a query we get the same version of catalog, so the mapping from column_id and
-        // table_idx will not change.
-
         Self {
             table_name,
             output_col_idx,
             cdc_table_desc,
-            chunk_size: None,
-            for_system_time_as_of_proctime,
             ctx,
-            table_cardinality,
         }
     }
 

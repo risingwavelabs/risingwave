@@ -31,7 +31,7 @@ use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamCdcTableScan,
     ToStreamContext,
 };
-use crate::optimizer::property::{Cardinality, Order};
+use crate::optimizer::property::Order;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalCdcScan` returns contents of a table or other equivalent object
@@ -73,15 +73,6 @@ impl LogicalCdcScan {
         &self.core.table_name
     }
 
-    pub fn for_system_time_as_of_proctime(&self) -> bool {
-        self.core.for_system_time_as_of_proctime
-    }
-
-    /// The cardinality of the table **without** applying the predicate.
-    pub fn table_cardinality(&self) -> Cardinality {
-        self.core.table_cardinality
-    }
-
     pub fn cdc_table_desc(&self) -> &CdcTableDesc {
         self.core.cdc_table_desc.as_ref()
     }
@@ -97,13 +88,11 @@ impl LogicalCdcScan {
     }
 
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
-        generic::CdcScan::new_inner(
+        generic::CdcScan::new(
             self.table_name().to_string(),
             output_col_idx,
             self.core.cdc_table_desc.clone(),
             self.base.ctx().clone(),
-            self.for_system_time_as_of_proctime(),
-            self.table_cardinality(),
         )
         .into()
     }
@@ -144,10 +133,6 @@ impl Distill for LogicalCdcScan {
                         .collect(),
                 ),
             ));
-        }
-
-        if self.table_cardinality() != Cardinality::unknown() {
-            vec.push(("cardinality", Pretty::display(&self.table_cardinality())));
         }
 
         childless_record("LogicalCdcScan", vec)
