@@ -65,7 +65,7 @@ fn make_timestamptz_impl(
     sec: F64,
 ) -> Result<Timestamptz> {
     let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
-    if !sec.is_finite() {
+    if !sec.is_finite() || sec.0.is_sign_negative() {
         return Err(ExprError::InvalidParam {
             name: "sec",
             reason: "invalid sec".into(),
