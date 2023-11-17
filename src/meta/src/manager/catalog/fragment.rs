@@ -180,7 +180,12 @@ impl FragmentManager {
                 let mut actors = vec![];
                 for fragment in table_fragment.fragments.values() {
                     for actor in &fragment.actors {
-                        actors.push(actor.actor_id)
+                        if let Some(node) = &actor.nodes
+                            && let Some(node) = &node.node_body
+                            && node.is_stream_scan()
+                        {
+                            actors.push(actor.actor_id)
+                        }
                     }
                 }
                 table_map.insert(*table_id, actors);
