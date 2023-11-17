@@ -40,8 +40,8 @@ use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{create_connection_request, DdlProgress, PbTableJobType};
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    BranchedObject, CompactStatus, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
-    HummockSnapshot, HummockVersion, HummockVersionDelta,
+    BranchedObject, CompactTaskAssignment, CompactionGroupInfo, HummockSnapshot, HummockVersion,
+    HummockVersionDelta,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -897,13 +897,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
-    async fn list_compaction_status(
-        &self,
-    ) -> RpcResult<(
-        Vec<CompactStatus>,
-        Vec<CompactTaskAssignment>,
-        Vec<CompactTaskProgress>,
-    )> {
+    async fn list_compact_task_assignment(&self) -> RpcResult<Vec<CompactTaskAssignment>> {
         unimplemented!()
     }
 }

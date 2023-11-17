@@ -1149,6 +1149,17 @@ impl MetaClient {
     pub async fn sink_coordinate_client(&self) -> SinkCoordinationRpcClient {
         self.inner.core.read().await.sink_coordinate_client.clone()
     }
+
+    pub async fn rise_ctl_list_compact_task_assignment(
+        &self,
+    ) -> Result<Vec<CompactTaskAssignment>> {
+        let req = RiseCtlListCompactTaskAssignmentRequest {};
+        let resp = self
+            .inner
+            .rise_ctl_list_compact_task_assignment(req)
+            .await?;
+        Ok(resp.task_assignment)
+    }
 }
 
 #[async_trait]
@@ -1798,6 +1809,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_branched_object, ListBranchedObjectRequest, ListBranchedObjectResponse }
             ,{ hummock_client, list_active_write_limit, ListActiveWriteLimitRequest, ListActiveWriteLimitResponse }
             ,{ hummock_client, list_hummock_meta_config, ListHummockMetaConfigRequest, ListHummockMetaConfigResponse }
+            ,{ hummock_client, rise_ctl_list_compact_task_assignment, RiseCtlListCompactTaskAssignmentRequest, RiseCtlListCompactTaskAssignmentResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

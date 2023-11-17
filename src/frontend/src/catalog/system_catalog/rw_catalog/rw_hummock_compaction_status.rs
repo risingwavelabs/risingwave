@@ -43,9 +43,8 @@ pub const RW_HUMMOCK_COMPACTION_STATUS: BuiltinTable = BuiltinTable {
 
 impl SysCatalogReaderImpl {
     pub async fn read_hummock_compaction_status(&self) -> Result<Vec<OwnedRow>> {
-        let (_compaction_status, compaction_assignment, _compaction_progress) =
-            self.meta_client.list_compaction_status().await?;
-        Ok(assignments_to_rows(compaction_assignment))
+        let compact_task_assignment = self.meta_client.list_compact_task_assignment().await?;
+        Ok(assignments_to_rows(compact_task_assignment))
     }
 }
 
