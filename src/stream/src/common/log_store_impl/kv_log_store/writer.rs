@@ -150,7 +150,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                 Bytes::from(next_key(
                     &self
                         .serde
-                        .serialize_truncate_offset_watermark_without_pk(truncation_offset),
+                        .serialize_truncate_offset_watermark_without_vnode(truncation_offset),
                 )),
             ));
         }

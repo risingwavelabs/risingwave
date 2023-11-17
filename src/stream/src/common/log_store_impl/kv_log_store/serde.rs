@@ -271,7 +271,7 @@ impl LogStoreRowSerde {
         )
     }
 
-    pub(crate) fn serialize_truncate_offset_watermark_without_pk(
+    pub(crate) fn serialize_truncate_offset_watermark_without_vnode(
         &self,
         offset: ReaderTruncationOffsetType,
     ) -> Bytes {
