@@ -24,7 +24,6 @@ use crate::binder::{
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
-use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
     LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
@@ -69,7 +68,6 @@ impl Planner {
     pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
         Ok(LogicalScan::create(
             base_table.table_catalog.name().to_string(),
-            ScanTableType::default(),
             Rc::new(base_table.table_catalog.table_desc()),
             base_table
                 .table_indexes
