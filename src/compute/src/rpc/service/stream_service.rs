@@ -214,11 +214,13 @@ impl StreamService for StreamServiceImpl {
 
                 // Must finish syncing data written in the epoch before respond back to ensure
                 // persistence of the state.
-                self.mgr
+                let sync_result = self
+                    .mgr
                     .sync_epoch(req.prev_epoch)
                     .instrument(span)
                     .instrument_await(format!("sync_epoch (epoch {})", req.prev_epoch))
-                    .await?
+                    .await?;
+                (sync_result.uncommitted_ssts, sync_result.watermarks)
             }
         };
 

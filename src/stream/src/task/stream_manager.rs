@@ -26,18 +26,17 @@ use hytra::TrAdder;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::config::{MetricLevel, StreamingConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
-use risingwave_hummock_sdk::table_watermark::TableWatermarks;
-use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_storage::monitor::HummockTraceFutureExt;
+use risingwave_storage::store::SyncResult;
 use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -286,10 +285,7 @@ impl LocalStreamManager {
         Ok(result)
     }
 
-    pub async fn sync_epoch(
-        &self,
-        epoch: u64,
-    ) -> StreamResult<(Vec<LocalSstableInfo>, HashMap<TableId, TableWatermarks>)> {
+    pub async fn sync_epoch(&self, epoch: u64) -> StreamResult<SyncResult> {
         let timer = self
             .core
             .lock()
@@ -298,18 +294,16 @@ impl LocalStreamManager {
             .barrier_sync_latency
             .start_timer();
         let res = dispatch_state_store!(self.state_store.clone(), store, {
-            match store.sync(epoch).await {
-                Ok(sync_result) => Ok((sync_result.uncommitted_ssts, sync_result.watermarks)),
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
-                        epoch, e);
-                    Err(e.into())
-                }
-            }
-        });
+            store.sync(epoch).await.inspect_err(|e| {
+                tracing::error!(
+                    "Failed to sync state store after receiving barrier prev_epoch {:?} due to {}",
+                    epoch,
+                    e
+                );
+            })
+        })?;
         timer.observe_duration();
-        res
+        Ok(res)
     }
 
     pub async fn clear_storage_buffer(&self) {

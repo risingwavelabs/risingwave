@@ -535,8 +535,13 @@ struct SyncingData {
     watermarks: HashMap<TableId, TableWatermarks>,
 }
 
+pub struct SyncedData {
+    pub staging_ssts: Vec<StagingSstableInfo>,
+    pub watermarks: HashMap<TableId, TableWatermarks>,
+}
+
 // newer staging sstable info at the front
-type SyncedDataState = HummockResult<(Vec<StagingSstableInfo>, HashMap<TableId, TableWatermarks>)>;
+type SyncedDataState = HummockResult<SyncedData>;
 
 struct UploaderContext {
     pinned_version: PinnedVersion,
@@ -971,7 +976,10 @@ impl HummockUploader {
                 // The newly uploaded `sstable_infos` contains newer data. Therefore,
                 // `sstable_infos` at the front
                 sstable_infos.extend(syncing_data.uploaded);
-                (sstable_infos, syncing_data.watermarks)
+                SyncedData {
+                    staging_ssts: sstable_infos,
+                    watermarks: syncing_data.watermarks,
+                }
             });
             self.add_synced_data(epoch, result);
             Poll::Ready(Some((epoch, newly_uploaded_sstable_infos)))
@@ -1346,7 +1354,7 @@ mod tests {
         };
         assert_eq!(epoch1, uploader.max_synced_epoch());
         let synced_data = uploader.get_synced_data(epoch1).unwrap();
-        let (ssts, _) = synced_data.as_ref().unwrap();
+        let ssts = &synced_data.as_ref().unwrap().staging_ssts;
         assert_eq!(1, ssts.len());
         let staging_sst = ssts.first().unwrap();
         assert_eq!(&vec![epoch1], staging_sst.epochs());
@@ -1825,7 +1833,12 @@ mod tests {
             unreachable!("should be sync finish");
         }
         assert_eq!(epoch1, uploader.max_synced_epoch);
-        let (synced_data1, _) = uploader.get_synced_data(epoch1).unwrap().as_ref().unwrap();
+        let synced_data1 = &uploader
+            .get_synced_data(epoch1)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .staging_ssts;
         assert_eq!(3, synced_data1.len());
         assert_eq!(&vec![imm1_4.batch_id()], synced_data1[0].imm_ids());
         assert_eq!(&vec![imm1_3.batch_id()], synced_data1[1].imm_ids());
@@ -1849,7 +1862,12 @@ mod tests {
             unreachable!("should be sync finish");
         }
         assert_eq!(epoch2, uploader.max_synced_epoch);
-        let (synced_data2, _) = uploader.get_synced_data(epoch2).unwrap().as_ref().unwrap();
+        let synced_data2 = &uploader
+            .get_synced_data(epoch2)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .staging_ssts;
         assert_eq!(1, synced_data2.len());
         assert_eq!(&vec![imm2.batch_id()], synced_data2[0].imm_ids());
 
@@ -1905,7 +1923,12 @@ mod tests {
             unreachable!("should be sync finish");
         }
         assert_eq!(epoch4, uploader.max_synced_epoch);
-        let (synced_data4, _) = uploader.get_synced_data(epoch4).unwrap().as_ref().unwrap();
+        let synced_data4 = &uploader
+            .get_synced_data(epoch4)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .staging_ssts;
         assert_eq!(3, synced_data4.len());
         assert_eq!(&vec![epoch4, epoch3], synced_data4[0].epochs());
         assert_eq!(
