@@ -284,13 +284,13 @@ pub fn get_sys_views_in_schema(schema_name: &str) -> Option<Vec<Arc<ViewCatalog>
 }
 
 /// The global registry of all builtin catalogs.
-pub static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| unsafe {
+pub static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
     // SAFETY: this function is called after all `#[ctor]` functions are called.
     let mut table_by_schema_name = HashMap::new();
     let mut table_name_by_id = HashMap::new();
     let mut view_by_schema_name = HashMap::new();
-    tracing::info!("found {} functions", SYS_CATALOGS_INIT.len());
-    for (id, catalog) in SYS_CATALOGS_INIT.drain(..) {
+    tracing::info!("found {} catalogs", unsafe { SYS_CATALOGS_INIT.len() });
+    for (id, catalog) in unsafe { SYS_CATALOGS_INIT.drain(..) } {
         match catalog {
             BuiltinCatalog::Table(table) => {
                 let sys_table: SystemTableCatalog = table.into();
