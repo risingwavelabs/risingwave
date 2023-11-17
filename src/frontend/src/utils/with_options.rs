@@ -76,7 +76,7 @@ impl WithOptions {
 
     /// Take the value of the inner map.
     pub fn into_inner(self) -> BTreeMap<String, String> {
-        self.inner.into_iter().collect()
+        self.inner
     }
 
     /// Parse the retention seconds from the options.

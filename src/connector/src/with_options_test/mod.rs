@@ -13,32 +13,48 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{env, fs};
 
 use serde::Serialize;
 use syn::{parse_file, Attribute, Field, Item, ItemFn, Lit, Meta, MetaNameValue, NestedMeta, Type};
 
-fn connector_crate_path() -> Option<PathBuf> {
-    let mut current_dir = env::current_dir().ok()?;
-    loop {
-        if current_dir.join("Cargo.lock").exists() {
-            let connector_path: PathBuf = current_dir.join("./src/connector");
-            return Some(connector_path);
-        }
-        if !current_dir.pop() {
-            break;
-        }
-    }
-    None
+fn connector_crate_path() -> PathBuf {
+    let connector_crate_path = env::var("CARGO_MANIFEST_DIR").unwrap();
+    Path::new(&connector_crate_path).to_path_buf()
 }
 
-pub fn update_with_options_yaml() -> String {
+fn source_mod_path() -> PathBuf {
+    connector_crate_path().join("src").join("source")
+}
+
+fn sink_mod_path() -> PathBuf {
+    connector_crate_path().join("src").join("sink")
+}
+
+fn common_mod_path() -> PathBuf {
+    connector_crate_path().join("src").join("common.rs")
+}
+
+pub fn generate_with_options_yaml_source() -> String {
+    generate_with_options_yaml_inner(&source_mod_path())
+}
+
+pub fn generate_with_options_yaml_sink() -> String {
+    generate_with_options_yaml_inner(&sink_mod_path())
+}
+
+/// Collect all structs with `#[derive(WithOptions)]` in the `.rs` files in `path` (plus `common.rs`),
+/// and generate a YAML file.
+fn generate_with_options_yaml_inner(path: &Path) -> String {
     let mut structs = vec![];
     let mut functions = BTreeMap::<String, FunctionInfo>::new();
 
     // Recursively list all the .rs files
-    for entry in walkdir::WalkDir::new(connector_crate_path().unwrap().join("src")) {
+    for entry in walkdir::WalkDir::new(path)
+        .into_iter()
+        .chain(walkdir::WalkDir::new(common_mod_path()))
+    {
         let entry = entry.expect("Failed to read directory entry");
         if entry.path().extension() == Some("rs".as_ref()) {
             // Parse the content of the .rs file
@@ -70,7 +86,11 @@ pub fn update_with_options_yaml() -> String {
         for field in struct_item.fields {
             // Process each field
             if let Some(field_name) = &field.ident {
-                let serde_props = extract_serde_properties(&field);
+                let SerdeProperties {
+                    default_func,
+                    rename,
+                    alias,
+                } = extract_serde_properties(&field);
 
                 let field_type = field.ty;
                 let mut required = match extract_type_name(&field_type).as_str() {
@@ -80,9 +100,6 @@ pub fn update_with_options_yaml() -> String {
                 };
                 let field_type = quote::quote!(#field_type).to_string();
                 let comments = extract_comments(&field.attrs);
-                let alias = serde_props.alias;
-                let rename = serde_props.rename;
-                let default_func = serde_props.default_func;
 
                 // Replace the function name with the function body.
                 let mut default = default_func.clone();
@@ -105,9 +122,16 @@ pub fn update_with_options_yaml() -> String {
                     default,
                     alias,
                 });
+            } else {
+                panic!("Unexpected tuple struct: {}", struct_name);
             }
         }
-        struct_infos.insert(struct_name, struct_info);
+        if struct_infos
+            .insert(struct_name.clone(), struct_info)
+            .is_some()
+        {
+            panic!("Duplicate struct: {}", struct_name);
+        };
     }
 
     // Flatten the nested options.
@@ -155,6 +179,7 @@ struct FunctionInfo {
     body: String,
 }
 
+/// Has `#[derive(WithOptions)]`
 fn has_with_options_attribute(attrs: &[Attribute]) -> bool {
     attrs.iter().any(|attr| {
         if let Ok(Meta::List(meta_list)) = attr.parse_meta() {
@@ -229,6 +254,16 @@ fn extract_serde_properties(field: &Field) -> SerdeProperties {
     SerdeProperties::default()
 }
 
+/// Flatten the nested options, e.g.,
+/// ```ignore
+/// pub struct KafkaConfig {
+///     #[serde(flatten)]
+///     pub common: KafkaCommon,
+///     #[serde(flatten)]
+///     pub rdkafka_properties: RdKafkaPropertiesProducer,
+///     // ...
+/// }
+/// ```
 fn flatten_nested_options(options: BTreeMap<String, StructInfo>) -> BTreeMap<String, StructInfo> {
     let mut deleted_keys = HashSet::new();
 
