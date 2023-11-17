@@ -776,6 +776,7 @@ mod batch_update;
 mod batch_values;
 mod logical_agg;
 mod logical_apply;
+mod logical_cdc_scan;
 mod logical_dedup;
 mod logical_delete;
 mod logical_except;
@@ -864,6 +865,7 @@ pub use batch_update::BatchUpdate;
 pub use batch_values::BatchValues;
 pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
+pub use logical_cdc_scan::LogicalCdcScan;
 pub use logical_dedup::LogicalDedup;
 pub use logical_delete::LogicalDelete;
 pub use logical_except::LogicalExcept;
@@ -948,6 +950,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Filter }
             , { Logical, Project }
             , { Logical, Scan }
+            , { Logical, CdcScan }
             , { Logical, SysScan }
             , { Logical, Source }
             , { Logical, Insert }
@@ -1041,6 +1044,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Filter }
             , { Logical, Project }
             , { Logical, Scan }
+            , { Logical, CdcScan }
             , { Logical, SysScan }
             , { Logical, Source }
             , { Logical, Insert }

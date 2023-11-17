@@ -36,13 +36,13 @@ use crate::{Explain, TableCatalog};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamCdcTableScan {
     pub base: PlanBase<Stream>,
-    core: generic::Scan,
+    core: generic::CdcScan,
     batch_plan_id: PlanNodeId,
     stream_scan_type: StreamScanType,
 }
 
 impl StreamCdcTableScan {
-    pub fn new(core: generic::Scan) -> Self {
+    pub fn new(core: generic::CdcScan) -> Self {
         let batch_plan_id = core.ctx.next_plan_node_id();
         let distribution = Distribution::SomeShard;
         let base = PlanBase::new_stream_with_core(
@@ -64,7 +64,7 @@ impl StreamCdcTableScan {
         &self.core.table_name
     }
 
-    pub fn core(&self) -> &generic::Scan {
+    pub fn core(&self) -> &generic::CdcScan {
         &self.core
     }
 
