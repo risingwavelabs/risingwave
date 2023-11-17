@@ -27,12 +27,12 @@ message ActorInfo {
 }
 
 enum WorkerType {
-  UNSPECIFIED = 0;
-  FRONTEND = 1;
-  COMPUTE_NODE = 2;
-  RISE_CTL = 3;
-  COMPACTOR = 4;
-  META = 5;
+  WORKER_TYPE_UNSPECIFIED = 0;
+  WORKER_TYPE_FRONTEND = 1;
+  WORKER_TYPE_COMPUTE_NODE = 2;
+  WORKER_TYPE_RISE_CTL = 3;
+  WORKER_TYPE_COMPACTOR = 4;
+  WORKER_TYPE_META = 5;
 }
 
 message ParallelUnit {

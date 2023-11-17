@@ -32,37 +32,36 @@ use risingwave_common::hash::{HashKey, NullBitmap};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::expr::NonStrictExpression;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
-use super::{Barrier, Executor, Message, MessageStream, StreamExecutorError, StreamExecutorResult};
+use super::{
+    Barrier, Executor, ExecutorInfo, Message, MessageStream, StreamExecutorError,
+    StreamExecutorResult,
+};
 use crate::cache::{cache_may_stale, new_with_hasher_in, ManagedLruCache};
 use crate::common::metrics::MetricsInfo;
 use crate::common::JoinStreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{
-    ActorContextRef, BoxedExecutor, JoinType, JoinTypePrimitive, PkIndices, Watermark,
-};
+use crate::executor::{ActorContextRef, BoxedExecutor, JoinType, JoinTypePrimitive, Watermark};
 use crate::task::AtomicU64Ref;
 
 pub struct TemporalJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitive> {
     ctx: ActorContextRef,
+    info: ExecutorInfo,
     left: BoxedExecutor,
     right: BoxedExecutor,
     right_table: TemporalSide<K, S>,
     left_join_keys: Vec<usize>,
     right_join_keys: Vec<usize>,
     null_safe: Vec<bool>,
-    condition: Option<BoxedExpression>,
+    condition: Option<NonStrictExpression>,
     output_indices: Vec<usize>,
-    pk_indices: PkIndices,
-    schema: Schema,
     chunk_size: usize,
-    identity: String,
     // TODO: update metrics
     #[allow(dead_code)]
     metrics: Arc<StreamingMetrics>,
@@ -181,7 +180,7 @@ impl<K: HashKey, S: StateStore> TemporalSide<K, S> {
                     &pk_prefix,
                     ..,
                     false,
-                    PrefetchOptions::new_for_exhaust_iter(),
+                    PrefetchOptions::default(),
                 )
                 .await?;
 
@@ -332,30 +331,22 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         left: BoxedExecutor,
         right: BoxedExecutor,
         table: StorageTable<S>,
         left_join_keys: Vec<usize>,
         right_join_keys: Vec<usize>,
         null_safe: Vec<bool>,
-        condition: Option<BoxedExpression>,
-        pk_indices: PkIndices,
+        condition: Option<NonStrictExpression>,
         output_indices: Vec<usize>,
         table_output_indices: Vec<usize>,
         table_stream_key_indices: Vec<usize>,
-        executor_id: u64,
         watermark_epoch: AtomicU64Ref,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         join_key_data_types: Vec<DataType>,
     ) -> Self {
-        let schema_fields = [left.schema().fields.clone(), right.schema().fields.clone()].concat();
-
-        let schema: Schema = output_indices
-            .iter()
-            .map(|&idx| schema_fields[idx].clone())
-            .collect();
-
         let alloc = StatsAlloc::new(Global).shared();
 
         let metrics_info = MetricsInfo::new(
@@ -374,6 +365,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
 
         Self {
             ctx: ctx.clone(),
+            info,
             left,
             right,
             right_table: TemporalSide {
@@ -389,10 +381,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
             null_safe,
             condition,
             output_indices,
-            schema,
             chunk_size,
-            pk_indices,
-            identity: format!("TemporalJoinExecutor {:X}", executor_id),
             metrics,
         }
     }
@@ -432,7 +421,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                 InternalMessage::Chunk(chunk) => {
                     let mut builder = JoinStreamChunkBuilder::new(
                         self.chunk_size,
-                        self.schema.data_types(),
+                        self.info.schema.data_types(),
                         left_map.clone(),
                         right_map.clone(),
                     );
@@ -444,7 +433,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                         };
                         if key.null_bitmap().is_subset(&null_matched)
                             && let join_entry = self.right_table.lookup(&key, epoch).await?
-                            && !join_entry.is_empty() {
+                            && !join_entry.is_empty()
+                        {
                             for right_row in join_entry.cached.values() {
                                 // check join condition
                                 let ok = if let Some(ref mut cond) = self.condition {
@@ -458,7 +448,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor
                                 };
 
                                 if ok {
-                                    if let Some(chunk) = builder.append_row(op, left_row, right_row) {
+                                    if let Some(chunk) = builder.append_row(op, left_row, right_row)
+                                    {
                                         yield Message::Chunk(chunk);
                                     }
                                 }
@@ -505,14 +496,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Executor
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> super::PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        self.identity.as_str()
+        &self.info.identity
     }
 }

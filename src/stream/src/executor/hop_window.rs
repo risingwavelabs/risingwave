@@ -19,7 +19,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::types::Interval;
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::expr::NonStrictExpression;
 use risingwave_expr::ExprError;
 
 use super::error::StreamExecutorError;
@@ -28,13 +28,13 @@ use crate::common::StreamChunkBuilder;
 
 pub struct HopWindowExecutor {
     _ctx: ActorContextRef,
-    pub input: BoxedExecutor,
     pub info: ExecutorInfo,
+    pub input: BoxedExecutor,
     pub time_col_idx: usize,
     pub window_slide: Interval,
     pub window_size: Interval,
-    window_start_exprs: Vec<BoxedExpression>,
-    window_end_exprs: Vec<BoxedExpression>,
+    window_start_exprs: Vec<NonStrictExpression>,
+    window_end_exprs: Vec<NonStrictExpression>,
     pub output_indices: Vec<usize>,
     chunk_size: usize,
 }
@@ -43,20 +43,20 @@ impl HopWindowExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        input: BoxedExecutor,
         info: ExecutorInfo,
+        input: BoxedExecutor,
         time_col_idx: usize,
         window_slide: Interval,
         window_size: Interval,
-        window_start_exprs: Vec<BoxedExpression>,
-        window_end_exprs: Vec<BoxedExpression>,
+        window_start_exprs: Vec<NonStrictExpression>,
+        window_end_exprs: Vec<NonStrictExpression>,
         output_indices: Vec<usize>,
         chunk_size: usize,
     ) -> Self {
         HopWindowExecutor {
             _ctx: ctx,
-            input,
             info,
+            input,
             time_col_idx,
             window_slide,
             window_size,
@@ -251,6 +251,7 @@ mod tests {
     use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::types::{DataType, Interval};
     use risingwave_expr::expr::test_utils::make_hop_window_expression;
+    use risingwave_expr::expr::NonStrictExpression;
 
     use crate::executor::test_utils::MockSource;
     use crate::executor::{ActorContext, Executor, ExecutorInfo, StreamChunk};
@@ -292,23 +293,30 @@ mod tests {
 
         super::HopWindowExecutor::new(
             ActorContext::create(123),
-            input,
             ExecutorInfo {
                 // TODO: the schema is incorrect, but it seems useless here.
                 schema,
                 pk_indices,
-                identity: "test".to_string(),
+                identity: "HopWindowExecutor".to_string(),
             },
+            input,
             2,
             window_slide,
             window_size,
-            window_start_exprs,
-            window_end_exprs,
+            window_start_exprs
+                .into_iter()
+                .map(NonStrictExpression::for_test)
+                .collect(),
+            window_end_exprs
+                .into_iter()
+                .map(NonStrictExpression::for_test)
+                .collect(),
             output_indices,
             CHUNK_SIZE,
         )
         .boxed()
     }
+
     #[tokio::test]
     async fn test_execute() {
         let default_indices: Vec<_> = (0..5).collect();

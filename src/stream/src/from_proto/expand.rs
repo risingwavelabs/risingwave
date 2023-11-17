@@ -19,7 +19,6 @@ use crate::executor::ExpandExecutor;
 
 pub struct ExpandExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for ExpandExecutorBuilder {
     type Node = ExpandNode;
 
@@ -30,7 +29,6 @@ impl ExecutorBuilder for ExpandExecutorBuilder {
         _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
         let [input]: [_; 1] = params.input.try_into().unwrap();
-        let pk_indices = params.pk_indices;
         let column_subsets = node
             .column_subsets
             .iter()
@@ -42,6 +40,6 @@ impl ExecutorBuilder for ExpandExecutorBuilder {
                     .collect_vec()
             })
             .collect_vec();
-        Ok(ExpandExecutor::new(input, pk_indices, column_subsets).boxed())
+        Ok(ExpandExecutor::new(params.info, input, column_subsets).boxed())
     }
 }

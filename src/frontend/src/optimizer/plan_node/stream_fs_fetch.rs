@@ -20,9 +20,9 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbStreamFsFetch, StreamFsFetchNode};
 
+use super::stream::prelude::*;
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary};
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::{childless_record, Distill};
 use crate::optimizer::plan_node::{generic, ExprRewritable, StreamNode};
 use crate::optimizer::property::Distribution;
@@ -30,7 +30,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamFsFetch {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     input: PlanRef,
     core: generic::Source,
 }
@@ -48,7 +48,7 @@ impl_plan_tree_node_for_unary! { StreamFsFetch }
 
 impl StreamFsFetch {
     pub fn new(input: PlanRef, source: generic::Source) -> Self {
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &source,
             Distribution::SomeShard,
             source.catalog.as_ref().map_or(true, |s| s.append_only),
@@ -111,12 +111,7 @@ impl StreamNode for StreamFsFetch {
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
             properties: source_catalog.properties.clone().into_iter().collect(),
-            rate_limit: self
-                .base
-                .ctx()
-                .session_ctx()
-                .config()
-                .get_streaming_rate_limit(),
+            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
         });
         NodeBody::StreamFsFetch(StreamFsFetchNode {
             node_inner: source_inner,

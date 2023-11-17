@@ -27,12 +27,14 @@ use parking_lot::Mutex;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorSuppressor, RwError};
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::source::ConnectorSplit;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de::DeserializeOwned;
 
+use super::cdc::DebeziumCdcMeta;
 use super::datagen::DatagenMeta;
 use super::filesystem::FsSplit;
 use super::google_pubsub::GooglePubsubMeta;
@@ -51,7 +53,7 @@ use crate::{
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
-const UPSTREAM_SOURCE_KEY: &str = "connector";
+pub const UPSTREAM_SOURCE_KEY: &str = "connector";
 
 pub trait TryFromHashmap: Sized {
     fn try_from_hashmap(props: HashMap<String, String>) -> Result<Self>;
@@ -193,18 +195,15 @@ impl SourceContext {
                 suppressor.lock().max()
             );
         }
-        self.metrics
-            .user_source_error_count
-            .with_label_values(&[
-                "SourceError",
-                // TODO(jon-chuang): add the error msg truncator to truncate these
-                &err_str,
-                // Let's be a bit more specific for SourceExecutor
-                "SourceExecutor",
-                &self.source_info.fragment_id.to_string(),
-                &self.source_info.source_id.table_id.to_string(),
-            ])
-            .inc();
+        GLOBAL_ERROR_METRICS.user_source_error.report([
+            "SourceError".to_owned(),
+            // TODO(jon-chuang): add the error msg truncator to truncate these
+            err_str,
+            // Let's be a bit more specific for SourceExecutor
+            "SourceExecutor".to_owned(),
+            self.source_info.fragment_id.to_string(),
+            self.source_info.source_id.table_id.to_string(),
+        ]);
     }
 }
 
@@ -561,7 +560,7 @@ pub type SplitId = Arc<str>;
 pub struct SourceMessage {
     pub key: Option<Vec<u8>>,
     pub payload: Option<Vec<u8>>,
-    pub offset: String,
+    pub offset: String, // TODO: use `Arc<str>`
     pub split_id: SplitId,
     pub meta: SourceMeta,
 }
@@ -572,6 +571,7 @@ pub enum SourceMeta {
     Nexmark(NexmarkMeta),
     GooglePubsub(GooglePubsubMeta),
     Datagen(DatagenMeta),
+    DebeziumCdc(DebeziumCdcMeta),
     // For the source that doesn't have meta data.
     Empty,
 }

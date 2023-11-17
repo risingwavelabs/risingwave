@@ -26,7 +26,7 @@ use risingwave_common::row::{self, once, OwnedRow, OwnedRow as RowData, Row};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{
-    build_func_non_strict, BoxedExpression, InputRefExpression, LiteralExpression,
+    build_func_non_strict, InputRefExpression, LiteralExpression, NonStrictExpression,
 };
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::{
@@ -39,7 +39,8 @@ use super::barrier_align::*;
 use super::error::StreamExecutorError;
 use super::monitor::StreamingMetrics;
 use super::{
-    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
+    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
+    PkIndicesRef,
 };
 use crate::common::table::state_table::{StateTable, WatermarkCacheParameterizedStateTable};
 use crate::common::StreamChunkBuilder;
@@ -48,15 +49,14 @@ use crate::task::ActorEvalErrorReport;
 
 pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool> {
     ctx: ActorContextRef,
+    info: ExecutorInfo,
+
     source_l: Option<BoxedExecutor>,
     source_r: Option<BoxedExecutor>,
     key_l: usize,
-    pk_indices: PkIndices,
-    identity: String,
     comparator: ExprNodeType,
     left_table: WatermarkCacheParameterizedStateTable<S, USE_WATERMARK_CACHE>,
     right_table: StateTable<S>,
-    schema: Schema,
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
@@ -66,30 +66,26 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         source_l: BoxedExecutor,
         source_r: BoxedExecutor,
         key_l: usize,
-        pk_indices: PkIndices,
-        executor_id: u64,
         comparator: ExprNodeType,
         state_table_l: WatermarkCacheParameterizedStateTable<S, USE_WATERMARK_CACHE>,
         state_table_r: StateTable<S>,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
     ) -> Self {
-        let schema = source_l.schema().clone();
         Self {
             ctx,
+            info,
             source_l: Some(source_l),
             source_r: Some(source_r),
             key_l,
-            pk_indices,
-            identity: format!("DynamicFilterExecutor {:X}", executor_id),
             comparator,
             left_table: state_table_l,
             right_table: state_table_r,
             metrics,
-            schema,
             chunk_size,
         }
     }
@@ -97,7 +93,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
     async fn apply_batch(
         &mut self,
         chunk: &StreamChunk,
-        condition: Option<BoxedExpression>,
+        condition: Option<NonStrictExpression>,
     ) -> Result<(Vec<Op>, Bitmap), StreamExecutorError> {
         let mut new_ops = Vec::with_capacity(chunk.capacity());
         let mut new_visibility = BitmapBuilder::with_capacity(chunk.capacity());
@@ -179,7 +175,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         }
 
         let new_visibility = new_visibility.finish();
-
+        self.left_table.try_flush().await?;
         Ok((new_ops, new_visibility))
     }
 
@@ -265,7 +261,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         let dynamic_cond = {
             let eval_error_report = ActorEvalErrorReport {
                 actor_context: self.ctx.clone(),
-                identity: self.identity.as_str().into(),
+                identity: Arc::from(self.info.identity.as_str()),
             };
             move |literal: Datum| {
                 literal.map(|scalar| {
@@ -309,7 +305,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         yield Message::Barrier(barrier);
 
         let mut stream_chunk_builder =
-            StreamChunkBuilder::new(self.chunk_size, self.schema.data_types());
+            StreamChunkBuilder::new(self.chunk_size, self.info.schema.data_types());
 
         let watermark_can_clean_state = !matches!(self.comparator, LessThan | LessThanOrEqual);
         let mut unused_clean_hint = None;
@@ -396,7 +392,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                                 self.left_table.iter_with_vnode(
                                     vnode,
                                     &range,
-                                    PrefetchOptions::new_for_exhaust_iter(),
+                                    PrefetchOptions::default(),
                                 )
                             }),
                         )
@@ -478,15 +474,15 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> Executor
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        self.identity.as_str()
+        &self.info.identity
     }
 }
 
@@ -544,13 +540,19 @@ mod tests {
         let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![0]);
         let (tx_r, source_r) = MockSource::channel(schema, vec![]);
 
+        let schema = source_l.schema().clone();
+        let info = ExecutorInfo {
+            schema,
+            pk_indices: vec![0],
+            identity: "DynamicFilterExecutor".to_string(),
+        };
+
         let executor = DynamicFilterExecutor::<MemoryStateStore, false>::new(
             ActorContext::create(123),
+            info,
             Box::new(source_l),
             Box::new(source_r),
             0,
-            vec![0],
-            1,
             comparator,
             mem_state_l,
             mem_state_r,

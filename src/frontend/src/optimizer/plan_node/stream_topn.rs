@@ -17,6 +17,7 @@ use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{DistillUnit, TopNLimit};
+use super::stream::prelude::*;
 use super::utils::{plan_node_name, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, Order};
@@ -25,7 +26,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// `StreamTopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTopN {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::TopN<PlanRef>,
 }
 
@@ -40,7 +41,7 @@ impl StreamTopN {
         };
         let watermark_columns = FixedBitSet::with_capacity(input.schema().len());
 
-        let base = PlanBase::new_stream_with_logical(&core, dist, false, false, watermark_columns);
+        let base = PlanBase::new_stream_with_core(&core, dist, false, false, watermark_columns);
         StreamTopN { base, core }
     }
 

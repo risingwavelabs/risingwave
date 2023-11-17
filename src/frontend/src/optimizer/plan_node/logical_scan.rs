@@ -18,22 +18,23 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnDesc, TableDesc};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, TableDesc};
+use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
     PredicatePushdown, StreamTableScan, ToBatch, ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
-    PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+    PredicatePushdownContext, RewriteStreamContext, StreamCdcTableScan, ToStreamContext,
 };
 use crate::optimizer::property::{Cardinality, Order};
 use crate::optimizer::rule::IndexSelectionRule;
@@ -42,7 +43,7 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalScan {
-    pub base: PlanBase,
+    pub base: PlanBase<Logical>,
     core: generic::Scan,
 }
 
@@ -63,7 +64,7 @@ impl LogicalScan {
     /// Create a [`LogicalScan`] node. Used by planner.
     pub fn create(
         table_name: String, // explain-only
-        is_sys_table: bool,
+        scan_table_type: ScanTableType,
         table_desc: Rc<TableDesc>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
@@ -72,7 +73,7 @@ impl LogicalScan {
     ) -> Self {
         generic::Scan::new(
             table_name,
-            is_sys_table,
+            scan_table_type,
             (0..table_desc.columns.len()).collect(),
             table_desc,
             indexes,
@@ -84,12 +85,30 @@ impl LogicalScan {
         .into()
     }
 
+    pub fn create_for_cdc(
+        table_name: String, // explain-only
+        cdc_table_desc: Rc<CdcTableDesc>,
+        ctx: OptimizerContextRef,
+    ) -> Self {
+        generic::Scan::new_for_cdc(
+            table_name,
+            (0..cdc_table_desc.columns.len()).collect(),
+            cdc_table_desc,
+            ctx,
+        )
+        .into()
+    }
+
     pub fn table_name(&self) -> &str {
         &self.core.table_name
     }
 
-    pub fn is_sys_table(&self) -> bool {
-        self.core.is_sys_table
+    pub fn scan_table_type(&self) -> &ScanTableType {
+        &self.core.scan_table_type
+    }
+
+    pub fn is_cdc_table(&self) -> bool {
+        matches!(self.core.scan_table_type, ScanTableType::CdcTable)
     }
 
     pub fn for_system_time_as_of_proctime(&self) -> bool {
@@ -104,6 +123,10 @@ impl LogicalScan {
     /// Get a reference to the logical scan's table desc.
     pub fn table_desc(&self) -> &TableDesc {
         self.core.table_desc.as_ref()
+    }
+
+    pub fn cdc_table_desc(&self) -> &CdcTableDesc {
+        self.core.cdc_table_desc.as_ref()
     }
 
     /// Get the descs of the output columns.
@@ -233,7 +256,7 @@ impl LogicalScan {
         }
 
         let mut inverse_mapping = {
-            let mapping = ColIndexMapping::with_target_size(
+            let mapping = ColIndexMapping::new(
                 self.required_col_idx().iter().map(|i| Some(*i)).collect(),
                 self.table_desc().columns.len(),
             );
@@ -242,14 +265,14 @@ impl LogicalScan {
             for (src, dst) in mapping.mapping_pairs() {
                 inverse_map[dst] = Some(src);
             }
-            ColIndexMapping::with_target_size(inverse_map, mapping.source_size())
+            ColIndexMapping::new(inverse_map, mapping.source_size())
         };
 
         predicate = predicate.rewrite_expr(&mut inverse_mapping);
 
         let scan_without_predicate = generic::Scan::new(
             self.table_name().to_string(),
-            self.is_sys_table(),
+            self.scan_table_type().clone(),
             self.required_col_idx().to_vec(),
             self.core.table_desc.clone(),
             self.indexes().to_vec(),
@@ -267,13 +290,14 @@ impl LogicalScan {
     }
 
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
-        generic::Scan::new(
+        generic::Scan::new_inner(
             self.table_name().to_string(),
-            self.is_sys_table(),
+            self.scan_table_type().clone(),
             self.output_col_idx().to_vec(),
             self.core.table_desc.clone(),
+            self.core.cdc_table_desc.clone(),
             self.indexes().to_vec(),
-            self.base.ctx.clone(),
+            self.base.ctx().clone(),
             predicate,
             self.for_system_time_as_of_proctime(),
             self.table_cardinality(),
@@ -282,13 +306,14 @@ impl LogicalScan {
     }
 
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
-        generic::Scan::new(
+        generic::Scan::new_inner(
             self.table_name().to_string(),
-            self.is_sys_table(),
+            self.scan_table_type().clone(),
             output_col_idx,
             self.core.table_desc.clone(),
+            self.core.cdc_table_desc.clone(),
             self.indexes().to_vec(),
-            self.base.ctx.clone(),
+            self.base.ctx().clone(),
             self.predicate().clone(),
             self.for_system_time_as_of_proctime(),
             self.table_cardinality(),
@@ -309,7 +334,7 @@ impl_plan_tree_node_for_leaf! {LogicalScan}
 
 impl Distill for LogicalScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
-        let verbose = self.base.ctx.is_explain_verbose();
+        let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(5);
         vec.push(("table", Pretty::from(self.table_name().to_owned())));
         let key_is_columns =
@@ -394,6 +419,11 @@ impl PredicatePushdown for LogicalScan {
         mut predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
+        // skip pushdown if the table is cdc table
+        if self.is_cdc_table() {
+            return self.clone().into();
+        }
+
         // If the predicate contains `CorrelatedInputRef` or `now()`. We don't push down.
         // This case could come from the predicate push down before the subquery unnesting.
         struct HasCorrelated {}
@@ -412,7 +442,7 @@ impl PredicatePushdown for LogicalScan {
             .conjunctions
             .extract_if(|expr| expr.count_nows() > 0 || HasCorrelated {}.visit_expr(expr))
             .collect();
-        let predicate = predicate.rewrite_expr(&mut ColIndexMapping::with_target_size(
+        let predicate = predicate.rewrite_expr(&mut ColIndexMapping::new(
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
             self.table_desc().columns.len(),
         ));
@@ -440,7 +470,7 @@ impl LogicalScan {
             let (scan_ranges, predicate) = self.predicate().clone().split_to_scan_ranges(
                 self.core.table_desc.clone(),
                 self.base
-                    .ctx
+                    .ctx()
                     .session_ctx()
                     .config()
                     .get_max_split_range_gap(),
@@ -523,14 +553,12 @@ impl ToBatch for LogicalScan {
 
 impl ToStream for LogicalScan {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        if self.is_sys_table() {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "streaming on system table is not allowed".to_string(),
-                None.into(),
-            )));
-        }
         if self.predicate().always_true() {
-            Ok(StreamTableScan::new(self.core.clone()).into())
+            if self.is_cdc_table() {
+                Ok(StreamCdcTableScan::new(self.core.clone()).into())
+            } else {
+                Ok(StreamTableScan::new(self.core.clone()).into())
+            }
         } else {
             let (scan, predicate, project_expr) = self.predicate_pull_up();
             let mut plan = LogicalFilter::create(scan.into(), predicate);
@@ -545,13 +573,14 @@ impl ToStream for LogicalScan {
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        if self.is_sys_table() {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "streaming on system table is not allowed".to_string(),
-                None.into(),
-            )));
+        if self.is_cdc_table() {
+            return Ok((
+                self.clone().into(),
+                ColIndexMapping::identity(self.schema().len()),
+            ));
         }
-        match self.base.stream_key.is_none() {
+
+        match self.base.stream_key().is_none() {
             true => {
                 let mut col_ids = HashSet::new();
 

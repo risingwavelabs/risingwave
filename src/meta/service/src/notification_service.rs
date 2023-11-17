@@ -207,7 +207,7 @@ impl NotificationServiceImpl {
 impl NotificationService for NotificationServiceImpl {
     type SubscribeStream = UnboundedReceiverStream<Notification>;
 
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     async fn subscribe(
         &self,
         request: Request<SubscribeRequest>,

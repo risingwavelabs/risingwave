@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg_attr(coverage, feature(no_coverage))]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 use estimate_size::{
     add_trait_bounds, extract_ignored_generics_list, has_nested_flag_attribute_list,
@@ -52,7 +52,7 @@ mod estimate_size;
 ///     }
 /// }
 /// ```
-#[cfg_attr(coverage, no_coverage)]
+#[cfg_attr(coverage, coverage(off))]
 #[proc_macro_derive(OverrideConfig, attributes(override_opts))]
 #[proc_macro_error]
 pub fn override_config(input: TokenStream) -> TokenStream {
@@ -190,7 +190,11 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
             if data_struct.fields.is_empty() {
                 // Empty structs are easy to implement.
                 let gen = quote! {
-                    impl EstimateSize for #name {}
+                    impl EstimateSize for #name {
+                        fn estimated_heap_size(&self) -> usize {
+                            0
+                        }
+                    }
                 };
                 return gen.into();
             }

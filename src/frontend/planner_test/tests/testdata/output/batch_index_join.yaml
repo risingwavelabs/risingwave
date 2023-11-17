@@ -6,7 +6,7 @@
     select * from t join t2 on t.b = t2.d;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: t.b = idx.d, output: all }
+    └─BatchLookupJoin { type: Inner, predicate: t.b = idx.d, output: all, lookup table: idx }
       └─BatchExchange { order: [], dist: UpstreamHashShard(t.b) }
         └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
 - sql: |
@@ -18,7 +18,7 @@
     select * from t join t2 on t.a = t2.c and t.b = t2.d;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: t.a = idx2.c AND t.b = idx2.d, output: all }
+    └─BatchLookupJoin { type: Inner, predicate: t.a = idx2.c AND t.b = idx2.d, output: all, lookup table: idx2 }
       └─BatchExchange { order: [], dist: UpstreamHashShard(t.a) }
         └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
 - sql: |
@@ -28,7 +28,7 @@
     select * from t join t2 on t.b = t2.d;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: t.b = idx.d, output: all }
+    └─BatchLookupJoin { type: Inner, predicate: t.b = idx.d, output: all, lookup table: idx }
       └─BatchExchange { order: [], dist: UpstreamHashShard(t.b) }
         └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
 - name: test index join predicate reorder
@@ -39,7 +39,7 @@
     select * from t join t2 on t.b = t2.d and t.a = t2.c;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: t.a = idx.c AND t.b = idx.d, output: all }
+    └─BatchLookupJoin { type: Inner, predicate: t.a = idx.c AND t.b = idx.d, output: all, lookup table: idx }
       └─BatchExchange { order: [], dist: UpstreamHashShard(t.a) }
         └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
 - name: test index join prefix lookup
@@ -50,7 +50,7 @@
     select * from t join t2 on t.a = t2.c;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: t.a = idx.c, output: all }
+    └─BatchLookupJoin { type: Inner, predicate: t.a = idx.c, output: all, lookup table: idx }
       └─BatchExchange { order: [], dist: UpstreamHashShard(t.a) }
         └─BatchScan { table: t, columns: [t.a, t.b], distribution: SomeShard }
 - name: test index join distribution derive
@@ -60,10 +60,10 @@
     select t2.c, t2.d, count(distinct t.a) from t join t2 on t.a = t2.c group by t2.c, t2.d;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchHashAgg { group_key: [first_value(t2.c order_by(t2.c ASC))], aggs: [first_value(first_value(t2.d order_by(t2.d ASC)) order_by(first_value(t2.d order_by(t2.d ASC)) ASC)), count(t.a)] }
-      └─BatchExchange { order: [], dist: HashShard(first_value(t2.c order_by(t2.c ASC))) }
-        └─BatchHashAgg { group_key: [t.a], aggs: [first_value(t2.c order_by(t2.c ASC)), first_value(t2.d order_by(t2.d ASC))] }
-          └─BatchLookupJoin { type: Inner, predicate: t.a = t2.c, output: [t2.c, t2.d, t.a] }
+    └─BatchHashAgg { group_key: [internal_last_seen_value(t2.c)], aggs: [internal_last_seen_value(internal_last_seen_value(t2.d)), count(t.a)] }
+      └─BatchExchange { order: [], dist: HashShard(internal_last_seen_value(t2.c)) }
+        └─BatchHashAgg { group_key: [t.a], aggs: [internal_last_seen_value(t2.c), internal_last_seen_value(t2.d)] }
+          └─BatchLookupJoin { type: Inner, predicate: t.a = t2.c, output: [t2.c, t2.d, t.a], lookup table: t2 }
             └─BatchExchange { order: [], dist: UpstreamHashShard(t.a) }
               └─BatchScan { table: t, columns: [t.a], distribution: SomeShard }
 - sql: |
@@ -73,7 +73,7 @@
     select * from t1 join idx on t1.a = idx.c and t1.b = idx.d;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: t1.a = idx.c AND t1.b = idx.d, output: all }
+    └─BatchLookupJoin { type: Inner, predicate: t1.a = idx.c AND t1.b = idx.d, output: all, lookup table: idx }
       └─BatchExchange { order: [], dist: UpstreamHashShard(t1.a) }
         └─BatchScan { table: t1, columns: [t1.a, t1.b], distribution: SomeShard }
 - name: shouldn't be a lookup join

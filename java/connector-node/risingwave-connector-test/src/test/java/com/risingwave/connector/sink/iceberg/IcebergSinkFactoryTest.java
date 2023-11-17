@@ -117,7 +117,7 @@ public class IcebergSinkFactoryTest {
                                         .setTypeName(Data.DataType.TypeName.VARCHAR)
                                         .build()),
                         Lists.newArrayList("id"));
-        sinkFactory.validate(diffTypeTableSchema, tableProperties, SinkType.APPEND_ONLY);
+        sinkFactory.validate(diffTypeTableSchema, tableProperties, SinkType.SINK_TYPE_APPEND_ONLY);
     }
 
     @Test(expected = RuntimeException.class)
@@ -145,6 +145,6 @@ public class IcebergSinkFactoryTest {
                                         .setTypeName(Data.DataType.TypeName.INT32)
                                         .build()),
                         Lists.newArrayList("id"));
-        sinkFactory.validate(diffTypeTableSchema, tableProperties, SinkType.APPEND_ONLY);
+        sinkFactory.validate(diffTypeTableSchema, tableProperties, SinkType.SINK_TYPE_APPEND_ONLY);
     }
 }

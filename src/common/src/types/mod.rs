@@ -416,7 +416,7 @@ impl DataType {
             DataType::Timestamptz => ScalarImpl::Timestamptz(Timestamptz::MIN),
             DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),
             DataType::Interval => ScalarImpl::Interval(Interval::MIN),
-            DataType::Jsonb => ScalarImpl::Jsonb(JsonbVal::dummy()), // NOT `min` #7981
+            DataType::Jsonb => ScalarImpl::Jsonb(JsonbVal::null()), // NOT `min` #7981
             DataType::Struct(data_types) => ScalarImpl::Struct(StructValue::new(
                 data_types
                     .types()
@@ -997,11 +997,10 @@ impl ScalarImpl {
             DataType::Timestamptz => Timestamptz::from_str(s).map_err(|e| e.to_string())?.into(),
             DataType::Time => Time::from_str(s).map_err(|e| e.to_string())?.into(),
             DataType::Interval => Interval::from_str(s).map_err(|e| e.to_string())?.into(),
-            // Not processing list or struct literal right now. Leave it for later phase (normal backend
-            // evaluation).
-            DataType::List { .. } => return Err("not supported".into()),
+            DataType::List { .. } => ListValue::from_str(s, t)?.into(),
+            // Not processing struct literal right now. Leave it for later phase (normal backend evaluation).
             DataType::Struct(_) => return Err("not supported".into()),
-            DataType::Jsonb => return Err("not supported".into()),
+            DataType::Jsonb => JsonbVal::from_str(s).map_err(|e| e.to_string())?.into(),
             DataType::Bytea => str_to_bytea(s)?.into(),
         })
     }
@@ -1220,7 +1219,7 @@ mod tests {
         );
         assert_eq!(
             format!("{}", d),
-            "struct<i integer,j character varying>".to_string()
+            "struct<i integer, j character varying>".to_string()
         );
     }
 
@@ -1303,7 +1302,7 @@ mod tests {
                     ScalarImpl::Interval(Interval::from_month_day_usec(2, 3, 3333)),
                     DataType::Interval,
                 ),
-                DataTypeName::Jsonb => (ScalarImpl::Jsonb(JsonbVal::dummy()), DataType::Jsonb),
+                DataTypeName::Jsonb => (ScalarImpl::Jsonb(JsonbVal::null()), DataType::Jsonb),
                 DataTypeName::Struct => (
                     ScalarImpl::Struct(StructValue::new(vec![
                         ScalarImpl::Int64(233).into(),

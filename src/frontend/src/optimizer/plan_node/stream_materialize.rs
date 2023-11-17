@@ -24,11 +24,14 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::derive_columns;
+use super::stream::prelude::*;
+use super::stream::StreamPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::table_catalog::{CreateType, TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::derive::derive_pk;
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -36,7 +39,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// Materializes a stream.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamMaterialize {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     /// Child of Materialize plan
     input: PlanRef,
     table: TableCatalog,
@@ -149,7 +152,22 @@ impl StreamMaterialize {
                 TableType::MaterializedView => {
                     assert_matches!(user_distributed_by, RequiredDist::Any);
                     // ensure the same pk will not shuffle to different node
-                    RequiredDist::shard_by_key(input.schema().len(), input.expect_stream_key())
+                    let required_dist =
+                        RequiredDist::shard_by_key(input.schema().len(), input.expect_stream_key());
+
+                    // If the input is a stream join, enforce the stream key as the materialized
+                    // view distribution key to avoid slow backfilling caused by
+                    // data skew of the dimension table join key.
+                    // See <https://github.com/risingwavelabs/risingwave/issues/12824> for more information.
+                    let is_stream_join = matches!(input.as_stream_hash_join(), Some(_join))
+                        || matches!(input.as_stream_temporal_join(), Some(_join))
+                        || matches!(input.as_stream_delta_join(), Some(_join));
+
+                    if is_stream_join {
+                        return Ok(required_dist.enforce(input, &Order::any()));
+                    }
+
+                    required_dist
                 }
                 TableType::Index => {
                     assert_matches!(
@@ -233,6 +251,7 @@ impl StreamMaterialize {
             initialized_at_epoch: None,
             cleaned_by_watermark: false,
             create_type: CreateType::Foreground, // Will be updated in the handler itself.
+            description: None,
         })
     }
 
@@ -273,8 +292,8 @@ impl Distill for StreamMaterialize {
 
         vec.push(("pk_conflict", Pretty::from(pk_conflict_behavior)));
 
-        let watermark_columns = &self.base.watermark_columns;
-        if self.base.watermark_columns.count_ones(..) > 0 {
+        let watermark_columns = &self.base.watermark_columns();
+        if self.base.watermark_columns().count_ones(..) > 0 {
             let watermark_column_names = watermark_columns
                 .ones()
                 .map(|i| table.columns()[i].name_with_hidden().to_string())
@@ -294,16 +313,16 @@ impl PlanTreeNodeUnary for StreamMaterialize {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let new = Self::new(input, self.table().clone());
         new.base
-            .schema
+            .schema()
             .fields
             .iter()
-            .zip_eq_fast(self.base.schema.fields.iter())
+            .zip_eq_fast(self.base.schema().fields.iter())
             .for_each(|(a, b)| {
                 assert_eq!(a.data_type, b.data_type);
                 assert_eq!(a.type_name, b.type_name);
                 assert_eq!(a.sub_fields, b.sub_fields);
             });
-        assert_eq!(new.plan_base().stream_key, self.plan_base().stream_key);
+        assert_eq!(new.plan_base().stream_key(), self.plan_base().stream_key());
         new
     }
 }

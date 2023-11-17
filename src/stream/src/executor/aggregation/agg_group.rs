@@ -25,12 +25,12 @@ use risingwave_common::must_match;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction};
+use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 
 use super::agg_state::{AggState, AggStateStorage};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
-use crate::executor::PkIndices;
 
 pub trait Strategy {
     /// Infer the change type of the aggregation result. Don't need to take the ownership of
@@ -192,12 +192,12 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     /// For [`crate::executor::SimpleAggExecutor`], the `group_key` should be `None`.
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
+        version: PbAggNodeVersion,
         group_key: Option<GroupKey>,
         agg_calls: &[AggCall],
         agg_funcs: &[BoxedAggregateFunction],
         storages: &[AggStateStorage<S>],
         intermediate_state_table: &StateTable<S>,
-        pk_indices: &PkIndices,
         row_count_index: usize,
         extreme_cache_size: usize,
         input_schema: &Schema,
@@ -212,11 +212,11 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         let mut states = Vec::with_capacity(agg_calls.len());
         for (idx, (agg_call, agg_func)) in agg_calls.iter().zip_eq_fast(agg_funcs).enumerate() {
             let state = AggState::create(
+                version,
                 agg_call,
                 agg_func,
                 &storages[idx],
                 encoded_states.as_ref().map(|outputs| &outputs[idx]),
-                pk_indices,
                 extreme_cache_size,
                 input_schema,
             )?;
@@ -242,12 +242,12 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     /// Create a group from encoded states for EOWC. The previous output is set to `None`.
     #[allow(clippy::too_many_arguments)]
     pub fn create_eowc(
+        version: PbAggNodeVersion,
         group_key: Option<GroupKey>,
         agg_calls: &[AggCall],
         agg_funcs: &[BoxedAggregateFunction],
         storages: &[AggStateStorage<S>],
         encoded_states: &OwnedRow,
-        pk_indices: &PkIndices,
         row_count_index: usize,
         extreme_cache_size: usize,
         input_schema: &Schema,
@@ -255,11 +255,11 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         let mut states = Vec::with_capacity(agg_calls.len());
         for (idx, (agg_call, agg_func)) in agg_calls.iter().zip_eq_fast(agg_funcs).enumerate() {
             let state = AggState::create(
+                version,
                 agg_call,
                 agg_func,
                 &storages[idx],
                 Some(&encoded_states[idx]),
-                pk_indices,
                 extreme_cache_size,
                 input_schema,
             )?;

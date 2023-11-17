@@ -208,6 +208,10 @@ pub struct MetaConfig {
     #[serde(default)]
     pub disable_recovery: bool,
 
+    /// Whether to enable scale-in when recovery.
+    #[serde(default)]
+    pub enable_scale_in_when_recovery: bool,
+
     #[serde(default = "default::meta::meta_leader_lease_secs")]
     pub meta_leader_lease_secs: u64,
 
@@ -499,6 +503,10 @@ pub struct StorageConfig {
     #[serde(default)]
     pub meta_cache_capacity_mb: Option<usize>,
 
+    /// max memory usage for large query
+    #[serde(default)]
+    pub large_query_memory_usage_mb: Option<usize>,
+
     #[serde(default = "default::storage::disable_remote_compactor")]
     pub disable_remote_compactor: bool,
 
@@ -548,6 +556,9 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::max_preload_wait_time_mill")]
     pub max_preload_wait_time_mill: u64,
 
+    #[serde(default = "default::storage::max_version_pinning_duration_sec")]
+    pub max_version_pinning_duration_sec: u64,
+
     #[serde(default = "default::storage::object_store_streaming_read_timeout_ms")]
     pub object_store_streaming_read_timeout_ms: u64,
     #[serde(default = "default::storage::object_store_streaming_upload_timeout_ms")]
@@ -583,8 +594,14 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::enable_sst_vnode_bitmap")]
     pub enable_sst_vnode_bitmap: bool,
 
+    #[serde(default = "default::storage::max_preload_io_retry_times")]
+    pub max_preload_io_retry_times: usize,
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
+
+    /// The spill threshold for mem table.
+    #[serde(default = "default::storage::mem_table_spill_threshold")]
+    pub mem_table_spill_threshold: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde)]
@@ -637,9 +654,6 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::file_capacity_mb")]
     pub file_capacity_mb: usize,
 
-    #[serde(default)]
-    pub buffer_pool_size_mb: Option<usize>,
-
     #[serde(default = "default::file_cache::device_align")]
     pub device_align: usize,
 
@@ -664,17 +678,17 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::insert_rate_limit_mb")]
     pub insert_rate_limit_mb: usize,
 
-    #[serde(default = "default::file_cache::flush_rate_limit_mb")]
-    pub flush_rate_limit_mb: usize,
-
     #[serde(default = "default::file_cache::reclaim_rate_limit_mb")]
     pub reclaim_rate_limit_mb: usize,
 
-    #[serde(default = "default::file_cache::allocation_bits")]
-    pub allocation_bits: usize,
+    #[serde(default = "default::file_cache::ring_buffer_capacity_mb")]
+    pub ring_buffer_capacity_mb: usize,
 
-    #[serde(default = "default::file_cache::allocation_timeout_ms")]
-    pub allocation_timeout_ms: usize,
+    #[serde(default = "default::file_cache::catalog_bits")]
+    pub catalog_bits: usize,
+
+    #[serde(default = "default::file_cache::compression")]
+    pub compression: String,
 
     #[serde(default, flatten)]
     pub unrecognized: Unrecognized<Self>,
@@ -1065,6 +1079,10 @@ pub mod default {
             0
         }
 
+        pub fn max_version_pinning_duration_sec() -> u64 {
+            3 * 3600
+        }
+
         pub fn object_store_streaming_read_timeout_ms() -> u64 {
             10 * 60 * 1000
         }
@@ -1097,8 +1115,16 @@ pub mod default {
             true
         }
 
+<<<<<<< HEAD
         pub fn enable_sst_vnode_bitmap() -> bool {
             false
+=======
+        pub fn max_preload_io_retry_times() -> usize {
+            3
+        }
+        pub fn mem_table_spill_threshold() -> usize {
+            4 << 20
+>>>>>>> 483347725eacbe39a9a60b0817ac145aaf205f80
         }
     }
 
@@ -1134,10 +1160,6 @@ pub mod default {
             64
         }
 
-        pub fn buffer_pool_size_mb() -> usize {
-            1024
-        }
-
         pub fn device_align() -> usize {
             4096
         }
@@ -1170,20 +1192,20 @@ pub mod default {
             0
         }
 
-        pub fn flush_rate_limit_mb() -> usize {
-            0
-        }
-
         pub fn reclaim_rate_limit_mb() -> usize {
             0
         }
 
-        pub fn allocation_bits() -> usize {
-            0
+        pub fn ring_buffer_capacity_mb() -> usize {
+            256
         }
 
-        pub fn allocation_timeout_ms() -> usize {
-            10
+        pub fn catalog_bits() -> usize {
+            6
+        }
+
+        pub fn compression() -> String {
+            "none".to_string()
         }
     }
 
@@ -1398,9 +1420,10 @@ pub struct StorageMemoryConfig {
     pub block_cache_capacity_mb: usize,
     pub meta_cache_capacity_mb: usize,
     pub shared_buffer_capacity_mb: usize,
-    pub data_file_cache_buffer_pool_capacity_mb: usize,
-    pub meta_file_cache_buffer_pool_capacity_mb: usize,
+    pub data_file_cache_ring_buffer_capacity_mb: usize,
+    pub meta_file_cache_ring_buffer_capacity_mb: usize,
     pub compactor_memory_limit_mb: usize,
+    pub large_query_memory_usage_mb: usize,
     pub high_priority_ratio_in_percent: usize,
 }
 
@@ -1417,16 +1440,8 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         .storage
         .shared_buffer_capacity_mb
         .unwrap_or(default::storage::shared_buffer_capacity_mb());
-    let data_file_cache_buffer_pool_size_mb = s
-        .storage
-        .data_file_cache
-        .buffer_pool_size_mb
-        .unwrap_or(default::file_cache::buffer_pool_size_mb());
-    let meta_file_cache_buffer_pool_size_mb = s
-        .storage
-        .meta_file_cache
-        .buffer_pool_size_mb
-        .unwrap_or(default::file_cache::buffer_pool_size_mb());
+    let data_file_cache_ring_buffer_capacity_mb = s.storage.data_file_cache.ring_buffer_capacity_mb;
+    let meta_file_cache_ring_buffer_capacity_mb = s.storage.meta_file_cache.ring_buffer_capacity_mb;
     let compactor_memory_limit_mb = s
         .storage
         .compactor_memory_limit_mb
@@ -1435,14 +1450,19 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         .storage
         .high_priority_ratio_in_percent
         .unwrap_or(default::storage::high_priority_ratio_in_percent());
+    let large_query_memory_usage_mb = s
+        .storage
+        .shared_buffer_capacity_mb
+        .unwrap_or((100 - high_priority_ratio_in_percent) * block_cache_capacity_mb / 100);
 
     StorageMemoryConfig {
         block_cache_capacity_mb,
         meta_cache_capacity_mb,
         shared_buffer_capacity_mb,
-        data_file_cache_buffer_pool_capacity_mb: data_file_cache_buffer_pool_size_mb,
-        meta_file_cache_buffer_pool_capacity_mb: meta_file_cache_buffer_pool_size_mb,
+        data_file_cache_ring_buffer_capacity_mb,
+        meta_file_cache_ring_buffer_capacity_mb,
         compactor_memory_limit_mb,
+        large_query_memory_usage_mb,
         high_priority_ratio_in_percent,
     }
 }
@@ -1492,17 +1512,13 @@ mod tests {
     /// test fails.
     #[test]
     fn test_example_up_to_date() {
-        let actual = {
-            let content = include_str!("../../config/example.toml");
-            toml::from_str::<toml::Value>(content).expect("parse example.toml failed")
-        };
-        let expected =
-            toml::Value::try_from(RwConfig::default()).expect("serialize default config failed");
+        const HEADER: &str = "# This file is generated by ./risedev generate-example-config
+# Check detailed comments in src/common/src/config.rs";
 
-        // Compare the `Value` representation instead of string for normalization.
-        pretty_assertions::assert_eq!(
-            actual, expected,
-            "\n`config/example.toml` is not up-to-date with the default values specified in `config.rs`.\nPlease run `./risedev generate-example-config` to update it."
-        );
+        let actual = expect_test::expect_file!["../../config/example.toml"];
+        let default = toml::to_string(&RwConfig::default()).expect("failed to serialize");
+
+        let expected = format!("{HEADER}\n\n{default}");
+        actual.assert_eq(&expected);
     }
 }

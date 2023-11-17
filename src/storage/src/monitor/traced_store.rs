@@ -212,6 +212,13 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         let _span = TraceSpan::new_seal_current_epoch_span(next_epoch, self.storage_type);
         self.inner.seal_current_epoch(next_epoch)
     }
+
+    async fn try_flush(&mut self) -> StorageResult<()> {
+        let span = TraceSpan::new_try_flush_span(self.storage_type);
+        let res = self.inner.try_flush().await;
+        span.may_send_result(OperationResult::TryFlush(res.as_ref().map(|o| *o).into()));
+        res
+    }
 }
 
 impl<S: StateStore> StateStore for TracedStateStore<S> {

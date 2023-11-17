@@ -181,7 +181,7 @@ impl StateStore for HummockStorage {
         self.validate_read_epoch(wait_epoch)?;
         let wait_epoch = match wait_epoch {
             HummockReadEpoch::Committed(epoch) => {
-                assert_ne!(epoch, HummockEpoch::MAX, "epoch should not be u64::MAX");
+                assert_ne!(epoch, MAX_EPOCH, "epoch should not be MAX_EPOCH");
                 epoch
             }
             _ => return Ok(()),
@@ -208,7 +208,7 @@ impl StateStore for HummockStorage {
 
         if is_checkpoint {
             let _ = self.min_current_epoch.compare_exchange(
-                HummockEpoch::MAX,
+                MAX_EPOCH,
                 epoch,
                 MemOrdering::SeqCst,
                 MemOrdering::SeqCst,
@@ -232,7 +232,7 @@ impl StateStore for HummockStorage {
 
         let epoch = self.pinned_version.load().max_committed_epoch();
         self.min_current_epoch
-            .store(HummockEpoch::MAX, MemOrdering::SeqCst);
+            .store(MAX_EPOCH, MemOrdering::SeqCst);
         self.seal_epoch.store(epoch, MemOrdering::SeqCst);
 
         Ok(())
@@ -246,8 +246,8 @@ impl StateStore for HummockStorage {
         if let HummockReadEpoch::Current(read_current_epoch) = epoch {
             assert_ne!(
                 read_current_epoch,
-                HummockEpoch::MAX,
-                "epoch should not be u64::MAX"
+                MAX_EPOCH,
+                "epoch should not be MAX_EPOCH"
             );
             let sealed_epoch = self.seal_epoch.load(MemOrdering::SeqCst);
             if read_current_epoch > sealed_epoch {

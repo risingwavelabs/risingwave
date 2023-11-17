@@ -13,7 +13,7 @@
 // limitations under the License.
 
 #![feature(bound_map)]
-#![feature(generators)]
+#![feature(coroutines)]
 #![feature(stmt_expr_attributes)]
 #![feature(proc_macro_hygiene)]
 
@@ -109,6 +109,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
             storage_opts.block_cache_capacity_mb * (1 << 20),
             storage_opts.meta_cache_capacity_mb * (1 << 20),
             storage_opts.high_priority_ratio,
+            storage_opts.large_query_memory_usage_mb * (1 << 20),
             FileCache::none(),
             FileCache::none(),
             None,

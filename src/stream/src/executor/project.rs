@@ -14,14 +14,13 @@
 
 use std::fmt::{Debug, Formatter};
 
-use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::expr::NonStrictExpression;
 
 use super::*;
 
@@ -38,7 +37,7 @@ struct Inner {
     info: ExecutorInfo,
 
     /// Expressions of the current projection.
-    exprs: Vec<BoxedExpression>,
+    exprs: Vec<NonStrictExpression>,
     /// All the watermark derivations, (input_column_index, output_column_index). And the
     /// derivation expression is the project's expression itself.
     watermark_derivations: MultiMap<usize, usize>,
@@ -56,38 +55,19 @@ impl ProjectExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         input: Box<dyn Executor>,
-        pk_indices: PkIndices,
-        exprs: Vec<BoxedExpression>,
-        executor_id: u64,
+        exprs: Vec<NonStrictExpression>,
         watermark_derivations: MultiMap<usize, usize>,
         nondecreasing_expr_indices: Vec<usize>,
         materialize_selectivity_threshold: f64,
     ) -> Self {
-        let info = ExecutorInfo {
-            schema: input.schema().to_owned(),
-            pk_indices,
-            identity: "Project".to_owned(),
-        };
-
-        let schema = Schema {
-            fields: exprs
-                .iter()
-                .map(|e| Field::unnamed(e.return_type()))
-                .collect_vec(),
-        };
-
         let n_nondecreasing_exprs = nondecreasing_expr_indices.len();
-
         Self {
             input,
             inner: Inner {
                 _ctx: ctx,
-                info: ExecutorInfo {
-                    schema,
-                    pk_indices: info.pk_indices,
-                    identity: format!("ProjectExecutor {:X}", executor_id),
-                },
+                info,
                 exprs,
                 watermark_derivations,
                 nondecreasing_expr_indices,
@@ -233,11 +213,12 @@ mod tests {
     use risingwave_common::array::{DataChunk, StreamChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, Datum};
-    use risingwave_expr::expr::{self, build_from_pretty, Expression, ValueImpl};
+    use risingwave_expr::expr::{self, Expression, ValueImpl};
 
     use super::super::test_utils::MockSource;
     use super::super::*;
     use super::*;
+    use crate::executor::test_utils::expr::build_from_pretty;
     use crate::executor::test_utils::StreamExecutorTestExt;
 
     #[tokio::test]
@@ -260,16 +241,23 @@ mod tests {
             ],
         };
         let pk_indices = vec![0];
-        let (mut tx, source) = MockSource::channel(schema, pk_indices.clone());
+        let (mut tx, source) = MockSource::channel(schema, pk_indices);
 
         let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
 
+        let info = ExecutorInfo {
+            schema: Schema {
+                fields: vec![Field::unnamed(DataType::Int64)],
+            },
+            pk_indices: vec![],
+            identity: "ProjectExecutor".to_string(),
+        };
+
         let project = Box::new(ProjectExecutor::new(
             ActorContext::create(123),
+            info,
             Box::new(source),
-            pk_indices,
             vec![test_expr],
-            1,
             MultiMap::new(),
             vec![],
             0.0,
@@ -345,14 +333,25 @@ mod tests {
 
         let a_expr = build_from_pretty("(add:int8 $0:int8 1:int8)");
         let b_expr = build_from_pretty("(subtract:int8 $0:int8 1:int8)");
-        let c_expr = DummyNondecreasingExpr.boxed();
+        let c_expr = NonStrictExpression::for_test(DummyNondecreasingExpr);
+
+        let info = ExecutorInfo {
+            schema: Schema {
+                fields: vec![
+                    Field::unnamed(DataType::Int64),
+                    Field::unnamed(DataType::Int64),
+                    Field::unnamed(DataType::Int64),
+                ],
+            },
+            pk_indices: vec![],
+            identity: "ProjectExecutor".to_string(),
+        };
 
         let project = Box::new(ProjectExecutor::new(
             ActorContext::create(123),
+            info,
             Box::new(source),
-            vec![],
             vec![a_expr, b_expr, c_expr],
-            1,
             MultiMap::from_iter(vec![(0, 0), (0, 1)].into_iter()),
             vec![2],
             0.0,

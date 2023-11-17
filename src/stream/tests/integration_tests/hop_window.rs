@@ -15,6 +15,7 @@
 use risingwave_common::types::test_utils::IntervalTestExt;
 use risingwave_common::types::{Interval, Timestamp};
 use risingwave_expr::expr::test_utils::make_hop_window_expression;
+use risingwave_expr::expr::NonStrictExpression;
 use risingwave_stream::executor::{ExecutorInfo, HopWindowExecutor};
 
 use crate::prelude::*;
@@ -46,17 +47,23 @@ fn create_executor(output_indices: Vec<usize>) -> (MessageSender, BoxedMessageSt
         tx,
         HopWindowExecutor::new(
             ActorContext::create(123),
-            Box::new(source),
             ExecutorInfo {
                 schema,
                 pk_indices,
-                identity: "test".to_string(),
+                identity: "HopWindowExecutor".to_string(),
             },
+            Box::new(source),
             TIME_COL_IDX,
             window_slide,
             window_size,
-            window_start_exprs,
-            window_end_exprs,
+            window_start_exprs
+                .into_iter()
+                .map(NonStrictExpression::for_test)
+                .collect(),
+            window_end_exprs
+                .into_iter()
+                .map(NonStrictExpression::for_test)
+                .collect(),
             output_indices,
             CHUNK_SIZE,
         )

@@ -1,0 +1,59 @@
+# Test rank window functions including `row_number`, `rank`, `dense_rank`.
+
+include ./row_number_old.slt.part
+
+statement ok
+create table t (id int, score int);
+
+statement ok
+create $view_type v as
+select
+    *
+    , row_number() over (partition by 0::int order by score desc, id) as r1
+    , rank() over (partition by 0::int order by score desc) as r2
+    , dense_rank() over (partition by 0::int order by score desc) as r3
+from t;
+
+statement ok
+insert into t values
+  (10001, 95)
+, (10002, 90)
+, (10003, 80)
+, (10004, 95)
+, (10005, 90)
+, (10006, 90)
+, (10007, 96)
+;
+
+query iiIII
+select * from v order by id;
+----
+10001  95  2  2  2
+10002  90  4  4  3
+10003  80  7  7  4
+10004  95  3  2  2
+10005  90  5  4  3
+10006  90  6  4  3
+10007  96  1  1  1
+
+statement ok
+update t set score = 96 where id = 10001;
+
+statement ok
+delete from t where id = 10006;
+
+query iiIII
+select * from v order by id;
+----
+10001  96  1  1  1
+10002  90  4  4  3
+10003  80  6  6  4
+10004  95  3  3  2
+10005  90  5  4  3
+10007  96  2  1  1
+
+statement ok
+drop $view_type v;
+
+statement ok
+drop table t;

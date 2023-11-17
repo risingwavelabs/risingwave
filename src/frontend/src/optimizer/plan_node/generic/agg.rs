@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fmt;
+use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
 use itertools::{Either, Itertools};
@@ -74,7 +74,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         for (i, key) in self.group_key.indices().enumerate() {
             map[i] = Some(key);
         }
-        ColIndexMapping::with_target_size(map, self.input.schema().len())
+        ColIndexMapping::new(map, self.input.schema().len())
     }
 
     /// get the Mapping of columnIndex from input column index to out column index
@@ -83,7 +83,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         for (i, key) in self.group_key.indices().enumerate() {
             map[key] = Some(i);
         }
-        ColIndexMapping::with_target_size(map, self.output_len())
+        ColIndexMapping::new(map, self.output_len())
     }
 
     fn two_phase_agg_forced(&self) -> bool {
@@ -248,6 +248,11 @@ impl AggCallState {
                                 .into_iter()
                                 .map(|x| x as _)
                                 .collect(),
+                            order_columns: s
+                                .order_columns
+                                .into_iter()
+                                .map(|x| x.to_protobuf())
+                                .collect(),
                         },
                     )
                 }
@@ -260,12 +265,13 @@ pub struct MaterializedInputState {
     pub table: TableCatalog,
     pub included_upstream_indices: Vec<usize>,
     pub table_value_indices: Vec<usize>,
+    pub order_columns: Vec<ColumnOrder>,
 }
 
 impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     pub fn infer_tables(
         &self,
-        me: &impl stream::StreamPlanRef,
+        me: impl stream::StreamPlanRef,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> (
@@ -274,9 +280,9 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         HashMap<usize, TableCatalog>,
     ) {
         (
-            self.infer_intermediate_state_table(me, vnode_col_idx, window_col_idx),
-            self.infer_stream_agg_state(me, vnode_col_idx, window_col_idx),
-            self.infer_distinct_dedup_tables(me, vnode_col_idx, window_col_idx),
+            self.infer_intermediate_state_table(&me, vnode_col_idx, window_col_idx),
+            self.infer_stream_agg_state(&me, vnode_col_idx, window_col_idx),
+            self.infer_distinct_dedup_tables(&me, vnode_col_idx, window_col_idx),
         )
     }
 
@@ -338,7 +344,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     /// Infer `AggCallState`s for streaming agg.
     pub fn infer_stream_agg_state(
         &self,
-        me: &impl stream::StreamPlanRef,
+        me: impl stream::StreamPlanRef,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> Vec<AggCallState> {
@@ -348,38 +354,37 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
 
         let gen_materialized_input_state = |sort_keys: Vec<(OrderType, usize)>,
+                                            extra_keys: Vec<usize>,
                                             include_keys: Vec<usize>|
          -> MaterializedInputState {
             let (mut table_builder, mut included_upstream_indices, mut column_mapping) =
                 self.create_table_builder(me.ctx(), window_col_idx);
             let read_prefix_len_hint = table_builder.get_current_pk_len();
 
+            let mut order_columns = vec![];
             let mut table_value_indices = BTreeSet::new(); // table column indices of value columns
             let mut add_column =
-                |upstream_idx, order_type, is_value, table_builder: &mut TableCatalogBuilder| {
+                |upstream_idx, order_type, table_builder: &mut TableCatalogBuilder| {
                     column_mapping.entry(upstream_idx).or_insert_with(|| {
                         let table_col_idx = table_builder.add_column(&in_fields[upstream_idx]);
                         if let Some(order_type) = order_type {
                             table_builder.add_order_column(table_col_idx, order_type);
+                            order_columns.push(ColumnOrder::new(upstream_idx, order_type));
                         }
                         included_upstream_indices.push(upstream_idx);
                         table_col_idx
                     });
-                    if is_value {
-                        // note that some indices may be added before as group keys which are not
-                        // value
-                        table_value_indices.insert(column_mapping[&upstream_idx]);
-                    }
+                    table_value_indices.insert(column_mapping[&upstream_idx]);
                 };
 
             for (order_type, idx) in sort_keys {
-                add_column(idx, Some(order_type), true, &mut table_builder);
+                add_column(idx, Some(order_type), &mut table_builder);
             }
-            for &idx in &in_pks {
-                add_column(idx, Some(OrderType::ascending()), true, &mut table_builder);
+            for idx in extra_keys {
+                add_column(idx, Some(OrderType::ascending()), &mut table_builder);
             }
             for idx in include_keys {
-                add_column(idx, None, true, &mut table_builder);
+                add_column(idx, None, &mut table_builder);
             }
 
             let mapping =
@@ -397,6 +402,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 table: table_builder.build(tb_dist.unwrap_or_default(), read_prefix_len_hint),
                 included_upstream_indices,
                 table_value_indices,
+                order_columns,
             }
         };
 
@@ -458,6 +464,17 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                             _ => unreachable!(),
                         }
                     };
+
+                    // columns to ensure each row unique
+                    let extra_keys = if agg_call.distinct {
+                        // if distinct, use distinct keys as extra keys
+                        let distinct_key = agg_call.inputs[0].index;
+                        vec![distinct_key]
+                    } else {
+                        // if not distinct, use primary keys as extra keys
+                        in_pks.clone()
+                    };
+
                     // other columns that should be contained in state table
                     let include_keys = match agg_call.agg_kind {
                         AggKind::FirstValue
@@ -470,7 +487,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         }
                         _ => vec![],
                     };
-                    let state = gen_materialized_input_state(sort_keys, include_keys);
+
+                    let state = gen_materialized_input_state(sort_keys, extra_keys, include_keys);
                     AggCallState::MaterializedInput(Box::new(state))
                 }
                 agg_kinds::rewritten!() => {
@@ -487,7 +505,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     /// group key | state for AGG1 | state for AGG2 | ...
     pub fn infer_intermediate_state_table(
         &self,
-        me: &impl GenericPlanRef,
+        me: impl GenericPlanRef,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> TableCatalog {
@@ -516,11 +534,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 // we use materialized input state for non-retractable aggregate function.
                 // for backward compatibility, the state type is same as the return type.
                 // its values in the intermediate state table are always null.
-            } else {
-                field.data_type = sig
-                    .state_type
-                    .clone()
-                    .unwrap_or(sig.ret_type.as_exact().clone());
+            } else if let Some(state_type) = &sig.state_type {
+                field.data_type = state_type.clone();
             }
         }
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();
@@ -553,7 +568,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     /// group key | distinct key | count for AGG1(distinct x) | count for AGG2(distinct x) | ...
     pub fn infer_distinct_dedup_tables(
         &self,
-        me: &impl GenericPlanRef,
+        me: impl GenericPlanRef,
         vnode_col_idx: Option<usize>,
         window_col_idx: Option<usize>,
     ) -> HashMap<usize, TableCatalog> {

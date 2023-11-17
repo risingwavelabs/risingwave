@@ -21,6 +21,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::meta::get_reschedule_plan_request::{PbWorkerChanges, StableResizePolicy};
 use risingwave_pb::meta::PausedReason;
 use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
 use risingwave_pb::stream_plan::AddMutation;
@@ -40,7 +41,7 @@ use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::{CheckpointControl, Command, GlobalBarrierManager};
 use crate::manager::WorkerId;
 use crate::model::{BarrierManagerState, MigrationPlan};
-use crate::stream::build_actor_connector_splits;
+use crate::stream::{build_actor_connector_splits, RescheduleOptions};
 use crate::MetaResult;
 
 impl GlobalBarrierManager {
@@ -219,7 +220,6 @@ impl GlobalBarrierManager {
         &self,
         prev_epoch: TracedEpoch,
         paused_reason: Option<PausedReason>,
-        bootstrap_recovery: bool,
     ) -> BarrierManagerState {
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
@@ -227,11 +227,9 @@ impl GlobalBarrierManager {
             .await;
 
         tracing::info!("recovery start!");
-        if bootstrap_recovery {
-            self.clean_dirty_tables()
-                .await
-                .expect("clean dirty tables should not fail");
-        }
+        self.clean_dirty_tables()
+            .await
+            .expect("clean dirty tables should not fail");
         self.clean_dirty_fragments()
             .await
             .expect("clean dirty fragments");
@@ -257,12 +255,21 @@ impl GlobalBarrierManager {
                     // following steps will be no-op, while the compute nodes will still be reset.
                     let mut info = self.resolve_actor_info_for_recovery().await;
 
-                    // Migrate actors in expired CN to newly joined one.
-                    let migrated = self.migrate_actors(&info).await.inspect_err(|err| {
-                        warn!(err = ?err, "migrate actors failed");
-                    })?;
-                    if migrated {
-                        info = self.resolve_actor_info_for_recovery().await;
+                    if self.env.opts.enable_scale_in_when_recovery {
+                        let scaled = self.scale_actors(&info).await.inspect_err(|err| {
+                            warn!(err = ?err, "scale actors failed");
+                        })?;
+                        if scaled {
+                            info = self.resolve_actor_info_for_recovery().await;
+                        }
+                    } else {
+                        // Migrate actors in expired CN to newly joined one.
+                        let migrated = self.migrate_actors(&info).await.inspect_err(|err| {
+                            warn!(err = ?err, "migrate actors failed");
+                        })?;
+                        if migrated {
+                            info = self.resolve_actor_info_for_recovery().await;
+                        }
                     }
 
                     // Reset all compute nodes, stop and drop existing actors.
@@ -304,6 +311,7 @@ impl GlobalBarrierManager {
                         command,
                         BarrierKind::Initial,
                         self.source_manager.clone(),
+                        self.scale_controller.clone(),
                         tracing::Span::current(), // recovery span
                     ));
 
@@ -386,6 +394,86 @@ impl GlobalBarrierManager {
         migration_plan.delete(self.env.meta_store()).await?;
 
         debug!("migrate actors succeed.");
+        Ok(true)
+    }
+
+    async fn scale_actors(&self, info: &BarrierActorInfo) -> MetaResult<bool> {
+        debug!("start scaling-in offline actors.");
+
+        let expired_workers: HashSet<WorkerId> = info
+            .actor_map
+            .iter()
+            .filter(|(&worker, actors)| !actors.is_empty() && !info.node_map.contains_key(&worker))
+            .map(|(&worker, _)| worker)
+            .collect();
+
+        if expired_workers.is_empty() {
+            debug!("no expired workers, skipping.");
+            return Ok(false);
+        }
+
+        let all_worker_parallel_units = self.fragment_manager.all_worker_parallel_units().await;
+
+        let expired_worker_parallel_units: HashMap<_, _> = all_worker_parallel_units
+            .into_iter()
+            .filter(|(worker, _)| expired_workers.contains(worker))
+            .collect();
+
+        let fragment_worker_changes = {
+            let guard = self.fragment_manager.get_fragment_read_guard().await;
+            let mut policy = HashMap::new();
+            for table_fragments in guard.table_fragments().values() {
+                for fragment_id in table_fragments.fragment_ids() {
+                    policy.insert(
+                        fragment_id,
+                        PbWorkerChanges {
+                            exclude_worker_ids: expired_workers.iter().cloned().collect(),
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
+            policy
+        };
+
+        let plan = self
+            .scale_controller
+            .generate_stable_resize_plan(
+                StableResizePolicy {
+                    fragment_worker_changes,
+                },
+                Some(expired_worker_parallel_units),
+            )
+            .await?;
+
+        let (reschedule_fragment, applied_reschedules) = self
+            .scale_controller
+            .prepare_reschedule_command(
+                plan,
+                RescheduleOptions {
+                    resolve_no_shuffle_upstream: true,
+                },
+            )
+            .await?;
+
+        if let Err(e) = self
+            .scale_controller
+            .post_apply_reschedule(&reschedule_fragment)
+            .await
+        {
+            tracing::error!(
+                "failed to apply reschedule for offline scaling in recovery: {}",
+                e.to_string()
+            );
+
+            self.fragment_manager
+                .cancel_apply_reschedules(applied_reschedules)
+                .await;
+
+            return Err(e);
+        }
+
+        debug!("scaling-in actors succeed.");
         Ok(true)
     }
 

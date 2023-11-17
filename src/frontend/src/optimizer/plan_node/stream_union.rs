@@ -19,16 +19,20 @@ use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::UnionNode;
 
+use super::generic::GenericPlanRef;
+use super::stream::prelude::*;
+use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanRef};
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNode, StreamNode};
+use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamUnion` implements [`super::LogicalUnion`]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamUnion {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::Union<PlanRef>,
 }
 
@@ -37,6 +41,12 @@ impl StreamUnion {
         let inputs = &core.inputs;
         let dist = inputs[0].distribution().clone();
         assert!(inputs.iter().all(|input| *input.distribution() == dist));
+        Self::new_with_dist(core, dist)
+    }
+
+    pub fn new_with_dist(core: generic::Union<PlanRef>, dist: Distribution) -> Self {
+        let inputs = &core.inputs;
+
         let watermark_columns = inputs.iter().fold(
             {
                 let mut bitset = FixedBitSet::with_capacity(core.schema().len());
@@ -46,13 +56,14 @@ impl StreamUnion {
             |acc_watermark_columns, input| acc_watermark_columns.bitand(input.watermark_columns()),
         );
 
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             dist,
             inputs.iter().all(|x| x.append_only()),
             inputs.iter().all(|x| x.emit_on_window_close()),
             watermark_columns,
         );
+
         StreamUnion { base, core }
     }
 }
@@ -60,7 +71,7 @@ impl StreamUnion {
 impl Distill for StreamUnion {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let mut vec = self.core.fields_pretty();
-        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+        if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             vec.push(("output_watermarks", ow));
         }
         childless_record("StreamUnion", vec)
@@ -75,7 +86,8 @@ impl PlanTreeNode for StreamUnion {
     fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
         let mut new = self.core.clone();
         new.inputs = inputs.to_vec();
-        Self::new(new).into()
+        let dist = self.distribution().clone();
+        Self::new_with_dist(new, dist).into()
     }
 }
 

@@ -17,9 +17,11 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, PlanAggCall};
+use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;
+use crate::optimizer::plan_node::generic::PhysicalPlanRef;
 use crate::optimizer::property::RequiredDist;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -31,7 +33,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// by `StreamSimpleAgg`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamStatelessSimpleAgg {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::Agg<PlanRef>,
 }
 
@@ -49,7 +51,7 @@ impl StreamStatelessSimpleAgg {
             }
         }
 
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             input_dist.clone(),
             input.append_only(),
@@ -98,6 +100,7 @@ impl StreamNode for StreamStatelessSimpleAgg {
             intermediate_state_table: None,
             is_append_only: self.input().append_only(),
             distinct_dedup_tables: Default::default(),
+            version: AggNodeVersion::Issue12140 as _,
         })
     }
 }

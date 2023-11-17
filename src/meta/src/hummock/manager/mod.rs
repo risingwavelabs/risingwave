@@ -352,8 +352,8 @@ impl HummockManager {
             if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref()
                 && !env.opts.do_not_config_object_storage_lifecycle
             {
-                let is_bucket_expiration_configured = s3.inner().configure_bucket_lifecycle().await;
-                if is_bucket_expiration_configured{
+                let is_bucket_expiration_configured = s3.inner().configure_bucket_lifecycle(state_store_dir).await;
+                if is_bucket_expiration_configured {
                     return Err(ObjectError::internal("Cluster cannot start with object expiration configured for bucket because RisingWave data will be lost when object expiration kicks in.
                     Please disable object expiration and restart the cluster.")
                     .into());
@@ -556,7 +556,7 @@ impl HummockManager {
         versioning_guard.write_limit =
             calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
         trigger_write_stop_stats(&self.metrics, &versioning_guard.write_limit);
-        tracing::info!("Hummock stopped write: {:#?}", versioning_guard.write_limit);
+        tracing::debug!("Hummock stopped write: {:#?}", versioning_guard.write_limit);
 
         Ok(())
     }
@@ -628,7 +628,7 @@ impl HummockManager {
 
     /// Unpin all pins which belongs to `context_id` and has an id which is older than
     /// `unpin_before`. All versions >= `unpin_before` will be treated as if they are all pinned by
-    /// this `context_id` so they will not be vacummed.
+    /// this `context_id` so they will not be vacuumed.
     #[named]
     pub async fn unpin_version_before(
         &self,
@@ -645,6 +645,12 @@ impl HummockManager {
                 context_id,
                 min_pinned_id: 0,
             },
+        );
+        assert!(
+            context_pinned_version.min_pinned_id <= unpin_before,
+            "val must be monotonically non-decreasing. old = {}, new = {}.",
+            context_pinned_version.min_pinned_id,
+            unpin_before
         );
         context_pinned_version.min_pinned_id = unpin_before;
         commit_multi_var!(
@@ -1762,7 +1768,7 @@ impl HummockManager {
     }
 
     /// Get version deltas from meta store
-    #[cfg_attr(coverage, no_coverage)]
+    #[cfg_attr(coverage, coverage(off))]
     #[named]
     pub async fn list_version_deltas(
         &self,
@@ -2749,9 +2755,10 @@ impl HummockManager {
                                 // TODO: task cancellation can be batched
                                 for task in cancel_tasks {
                                     tracing::info!(
-                                        "Task with task_id {} with context_id {} has expired due to lack of visible progress",
+                                        "Task with group_id {} task_id {} with context_id {} has expired due to lack of visible progress",
+                                        task.compaction_group_id,
+                                        task.task_id,
                                         context_id,
-                                        task.task_id
                                     );
 
                                     if let Err(e) =

@@ -25,7 +25,6 @@ use crate::executor::MaterializeExecutor;
 
 pub struct MaterializeExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for MaterializeExecutorBuilder {
     type Node = MaterializeNode;
 
@@ -48,17 +47,12 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
         let conflict_behavior =
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());
-        let info = ExecutorInfo {
-            schema: params.schema,
-            pk_indices: params.pk_indices,
-            identity: params.identity,
-        };
 
         macro_rules! new_executor {
             ($SD:ident) => {
                 MaterializeExecutor::<_, $SD>::new(
                     input,
-                    info,
+                    params.info,
                     store,
                     order_key,
                     params.actor_context,
@@ -85,7 +79,6 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
 pub struct ArrangeExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for ArrangeExecutorBuilder {
     type Node = ArrangeNode;
 
@@ -111,14 +104,9 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let conflict_behavior =
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());
-        let info = ExecutorInfo {
-            schema: params.schema,
-            pk_indices: params.pk_indices,
-            identity: params.identity,
-        };
         let executor = MaterializeExecutor::<_, BasicSerde>::new(
             input,
-            info,
+            params.info,
             store,
             keys,
             params.actor_context,

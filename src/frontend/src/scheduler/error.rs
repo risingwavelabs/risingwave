@@ -26,8 +26,12 @@ pub enum SchedulerError {
     #[error("Pin snapshot error: {0} fails to get epoch {1}")]
     PinSnapshot(QueryId, u64),
 
-    #[error("Rpc error: {0}")]
-    RpcError(#[from] RpcError),
+    #[error(transparent)]
+    RpcError(
+        #[from]
+        #[backtrace]
+        RpcError,
+    ),
 
     #[error("Empty workers found")]
     EmptyWorkerNodes,
@@ -52,7 +56,11 @@ pub enum SchedulerError {
     QueryReachLimit(QueryMode, u64),
 
     #[error(transparent)]
-    Internal(#[from] anyhow::Error),
+    Internal(
+        #[from]
+        #[backtrace]
+        anyhow::Error,
+    ),
 }
 
 /// Only if the code is Internal, change it to Execution Error. Otherwise convert to Rpc Error.

@@ -182,9 +182,9 @@ statement ok
 drop table s1;
 
 # Do NOT allow With clause to contain a comma only.
-statement error QueryError: sql parser error: Expected identifier.*
+statement error Expected identifier.*
 create table s1 (v1 int) with (,) ROW FORMAT JSON;
 
 # Do NOT allow an empty With clause.
-statement error QueryError: sql parser error: Expected identifier.*
+statement error Expected identifier.*
 create table s1 (v1 int) with () ROW FORMAT JSON;

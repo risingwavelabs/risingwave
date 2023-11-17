@@ -12,14 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::generic::GenericPlanRef;
+use super::generic::PhysicalPlanRef;
 use crate::optimizer::property::Order;
 
-/// A subtrait of [`GenericPlanRef`] for batch plans.
+/// A subtrait of [`PhysicalPlanRef`] for batch plans.
 ///
 /// Due to the lack of refactoring, all plan nodes currently implement this trait
 /// through [`super::PlanBase`]. One may still use this trait as a bound for
-/// expecting a batch plan, in contrast to [`GenericPlanRef`].
-pub trait BatchPlanRef: GenericPlanRef {
+/// accessing a batch plan, in contrast to [`GenericPlanRef`] or
+/// [`PhysicalPlanRef`].
+///
+/// [`GenericPlanRef`]: super::generic::GenericPlanRef
+#[auto_impl::auto_impl(&)]
+pub trait BatchPlanRef: PhysicalPlanRef {
     fn order(&self) -> &Order;
+}
+
+/// Prelude for batch plan nodes.
+pub mod prelude {
+    pub use super::super::generic::{GenericPlanRef, PhysicalPlanRef};
+    pub use super::super::Batch;
+    pub use super::BatchPlanRef;
 }

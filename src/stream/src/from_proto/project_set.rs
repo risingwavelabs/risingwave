@@ -22,7 +22,6 @@ use crate::executor::ProjectSetExecutor;
 
 pub struct ProjectSetExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for ProjectSetExecutorBuilder {
     type Node = ProjectSetNode;
 
@@ -59,10 +58,9 @@ impl ExecutorBuilder for ProjectSetExecutorBuilder {
         let chunk_size = params.env.config().developer.chunk_size;
         Ok(ProjectSetExecutor::new(
             params.actor_context,
+            params.info,
             input,
-            params.pk_indices,
             select_list,
-            params.executor_id,
             chunk_size,
             watermark_derivations,
             nondecreasing_expr_indices,

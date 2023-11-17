@@ -16,6 +16,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use risingwave_common::config::{CompactionConfig, DefaultParallelism};
+use risingwave_meta_model_v2::prelude::Cluster;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{ConnectorClient, StreamClientPool, StreamClientPoolRef};
 use sea_orm::EntityTrait;
@@ -28,7 +29,6 @@ use crate::manager::{
     NotificationManagerRef,
 };
 use crate::model::ClusterId;
-use crate::model_v2::prelude::Cluster;
 use crate::storage::MetaStoreRef;
 #[cfg(any(test, feature = "test"))]
 use crate::storage::{MemStore, MetaStoreBoxExt};
@@ -81,6 +81,8 @@ pub struct MetaOpts {
     /// Whether to enable the recovery of the cluster. If disabled, the meta service will exit on
     /// abnormal cases.
     pub enable_recovery: bool,
+    /// Whether to enable the scale-in feature when compute-node is removed.
+    pub enable_scale_in_when_recovery: bool,
     /// The maximum number of barriers in-flight in the compute nodes.
     pub in_flight_barrier_nums: usize,
     /// After specified seconds of idle (no mview or flush), the process will be exited.
@@ -176,6 +178,7 @@ impl MetaOpts {
     pub fn test(enable_recovery: bool) -> Self {
         Self {
             enable_recovery,
+            enable_scale_in_when_recovery: false,
             in_flight_barrier_nums: 40,
             max_idle_ms: 0,
             compaction_deterministic_test: false,

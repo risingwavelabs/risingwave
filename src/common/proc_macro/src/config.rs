@@ -41,7 +41,7 @@ fn type_is_option(ty: &syn::Type) -> bool {
     false
 }
 
-#[cfg_attr(coverage, no_coverage)]
+#[cfg_attr(coverage, coverage(off))]
 pub fn produce_override_config(input: DeriveInput) -> TokenStream {
     let syn::Data::Struct(syn::DataStruct { fields, .. }) = input.data else {
         abort!(input, "Only struct is supported");

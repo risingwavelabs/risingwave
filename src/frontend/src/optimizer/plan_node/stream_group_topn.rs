@@ -16,7 +16,9 @@ use fixedbitset::FixedBitSet;
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
-use super::generic::{DistillUnit, TopNLimit};
+use super::generic::{DistillUnit, GenericPlanRef, TopNLimit};
+use super::stream::prelude::*;
+use super::stream::StreamPlanRef;
 use super::utils::{plan_node_name, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::generic::GenericPlanNode;
@@ -26,7 +28,7 @@ use crate::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamGroupTopN {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     core: generic::TopN<PlanRef>,
     /// an optional column index which is the vnode of each row computed by the input's consistent
     /// hash distribution
@@ -55,7 +57,9 @@ impl StreamGroupTopN {
         let mut stream_key = core
             .stream_key()
             .expect("logical node should have stream key here");
-        if let Some(vnode_col_idx) = vnode_col_idx && stream_key.len() > 1 {
+        if let Some(vnode_col_idx) = vnode_col_idx
+            && stream_key.len() > 1
+        {
             // The output stream key of `GroupTopN` is a union of group key and input stream key,
             // while vnode is calculated from a subset of input stream key. So we can safely remove
             // the vnode column from output stream key. While at meanwhile we cannot leave the stream key
@@ -135,7 +139,7 @@ impl Distill for StreamGroupTopN {
             { "append_only", self.input().append_only() },
         );
         let mut node = self.core.distill_with_name(name);
-        if let Some(ow) = watermark_pretty(&self.base.watermark_columns, self.schema()) {
+        if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             node.fields.push(("output_watermarks".into(), ow));
         }
         node

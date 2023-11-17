@@ -16,6 +16,7 @@ updates:
     arrow:
       patterns:
         - "arrow*"
+        - "parquet"
     aws:
       patterns:
         - "aws*"
@@ -23,3 +24,11 @@ updates:
       patterns:
         - "tonic*"
         - "prost*"
+    opentelemetry:
+      patterns:
+        - "opentelemetry*"
+        - "tracing-opentelemetry"
+    mysql:
+      patterns:
+        - "mysql_common"
+        - "mysql_async"

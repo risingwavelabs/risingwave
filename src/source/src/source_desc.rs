@@ -197,6 +197,7 @@ pub mod test_utils {
                         field_descs: vec![],
                         type_name: "".to_string(),
                         generated_or_default_column: None,
+                        description: None,
                     }
                     .to_protobuf(),
                 ),

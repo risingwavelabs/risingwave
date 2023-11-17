@@ -26,8 +26,8 @@
 - name: int[] || text -> err
   sql: |
     with t(s) as (select '2') select array[1] || s from t;
-  binder_error: |-
-    Bind error: failed to bind expression: ARRAY[1] || s
+  binder_error: |
+    Failed to bind expression: ARRAY[1] || s
 
     Caused by:
       Bind error: Cannot append character varying to integer[]
@@ -50,8 +50,8 @@
 - name: int || int -> err
   sql: |
     select 1 || 2;
-  binder_error: |-
-    Bind error: failed to bind expression: 1 || 2
+  binder_error: |
+    Failed to bind expression: 1 || 2
 
     Caused by:
       Bind error: operator does not exist: integer || integer

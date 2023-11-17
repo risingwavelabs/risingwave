@@ -32,9 +32,9 @@ message SstableInfo {
 }
 
 enum LevelType {
-  UNSPECIFIED = 0;
-  NONOVERLAPPING = 1;
-  OVERLAPPING = 2;
+  LEVEL_TYPE_UNSPECIFIED = 0;
+  LEVEL_TYPE_NONOVERLAPPING = 1;
+  LEVEL_TYPE_OVERLAPPING = 2;
 }
 
 message OverlappingLevel {

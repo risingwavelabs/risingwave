@@ -72,7 +72,7 @@ pub async fn prepare_first_valid_version(
     let (tx, mut rx) = unbounded_channel();
     let notification_client =
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone());
-    let backup_manager = BackupReader::unused();
+    let backup_manager = BackupReader::unused().await;
     let write_limiter = WriteLimiter::unused();
     let observer_manager = ObserverManager::new(
         notification_client,

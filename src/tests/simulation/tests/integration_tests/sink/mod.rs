@@ -14,3 +14,33 @@
 
 #[cfg(madsim)]
 mod basic;
+#[cfg(madsim)]
+mod recovery;
+#[cfg(madsim)]
+mod scale;
+#[cfg(madsim)]
+mod utils;
+
+#[macro_export]
+macro_rules! assert_with_err_returned {
+    ($condition:expr, $($rest:tt)*) => {{
+        if !$condition {
+            return Err(anyhow::anyhow!($($rest)*).into());
+        }
+    }};
+    ($condition:expr) => {{
+        if !$condition {
+            return Err(anyhow::anyhow!("fail assertion {}", stringify! {$condition}).into());
+        }
+    }};
+}
+
+#[macro_export]
+macro_rules! assert_eq_with_err_returned {
+    ($first:expr, $second:expr $(,$($rest:tt)*)?) => {{
+        $crate::assert_with_err_returned ! {
+            {$first == $second}
+            $(, $($rest:tt)*)?
+        }
+    }};
+}

@@ -42,6 +42,7 @@ use risingwave_sqlparser::ast::{
 };
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Hash, Eq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -282,7 +283,12 @@ impl TestCase {
             .chain(std::iter::once(self.sql()))
         {
             result = self
-                .run_sql(sql, session.clone(), do_check_result, result)
+                .run_sql(
+                    Arc::from(sql.to_owned()),
+                    session.clone(),
+                    do_check_result,
+                    result,
+                )
                 .await?;
         }
 
@@ -326,7 +332,7 @@ impl TestCase {
                     );
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
-                        &(sql + temp_file.path().to_str().unwrap() + "')"),
+                        Arc::from(sql + temp_file.path().to_str().unwrap() + "')"),
                         session.clone(),
                         false,
                         None,
@@ -357,7 +363,7 @@ impl TestCase {
                     );
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
-                        &(sql + temp_file.path().to_str().unwrap() + "')"),
+                        Arc::from(sql + temp_file.path().to_str().unwrap() + "')"),
                         session.clone(),
                         false,
                         None,
@@ -376,15 +382,15 @@ impl TestCase {
 
     async fn run_sql(
         &self,
-        sql: &str,
+        sql: Arc<str>,
         session: Arc<SessionImpl>,
         do_check_result: bool,
         mut result: Option<TestCaseResult>,
     ) -> Result<Option<TestCaseResult>> {
-        let statements = Parser::parse_sql(sql).unwrap();
+        let statements = Parser::parse_sql(&sql).unwrap();
         for stmt in statements {
             // TODO: `sql` may contain multiple statements here.
-            let handler_args = HandlerArgs::new(session.clone(), &stmt, sql)?;
+            let handler_args = HandlerArgs::new(session.clone(), &stmt, sql.clone())?;
             let _guard = session.txn_begin_implicit();
             match stmt.clone() {
                 Statement::Query(_)
@@ -399,7 +405,7 @@ impl TestCase {
                         ..Default::default()
                     };
                     let context = OptimizerContext::new(
-                        HandlerArgs::new(session.clone(), &stmt, sql)?,
+                        HandlerArgs::new(session.clone(), &stmt, sql.clone())?,
                         explain_options,
                     );
                     let ret = self.apply_query(&stmt, context.into())?;
@@ -416,6 +422,7 @@ impl TestCase {
                     source_schema,
                     source_watermarks,
                     append_only,
+                    cdc_table_info,
                     ..
                 } => {
                     // TODO(st1page): refacor it
@@ -433,6 +440,7 @@ impl TestCase {
                         source_watermarks,
                         append_only,
                         notice,
+                        cdc_table_info,
                     )
                     .await?;
                 }
@@ -571,7 +579,7 @@ impl TestCase {
             match binder.bind(stmt.clone()) {
                 Ok(bound) => bound,
                 Err(err) => {
-                    ret.binder_error = Some(err.to_string());
+                    ret.binder_error = Some(err.to_report_string_pretty());
                     return Ok(ret);
                 }
             }
@@ -587,7 +595,7 @@ impl TestCase {
                 logical_plan
             }
             Err(err) => {
-                ret.planner_error = Some(err.to_string());
+                ret.planner_error = Some(err.to_report_string_pretty());
                 return Ok(ret);
             }
         };
@@ -601,7 +609,7 @@ impl TestCase {
                 match logical_plan.gen_optimized_logical_plan_for_batch() {
                     Ok(optimized_logical_plan_for_batch) => optimized_logical_plan_for_batch,
                     Err(err) => {
-                        ret.optimizer_error = Some(err.to_string());
+                        ret.optimizer_error = Some(err.to_report_string_pretty());
                         return Ok(ret);
                     }
                 };
@@ -625,7 +633,7 @@ impl TestCase {
                 match logical_plan.gen_optimized_logical_plan_for_stream() {
                     Ok(optimized_logical_plan_for_stream) => optimized_logical_plan_for_stream,
                     Err(err) => {
-                        ret.optimizer_error = Some(err.to_string());
+                        ret.optimizer_error = Some(err.to_report_string_pretty());
                         return Ok(ret);
                     }
                 };
@@ -652,12 +660,12 @@ impl TestCase {
                     Ok(batch_plan) => match logical_plan.gen_batch_distributed_plan(batch_plan) {
                         Ok(batch_plan) => batch_plan,
                         Err(err) => {
-                            ret.batch_error = Some(err.to_string());
+                            ret.batch_error = Some(err.to_report_string_pretty());
                             break 'batch;
                         }
                     },
                     Err(err) => {
-                        ret.batch_error = Some(err.to_string());
+                        ret.batch_error = Some(err.to_report_string_pretty());
                         break 'batch;
                     }
                 };
@@ -684,12 +692,12 @@ impl TestCase {
                     Ok(batch_plan) => match logical_plan.gen_batch_local_plan(batch_plan) {
                         Ok(batch_plan) => batch_plan,
                         Err(err) => {
-                            ret.batch_error = Some(err.to_string());
+                            ret.batch_error = Some(err.to_report_string_pretty());
                             break 'local_batch;
                         }
                     },
                     Err(err) => {
-                        ret.batch_error = Some(err.to_string());
+                        ret.batch_error = Some(err.to_report_string_pretty());
                         break 'local_batch;
                     }
                 };
@@ -752,7 +760,7 @@ impl TestCase {
                 ) {
                     Ok((stream_plan, _)) => stream_plan,
                     Err(err) => {
-                        *ret_error_str = Some(err.to_string());
+                        *ret_error_str = Some(err.to_report_string_pretty());
                         continue;
                     }
                 };
@@ -792,7 +800,7 @@ impl TestCase {
                         break 'sink;
                     }
                     Err(err) => {
-                        ret.sink_error = Some(err.to_string());
+                        ret.sink_error = Some(err.to_report_string_pretty());
                         break 'sink;
                     }
                 }

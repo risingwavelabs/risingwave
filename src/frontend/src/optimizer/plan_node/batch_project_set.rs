@@ -17,6 +17,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ProjectSetNode;
 
+use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable};
 use crate::expr::ExprRewriter;
@@ -28,7 +29,7 @@ use crate::utils::ColIndexMappingRewriteExt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchProjectSet {
-    pub base: PlanBase,
+    pub base: PlanBase<Batch>,
     core: generic::ProjectSet<PlanRef>,
 }
 
@@ -38,11 +39,8 @@ impl BatchProjectSet {
             .i2o_col_mapping()
             .rewrite_provided_distribution(core.input.distribution());
 
-        let base = PlanBase::new_batch_from_logical(
-            &core,
-            distribution,
-            core.get_out_column_index_order(),
-        );
+        let base =
+            PlanBase::new_batch_with_core(&core, distribution, core.get_out_column_index_order());
         BatchProjectSet { base, core }
     }
 }

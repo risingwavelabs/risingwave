@@ -155,17 +155,18 @@
           └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [unnest, t._row_id(hidden), projected_row_id(hidden), t._row_id#1(hidden), projected_row_id#1(hidden)], stream_key: [t._row_id, projected_row_id, t._row_id#1, projected_row_id#1, unnest], pk_columns: [t._row_id, projected_row_id, t._row_id#1, projected_row_id#1, unnest], pk_conflict: NoCheck }
-    └─StreamHashJoin { type: Inner, predicate: Unnest($0) = Unnest($0), output: [Unnest($0), t._row_id, projected_row_id, t._row_id, projected_row_id] }
-      ├─StreamExchange { dist: HashShard(Unnest($0)) }
-      │ └─StreamShare { id: 3 }
-      │   └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
-      │     └─StreamProjectSet { select_list: [Unnest($0), $1] }
-      │       └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-      └─StreamExchange { dist: HashShard(Unnest($0)) }
-        └─StreamShare { id: 3 }
-          └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
-            └─StreamProjectSet { select_list: [Unnest($0), $1] }
-              └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamExchange { dist: HashShard(Unnest($0), t._row_id, projected_row_id, t._row_id, projected_row_id) }
+      └─StreamHashJoin { type: Inner, predicate: Unnest($0) = Unnest($0), output: [Unnest($0), t._row_id, projected_row_id, t._row_id, projected_row_id] }
+        ├─StreamExchange { dist: HashShard(Unnest($0)) }
+        │ └─StreamShare { id: 3 }
+        │   └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
+        │     └─StreamProjectSet { select_list: [Unnest($0), $1] }
+        │       └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamExchange { dist: HashShard(Unnest($0)) }
+          └─StreamShare { id: 3 }
+            └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
+              └─StreamProjectSet { select_list: [Unnest($0), $1] }
+                └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: issue-10080
   sql: |
     with cte as (SELECT 1 as v1, unnest(array[1,2,3,4,5]) AS v2) select v1 from cte;
@@ -194,40 +195,40 @@
 - name: set-returning function disallowed in CASE WHEN
   sql: |
     with a(a1) as (values (array[2]), (null)) select case when a1 is not null then unnest(a1) end from a;
-  binder_error: |-
-    Bind error: failed to bind expression: CASE WHEN a1 IS NOT NULL THEN unnest(a1) END
+  binder_error: |
+    Failed to bind expression: CASE WHEN a1 IS NOT NULL THEN unnest(a1) END
 
     Caused by:
       Bind error: table functions are not allowed in CASE
 - name: set-returning function disallowed in COALESCE
   sql: |
     with a(a1) as (values (array[2]), (null)) select coalesce(unnest(a1), 0) from a;
-  binder_error: |-
-    Bind error: failed to bind expression: coalesce(unnest(a1), 0)
+  binder_error: |
+    Failed to bind expression: coalesce(unnest(a1), 0)
 
     Caused by:
       Bind error: table functions are not allowed in COALESCE
 - name: set-returning function disallowed in JOIN ON
   sql: |
     with a(a1) as (values (array[2]), (null)), b(b1) as (select 2) select a1 from a join b on unnest(a1) = b1;
-  binder_error: |-
-    Bind error: failed to bind expression: unnest(a1) = b1
+  binder_error: |
+    Failed to bind expression: unnest(a1) = b1
 
     Caused by:
       Invalid input syntax: table functions are not allowed in JOIN ON
 - name: set-returning function disallowed in HAVING
   sql: |
     with a(a1) as (values (array[2]), (null)) select count(*) from a group by a1 having unnest(a1) < 5;
-  binder_error: |-
-    Bind error: failed to bind expression: unnest(a1) < 5
+  binder_error: |
+    Failed to bind expression: unnest(a1) < 5
 
     Caused by:
       Invalid input syntax: table functions are not allowed in HAVING
 - name: set-returning function disallowed in FILTER
   sql: |
     with a(a1) as (values (array[2]), (null)) select count(*) filter(where unnest(a1) < 3) from a;
-  binder_error: |-
-    Bind error: failed to bind expression: count(*) FILTER(WHERE unnest(a1) < 3)
+  binder_error: |
+    Failed to bind expression: count(*) FILTER(WHERE unnest(a1) < 3)
 
     Caused by:
       Invalid input syntax: table functions are not allowed in FILTER

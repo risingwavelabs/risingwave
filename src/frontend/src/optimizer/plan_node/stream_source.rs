@@ -20,10 +20,10 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
 
+use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, StreamNode};
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -31,13 +31,13 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSource {
-    pub base: PlanBase,
+    pub base: PlanBase<Stream>,
     pub(crate) core: generic::Source,
 }
 
 impl StreamSource {
     pub fn new(core: generic::Source) -> Self {
-        let base = PlanBase::new_stream_with_logical(
+        let base = PlanBase::new_stream_with_core(
             &core,
             Distribution::SomeShard,
             core.catalog.as_ref().map_or(true, |s| s.append_only),
@@ -87,12 +87,7 @@ impl StreamNode for StreamSource {
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
             properties: source_catalog.properties.clone().into_iter().collect(),
-            rate_limit: self
-                .base
-                .ctx()
-                .session_ctx()
-                .config()
-                .get_streaming_rate_limit(),
+            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
         });
         PbNodeBody::Source(SourceNode { source_inner })
     }

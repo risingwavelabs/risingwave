@@ -515,6 +515,7 @@ pub struct HummockVersionReader {
 
     /// Statistics
     state_store_metrics: Arc<HummockStateStoreMetrics>,
+    preload_retry_times: usize,
 }
 
 /// use `HummockVersionReader` to reuse `get` and `iter` implement for both `batch_query` and
@@ -523,10 +524,12 @@ impl HummockVersionReader {
     pub fn new(
         sstable_store: SstableStoreRef,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
+        preload_retry_times: usize,
     ) -> Self {
         Self {
             sstable_store,
             state_store_metrics,
+            preload_retry_times,
         }
     }
 
@@ -568,7 +571,7 @@ impl HummockVersionReader {
                 &read_options,
                 local_stats,
             ) {
-                return Ok(if data_epoch < min_epoch {
+                return Ok(if data_epoch.pure_epoch() < min_epoch {
                     None
                 } else {
                     data.into_user_value()
@@ -594,7 +597,7 @@ impl HummockVersionReader {
             )
             .await?
             {
-                return Ok(if data_epoch < min_epoch {
+                return Ok(if data_epoch.pure_epoch() < min_epoch {
                     None
                 } else {
                     data.into_user_value()
@@ -631,7 +634,7 @@ impl HummockVersionReader {
                         )
                         .await?
                         {
-                            return Ok(if data_epoch < min_epoch {
+                            return Ok(if data_epoch.pure_epoch() < min_epoch {
                                 None
                             } else {
                                 data.into_user_value()
@@ -668,7 +671,7 @@ impl HummockVersionReader {
                     )
                     .await?
                     {
-                        return Ok(if data_epoch < min_epoch {
+                        return Ok(if data_epoch.pure_epoch() < min_epoch {
                             None
                         } else {
                             data.into_user_value()
@@ -717,7 +720,13 @@ impl HummockVersionReader {
             .prefix_hint
             .as_ref()
             .map(|hint| Sstable::hash_for_bloom_filter(hint, read_options.table_id.table_id()));
-
+        let mut sst_read_options = SstableIteratorReadOptions::from_read_options(&read_options);
+        if read_options.prefetch_options.preload {
+            sst_read_options.must_iterated_end_user_key =
+                Some(user_key_range.1.map(|key| key.cloned()));
+            sst_read_options.max_preload_retry_times = self.preload_retry_times;
+        }
+        let sst_read_options = Arc::new(sst_read_options);
         for sstable_info in &uncommitted_ssts {
             let table_holder = self
                 .sstable_store
@@ -750,7 +759,7 @@ impl HummockVersionReader {
             staging_iters.push(HummockIteratorUnion::Second(SstableIterator::new(
                 table_holder,
                 self.sstable_store.clone(),
-                Arc::new(SstableIteratorReadOptions::from_read_options(&read_options)),
+                sst_read_options.clone(),
             )));
         }
         local_stats.staging_sst_iter_count = staging_sst_iter_count;
@@ -764,12 +773,6 @@ impl HummockVersionReader {
             .with_label_values(&[table_id_label])
             .start_timer();
 
-        let mut sst_read_options = SstableIteratorReadOptions::from_read_options(&read_options);
-        if read_options.prefetch_options.exhaust_iter {
-            sst_read_options.must_iterated_end_user_key =
-                Some(user_key_range.1.map(|key| key.cloned()));
-        }
-        let sst_read_options = Arc::new(sst_read_options);
         for level in committed.levels(read_options.table_id) {
             if level.table_infos.is_empty() {
                 continue;
