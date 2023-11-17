@@ -21,7 +21,7 @@ use tracing::warn;
 
 use super::{Result, SinkFormatter, StreamChunk};
 use crate::sink::encoder::{
-    JsonEncoder, RowEncoder, TimestampHandlingMode, TimestamptzHandlingMode,
+    DateHandlingMode, JsonEncoder, RowEncoder, TimestampHandlingMode, TimestamptzHandlingMode,
 };
 use crate::tri;
 
@@ -64,12 +64,14 @@ impl DebeziumJsonFormatter {
         let key_encoder = JsonEncoder::new(
             schema.clone(),
             Some(pk_indices.clone()),
+            DateHandlingMode::FromEpoch,
             TimestampHandlingMode::Milli,
             TimestamptzHandlingMode::UtcString,
         );
         let val_encoder = JsonEncoder::new(
             schema.clone(),
             None,
+            DateHandlingMode::FromEpoch,
             TimestampHandlingMode::Milli,
             TimestamptzHandlingMode::UtcString,
         );
@@ -284,12 +286,17 @@ pub(crate) fn field_to_json(field: &Field) -> Value {
 
         risingwave_common::types::DataType::Varchar => ("string", ""),
 
-        // use built-in Kafka Connect logical types, may lose precision when Time has a fractional second precision value that is greater than 3.
+        // use built-in Kafka Connect logical types.
         risingwave_common::types::DataType::Date => ("int32", "org.apache.kafka.connect.data.Date"),
+        // may lose precision when Time/Timestamp has a fractional second precision value that is greater than 3. But for TimestampHandlingMode:Milli, it is sufficient.
         risingwave_common::types::DataType::Time => ("int64", "org.apache.kafka.connect.data.Time"),
-        risingwave_common::types::DataType::Timestamp => ("int64", "org.apache.kafka.connect.data.Timestamp"),
+        risingwave_common::types::DataType::Timestamp => {
+            ("int64", "org.apache.kafka.connect.data.Timestamp")
+        }
 
-        risingwave_common::types::DataType::Timestamptz => ("string", "io.debezium.time.ZonedTimestamp"),
+        risingwave_common::types::DataType::Timestamptz => {
+            ("string", "io.debezium.time.ZonedTimestamp")
+        }
         risingwave_common::types::DataType::Interval => ("string", "io.debezium.time.Interval"),
 
         risingwave_common::types::DataType::Bytea => ("bytes", ""),
@@ -383,6 +390,7 @@ mod tests {
         let encoder = JsonEncoder::new(
             schema.clone(),
             None,
+            DateHandlingMode::FromEpoch,
             TimestampHandlingMode::Milli,
             TimestamptzHandlingMode::UtcString,
         );
