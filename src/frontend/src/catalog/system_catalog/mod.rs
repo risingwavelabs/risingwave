@@ -283,34 +283,62 @@ pub fn get_sys_views_in_schema(schema_name: &str) -> Option<Vec<Arc<ViewCatalog>
         .map(Clone::clone)
 }
 
+/// The global registry of all builtin catalogs.
+pub static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| unsafe {
+    // SAFETY: this function is called after all `#[ctor]` functions are called.
+    let mut table_by_schema_name = HashMap::new();
+    let mut table_name_by_id = HashMap::new();
+    let mut view_by_schema_name = HashMap::new();
+    tracing::info!("found {} functions", SYS_CATALOGS_INIT.len());
+    for (id, catalog) in SYS_CATALOGS_INIT.drain(..) {
+        match catalog {
+            BuiltinCatalog::Table(table) => {
+                let sys_table: SystemTableCatalog = table.into();
+                table_by_schema_name
+                    .entry(table.schema)
+                    .or_insert(vec![])
+                    .push(Arc::new(sys_table.with_id(id.into())));
+                table_name_by_id.insert(id.into(), table.name);
+            }
+            BuiltinCatalog::View(view) => {
+                let sys_view: ViewCatalog = view.into();
+                view_by_schema_name
+                    .entry(view.schema)
+                    .or_insert(vec![])
+                    .push(Arc::new(sys_view.with_id(id)));
+            }
+        }
+    }
+    SystemCatalog {
+        table_by_schema_name,
+        table_name_by_id,
+        view_by_schema_name,
+    }
+});
+
+pub static mut SYS_CATALOGS_INIT: Vec<(u32, BuiltinCatalog)> = vec![];
+
+/// Register the catalog to global registry.
+///
+/// Note: The function is used by macro generated code. Don't call it directly.
+#[doc(hidden)]
+pub(super) unsafe fn _register(id: u32, builtin_catalog: BuiltinCatalog) {
+    assert!(id < NON_RESERVED_SYS_CATALOG_ID as u32);
+
+    SYS_CATALOGS_INIT.push((id, builtin_catalog));
+}
+
 macro_rules! prepare_sys_catalog {
     ($( { $builtin_catalog:expr $(, $func:ident $($await:ident)?)? } ),* $(,)?) => {
-        pub(crate) static SYS_CATALOGS: LazyLock<SystemCatalog> = LazyLock::new(|| {
-            let mut table_by_schema_name = HashMap::new();
-            let mut table_name_by_id = HashMap::new();
-            let mut view_by_schema_name = HashMap::new();
+        paste::paste! {
             $(
-                let id = (${index()} + 1) as u32;
-                match $builtin_catalog {
-                    BuiltinCatalog::Table(table) => {
-                        let sys_table: SystemTableCatalog = table.into();
-                        table_by_schema_name.entry(table.schema).or_insert(vec![]).push(Arc::new(sys_table.with_id(id.into())));
-                        table_name_by_id.insert(id.into(), table.name);
-                    },
-                    BuiltinCatalog::View(view) => {
-                        let sys_view: ViewCatalog = view.into();
-                        view_by_schema_name.entry(view.schema).or_insert(vec![]).push(Arc::new(sys_view.with_id(id)));
-                    },
+                #[ctor::ctor]
+                #[allow(non_snake_case)]
+                unsafe fn [<register_ ${index()}>]() {
+                    _register(${index()} as u32, $builtin_catalog);
                 }
             )*
-            assert!(table_name_by_id.len() < NON_RESERVED_SYS_CATALOG_ID as usize, "too many system catalogs");
-
-            SystemCatalog {
-                table_by_schema_name,
-                table_name_by_id,
-                view_by_schema_name,
-            }
-        });
+        }
 
         #[async_trait]
         impl SysCatalogReader for SysCatalogReaderImpl {
