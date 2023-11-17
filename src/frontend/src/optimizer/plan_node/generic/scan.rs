@@ -18,7 +18,7 @@ use std::rc::Rc;
 use educe::Educe;
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::Pretty;
-use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, Field, Schema, TableDesc};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
 
@@ -39,8 +39,6 @@ pub struct Scan {
     pub output_col_idx: Vec<usize>,
     /// Descriptor of the table
     pub table_desc: Rc<TableDesc>,
-    /// Descriptor of the external table for CDC
-    pub cdc_table_desc: Rc<CdcTableDesc>,
     /// Descriptors of all indexes on this table
     pub indexes: Vec<Rc<IndexCatalog>>,
     /// The pushed down predicates. It refers to column indexes of the table.
@@ -246,7 +244,6 @@ impl Scan {
             table_name,
             output_col_idx,
             table_desc,
-            Rc::new(CdcTableDesc::default()),
             indexes,
             ctx,
             predicate,
@@ -260,7 +257,6 @@ impl Scan {
         table_name: String,
         output_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
-        cdc_table_desc: Rc<CdcTableDesc>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
@@ -288,7 +284,6 @@ impl Scan {
             required_col_idx,
             output_col_idx,
             table_desc,
-            cdc_table_desc,
             indexes,
             predicate,
             chunk_size: None,
@@ -321,7 +316,6 @@ impl Scan {
     }
 }
 
-// TODO: extend for cdc table
 impl GenericPlanNode for Scan {
     fn schema(&self) -> Schema {
         let fields = self

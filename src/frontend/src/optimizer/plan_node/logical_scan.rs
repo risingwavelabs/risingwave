@@ -18,7 +18,7 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, TableDesc};
+use risingwave_common::catalog::{ColumnDesc, TableDesc};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::ColumnOrder;
 
@@ -98,10 +98,6 @@ impl LogicalScan {
     /// Get a reference to the logical scan's table desc.
     pub fn table_desc(&self) -> &TableDesc {
         self.core.table_desc.as_ref()
-    }
-
-    pub fn cdc_table_desc(&self) -> &CdcTableDesc {
-        self.core.cdc_table_desc.as_ref()
     }
 
     /// Get the descs of the output columns.
@@ -268,7 +264,6 @@ impl LogicalScan {
             self.table_name().to_string(),
             self.output_col_idx().to_vec(),
             self.core.table_desc.clone(),
-            self.core.cdc_table_desc.clone(),
             self.indexes().to_vec(),
             self.base.ctx().clone(),
             predicate,
@@ -283,7 +278,6 @@ impl LogicalScan {
             self.table_name().to_string(),
             output_col_idx,
             self.core.table_desc.clone(),
-            self.core.cdc_table_desc.clone(),
             self.indexes().to_vec(),
             self.base.ctx().clone(),
             self.predicate().clone(),
