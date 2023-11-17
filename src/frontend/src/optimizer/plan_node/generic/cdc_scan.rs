@@ -27,7 +27,7 @@ use crate::expr::ExprRewriter;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
 
-/// [`CdcScan`] returns contents of a table or other equivalent object
+/// [`CdcScan`] reads rows of a table from an external upstream database
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
 pub struct CdcScan {
