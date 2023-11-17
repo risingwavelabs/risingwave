@@ -98,7 +98,11 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
                     "HashMap" | "Option" => false,
                     _ => true,
                 };
-                let field_type = quote::quote!(#field_type).to_string();
+                let mut field_type = quote::quote!(#field_type).to_string();
+                // Option < T > -> T
+                if field_type.starts_with("Option") {
+                    field_type = field_type[9..field_type.len() - 2].to_string();
+                }
                 let comments = extract_comments(&field.attrs);
 
                 // Replace the function name with the function body.
