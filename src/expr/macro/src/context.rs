@@ -188,7 +188,6 @@ pub(super) fn generate_captured_function(
 
     let new_body = {
         let mut scoped = quote! {
-            // TODO: We can call the old function directly here.
             #call_old_fn
         };
 
