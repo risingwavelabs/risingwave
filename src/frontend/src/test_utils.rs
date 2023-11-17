@@ -542,6 +542,9 @@ impl CatalogWriter for MockCatalogWriter {
                     table.to_prost(new_schema_id, database_id)
                 };
                 self.catalog.write().update_table(&pb_table);
+                self.table_id_to_schema_id
+                    .write()
+                    .insert(table_id, new_schema_id);
                 Ok(())
             }
             _ => unreachable!(),
