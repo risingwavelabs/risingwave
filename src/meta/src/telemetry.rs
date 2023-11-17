@@ -20,6 +20,7 @@ use risingwave_common::telemetry::{
     current_timestamp, SystemData, TelemetryNodeType, TelemetryReport, TelemetryReportBase,
     TelemetryResult,
 };
+use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_pb::common::WorkerType;
 use serde::{Deserialize, Serialize};
 
@@ -35,12 +36,19 @@ struct NodeCount {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct RwVersion {
+    version: String,
+    git_sha: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct MetaTelemetryReport {
     #[serde(flatten)]
     base: TelemetryReportBase,
     node_count: NodeCount,
     // At this point, it will always be etcd, but we will enable telemetry when using memory.
     meta_backend: MetaBackend,
+    rw_version: RwVersion,
 }
 
 impl TelemetryReport for MetaTelemetryReport {}
@@ -88,6 +96,10 @@ impl TelemetryReportCreator for MetaReportCreator {
     ) -> TelemetryResult<MetaTelemetryReport> {
         let node_map = self.cluster_mgr.count_worker_node().await;
         Ok(MetaTelemetryReport {
+            rw_version: RwVersion {
+                version: RW_VERSION.to_string(),
+                git_sha: GIT_SHA.to_string(),
+            },
             base: TelemetryReportBase {
                 tracking_id,
                 session_id,
