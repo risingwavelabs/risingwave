@@ -435,7 +435,7 @@ impl Cluster {
                     "ctl",
                     "throttle",
                     "mv",
-                    table_id.table_id.to_string(),
+                    &table_id.table_id.to_string(),
                     rate_limit.map(|r| r.to_string()).unwrap_or_default(),
                 ]);
                 risingwave_ctl::start(opts).await
