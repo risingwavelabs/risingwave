@@ -22,7 +22,7 @@ use serde_json::Value;
 use tracing::debug;
 
 use super::DEFAULT_MAX_PAST;
-use crate::types::{Datum, Scalar, Timestamp};
+use crate::types::{Datum, Scalar, Timestamp, Timestamptz};
 
 pub struct ChronoField<T: ChronoFieldInner> {
     max_past: Duration,
@@ -104,5 +104,27 @@ impl ChronoFieldInner for Timestamp {
 
     fn to_json(&self) -> Value {
         Value::String(self.0.to_string())
+    }
+}
+
+impl ChronoFieldInner for Timestamptz {
+    fn from_now() -> Self {
+        Timestamptz::from(
+            Utc::now()
+                .duration_round(Duration::microseconds(1))
+                .unwrap(),
+        )
+    }
+
+    fn from_base(base: DateTime<FixedOffset>) -> Self {
+        Timestamptz::from(base)
+    }
+
+    fn minus(&self, duration: Duration) -> Self {
+        Timestamptz::from(self.to_datetime_utc() - duration)
+    }
+
+    fn to_json(&self) -> Value {
+        Value::String(self.to_string())
     }
 }
