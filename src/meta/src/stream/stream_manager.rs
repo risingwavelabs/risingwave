@@ -766,7 +766,7 @@ impl GlobalStreamManager {
                 biased;
 
                 _ = &mut shutdown_rx => {
-                    tracing::info!("Barrier manager is stopped");
+                    tracing::info!("Stream manager is stopped");
                     break;
                 }
 
@@ -774,6 +774,11 @@ impl GlobalStreamManager {
                     let notification = notification.expect("local notification channel closed in loop of stream manager");
                     if let LocalNotification::WorkerNodeActivated(worker) = &notification {
                         if self.env.opts.enable_automatic_parallelism_control {
+                            if let Some(worker) = self.cluster_manager.get_worker_by_id(worker.id).await {
+                                tracing::debug!("Worker node {} is re-activated, skipping in stream manager scaling loop", worker.worker_id());
+                                continue
+                            }
+
                             if let Err(e) = self.trigger_scale_out(vec![worker.id]).await {
                                 tracing::error!(error = ?e, "Failed to trigger scale out");
                             }
