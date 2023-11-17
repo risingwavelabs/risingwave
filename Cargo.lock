@@ -4251,6 +4251,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25db6b064527c5d482d0423354fcd07a89a2dfe07b67892e62411946db7f07b0"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6024,7 +6033,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "futures",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-tokio",
  "openssl",
  "panic-message",
@@ -6560,7 +6569,7 @@ checksum = "8bdf592881d821b83d471f8af290226c8d51402259e9bb5be7f9f8bdebbb11ac"
 dependencies = [
  "bytes",
  "heck 0.4.1",
- "itertools 0.11.0",
+ "itertools 0.10.5",
  "log",
  "multimap 0.8.3",
  "once_cell",
@@ -6594,7 +6603,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "265baba7fabd416cf5078179f7d2cbeca4ce7a9041111900675ea7c4cb8a4c32"
 dependencies = [
  "anyhow",
- "itertools 0.11.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.37",
@@ -7163,7 +7172,7 @@ dependencies = [
  "glob",
  "google-cloud-pubsub",
  "indicatif",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-rdkafka",
  "madsim-tokio",
  "redis",
@@ -7190,7 +7199,7 @@ dependencies = [
  "dialoguer",
  "enum-iterator",
  "fs-err",
- "itertools 0.11.0",
+ "itertools 0.12.0",
 ]
 
 [[package]]
@@ -7201,7 +7210,7 @@ dependencies = [
  "async-trait",
  "bincode 1.3.3",
  "bytes",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "parking_lot 0.12.1",
  "prost 0.12.1",
  "risingwave_common",
@@ -7230,7 +7239,7 @@ dependencies = [
  "futures-util",
  "hashbrown 0.14.0",
  "hytra",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",
@@ -7273,7 +7282,7 @@ dependencies = [
  "clap",
  "futures",
  "hdrhistogram",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "libc",
  "madsim-tokio",
  "nix 0.27.1",
@@ -7384,7 +7393,7 @@ dependencies = [
  "humantime",
  "hyper",
  "hytra",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "itoa",
  "jsonbb",
  "libc",
@@ -7548,7 +7557,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "hyper",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -7618,7 +7627,7 @@ dependencies = [
  "hyper-tls",
  "icelake",
  "indexmap 1.9.3",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "jni",
  "jsonschema-transpiler",
  "madsim-rdkafka",
@@ -7689,7 +7698,7 @@ dependencies = [
  "comfy-table",
  "futures",
  "inquire",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-etcd-client",
  "madsim-tokio",
  "regex",
@@ -7762,7 +7771,7 @@ dependencies = [
  "expect-test",
  "futures-async-stream",
  "futures-util",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-tokio",
  "num-traits",
  "parse-display",
@@ -7793,7 +7802,7 @@ dependencies = [
  "futures-async-stream",
  "futures-util",
  "hex",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "jsonbb",
  "madsim-tokio",
  "md5",
@@ -7817,7 +7826,7 @@ dependencies = [
 name = "risingwave_expr_macro"
 version = "0.1.0"
 dependencies = [
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "proc-macro2",
  "quote",
  "syn 2.0.37",
@@ -7849,7 +7858,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "iana-time-zone",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -7898,7 +7907,7 @@ version = "1.3.0-alpha"
 dependencies = [
  "bytes",
  "hex",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "parse-display",
  "risingwave_common",
  "risingwave_pb",
@@ -7918,7 +7927,7 @@ dependencies = [
  "fail",
  "futures",
  "futures-async-stream",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-tokio",
  "parking_lot 0.12.1",
  "rand",
@@ -7983,7 +7992,7 @@ dependencies = [
  "cfg-or-panic",
  "expect-test",
  "futures",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "jni",
  "madsim-tokio",
  "paste",
@@ -8023,7 +8032,7 @@ dependencies = [
  "futures",
  "hex",
  "hyper",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
@@ -8093,7 +8102,7 @@ dependencies = [
  "clap",
  "either",
  "futures",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
@@ -8121,7 +8130,7 @@ dependencies = [
  "async-trait",
  "either",
  "futures",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-tokio",
  "madsim-tonic",
  "rand",
@@ -8157,7 +8166,7 @@ dependencies = [
  "hyper",
  "hyper-rustls",
  "hyper-tls",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
  "opendal",
@@ -8195,7 +8204,7 @@ version = "1.3.0-alpha"
 dependencies = [
  "anyhow",
  "expect-test",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "libtest-mimic",
  "madsim-tokio",
  "paste",
@@ -8235,7 +8244,7 @@ dependencies = [
  "either",
  "futures",
  "hyper",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "lru 0.10.1",
  "madsim-tokio",
  "madsim-tonic",
@@ -8292,7 +8301,7 @@ dependencies = [
  "console",
  "futures",
  "glob",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "lru 0.7.6",
  "madsim",
  "madsim-aws-sdk-s3",
@@ -8339,7 +8348,7 @@ dependencies = [
  "criterion",
  "futures",
  "futures-async-stream",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-tokio",
  "parking_lot 0.12.1",
  "paste",
@@ -8356,7 +8365,7 @@ dependencies = [
 name = "risingwave_sqlparser"
 version = "1.3.0-alpha"
 dependencies = [
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "matches",
  "serde",
  "tracing",
@@ -8387,7 +8396,7 @@ dependencies = [
  "chrono",
  "clap",
  "expect-test",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "libtest-mimic",
  "madsim-tokio",
  "rand",
@@ -8449,7 +8458,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "hex",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "libc",
  "lz4",
  "mach2",
@@ -8512,7 +8521,7 @@ dependencies = [
  "futures-async-stream",
  "governor",
  "hytra",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "local_stats_alloc",
  "lru 0.7.6",
  "madsim-tokio",
@@ -11421,7 +11430,6 @@ dependencies = [
  "hyper",
  "indexmap 1.9.3",
  "itertools 0.10.5",
- "itertools 0.11.0",
  "jni",
  "lazy_static",
  "lexical-core",
