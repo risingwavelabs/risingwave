@@ -27,7 +27,7 @@ use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::ExprRewriter;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order};
-use crate::utils::{ColIndexMappingRewriteExt, Condition};
+use crate::utils::ColIndexMappingRewriteExt;
 
 /// [`CdcScan`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone, Educe)]
@@ -43,8 +43,6 @@ pub struct CdcScan {
     pub cdc_table_desc: Rc<CdcTableDesc>,
     /// Descriptors of all indexes on this table
     pub indexes: Vec<Rc<IndexCatalog>>,
-    /// The pushed down predicates. It refers to column indexes of the table.
-    pub predicate: Condition,
     /// Help RowSeqCdcScan executor use a better chunk size
     pub chunk_size: Option<u32>,
     /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
@@ -57,19 +55,7 @@ pub struct CdcScan {
 }
 
 impl CdcScan {
-    pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
-        self.predicate = self.predicate.clone().rewrite_expr(r);
-    }
-
-    /// The mapped distribution key of the scan operator.
-    ///
-    /// The column indices in it is the position in the `output_col_idx`, instead of the position
-    /// in all the columns of the table (which is the table's distribution key).
-    ///
-    /// Return `None` if the table's distribution key are not all in the `output_col_idx`.
-    pub fn distribution_key(&self) -> Option<Vec<usize>> {
-        None
-    }
+    pub fn rewrite_exprs(&self, _rewriter: &mut dyn ExprRewriter) {}
 
     /// Get the ids of the output columns.
     pub fn output_column_ids(&self) -> Vec<ColumnId> {
@@ -154,7 +140,6 @@ impl CdcScan {
             cdc_table_desc,
             vec![],
             ctx,
-            Condition::true_cond(),
             false,
             Cardinality::unknown(),
         )
@@ -168,7 +153,6 @@ impl CdcScan {
         cdc_table_desc: Rc<CdcTableDesc>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
-        predicate: Condition, // refers to column indexes of the table
         for_system_time_as_of_proctime: bool,
         table_cardinality: Cardinality,
     ) -> Self {
@@ -180,13 +164,7 @@ impl CdcScan {
         // table_idx will not change. And the `required_col_idx` is the `table_idx` of the
         // required columns, i.e., the mapping from operator_idx to table_idx.
 
-        let mut required_col_idx = output_col_idx.clone();
-        let predicate_col_idx = predicate.collect_input_refs(table_desc.columns.len());
-        predicate_col_idx.ones().for_each(|idx| {
-            if !required_col_idx.contains(&idx) {
-                required_col_idx.push(idx);
-            }
-        });
+        let required_col_idx = output_col_idx.clone();
 
         Self {
             table_name,
@@ -195,7 +173,6 @@ impl CdcScan {
             table_desc,
             cdc_table_desc,
             indexes,
-            predicate,
             chunk_size: None,
             for_system_time_as_of_proctime,
             ctx,
@@ -213,16 +190,6 @@ impl CdcScan {
             .map(Pretty::from)
             .collect(),
         )
-    }
-
-    pub(crate) fn fields_pretty_schema(&self) -> Schema {
-        let fields = self
-            .table_desc
-            .columns
-            .iter()
-            .map(|col| Field::from_with_table_name_prefix(col, &self.table_name))
-            .collect();
-        Schema { fields }
     }
 }
 

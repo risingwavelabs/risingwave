@@ -263,7 +263,7 @@ impl ExprRewritable for StreamCdcTableScan {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut core = self.core.clone();
+        let core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core).into()
     }

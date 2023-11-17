@@ -32,7 +32,7 @@ use crate::optimizer::plan_node::{
     ToStreamContext,
 };
 use crate::optimizer::property::{Cardinality, Order};
-use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
+use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalCdcScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -96,11 +96,6 @@ impl LogicalCdcScan {
         self.core.output_column_ids()
     }
 
-    /// Get the logical scan's filter predicate
-    pub fn predicate(&self) -> &Condition {
-        &self.core.predicate
-    }
-
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
         generic::CdcScan::new_inner(
             self.table_name().to_string(),
@@ -109,7 +104,6 @@ impl LogicalCdcScan {
             self.core.cdc_table_desc.clone(),
             vec![],
             self.base.ctx().clone(),
-            self.predicate().clone(),
             self.for_system_time_as_of_proctime(),
             self.table_cardinality(),
         )
@@ -132,8 +126,7 @@ impl Distill for LogicalCdcScan {
         let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(5);
         vec.push(("table", Pretty::from(self.table_name().to_owned())));
-        let key_is_columns =
-            self.predicate().always_true() || self.output_col_idx() == self.required_col_idx();
+        let key_is_columns = true;
         let key = if key_is_columns {
             "columns"
         } else {
@@ -157,17 +150,6 @@ impl Distill for LogicalCdcScan {
                         .collect(),
                 ),
             ));
-        }
-
-        if !self.predicate().always_true() {
-            let input_schema = self.core.fields_pretty_schema();
-            vec.push((
-                "predicate",
-                Pretty::display(&ConditionDisplay {
-                    condition: self.predicate(),
-                    input_schema: &input_schema,
-                }),
-            ))
         }
 
         if self.table_cardinality() != Cardinality::unknown() {
@@ -198,7 +180,7 @@ impl ExprRewritable for LogicalCdcScan {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut core = self.core.clone();
+        let core = self.core.clone();
         core.rewrite_exprs(r);
         Self {
             base: self.base.clone_with_new_plan_id(),
