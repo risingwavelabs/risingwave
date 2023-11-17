@@ -31,7 +31,6 @@ use super::{
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -64,7 +63,6 @@ impl LogicalScan {
     /// Create a [`LogicalScan`] node. Used by planner.
     pub fn create(
         table_name: String, // explain-only
-        scan_table_type: ScanTableType,
         table_desc: Rc<TableDesc>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
@@ -73,7 +71,6 @@ impl LogicalScan {
     ) -> Self {
         generic::Scan::new(
             table_name,
-            scan_table_type,
             (0..table_desc.columns.len()).collect(),
             table_desc,
             indexes,
@@ -85,30 +82,8 @@ impl LogicalScan {
         .into()
     }
 
-    pub fn create_for_cdc(
-        table_name: String, // explain-only
-        cdc_table_desc: Rc<CdcTableDesc>,
-        ctx: OptimizerContextRef,
-    ) -> Self {
-        generic::Scan::new_for_cdc(
-            table_name,
-            (0..cdc_table_desc.columns.len()).collect(),
-            cdc_table_desc,
-            ctx,
-        )
-        .into()
-    }
-
     pub fn table_name(&self) -> &str {
         &self.core.table_name
-    }
-
-    pub fn scan_table_type(&self) -> &ScanTableType {
-        &self.core.scan_table_type
-    }
-
-    pub fn is_cdc_table(&self) -> bool {
-        matches!(self.core.scan_table_type, ScanTableType::CdcTable)
     }
 
     pub fn for_system_time_as_of_proctime(&self) -> bool {
@@ -272,7 +247,6 @@ impl LogicalScan {
 
         let scan_without_predicate = generic::Scan::new(
             self.table_name().to_string(),
-            self.scan_table_type().clone(),
             self.required_col_idx().to_vec(),
             self.core.table_desc.clone(),
             self.indexes().to_vec(),
@@ -292,7 +266,6 @@ impl LogicalScan {
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
         generic::Scan::new_inner(
             self.table_name().to_string(),
-            self.scan_table_type().clone(),
             self.output_col_idx().to_vec(),
             self.core.table_desc.clone(),
             self.core.cdc_table_desc.clone(),
@@ -308,7 +281,6 @@ impl LogicalScan {
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
         generic::Scan::new_inner(
             self.table_name().to_string(),
-            self.scan_table_type().clone(),
             output_col_idx,
             self.core.table_desc.clone(),
             self.core.cdc_table_desc.clone(),
@@ -419,11 +391,6 @@ impl PredicatePushdown for LogicalScan {
         mut predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        // skip pushdown if the table is cdc table
-        if self.is_cdc_table() {
-            return self.clone().into();
-        }
-
         // If the predicate contains `CorrelatedInputRef` or `now()`. We don't push down.
         // This case could come from the predicate push down before the subquery unnesting.
         struct HasCorrelated {}
@@ -569,13 +536,6 @@ impl ToStream for LogicalScan {
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        if self.is_cdc_table() {
-            return Ok((
-                self.clone().into(),
-                ColIndexMapping::identity(self.schema().len()),
-            ));
-        }
-
         match self.base.stream_key().is_none() {
             true => {
                 let mut col_ids = HashSet::new();
