@@ -133,22 +133,6 @@ impl CdcScan {
             .collect()
     }
 
-    pub(crate) fn order_names(&self) -> Vec<String> {
-        self.table_desc
-            .order_column_indices()
-            .iter()
-            .map(|&i| self.get_table_columns()[i].name.clone())
-            .collect()
-    }
-
-    pub(crate) fn order_names_with_table_prefix(&self) -> Vec<String> {
-        self.table_desc
-            .order_column_indices()
-            .iter()
-            .map(|&i| format!("{}.{}", self.table_name, self.get_table_columns()[i].name))
-            .collect()
-    }
-
     /// Return indices of fields the output is ordered by and
     /// corresponding direction
     pub fn get_out_column_index_order(&self) -> Order {

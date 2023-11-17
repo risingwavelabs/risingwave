@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
@@ -29,12 +29,12 @@ use super::{
     ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::expr::{ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::generic::CdcScanTableType;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, LogicalFilter, LogicalProject, PredicatePushdownContext,
-    RewriteStreamContext, StreamCdcTableScan, ToStreamContext,
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamCdcTableScan,
+    ToStreamContext,
 };
 use crate::optimizer::property::{Cardinality, Order};
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
@@ -60,31 +60,7 @@ impl From<generic::CdcScan> for PlanRef {
 }
 
 impl LogicalCdcScan {
-    /// Create a [`LogicalCdcScan`] node. Used by planner.
     pub fn create(
-        table_name: String, // explain-only
-        scan_table_type: CdcScanTableType,
-        table_desc: Rc<TableDesc>,
-        indexes: Vec<Rc<IndexCatalog>>,
-        ctx: OptimizerContextRef,
-        for_system_time_as_of_proctime: bool,
-        table_cardinality: Cardinality,
-    ) -> Self {
-        generic::CdcScan::new(
-            table_name,
-            scan_table_type,
-            (0..table_desc.columns.len()).collect(),
-            table_desc,
-            indexes,
-            ctx,
-            Condition::true_cond(),
-            for_system_time_as_of_proctime,
-            table_cardinality,
-        )
-        .into()
-    }
-
-    pub fn create_for_cdc(
         table_name: String, // explain-only
         cdc_table_desc: Rc<CdcTableDesc>,
         ctx: OptimizerContextRef,
@@ -104,10 +80,6 @@ impl LogicalCdcScan {
 
     pub fn scan_table_type(&self) -> &CdcScanTableType {
         &self.core.scan_table_type
-    }
-
-    pub fn is_cdc_table(&self) -> bool {
-        matches!(self.core.scan_table_type, CdcScanTableType::CdcTable)
     }
 
     pub fn for_system_time_as_of_proctime(&self) -> bool {
@@ -291,22 +263,6 @@ impl LogicalCdcScan {
         (scan_without_predicate, predicate, project_expr)
     }
 
-    fn clone_with_predicate(&self, predicate: Condition) -> Self {
-        generic::CdcScan::new_inner(
-            self.table_name().to_string(),
-            self.scan_table_type().clone(),
-            self.output_col_idx().to_vec(),
-            self.core.table_desc.clone(),
-            self.core.cdc_table_desc.clone(),
-            self.indexes().to_vec(),
-            self.base.ctx().clone(),
-            predicate,
-            self.for_system_time_as_of_proctime(),
-            self.table_cardinality(),
-        )
-        .into()
-    }
-
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
         generic::CdcScan::new_inner(
             self.table_name().to_string(),
@@ -418,74 +374,10 @@ impl ExprRewritable for LogicalCdcScan {
 impl PredicatePushdown for LogicalCdcScan {
     fn predicate_pushdown(
         &self,
-        mut predicate: Condition,
+        _predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        // skip pushdown if the table is cdc table
-        if self.is_cdc_table() {
-            return self.clone().into();
-        }
-
-        // If the predicate contains `CorrelatedInputRef` or `now()`. We don't push down.
-        // This case could come from the predicate push down before the subquery unnesting.
-        struct HasCorrelated {}
-        impl ExprVisitor for HasCorrelated {
-            type Result = bool;
-
-            fn merge(a: bool, b: bool) -> bool {
-                a | b
-            }
-
-            fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) -> bool {
-                true
-            }
-        }
-        let non_pushable_predicate: Vec<_> = predicate
-            .conjunctions
-            .extract_if(|expr| expr.count_nows() > 0 || HasCorrelated {}.visit_expr(expr))
-            .collect();
-        let predicate = predicate.rewrite_expr(&mut ColIndexMapping::new(
-            self.output_col_idx().iter().map(|i| Some(*i)).collect(),
-            self.table_desc().columns.len(),
-        ));
-        if non_pushable_predicate.is_empty() {
-            self.clone_with_predicate(predicate.and(self.predicate().clone()))
-                .into()
-        } else {
-            return LogicalFilter::create(
-                self.clone_with_predicate(predicate.and(self.predicate().clone()))
-                    .into(),
-                Condition {
-                    conjunctions: non_pushable_predicate,
-                },
-            );
-        }
-    }
-}
-
-impl LogicalCdcScan {
-    fn to_batch_inner_with_required(&self, required_order: &Order) -> Result<PlanRef> {
-        unreachable!()
-    }
-
-    // For every index, check if the order of the index satisfies the required_order
-    // If yes, use an index scan
-    fn use_index_scan_if_order_is_satisfied(
-        &self,
-        required_order: &Order,
-    ) -> Option<Result<PlanRef>> {
-        if required_order.column_orders.is_empty() {
-            return None;
-        }
-
-        let order_satisfied_index = self.indexes_satisfy_order(required_order);
-        for index in order_satisfied_index {
-            if let Some(index_scan) = self.to_index_scan_if_index_covered(index) {
-                return Some(index_scan.to_batch());
-            }
-        }
-
-        None
+        self.clone().into()
     }
 }
 
@@ -494,68 +386,23 @@ impl ToBatch for LogicalCdcScan {
         unreachable!()
     }
 
-    fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
+    fn to_batch_with_order_required(&self, _required_order: &Order) -> Result<PlanRef> {
         unreachable!()
     }
 }
 
 impl ToStream for LogicalCdcScan {
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        if self.predicate().always_true() {
-            Ok(StreamCdcTableScan::new(self.core.clone()).into())
-        } else {
-            let (scan, predicate, project_expr) = self.predicate_pull_up();
-            let mut plan = LogicalFilter::create(scan.into(), predicate);
-            if let Some(exprs) = project_expr {
-                plan = LogicalProject::create(plan, exprs)
-            }
-            plan.to_stream(ctx)
-        }
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+        Ok(StreamCdcTableScan::new(self.core.clone()).into())
     }
 
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        if self.is_cdc_table() {
-            return Ok((
-                self.clone().into(),
-                ColIndexMapping::identity(self.schema().len()),
-            ));
-        }
-
-        match self.base.stream_key().is_none() {
-            true => {
-                let mut col_ids = HashSet::new();
-
-                for &idx in self.output_col_idx() {
-                    col_ids.insert(self.table_desc().columns[idx].column_id);
-                }
-                let col_need_to_add = self
-                    .table_desc()
-                    .pk
-                    .iter()
-                    .filter_map(|c| {
-                        if !col_ids.contains(&self.table_desc().columns[c.column_index].column_id) {
-                            Some(c.column_index)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect_vec();
-
-                let mut output_col_idx = self.output_col_idx().clone();
-                output_col_idx.extend(col_need_to_add);
-                let new_len = output_col_idx.len();
-                Ok((
-                    self.clone_with_output_indices(output_col_idx).into(),
-                    ColIndexMapping::identity_or_none(self.schema().len(), new_len),
-                ))
-            }
-            false => Ok((
-                self.clone().into(),
-                ColIndexMapping::identity(self.schema().len()),
-            )),
-        }
+        Ok((
+            self.clone().into(),
+            ColIndexMapping::identity(self.schema().len()),
+        ))
     }
 }

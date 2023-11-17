@@ -34,7 +34,7 @@ use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
-    PredicatePushdownContext, RewriteStreamContext, StreamCdcTableScan, ToStreamContext,
+    PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
 use crate::optimizer::property::{Cardinality, Order};
 use crate::optimizer::rule::IndexSelectionRule;
