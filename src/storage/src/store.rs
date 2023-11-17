@@ -22,16 +22,19 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use prost::Message;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::table_watermark::{
+    TableWatermarks, VnodeWatermark, WatermarkDirection,
+};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedPrefetchOptions, TracedReadOptions,
     TracedSealCurrentEpochOptions, TracedWriteOptions,
 };
-use risingwave_pb::hummock::{VnodeWatermark, WatermarkList};
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
@@ -164,7 +167,7 @@ pub struct SyncResult {
     pub sync_size: usize,
     /// The sst_info of sync.
     pub uncommitted_ssts: Vec<LocalSstableInfo>,
-    pub watermarks: HashMap<TableId, WatermarkList>,
+    pub watermarks: HashMap<TableId, TableWatermarks>,
 }
 
 pub trait StateStore: StateStoreRead + StaticSendSync + Clone {
@@ -492,7 +495,8 @@ impl From<TracedInitOptions> for InitOptions {
 
 #[derive(Clone)]
 pub struct SealCurrentEpochOptions {
-    pub watermark: Option<VnodeWatermark>,
+    pub watermark: Vec<VnodeWatermark>,
+    pub watermark_direction: WatermarkDirection,
 }
 
 impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
@@ -500,7 +504,10 @@ impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
         TracedSealCurrentEpochOptions {
             watermark: value
                 .watermark
-                .map(|watermark| Message::encode_to_vec(&watermark)),
+                .iter()
+                .map(|watermark| Message::encode_to_vec(&watermark.to_protobuf()))
+                .collect(),
+            is_watermark_ascending: value.watermark_direction == WatermarkDirection::Ascending,
         }
     }
 }
@@ -509,29 +516,44 @@ impl TryInto<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
     type Error = anyhow::Error;
 
     fn try_into(self) -> Result<SealCurrentEpochOptions, Self::Error> {
-        let watermark = match self.watermark {
-            None => None,
-            Some(serialized_watermark) => Some(
-                Message::decode(serialized_watermark.as_slice())
-                    .map_err(|e| anyhow!("failed to decode: {:?}", e))?,
-            ),
-        };
-        Ok(SealCurrentEpochOptions { watermark })
+        Ok(SealCurrentEpochOptions {
+            watermark: self
+                .watermark
+                .iter()
+                .map(|serialized_watermark| {
+                    Message::decode(serialized_watermark.as_slice())
+                        .map(|pb| VnodeWatermark::from_protobuf(&pb))
+                        .map_err(|e| anyhow!("failed to decode: {:?}", e))
+                })
+                .try_collect()?,
+            watermark_direction: if self.is_watermark_ascending {
+                WatermarkDirection::Ascending
+            } else {
+                WatermarkDirection::Descending
+            },
+        })
     }
 }
 
 impl SealCurrentEpochOptions {
-    pub fn new(watermark: Option<VnodeWatermark>) -> Self {
-        Self { watermark }
+    pub fn new(watermark: Vec<VnodeWatermark>, watermark_direction: WatermarkDirection) -> Self {
+        Self {
+            watermark,
+            watermark_direction,
+        }
     }
 
-    pub fn new_with_watermark(watermark: VnodeWatermark) -> Self {
+    pub fn no_watermark() -> Self {
         Self {
-            watermark: Some(watermark),
+            watermark: vec![],
+            watermark_direction: WatermarkDirection::Ascending,
         }
     }
 
     pub fn for_test() -> Self {
-        Self { watermark: None }
+        Self {
+            watermark: vec![],
+            watermark_direction: WatermarkDirection::Ascending,
+        }
     }
 }

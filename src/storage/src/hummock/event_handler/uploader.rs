@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
@@ -28,8 +29,10 @@ use more_asserts::{assert_ge, assert_gt, assert_le};
 use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::EPOCH_LEN;
+use risingwave_hummock_sdk::table_watermark::{
+    TableWatermarks, VnodeWatermark, WatermarkDirection,
+};
 use risingwave_hummock_sdk::{info_in_release, CompactionGroupId, HummockEpoch, LocalSstableInfo};
-use risingwave_pb::hummock::{EpochNewWatermarks, VnodeWatermark, WatermarkList};
 use tokio::task::JoinHandle;
 use tracing::error;
 
@@ -286,7 +289,7 @@ struct UnsealedEpochData {
     imms: VecDeque<ImmutableMemtable>,
     spilled_data: SpilledData,
 
-    watermarks: HashMap<TableId, Vec<VnodeWatermark>>,
+    watermarks: HashMap<TableId, (WatermarkDirection, Vec<VnodeWatermark>)>,
 }
 
 impl UnsealedEpochData {
@@ -324,7 +327,7 @@ struct SealedData {
 
     spilled_data: SpilledData,
 
-    watermarks: HashMap<TableId, Vec<EpochNewWatermarks>>,
+    watermarks: HashMap<TableId, TableWatermarks>,
 }
 
 impl SealedData {
@@ -396,11 +399,17 @@ impl SealedData {
             .append(&mut self.spilled_data.uploaded_data);
         self.spilled_data.uploading_tasks = unseal_epoch_data.spilled_data.uploading_tasks;
         self.spilled_data.uploaded_data = unseal_epoch_data.spilled_data.uploaded_data;
-        for (table_id, watermarks) in unseal_epoch_data.watermarks {
-            self.watermarks
-                .entry(table_id)
-                .or_default()
-                .push(EpochNewWatermarks { watermarks, epoch })
+        for (table_id, (direction, watermarks)) in unseal_epoch_data.watermarks {
+            match self.watermarks.entry(table_id) {
+                Entry::Occupied(mut entry) => {
+                    entry
+                        .get_mut()
+                        .add_new_epoch_watermarks(epoch, watermarks, direction);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(TableWatermarks::single_epoch(epoch, watermarks, direction));
+                }
+            };
         }
     }
 
@@ -523,11 +532,11 @@ struct SyncingData {
     uploading_tasks: Option<TryJoinAll<UploadingTask>>,
     // newer data at the front
     uploaded: VecDeque<StagingSstableInfo>,
-    watermarks: HashMap<TableId, WatermarkList>,
+    watermarks: HashMap<TableId, TableWatermarks>,
 }
 
 // newer staging sstable info at the front
-type SyncedDataState = HummockResult<(Vec<StagingSstableInfo>, HashMap<TableId, WatermarkList>)>;
+type SyncedDataState = HummockResult<(Vec<StagingSstableInfo>, HashMap<TableId, TableWatermarks>)>;
 
 struct UploaderContext {
     pinned_version: PinnedVersion,
@@ -678,7 +687,8 @@ impl HummockUploader {
         &mut self,
         epoch: u64,
         table_id: TableId,
-        watermark: VnodeWatermark,
+        watermarks: Vec<VnodeWatermark>,
+        direction: WatermarkDirection,
     ) {
         assert!(
             epoch > self.max_sealed_epoch,
@@ -686,13 +696,27 @@ impl HummockUploader {
             epoch,
             self.max_sealed_epoch
         );
-        self.unsealed_data
+        match self
+            .unsealed_data
             .entry(epoch)
             .or_default()
             .watermarks
             .entry(table_id)
-            .or_default()
-            .push(watermark);
+        {
+            Entry::Occupied(mut entry) => {
+                let (prev_direction, prev_watermarks) = entry.get_mut();
+                assert_eq!(
+                    *prev_direction, direction,
+                    "table id {} new watermark direction not match with previous",
+                    table_id
+                );
+                // TODO: may add check on writing vnode for multiple times
+                prev_watermarks.extend(watermarks);
+            }
+            Entry::Vacant(entry) => {
+                entry.insert((direction, watermarks));
+            }
+        };
     }
 
     pub(crate) fn seal_epoch(&mut self, epoch: HummockEpoch) {
@@ -826,10 +850,7 @@ impl HummockUploader {
             sync_epoch: epoch,
             uploading_tasks: try_join_all_upload_task,
             uploaded: uploaded_data,
-            watermarks: watermarks
-                .into_iter()
-                .map(|(table_id, epoch_watermarks)| (table_id, WatermarkList { epoch_watermarks }))
-                .collect(),
+            watermarks,
         });
     }
 

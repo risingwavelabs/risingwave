@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use risingwave_pb::hummock::{GroupDelta as PbGroupDelta, HummockVersionDelta, WatermarkList};
+use risingwave_pb::hummock::{GroupDelta as PbGroupDelta, HummockVersionDelta, TableWatermarks};
 use sea_orm::entity::prelude::*;
 use sea_orm::FromJsonQueryResult;
 use serde::{Deserialize, Serialize};
@@ -32,7 +32,7 @@ pub struct Model {
     pub safe_epoch: Epoch,
     pub trivial_move: bool,
     pub gc_object_ids: SstableObjectIds,
-    pub new_watermarks: NewTableWatermark,
+    pub new_watermarks: NewTableWatermarks,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -50,7 +50,7 @@ impl From<Vec<u64>> for SstableObjectIds {
 
 crate::derive_from_json_struct!(GroupDeltas, HashMap<CompactionGroupId, Vec<PbGroupDelta>>);
 
-crate::derive_from_json_struct!(NewTableWatermark, HashMap<u64, WatermarkList>);
+crate::derive_from_json_struct!(NewTableWatermarks, HashMap<u64, TableWatermarks>);
 
 impl From<Model> for HummockVersionDelta {
     fn from(value: Model) -> Self {

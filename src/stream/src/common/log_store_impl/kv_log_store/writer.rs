@@ -16,6 +16,7 @@ use std::ops::Bound::{Excluded, Included};
 use std::sync::Arc;
 
 use bytes::Bytes;
+use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
@@ -24,7 +25,7 @@ use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::sink::log_store::{LogStoreResult, LogWriter};
 use risingwave_hummock_sdk::key::next_key;
-use risingwave_pb::hummock::{vnodes, PbVnodes, VnodeWatermark};
+use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, Vnodes, WatermarkDirection};
 use risingwave_storage::store::{InitOptions, LocalStateStore, SealCurrentEpochOptions};
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender;
@@ -144,23 +145,21 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                     .serialize_truncation_offset_watermark(vnode, truncation_offset);
                 delete_range.push((Included(range_begin), Excluded(range_end)));
             }
-            watermark = Some(VnodeWatermark {
-                watermark: next_key(
+            watermark = Some(VnodeWatermark::new(
+                Vnodes::Bitmap(self.serde.vnodes().clone()),
+                Bytes::from(next_key(
                     &self
                         .serde
                         .serialize_truncate_offset_watermark_without_pk(truncation_offset),
-                ),
-                vnodes: Some(PbVnodes {
-                    vnodes: Some(vnodes::Vnodes::VnodeBitmap(
-                        self.serde.vnodes().to_protobuf(),
-                    )),
-                }),
-                is_ascending: false,
-            });
+                )),
+            ));
         }
         self.state_store.flush(delete_range).await?;
-        self.state_store
-            .seal_current_epoch(next_epoch, SealCurrentEpochOptions::new(watermark));
+        let watermark = watermark.into_iter().collect_vec();
+        self.state_store.seal_current_epoch(
+            next_epoch,
+            SealCurrentEpochOptions::new(watermark, WatermarkDirection::Ascending),
+        );
         self.tx.barrier(epoch, is_checkpoint, next_epoch);
         self.seq_id = FIRST_SEQ_ID;
         Ok(())

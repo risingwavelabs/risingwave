@@ -30,9 +30,9 @@ use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::config::{MetricLevel, StreamingConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::hummock::WatermarkList;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -289,7 +289,7 @@ impl LocalStreamManager {
     pub async fn sync_epoch(
         &self,
         epoch: u64,
-    ) -> StreamResult<(Vec<LocalSstableInfo>, HashMap<TableId, WatermarkList>)> {
+    ) -> StreamResult<(Vec<LocalSstableInfo>, HashMap<TableId, TableWatermarks>)> {
         let timer = self
             .core
             .lock()

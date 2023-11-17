@@ -183,8 +183,8 @@ impl LogStoreRowSerde {
         self.vnodes = vnodes;
     }
 
-    pub(crate) fn vnodes(&self) -> &Bitmap {
-        self.vnodes.as_ref()
+    pub(crate) fn vnodes(&self) -> &Arc<Bitmap> {
+        &self.vnodes
     }
 
     pub(crate) fn encode_epoch(epoch: u64) -> i64 {

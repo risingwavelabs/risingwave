@@ -217,5 +217,6 @@ pub struct TracedInitOptions {
 #[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub struct TracedSealCurrentEpochOptions {
     // The watermark is serialized into protobuf
-    pub watermark: Option<Vec<u8>>,
+    pub watermark: Vec<Vec<u8>>,
+    pub is_watermark_ascending: bool,
 }

@@ -21,6 +21,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(is_sorted)]
+#![feature(let_chains)]
 
 mod key_cmp;
 use std::cmp::Ordering;
@@ -40,6 +41,7 @@ pub mod key;
 pub mod key_range;
 pub mod prost_key_range;
 pub mod table_stats;
+pub mod table_watermark;
 
 pub use compact::*;
 

@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_meta_model_v2::compaction_config::CompactionConfig;
 use risingwave_meta_model_v2::compaction_status::LevelHandlers;
 use risingwave_meta_model_v2::compaction_task::CompactionTask;
-use risingwave_meta_model_v2::hummock_version_delta::{GroupDeltas, NewTableWatermark};
+use risingwave_meta_model_v2::hummock_version_delta::{GroupDeltas, NewTableWatermarks};
 use risingwave_meta_model_v2::{
     compaction_config, compaction_status, compaction_task, hummock_pinned_snapshot,
     hummock_pinned_version, hummock_version_delta, CompactionGroupId, CompactionTaskId,
@@ -199,7 +199,7 @@ impl Transactional<Transaction> for HummockVersionDelta {
             safe_epoch: Set(self.safe_epoch as _),
             trivial_move: Set(self.trivial_move),
             gc_object_ids: Set(self.gc_object_ids.to_owned().into()),
-            new_watermarks: Set(NewTableWatermark(self.new_watermarks.clone())),
+            new_watermarks: Set(NewTableWatermarks(self.new_watermarks.clone())),
         };
         hummock_version_delta::Entity::insert(m)
             .on_conflict(

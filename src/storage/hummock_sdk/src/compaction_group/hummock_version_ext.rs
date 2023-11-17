@@ -32,6 +32,7 @@ use super::StateTableId;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
 use crate::prost_key_range::KeyRangeExt;
+use crate::table_watermark::{apply_new_table_watermark, clear_stale_epoch_watermark};
 use crate::{can_concat, CompactionGroupId, HummockSstableId, HummockSstableObjectId};
 
 pub struct GroupDeltasSummary {
@@ -571,13 +572,24 @@ impl HummockVersionUpdateExt for HummockVersion {
         }
         self.id = version_delta.id;
         self.max_committed_epoch = version_delta.max_committed_epoch;
-        self.safe_epoch = version_delta.safe_epoch;
         for (table_id, watermarks) in &version_delta.new_watermarks {
+            match self.table_watermarks.entry(*table_id) {
+                Entry::Occupied(mut entry) => {
+                    apply_new_table_watermark(entry.get_mut(), watermarks);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(watermarks.clone());
+                }
+            }
+        }
+        if version_delta.safe_epoch != self.safe_epoch {
+            assert!(version_delta.safe_epoch > self.safe_epoch);
             self.table_watermarks
-                .entry(*table_id)
-                .or_default()
-                .epoch_watermarks
-                .extend(watermarks.epoch_watermarks.clone());
+                .values_mut()
+                .for_each(|table_watermarks| {
+                    clear_stale_epoch_watermark(table_watermarks, version_delta.safe_epoch)
+                });
+            self.safe_epoch = version_delta.safe_epoch;
         }
         sst_split_info
     }

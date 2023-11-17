@@ -24,9 +24,9 @@ use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
+use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::version_update_payload::Payload;
-use risingwave_pb::hummock::WatermarkList;
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info, trace, warn};
@@ -587,8 +587,13 @@ impl HummockEventHandler {
                 table_id,
                 ..
             } => {
-                if let Some(watermark) = opts.watermark {
-                    self.uploader.add_watermark(epoch, table_id, watermark)
+                if !opts.watermark.is_empty() {
+                    self.uploader.add_watermark(
+                        epoch,
+                        table_id,
+                        opts.watermark,
+                        opts.watermark_direction,
+                    )
                 }
             }
 
@@ -695,7 +700,7 @@ fn send_sync_result(
 }
 
 fn to_sync_result(
-    result: &HummockResult<(Vec<StagingSstableInfo>, HashMap<TableId, WatermarkList>)>,
+    result: &HummockResult<(Vec<StagingSstableInfo>, HashMap<TableId, TableWatermarks>)>,
 ) -> HummockResult<SyncResult> {
     match result {
         Ok((staging_sstable_infos, watermarks)) => {
