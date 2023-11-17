@@ -22,22 +22,21 @@ use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, TableDesc};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::ColumnOrder;
 
-use super::generic::{GenericPlanNode, GenericPlanRef};
+use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{
-    generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef,
-    PredicatePushdown, StreamTableScan, ToBatch, ToStream,
+    generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch,
+    ToStream,
 };
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::generic::CdcScanTableType;
 use crate::optimizer::plan_node::{
-    BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
-    PredicatePushdownContext, RewriteStreamContext, StreamCdcTableScan, ToStreamContext,
+    ColumnPruningContext, LogicalFilter, LogicalProject, PredicatePushdownContext,
+    RewriteStreamContext, StreamCdcTableScan, ToStreamContext,
 };
 use crate::optimizer::property::{Cardinality, Order};
-use crate::optimizer::rule::IndexSelectionRule;
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalCdcScan` returns contents of a table or other equivalent object
