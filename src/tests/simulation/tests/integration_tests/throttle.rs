@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::TableId;
-use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration};
+use risingwave_simulation::cluster::{Cluster, Configuration};
 
 const SET_PARALLELISM: &str = "SET STREAMING_PARALLELISM = 1;";
 
@@ -34,6 +34,11 @@ async fn test_throttle_mv() {
 
     cluster
         .throttle_mv(TableId::from(1002), Some(200))
+        .await
+        .unwrap();
+
+    cluster
+        .throttle_mv(TableId::from(1002), None)
         .await
         .unwrap();
 }
