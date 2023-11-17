@@ -72,7 +72,7 @@ fn make_timestamptz_impl(
         });
     }
     let sec_u32 = sec.0.trunc() as u32;
-    let microsecond_u32 = ((sec.0 - sec.0.trunc()) * 1_000_000.0).round() as u32;
+    let microsecond_u32 = ((sec.0 - sec.0.trunc()) * 1_000_000.0).round_ties_even() as u32;
     let naive_date_time = NaiveDateTime::new(
         NaiveDate::from_ymd_opt(year, month as u32, day as u32).ok_or_else(|| {
             ExprError::InvalidParam {
