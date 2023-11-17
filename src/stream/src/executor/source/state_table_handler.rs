@@ -37,8 +37,9 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
+use crate::executor::backfill::cdc::BACKFILL_STATE_KEY_SUFFIX;
 use crate::executor::error::StreamExecutorError;
-use crate::executor::{StreamExecutorResult, BACKFILL_STATE_KEY_SUFFIX};
+use crate::executor::StreamExecutorResult;
 
 const COMPLETE_SPLIT_PREFIX: &str = "SsGLdzRDqBuKzMf9bDap";
 
@@ -101,11 +102,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         // all source executor has vnode id zero
         let iter = self
             .state_store
-            .iter_with_vnode(
-                VirtualNode::ZERO,
-                &(start, end),
-                PrefetchOptions::new_for_exhaust_iter(),
-            )
+            .iter_with_vnode(VirtualNode::ZERO, &(start, end), PrefetchOptions::default())
             .await?;
 
         let mut set = HashSet::new();

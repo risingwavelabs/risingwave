@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
+use risingwave_pb::meta::table_fragments::PbState as PbStreamJobState;
 use sea_orm::{DeriveActiveEnum, EnumIter, FromJsonQueryResult};
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +40,7 @@ pub mod object_dependency;
 pub mod schema;
 pub mod sink;
 pub mod source;
+pub mod streaming_job;
 pub mod system_parameter;
 pub mod table;
 pub mod user;
@@ -47,10 +49,11 @@ pub mod view;
 pub mod worker;
 pub mod worker_property;
 
-pub type WorkerId = u32;
-pub type TransactionId = u32;
+pub type WorkerId = i32;
 
-pub type ObjectId = u32;
+pub type TransactionId = i32;
+
+pub type ObjectId = i32;
 pub type DatabaseId = ObjectId;
 pub type SchemaId = ObjectId;
 pub type TableId = ObjectId;
@@ -60,11 +63,18 @@ pub type IndexId = ObjectId;
 pub type ViewId = ObjectId;
 pub type FunctionId = ObjectId;
 pub type ConnectionId = ObjectId;
-pub type UserId = u32;
+pub type UserId = i32;
+pub type PrivilegeId = i32;
 
-pub type FragmentId = u32;
+pub type HummockVersionId = i64;
+pub type Epoch = i64;
+pub type CompactionGroupId = i64;
+pub type CompactionTaskId = i64;
+pub type HummockSstableObjectId = i64;
 
-pub type ActorId = u32;
+pub type FragmentId = i32;
+
+pub type ActorId = i32;
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "String(None)")]
@@ -80,6 +90,16 @@ impl From<JobStatus> for PbStreamJobStatus {
         match job_status {
             JobStatus::Creating => Self::Creating,
             JobStatus::Created => Self::Created,
+        }
+    }
+}
+
+// todo: deprecate job status in catalog and unify with this one.
+impl From<JobStatus> for PbStreamJobState {
+    fn from(status: JobStatus) -> Self {
+        match status {
+            JobStatus::Creating => PbStreamJobState::Creating,
+            JobStatus::Created => PbStreamJobState::Created,
         }
     }
 }
@@ -121,10 +141,33 @@ macro_rules! derive_from_json_struct {
     };
 }
 
+pub(crate) use derive_from_json_struct;
+
 derive_from_json_struct!(I32Array, Vec<i32>);
-derive_from_json_struct!(U32Array, Vec<u32>);
+
+impl From<Vec<u32>> for I32Array {
+    fn from(value: Vec<u32>) -> Self {
+        Self(value.into_iter().map(|id| id as _).collect())
+    }
+}
+
+impl I32Array {
+    pub fn into_u32_array(self) -> Vec<u32> {
+        self.0.into_iter().map(|id| id as _).collect()
+    }
+}
 
 derive_from_json_struct!(ActorUpstreamActors, BTreeMap<FragmentId, Vec<ActorId>>);
+
+impl From<BTreeMap<u32, Vec<u32>>> for ActorUpstreamActors {
+    fn from(val: BTreeMap<u32, Vec<u32>>) -> Self {
+        let mut map = BTreeMap::new();
+        for (k, v) in val {
+            map.insert(k as _, v.into_iter().map(|a| a as _).collect());
+        }
+        Self(map)
+    }
+}
 
 derive_from_json_struct!(DataType, risingwave_pb::data::DataType);
 derive_from_json_struct!(DataTypeArray, Vec<risingwave_pb::data::DataType>);
@@ -150,15 +193,12 @@ derive_from_json_struct!(
     PrivateLinkService,
     risingwave_pb::catalog::connection::PbPrivateLinkService
 );
+derive_from_json_struct!(AuthInfo, risingwave_pb::user::PbAuthInfo);
 
 derive_from_json_struct!(StreamNode, risingwave_pb::stream_plan::PbStreamNode);
 derive_from_json_struct!(Dispatchers, Vec<risingwave_pb::stream_plan::Dispatcher>);
 
 derive_from_json_struct!(ConnectorSplits, risingwave_pb::source::ConnectorSplits);
-derive_from_json_struct!(
-    ActorStatus,
-    risingwave_pb::meta::table_fragments::PbActorStatus
-);
 derive_from_json_struct!(VnodeBitmap, risingwave_pb::common::Buffer);
 
 derive_from_json_struct!(

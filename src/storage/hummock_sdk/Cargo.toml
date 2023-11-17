@@ -16,7 +16,7 @@ normal = ["workspace-hack"]
 [dependencies]
 bytes = "1"
 hex = "0.4"
-itertools = "0.11"
+itertools = "0.12"
 parse-display = "0.8"
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
@@ -27,3 +27,7 @@ workspace-hack = { path = "../../workspace-hack" }
 
 [lints]
 workspace = true
+
+[features]
+enable_test_epoch = []
+

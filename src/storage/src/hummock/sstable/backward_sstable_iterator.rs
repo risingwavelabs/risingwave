@@ -184,22 +184,20 @@ mod tests {
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
-        create_small_table_cache, default_builder_opt_for_test, gen_default_test_sstable,
-        test_key_of, test_value_of, TEST_KEYS_COUNT,
+        default_builder_opt_for_test, gen_default_test_sstable, test_key_of, test_value_of,
+        TEST_KEYS_COUNT,
     };
 
     #[tokio::test]
     async fn test_backward_sstable_iterator() {
         // build remote sstable
         let sstable_store = mock_sstable_store();
-        let sstable =
+        let handle =
             gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
-        assert!(sstable.meta.block_metas.len() > 10);
-        let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable), CachePriority::High);
+        assert!(handle.value().meta.block_metas.len() > 10);
         let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store);
         let mut cnt = TEST_KEYS_COUNT;
         sstable_iter.rewind().await.unwrap();
@@ -224,10 +222,8 @@ mod tests {
                 .await;
         // We should have at least 10 blocks, so that sstable iterator test could cover more code
         // path.
-        assert!(sstable.meta.block_metas.len() > 10);
-        let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable), CachePriority::High);
-        let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store);
+        assert!(sstable.value().meta.block_metas.len() > 10);
+        let mut sstable_iter = BackwardSstableIterator::new(sstable, sstable_store);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
         all_key_to_test.shuffle(&mut rng);

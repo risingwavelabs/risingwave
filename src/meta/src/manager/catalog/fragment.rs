@@ -23,6 +23,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_connector::source::SplitImpl;
+use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
@@ -584,7 +585,7 @@ impl FragmentManager {
         let mut table_fragments = BTreeMapTransaction::new(map);
         for table_fragment in &to_delete_table_fragments {
             table_fragments.remove(table_fragment.table_id());
-            let chain_actor_ids = table_fragment.chain_actor_ids();
+            let backfill_actor_ids = table_fragment.backfill_actor_ids();
             let dependent_table_ids = table_fragment.dependent_table_ids();
             for (dependent_table_id, _) in dependent_table_ids {
                 if table_ids.contains(&dependent_table_id) {
@@ -607,7 +608,7 @@ impl FragmentManager {
                     .for_each(|a| {
                         a.dispatcher.retain_mut(|d| {
                             d.downstream_actor_id
-                                .retain(|x| !chain_actor_ids.contains(x));
+                                .retain(|x| !backfill_actor_ids.contains(x));
                             !d.downstream_actor_id.is_empty()
                         })
                     });
@@ -1036,7 +1037,7 @@ impl FragmentManager {
                 for (upstream_fragment_id, dispatcher_id) in upstream_fragment_dispatcher_ids {
                     // here we assume the upstream fragment is in the same streaming job as this
                     // fragment. Cross-table references only occur in the case
-                    // of Chain fragment, and the scale of Chain fragment does not introduce updates
+                    // of StreamScan fragment, and the scale of StreamScan fragment does not introduce updates
                     // to the upstream Fragment (because of NoShuffle)
                     let upstream_fragment = table_fragment
                         .fragments
@@ -1170,10 +1171,11 @@ impl FragmentManager {
             .mview_actor_ids())
     }
 
-    /// Get and filter the upstream `Materialize` fragments of the specified relations.
-    pub async fn get_upstream_mview_fragments(
+    /// Get and filter the upstream `Materialize` or `Source` fragments of the specified relations.
+    pub async fn get_upstream_root_fragments(
         &self,
         upstream_table_ids: &HashSet<TableId>,
+        table_job_type: Option<TableJobType>,
     ) -> MetaResult<HashMap<TableId, Fragment>> {
         let map = &self.core.read().await.table_fragments;
         let mut fragments = HashMap::new();
@@ -1182,16 +1184,26 @@ impl FragmentManager {
             let table_fragments = map
                 .get(&table_id)
                 .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
-            if let Some(fragment) = table_fragments.mview_fragment() {
-                fragments.insert(table_id, fragment);
+            match table_job_type.as_ref() {
+                Some(TableJobType::SharedCdcSource) => {
+                    if let Some(fragment) = table_fragments.source_fragment() {
+                        fragments.insert(table_id, fragment);
+                    }
+                }
+                // MV on MV, and other kinds of table job
+                None | Some(TableJobType::General) | Some(TableJobType::Unspecified) => {
+                    if let Some(fragment) = table_fragments.mview_fragment() {
+                        fragments.insert(table_id, fragment);
+                    }
+                }
             }
         }
 
         Ok(fragments)
     }
 
-    /// Get the downstream `Chain` fragments of the specified table.
-    pub async fn get_downstream_chain_fragments(
+    /// Get the downstream `StreamTableScan` fragments of the specified MV.
+    pub async fn get_downstream_fragments(
         &self,
         table_id: TableId,
     ) -> MetaResult<Vec<(DispatchStrategy, Fragment)>> {
@@ -1211,6 +1223,7 @@ impl FragmentManager {
                     r#type: d.r#type,
                     dist_key_indices: d.dist_key_indices.clone(),
                     output_indices: d.output_indices.clone(),
+                    downstream_table_name: d.downstream_table_name.clone(),
                 };
                 (fragment_id, strategy)
             })
@@ -1229,7 +1242,7 @@ impl FragmentManager {
                             .map(|d| (d.clone(), fragment.clone()))
                     })
                     .inspect(|(_, f)| {
-                        assert!((f.fragment_type_mask & FragmentTypeFlag::ChainNode as u32) != 0)
+                        assert!((f.fragment_type_mask & FragmentTypeFlag::StreamScan as u32) != 0)
                     })
             })
             .collect_vec();

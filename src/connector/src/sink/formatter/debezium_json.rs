@@ -20,7 +20,9 @@ use serde_json::{json, Map, Value};
 use tracing::warn;
 
 use super::{Result, SinkFormatter, StreamChunk};
-use crate::sink::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
+use crate::sink::encoder::{
+    JsonEncoder, RowEncoder, TimestampHandlingMode, TimestamptzHandlingMode,
+};
 use crate::tri;
 
 const DEBEZIUM_NAME_FIELD_PREFIX: &str = "RisingWave";
@@ -63,8 +65,14 @@ impl DebeziumJsonFormatter {
             schema.clone(),
             Some(pk_indices.clone()),
             TimestampHandlingMode::Milli,
+            TimestamptzHandlingMode::UtcString,
         );
-        let val_encoder = JsonEncoder::new(schema.clone(), None, TimestampHandlingMode::Milli);
+        let val_encoder = JsonEncoder::new(
+            schema.clone(),
+            None,
+            TimestampHandlingMode::Milli,
+            TimestamptzHandlingMode::UtcString,
+        );
         Self {
             schema,
             pk_indices,
@@ -217,7 +225,7 @@ pub(crate) fn schema_to_json(schema: &Schema, db_name: &str, sink_from_name: &st
             json!({
                 "type": "int64",
                 "optional": false,
-                "field": "table"
+                "field": "ts_ms"
             }),
         ],
 
@@ -305,7 +313,7 @@ mod tests {
     use super::*;
     use crate::sink::utils::chunk_to_json;
 
-    const SCHEMA_JSON_RESULT: &str = r#"{"fields":[{"field":"before","fields":[{"field":"v1","optional":true,"type":"int32"},{"field":"v2","optional":true,"type":"float"},{"field":"v3","optional":true,"type":"string"}],"name":"RisingWave.test_db.test_table.Key","optional":true,"type":"struct"},{"field":"after","fields":[{"field":"v1","optional":true,"type":"int32"},{"field":"v2","optional":true,"type":"float"},{"field":"v3","optional":true,"type":"string"}],"name":"RisingWave.test_db.test_table.Key","optional":true,"type":"struct"},{"field":"source","fields":[{"field":"db","optional":false,"type":"string"},{"field":"table","optional":true,"type":"string"},{"field":"table","optional":false,"type":"int64"}],"name":"RisingWave.test_db.test_table.Source","optional":false,"type":"struct"},{"field":"op","optional":false,"type":"string"},{"field":"ts_ms","optional":false,"type":"int64"}],"name":"RisingWave.test_db.test_table.Envelope","optional":false,"type":"struct"}"#;
+    const SCHEMA_JSON_RESULT: &str = r#"{"fields":[{"field":"before","fields":[{"field":"v1","optional":true,"type":"int32"},{"field":"v2","optional":true,"type":"float"},{"field":"v3","optional":true,"type":"string"}],"name":"RisingWave.test_db.test_table.Key","optional":true,"type":"struct"},{"field":"after","fields":[{"field":"v1","optional":true,"type":"int32"},{"field":"v2","optional":true,"type":"float"},{"field":"v3","optional":true,"type":"string"}],"name":"RisingWave.test_db.test_table.Key","optional":true,"type":"struct"},{"field":"source","fields":[{"field":"db","optional":false,"type":"string"},{"field":"table","optional":true,"type":"string"},{"field":"ts_ms","optional":false,"type":"int64"}],"name":"RisingWave.test_db.test_table.Source","optional":false,"type":"struct"},{"field":"op","optional":false,"type":"string"},{"field":"ts_ms","optional":false,"type":"int64"}],"name":"RisingWave.test_db.test_table.Envelope","optional":false,"type":"struct"}"#;
 
     #[test]
     fn test_chunk_to_json() -> Result<()> {
@@ -360,7 +368,12 @@ mod tests {
             },
         ]);
 
-        let encoder = JsonEncoder::new(schema.clone(), None, TimestampHandlingMode::Milli);
+        let encoder = JsonEncoder::new(
+            schema.clone(),
+            None,
+            TimestampHandlingMode::Milli,
+            TimestamptzHandlingMode::UtcString,
+        );
         let json_chunk = chunk_to_json(chunk, &encoder).unwrap();
         let schema_json = schema_to_json(&schema, "test_db", "test_table");
         assert_eq!(

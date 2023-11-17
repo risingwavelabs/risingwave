@@ -1,0 +1,29 @@
+# https://github.com/risingwavelabs/risingwave/issues/13094
+# The singleton requirement should be propagated through no-shuffle edges in the scheduler.
+
+statement ok
+create table t(v int);
+
+statement ok
+create materialized view m as
+with sub(v1) as (select max(v) as v1 from t)
+select s1.v1 as sv1, s2.v1 as sv2
+from sub as s1, sub as s2
+where s1.v1 = s2.v1;
+
+statement ok
+insert into t values (1);
+
+statement ok
+flush;
+
+query II
+select * from m;
+----
+1 1
+
+statement ok
+drop materialized view m;
+
+statement ok
+drop table t;

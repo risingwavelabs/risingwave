@@ -37,7 +37,7 @@ public class DeserializerTest extends TestCase {
                 ConnectorServiceProto.SinkWriterStreamRequest.WriteBatch.newBuilder()
                         .setJsonPayload(jsonPayload)
                         .build();
-        SinkRow outcome = deserializer.deserialize(writeBatch).next();
+        SinkRow outcome = deserializer.deserialize(writeBatch).iterator().next();
         assertEquals(outcome.get(0), 1);
         assertEquals(outcome.get(1), "John");
     }

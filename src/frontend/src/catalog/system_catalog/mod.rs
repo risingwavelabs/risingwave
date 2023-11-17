@@ -374,6 +374,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_USERS), read_rw_user_info },
     { BuiltinCatalog::Table(&RW_USER_SECRETS), read_rw_user_secrets_info },
     { BuiltinCatalog::Table(&RW_TABLES), read_rw_table_info },
+    { BuiltinCatalog::Table(&RW_INTERNAL_TABLES), read_rw_internal_table_info },
     { BuiltinCatalog::Table(&RW_MATERIALIZED_VIEWS), read_rw_mview_info },
     { BuiltinCatalog::Table(&RW_INDEXES), read_rw_indexes_info },
     { BuiltinCatalog::Table(&RW_SOURCES), read_rw_sources_info },

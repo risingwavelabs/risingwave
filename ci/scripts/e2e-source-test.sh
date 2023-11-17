@@ -44,7 +44,7 @@ echo "--- e2e, ci-1cn-1fe, mysql & postgres cdc"
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc.sql
 
 # import data to postgres
-export PGHOST=db PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test
+export PGHOST=db PGPORT=5432 PGUSER=postgres PGPASSWORD=postgres PGDATABASE=cdc_test
 createdb
 psql < ./e2e_test/source/cdc/postgres_cdc.sql
 
@@ -66,9 +66,22 @@ sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.load.slt'
 sleep 10
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
 
-# kill cluster and the connector node
+# cdc share stream test cases
+export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.share_stream.slt'
+
+
+# kill cluster
 cargo make kill
 echo "cluster killed "
+
+# insert into mytest database (cdc.share_stream.slt)
+mysql --protocol=tcp -u root mytest -e "INSERT INTO products
+       VALUES (default,'RisingWave','Next generation Streaming Database'),
+              (default,'Materialize','The Streaming Database You Already Know How to Use');
+       UPDATE products SET name = 'RW' WHERE id <= 103;
+       INSERT INTO orders VALUES (default, '2022-12-01 15:08:22', 'Sam', 1000.52, 110, false);"
+
 
 # insert new rows
 mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/source/cdc/mysql_cdc_insert.sql
@@ -85,6 +98,9 @@ echo "check mviews after cluster recovery"
 # check results
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
 
+# drop relations
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc_share_stream_drop.slt'
+
 echo "--- Kill cluster"
 cargo make ci-kill
 
@@ -93,6 +109,10 @@ RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=i
 cargo make ci-start ci-1cn-1fe
 python3 -m pip install requests protobuf confluent-kafka
 python3 e2e_test/schema_registry/pb.py "message_queue:29092" "http://message_queue:8081" "sr_pb_test" 20
+echo "make sure google/protobuf/source_context.proto is NOT in schema registry"
+curl --silent 'http://message_queue:8081/subjects'; echo
+# curl --silent --head -X GET 'http://message_queue:8081/subjects/google%2Fprotobuf%2Fsource_context.proto/versions' | grep 404
+curl --silent 'http://message_queue:8081/subjects' | grep -v 'google/protobuf/source_context.proto'
 sqllogictest -p 4566 -d dev './e2e_test/schema_registry/pb.slt'
 
 echo "--- Kill cluster"

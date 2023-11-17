@@ -25,12 +25,11 @@ use risingwave_storage::table::Distribution;
 
 use super::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, JoinType, PkIndices, TemporalJoinExecutor};
+use crate::executor::{ActorContextRef, JoinType, TemporalJoinExecutor};
 use crate::task::AtomicU64Ref;
 
 pub struct TemporalJoinExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for TemporalJoinExecutorBuilder {
     type Node = TemporalJoinNode;
 
@@ -159,6 +158,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
 
         let dispatcher_args = TemporalJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
+            info: params.info,
             left: source_l,
             right: source_r,
             right_table: table,
@@ -166,11 +166,9 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             right_join_keys,
             null_safe,
             condition,
-            pk_indices: params.pk_indices,
             output_indices,
             table_output_indices,
             table_stream_key_indices,
-            executor_id: params.executor_id,
             watermark_epoch: stream.get_watermark_epoch(),
             chunk_size: params.env.config().developer.chunk_size,
             metrics: params.executor_stats,
@@ -184,6 +182,7 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
 
 struct TemporalJoinExecutorDispatcherArgs<S: StateStore> {
     ctx: ActorContextRef,
+    info: ExecutorInfo,
     left: BoxedExecutor,
     right: BoxedExecutor,
     right_table: StorageTable<S>,
@@ -191,11 +190,9 @@ struct TemporalJoinExecutorDispatcherArgs<S: StateStore> {
     right_join_keys: Vec<usize>,
     null_safe: Vec<bool>,
     condition: Option<NonStrictExpression>,
-    pk_indices: PkIndices,
     output_indices: Vec<usize>,
     table_output_indices: Vec<usize>,
     table_stream_key_indices: Vec<usize>,
-    executor_id: u64,
     watermark_epoch: AtomicU64Ref,
     chunk_size: usize,
     metrics: Arc<StreamingMetrics>,
@@ -216,6 +213,7 @@ impl<S: StateStore> HashKeyDispatcher for TemporalJoinExecutorDispatcherArgs<S> 
                     { JoinType::$join_type },
                 >::new(
                     self.ctx,
+                    self.info,
                     self.left,
                     self.right,
                     self.right_table,
@@ -223,11 +221,9 @@ impl<S: StateStore> HashKeyDispatcher for TemporalJoinExecutorDispatcherArgs<S> 
                     self.right_join_keys,
                     self.null_safe,
                     self.condition,
-                    self.pk_indices,
                     self.output_indices,
                     self.table_output_indices,
                     self.table_stream_key_indices,
-                    self.executor_id,
                     self.watermark_epoch,
                     self.metrics,
                     self.chunk_size,

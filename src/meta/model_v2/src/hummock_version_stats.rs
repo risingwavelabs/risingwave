@@ -12,18 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use sea_orm::entity::prelude::*;
+use std::collections::HashMap;
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+use risingwave_pb::hummock::{HummockVersionStats, TableStats as PbTableStats};
+use sea_orm::entity::prelude::*;
+use sea_orm::FromJsonQueryResult;
+use serde::{Deserialize, Serialize};
+
+use crate::HummockVersionId;
+
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize, Default)]
 #[sea_orm(table_name = "hummock_version_stats")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: i64,
-    #[sea_orm(column_type = "JsonBinary")]
-    pub stats: Json,
+    pub id: HummockVersionId,
+    pub stats: TableStats,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+#[derive(Clone, Debug, PartialEq, Eq, FromJsonQueryResult, Serialize, Deserialize, Default)]
+pub struct TableStats(pub HashMap<u32, PbTableStats>);
+
+impl From<Model> for HummockVersionStats {
+    fn from(value: Model) -> Self {
+        Self {
+            hummock_version_id: value.id as _,
+            table_stats: value.stats.0,
+        }
+    }
+}

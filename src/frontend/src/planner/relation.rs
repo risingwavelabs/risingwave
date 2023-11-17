@@ -24,9 +24,10 @@ use crate::binder::{
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalHopWindow, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
-    LogicalSource, LogicalTableFunction, LogicalValues, PlanRef,
+    LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues, PlanRef,
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::Planner;
@@ -56,13 +57,10 @@ impl Planner {
     }
 
     pub(crate) fn plan_sys_table(&mut self, sys_table: BoundSystemTable) -> Result<PlanRef> {
-        Ok(LogicalScan::create(
+        Ok(LogicalSysScan::create(
             sys_table.sys_table_catalog.name().to_string(),
-            true,
             Rc::new(sys_table.sys_table_catalog.table_desc()),
-            vec![],
             self.ctx(),
-            false,
             Cardinality::unknown(), // TODO(card): cardinality of system table
         )
         .into())
@@ -71,7 +69,7 @@ impl Planner {
     pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {
         Ok(LogicalScan::create(
             base_table.table_catalog.name().to_string(),
-            false,
+            ScanTableType::default(),
             Rc::new(base_table.table_catalog.table_desc()),
             base_table
                 .table_indexes

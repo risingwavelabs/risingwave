@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -31,15 +32,15 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::CatalogError;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
-use crate::session::{CheckRelationError, SessionImpl};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
 pub(crate) fn gen_create_index_plan(
@@ -324,7 +325,7 @@ fn assemble_materialize(
 
     let logical_scan = LogicalScan::create(
         table_name,
-        false,
+        ScanTableType::default(),
         table_desc.clone(),
         // Index table has no indexes.
         vec![],
@@ -410,17 +411,13 @@ pub async fn handle_create_index(
 
     let (graph, index_table, index) = {
         {
-            match session.check_relation_name_duplicated(index_name.clone()) {
-                Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name)))
-                    if if_not_exists =>
-                {
-                    return Ok(PgResponse::builder(StatementType::CREATE_INDEX)
-                        .notice(format!("relation \"{}\" already exists, skipping", name))
-                        .into());
-                }
-                Err(e) => return Err(e.into()),
-                Ok(_) => {}
-            };
+            if let Either::Right(resp) = session.check_relation_name_duplicated(
+                index_name.clone(),
+                StatementType::CREATE_INDEX,
+                if_not_exists,
+            )? {
+                return Ok(resp);
+            }
         }
 
         let context = OptimizerContext::from_handler_args(handler_args);

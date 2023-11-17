@@ -67,7 +67,7 @@ impl Notifier {
     ///
     /// Generally when a barrier is collected, it's also finished since it does not require further
     /// report of finishing from actors.
-    /// However for creating MV, this is only called when all `Chain` report it finished.
+    /// However for creating MV, this is only called when all `BackfillExecutor` report it finished.
     pub fn notify_finished(self) {
         if let Some(tx) = self.finished {
             tx.send(()).ok();

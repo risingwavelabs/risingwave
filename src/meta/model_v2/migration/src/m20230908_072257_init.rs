@@ -14,6 +14,7 @@ impl MigrationTrait for Migration {
         assert!(!manager.has_table(UserPrivilege::Table.to_string()).await?);
         assert!(!manager.has_table(Database::Table.to_string()).await?);
         assert!(!manager.has_table(Schema::Table.to_string()).await?);
+        assert!(!manager.has_table(StreamingJob::Table.to_string()).await?);
         assert!(!manager.has_table(Fragment::Table.to_string()).await?);
         assert!(!manager.has_table(Actor::Table.to_string()).await?);
         assert!(!manager.has_table(Table::Table.to_string()).await?);
@@ -124,13 +125,12 @@ impl MigrationTrait for Migration {
                             .primary_key()
                             .auto_increment(),
                     )
-                    .col(ColumnDef::new(User::Name).string().not_null())
+                    .col(ColumnDef::new(User::Name).string().unique_key().not_null())
                     .col(ColumnDef::new(User::IsSuper).boolean().not_null())
                     .col(ColumnDef::new(User::CanCreateDb).boolean().not_null())
                     .col(ColumnDef::new(User::CanCreateUser).boolean().not_null())
                     .col(ColumnDef::new(User::CanLogin).boolean().not_null())
-                    .col(ColumnDef::new(User::AuthType).string())
-                    .col(ColumnDef::new(User::AuthValue).string())
+                    .col(ColumnDef::new(User::AuthInfo).json())
                     .to_owned(),
             )
             .await?;
@@ -197,6 +197,7 @@ impl MigrationTrait for Migration {
                             .primary_key()
                             .auto_increment(),
                     )
+                    .col(ColumnDef::new(UserPrivilege::DependentId).integer())
                     .col(ColumnDef::new(UserPrivilege::UserId).integer().not_null())
                     .col(ColumnDef::new(UserPrivilege::Oid).integer().not_null())
                     .col(
@@ -204,11 +205,19 @@ impl MigrationTrait for Migration {
                             .integer()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(UserPrivilege::Actions).string().not_null())
+                    .col(ColumnDef::new(UserPrivilege::Action).string().not_null())
                     .col(
                         ColumnDef::new(UserPrivilege::WithGrantOption)
                             .boolean()
                             .not_null(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_user_privilege_dependent_id")
+                            .from(UserPrivilege::Table, UserPrivilege::DependentId)
+                            .to(UserPrivilege::Table, UserPrivilege::Id)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
                     )
                     .foreign_key(
                         &mut ForeignKey::create()
@@ -230,6 +239,7 @@ impl MigrationTrait for Migration {
                             .name("FK_user_privilege_oid")
                             .from(UserPrivilege::Table, UserPrivilege::Oid)
                             .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
                             .to_owned(),
                     )
                     .to_owned(),
@@ -312,6 +322,25 @@ impl MigrationTrait for Migration {
         manager
             .create_table(
                 MigrationTable::create()
+                    .table(StreamingJob::Table)
+                    .col(ColumnDef::new(StreamingJob::JobId).integer().primary_key())
+                    .col(ColumnDef::new(StreamingJob::JobStatus).string().not_null())
+                    .col(ColumnDef::new(StreamingJob::CreateType).string().not_null())
+                    .col(ColumnDef::new(StreamingJob::Timezone).string())
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_streaming_job_object_id")
+                            .from(StreamingJob::Table, StreamingJob::JobId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
                     .table(Fragment::Table)
                     .col(
                         ColumnDef::new(Fragment::FragmentId)
@@ -319,7 +348,7 @@ impl MigrationTrait for Migration {
                             .primary_key()
                             .auto_increment(),
                     )
-                    .col(ColumnDef::new(Fragment::TableId).integer().not_null())
+                    .col(ColumnDef::new(Fragment::JobId).integer().not_null())
                     .col(
                         ColumnDef::new(Fragment::FragmentTypeMask)
                             .integer()
@@ -331,13 +360,13 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(ColumnDef::new(Fragment::StreamNode).json().not_null())
-                    .col(ColumnDef::new(Fragment::VnodeMapping).json())
+                    .col(ColumnDef::new(Fragment::VnodeMapping).json().not_null())
                     .col(ColumnDef::new(Fragment::StateTableIds).json())
                     .col(ColumnDef::new(Fragment::UpstreamFragmentId).json())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_fragment_table_id")
-                            .from(Fragment::Table, Fragment::TableId)
+                            .from(Fragment::Table, Fragment::JobId)
                             .to(Object::Table, Object::Oid)
                             .on_delete(ForeignKeyAction::Cascade)
                             .to_owned(),
@@ -361,7 +390,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Actor::ParallelUnitId).integer().not_null())
                     .col(ColumnDef::new(Actor::UpstreamActorIds).json())
                     .col(ColumnDef::new(Actor::Dispatchers).json().not_null())
-                    .col(ColumnDef::new(Actor::VnodeBitmap).string())
+                    .col(ColumnDef::new(Actor::VnodeBitmap).json())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_actor_fragment_id")
@@ -651,6 +680,19 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
+        manager
+            .create_index(
+                MigrationIndex::create()
+                    .table(UserPrivilege::Table)
+                    .name("idx_user_privilege_item")
+                    .unique()
+                    .col(UserPrivilege::UserId)
+                    .col(UserPrivilege::Oid)
+                    .col(UserPrivilege::Action)
+                    .col(UserPrivilege::GrantedBy)
+                    .to_owned(),
+            )
+            .await?;
 
         // 4. initialize data.
         let insert_cluster_id = Query::insert()
@@ -745,6 +787,7 @@ impl MigrationTrait for Migration {
             UserPrivilege,
             Database,
             Schema,
+            StreamingJob,
             Fragment,
             Actor,
             Table,
@@ -799,18 +842,18 @@ enum User {
     CanCreateDb,
     CanCreateUser,
     CanLogin,
-    AuthType,
-    AuthValue,
+    AuthInfo,
 }
 
 #[derive(DeriveIden)]
 enum UserPrivilege {
     Table,
     Id,
+    DependentId,
     UserId,
     Oid,
     GrantedBy,
-    Actions,
+    Action,
     WithGrantOption,
 }
 
@@ -832,7 +875,7 @@ enum Schema {
 enum Fragment {
     Table,
     FragmentId,
-    TableId,
+    JobId,
     FragmentTypeMask,
     DistributionType,
     StreamNode,
@@ -852,6 +895,15 @@ enum Actor {
     UpstreamActorIds,
     Dispatchers,
     VnodeBitmap,
+}
+
+#[derive(DeriveIden)]
+enum StreamingJob {
+    Table,
+    JobId,
+    JobStatus,
+    Timezone,
+    CreateType,
 }
 
 #[derive(DeriveIden)]

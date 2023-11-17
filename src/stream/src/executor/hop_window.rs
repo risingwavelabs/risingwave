@@ -28,8 +28,8 @@ use crate::common::StreamChunkBuilder;
 
 pub struct HopWindowExecutor {
     _ctx: ActorContextRef,
-    pub input: BoxedExecutor,
     pub info: ExecutorInfo,
+    pub input: BoxedExecutor,
     pub time_col_idx: usize,
     pub window_slide: Interval,
     pub window_size: Interval,
@@ -43,8 +43,8 @@ impl HopWindowExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        input: BoxedExecutor,
         info: ExecutorInfo,
+        input: BoxedExecutor,
         time_col_idx: usize,
         window_slide: Interval,
         window_size: Interval,
@@ -55,8 +55,8 @@ impl HopWindowExecutor {
     ) -> Self {
         HopWindowExecutor {
             _ctx: ctx,
-            input,
             info,
+            input,
             time_col_idx,
             window_slide,
             window_size,
@@ -293,13 +293,13 @@ mod tests {
 
         super::HopWindowExecutor::new(
             ActorContext::create(123),
-            input,
             ExecutorInfo {
                 // TODO: the schema is incorrect, but it seems useless here.
                 schema,
                 pk_indices,
-                identity: "test".to_string(),
+                identity: "HopWindowExecutor".to_string(),
             },
+            input,
             2,
             window_slide,
             window_size,
@@ -316,6 +316,7 @@ mod tests {
         )
         .boxed()
     }
+
     #[tokio::test]
     async fn test_execute() {
         let default_indices: Vec<_> = (0..5).collect();

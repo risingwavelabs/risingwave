@@ -662,6 +662,9 @@ impl dyn PlanNode {
         if let Some(stream_table_scan) = self.as_stream_table_scan() {
             return stream_table_scan.adhoc_to_stream_prost(state);
         }
+        if let Some(stream_cdc_table_scan) = self.as_stream_cdc_table_scan() {
+            return stream_cdc_table_scan.adhoc_to_stream_prost(state);
+        }
         if let Some(stream_share) = self.as_stream_share() {
             return stream_share.adhoc_to_stream_prost(state);
         }
@@ -765,6 +768,7 @@ mod batch_simple_agg;
 mod batch_sort;
 mod batch_sort_agg;
 mod batch_source;
+mod batch_sys_seq_scan;
 mod batch_table_function;
 mod batch_topn;
 mod batch_union;
@@ -790,6 +794,7 @@ mod logical_project_set;
 mod logical_scan;
 mod logical_share;
 mod logical_source;
+mod logical_sys_scan;
 mod logical_table_function;
 mod logical_topn;
 mod logical_union;
@@ -825,6 +830,7 @@ mod stream_values;
 mod stream_watermark_filter;
 
 mod derive;
+mod stream_cdc_table_scan;
 mod stream_share;
 mod stream_temporal_join;
 mod stream_union;
@@ -850,6 +856,7 @@ pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
 pub use batch_sort_agg::BatchSortAgg;
 pub use batch_source::BatchSource;
+pub use batch_sys_seq_scan::BatchSysSeqScan;
 pub use batch_table_function::BatchTableFunction;
 pub use batch_topn::BatchTopN;
 pub use batch_union::BatchUnion;
@@ -875,11 +882,13 @@ pub use logical_project_set::LogicalProjectSet;
 pub use logical_scan::LogicalScan;
 pub use logical_share::LogicalShare;
 pub use logical_source::LogicalSource;
+pub use logical_sys_scan::LogicalSysScan;
 pub use logical_table_function::LogicalTableFunction;
 pub use logical_topn::LogicalTopN;
 pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
+pub use stream_cdc_table_scan::StreamCdcTableScan;
 pub use stream_dedup::StreamDedup;
 pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_dml::StreamDml;
@@ -939,6 +948,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Filter }
             , { Logical, Project }
             , { Logical, Scan }
+            , { Logical, SysScan }
             , { Logical, Source }
             , { Logical, Insert }
             , { Logical, Delete }
@@ -968,6 +978,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, Delete }
             , { Batch, Update }
             , { Batch, SeqScan }
+            , { Batch, SysSeqScan }
             , { Batch, HashJoin }
             , { Batch, NestedLoopJoin }
             , { Batch, Values }
@@ -987,6 +998,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Project }
             , { Stream, Filter }
             , { Stream, TableScan }
+            , { Stream, CdcTableScan }
             , { Stream, Sink }
             , { Stream, Source }
             , { Stream, HashJoin }
@@ -1029,6 +1041,7 @@ macro_rules! for_logical_plan_nodes {
             , { Logical, Filter }
             , { Logical, Project }
             , { Logical, Scan }
+            , { Logical, SysScan }
             , { Logical, Source }
             , { Logical, Insert }
             , { Logical, Delete }
@@ -1064,6 +1077,7 @@ macro_rules! for_batch_plan_nodes {
             , { Batch, Project }
             , { Batch, Filter }
             , { Batch, SeqScan }
+            , { Batch, SysSeqScan }
             , { Batch, HashJoin }
             , { Batch, NestedLoopJoin }
             , { Batch, Values }
@@ -1097,6 +1111,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, HashJoin }
             , { Stream, Exchange }
             , { Stream, TableScan }
+            , { Stream, CdcTableScan }
             , { Stream, Sink }
             , { Stream, Source }
             , { Stream, HashAgg }

@@ -20,7 +20,6 @@ use crate::executor::StatelessSimpleAggExecutor;
 
 pub struct StatelessSimpleAggExecutorBuilder;
 
-#[async_trait::async_trait]
 impl ExecutorBuilder for StatelessSimpleAggExecutorBuilder {
     type Node = SimpleAggNode;
 
@@ -37,13 +36,9 @@ impl ExecutorBuilder for StatelessSimpleAggExecutorBuilder {
             .map(AggCall::from_protobuf)
             .try_collect()?;
 
-        Ok(StatelessSimpleAggExecutor::new(
-            params.actor_context,
-            input,
-            agg_calls,
-            params.pk_indices,
-            params.executor_id,
-        )?
-        .boxed())
+        Ok(
+            StatelessSimpleAggExecutor::new(params.actor_context, params.info, input, agg_calls)?
+                .boxed(),
+        )
     }
 }

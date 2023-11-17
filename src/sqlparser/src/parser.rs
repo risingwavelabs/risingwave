@@ -26,7 +26,8 @@ use itertools::Itertools;
 use tracing::{debug, instrument};
 
 use crate::ast::ddl::{
-    AlterIndexOperation, AlterSinkOperation, AlterViewOperation, SourceWatermark,
+    AlterDatabaseOperation, AlterIndexOperation, AlterSchemaOperation, AlterSinkOperation,
+    AlterViewOperation, SourceWatermark,
 };
 use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};
@@ -239,6 +240,7 @@ impl Parser {
                     }
                 }
                 Keyword::CANCEL => Ok(self.parse_cancel_job()?),
+                Keyword::KILL => Ok(self.parse_kill_process()?),
                 Keyword::DESCRIBE => Ok(Statement::Describe {
                     name: self.parse_object_name()?,
                 }),
@@ -2446,7 +2448,7 @@ impl Parser {
         let connector = option.map(|opt| opt.value.to_string());
 
         let source_schema = if let Some(connector) = connector {
-            Some(self.parse_source_schema_with_connector(&connector)?)
+            Some(self.parse_source_schema_with_connector(&connector, false)?)
         } else {
             None // Table is NOT created with an external connector.
         };
@@ -2463,6 +2465,23 @@ impl Parser {
             None
         };
 
+        let cdc_table_info = if self.parse_keyword(Keyword::FROM) {
+            let source_name = self.parse_object_name()?;
+            if self.parse_keyword(Keyword::TABLE) {
+                let external_table_name = self.parse_literal_string()?;
+                Some(CdcTableInfo {
+                    source_name,
+                    external_table_name,
+                })
+            } else {
+                return Err(ParserError::ParserError(
+                    "Expect a TABLE clause on table created by CREATE TABLE FROM".to_string(),
+                ));
+            }
+        } else {
+            None
+        };
+
         Ok(Statement::CreateTable {
             name: table_name,
             temporary,
@@ -2475,6 +2494,7 @@ impl Parser {
             source_watermarks,
             append_only,
             query,
+            cdc_table_info,
         })
     }
 
@@ -2765,7 +2785,11 @@ impl Parser {
     }
 
     pub fn parse_alter(&mut self) -> Result<Statement, ParserError> {
-        if self.parse_keyword(Keyword::TABLE) {
+        if self.parse_keyword(Keyword::DATABASE) {
+            self.parse_alter_database()
+        } else if self.parse_keyword(Keyword::SCHEMA) {
+            self.parse_alter_schema()
+        } else if self.parse_keyword(Keyword::TABLE) {
             self.parse_alter_table()
         } else if self.parse_keyword(Keyword::INDEX) {
             self.parse_alter_index()
@@ -2783,10 +2807,44 @@ impl Parser {
             self.parse_alter_system()
         } else {
             self.expected(
-                "TABLE, INDEX, MATERIALIZED, VIEW, SINK, SOURCE, USER or SYSTEM after ALTER",
+                "DATABASE, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SOURCE, USER or SYSTEM after ALTER",
                 self.peek_token(),
             )
         }
+    }
+
+    pub fn parse_alter_database(&mut self) -> Result<Statement, ParserError> {
+        let database_name = self.parse_object_name()?;
+        let operation = if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterDatabaseOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
+        } else {
+            return self.expected("OWNER TO after ALTER DATABASE", self.peek_token());
+        };
+
+        Ok(Statement::AlterDatabase {
+            name: database_name,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_schema(&mut self) -> Result<Statement, ParserError> {
+        let schema_name = self.parse_object_name()?;
+        let operation = if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterSchemaOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
+        } else {
+            return self.expected("OWNER TO after ALTER SCHEMA", self.peek_token());
+        };
+
+        Ok(Statement::AlterSchema {
+            name: schema_name,
+            operation,
+        })
     }
 
     pub fn parse_alter_user(&mut self) -> Result<Statement, ParserError> {
@@ -2872,7 +2930,10 @@ impl Parser {
             };
             AlterTableOperation::AlterColumn { column_name, op }
         } else {
-            return self.expected("ADD, RENAME or DROP after ALTER TABLE", self.peek_token());
+            return self.expected(
+                "ADD, RENAME, OWNER TO or DROP after ALTER TABLE",
+                self.peek_token(),
+            );
         };
         Ok(Statement::AlterTable {
             name: table_name,
@@ -2908,10 +2969,15 @@ impl Parser {
             } else {
                 return self.expected("TO after RENAME", self.peek_token());
             }
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterViewOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
         } else {
             return self.expected(
                 &format!(
-                    "RENAME after ALTER {}VIEW",
+                    "RENAME or OWNER TO after ALTER {}VIEW",
                     if materialized { "MATERIALIZED " } else { "" }
                 ),
                 self.peek_token(),
@@ -2934,8 +3000,13 @@ impl Parser {
             } else {
                 return self.expected("TO after RENAME", self.peek_token());
             }
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterSinkOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
         } else {
-            return self.expected("RENAME after ALTER SINK", self.peek_token());
+            return self.expected("RENAME or OWNER TO after ALTER SINK", self.peek_token());
         };
 
         Ok(Statement::AlterSink {
@@ -2958,8 +3029,16 @@ impl Parser {
             let _if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
             let column_def = self.parse_column_def()?;
             AlterSourceOperation::AddColumn { column_def }
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterSourceOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
         } else {
-            return self.expected("RENAME | ADD COLUMN after ALTER SOURCE", self.peek_token());
+            return self.expected(
+                "RENAME, ADD COLUMN or OWNER TO after ALTER SOURCE",
+                self.peek_token(),
+            );
         };
 
         Ok(Statement::AlterSource {
@@ -4012,6 +4091,12 @@ impl Parser {
                         filter: self.parse_show_statement_filter()?,
                     });
                 }
+                Keyword::PROCESSLIST => {
+                    return Ok(Statement::ShowObjects {
+                        object: ShowObject::ProcessList,
+                        filter: self.parse_show_statement_filter()?,
+                    });
+                }
                 _ => {}
             }
         }
@@ -4031,6 +4116,11 @@ impl Parser {
             }
         }
         Ok(Statement::CancelJobs(JobIdents(job_ids)))
+    }
+
+    pub fn parse_kill_process(&mut self) -> Result<Statement, ParserError> {
+        let process_id = self.parse_literal_uint()? as i32;
+        Ok(Statement::Kill(process_id))
     }
 
     /// Parser `from schema` after `show tables` and `show materialized views`, if not conclude

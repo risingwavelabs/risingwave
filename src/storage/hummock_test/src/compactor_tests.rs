@@ -15,7 +15,7 @@
 #[cfg(test)]
 pub(crate) mod tests {
 
-    use std::collections::{BTreeSet, HashMap, VecDeque};
+    use std::collections::{BTreeMap, BTreeSet, VecDeque};
     use std::ops::Bound;
     use std::sync::atomic::AtomicU32;
     use std::sync::Arc;
@@ -62,10 +62,9 @@ pub(crate) mod tests {
     use risingwave_storage::hummock::test_utils::gen_test_sstable_info;
     use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{
-        CachePolicy, CompactionDeleteRanges, CompressionAlgorithm,
-        HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
-        SharedComapctorObjectIdManager, Sstable, SstableBuilderOptions, SstableIteratorReadOptions,
-        SstableObjectIdManager,
+        CachePolicy, CompressionAlgorithm, HummockStorage as GlobalHummockStorage, HummockStorage,
+        MemoryLimiter, SharedComapctorObjectIdManager, Sstable, SstableBuilderOptions,
+        SstableIteratorReadOptions, SstableObjectIdManager,
     };
     use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
     use risingwave_storage::opts::StorageOpts;
@@ -280,7 +279,7 @@ pub(crate) mod tests {
             let compaction_filter_flag = CompactionFilterFlag::TTL;
             compact_task.watermark = (TEST_WATERMARK * 1000) << 16;
             compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-            compact_task.table_options = HashMap::from([(
+            compact_task.table_options = BTreeMap::from([(
                 0,
                 TableOption {
                     retention_seconds: 64,
@@ -839,7 +838,7 @@ pub(crate) mod tests {
                 None,
                 ReadOptions {
                     table_id: TableId::from(existing_table_ids),
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
                 },
@@ -952,7 +951,7 @@ pub(crate) mod tests {
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
         let retention_seconds_expire_second = 1;
-        compact_task.table_options = HashMap::from_iter([(
+        compact_task.table_options = BTreeMap::from_iter([(
             existing_table_id,
             TableOption {
                 retention_seconds: retention_seconds_expire_second,
@@ -1035,7 +1034,7 @@ pub(crate) mod tests {
                 None,
                 ReadOptions {
                     table_id: TableId::from(existing_table_id),
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
                 },
@@ -1157,8 +1156,6 @@ pub(crate) mod tests {
 
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-        // compact_task.table_options =
-        //     HashMap::from_iter([(existing_table_id, TableOption { ttl: 0 })]);
         compact_task.current_epoch_time = epoch;
 
         // 3. compact
@@ -1238,7 +1235,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     prefix_hint: Some(Bytes::from(bloom_filter_key)),
                     table_id: TableId::from(existing_table_id),
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
                 },
@@ -1423,7 +1420,6 @@ pub(crate) mod tests {
             gc_delete_keys: true,
             ..Default::default()
         };
-        let deg = Arc::new(CompactionDeleteRanges::default());
         let multi_filter_key_extractor =
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor));
         let compaction_filter = DummyCompactionFilter {};
@@ -1448,7 +1444,6 @@ pub(crate) mod tests {
             .run(
                 compaction_filter,
                 multi_filter_key_extractor,
-                deg,
                 Arc::new(TaskProgress::default()),
             )
             .await

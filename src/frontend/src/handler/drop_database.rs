@@ -59,9 +59,7 @@ pub async fn handle_drop_database(
         }
     };
 
-    if session.user_id() != database.owner() {
-        return Err(ErrorCode::PermissionDenied("Do not have the privilege".to_string()).into());
-    }
+    session.check_privilege_for_drop_alter_db_schema(&database)?;
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer.drop_database(database.id()).await?;

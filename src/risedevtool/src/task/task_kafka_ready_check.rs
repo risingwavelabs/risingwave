@@ -14,7 +14,7 @@
 
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Context, Result};
 use rdkafka::config::FromClientConfig;
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::ClientConfig;
@@ -48,7 +48,7 @@ impl Task for KafkaReadyCheckTask {
         let consumer = rt.block_on(async {
             BaseConsumer::from_config(&config)
                 .await
-                .map_err(|e| anyhow!("{}", e))
+                .context("failed to create consumer")
         })?;
 
         ctx.wait(|| {
@@ -56,7 +56,7 @@ impl Task for KafkaReadyCheckTask {
                 let _metadata = consumer
                     .fetch_metadata(None, Duration::from_secs(1))
                     .await
-                    .map_err(|e| anyhow!("{}", e))?;
+                    .context("failed to fetch metadata")?;
                 Ok(())
             })
         })?;
