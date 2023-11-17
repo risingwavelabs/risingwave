@@ -14,12 +14,14 @@
 
 use std::marker::PhantomData;
 
+use anyhow::Context;
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::S3;
 use opendal::Operator;
 
 use super::opendal_enumerator::{EngineType, OpendalEnumerator};
 use super::OpenDalProperties;
+use crate::source::filesystem::opendal_source::get_prefix;
 use crate::source::filesystem::S3Properties;
 
 impl<C: OpenDalProperties> OpendalEnumerator<C>
@@ -30,9 +32,7 @@ where
     pub fn new_s3_source(s3_properties: S3Properties) -> anyhow::Result<Self> {
         // Create s3 backend builder.
         let mut builder = S3::default();
-
         builder.bucket(&s3_properties.bucket_name);
-
         builder.region(&s3_properties.region_name);
 
         if let Some(endpoint_url) = s3_properties.endpoint_url {
@@ -47,13 +47,26 @@ where
             builder.secret_access_key(&secret);
         }
 
+        builder.disable_config_load();
+        let (prefix, matcher) = if let Some(pattern) = s3_properties.match_pattern.as_ref() {
+            let prefix = get_prefix(pattern);
+            let matcher = glob::Pattern::new(pattern)
+                .with_context(|| format!("Invalid match_pattern: {}", pattern))?;
+            (Some(prefix), Some(matcher))
+        } else {
+            (None, None)
+        };
+
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .layer(RetryLayer::default())
             .finish();
+
         Ok(Self {
             op,
             engine_type: EngineType::S3,
+            prefix,
+            matcher,
             marker: PhantomData,
         })
     }

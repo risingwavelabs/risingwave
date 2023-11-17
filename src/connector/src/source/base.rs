@@ -39,9 +39,10 @@ use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::monitor::SourceMetrics;
 use super::nexmark::source::message::NexmarkMeta;
+use super::{GCS_CONNECTOR, OPENDAL_S3_CONNECTOR};
 use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
-use crate::source::filesystem::{FsPageItem, S3Properties, S3_V2_CONNECTOR};
+use crate::source::filesystem::{FsPageItem, S3Properties};
 use crate::source::monitor::EnumeratorMetrics;
 use crate::source::S3_CONNECTOR;
 use crate::{
@@ -365,27 +366,54 @@ impl ConnectorProperties {
     pub fn is_new_fs_connector_b_tree_map(props: &BTreeMap<String, String>) -> bool {
         props
             .get(UPSTREAM_SOURCE_KEY)
-            .map(|s| s.eq_ignore_ascii_case(S3_V2_CONNECTOR))
+            .map(|s| s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR))
             .unwrap_or(false)
+            || props
+                .get(UPSTREAM_SOURCE_KEY)
+                .map(|s| s.eq_ignore_ascii_case(GCS_CONNECTOR))
+                .unwrap_or(false)
     }
 
     pub fn is_new_fs_connector_hash_map(props: &HashMap<String, String>) -> bool {
         props
             .get(UPSTREAM_SOURCE_KEY)
-            .map(|s| s.eq_ignore_ascii_case(S3_V2_CONNECTOR))
+            .map(|s| s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR))
             .unwrap_or(false)
+            || props
+                .get(UPSTREAM_SOURCE_KEY)
+                .map(|s| s.eq_ignore_ascii_case(GCS_CONNECTOR))
+                .unwrap_or(false)
     }
 
     pub fn rewrite_upstream_source_key_hash_map(props: &mut HashMap<String, String>) {
         let connector = props.remove(UPSTREAM_SOURCE_KEY).unwrap();
         match connector.as_str() {
-            S3_V2_CONNECTOR => {
+            // S3_V2_CONNECTOR => {
+            //     tracing::info!(
+            //         "using new fs source, rewrite connector from '{}' to '{}'",
+            //         S3_V2_CONNECTOR,
+            //         S3_CONNECTOR
+            //     );
+            //     props.insert(UPSTREAM_SOURCE_KEY.to_string(), S3_CONNECTOR.to_string());
+            // }
+            OPENDAL_S3_CONNECTOR => {
                 tracing::info!(
                     "using new fs source, rewrite connector from '{}' to '{}'",
-                    S3_V2_CONNECTOR,
+                    OPENDAL_S3_CONNECTOR,
                     S3_CONNECTOR
                 );
-                props.insert(UPSTREAM_SOURCE_KEY.to_string(), S3_CONNECTOR.to_string());
+                props.insert(
+                    UPSTREAM_SOURCE_KEY.to_string(),
+                    OPENDAL_S3_CONNECTOR.to_string(),
+                );
+            }
+            GCS_CONNECTOR => {
+                tracing::info!(
+                    "using new fs source, rewrite connector from '{}' to '{}'",
+                    GCS_CONNECTOR,
+                    S3_CONNECTOR
+                );
+                props.insert(UPSTREAM_SOURCE_KEY.to_string(), GCS_CONNECTOR.to_string());
             }
             _ => {
                 props.insert(UPSTREAM_SOURCE_KEY.to_string(), connector);

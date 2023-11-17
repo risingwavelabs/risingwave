@@ -32,6 +32,9 @@ where
 {
     pub(crate) op: Operator,
     pub(crate) engine_type: EngineType,
+    // prefix is used to reduce the number of objects to be listed
+    pub(crate) prefix: Option<String>,
+    pub(crate) matcher: Option<glob::Pattern>,
     pub(crate) marker: PhantomData<C>,
 }
 
@@ -65,10 +68,17 @@ impl<C: OpenDalProperties> OpendalEnumerator<C>
 where
     C: Send + Clone + Sized + PartialEq + 'static + Sync,
 {
-    pub async fn list(&self, prefix: &str) -> anyhow::Result<ObjectMetadataIter> {
+    pub async fn list(&self) -> anyhow::Result<ObjectMetadataIter> {
+        let _prefix = match &self.prefix {
+            Some(prefix) => prefix,
+            None => "",
+        };
+        // Currently, we need to do full list and then filter the prefix and matcher,
+        // After OpenDAL implementing the list prefix, we can use the user-specified prefix.
+        // https://github.com/apache/incubator-opendal/issues/3247
         let object_lister = self
             .op
-            .lister_with(prefix)
+            .lister_with("/")
             .delimiter("")
             .metakey(Metakey::ContentLength | Metakey::ContentType)
             .await?;
@@ -76,6 +86,7 @@ where
         let stream = stream::unfold(object_lister, |mut object_lister| async move {
             match object_lister.next().await {
                 Some(Ok(object)) => {
+                    // todo: manual filtering prefix
                     let name = object.path().to_string();
                     let om = object.metadata();
 
@@ -95,8 +106,14 @@ where
                     };
                     Some((Ok(metadata), object_lister))
                 }
-                Some(Err(err)) => Some((Err(err.into()), object_lister)),
-                None => None,
+                Some(Err(err)) => {
+                    tracing::error!("list fail");
+                    Some((Err(err.into()), object_lister))
+                }
+                None => {
+                    tracing::info!("list to the end");
+                    None
+                }
             }
         });
 

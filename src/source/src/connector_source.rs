@@ -36,7 +36,7 @@ use risingwave_connector::source::{
     ConnectorState, FsFilterCtrlCtx, SourceColumnDesc, SourceContext, SplitReader,
 };
 use tokio::time;
-use tokio::time::{Duration, MissedTickBehavior};
+use tokio::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct ConnectorSource {
@@ -93,7 +93,6 @@ impl ConnectorSource {
 
     pub fn get_opendal_source_list(&self) -> Result<BoxTryStream<FsPageItem>> {
         let config = self.config.clone();
-
         match config {
             ConnectorProperties::Gcs(prop) => {
                 let lister: OpendalEnumerator<GcsProperties> =
@@ -107,9 +106,10 @@ impl ConnectorSource {
                     lister,
                 ))
             }
-            ConnectorProperties::OpenDalS3(prop) => {
+            ConnectorProperties::S3(prop) => {
+                // todo(wcy-fdu): use new s3 prop
                 let lister: OpendalEnumerator<OpendalS3Properties> =
-                    OpendalEnumerator::new_s3_source(prop.s3_properties)?;
+                    OpendalEnumerator::new_s3_source(*prop)?;
                 Ok(build_opendal_fs_list_stream(
                     FsListCtrlContext {
                         interval: Duration::from_secs(60),
@@ -157,7 +157,7 @@ impl ConnectorSource {
 
         dispatch_source_prop!(config, prop, {
             let readers = if support_multiple_splits {
-                tracing::debug!(
+                tracing::info!(
                     "spawning connector split reader for multiple splits {:?}",
                     splits
                 );
@@ -171,7 +171,7 @@ impl ConnectorSource {
                 let to_reader_splits = splits.into_iter().map(|split| vec![split]);
 
                 try_join_all(to_reader_splits.into_iter().map(|splits| {
-                    tracing::debug!(?splits, ?prop, "spawning connector split reader");
+                    tracing::info!(?splits, ?prop, "spawning connector split reader");
                     let props = prop.clone();
                     let data_gen_columns = data_gen_columns.clone();
                     let parser_config = parser_config.clone();
@@ -199,22 +199,14 @@ impl ConnectorSource {
 
 #[try_stream(boxed, ok = FsPageItem, error = RwError)]
 async fn build_opendal_fs_list_stream<C: OpenDalProperties>(
-    ctrl_ctx: FsListCtrlContext,
+    _ctrl_ctx: FsListCtrlContext,
     lister: OpendalEnumerator<C>,
 ) {
-    let mut interval = time::interval(ctrl_ctx.interval);
-    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    // let mut interval = time::interval(ctrl_ctx.interval);
+    // interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-    let mut object_metadata_iter = lister.list("123").await?;
-    loop {
-        match object_metadata_iter.next().await {
-            Some(list_res) => {
-                yield list_res.unwrap();
-            }
-            None => {
-                break;
-            }
-        }
-        interval.tick().await;
+    let mut object_metadata_iter = lister.list().await?;
+    while let Some(list_res) = object_metadata_iter.next().await {
+        yield list_res.unwrap();
     }
 }

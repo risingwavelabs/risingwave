@@ -176,6 +176,7 @@ where
     }
 
     pub async fn get_object(op: Operator, object_name: &str, start: usize) -> Result<ByteStream> {
+        println!("读{:?}", object_name);
         let mut reader = op.reader_with(object_name).range(start as u64..).await?;
         let mut buffer = Vec::new();
         reader.read_to_end(&mut buffer).await?;
