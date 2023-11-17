@@ -34,7 +34,7 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::Order;
 use crate::utils::{ColIndexMapping, Condition};
 
-/// `LogicalCdcScan` returns contents of a table or other equivalent object
+/// `LogicalCdcScan` reads rows of a table from an external upstream database
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalCdcScan {
     pub base: PlanBase<Logical>,
