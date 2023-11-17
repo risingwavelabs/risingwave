@@ -529,10 +529,23 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_set_schema(
         &self,
-        _object: alter_set_schema_request::Object,
-        _new_schema_id: u32,
+        object: alter_set_schema_request::Object,
+        new_schema_id: u32,
     ) -> Result<()> {
-        unreachable!()
+        match object {
+            alter_set_schema_request::Object::TableId(table_id) => {
+                let &schema_id = self.table_id_to_schema_id.read().get(&table_id).unwrap();
+                let database_id = self.get_database_id_by_schema(schema_id);
+                let pb_table = {
+                    let reader = self.catalog.read();
+                    let table = reader.get_table_by_id(&table_id.into())?.to_owned();
+                    table.to_prost(new_schema_id, database_id)
+                };
+                self.catalog.write().update_table(&pb_table);
+                Ok(())
+            }
+            _ => unreachable!(),
+        }
     }
 
     async fn alter_view_name(&self, _view_id: u32, _view_name: &str) -> Result<()> {
