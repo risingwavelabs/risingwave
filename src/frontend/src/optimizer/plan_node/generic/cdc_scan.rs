@@ -12,22 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use educe::Educe;
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::Pretty;
-use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, Field, Schema, TableDesc};
+use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, Field, Schema};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::GenericPlanNode;
-use crate::catalog::{ColumnId, IndexCatalog};
+use crate::catalog::ColumnId;
 use crate::expr::ExprRewriter;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order};
-use crate::utils::ColIndexMappingRewriteExt;
+use crate::optimizer::property::{Cardinality, FunctionalDependencySet};
 
 /// [`CdcScan`] returns contents of a table or other equivalent object
 #[derive(Debug, Clone, Educe)]
@@ -35,14 +33,9 @@ use crate::utils::ColIndexMappingRewriteExt;
 pub struct CdcScan {
     pub table_name: String,
     /// Include `output_col_idx` and columns required in `predicate`
-    pub required_col_idx: Vec<usize>,
     pub output_col_idx: Vec<usize>,
-    /// Descriptor of the table
-    pub table_desc: Rc<TableDesc>,
     /// Descriptor of the external table for CDC
     pub cdc_table_desc: Rc<CdcTableDesc>,
-    /// Descriptors of all indexes on this table
-    pub indexes: Vec<Rc<IndexCatalog>>,
     /// Help RowSeqCdcScan executor use a better chunk size
     pub chunk_size: Option<u32>,
     /// syntax `FOR SYSTEM_TIME AS OF PROCTIME()` is used for temporal join.
@@ -87,25 +80,6 @@ impl CdcScan {
             .collect()
     }
 
-    /// Return indices of fields the output is ordered by and
-    /// corresponding direction
-    pub fn get_out_column_index_order(&self) -> Order {
-        let id_to_tb_idx = self.table_desc.get_id_to_op_idx_mapping();
-        let order = Order::new(
-            self.table_desc
-                .pk
-                .iter()
-                .map(|order| {
-                    let idx = id_to_tb_idx
-                        .get(&self.table_desc.columns[order.column_index].column_id)
-                        .unwrap();
-                    ColumnOrder::new(*idx, order.order_type)
-                })
-                .collect(),
-        );
-        self.i2o_col_mapping().rewrite_provided_order(&order)
-    }
-
     /// get the Mapping of columnIndex from internal column index to output column index
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         ColIndexMapping::with_remaining_columns(
@@ -136,9 +110,7 @@ impl CdcScan {
         Self::new_inner(
             table_name,
             output_col_idx,
-            Rc::new(TableDesc::default()),
             cdc_table_desc,
-            vec![],
             ctx,
             false,
             Cardinality::unknown(),
@@ -149,9 +121,7 @@ impl CdcScan {
     pub(crate) fn new_inner(
         table_name: String,
         output_col_idx: Vec<usize>, // the column index in the table
-        table_desc: Rc<TableDesc>,
         cdc_table_desc: Rc<CdcTableDesc>,
-        indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         for_system_time_as_of_proctime: bool,
         table_cardinality: Cardinality,
@@ -161,18 +131,12 @@ impl CdcScan {
         // 2. table_idx: usize, column index in the TableDesc or tableCatalog.
         // 3. operator_idx: usize, column index in the CdcScanOperator's schema.
         // In a query we get the same version of catalog, so the mapping from column_id and
-        // table_idx will not change. And the `required_col_idx` is the `table_idx` of the
-        // required columns, i.e., the mapping from operator_idx to table_idx.
-
-        let required_col_idx = output_col_idx.clone();
+        // table_idx will not change.
 
         Self {
             table_name,
-            required_col_idx,
             output_col_idx,
-            table_desc,
             cdc_table_desc,
-            indexes,
             chunk_size: None,
             for_system_time_as_of_proctime,
             ctx,
@@ -240,21 +204,5 @@ impl CdcScan {
             .iter()
             .map(|&i| self.get_table_columns()[i].clone())
             .collect()
-    }
-
-    /// Helper function to create a mapping from `column_id` to `operator_idx`
-    pub fn get_id_to_op_idx_mapping(
-        output_col_idx: &[usize],
-        table_desc: &Rc<TableDesc>,
-    ) -> HashMap<ColumnId, usize> {
-        let mut id_to_op_idx = HashMap::new();
-        output_col_idx
-            .iter()
-            .enumerate()
-            .for_each(|(op_idx, tb_idx)| {
-                let col = &table_desc.columns[*tb_idx];
-                id_to_op_idx.insert(col.column_id, op_idx);
-            });
-        id_to_op_idx
     }
 }

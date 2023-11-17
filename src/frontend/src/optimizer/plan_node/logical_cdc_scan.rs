@@ -100,9 +100,7 @@ impl LogicalCdcScan {
         generic::CdcScan::new_inner(
             self.table_name().to_string(),
             output_col_idx,
-            self.core.table_desc.clone(),
             self.core.cdc_table_desc.clone(),
-            vec![],
             self.base.ctx().clone(),
             self.for_system_time_as_of_proctime(),
             self.table_cardinality(),
@@ -112,10 +110,6 @@ impl LogicalCdcScan {
 
     pub fn output_col_idx(&self) -> &Vec<usize> {
         &self.core.output_col_idx
-    }
-
-    pub fn required_col_idx(&self) -> &Vec<usize> {
-        &self.core.required_col_idx
     }
 }
 
@@ -137,7 +131,7 @@ impl Distill for LogicalCdcScan {
             vec.push((
                 "required_columns",
                 Pretty::Array(
-                    self.required_col_idx()
+                    self.output_col_idx()
                         .iter()
                         .map(|i| {
                             let col_name = &self.cdc_table_desc().columns[*i].name;
@@ -164,7 +158,7 @@ impl ColPrunable for LogicalCdcScan {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let output_col_idx: Vec<usize> = required_cols
             .iter()
-            .map(|i| self.required_col_idx()[*i])
+            .map(|i| self.output_col_idx()[*i])
             .collect();
         assert!(output_col_idx
             .iter()
