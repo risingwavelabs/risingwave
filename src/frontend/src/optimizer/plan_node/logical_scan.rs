@@ -19,7 +19,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, TableDesc};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
@@ -105,10 +105,6 @@ impl LogicalScan {
 
     pub fn scan_table_type(&self) -> &ScanTableType {
         &self.core.scan_table_type
-    }
-
-    pub fn is_sys_table(&self) -> bool {
-        self.core.is_sys_table()
     }
 
     pub fn is_cdc_table(&self) -> bool {
@@ -557,12 +553,6 @@ impl ToBatch for LogicalScan {
 
 impl ToStream for LogicalScan {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        if self.is_sys_table() {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "streaming on system table is not allowed".to_string(),
-                None.into(),
-            )));
-        }
         if self.predicate().always_true() {
             if self.is_cdc_table() {
                 Ok(StreamCdcTableScan::new(self.core.clone()).into())
@@ -583,13 +573,6 @@ impl ToStream for LogicalScan {
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        if self.is_sys_table() {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "streaming on system table is not allowed".to_string(),
-                None.into(),
-            )));
-        }
-
         if self.is_cdc_table() {
             return Ok((
                 self.clone().into(),

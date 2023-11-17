@@ -70,7 +70,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     // TODO: use the correct information to fill in pk_dicies.
                     // We should consdier add back the "pk_column_ids" field removed by #8841 in
                     // StreamSource
-                    params.pk_indices.clone(),
+                    params.info.pk_indices.clone(),
                 );
 
                 let source_ctrl_opts = SourceCtrlOpts {
@@ -194,7 +194,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     }
                 }
             };
-            let rate_limit = source.get_rate_limit().cloned().ok();
+            let rate_limit = source.rate_limit.map(|x| x as _);
             Ok(FlowControlExecutor::new(executor, params.actor_context, rate_limit).boxed())
         } else {
             // If there is no external stream source, then no data should be persisted. We pass a

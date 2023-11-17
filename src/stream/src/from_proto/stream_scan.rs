@@ -218,7 +218,11 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
             }
             StreamScanType::Unspecified => unreachable!(),
         };
-        let rate_limit = node.get_rate_limit().cloned().ok();
-        Ok(FlowControlExecutor::new(executor, params.actor_context, rate_limit).boxed())
+        Ok(FlowControlExecutor::new(
+            executor,
+            params.actor_context,
+            node.rate_limit.map(|x| x as _),
+        )
+        .boxed())
     }
 }

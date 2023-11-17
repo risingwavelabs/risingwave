@@ -28,6 +28,6 @@ impl ExecutorBuilder for UnionExecutorBuilder {
         _store: impl StateStore,
         _stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        Ok(UnionExecutor::new(params.pk_indices, params.input).boxed())
+        Ok(UnionExecutor::new(params.info, params.input).boxed())
     }
 }

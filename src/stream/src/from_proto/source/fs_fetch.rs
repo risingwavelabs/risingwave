@@ -55,7 +55,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             source_info.clone(),
             params.env.connector_params(),
             params.env.config().developer.connector_message_buffer_size,
-            params.pk_indices.clone(),
+            params.info.pk_indices.clone(),
         );
 
         let source_ctrl_opts = SourceCtrlOpts {
@@ -97,7 +97,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         )
         .boxed();
 
-        let rate_limit = source.get_rate_limit().cloned().ok();
+        let rate_limit = source.rate_limit.map(|x| x as _);
         Ok(FlowControlExecutor::new(executor, params.actor_context, rate_limit).boxed())
     }
 }
