@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::num::NonZeroU32;
 
@@ -172,18 +172,27 @@ impl TryFrom<&[SqlOption]> for WithOptions {
     type Error = RwError;
 
     fn try_from(options: &[SqlOption]) -> Result<Self, Self::Error> {
+        let mut option_entry = HashSet::new();
         let inner = options
             .iter()
             .cloned()
-            .map(|x| match x.value {
-                Value::CstyleEscapedString(s) => Ok((x.name.real_value(), s.value)),
-                Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
-                Value::Number(n) => Ok((x.name.real_value(), n)),
-                Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
-                _ => Err(ErrorCode::InvalidParameterValue(
-                    "`with options` or `with properties` only support single quoted string value and C style escaped string"
-                        .to_owned(),
-                )),
+            .map(|x| {
+                if !option_entry.insert(x.name.real_value()) {
+                    return Err(ErrorCode::InvalidParameterValue(format!(
+                        "Duplicated option: {}",
+                        x.name.real_value()
+                    )));
+                }
+                match x.value {
+                    Value::CstyleEscapedString(s) => Ok((x.name.real_value(), s.value)),
+                    Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
+                    Value::Number(n) => Ok((x.name.real_value(), n)),
+                    Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
+                    _ => Err(ErrorCode::InvalidParameterValue(
+                        "`with options` or `with properties` only support single quoted string value and C style escaped string"
+                            .to_owned(),
+                    )),
+                }
             })
             .try_collect()?;
 
