@@ -1115,16 +1115,15 @@ pub mod default {
             true
         }
 
-<<<<<<< HEAD
         pub fn enable_sst_vnode_bitmap() -> bool {
             false
-=======
+        }
+
         pub fn max_preload_io_retry_times() -> usize {
             3
         }
         pub fn mem_table_spill_threshold() -> usize {
             4 << 20
->>>>>>> 483347725eacbe39a9a60b0817ac145aaf205f80
         }
     }
 
