@@ -17,7 +17,6 @@
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 mod block;
 
-use std::collections::BTreeSet;
 use std::fmt::{Debug, Formatter};
 use std::ops::{BitXor, Bound, Range};
 
@@ -34,7 +33,6 @@ pub mod builder;
 pub use builder::*;
 pub mod writer;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::MAX_EPOCH;
 pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
@@ -57,16 +55,15 @@ pub use delete_range_aggregator::{
     SstableDeleteRangeIterator,
 };
 pub use filter::FilterBuilder;
+#[cfg(any(test, feature = "test"))]
 use itertools::Itertools;
 pub use sstable_object_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 use xxhash_rust::{xxh32, xxh64};
 
-use self::delete_range_aggregator::{apply_event, CompactionDeleteRangeEvent};
 use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
-use crate::hummock::sstable::delete_range_aggregator::TombstoneEnterExitEvent;
 use crate::hummock::CachePolicy;
 use crate::store::ReadOptions;
 
@@ -201,9 +198,15 @@ impl MonotonicDeleteEvent {
 }
 
 #[cfg(any(test, feature = "test"))]
+use self::delete_range_aggregator::{apply_event, CompactionDeleteRangeEvent};
+#[cfg(any(test, feature = "test"))]
 fn create_monotonic_events_from_compaction_delete_events(
     compaction_delete_range_events: Vec<CompactionDeleteRangeEvent>,
 ) -> Vec<MonotonicDeleteEvent> {
+    use std::collections::BTreeSet;
+
+    use risingwave_common::util::epoch::MAX_EPOCH;
+
     let mut epochs = BTreeSet::new();
     let mut monotonic_tombstone_events = Vec::with_capacity(compaction_delete_range_events.len());
     for event in compaction_delete_range_events {
@@ -227,6 +230,8 @@ fn create_monotonic_events_from_compaction_delete_events(
 /// -epoch3> }`
 #[cfg(any(test, feature = "test"))]
 fn build_events(delete_tombstones: &Vec<DeleteRangeTombstone>) -> Vec<CompactionDeleteRangeEvent> {
+    use crate::hummock::sstable::delete_range_aggregator::TombstoneEnterExitEvent;
+
     let tombstone_len = delete_tombstones.len();
     let mut events = Vec::with_capacity(tombstone_len * 2);
     for DeleteRangeTombstone {
