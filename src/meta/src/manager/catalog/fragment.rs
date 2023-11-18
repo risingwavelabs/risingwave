@@ -175,16 +175,26 @@ impl FragmentManager {
     ) -> HashMap<TableId, Vec<ActorId>> {
         let map = &self.core.read().await.table_fragments;
         let mut table_map = HashMap::new();
+        // TODO(kwannoel): Can this be unified with `PlanVisitor`?
+        fn has_stream_scan(stream_node: &StreamNode) -> bool {
+            let is_node_scan = if let Some(node) = &stream_node.node_body {
+                node.is_stream_scan()
+            } else {
+                false
+            };
+            is_node_scan || stream_node.get_input().iter().any(has_stream_scan)
+        }
         for table_id in table_ids {
             if let Some(table_fragment) = map.get(table_id) {
                 let mut actors = vec![];
                 for fragment in table_fragment.fragments.values() {
                     for actor in &fragment.actors {
                         if let Some(node) = &actor.nodes
-                            && let Some(node) = &node.node_body
-                            && node.is_stream_scan()
+                            && has_stream_scan(node)
                         {
                             actors.push(actor.actor_id)
+                        } else {
+                            tracing::trace!("ignoring actor: {:?}", actor);
                         }
                     }
                 }
