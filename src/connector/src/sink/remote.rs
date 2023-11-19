@@ -31,7 +31,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::drop_either_future;
 use risingwave_jni_core::jvm_runtime::JVM;
 use risingwave_jni_core::{
-    call_static_method, gen_class_name, JniReceiverType, JniSenderType, SinkWriterStreamRequestEnum,
+    call_static_method, gen_class_name, JniReceiverType, JniSenderType, JniSinkWriterStreamRequest,
 };
 use risingwave_pb::connector_service::sink_coordinator_stream_request::StartCoordinator;
 use risingwave_pb::connector_service::sink_writer_stream_request::{
@@ -228,7 +228,7 @@ async fn validate_remote_sink(param: &SinkParam) -> Result<()> {
 }
 
 pub struct RemoteLogSinker {
-    request_sender: BidiStreamSender<SinkWriterStreamRequestEnum>,
+    request_sender: BidiStreamSender<JniSinkWriterStreamRequest>,
     response_stream: BidiStreamReceiver<SinkWriterStreamResponse>,
     sink_metrics: SinkMetrics,
 }
@@ -399,7 +399,7 @@ impl LogSinker for RemoteLogSinker {
                                     .inc_by(cardinality as _);
 
                                 request_tx
-                                    .send_request(SinkWriterStreamRequestEnum::Chunk {
+                                    .send_request(JniSinkWriterStreamRequest::Chunk {
                                         epoch,
                                         batch_id: chunk_id as u64,
                                         chunk,
@@ -500,7 +500,7 @@ pub struct CoordinatedRemoteSinkWriter {
     properties: HashMap<String, String>,
     epoch: Option<u64>,
     batch_id: u64,
-    stream_handle: SinkWriterStreamHandle<SinkWriterStreamRequestEnum>,
+    stream_handle: SinkWriterStreamHandle<JniSinkWriterStreamRequest>,
     sink_metrics: SinkMetrics,
 }
 
@@ -525,7 +525,7 @@ impl CoordinatedRemoteSinkWriter {
 
     fn for_test(
         response_receiver: Receiver<anyhow::Result<SinkWriterStreamResponse>>,
-        request_sender: Sender<SinkWriterStreamRequestEnum>,
+        request_sender: Sender<JniSinkWriterStreamRequest>,
     ) -> CoordinatedRemoteSinkWriter {
         let properties = HashMap::from([("output.path".to_string(), "/tmp/rw".to_string())]);
 
@@ -564,7 +564,7 @@ impl SinkWriter for CoordinatedRemoteSinkWriter {
         let batch_id = self.batch_id;
         self.stream_handle
             .request_sender
-            .send_request(SinkWriterStreamRequestEnum::Chunk {
+            .send_request(JniSinkWriterStreamRequest::Chunk {
                 chunk,
                 epoch,
                 batch_id,
@@ -648,14 +648,14 @@ impl EmbeddedConnectorClient {
         &self,
         sink_param: SinkParam,
         sink_payload_format: SinkPayloadFormat,
-    ) -> Result<SinkWriterStreamHandle<SinkWriterStreamRequestEnum>> {
+    ) -> Result<SinkWriterStreamHandle<JniSinkWriterStreamRequest>> {
         let (handle, first_rsp) = SinkWriterStreamHandle::initialize(
-            SinkWriterStreamRequestEnum::from(SinkWriterStreamRequest {
+            SinkWriterStreamRequest {
                 request: Some(SinkRequest::Start(StartSink {
                     sink_param: Some(sink_param.to_proto()),
                     format: sink_payload_format as i32,
                 })),
-            }),
+            },
             |rx| async move {
                 let rx = self.start_jvm_worker_thread(
                     gen_class_name!(com.risingwave.connector.JniSinkWriterHandler),
@@ -760,7 +760,7 @@ mod test {
 
     use risingwave_common::array::StreamChunk;
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_jni_core::SinkWriterStreamRequestEnum;
+    use risingwave_jni_core::JniSinkWriterStreamRequest;
     use risingwave_pb::connector_service::sink_writer_stream_request::{Barrier, Request};
     use risingwave_pb::connector_service::sink_writer_stream_response::{CommitResponse, Response};
     use risingwave_pb::connector_service::{SinkWriterStreamRequest, SinkWriterStreamResponse};
@@ -841,7 +841,7 @@ mod test {
         assert_eq!(sink.epoch, Some(2022));
         assert_eq!(sink.batch_id, 1);
         match request_receiver.recv().await.unwrap() {
-            SinkWriterStreamRequestEnum::Chunk {
+            JniSinkWriterStreamRequest::Chunk {
                 epoch,
                 batch_id,
                 chunk,
@@ -866,7 +866,7 @@ mod test {
         sink.barrier(false).await.unwrap();
         let commit_request = request_receiver.recv().await.unwrap();
         match commit_request {
-            SinkWriterStreamRequestEnum::PbRequest(SinkWriterStreamRequest {
+            JniSinkWriterStreamRequest::PbRequest(SinkWriterStreamRequest {
                 request:
                     Some(Request::Barrier(Barrier {
                         epoch,
@@ -889,7 +889,7 @@ mod test {
         assert_eq!(sink.epoch, Some(2023));
         assert_eq!(sink.batch_id, 2);
         match request_receiver.recv().await.unwrap() {
-            SinkWriterStreamRequestEnum::Chunk {
+            JniSinkWriterStreamRequest::Chunk {
                 epoch,
                 batch_id,
                 chunk,

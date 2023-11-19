@@ -49,7 +49,7 @@ public class JniSinkWriterStreamRequest implements AutoCloseable {
         }
     }
 
-    public static JniSinkWriterStreamRequest fromStreamChunk(
+    public static JniSinkWriterStreamRequest fromStreamChunkOwnedPointer(
             long pointer, long epoch, long batchId) {
         return new JniSinkWriterStreamRequest(
                 StreamChunk.fromOwnedPointer(pointer), epoch, batchId);

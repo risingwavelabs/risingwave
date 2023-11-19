@@ -896,7 +896,7 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_sendCdcSourceMsgToCh
     })
 }
 
-pub enum SinkWriterStreamRequestEnum {
+pub enum JniSinkWriterStreamRequest {
     PbRequest(SinkWriterStreamRequest),
     Chunk {
         epoch: u64,
@@ -905,7 +905,7 @@ pub enum SinkWriterStreamRequestEnum {
     },
 }
 
-impl From<SinkWriterStreamRequest> for SinkWriterStreamRequestEnum {
+impl From<SinkWriterStreamRequest> for JniSinkWriterStreamRequest {
     fn from(value: SinkWriterStreamRequest) -> Self {
         Self::PbRequest(value)
     }
@@ -916,12 +916,12 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_recvSinkWriterRe
     'a,
 >(
     env: EnvParam<'a>,
-    mut channel: Pointer<'a, JniReceiverType<SinkWriterStreamRequestEnum>>,
+    mut channel: Pointer<'a, JniReceiverType<JniSinkWriterStreamRequest>>,
 ) -> JObject<'a> {
     execute_and_catch(env, move |env| match channel.as_mut().blocking_recv() {
         Some(msg) => {
             let obj = match msg {
-                SinkWriterStreamRequestEnum::PbRequest(request) => {
+                JniSinkWriterStreamRequest::PbRequest(request) => {
                     let bytes = env.byte_array_from_slice(&Message::encode_to_vec(&request))?;
                     call_static_method!(
                         env,
@@ -930,7 +930,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_recvSinkWriterRe
                         &JObject::from(bytes)
                     )?
                 }
-                SinkWriterStreamRequestEnum::Chunk {
+                JniSinkWriterStreamRequest::Chunk {
                     epoch,
                     batch_id,
                     chunk,
@@ -939,7 +939,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_recvSinkWriterRe
                     call_static_method!(
                         env,
                         {com.risingwave.java.binding.JniSinkWriterStreamRequest},
-                        {com.risingwave.java.binding.JniSinkWriterStreamRequest fromStreamChunk(long pointer, long epoch, long batchId)},
+                        {com.risingwave.java.binding.JniSinkWriterStreamRequest fromStreamChunkOwnedPointer(long pointer, long epoch, long batchId)},
                         pointer as u64, epoch, batch_id
                     )
                     .inspect_err(|_| unsafe {
