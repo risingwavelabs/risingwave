@@ -691,12 +691,14 @@ impl HummockVersionReader {
         read_options: ReadOptions,
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
-        let read_version_tuple = {
-            let (first, second, third) = read_version_tuple;
-            (first, second, third, None)
-        };
-        self.iter_inner(table_key_range, epoch, read_options, read_version_tuple)
-            .await
+        self.iter_inner(
+            table_key_range,
+            epoch,
+            read_options,
+            read_version_tuple,
+            None,
+        )
+        .await
     }
 
     pub async fn iter_with_memtable<'a>(
@@ -704,15 +706,17 @@ impl HummockVersionReader {
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-        read_snapshot: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
+        read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
         memtable_iter: MemTableHummockIterator<'a>,
     ) -> StorageResult<StreamTypeOfIter<LocalHummockStorageIterator<'_>>> {
-        let read_snapshot = {
-            let (first, second, third) = read_snapshot;
-            (first, second, third, Some(memtable_iter))
-        };
-        self.iter_inner(table_key_range, epoch, read_options, read_snapshot)
-            .await
+        self.iter_inner(
+            table_key_range,
+            epoch,
+            read_options,
+            read_version_tuple,
+            Some(memtable_iter),
+        )
+        .await
     }
 
     pub async fn iter_inner<'a, 'b>(
@@ -720,16 +724,12 @@ impl HummockVersionReader {
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-        read_version_tuple: (
-            Vec<ImmutableMemtable>,
-            Vec<SstableInfo>,
-            CommittedVersion,
-            Option<MemTableHummockIterator<'b>>,
-        ),
+        read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
+        mem_table: Option<MemTableHummockIterator<'b>>,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIteratorInner<'b>>> {
         let table_id_string = read_options.table_id.to_string();
         let table_id_label = table_id_string.as_str();
-        let (imms, uncommitted_ssts, committed, mem_table) = read_version_tuple;
+        let (imms, uncommitted_ssts, committed) = read_version_tuple;
 
         let mut local_stats = StoreLocalStatistic::default();
         let mut staging_iters = Vec::with_capacity(imms.len() + uncommitted_ssts.len());
