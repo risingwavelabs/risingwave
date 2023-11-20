@@ -14,7 +14,6 @@
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::future::Future;
 use std::sync::atomic::AtomicU64;
 use std::sync::{atomic, Arc};
 use std::time::Instant;
@@ -432,23 +431,17 @@ impl ConcatSstableIterator {
 impl HummockIterator for ConcatSstableIterator {
     type Direction = Forward;
 
-    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
+    async fn next(&mut self) -> HummockResult<()> {
+        let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
 
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        async {
-            let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
-
-            // Does just calling `next()` suffice?
-            sstable_iter.next().await?;
-            if sstable_iter.is_valid() {
-                Ok(())
-            } else {
-                // No, seek to next table.
-                self.seek_idx(self.cur_idx + 1, None).await?;
-                Ok(())
-            }
+        // Does just calling `next()` suffice?
+        sstable_iter.next().await?;
+        if sstable_iter.is_valid() {
+            Ok(())
+        } else {
+            // No, seek to next table.
+            self.seek_idx(self.cur_idx + 1, None).await?;
+            Ok(())
         }
     }
 
@@ -464,34 +457,32 @@ impl HummockIterator for ConcatSstableIterator {
         self.sstable_iter.as_ref().map_or(false, |i| i.is_valid())
     }
 
-    fn rewind(&mut self) -> Self::RewindFuture<'_> {
-        async { self.seek_idx(0, None).await }
+    async fn rewind(&mut self) -> HummockResult<()> {
+        self.seek_idx(0, None).await
     }
 
     /// Resets the iterator and seeks to the first position where the stored key >= `key`.
-    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
-        async move {
-            let seek_key = if self.key_range.left.is_empty() {
-                key
-            } else {
-                match key.cmp(&FullKey::decode(&self.key_range.left)) {
-                    Ordering::Less | Ordering::Equal => FullKey::decode(&self.key_range.left),
-                    Ordering::Greater => key,
-                }
-            };
-            let table_idx = self.sstables.partition_point(|table| {
-                // We use the maximum key of an SST for the search. That way, we guarantee that the
-                // resulting SST contains either that key or the next-larger KV-pair. Subsequently,
-                // we avoid calling `seek_idx()` twice if the determined SST does not contain `key`.
+    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+        let seek_key = if self.key_range.left.is_empty() {
+            key
+        } else {
+            match key.cmp(&FullKey::decode(&self.key_range.left)) {
+                Ordering::Less | Ordering::Equal => FullKey::decode(&self.key_range.left),
+                Ordering::Greater => key,
+            }
+        };
+        let table_idx = self.sstables.partition_point(|table| {
+            // We use the maximum key of an SST for the search. That way, we guarantee that the
+            // resulting SST contains either that key or the next-larger KV-pair. Subsequently,
+            // we avoid calling `seek_idx()` twice if the determined SST does not contain `key`.
 
-                // Note that we need to use `<` instead of `<=` to ensure that all keys in an SST
-                // (including its max. key) produce the same search result.
-                let max_sst_key = &table.key_range.as_ref().unwrap().right;
-                FullKey::decode(max_sst_key).cmp(&seek_key) == Ordering::Less
-            });
+            // Note that we need to use `<` instead of `<=` to ensure that all keys in an SST
+            // (including its max. key) produce the same search result.
+            let max_sst_key = &table.key_range.as_ref().unwrap().right;
+            FullKey::decode(max_sst_key).cmp(&seek_key) == Ordering::Less
+        });
 
-            self.seek_idx(table_idx, Some(key)).await
-        }
+        self.seek_idx(table_idx, Some(key)).await
     }
 
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {

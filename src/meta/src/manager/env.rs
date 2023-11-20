@@ -169,6 +169,7 @@ pub struct MetaOpts {
 
     pub compaction_task_max_heartbeat_interval_secs: u64,
     pub compaction_config: Option<CompactionConfig>,
+    pub advertise_addr: String,
 }
 
 impl MetaOpts {
@@ -209,6 +210,7 @@ impl MetaOpts {
             partition_vnode_count: 32,
             compaction_task_max_heartbeat_interval_secs: 0,
             compaction_config: None,
+            advertise_addr: "".to_string(),
         }
     }
 }

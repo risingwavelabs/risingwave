@@ -176,8 +176,7 @@ create table s11 with (
   connector = 'kafka',
   topic = 'proto_c_bin',
   properties.bootstrap.server = 'message_queue:29092',
-  scan.startup.mode = 'earliest',
-  proto.message = 'test.User'
+  scan.startup.mode = 'earliest'
 ) row format protobuf message 'test.User' row schema location 'file:///risingwave/proto-complex-schema'
 
 statement ok
@@ -260,8 +259,7 @@ create source s17 with (
   connector = 'kafka',
   topic = 'proto_c_bin',
   properties.bootstrap.server = 'message_queue:29092',
-  scan.startup.mode = 'earliest',
-  proto.message = 'test.User'
+  scan.startup.mode = 'earliest'
 ) row format protobuf message 'test.User' row schema location 'file:///risingwave/proto-complex-schema'
 
 statement ok

@@ -234,7 +234,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             });
 
         let add_info = AddressInfo {
-            advertise_addr: opts.advertise_addr,
+            advertise_addr: opts.advertise_addr.to_owned(),
             listen_addr,
             prometheus_addr,
             dashboard_addr,
@@ -300,6 +300,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .meta
                     .compaction_task_max_heartbeat_interval_secs,
                 compaction_config: Some(config.meta.compaction_config),
+                advertise_addr: opts.advertise_addr,
             },
             config.system.into_init_system_params(),
         )
