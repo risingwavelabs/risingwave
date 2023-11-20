@@ -42,6 +42,45 @@ def run_demo(demo: str, format: str, wait_time = 40):
         run_sql_file(sql_file, demo_dir)
         sleep(10)
 
+def run_kafka_cdc_demo():
+    demo = "kafka-cdc-sink"
+    file_dir = dirname(abspath(__file__))
+    project_dir = dirname(file_dir)
+    demo_dir = os.path.join(project_dir, demo)
+    print("Running demo: kafka-cdc-sink")
+
+    subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=demo_dir, check=True)
+    sleep(40)
+
+    subprocess.run(["bash","./prepare.sh"], cwd=demo_dir, check=True)
+
+    sql_files = ['create_source.sql', 'create_mv.sql', 'create_sink.sql']
+    for fname in sql_files:
+        sql_file = os.path.join(demo_dir,  fname)
+        print("executing sql: ", open(sql_file).read())
+        run_sql_file(sql_file, demo_dir)
+
+    print("sink created. Wait for 2 min time for ingestion")
+
+    # wait for two minutes ingestion
+    sleep(120)
+
+    pg_check_file = os.path.join(demo_dir, 'pg_check')
+    with open(pg_check_file) as f:
+        relations = f.read().strip().split(",")
+        failed_cases = []
+        for rel in relations:
+            sql = 'SELECT COUNT(*) FROM {}'.format(rel)
+            print("Running SQL: {} on PG".format(sql))
+            command = 'psql -U $POSTGRES_USER $POSTGRES_DB --tuples-only -c "{}"'.format(sql)
+            rows = subprocess.check_output(["docker", "exec", "postgres", "bash", "-c", command])
+            rows = int(rows.decode('utf8').strip())
+            print("{} rows in {}".format(rows, rel))
+            if rows < 1:
+                failed_cases.append(rel)
+        if len(failed_cases) != 0:
+            raise Exception("Data check failed for case {}".format(failed_cases))
+
 def iceberg_cdc_demo():
     demo = "iceberg-cdc"
     file_dir = dirname(abspath(__file__))
@@ -158,5 +197,7 @@ elif args.case == "clickhouse-sink":
     run_clickhouse_demo()
 elif args.case == "iceberg-cdc":
     iceberg_cdc_demo()
+elif args.case == "kafka-cdc-sink":
+    run_kafka_cdc_demo()
 else:
     run_demo(args.case, args.format)
