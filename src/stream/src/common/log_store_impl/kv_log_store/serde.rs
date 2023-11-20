@@ -276,13 +276,13 @@ impl LogStoreRowSerde {
         offset: ReaderTruncationOffsetType,
     ) -> Bytes {
         let (epoch, seq_id) = offset;
-        serialize_pk(
+        Bytes::from(next_key(&serialize_pk(
             [
                 Some(ScalarImpl::Int64(Self::encode_epoch(epoch))),
                 seq_id.map(ScalarImpl::Int32),
             ],
             &self.pk_serde,
-        )
+        )))
     }
 
     pub(crate) fn serialize_truncation_offset_watermark(

@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use risingwave_pb::hummock::{GroupDelta as PbGroupDelta, HummockVersionDelta, TableWatermarks};
+use risingwave_pb::hummock::{HummockVersionDelta, PbGroupDelta, PbTableWatermarks};
 use sea_orm::entity::prelude::*;
 use sea_orm::FromJsonQueryResult;
 use serde::{Deserialize, Serialize};
@@ -32,7 +32,7 @@ pub struct Model {
     pub safe_epoch: Epoch,
     pub trivial_move: bool,
     pub gc_object_ids: SstableObjectIds,
-    pub new_watermarks: NewTableWatermarks,
+    pub new_table_watermarks: NewTableWatermarks,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -50,7 +50,7 @@ impl From<Vec<u64>> for SstableObjectIds {
 
 crate::derive_from_json_struct!(GroupDeltas, HashMap<CompactionGroupId, Vec<PbGroupDelta>>);
 
-crate::derive_from_json_struct!(NewTableWatermarks, HashMap<u64, TableWatermarks>);
+crate::derive_from_json_struct!(NewTableWatermarks, HashMap<u64, PbTableWatermarks>);
 
 impl From<Model> for HummockVersionDelta {
     fn from(value: Model) -> Self {
@@ -73,7 +73,11 @@ impl From<Model> for HummockVersionDelta {
                 .into_iter()
                 .map(|id| id as _)
                 .collect(),
-            new_watermarks: value.new_watermarks.into_inner().into_iter().collect(),
+            new_table_watermarks: value
+                .new_table_watermarks
+                .into_inner()
+                .into_iter()
+                .collect(),
         }
     }
 }

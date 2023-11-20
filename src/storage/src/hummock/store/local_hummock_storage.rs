@@ -401,6 +401,15 @@ impl LocalStateStore for LocalHummockStorage {
             next_epoch,
             prev_epoch
         );
+        if !opts.watermark.is_empty() {
+            self.read_version
+                .write()
+                .update(VersionUpdate::NewTableWatermark {
+                    direction: opts.watermark_direction,
+                    epoch: prev_epoch,
+                    vnode_watermarks: opts.watermark.clone(),
+                });
+        }
         self.event_sender
             .send(HummockEvent::LocalSealEpoch {
                 instance_id: self.instance_id(),

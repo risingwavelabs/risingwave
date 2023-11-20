@@ -46,7 +46,7 @@ use crate::hummock::compaction::selector::{
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
-use crate::hummock::{HummockManager, HummockManagerRef};
+use crate::hummock::{CommitEpochInfo, HummockManager, HummockManagerRef};
 use crate::manager::WorkerId;
 use crate::model::MetadataModel;
 use crate::rpc::metrics::MetaMetrics;
@@ -768,7 +768,10 @@ async fn test_invalid_sst_id() {
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), WorkerId::MAX))
         .collect();
     let error = hummock_manager
-        .commit_epoch(epoch, ssts.clone(), HashMap::new(), sst_to_worker)
+        .commit_epoch(
+            epoch,
+            CommitEpochInfo::for_test(ssts.clone(), sst_to_worker),
+        )
         .await
         .unwrap_err();
     assert!(matches!(error, Error::InvalidSst(1)));
@@ -778,7 +781,7 @@ async fn test_invalid_sst_id() {
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, HashMap::new(), sst_to_worker)
+        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
         .await
         .unwrap();
 }
@@ -1168,7 +1171,7 @@ async fn test_version_stats() {
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), worker_node.id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, HashMap::new(), sst_to_worker)
+        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
         .await
         .unwrap();
 
@@ -1269,9 +1272,7 @@ async fn test_split_compaction_group_on_commit() {
     hummock_manager
         .commit_epoch(
             30,
-            vec![sst_1],
-            HashMap::new(),
-            HashMap::from([(10, context_id)]),
+            CommitEpochInfo::for_test(vec![sst_1], HashMap::from([(10, context_id)])),
         )
         .await
         .unwrap();
@@ -1413,9 +1414,10 @@ async fn test_split_compaction_group_on_demand_basic() {
     hummock_manager
         .commit_epoch(
             30,
-            vec![sst_1, sst_2],
-            HashMap::new(),
-            HashMap::from([(10, context_id), (11, context_id)]),
+            CommitEpochInfo::for_test(
+                vec![sst_1, sst_2],
+                HashMap::from([(10, context_id), (11, context_id)]),
+            ),
         )
         .await
         .unwrap();
@@ -1509,9 +1511,7 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
     hummock_manager
         .commit_epoch(
             30,
-            vec![sst_1],
-            HashMap::new(),
-            HashMap::from([(10, context_id)]),
+            CommitEpochInfo::for_test(vec![sst_1], HashMap::from([(10, context_id)])),
         )
         .await
         .unwrap();
@@ -1627,14 +1627,15 @@ async fn test_split_compaction_group_trivial_expired() {
     hummock_manager
         .commit_epoch(
             30,
-            vec![sst_1, sst_2, sst_3, sst_4],
-            HashMap::new(),
-            HashMap::from([
-                (10, context_id),
-                (11, context_id),
-                (9, context_id),
-                (8, context_id),
-            ]),
+            CommitEpochInfo::for_test(
+                vec![sst_1, sst_2, sst_3, sst_4],
+                HashMap::from([
+                    (10, context_id),
+                    (11, context_id),
+                    (9, context_id),
+                    (8, context_id),
+                ]),
+            ),
         )
         .await
         .unwrap();
@@ -1765,9 +1766,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
     hummock_manager
         .commit_epoch(
             30,
-            vec![sst_1.clone()],
-            HashMap::new(),
-            HashMap::from([(10, context_id)]),
+            CommitEpochInfo::for_test(vec![sst_1.clone()], HashMap::from([(10, context_id)])),
         )
         .await
         .unwrap();
@@ -1931,9 +1930,10 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     hummock_manager
         .commit_epoch(
             30,
-            vec![sst_1, sst_2],
-            HashMap::new(),
-            HashMap::from([(10, context_id), (11, context_id)]),
+            CommitEpochInfo::for_test(
+                vec![sst_1, sst_2],
+                HashMap::from([(10, context_id), (11, context_id)]),
+            ),
         )
         .await
         .unwrap();
@@ -1992,9 +1992,7 @@ async fn test_move_tables_between_compaction_group() {
     hummock_manager
         .commit_epoch(
             30,
-            vec![sst_1.clone()],
-            HashMap::new(),
-            HashMap::from([(10, context_id)]),
+            CommitEpochInfo::for_test(vec![sst_1.clone()], HashMap::from([(10, context_id)])),
         )
         .await
         .unwrap();
@@ -2020,9 +2018,7 @@ async fn test_move_tables_between_compaction_group() {
     hummock_manager
         .commit_epoch(
             31,
-            vec![sst_2.clone()],
-            HashMap::new(),
-            HashMap::from([(14, context_id)]),
+            CommitEpochInfo::for_test(vec![sst_2.clone()], HashMap::from([(14, context_id)])),
         )
         .await
         .unwrap();

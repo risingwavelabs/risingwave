@@ -43,9 +43,9 @@ async fn test_read_version_basic() {
     let (pinned_version, _, _) =
         prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
 
-    let mut read_version = HummockReadVersion::new(pinned_version);
     let mut epoch = 1;
     let table_id = 0;
+    let mut read_version = HummockReadVersion::new(TableId::from(table_id), pinned_version);
 
     {
         // single imm
@@ -266,9 +266,12 @@ async fn test_read_filter_basic() {
     let (pinned_version, _, _) =
         prepare_first_valid_version(env, hummock_manager_ref, worker_node).await;
 
-    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(pinned_version)));
     let epoch = 1;
     let table_id = 0;
+    let read_version = Arc::new(RwLock::new(HummockReadVersion::new(
+        TableId::from(table_id),
+        pinned_version,
+    )));
 
     {
         // single imm

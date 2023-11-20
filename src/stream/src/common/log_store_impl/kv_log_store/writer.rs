@@ -24,7 +24,6 @@ use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::sink::log_store::{LogStoreResult, LogWriter};
-use risingwave_hummock_sdk::key::next_key;
 use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, Vnodes, WatermarkDirection};
 use risingwave_storage::store::{InitOptions, LocalStateStore, SealCurrentEpochOptions};
 
@@ -147,11 +146,8 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
             }
             watermark = Some(VnodeWatermark::new(
                 Vnodes::Bitmap(self.serde.vnodes().clone()),
-                Bytes::from(next_key(
-                    &self
-                        .serde
-                        .serialize_truncate_offset_watermark_without_vnode(truncation_offset),
-                )),
+                self.serde
+                    .serialize_truncate_offset_watermark_without_vnode(truncation_offset),
             ));
         }
         self.state_store.flush(delete_range).await?;

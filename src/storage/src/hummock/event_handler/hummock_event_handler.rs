@@ -610,6 +610,7 @@ impl HummockEventHandler {
                 let pinned_version = self.pinned_version.load();
                 let basic_read_version = Arc::new(RwLock::new(
                     HummockReadVersion::new_with_replication_option(
+                        table_id,
                         (**pinned_version).clone(),
                         is_replicated,
                     ),

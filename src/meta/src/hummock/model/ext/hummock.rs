@@ -199,7 +199,7 @@ impl Transactional<Transaction> for HummockVersionDelta {
             safe_epoch: Set(self.safe_epoch as _),
             trivial_move: Set(self.trivial_move),
             gc_object_ids: Set(self.gc_object_ids.to_owned().into()),
-            new_watermarks: Set(NewTableWatermarks(self.new_watermarks.clone())),
+            new_table_watermarks: Set(NewTableWatermarks(self.new_table_watermarks.clone())),
         };
         hummock_version_delta::Entity::insert(m)
             .on_conflict(

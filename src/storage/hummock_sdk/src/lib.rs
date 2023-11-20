@@ -22,6 +22,7 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(is_sorted)]
 #![feature(let_chains)]
+#![feature(btree_cursors)]
 
 mod key_cmp;
 use std::cmp::Ordering;

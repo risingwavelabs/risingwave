@@ -251,6 +251,38 @@ pub enum CompactionResumeTrigger {
     TaskReport { original_task_num: usize },
 }
 
+pub struct CommitEpochInfo {
+    pub sstables: Vec<ExtendedSstableInfo>,
+    pub new_table_watermarks: HashMap<u64, TableWatermarks>,
+    pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+}
+
+impl CommitEpochInfo {
+    pub fn new(
+        sstables: Vec<ExtendedSstableInfo>,
+        new_table_watermarks: HashMap<u64, TableWatermarks>,
+        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+    ) -> Self {
+        Self {
+            sstables,
+            new_table_watermarks,
+            sst_to_context,
+        }
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub(crate) fn for_test(
+        sstables: Vec<impl Into<ExtendedSstableInfo>>,
+        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+    ) -> Self {
+        Self::new(
+            sstables.into_iter().map(Into::into).collect(),
+            HashMap::new(),
+            sst_to_context,
+        )
+    }
+}
+
 impl HummockManager {
     pub async fn new(
         env: MetaSrvEnv,
@@ -1408,11 +1440,13 @@ impl HummockManager {
     pub async fn commit_epoch(
         &self,
         epoch: HummockEpoch,
-        sstables: Vec<impl Into<ExtendedSstableInfo>>,
-        watermarks: HashMap<u64, TableWatermarks>,
-        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+        commit_info: CommitEpochInfo,
     ) -> Result<Option<HummockSnapshot>> {
-        let mut sstables = sstables.into_iter().map(|s| s.into()).collect_vec();
+        let CommitEpochInfo {
+            mut sstables,
+            new_table_watermarks,
+            sst_to_context,
+        } = commit_info;
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         // Prevent commit new epochs if this flag is set
@@ -1442,7 +1476,7 @@ impl HummockManager {
             build_version_delta_after_version(old_version),
         );
         new_version_delta.max_committed_epoch = epoch;
-        new_version_delta.new_watermarks = watermarks;
+        new_version_delta.new_table_watermarks = new_table_watermarks;
         let mut new_hummock_version = old_version.clone();
         new_hummock_version.id = new_version_delta.id;
         let mut incorrect_ssts = vec![];

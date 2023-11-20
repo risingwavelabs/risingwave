@@ -7897,6 +7897,7 @@ version = "1.3.0-alpha"
 dependencies = [
  "auto_enums",
  "bytes",
+ "easy-ext",
  "hex",
  "itertools 0.11.0",
  "parse-display",

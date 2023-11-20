@@ -27,6 +27,9 @@ use risingwave_hummock_sdk::key::{
     bound_table_key_range, FullKey, TableKey, TableKeyRange, UserKey,
 };
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
+use risingwave_hummock_sdk::table_watermark::{
+    TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
+};
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
 use sync_point::sync_point;
@@ -123,6 +126,11 @@ pub enum VersionUpdate {
     Staging(StagingData),
     CommittedDelta(HummockVersionDelta),
     CommittedSnapshot(CommittedVersion),
+    NewTableWatermark {
+        direction: WatermarkDirection,
+        epoch: HummockEpoch,
+        vnode_watermarks: Vec<VnodeWatermark>,
+    },
 }
 
 #[derive(Clone)]
@@ -196,6 +204,8 @@ impl StagingVersion {
 #[derive(Clone)]
 /// A container of information required for reading from hummock.
 pub struct HummockReadVersion {
+    table_id: TableId,
+
     /// Local version for staging data.
     staging: StagingVersion,
 
@@ -207,10 +217,13 @@ pub struct HummockReadVersion {
     /// Otherwise for local state store, it is fine, see we will see the
     /// ReadVersion just for that local state store.
     is_replicated: bool,
+
+    table_watermarks: Option<TableWatermarksIndex>,
 }
 
 impl HummockReadVersion {
     pub fn new_with_replication_option(
+        table_id: TableId,
         committed_version: CommittedVersion,
         is_replicated: bool,
     ) -> Self {
@@ -219,6 +232,11 @@ impl HummockReadVersion {
         // notification), so add a assert condition to guarantee correct initialization order
         assert!(committed_version.is_valid());
         Self {
+            table_id,
+            table_watermarks: committed_version
+                .table_watermark_index()
+                .get(&table_id)
+                .cloned(),
             staging: StagingVersion {
                 imm: VecDeque::default(),
                 merged_imm: Default::default(),
@@ -231,8 +249,8 @@ impl HummockReadVersion {
         }
     }
 
-    pub fn new(committed_version: CommittedVersion) -> Self {
-        Self::new_with_replication_option(committed_version, false)
+    pub fn new(table_id: TableId, committed_version: CommittedVersion) -> Self {
+        Self::new_with_replication_option(table_id, committed_version, false)
     }
 
     /// Updates the read version with `VersionUpdate`.
@@ -385,7 +403,27 @@ impl HummockReadVersion {
                         sst.epochs.last().expect("epochs not empty") > &max_committed_epoch
                     }));
                 }
+
+                if let Some(committed_watermarks) =
+                    self.committed.table_watermark_index().get(&self.table_id)
+                {
+                    if let Some(watermark_index) = &mut self.table_watermarks {
+                        watermark_index.apply_committed_watermarks(committed_watermarks);
+                    } else {
+                        self.table_watermarks = Some(committed_watermarks.clone());
+                    }
+                }
             }
+            VersionUpdate::NewTableWatermark {
+                direction,
+                epoch,
+                vnode_watermarks,
+            } => self
+                .table_watermarks
+                .get_or_insert_with(|| {
+                    TableWatermarksIndex::new(direction, self.committed.max_committed_epoch())
+                })
+                .add_epoch_watermark(epoch, &vnode_watermarks, direction),
         }
     }
 
