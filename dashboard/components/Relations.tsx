@@ -44,6 +44,7 @@ import Title from "../components/Title"
 import extractColumnInfo from "../lib/extractInfo"
 import { Relation, StreamingJob } from "../pages/api/streaming"
 import { Table as RwTable } from "../proto/gen/catalog"
+import { ColumnCatalog } from "../proto/gen/plan_common"
 
 const ReactJson = loadable(() => import("react-json-view"))
 
@@ -130,7 +131,7 @@ export function Relations<R extends Relation>(
       }
     }
     doFetch()
-    return () => {}
+    return () => { }
   }, [toast, getRelations])
 
   const { isOpen, onOpen, onClose } = useDisclosure()
@@ -209,7 +210,7 @@ export function Relations<R extends Relation>(
                 ))}
                 <Td overflowWrap="normal">
                   {r.columns
-                    .filter((col) => !col.isHidden)
+                    .filter((col) => "isHidden" in col ? !col.isHidden : true)
                     .map((col) => extractColumnInfo(col))
                     .join(", ")}
                 </Td>

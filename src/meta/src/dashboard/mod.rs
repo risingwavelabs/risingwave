@@ -59,7 +59,7 @@ pub(super) mod handlers {
     use risingwave_common::bail;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_pb::catalog::table::TableType;
-    use risingwave_pb::catalog::{Sink, Source, Table};
+    use risingwave_pb::catalog::{Sink, Source, Table, View};
     use risingwave_pb::common::{WorkerNode, WorkerType};
     use risingwave_pb::meta::{ActorLocation, PbTableFragments};
     use risingwave_pb::monitor_service::{
@@ -161,6 +161,13 @@ pub(super) mod handlers {
         use crate::model::MetadataModel;
 
         let sinks = Sink::list(&srv.meta_store).await.map_err(err)?;
+        Ok(Json(sinks))
+    }
+
+    pub async fn list_views(Extension(srv): Extension<Service>) -> Result<Json<Vec<View>>> {
+        use crate::model::MetadataModel;
+
+        let sinks = View::list(&srv.meta_store).await.map_err(err)?;
         Ok(Json(sinks))
     }
 
@@ -341,6 +348,7 @@ impl DashboardService {
             .route("/clusters/:ty", get(list_clusters))
             .route("/actors", get(list_actors))
             .route("/fragments2", get(list_fragments))
+            .route("/views", get(list_views))
             .route("/materialized_views", get(list_materialized_views))
             .route("/tables", get(list_tables))
             .route("/indexes", get(list_indexes))

@@ -15,14 +15,12 @@
  *
  */
 
-import { ColumnCatalog, Field } from "../proto/gen/plan_common"
+import {
+  Relations,
+} from "../components/Relations"
+import { getViews } from "./api/streaming"
 
-export default function extractColumnInfo(col: ColumnCatalog | Field) {
-  if ("columnDesc" in col) {
-    // ColumnCatalog
-    return `${col.columnDesc?.name} (${col.columnDesc?.columnType?.typeName})`
-  } else {
-    // Field
-    return `${col.name} (${col.dataType?.typeName})`
-  }
+export default function Views() {
+  return Relations("Views", getViews, [])
 }
+

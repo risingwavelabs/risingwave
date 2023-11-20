@@ -52,7 +52,7 @@ function NavButton({
 
   useEffect(() => {
     setMatch(router.asPath.startsWith(href.toString()))
-    return () => {}
+    return () => { }
   }, [href, router.asPath])
 
   return (
@@ -123,6 +123,7 @@ function Layout({ children }: { children: React.ReactNode }) {
             <NavButton href="/indexes/">Indexes</NavButton>
             <NavButton href="/internal_tables/">Internal Tables</NavButton>
             <NavButton href="/sinks/">Sinks</NavButton>
+            <NavButton href="/views/">Views</NavButton>
           </VStack>
           <VStack width="full" alignItems="flex-start" px={3}>
             <NavTitle>Streaming</NavTitle>
