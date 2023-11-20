@@ -1015,14 +1015,9 @@ pub async fn handle_create_table(
     source_schema: Option<ConnectorSchema>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
-    notice: Option<String>,
     cdc_table_info: Option<CdcTableInfo>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    // TODO(st1page): refactor it
-    if let Some(notice) = notice {
-        session.notice_to_user(notice)
-    }
 
     if append_only {
         session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");

@@ -57,15 +57,6 @@ pub struct OptimizerContext {
     overwrite_options: OverwriteOptions,
 }
 
-// Still not sure if we need to introduce "on_optimization_finish" or other common callback methods,
-impl Drop for OptimizerContext {
-    fn drop(&mut self) {
-        if let Some(warning) = self.session_timezone.borrow().warning() {
-            self.warn_to_user(warning);
-        };
-    }
-}
-
 pub type OptimizerContextRef = Rc<OptimizerContext>;
 
 impl OptimizerContext {
