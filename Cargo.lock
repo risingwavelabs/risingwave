@@ -7907,6 +7907,7 @@ name = "risingwave_hummock_sdk"
 version = "1.3.0-alpha"
 dependencies = [
  "bytes",
+ "easy-ext",
  "hex",
  "itertools 0.12.0",
  "parse-display",
