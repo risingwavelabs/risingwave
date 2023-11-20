@@ -135,7 +135,7 @@ select count(*) from debezium_compact;
 2
 
 query TFITT
-select 
+select
   "dimensions", "price", "productId", "productName", "tags"
 from kafka_json_schema_plain
 ----
