@@ -169,7 +169,7 @@ impl FragmentManager {
     /// The `table_ids` here should correspond to stream jobs.
     /// We get their corresponding table fragment, and from there,
     /// we get the actors that are in the table fragment.
-    pub async fn get_table_id_actor_mapping(
+    pub async fn get_table_id_stream_scan_actor_mapping(
         &self,
         table_ids: &[TableId],
     ) -> HashMap<TableId, Vec<ActorId>> {
