@@ -465,7 +465,7 @@ enum StreamScanType {
   STREAM_SCAN_TYPE_UPSTREAM_ONLY = 4;
 
   // CdcBackfillExecutor
-  STREAM_SCAN_TYPE_CDC_BACKFILL = 5;
+  STREAM_SCAN_TYPE_CDC_BACKFILL = 5 [deprecated = true];
 }
 
 // StreamScanNode reads data from upstream table first, and then pass all events to downstream.
@@ -504,7 +504,7 @@ message StreamScanNode {
   uint32 snapshot_read_barrier_interval = 9 [deprecated = true];
 
   // The external table that will be backfilled for CDC.
-  plan_common.ExternalTableDesc cdc_table_desc = 10;
+  plan_common.ExternalTableDesc cdc_table_desc = 10 [deprecated = true];
 }
 
 message StreamCdcScanNode {

@@ -563,7 +563,7 @@ impl CompleteStreamFragmentGraph {
                             // extract the upstream full_table_name from the source fragment
                             let mut full_table_name = None;
                             visit_fragment(&mut fragment.inner, |node_body| {
-                                if let NodeBody::StreamScan(stream_scan) = node_body {
+                                if let NodeBody::StreamCdcScan(stream_scan) = node_body {
                                     full_table_name = stream_scan
                                         .cdc_table_desc
                                         .as_ref()
