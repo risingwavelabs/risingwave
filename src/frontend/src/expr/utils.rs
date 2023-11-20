@@ -356,7 +356,7 @@ pub struct CollectInputRef {
 impl ExprVisitor for CollectInputRef {
     type Result = ();
 
-    fn merge(_: (), _: ()) {}
+    fn merge(&self, _: (), _: ()) {}
 
     fn visit_input_ref(&mut self, expr: &InputRef) {
         self.input_bits.insert(expr.index());
@@ -413,7 +413,7 @@ pub struct CountNow {}
 impl ExprVisitor for CountNow {
     type Result = usize;
 
-    fn merge(a: usize, b: usize) -> usize {
+    fn merge(&self, a: usize, b: usize) -> usize {
         a + b
     }
 

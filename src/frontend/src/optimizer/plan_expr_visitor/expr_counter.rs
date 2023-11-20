@@ -14,6 +14,8 @@
 
 use std::collections::HashMap;
 
+use itertools::Itertools;
+
 use crate::expr::{ExprImpl, ExprType, ExprVisitor, FunctionCall};
 
 /// `ExprCounter` is used by `CseRewriter`.
@@ -26,7 +28,7 @@ pub struct CseExprCounter {
 impl ExprVisitor for CseExprCounter {
     type Result = ();
 
-    fn merge(_: (), _: ()) {}
+    fn merge(&self, _: (), _: ()) {}
 
     fn visit_expr(&mut self, expr: &ExprImpl) {
         // Considering this sql, `In` expression needs to ensure its in-clauses to be const.
@@ -85,11 +87,13 @@ impl ExprVisitor for CseExprCounter {
             _ => {}
         };
 
-        func_call
+        let vec = func_call
             .inputs()
             .iter()
             .map(|expr| self.visit_expr(expr))
-            .reduce(Self::merge)
+            .collect_vec();
+        vec.into_iter()
+            .reduce(self.gen_merge_fn())
             .unwrap_or_default()
     }
 }

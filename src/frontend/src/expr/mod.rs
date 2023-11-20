@@ -15,6 +15,7 @@
 use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
 use futures::FutureExt;
+use itertools::Itertools;
 use paste::paste;
 use risingwave_common::array::ListValue;
 use risingwave_common::error::{ErrorCode, Result as RwResult};
@@ -355,7 +356,7 @@ macro_rules! impl_has_variant {
 
                             type Result = bool;
 
-                            fn merge(a: bool, b: bool) -> bool {
+                            fn merge(&self, a: bool, b: bool) -> bool {
                                 a | b
                             }
 
@@ -427,7 +428,7 @@ impl ExprImpl {
         impl ExprVisitor for Has {
             type Result = bool;
 
-            fn merge(a: bool, b: bool) -> bool {
+            fn merge(&self, a: bool, b: bool) -> bool {
                 a | b
             }
 
@@ -487,7 +488,7 @@ impl ExprImpl {
         impl ExprVisitor for Has {
             type Result = bool;
 
-            fn merge(a: bool, b: bool) -> bool {
+            fn merge(&self, a: bool, b: bool) -> bool {
                 a | b
             }
 
@@ -506,16 +507,25 @@ impl ExprImpl {
         impl Has {
             fn visit_bound_set_expr(&mut self, set_expr: &BoundSetExpr) -> bool {
                 match set_expr {
-                    BoundSetExpr::Select(select) => select
-                        .exprs()
-                        .map(|expr| self.visit_expr(expr))
-                        .reduce(Self::merge)
-                        .unwrap_or_default(),
-                    BoundSetExpr::Values(values) => values
-                        .exprs()
-                        .map(|expr| self.visit_expr(expr))
-                        .reduce(Self::merge)
-                        .unwrap_or_default(),
+                    BoundSetExpr::Select(select) => {
+                        let vec = select
+                            .exprs()
+                            .map(|expr| self.visit_expr(expr))
+                            .collect_vec();
+
+                        vec.into_iter()
+                            .reduce(self.gen_merge_fn())
+                            .unwrap_or_default()
+                    }
+                    BoundSetExpr::Values(values) => {
+                        let vec = values
+                            .exprs()
+                            .map(|expr| self.visit_expr(expr))
+                            .collect_vec();
+                        vec.into_iter()
+                            .reduce(self.gen_merge_fn())
+                            .unwrap_or_default()
+                    }
                     BoundSetExpr::Query(query) => self.visit_bound_set_expr(&query.body),
                     BoundSetExpr::SetOperation { left, right, .. } => {
                         self.visit_bound_set_expr(left) | self.visit_bound_set_expr(right)
@@ -609,7 +619,7 @@ impl ExprImpl {
             impl ExprVisitor for HasOthers {
                 type Result = ();
 
-                fn merge(_: (), _: ()) {}
+                fn merge(&self, _: (), _: ()) {}
 
                 fn visit_expr(&mut self, expr: &ExprImpl) {
                     match expr {

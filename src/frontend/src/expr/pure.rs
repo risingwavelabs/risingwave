@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_pb::expr::expr_node;
 
 use super::{ExprImpl, ExprVisitor};
@@ -21,7 +22,7 @@ pub(crate) struct ImpureAnalyzer {}
 impl ExprVisitor for ImpureAnalyzer {
     type Result = bool;
 
-    fn merge(a: bool, b: bool) -> bool {
+    fn merge(&self, a: bool, b: bool) -> bool {
         // the expr will be impure if any of its input is impure
         a || b
     }
@@ -224,11 +225,14 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Least =>
             // expression output is deterministic(same result for the same input)
             {
-                let x = func_call
+                let vec = func_call
                     .inputs()
                     .iter()
                     .map(|expr| self.visit_expr(expr))
-                    .reduce(Self::merge)
+                    .collect_vec();
+                let x = vec
+                    .into_iter()
+                    .reduce(self.gen_merge_fn())
                     .unwrap_or_default();
                 x
             }

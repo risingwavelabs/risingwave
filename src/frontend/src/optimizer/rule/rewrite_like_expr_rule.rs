@@ -15,6 +15,7 @@
 use std::cmp::min;
 use std::str::from_utf8;
 
+use itertools::Itertools;
 use risingwave_common::types::ScalarImpl;
 use risingwave_connector::source::DataType;
 
@@ -51,7 +52,7 @@ struct HasLikeExprVisitor {}
 impl ExprVisitor for HasLikeExprVisitor {
     type Result = bool;
 
-    fn merge(a: bool, b: bool) -> bool {
+    fn merge(&self, a: bool, b: bool) -> bool {
         a | b
     }
 
@@ -62,11 +63,12 @@ impl ExprVisitor for HasLikeExprVisitor {
         {
             true
         } else {
-            func_call
+
+            let vec = func_call
                 .inputs()
                 .iter()
-                .map(|expr| self.visit_expr(expr))
-                .reduce(Self::merge)
+                .map(|expr| self.visit_expr(expr)).collect_vec();
+            vec.into_iter().reduce(self.gen_merge_fn())
                 .unwrap_or_default()
         }
     }

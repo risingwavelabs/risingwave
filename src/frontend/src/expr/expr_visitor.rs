@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
+
 use super::{
     AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, FunctionCallWithLambda, InputRef, Literal,
     Now, Parameter, Subquery, TableFunction, UserDefinedFunction, WindowFunction,
@@ -31,7 +33,12 @@ pub trait ExprVisitor {
     /// This merge function is used to reduce results of expr inputs.
     /// In order to always remind users to implement themselves, we don't provide an default
     /// implementation.
-    fn merge(a: Self::Result, b: Self::Result) -> Self::Result;
+    fn merge(&self, a: Self::Result, b: Self::Result) -> Self::Result;
+
+    #[allow(clippy::type_complexity)]
+    fn gen_merge_fn(&self) -> Box<dyn FnMut(Self::Result, Self::Result) -> Self::Result + '_> {
+        Box::new(|a: Self::Result, b: Self::Result| -> Self::Result { self.merge(a, b) })
+    }
 
     fn visit_expr(&mut self, expr: &ExprImpl) -> Self::Result {
         match expr {
@@ -50,11 +57,13 @@ pub trait ExprVisitor {
         }
     }
     fn visit_function_call(&mut self, func_call: &FunctionCall) -> Self::Result {
-        func_call
+        let vec = func_call
             .inputs()
             .iter()
             .map(|expr| self.visit_expr(expr))
-            .reduce(Self::merge)
+            .collect_vec();
+        vec.into_iter()
+            .reduce(self.gen_merge_fn())
             .unwrap_or_default()
     }
     fn visit_function_call_with_lambda(
@@ -64,14 +73,19 @@ pub trait ExprVisitor {
         self.visit_function_call(func_call.base())
     }
     fn visit_agg_call(&mut self, agg_call: &AggCall) -> Self::Result {
-        let mut r = agg_call
+        let vec = agg_call
             .args()
             .iter()
             .map(|expr| self.visit_expr(expr))
-            .reduce(Self::merge)
+            .collect_vec();
+        let mut r = vec
+            .into_iter()
+            .reduce(self.gen_merge_fn())
             .unwrap_or_default();
-        r = Self::merge(r, agg_call.order_by().visit_expr(self));
-        r = Self::merge(r, agg_call.filter().visit_expr(self));
+        let agg_call_order_by_result = agg_call.order_by().visit_expr(self);
+        r = self.merge(r, agg_call_order_by_result);
+        let agg_call_filter_result = agg_call.filter().visit_expr(self);
+        r = self.merge(r, agg_call_filter_result);
         r
     }
     fn visit_parameter(&mut self, _: &Parameter) -> Self::Result {
@@ -90,27 +104,36 @@ pub trait ExprVisitor {
         Self::Result::default()
     }
     fn visit_table_function(&mut self, func_call: &TableFunction) -> Self::Result {
-        func_call
+        let vec = func_call
             .args
             .iter()
             .map(|expr| self.visit_expr(expr))
-            .reduce(Self::merge)
+            .collect_vec();
+
+        vec.into_iter()
+            .reduce(self.gen_merge_fn())
             .unwrap_or_default()
     }
     fn visit_window_function(&mut self, func_call: &WindowFunction) -> Self::Result {
-        func_call
+        let vec = func_call
             .args
             .iter()
             .map(|expr| self.visit_expr(expr))
-            .reduce(Self::merge)
+            .collect_vec();
+
+        vec.into_iter()
+            .reduce(self.gen_merge_fn())
             .unwrap_or_default()
     }
     fn visit_user_defined_function(&mut self, func_call: &UserDefinedFunction) -> Self::Result {
-        func_call
+        let vec = func_call
             .args
             .iter()
             .map(|expr| self.visit_expr(expr))
-            .reduce(Self::merge)
+            .collect_vec();
+
+        vec.into_iter()
+            .reduce(self.gen_merge_fn())
             .unwrap_or_default()
     }
     fn visit_now(&mut self, _: &Now) -> Self::Result {

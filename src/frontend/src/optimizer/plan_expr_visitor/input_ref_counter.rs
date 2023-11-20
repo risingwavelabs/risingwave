@@ -25,7 +25,7 @@ pub struct InputRefCounter {
 impl ExprVisitor for InputRefCounter {
     type Result = ();
 
-    fn merge(_: (), _: ()) {}
+    fn merge(&self, _: (), _: ()) {}
 
     fn visit_input_ref(&mut self, input_ref: &InputRef) {
         self.counter

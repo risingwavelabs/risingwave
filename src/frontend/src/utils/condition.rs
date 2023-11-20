@@ -845,10 +845,13 @@ impl Condition {
     }
 
     pub fn visit_expr<V: ExprVisitor + ?Sized>(&self, visitor: &mut V) -> V::Result {
-        self.conjunctions
+        let vec = self
+            .conjunctions
             .iter()
             .map(|expr| visitor.visit_expr(expr))
-            .reduce(V::merge)
+            .collect_vec();
+        vec.into_iter()
+            .reduce(visitor.gen_merge_fn())
             .unwrap_or_default()
     }
 

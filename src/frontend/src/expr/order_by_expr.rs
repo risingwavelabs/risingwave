@@ -72,10 +72,13 @@ impl OrderBy {
     }
 
     pub fn visit_expr<V: ExprVisitor + ?Sized>(&self, visitor: &mut V) -> V::Result {
-        self.sort_exprs
+        let vec = self
+            .sort_exprs
             .iter()
             .map(|expr| visitor.visit_expr(&expr.expr))
-            .reduce(V::merge)
+            .collect_vec();
+        vec.into_iter()
+            .reduce(visitor.gen_merge_fn())
             .unwrap_or_default()
     }
 
