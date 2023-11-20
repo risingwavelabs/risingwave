@@ -326,15 +326,23 @@ impl CacheRefillTask {
             })
             .collect_vec();
 
-        if cfg!(debug_assertions) {
-            // assert units in asc order
-            units.iter().tuple_windows().for_each(|(a, b)| {
-                debug_assert_ne!(
-                    KeyComparator::compare_encoded_full_key(a.largest_key(), b.smallest_key()),
-                    std::cmp::Ordering::Greater
-                )
-            });
-        }
+        // if cfg!(debug_assertions) {
+        //     // assert units in asc order
+        //     units.iter().tuple_windows().for_each(|(a, b)| {
+        //         debug_assert_ne!(
+        //             KeyComparator::compare_encoded_full_key(a.largest_key(), b.smallest_key()),
+        //             std::cmp::Ordering::Greater
+        //         )
+        //     });
+        // }
+
+        // assert units in asc order
+        units.iter().tuple_windows().for_each(|(a, b)| {
+            assert_ne!(
+                KeyComparator::compare_encoded_full_key(a.largest_key(), b.smallest_key()),
+                std::cmp::Ordering::Greater
+            )
+        });
 
         for psst in parent_ssts {
             let mut idx = 0;
