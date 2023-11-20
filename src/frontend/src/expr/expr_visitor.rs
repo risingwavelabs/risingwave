@@ -33,10 +33,10 @@ pub trait ExprVisitor {
     /// This merge function is used to reduce results of expr inputs.
     /// In order to always remind users to implement themselves, we don't provide an default
     /// implementation.
-    fn merge(&self, a: Self::Result, b: Self::Result) -> Self::Result;
+    fn merge(&mut self, a: Self::Result, b: Self::Result) -> Self::Result;
 
     #[allow(clippy::type_complexity)]
-    fn gen_merge_fn(&self) -> Box<dyn FnMut(Self::Result, Self::Result) -> Self::Result + '_> {
+    fn gen_merge_fn(&mut self) -> Box<dyn FnMut(Self::Result, Self::Result) -> Self::Result + '_> {
         Box::new(|a: Self::Result, b: Self::Result| -> Self::Result { self.merge(a, b) })
     }
 

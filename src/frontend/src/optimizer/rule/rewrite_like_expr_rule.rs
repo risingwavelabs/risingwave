@@ -52,7 +52,7 @@ struct HasLikeExprVisitor {}
 impl ExprVisitor for HasLikeExprVisitor {
     type Result = bool;
 
-    fn merge(&self, a: bool, b: bool) -> bool {
+    fn merge(&mut self, a: bool, b: bool) -> bool {
         a | b
     }
 

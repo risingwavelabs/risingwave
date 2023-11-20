@@ -39,7 +39,7 @@ impl ExprVisitor for ExprVis<'_> {
         }
     }
 
-    fn merge(&self, a: Option<String>, b: Option<String>) -> Option<String> {
+    fn merge(&mut self, a: Option<String>, b: Option<String>) -> Option<String> {
         a.or(b)
     }
 }

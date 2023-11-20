@@ -327,7 +327,7 @@ impl<'a> OverWindowProjectBuilder<'a> {
 impl<'a> ExprVisitor for OverWindowProjectBuilder<'a> {
     type Result = ();
 
-    fn merge(&self, _a: (), _b: ()) {}
+    fn merge(&mut self, _a: (), _b: ()) {}
 
     fn visit_window_function(&mut self, window_function: &WindowFunction) {
         if let Err(e) = self.try_visit_window_function(window_function) {

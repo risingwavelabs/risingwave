@@ -28,7 +28,7 @@ pub struct CseExprCounter {
 impl ExprVisitor for CseExprCounter {
     type Result = ();
 
-    fn merge(&self, _: (), _: ()) {}
+    fn merge(&mut self, _: (), _: ()) {}
 
     fn visit_expr(&mut self, expr: &ExprImpl) {
         // Considering this sql, `In` expression needs to ensure its in-clauses to be const.

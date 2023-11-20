@@ -22,7 +22,7 @@ pub(crate) struct ImpureAnalyzer {}
 impl ExprVisitor for ImpureAnalyzer {
     type Result = bool;
 
-    fn merge(&self, a: bool, b: bool) -> bool {
+    fn merge(&mut self, a: bool, b: bool) -> bool {
         // the expr will be impure if any of its input is impure
         a || b
     }

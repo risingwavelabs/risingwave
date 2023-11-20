@@ -932,7 +932,7 @@ impl ExprVisitor for TableScanIoEstimator<'_> {
         }
     }
 
-    fn merge(&self, a: IndexCost, b: IndexCost) -> IndexCost {
+    fn merge(&mut self, a: IndexCost, b: IndexCost) -> IndexCost {
         a.add(&b)
     }
 }
@@ -945,7 +945,7 @@ struct ExprInputRefFinder {
 impl ExprVisitor for ExprInputRefFinder {
     type Result = ();
 
-    fn merge(&self, _: (), _: ()) {}
+    fn merge(&mut self, _: (), _: ()) {}
 
     fn visit_input_ref(&mut self, input_ref: &InputRef) {
         self.input_ref_index_set.insert(input_ref.index);

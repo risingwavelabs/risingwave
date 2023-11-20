@@ -356,7 +356,7 @@ macro_rules! impl_has_variant {
 
                             type Result = bool;
 
-                            fn merge(&self, a: bool, b: bool) -> bool {
+                            fn merge(&mut self, a: bool, b: bool) -> bool {
                                 a | b
                             }
 
@@ -428,7 +428,7 @@ impl ExprImpl {
         impl ExprVisitor for Has {
             type Result = bool;
 
-            fn merge(&self, a: bool, b: bool) -> bool {
+            fn merge(&mut self, a: bool, b: bool) -> bool {
                 a | b
             }
 
@@ -488,7 +488,7 @@ impl ExprImpl {
         impl ExprVisitor for Has {
             type Result = bool;
 
-            fn merge(&self, a: bool, b: bool) -> bool {
+            fn merge(&mut self, a: bool, b: bool) -> bool {
                 a | b
             }
 
@@ -619,7 +619,7 @@ impl ExprImpl {
             impl ExprVisitor for HasOthers {
                 type Result = ();
 
-                fn merge(&self, _: (), _: ()) {}
+                fn merge(&mut self, _: (), _: ()) {}
 
                 fn visit_expr(&mut self, expr: &ExprImpl) {
                     match expr {

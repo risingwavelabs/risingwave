@@ -391,7 +391,7 @@ impl PredicatePushdown for LogicalScan {
         impl ExprVisitor for HasCorrelated {
             type Result = bool;
 
-            fn merge(&self, a: bool, b: bool) -> bool {
+            fn merge(&mut self, a: bool, b: bool) -> bool {
                 a | b
             }
 
