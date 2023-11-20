@@ -493,7 +493,7 @@ impl From<TracedInitOptions> for InitOptions {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SealCurrentEpochOptions {
     pub watermark: Vec<VnodeWatermark>,
     pub watermark_direction: WatermarkDirection,

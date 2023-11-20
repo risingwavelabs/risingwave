@@ -129,8 +129,8 @@ impl HummockEvent {
                 opts,
             } => {
                 format!(
-                    "LocalSealEpoch epoch: {}, table_id: {}, instance_id: {}, watermark: {:?}",
-                    epoch, table_id.table_id, instance_id, opts.watermark
+                    "LocalSealEpoch epoch: {}, table_id: {}, instance_id: {}, opts: {:?}",
+                    epoch, table_id.table_id, instance_id, opts
                 )
             }
 
