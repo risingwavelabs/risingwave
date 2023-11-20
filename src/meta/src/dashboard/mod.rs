@@ -41,8 +41,8 @@ use crate::storage::MetaStoreRef;
 #[derive(Clone)]
 pub struct DashboardService {
     pub dashboard_addr: SocketAddr,
-    pub prometheus_endpoint: Option<String>,
     pub prometheus_client: Option<prometheus_http_query::Client>,
+    pub prometheus_selector: String,
     pub cluster_manager: ClusterManagerRef,
     pub fragment_manager: FragmentManagerRef,
     pub compute_clients: ComputeClientPool,
