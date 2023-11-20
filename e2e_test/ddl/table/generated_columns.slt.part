@@ -8,7 +8,7 @@ insert into t1 (v2) values (1), (2);
 statement ok
 flush;
 
-query IIIR rowsort
+query IIIR
 select * from t1;
 ----
 0 1 2 2.02
@@ -52,7 +52,7 @@ insert into t2 values (1), (2);
 statement ok
 flush;
 
-query II rowsort
+query II
 select * from t2;
 ----
 1 2
@@ -124,7 +124,7 @@ sleep 2s
 statement ok
 flush;
 
-query TT rowsort
+query TT
 select v, t >= date '2021-01-01' as later_than_2021 from mv;
 ----
 1 t
