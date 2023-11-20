@@ -55,7 +55,7 @@ use crate::handler::create_source::{
     check_source_schema, validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::{LogicalScan, LogicalSource};
+use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::session::SessionImpl;
@@ -698,6 +698,8 @@ fn gen_table_plan_inner(
     let connection_id =
         resolve_privatelink_in_with_option(&mut with_options, &schema_name, &session)?;
 
+    let is_external_source = source_info.is_some();
+
     let source = source_info.map(|source_info| PbSource {
         id: TableId::placeholder().table_id,
         schema_id,
@@ -776,6 +778,7 @@ fn gen_table_plan_inner(
         append_only,
         watermark_descs,
         version,
+        is_external_source,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -860,7 +863,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
 
     tracing::debug!(?cdc_table_desc, "create cdc table");
 
-    let logical_scan = LogicalScan::create_for_cdc(
+    let logical_scan = LogicalCdcScan::create(
         external_table_name,
         Rc::new(cdc_table_desc),
         context.clone(),
@@ -884,8 +887,9 @@ pub(crate) fn gen_create_table_plan_for_cdc_source(
         pk_column_ids,
         None,
         append_only,
-        vec![], // no watermarks
+        vec![],
         Some(col_id_gen.into_version()),
+        true,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -1011,14 +1015,9 @@ pub async fn handle_create_table(
     source_schema: Option<ConnectorSchema>,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
-    notice: Option<String>,
     cdc_table_info: Option<CdcTableInfo>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    // TODO(st1page): refactor it
-    if let Some(notice) = notice {
-        session.notice_to_user(notice)
-    }
 
     if append_only {
         session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");

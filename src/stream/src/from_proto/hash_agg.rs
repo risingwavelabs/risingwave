@@ -100,11 +100,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
 
                 input,
                 actor_ctx: params.actor_context,
-                info: ExecutorInfo {
-                    schema: params.schema,
-                    pk_indices: params.pk_indices,
-                    identity: params.identity,
-                },
+                info: params.info,
 
                 extreme_cache_size: stream.config.developer.unsafe_extreme_cache_size,
 

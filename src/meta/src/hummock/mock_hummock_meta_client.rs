@@ -217,6 +217,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                     port: 0,
                 },
                 Default::default(),
+                Default::default(),
             )
             .await
             .unwrap();

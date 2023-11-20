@@ -25,10 +25,11 @@ use pgwire::types::{Format, Row};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::*;
 
-use self::util::DataChunkToRowSetAdapter;
+use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
 use self::variable::handle_set_time_zone;
 use crate::catalog::table_catalog::TableType;
 use crate::handler::cancel_job::handle_cancel;
+use crate::handler::kill_process::handle_kill;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
@@ -69,6 +70,7 @@ pub mod explain;
 pub mod extended_handle;
 mod flush;
 pub mod handle_privilege;
+mod kill_process;
 pub mod privilege;
 pub mod query;
 mod show;
@@ -251,13 +253,7 @@ pub async fn handle(
                 )
                 .await;
             }
-            let (source_schema, notice) = match source_schema {
-                Some(s) => {
-                    let (s, notice) = s.into_source_schema_v2();
-                    (Some(s), notice)
-                }
-                None => (None, None),
-            };
+            let source_schema = source_schema.map(|s| s.into_v2_with_warning());
             create_table::handle_create_table(
                 handler_args,
                 name,
@@ -267,7 +263,6 @@ pub async fn handle(
                 source_schema,
                 source_watermarks,
                 append_only,
-                notice,
                 cdc_table_info,
             )
             .await
@@ -611,6 +606,7 @@ pub async fn handle(
             session,
         } => transaction::handle_set(handler_args, modes, snapshot, session).await,
         Statement::CancelJobs(jobs) => handle_cancel(handler_args, jobs).await,
+        Statement::Kill(process_id) => handle_kill(handler_args, process_id).await,
         Statement::Comment {
             object_type,
             object_name,
