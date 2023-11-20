@@ -34,7 +34,8 @@ use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
-    PredicatePushdownContext, RewriteStreamContext, StreamCdcTableScan, ToStreamContext,
+    PredicatePushdownContext, RewriteStreamContext, StreamCdcTableScan, StreamFilter,
+    ToStreamContext,
 };
 use crate::optimizer::property::{Cardinality, Order};
 use crate::optimizer::rule::IndexSelectionRule;
@@ -555,6 +556,10 @@ impl ToStream for LogicalScan {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         if self.predicate().always_true() {
             if self.is_cdc_table() {
+                // add a filter
+
+                // StreamFilter::new()
+
                 Ok(StreamCdcTableScan::new(self.core.clone()).into())
             } else {
                 Ok(StreamTableScan::new(self.core.clone()).into())

@@ -1128,6 +1128,10 @@ use crate::utils::Condition;
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
+    use risingwave_common::types::{JsonbVal, ScalarImpl};
+
     use super::*;
 
     #[test]
@@ -1136,5 +1140,54 @@ mod tests {
         e = FunctionCall::new(ExprType::Not, vec![e]).unwrap().into();
         let s = format!("{:#?}", e);
         assert!(s.contains("return_type: Boolean"))
+    }
+
+    #[tokio::test]
+    async fn test_cdc_filter_json_expr() {
+        let t1_json = JsonbVal::from_str(r#"{ "before": null, "after": { "v": 111, "v2": 222.2 }, "source": { "version": "2.2.0.Alpha3", "connector": "mysql", "name": "dbserver1", "ts_ms": 1678428689000, "snapshot": "false", "db": "inventory", "sequence": null, "table": "t1", "server_id": 223344, "gtid": null, "file": "mysql-bin.000003", "pos": 774, "row": 0, "thread": 8, "query": null }, "op": "c", "ts_ms": 1678428689389, "transaction": null }"#).unwrap();
+        let t2_json = JsonbVal::from_str(r#"{ "before": null, "after": { "v": 333, "v2": 666.6 }, "source": { "version": "2.2.0.Alpha3", "connector": "mysql", "name": "dbserver1", "ts_ms": 1678428689000, "snapshot": "false", "db": "inventory", "sequence": null, "table": "t2", "server_id": 223344, "gtid": null, "file": "mysql-bin.000003", "pos": 884, "row": 0, "thread": 8, "query": null }, "op": "c", "ts_ms": 1678428689389, "transaction": null }"#).unwrap();
+        let row1 = OwnedRow::new(vec![
+            Some(t1_json.into()),
+            Some(r#"{"file": "1.binlog", "pos": 100}"#.into()),
+        ]);
+        let row2 = OwnedRow::new(vec![
+            Some(t2_json.into()),
+            Some(r#"{"file": "2.binlog", "pos": 100}"#.into()),
+        ]);
+
+        let mut expr: ExprImpl = FunctionCall::new(
+            ExprType::Equal,
+            vec![
+                FunctionCall::new(
+                    ExprType::JsonbAccessStr,
+                    vec![
+                        FunctionCall::new(
+                            ExprType::JsonbAccess,
+                            vec![
+                                InputRef::new(0, DataType::Jsonb).into(),
+                                ExprImpl::literal_varchar("source".into()),
+                            ],
+                        )
+                        .unwrap()
+                        .into(),
+                        ExprImpl::literal_varchar("table".into()),
+                    ],
+                )
+                .unwrap()
+                .into(),
+                ExprImpl::literal_varchar("t1".into()),
+            ],
+        )
+        .unwrap()
+        .into();
+
+        assert_eq!(
+            expr.eval_row(&row1).await.unwrap(),
+            Some(ScalarImpl::Bool(true))
+        );
+        assert_eq!(
+            expr.eval_row(&row2).await.unwrap(),
+            Some(ScalarImpl::Bool(false))
+        );
     }
 }

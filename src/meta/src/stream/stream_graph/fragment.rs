@@ -560,38 +560,13 @@ impl CompleteStreamFragmentGraph {
                 for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
                     let (up_fragment_id, edge) = match table_job_type.as_ref() {
                         Some(TableJobType::SharedCdcSource) => {
-                            // extract the upstream full_table_name from the source fragment
-                            let mut full_table_name = None;
-                            visit_fragment(&mut fragment.inner, |node_body| {
-                                if let NodeBody::StreamScan(stream_scan) = node_body {
-                                    full_table_name = stream_scan
-                                        .cdc_table_desc
-                                        .as_ref()
-                                        .map(|desc| desc.table_name.clone());
-                                }
-                            });
-
-                            let source_fragment =
-                                upstream_root_fragments
-                                    .get(&upstream_table_id)
-                                    .context("upstream materialized view fragment not found")?;
+                            let source_fragment = upstream_root_fragments
+                                .get(&upstream_table_id)
+                                .context("upstream source fragment not found")?;
                             let source_job_id = GlobalFragmentId::new(source_fragment.fragment_id);
-                            // extract `_rw_table_name` column index
-                            let rw_table_name_index = {
-                                let node = source_fragment.actors[0].get_nodes().unwrap();
 
-                                // may remove the expect to extend other scenarios, currently only target the CDC scenario
-                                node.fields
-                                    .iter()
-                                    .position(|f| f.name.as_str() == TABLE_NAME_COLUMN_NAME)
-                                    .expect("table name column not found")
-                            };
-
-                            assert!(full_table_name.is_some());
                             tracing::debug!(
-                                ?full_table_name,
                                 ?source_job_id,
-                                ?rw_table_name_index,
                                 ?output_columns,
                                 "StreamScan with upstream source fragment"
                             );
@@ -600,11 +575,13 @@ impl CompleteStreamFragmentGraph {
                                     upstream_table_id,
                                     downstream_fragment_id: id,
                                 },
+                                // We always use `NoShuffle` for the exchange between the upstream
+                                // `Source` and the downstream `StreamScan` of the new cdc table.
                                 dispatch_strategy: DispatchStrategy {
-                                    r#type: DispatcherType::CdcTablename as _, /* there may have multiple downstream table jobs, so we use `Hash` here */
-                                    dist_key_indices: vec![rw_table_name_index as _], /* index to `_rw_table_name` column */
-                                    output_indices: (0..CDC_SOURCE_COLUMN_NUM as _).collect_vec(), /* require all columns from the cdc source */
-                                    downstream_table_name: full_table_name,
+                                    r#type: DispatcherType::NoShuffle as _,
+                                    dist_key_indices: vec![], // not used for `NoShuffle`
+                                    output_indices: (0..CDC_SOURCE_COLUMN_NUM as _).collect(),
+                                    downstream_table_name: None,
                                 },
                             };
 
