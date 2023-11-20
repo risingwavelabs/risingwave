@@ -36,11 +36,13 @@ use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{create_connection_request, DdlProgress, PbTableJobType};
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    BranchedObject, CompactionGroupInfo, HummockSnapshot, HummockVersion, HummockVersionDelta,
+    BranchedObject, CompactTaskAssignment, CompactionGroupInfo, HummockSnapshot, HummockVersion,
+    HummockVersionDelta,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -893,6 +895,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_hummock_meta_configs(&self) -> RpcResult<HashMap<String, String>> {
+        unimplemented!()
+    }
+
+    async fn list_compact_task_assignment(&self) -> RpcResult<Vec<CompactTaskAssignment>> {
+        unimplemented!()
+    }
+
+    async fn list_all_nodes(&self) -> RpcResult<Vec<WorkerNode>> {
         unimplemented!()
     }
 }

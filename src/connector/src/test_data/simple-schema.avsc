@@ -34,20 +34,19 @@
     {
       "name": "entrance_date",
       "type": "int",
-      "logicalType": "date",
-      "default": null
+      "logicalType": "date"
     },
     {
       "name": "birthday",
       "type": "long",
       "logicalType": "timestamp-millis",
-      "default": null
+      "default": 0
     },
     {
       "name": "anniversary",
       "type": "long",
       "logicalType": "timestamp-micros",
-      "default": null
+      "default": 0
     },
     {
       "name": "passed",
@@ -61,7 +60,7 @@
     {
       "name": "bytes",
       "type": "bytes",
-      "default": null
+      "default": ""
     }
   ]
 }

@@ -136,6 +136,7 @@ fn is_stateful_executor(stream_node: &StreamNode) -> bool {
             | NodeBody::HashJoin(_)
             | NodeBody::DeltaIndexJoin(_)
             | NodeBody::StreamScan(_)
+            | NodeBody::StreamCdcScan(_)
             | NodeBody::DynamicFilter(_)
     )
 }
@@ -280,6 +281,16 @@ fn build_fragment(
         NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
         NodeBody::StreamScan(node) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
+            // memorize table id for later use
+            // The table id could be a upstream CDC source
+            state
+                .dependent_table_ids
+                .insert(TableId::new(node.table_id));
+            current_fragment.upstream_table_ids.push(node.table_id);
+        }
+
+        NodeBody::StreamCdcScan(node) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
             // memorize table id for later use
             // The table id could be a upstream CDC source

@@ -243,9 +243,7 @@ impl StreamTableScan {
         // The required columns from the table (both scan and upstream).
         let upstream_column_ids = match self.stream_scan_type {
             // For backfill, we additionally need the primary key columns.
-            StreamScanType::Backfill | StreamScanType::CdcBackfill => {
-                self.core.output_and_pk_column_ids()
-            }
+            StreamScanType::Backfill => self.core.output_and_pk_column_ids(),
             StreamScanType::Chain | StreamScanType::Rearrange | StreamScanType::UpstreamOnly => {
                 self.core.output_column_ids()
             }
@@ -283,6 +281,7 @@ impl StreamTableScan {
             })
             .collect_vec();
 
+        // TODO: snapshot read of upstream mview
         let batch_plan_node = BatchPlanNode {
             table_desc: Some(self.core.table_desc.to_protobuf()),
             column_ids: upstream_column_ids.clone(),
@@ -301,12 +300,7 @@ impl StreamTableScan {
             // The table desc used by backfill executor
             table_desc: Some(self.core.table_desc.to_protobuf()),
             state_table: Some(catalog),
-            rate_limit: self
-                .base
-                .ctx()
-                .session_ctx()
-                .config()
-                .get_streaming_rate_limit(),
+            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
             ..Default::default()
         });
 

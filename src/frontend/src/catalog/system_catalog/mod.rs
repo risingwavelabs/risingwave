@@ -382,7 +382,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_CONNECTIONS), read_rw_connections_info },
     { BuiltinCatalog::Table(&RW_FUNCTIONS), read_rw_functions_info },
     { BuiltinCatalog::Table(&RW_VIEWS), read_rw_views_info },
-    { BuiltinCatalog::Table(&RW_WORKER_NODES), read_rw_worker_nodes_info },
+    { BuiltinCatalog::Table(&RW_WORKER_NODES), read_rw_worker_nodes_info await },
     { BuiltinCatalog::Table(&RW_PARALLEL_UNITS), read_rw_parallel_units_info },
     { BuiltinCatalog::Table(&RW_TABLE_FRAGMENTS), read_rw_table_fragments_info await },
     { BuiltinCatalog::Table(&RW_FRAGMENTS), read_rw_fragment_distributions_info await },
@@ -404,6 +404,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_HUMMOCK_BRANCHED_OBJECTS), read_hummock_branched_objects await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACTION_GROUP_CONFIGS), read_hummock_compaction_group_configs await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_META_CONFIGS), read_hummock_meta_configs await},
+    { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACT_TASK_ASSIGNMEN), read_hummock_compaction_status await },
     { BuiltinCatalog::Table(&RW_DESCRIPTION), read_rw_description },
 }
 

@@ -41,8 +41,8 @@ use crate::storage::MetaStoreRef;
 #[derive(Clone)]
 pub struct DashboardService {
     pub dashboard_addr: SocketAddr,
-    pub prometheus_endpoint: Option<String>,
     pub prometheus_client: Option<prometheus_http_query::Client>,
+    pub prometheus_selector: String,
     pub cluster_manager: ClusterManagerRef,
     pub fragment_manager: FragmentManagerRef,
     pub compute_clients: ComputeClientPool,
@@ -101,14 +101,12 @@ pub(super) mod handlers {
         Path(ty): Path<i32>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<WorkerNode>>> {
+        let worker_type = WorkerType::try_from(ty)
+            .map_err(|_| anyhow!("invalid worker type"))
+            .map_err(err)?;
         let mut result = srv
             .cluster_manager
-            .list_worker_node(
-                WorkerType::try_from(ty)
-                    .map_err(|_| anyhow!("invalid worker type"))
-                    .map_err(err)?,
-                None,
-            )
+            .list_worker_node(Some(worker_type), None)
             .await;
         result.sort_unstable_by_key(|n| n.id);
         Ok(result.into())
@@ -224,7 +222,7 @@ pub(super) mod handlers {
     ) -> Result<Json<StackTraceResponse>> {
         let worker_nodes = srv
             .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode, None)
+            .list_worker_node(Some(WorkerType::ComputeNode), None)
             .await;
 
         dump_await_tree_inner(&worker_nodes, &srv.compute_clients).await

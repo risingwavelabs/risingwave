@@ -171,7 +171,7 @@ dependencies = [
  "byteorder",
  "digest",
  "lazy_static",
- "libflate",
+ "libflate 1.4.0",
  "log",
  "num-bigint",
  "quad-rand",
@@ -179,40 +179,38 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
- "strum 0.25.0",
- "strum_macros 0.25.2",
+ "strum",
+ "strum_macros",
  "thiserror",
- "typed-builder",
+ "typed-builder 0.14.0",
  "uuid",
  "zerocopy",
 ]
 
 [[package]]
 name = "apache-avro"
-version = "0.15.0"
-source = "git+https://github.com/risingwavelabs/avro?rev=89c2c128de93586465a7ea85b0a1c1a53082bba2"
+version = "0.16.0"
+source = "git+https://github.com/risingwavelabs/avro?rev=b251943586e7fe7dd52319fc84f8be47921434aa#b251943586e7fe7dd52319fc84f8be47921434aa"
 dependencies = [
- "byteorder",
  "bzip2",
  "crc32fast",
  "digest",
  "lazy_static",
- "libflate",
+ "libflate 2.0.0",
  "log",
  "num-bigint",
  "quad-rand",
  "rand",
- "regex",
+ "regex-lite",
  "serde",
  "serde_json",
  "snap",
- "strum 0.24.1",
- "strum_macros 0.24.3",
+ "strum",
+ "strum_macros",
  "thiserror",
- "typed-builder",
+ "typed-builder 0.16.2",
  "uuid",
  "xz2",
- "zerocopy",
  "zstd 0.12.4",
 ]
 
@@ -243,9 +241,9 @@ checksum = "96d30a06541fbafbc7f82ed10c06164cfbd2c401138f6addd8404629c4b16711"
 
 [[package]]
 name = "arrow-arith"
-version = "48.0.0"
+version = "49.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5c3d17fc5b006e7beeaebfb1d2edfc92398b981f82d9744130437909b72a468"
+checksum = "34ccd45e217ffa6e53bbb0080990e77113bdd4e91ddb84e97b77649810bcf1a7"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -258,9 +256,9 @@ dependencies = [
 
 [[package]]
 name = "arrow-array"
-version = "48.0.0"
+version = "49.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55705ada5cdde4cb0f202ffa6aa756637e33fea30e13d8d0d0fd6a24ffcee1e3"
+checksum = "6bda9acea48b25123c08340f3a8ac361aa0f74469bb36f5ee9acf923fce23e9d"
 dependencies = [
  "ahash 0.8.3",
  "arrow-buffer",
@@ -274,9 +272,9 @@ dependencies = [
 
 [[package]]
 name = "arrow-buffer"
-version = "48.0.0"
+version = "49.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a722f90a09b94f295ab7102542e97199d3500128843446ef63e410ad546c5333"
+checksum = "01a0fc21915b00fc6c2667b069c1b64bdd920982f426079bc4a7cab86822886c"
 dependencies = [
  "bytes",
  "half 2.3.1",
@@ -285,15 +283,16 @@ dependencies = [
 
 [[package]]
 name = "arrow-cast"
-version = "48.0.0"
+version = "49.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af01fc1a06f6f2baf31a04776156d47f9f31ca5939fe6d00cd7a059f95a46ff1"
+checksum = "5dc0368ed618d509636c1e3cc20db1281148190a78f43519487b2daf07b63b4a"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
  "arrow-data",
  "arrow-schema",
  "arrow-select",
+ "base64 0.21.4",
  "chrono",
  "half 2.3.1",
  "lexical-core",
@@ -302,9 +301,9 @@ dependencies = [
 
 [[package]]
 name = "arrow-data"
-version = "48.0.0"
+version = "49.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0a547195e607e625e7fafa1a7269b8df1a4a612c919efd9b26bd86e74538f3a"
+checksum = "907fafe280a3874474678c1858b9ca4cb7fd83fb8034ff5b6d6376205a08c634"
 dependencies = [
  "arrow-buffer",
  "arrow-schema",
@@ -314,9 +313,9 @@ dependencies = [
 
 [[package]]
 name = "arrow-flight"
-version = "48.0.0"
+version = "49.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c58645809ced5acd6243e89a63ae8535a2ab50d780affcd7efe8c7473a0da661"
+checksum = "624e0dcb6b5a7a06222bfd2be3f7e905ce849a6b714ec989f18cdba330c77d38"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -334,9 +333,9 @@ dependencies = [
 
 [[package]]
 name = "arrow-ipc"
-version = "48.0.0"
+version = "49.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e36bf091502ab7e37775ff448413ef1ffff28ff93789acb669fffdd51b394d51"
+checksum = "79a43d6808411886b8c7d4f6f7dd477029c1e77ffffffb7923555cc6579639cd"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -348,9 +347,9 @@ dependencies = [
 
 [[package]]
 name = "arrow-ord"
-version = "48.0.0"
+version = "49.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4502123d2397319f3a13688432bc678c61cb1582f2daa01253186da650bf5841"
+checksum = "9b23b0e53c0db57c6749997fd343d4c0354c994be7eca67152dd2bdb9a3e1bb4"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -363,9 +362,9 @@ dependencies = [
 
 [[package]]
 name = "arrow-row"
-version = "48.0.0"
+version = "49.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "249fc5a07906ab3f3536a6e9f118ec2883fbcde398a97a5ba70053f0276abda4"
+checksum = "361249898d2d6d4a6eeb7484be6ac74977e48da12a4dd81a708d620cc558117a"
 dependencies = [
  "ahash 0.8.3",
  "arrow-array",
@@ -378,15 +377,15 @@ dependencies = [
 
 [[package]]
 name = "arrow-schema"
-version = "48.0.0"
+version = "49.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d7a8c3f97f5ef6abd862155a6f39aaba36b029322462d72bbcfa69782a50614"
+checksum = "09e28a5e781bf1b0f981333684ad13f5901f4cd2f20589eab7cf1797da8fc167"
 
 [[package]]
 name = "arrow-select"
-version = "48.0.0"
+version = "49.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f868f4a5001429e20f7c1994b5cd1aa68b82e3db8cf96c559cdb56dc8be21410"
+checksum = "4f6208466590960efc1d2a7172bc4ff18a67d6e25c529381d7f96ddaf0dc4036"
 dependencies = [
  "ahash 0.8.3",
  "arrow-array",
@@ -1836,8 +1835,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c64043d6c7b7a4c58e39e7efccfdea7b93d885a795d0c054a69dbbf4dd52686"
 dependencies = [
  "crossterm 0.27.0",
- "strum 0.25.0",
- "strum_macros 0.25.2",
+ "strum",
+ "strum_macros",
  "unicode-width",
 ]
 
@@ -1958,6 +1957,15 @@ name = "core-foundation-sys"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e496a50fda8aacccc86d7529e2c1e0892dbd0f898a6b5645b5561b89c3210efa"
+
+[[package]]
+name = "core2"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b49ba7ef1ad6107f8824dbe97de947cbaac53c44e7f9756a1fba0d37c1eec505"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "cpp_demangle"
@@ -2428,6 +2436,12 @@ dependencies = [
 name = "darwin-libproc-sys"
 version = "0.2.0"
 source = "git+https://github.com/risingwavelabs/darwin-libproc.git?rev=a502be24bd0971463f5bcbfe035a248d8ba503b7#a502be24bd0971463f5bcbfe035a248d8ba503b7"
+
+[[package]]
+name = "dary_heap"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7762d17f1241643615821a8455a0b2c3e803784b058693d990b11f2dce25a0ca"
 
 [[package]]
 name = "dashmap"
@@ -4047,7 +4061,7 @@ version = "0.0.10"
 source = "git+https://github.com/icelake-io/icelake?rev=5cdcdffd24f4624a0a43f92c5f368988169a799b#5cdcdffd24f4624a0a43f92c5f368988169a799b"
 dependencies = [
  "anyhow",
- "apache-avro 0.15.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apache-avro 0.15.0",
  "arrow-arith",
  "arrow-array",
  "arrow-buffer",
@@ -4246,6 +4260,15 @@ name = "itertools"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1c173a5686ce8bfa551b3563d0c2170bf24ca44da99c7ca4bfdab5418c3fe57"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25db6b064527c5d482d0423354fcd07a89a2dfe07b67892e62411946db7f07b0"
 dependencies = [
  "either",
 ]
@@ -4469,7 +4492,20 @@ checksum = "5ff4ae71b685bbad2f2f391fe74f6b7659a34871c08b210fdc039e43bee07d18"
 dependencies = [
  "adler32",
  "crc32fast",
- "libflate_lz77",
+ "libflate_lz77 1.2.0",
+]
+
+[[package]]
+name = "libflate"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f7d5654ae1795afc7ff76f4365c2c8791b0feb18e8996a96adad8ffd7c3b2bf"
+dependencies = [
+ "adler32",
+ "core2",
+ "crc32fast",
+ "dary_heap",
+ "libflate_lz77 2.0.0",
 ]
 
 [[package]]
@@ -4478,6 +4514,17 @@ version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a52d3a8bfc85f250440e4424db7d857e241a3aebbbe301f3eb606ab15c39acbf"
 dependencies = [
+ "rle-decode-fast",
+]
+
+[[package]]
+name = "libflate_lz77"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be5f52fb8c451576ec6b79d3f4deb327398bc05bbdbd99021a6e77a4c855d524"
+dependencies = [
+ "core2",
+ "hashbrown 0.13.2",
  "rle-decode-fast",
 ]
 
@@ -5842,9 +5889,9 @@ dependencies = [
 
 [[package]]
 name = "parquet"
-version = "48.0.0"
+version = "49.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "239229e6a668ab50c61de3dce61cf0fa1069345f7aa0f4c934491f92205a4945"
+checksum = "af88740a842787da39b3d69ce5fbf6fce97d20211d3b299fee0a0da6430c74d4"
 dependencies = [
  "ahash 0.8.3",
  "arrow-array",
@@ -6024,7 +6071,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "futures",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-tokio",
  "openssl",
  "panic-message",
@@ -6990,6 +7037,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "regex-lite"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30b661b2f27137bdbc16f00eda72866a92bb28af1753ffbd56744fb6e2e9cd8e"
+
+[[package]]
 name = "regex-syntax"
 version = "0.6.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7163,7 +7216,7 @@ dependencies = [
  "glob",
  "google-cloud-pubsub",
  "indicatif",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-rdkafka",
  "madsim-tokio",
  "redis",
@@ -7190,7 +7243,7 @@ dependencies = [
  "dialoguer",
  "enum-iterator",
  "fs-err",
- "itertools 0.11.0",
+ "itertools 0.12.0",
 ]
 
 [[package]]
@@ -7201,7 +7254,7 @@ dependencies = [
  "async-trait",
  "bincode 1.3.3",
  "bytes",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "parking_lot 0.12.1",
  "prost 0.12.1",
  "risingwave_common",
@@ -7230,7 +7283,7 @@ dependencies = [
  "futures-util",
  "hashbrown 0.14.0",
  "hytra",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.1",
@@ -7273,7 +7326,7 @@ dependencies = [
  "clap",
  "futures",
  "hdrhistogram",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "libc",
  "madsim-tokio",
  "nix 0.27.1",
@@ -7334,8 +7387,8 @@ dependencies = [
  "risingwave_meta_node",
  "risingwave_rt",
  "shell-words",
- "strum 0.25.0",
- "strum_macros 0.25.2",
+ "strum",
+ "strum_macros",
  "task_stats_alloc",
  "tempfile",
  "tikv-jemallocator",
@@ -7384,7 +7437,7 @@ dependencies = [
  "humantime",
  "hyper",
  "hytra",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "itoa",
  "jsonbb",
  "libc",
@@ -7425,8 +7478,8 @@ dependencies = [
  "smallbitset",
  "speedate",
  "static_assertions",
- "strum 0.25.0",
- "strum_macros 0.25.2",
+ "strum",
+ "strum_macros",
  "sysinfo",
  "tempfile",
  "thiserror",
@@ -7548,7 +7601,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "hyper",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -7582,7 +7635,7 @@ name = "risingwave_connector"
 version = "1.3.0-alpha"
 dependencies = [
  "anyhow",
- "apache-avro 0.15.0 (git+https://github.com/risingwavelabs/avro?rev=89c2c128de93586465a7ea85b0a1c1a53082bba2)",
+ "apache-avro 0.16.0",
  "arrow-array",
  "arrow-schema",
  "async-nats",
@@ -7618,7 +7671,7 @@ dependencies = [
  "hyper-tls",
  "icelake",
  "indexmap 1.9.3",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "jni",
  "jsonschema-transpiler",
  "madsim-rdkafka",
@@ -7656,8 +7709,8 @@ dependencies = [
  "serde_with",
  "serde_yaml",
  "simd-json",
- "strum 0.25.0",
- "strum_macros 0.25.2",
+ "strum",
+ "strum_macros",
  "syn 1.0.109",
  "tempfile",
  "thiserror",
@@ -7689,7 +7742,7 @@ dependencies = [
  "comfy-table",
  "futures",
  "inquire",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-etcd-client",
  "madsim-tokio",
  "regex",
@@ -7762,7 +7815,7 @@ dependencies = [
  "expect-test",
  "futures-async-stream",
  "futures-util",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-tokio",
  "num-traits",
  "parse-display",
@@ -7793,7 +7846,7 @@ dependencies = [
  "futures-async-stream",
  "futures-util",
  "hex",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "jsonbb",
  "madsim-tokio",
  "md5",
@@ -7817,7 +7870,7 @@ dependencies = [
 name = "risingwave_expr_macro"
 version = "0.1.0"
 dependencies = [
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "proc-macro2",
  "quote",
  "syn 2.0.37",
@@ -7837,6 +7890,7 @@ dependencies = [
  "auto_impl",
  "bk-tree",
  "bytes",
+ "chrono",
  "clap",
  "downcast-rs",
  "dyn-clone",
@@ -7848,7 +7902,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "iana-time-zone",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -7898,7 +7952,7 @@ dependencies = [
  "bytes",
  "easy-ext",
  "hex",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "parse-display",
  "risingwave_common",
  "risingwave_pb",
@@ -7918,7 +7972,7 @@ dependencies = [
  "fail",
  "futures",
  "futures-async-stream",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-tokio",
  "parking_lot 0.12.1",
  "rand",
@@ -7983,7 +8037,7 @@ dependencies = [
  "cfg-or-panic",
  "expect-test",
  "futures",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "jni",
  "madsim-tokio",
  "paste",
@@ -8023,7 +8077,7 @@ dependencies = [
  "futures",
  "hex",
  "hyper",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
@@ -8093,7 +8147,7 @@ dependencies = [
  "clap",
  "either",
  "futures",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-etcd-client",
  "madsim-tokio",
  "madsim-tonic",
@@ -8121,7 +8175,7 @@ dependencies = [
  "async-trait",
  "either",
  "futures",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-tokio",
  "madsim-tonic",
  "rand",
@@ -8157,7 +8211,7 @@ dependencies = [
  "hyper",
  "hyper-rustls",
  "hyper-tls",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
  "opendal",
@@ -8183,7 +8237,7 @@ dependencies = [
  "prost 0.12.1",
  "prost-helpers",
  "serde",
- "strum 0.25.0",
+ "strum",
  "thiserror",
  "walkdir",
  "workspace-hack",
@@ -8195,7 +8249,7 @@ version = "1.3.0-alpha"
 dependencies = [
  "anyhow",
  "expect-test",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "libtest-mimic",
  "madsim-tokio",
  "paste",
@@ -8235,7 +8289,7 @@ dependencies = [
  "either",
  "futures",
  "hyper",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "lru 0.10.1",
  "madsim-tokio",
  "madsim-tonic",
@@ -8292,7 +8346,7 @@ dependencies = [
  "console",
  "futures",
  "glob",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "lru 0.7.6",
  "madsim",
  "madsim-aws-sdk-s3",
@@ -8339,7 +8393,7 @@ dependencies = [
  "criterion",
  "futures",
  "futures-async-stream",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "madsim-tokio",
  "parking_lot 0.12.1",
  "paste",
@@ -8356,7 +8410,7 @@ dependencies = [
 name = "risingwave_sqlparser"
 version = "1.3.0-alpha"
 dependencies = [
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "matches",
  "serde",
  "tracing",
@@ -8387,7 +8441,7 @@ dependencies = [
  "chrono",
  "clap",
  "expect-test",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "libtest-mimic",
  "madsim-tokio",
  "rand",
@@ -8449,7 +8503,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "hex",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "libc",
  "lz4",
  "mach2",
@@ -8512,7 +8566,7 @@ dependencies = [
  "futures-async-stream",
  "governor",
  "hytra",
- "itertools 0.11.0",
+ "itertools 0.12.0",
  "local_stats_alloc",
  "lru 0.7.6",
  "madsim-tokio",
@@ -8912,7 +8966,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
- "strum 0.25.0",
+ "strum",
  "thiserror",
  "time",
  "tracing",
@@ -9600,8 +9654,8 @@ version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "242f76c50fd18cbf098607090ade73a08d39cfd84ea835f3796a2c855223b19b"
 dependencies = [
- "strum 0.25.0",
- "strum_macros 0.25.2",
+ "strum",
+ "strum_macros",
 ]
 
 [[package]]
@@ -9949,30 +10003,11 @@ dependencies = [
 
 [[package]]
 name = "strum"
-version = "0.24.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "063e6045c0e62079840579a7e47a355ae92f60eb74daaf156fb1e84ba164e63f"
-
-[[package]]
-name = "strum"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
 dependencies = [
- "strum_macros 0.25.2",
-]
-
-[[package]]
-name = "strum_macros"
-version = "0.24.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e385be0d24f186b4ce2f9982191e7101bb737312ad61c1f2f984f34bcf85d59"
-dependencies = [
- "heck 0.4.1",
- "proc-macro2",
- "quote",
- "rustversion",
- "syn 1.0.109",
+ "strum_macros",
 ]
 
 [[package]]
@@ -10827,6 +10862,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "typed-builder"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34085c17941e36627a879208083e25d357243812c30e7d7387c3b954f30ade16"
+dependencies = [
+ "typed-builder-macro",
+]
+
+[[package]]
+name = "typed-builder-macro"
+version = "0.16.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f03ca4cb38206e2bef0700092660bb74d696f808514dae47fa1467cbfe26e96e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.37",
+]
+
+[[package]]
 name = "typenum"
 version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11483,7 +11538,7 @@ dependencies = [
  "sqlx-mysql",
  "sqlx-postgres",
  "sqlx-sqlite",
- "strum 0.25.0",
+ "strum",
  "subtle",
  "syn 1.0.109",
  "syn 2.0.37",

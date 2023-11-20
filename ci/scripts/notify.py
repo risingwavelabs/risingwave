@@ -9,6 +9,9 @@ import subprocess
 TEST_MAP = {
     "test-notify": ["noelkwan", "noelkwan"],
     "backfill-tests": ["noelkwan"],
+    "backwards-compat-tests": ["noelkwan"],
+    "fuzz-test": ["noelkwan"],
+    "e2e-test-release": ["zhi"],
     "e2e-iceberg-sink-tests": ["renjie"],
     "e2e-java-binding-tests": ["yiming"],
     "e2e-clickhouse-sink-tests": ["bohan"],

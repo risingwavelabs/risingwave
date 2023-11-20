@@ -747,9 +747,7 @@ fn exist_and_no_exchange_before(plan: &PlanRef, is_candidate: fn(&PlanRef) -> bo
 /// Returns `true` if we must insert an additional exchange to ensure this.
 fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> bool {
     fn is_user_table(plan: &PlanRef) -> bool {
-        plan.as_batch_seq_scan()
-            .map(|node| !node.core().is_sys_table())
-            .unwrap_or(false)
+        plan.node_type() == PlanNodeType::BatchSeqScan
     }
 
     fn is_source(plan: &PlanRef) -> bool {
@@ -780,9 +778,7 @@ fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> boo
 /// them for the different requirement of plan node in different execute mode.
 fn require_additional_exchange_on_root_in_local_mode(plan: PlanRef) -> bool {
     fn is_user_table(plan: &PlanRef) -> bool {
-        plan.as_batch_seq_scan()
-            .map(|node| !node.core().is_sys_table())
-            .unwrap_or(false)
+        plan.node_type() == PlanNodeType::BatchSeqScan
     }
 
     fn is_source(plan: &PlanRef) -> bool {

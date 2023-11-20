@@ -18,6 +18,7 @@ pub use risingwave_pb::expr::expr_node::Type as ExprType;
 pub use crate::expr::expr_rewriter::ExprRewriter;
 pub use crate::expr::function_call::FunctionCall;
 use crate::expr::{Expr, ExprImpl};
+use crate::session::current;
 
 /// `SessionTimezone` will be used to resolve session
 /// timezone-dependent casts, comparisons or arithmetic.
@@ -35,7 +36,7 @@ impl ExprRewriter for SessionTimezone {
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         if let Some(expr) = self.with_timezone(func_type, &inputs, ret.clone()) {
-            self.used = true;
+            self.mark_used();
             expr
         } else {
             FunctionCall::new_unchecked(func_type, inputs, ret).into()
@@ -59,16 +60,15 @@ impl SessionTimezone {
         self.used
     }
 
-    pub fn warning(&self) -> Option<String> {
-        if self.used {
-            Some(format!(
+    fn mark_used(&mut self) {
+        if !self.used {
+            self.used = true;
+            current::notice_to_user(format!(
                 "Your session timezone is {}. It was used in the interpretation of timestamps and dates in your query. If this is unintended, \
                 change your timezone to match that of your data's with `set timezone = [timezone]` or \
                 rewrite your query with an explicit timezone conversion, e.g. with `AT TIME ZONE`.\n",
                 self.timezone
-            ))
-        } else {
-            None
+            ));
         }
     }
 
