@@ -14,6 +14,7 @@
 use std::clone::Clone;
 use std::collections::VecDeque;
 use std::future::Future;
+use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -22,7 +23,9 @@ use bytes::{Bytes, BytesMut};
 use fail::fail_point;
 use futures::{future, StreamExt};
 use itertools::Itertools;
-use risingwave_common::cache::{CachePriority, LookupResponse, LruCacheEventListener};
+use risingwave_common::cache::{
+    CachePriority, LookupResponse, LruCacheEventListener, LruKey, LruValue,
+};
 use risingwave_common::config::StorageMemoryConfig;
 use risingwave_hummock_sdk::{HummockSstableObjectId, OBJECT_SUFFIX};
 use risingwave_hummock_trace::TracedCachePolicy;
@@ -126,6 +129,30 @@ impl LruCacheEventListener for MetaCacheEventListener {
         // FYI: https://github.com/madsim-rs/madsim/issues/182
         #[cfg(not(madsim))]
         self.0.insert_if_not_exists_async(key, value);
+    }
+}
+
+pub enum CachedOrOwned<K, V>
+where
+    K: LruKey,
+    V: LruValue,
+{
+    Cached(CacheableEntry<K, V>),
+    Owned(V),
+}
+
+impl<K, V> Deref for CachedOrOwned<K, V>
+where
+    K: LruKey,
+    V: LruValue,
+{
+    type Target = V;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            CachedOrOwned::Cached(entry) => entry,
+            CachedOrOwned::Owned(v) => v,
+        }
     }
 }
 
@@ -451,6 +478,26 @@ impl SstableStore {
         if let Err(e) = self.meta_file_cache.clear() {
             tracing::warn!("meta file cache clear error: {}", e);
         }
+    }
+
+    pub async fn sstable_cached(
+        &self,
+        sst_obj_id: HummockSstableObjectId,
+    ) -> HummockResult<Option<CachedOrOwned<HummockSstableObjectId, Box<Sstable>>>> {
+        if let Some(sst) = self.meta_cache.lookup(sst_obj_id, &sst_obj_id) {
+            return Ok(Some(CachedOrOwned::Cached(sst)));
+        }
+
+        if let Some(sst) = self
+            .meta_file_cache
+            .lookup(&sst_obj_id)
+            .await
+            .map_err(HummockError::file_cache)?
+        {
+            return Ok(Some(CachedOrOwned::Owned(sst)));
+        }
+
+        Ok(None)
     }
 
     /// Returns `table_holder`

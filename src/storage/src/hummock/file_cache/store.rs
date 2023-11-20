@@ -234,6 +234,10 @@ where
             store: NoneStore::default(),
         }
     }
+
+    pub fn is_none(&self) -> bool {
+        matches!(self, FileCache::None { .. })
+    }
 }
 
 impl<K, V> Storage for FileCache<K, V>

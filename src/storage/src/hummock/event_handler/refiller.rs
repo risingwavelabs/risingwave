@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashSet, VecDeque};
-use std::ops::DerefMut;
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::ops::{Deref, DerefMut, Range};
 use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
 use std::task::{ready, Context, Poll};
@@ -32,6 +32,7 @@ use prometheus::{
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
+use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
@@ -303,6 +304,89 @@ impl CacheRefillTask {
         Ok(holders)
     }
 
+    fn filter(
+        context: &CacheRefillContext,
+        ssts: &[TableHolder],
+        parent_ssts: &[impl Deref<Target = Box<Sstable>>],
+    ) -> BTreeMap<SstableUnit, Vec<SstableBlock>> {
+        let mut res = BTreeMap::default();
+
+        let data_file_cache = context.sstable_store.data_file_cache();
+        if data_file_cache.is_none() {
+            return res;
+        }
+
+        let unit = context.config.unit;
+
+        let units = ssts
+            .iter()
+            .flat_map(|sst| {
+                let units = Unit::units(sst, unit);
+                (0..units).map(|uidx| Unit::new(sst, unit, uidx))
+            })
+            .collect_vec();
+
+        if cfg!(debug_assertions) {
+            // assert units in asc order
+            units.iter().tuple_windows().for_each(|(a, b)| {
+                debug_assert_ne!(
+                    KeyComparator::compare_encoded_full_key(a.largest_key(), b.smallest_key()),
+                    std::cmp::Ordering::Greater
+                )
+            });
+        }
+
+        for psst in parent_ssts {
+            let mut idx = 0;
+            let mut pblk = 0;
+
+            while idx < units.len() && pblk < psst.block_count() {
+                let uleft = units[idx].smallest_key();
+                let uright = units[idx].largest_key();
+
+                let pleft = &psst.meta.block_metas[pblk].smallest_key;
+                let pright = if pblk + 1 == psst.block_count() {
+                    // `largest_key` can be included or excluded, both are treated as included here
+                    &psst.meta.largest_key
+                } else {
+                    &psst.meta.block_metas[pblk + 1].smallest_key
+                };
+
+                if uleft > pright {
+                    pblk += 1;
+                    continue;
+                }
+                if pleft > uright {
+                    idx += 1;
+                    continue;
+                }
+
+                // uleft <= pright && uleft >= pleft
+                if KeyComparator::compare_encoded_full_key(uleft, pright)
+                    != std::cmp::Ordering::Greater
+                    && KeyComparator::compare_encoded_full_key(uright, pleft)
+                        != std::cmp::Ordering::Less
+                {
+                    res.entry(SstableUnit {
+                        sst_obj_id: units[idx].sst.id,
+                        unit,
+                        uidx: units[idx].uidx,
+                        blks: units[idx].blks.clone(),
+                    })
+                    .or_default()
+                    .push(SstableBlock {
+                        sst_obj_id: psst.id,
+                        blk_idx: pblk,
+                    });
+                }
+
+                pblk += 1;
+            }
+        }
+
+        res
+    }
+
     async fn data_cache_refill(
         context: &CacheRefillContext,
         delta: &SstDeltaInfo,
@@ -318,7 +402,7 @@ impl CacheRefillTask {
             return;
         }
 
-        // return if filtered
+        // return if recent filter miss
         if !context
             .config
             .data_refill_levels
@@ -332,133 +416,219 @@ impl CacheRefillTask {
             return;
         }
 
-        let mut tasks = vec![];
-        for sst_info in &holders {
-            let task = async move {
-                if let Err(e) = Self::data_file_cache_refill_impl(context, sst_info.value()).await {
-                    tracing::warn!("data cache refill error: {:?}", e);
-                }
-            };
-            tasks.push(task);
-        }
+        let sstable_store = context.sstable_store.clone();
+        let futures = delta.delete_sst_object_ids.iter().map(|sst_obj_id| {
+            let store = sstable_store.clone();
+            async move { store.sstable_cached(*sst_obj_id).await }
+        });
+        let parent_ssts = match try_join_all(futures).await {
+            Ok(parent_ssts) => parent_ssts.into_iter().flatten().collect_vec(),
+            Err(e) => return tracing::error!("get old meta from cache error: {}", e),
+        };
+        let units = Self::filter(context, &holders, &parent_ssts);
+        let ssts: HashMap<HummockSstableObjectId, TableHolder> =
+            holders.into_iter().map(|meta| (meta.id, meta)).collect();
+        let ssts = Arc::new(ssts);
+        let futures = units.into_iter().map(|(unit, pblks)| {
+            let store = sstable_store.clone();
+            let ssts = ssts.clone();
+            async move {
+                let refill = pblks
+                    .into_iter()
+                    .flat_map(|pblk| {
+                        store.data_file_cache().exists(&SstableBlockIndex {
+                            sst_id: pblk.sst_obj_id,
+                            block_idx: pblk.blk_idx as u64,
+                        })
+                    })
+                    .any(|exists| exists);
+                let sst = ssts.get(&unit.sst_obj_id).unwrap();
 
-        join_all(tasks).await;
+                if refill && let Err(e) = Self::data_file_cache_unit_refill(context, sst, unit).await {
+                    tracing::error!("data file cache unit refill error: {}", e);
+                }
+            }
+        });
+        join_all(futures).await;
     }
 
-    async fn data_file_cache_refill_impl(
+    async fn data_file_cache_unit_refill(
         context: &CacheRefillContext,
         sst: &Sstable,
+        unit: SstableUnit,
     ) -> HummockResult<()> {
         let sstable_store = &context.sstable_store;
         let object_id = sst.id;
-        let unit = context.config.unit;
         let threshold = context.config.threshold;
 
         if let Some(filter) = sstable_store.data_recent_filter() {
             filter.insert(object_id);
         }
 
+        let blocks = unit.blks.size().unwrap();
+
+        GLOBAL_CACHE_REFILL_METRICS
+            .data_refill_ideal_bytes
+            .inc_by(blocks as u64);
+
         let mut tasks = vec![];
+        let mut writers = Vec::with_capacity(blocks);
+        let mut ranges = Vec::with_capacity(blocks);
+        let mut admits = 0;
 
-        // unit-level refill:
-        //
-        // Although file cache receivces item by block, a larger range of data is still recommended to reduce
-        // S3 iops and per request base latency waste.
-        //
-        // To decide which unit to refill, we calculate the ratio that the block of a unit will be received by
-        // file cache. If the ratio is higher than a threshold, we fetich and refill the whole unit by block.
+        let (range_first, _) = sst.calculate_block_info(unit.blks.start);
+        let (range_last, _) = sst.calculate_block_info(unit.blks.end - 1);
+        let range = range_first.start..range_last.end;
 
-        for block_index_start in (0..sst.block_count()).step_by(unit) {
-            let block_index_end = std::cmp::min(block_index_start + unit, sst.block_count());
+        for blk in unit.blks {
+            let (range, _uncompressed_capacity) = sst.calculate_block_info(blk);
+            let key = SstableBlockIndex {
+                sst_id: object_id,
+                block_idx: blk as u64,
+            };
+            // see `CachedBlock::serialized_len()`
+            let mut writer = sstable_store
+                .data_file_cache()
+                .writer(key, key.serialized_len() + 1 + 8 + range.size().unwrap());
 
-            let (range_first, _) = sst.calculate_block_info(block_index_start);
-            let (range_last, _) = sst.calculate_block_info(block_index_end - 1);
-            let range = range_first.start..range_last.end;
-
-            GLOBAL_CACHE_REFILL_METRICS
-                .data_refill_ideal_bytes
-                .inc_by((range.end - range.start) as u64);
-
-            let mut writers = Vec::with_capacity(block_index_end - block_index_start);
-            let mut ranges = Vec::with_capacity(block_index_end - block_index_start);
-            let mut admits = 0;
-
-            for block_index in block_index_start..block_index_end {
-                let (range, _uncompressed_capacity) = sst.calculate_block_info(block_index);
-                let key = SstableBlockIndex {
-                    sst_id: object_id,
-                    block_idx: block_index as u64,
-                };
-                // see `CachedBlock::serialized_len()`
-                let mut writer = sstable_store
-                    .data_file_cache()
-                    .writer(key, key.serialized_len() + 1 + 8 + range.size().unwrap());
-
-                if writer.judge() {
-                    admits += 1;
-                }
-
-                writers.push(writer);
-                ranges.push(range);
+            if writer.judge() {
+                admits += 1;
             }
 
-            if admits as f64 / writers.len() as f64 >= threshold {
-                let task = async move {
-                    GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
+            writers.push(writer);
+            ranges.push(range);
+        }
 
-                    let permit = context.concurrency.acquire().await.unwrap();
+        if admits as f64 / writers.len() as f64 >= threshold {
+            let task = async move {
+                GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
 
-                    GLOBAL_CACHE_REFILL_METRICS.data_refill_started_total.inc();
+                let permit = context.concurrency.acquire().await.unwrap();
 
-                    let timer = GLOBAL_CACHE_REFILL_METRICS
-                        .data_refill_success_duration
-                        .start_timer();
+                GLOBAL_CACHE_REFILL_METRICS.data_refill_started_total.inc();
 
-                    let data = sstable_store
-                        .store()
-                        .read(&sstable_store.get_sst_data_path(object_id), range.clone())
-                        .await?;
-                    let mut futures = vec![];
-                    for (mut writer, r) in writers.into_iter().zip_eq_fast(ranges) {
-                        let offset = r.start - range.start;
-                        let len = r.end - r.start;
-                        let bytes = data.slice(offset..offset + len);
+                let timer = GLOBAL_CACHE_REFILL_METRICS
+                    .data_refill_success_duration
+                    .start_timer();
 
-                        let future = async move {
-                            let value = CachedBlock::Fetched {
-                                bytes,
-                                uncompressed_capacity: writer.weight()
-                                    - writer.key().serialized_len(),
-                            };
-                            writer.force();
-                            // TODO(MrCroxx): compress if raw is not compressed?
-                            // skip compression for it may already be compressed.
-                            writer.set_compression(FileCacheCompression::None);
-                            let res = writer.finish(value).await.map_err(HummockError::file_cache);
-                            if matches!(res, Ok(true)) {
-                                GLOBAL_CACHE_REFILL_METRICS
-                                    .data_refill_success_bytes
-                                    .inc_by(len as u64);
-                            }
-                            res
+                let data = sstable_store
+                    .store()
+                    .read(&sstable_store.get_sst_data_path(object_id), range.clone())
+                    .await?;
+                let mut futures = vec![];
+                for (mut writer, r) in writers.into_iter().zip_eq_fast(ranges) {
+                    let offset = r.start - range.start;
+                    let len = r.end - r.start;
+                    let bytes = data.slice(offset..offset + len);
+
+                    let future = async move {
+                        let value = CachedBlock::Fetched {
+                            bytes,
+                            uncompressed_capacity: writer.weight() - writer.key().serialized_len(),
                         };
-                        futures.push(future);
-                    }
-                    try_join_all(futures)
-                        .await
-                        .map_err(HummockError::file_cache)?;
+                        writer.force();
+                        // TODO(MrCroxx): compress if raw is not compressed?
+                        // skip compression for it may already be compressed.
+                        writer.set_compression(FileCacheCompression::None);
+                        let res = writer.finish(value).await.map_err(HummockError::file_cache);
+                        if matches!(res, Ok(true)) {
+                            GLOBAL_CACHE_REFILL_METRICS
+                                .data_refill_success_bytes
+                                .inc_by(len as u64);
+                        }
+                        res
+                    };
+                    futures.push(future);
+                }
+                try_join_all(futures)
+                    .await
+                    .map_err(HummockError::file_cache)?;
 
-                    drop(permit);
-                    drop(timer);
+                drop(permit);
+                drop(timer);
 
-                    Ok::<_, HummockError>(())
-                };
-                tasks.push(task);
-            }
+                Ok::<_, HummockError>(())
+            };
+            tasks.push(task);
         }
 
         try_join_all(tasks).await?;
 
         Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct SstableBlock {
+    pub sst_obj_id: HummockSstableObjectId,
+    pub blk_idx: usize,
+}
+
+#[derive(Debug)]
+pub struct SstableUnit {
+    pub sst_obj_id: HummockSstableObjectId,
+    pub unit: usize,
+    pub uidx: usize,
+    pub blks: Range<usize>,
+}
+
+impl PartialEq for SstableUnit {
+    fn eq(&self, other: &Self) -> bool {
+        self.sst_obj_id == other.sst_obj_id && self.unit == other.unit
+    }
+}
+
+impl Eq for SstableUnit {}
+
+impl Ord for SstableUnit {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match self.sst_obj_id.cmp(&other.sst_obj_id) {
+            std::cmp::Ordering::Equal => {}
+            ord => return ord,
+        }
+        self.unit.cmp(&other.unit)
+    }
+}
+
+impl PartialOrd for SstableUnit {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[derive(Debug)]
+struct Unit<'a> {
+    sst: &'a Sstable,
+    _unit: usize,
+    uidx: usize,
+    blks: Range<usize>,
+}
+
+impl<'a> Unit<'a> {
+    fn new(sst: &'a Sstable, unit: usize, uidx: usize) -> Self {
+        let blks = unit * uidx..std::cmp::min(unit * (uidx + 1), sst.block_count());
+        Self {
+            sst,
+            _unit: unit,
+            uidx,
+            blks,
+        }
+    }
+
+    fn smallest_key(&self) -> &Vec<u8> {
+        &self.sst.meta.block_metas[self.blks.start].smallest_key
+    }
+
+    // `largest_key` can be included or excluded, both are treated as included here
+    fn largest_key(&self) -> &Vec<u8> {
+        if self.blks.end == self.sst.block_count() {
+            &self.sst.meta.largest_key
+        } else {
+            &self.sst.meta.block_metas[self.blks.end].smallest_key
+        }
+    }
+
+    fn units(sst: &Sstable, unit: usize) -> usize {
+        sst.block_count() / unit + if sst.block_count() % unit == 0 { 0 } else { 1 }
     }
 }
