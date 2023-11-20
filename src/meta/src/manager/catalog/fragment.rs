@@ -172,7 +172,7 @@ impl FragmentManager {
     pub async fn get_table_id_stream_scan_actor_mapping(
         &self,
         table_ids: &[TableId],
-    ) -> HashMap<TableId, Vec<ActorId>> {
+    ) -> HashMap<TableId, HashSet<ActorId>> {
         let map = &self.core.read().await.table_fragments;
         let mut table_map = HashMap::new();
         // TODO(kwannoel): Can this be unified with `PlanVisitor`?
@@ -186,13 +186,13 @@ impl FragmentManager {
         }
         for table_id in table_ids {
             if let Some(table_fragment) = map.get(table_id) {
-                let mut actors = vec![];
+                let mut actors = HashSet::new();
                 for fragment in table_fragment.fragments.values() {
                     for actor in &fragment.actors {
                         if let Some(node) = &actor.nodes
                             && has_stream_scan(node)
                         {
-                            actors.push(actor.actor_id)
+                            actors.insert(actor.actor_id);
                         } else {
                             tracing::trace!("ignoring actor: {:?}", actor);
                         }

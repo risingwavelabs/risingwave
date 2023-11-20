@@ -270,7 +270,7 @@ impl CreateMviewProgressTracker {
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
-        let table_map: HashMap<_, Vec<ActorId>> = table_map.into();
+        let table_map: HashMap<_, HashSet<ActorId>> = table_map.into();
         for (creating_table_id, actors) in table_map {
             // 1. Recover `BackfillState` in the tracker.
             let mut states = HashMap::new();
