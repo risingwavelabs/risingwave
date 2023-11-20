@@ -507,6 +507,35 @@ message StreamScanNode {
   plan_common.ExternalTableDesc cdc_table_desc = 10;
 }
 
+message StreamCdcScanNode {
+  uint32 table_id = 1;
+
+  // The columns from the upstream table that'll be internally required by this stream scan node.
+  // - For non-backfill stream scan node, it's the same as the output columns.
+  // - For backfill stream scan node, there're additionally primary key columns.
+  repeated int32 upstream_column_ids = 2;
+
+  // The columns to be output by this stream scan node. The index is based on the internal required columns.
+  // - For non-backfill stream scan node, it's simply all the columns.
+  // - For backfill stream scan node, this strips the primary key columns if they're unnecessary.
+  repeated uint32 output_indices = 3;
+
+  // Generally, the barrier needs to be rearranged during the MV creation process, so that data can
+  // be flushed to shared buffer periodically, instead of making the first epoch from batch query extra
+  // large. However, in some cases, e.g., shared state, the barrier cannot be rearranged in StreamScanNode.
+  // StreamScanType is used to decide which implementation for the StreamScanNode.
+  StreamScanType stream_scan_type = 4;
+
+  /// The state table used by Backfill operator for persisting internal state
+  catalog.Table state_table = 5;
+
+  // The rate limit for the stream scan node.
+  optional uint32 rate_limit = 8;
+
+  // The external table that will be backfilled for CDC.
+  plan_common.ExternalTableDesc cdc_table_desc = 10;
+}
+
 // BatchPlanNode is used for mv on mv snapshot read.
 // BatchPlanNode is supposed to carry a batch plan that can be optimized with the streaming plan_common.
 // Currently, streaming to batch push down is not yet supported, BatchPlanNode is simply a table scan.
