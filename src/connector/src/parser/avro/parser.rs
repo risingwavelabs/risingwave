@@ -203,6 +203,7 @@ mod test {
     use std::ops::Sub;
     use std::path::PathBuf;
 
+    use apache_avro::schema::RecordSchema;
     use apache_avro::types::{Record, Value};
     use apache_avro::{Codec, Days, Duration, Millis, Months, Reader, Schema, Writer};
     use itertools::Itertools;
@@ -471,12 +472,17 @@ mod test {
 
                 match build_field(inner_schema) {
                     None => {
-                        let index_of_union =
-                            union_schema.find_schema(&Value::Null).unwrap().0 as u32;
+                        let index_of_union = union_schema
+                            .find_schema_with_known_schemata::<&Schema>(&Value::Null, None, &None)
+                            .unwrap()
+                            .0 as u32;
                         Some(Value::Union(index_of_union, Box::new(Value::Null)))
                     }
                     Some(value) => {
-                        let index_of_union = union_schema.find_schema(&value).unwrap().0 as u32;
+                        let index_of_union = union_schema
+                            .find_schema_with_known_schemata::<&Schema>(&value, None, &None)
+                            .unwrap()
+                            .0 as u32;
                         Some(Value::Union(index_of_union, Box::new(value)))
                     }
                 }
@@ -487,9 +493,9 @@ mod test {
 
     fn build_avro_data(schema: &Schema) -> Record<'_> {
         let mut record = Record::new(schema).unwrap();
-        if let Schema::Record {
+        if let Schema::Record(RecordSchema {
             name: _, fields, ..
-        } = schema.clone()
+        }) = schema.clone()
         {
             for field in &fields {
                 let value = build_field(&field.schema)
@@ -513,7 +519,6 @@ mod test {
     #[tokio::test]
     async fn test_new_avro_parser() {
         let avro_parser_rs = new_avro_parser_from_local("simple-schema.avsc").await;
-        assert!(avro_parser_rs.is_ok());
         let avro_parser = avro_parser_rs.unwrap();
         println!("avro_parser = {:?}", avro_parser);
     }

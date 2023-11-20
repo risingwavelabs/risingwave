@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use apache_avro::schema::Schema as AvroSchema;
+use apache_avro::schema::{RecordSchema, Schema as AvroSchema};
 use apache_avro::types::{Record, Value};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
@@ -250,7 +250,7 @@ fn validate_fields<'rw>(
     rw_fields: impl Iterator<Item = (&'rw str, &'rw DataType)>,
     avro: &AvroSchema,
 ) -> Result<()> {
-    let AvroSchema::Record { fields, lookup, .. } = avro else {
+    let AvroSchema::Record(RecordSchema { fields, lookup, .. }) = avro else {
         return Err(FieldEncodeError::new(format!(
             "expect avro record but got {}",
             avro.canonical_form(),
@@ -283,7 +283,7 @@ fn encode_fields<'avro, 'rw>(
     schema: &'avro AvroSchema,
 ) -> Result<Record<'avro>> {
     let mut record = Record::new(schema).unwrap();
-    let AvroSchema::Record { fields, lookup, .. } = schema else {
+    let AvroSchema::Record(RecordSchema { fields, lookup, .. }) = schema else {
         unreachable!()
     };
     let mut present = vec![false; fields.len()];
