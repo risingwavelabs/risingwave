@@ -2548,6 +2548,7 @@ impl HummockManager {
                             });
                         }
                     } else {
+                        // For creating table, relax the checking restrictions to make the data alignment behavior more sensitive.
                         let sum = history.iter().sum::<u64>();
                         is_low_write_throughput = sum
                             < self.env.opts.min_table_split_write_throughput
