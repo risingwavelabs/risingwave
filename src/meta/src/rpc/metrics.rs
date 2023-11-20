@@ -24,10 +24,13 @@ use prometheus::{
     register_int_counter_with_registry, register_int_gauge_with_registry, Histogram, HistogramVec,
     IntCounter, IntGauge, Registry,
 };
-use risingwave_common::metrics::{LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec};
+use risingwave_common::metrics::{
+    LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
+};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
-    register_guarded_int_counter_vec_with_registry, register_guarded_int_gauge_vec_with_registry,
+    register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
+    register_guarded_int_gauge_vec_with_registry,
 };
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_object_store::object::object_metrics::{
@@ -52,7 +55,7 @@ pub struct MetaMetrics {
 
     /// ********************************** gRPC ************************************
     /// gRPC latency of meta services
-    pub grpc_latency: HistogramVec,
+    pub grpc_latency: LabelGuardedHistogramVec<1>,
 
     /// ********************************** Barrier ************************************
     /// The duration from barrier injection to commit
@@ -134,7 +137,7 @@ pub struct MetaMetrics {
     /// Latency for hummock manager to acquire lock
     pub hummock_manager_lock_time: HistogramVec,
     /// Latency for hummock manager to really process a request after acquire the lock
-    pub hummock_manager_real_process_time: HistogramVec,
+    pub hummock_manager_real_process_time: LabelGuardedHistogramVec<1>,
     /// The number of compactions from one level to another level that have been skipped
     pub compact_skip_frequency: LabelGuardedIntCounterVec<2>,
     /// Bytes of lsm tree needed to reach balance
@@ -144,9 +147,9 @@ pub struct MetaMetrics {
     /// Per level number of running compaction task
     pub level_compact_task_cnt: LabelGuardedIntGaugeVec<1>,
     pub time_after_last_observation: Arc<AtomicU64>,
-    pub l0_compact_level_count: HistogramVec,
-    pub compact_task_size: HistogramVec,
-    pub compact_task_file_count: HistogramVec,
+    pub l0_compact_level_count: LabelGuardedHistogramVec<2>,
+    pub compact_task_size: LabelGuardedHistogramVec<2>,
+    pub compact_task_file_count: LabelGuardedHistogramVec<2>,
     pub move_state_table_count: LabelGuardedIntCounterVec<1>,
     pub state_table_count: LabelGuardedIntGaugeVec<1>,
     pub branched_sst_count: LabelGuardedIntGaugeVec<1>,
@@ -186,7 +189,7 @@ impl MetaMetrics {
             exponential_buckets(0.0001, 2.0, 20).unwrap() // max 52s
         );
         let grpc_latency =
-            register_histogram_vec_with_registry!(opts, &["path"], registry).unwrap();
+            register_guarded_histogram_vec_with_registry!(opts, &["path"], registry).unwrap();
 
         let opts = histogram_opts!(
             "meta_barrier_duration_seconds",
@@ -442,7 +445,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let hummock_manager_real_process_time = register_histogram_vec_with_registry!(
+        let hummock_manager_real_process_time = register_guarded_histogram_vec_with_registry!(
             "meta_hummock_manager_real_process_time",
             "latency for hummock manager to really process the request",
             &["method"],
@@ -544,7 +547,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let l0_compact_level_count = register_histogram_vec_with_registry!(
+        let l0_compact_level_count = register_guarded_histogram_vec_with_registry!(
             "storage_l0_compact_level_count",
             "level_count of l0 compact task",
             &["group", "type"],
@@ -559,9 +562,10 @@ impl MetaMetrics {
         );
 
         let compact_task_size =
-            register_histogram_vec_with_registry!(opts, &["group", "type"], registry).unwrap();
+            register_guarded_histogram_vec_with_registry!(opts, &["group", "type"], registry)
+                .unwrap();
 
-        let compact_task_file_count = register_histogram_vec_with_registry!(
+        let compact_task_file_count = register_guarded_histogram_vec_with_registry!(
             "storage_compact_task_file_count",
             "file count of compact task",
             &["group", "type"],
