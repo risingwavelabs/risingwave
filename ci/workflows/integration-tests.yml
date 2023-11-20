@@ -158,4 +158,4 @@ steps:
         - with:
             testcase: "kafka-cdc-sink"
             format: "protobuf"
-            skip: true
+          skip: true
