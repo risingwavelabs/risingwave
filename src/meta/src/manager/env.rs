@@ -171,6 +171,7 @@ pub struct MetaOpts {
     pub compaction_config: Option<CompactionConfig>,
 
     pub enable_sst_vnode_bitmap: bool,
+    pub advertise_addr: String,
 }
 
 impl MetaOpts {
@@ -212,6 +213,7 @@ impl MetaOpts {
             compaction_task_max_heartbeat_interval_secs: 0,
             compaction_config: None,
             enable_sst_vnode_bitmap: false,
+            advertise_addr: "".to_string(),
         }
     }
 }
