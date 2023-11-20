@@ -346,6 +346,7 @@ pub async fn setup_compute_env_with_metric(
                 is_serving: true,
                 is_unschedulable: false,
             },
+            Default::default(),
         )
         .await
         .unwrap();

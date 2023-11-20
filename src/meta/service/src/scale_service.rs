@@ -88,7 +88,7 @@ impl ScaleService for ScaleServiceImpl {
 
         let worker_nodes = self
             .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode, None)
+            .list_worker_node(Some(WorkerType::ComputeNode), None)
             .await;
 
         let actor_splits = self

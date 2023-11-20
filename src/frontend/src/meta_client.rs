@@ -18,6 +18,7 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -96,6 +97,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_hummock_active_write_limits(&self) -> Result<HashMap<u64, WriteLimit>>;
 
     async fn list_hummock_meta_configs(&self) -> Result<HashMap<String, String>>;
+
+    async fn list_all_nodes(&self) -> Result<Vec<WorkerNode>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -239,5 +242,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_hummock_meta_configs(&self) -> Result<HashMap<String, String>> {
         self.0.list_hummock_meta_config().await
+    }
+
+    async fn list_all_nodes(&self) -> Result<Vec<WorkerNode>> {
+        self.0.list_worker_nodes(None).await
     }
 }
