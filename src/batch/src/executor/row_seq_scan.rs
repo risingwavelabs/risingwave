@@ -405,6 +405,8 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 (next_col_bounds.1, next_col_bounds.0)
             };
 
+        let start_bound_is_unbounded = matches!(start_bound, Bound::Unbounded);
+
         // Range Scan.
         assert!(pk_prefix.len() < table.pk_indices().len());
         let iter = table
@@ -413,7 +415,19 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 &pk_prefix,
                 (
                     start_bound.map(|x| OwnedRow::new(vec![x])),
-                    end_bound.map(|x| OwnedRow::new(vec![x])),
+                    match end_bound {
+                        Bound::Unbounded => {
+                            if start_bound_is_unbounded {
+                                // Both start and end are unbounded, so we need to select all rows.
+                                Bound::Unbounded
+                            } else {
+                                // Since Null is the largest value, we need to skip it for range scan to meet the sql semantics.
+                                Bound::Excluded(OwnedRow::new(vec![None]))
+                            }
+                        }
+                        Bound::Included(x) => Bound::Included(OwnedRow::new(vec![x])),
+                        Bound::Excluded(x) => Bound::Excluded(OwnedRow::new(vec![x])),
+                    },
                 ),
                 ordered,
                 PrefetchOptions::new_for_large_range_scan(),
