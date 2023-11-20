@@ -416,9 +416,47 @@ impl CacheRefillTask {
             return;
         }
 
+        if delta.insert_sst_level == 0 {
+            Self::data_file_cache_refill_l0_impl(context, delta, holders).await;
+        } else {
+            Self::data_file_cache_impl(context, delta, holders).await;
+        }
+    }
+
+    async fn data_file_cache_refill_l0_impl(
+        context: &CacheRefillContext,
+        _delta: &SstDeltaInfo,
+        holders: Vec<TableHolder>,
+    ) {
+        let unit = context.config.unit;
+
+        let mut futures = vec![];
+
+        for sst in &holders {
+            for (uidx, blk_start) in (0..sst.block_count()).step_by(unit).enumerate() {
+                let blk_end = std::cmp::min(sst.block_count(), blk_start + unit);
+                let unit = SstableUnit {
+                    sst_obj_id: sst.id,
+                    unit,
+                    uidx,
+                    blks: blk_start..blk_end,
+                };
+                futures.push(
+                    async move { Self::data_file_cache_refill_unit(context, sst, unit).await },
+                );
+            }
+        }
+        join_all(futures).await;
+    }
+
+    async fn data_file_cache_impl(
+        context: &CacheRefillContext,
+        delta: &SstDeltaInfo,
+        holders: Vec<TableHolder>,
+    ) {
         let sstable_store = context.sstable_store.clone();
         let futures = delta.delete_sst_object_ids.iter().map(|sst_obj_id| {
-            let store = sstable_store.clone();
+            let store = &sstable_store;
             async move { store.sstable_cached(*sst_obj_id).await }
         });
         let parent_ssts = match try_join_all(futures).await {
@@ -428,10 +466,9 @@ impl CacheRefillTask {
         let units = Self::filter(context, &holders, &parent_ssts);
         let ssts: HashMap<HummockSstableObjectId, TableHolder> =
             holders.into_iter().map(|meta| (meta.id, meta)).collect();
-        let ssts = Arc::new(ssts);
         let futures = units.into_iter().map(|(unit, pblks)| {
-            let store = sstable_store.clone();
-            let ssts = ssts.clone();
+            let store = &sstable_store;
+            let ssts = &ssts;
             async move {
                 let refill = pblks
                     .into_iter()
@@ -444,7 +481,7 @@ impl CacheRefillTask {
                     .any(|exists| exists);
                 let sst = ssts.get(&unit.sst_obj_id).unwrap();
 
-                if refill && let Err(e) = Self::data_file_cache_unit_refill(context, sst, unit).await {
+                if refill && let Err(e) = Self::data_file_cache_refill_unit(context, sst, unit).await {
                     tracing::error!("data file cache unit refill error: {}", e);
                 }
             }
@@ -452,7 +489,7 @@ impl CacheRefillTask {
         join_all(futures).await;
     }
 
-    async fn data_file_cache_unit_refill(
+    async fn data_file_cache_refill_unit(
         context: &CacheRefillContext,
         sst: &Sstable,
         unit: SstableUnit,
