@@ -633,7 +633,7 @@ impl HummockManager {
 
     /// Unpin all pins which belongs to `context_id` and has an id which is older than
     /// `unpin_before`. All versions >= `unpin_before` will be treated as if they are all pinned by
-    /// this `context_id` so they will not be vacummed.
+    /// this `context_id` so they will not be vacuumed.
     #[named]
     pub async fn unpin_version_before(
         &self,
@@ -650,6 +650,12 @@ impl HummockManager {
                 context_id,
                 min_pinned_id: 0,
             },
+        );
+        assert!(
+            context_pinned_version.min_pinned_id <= unpin_before,
+            "val must be monotonically non-decreasing. old = {}, new = {}.",
+            context_pinned_version.min_pinned_id,
+            unpin_before
         );
         context_pinned_version.min_pinned_id = unpin_before;
         commit_multi_var!(

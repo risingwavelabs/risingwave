@@ -36,15 +36,14 @@ use crate::storage_value::StorageValue;
 
 pub trait StaticSendSync = Send + Sync + 'static;
 
-pub trait StateStoreIter: StaticSendSync {
+pub trait StateStoreIter: Send + Sync {
     type Item: Send;
 
     fn next(&mut self) -> impl Future<Output = StorageResult<Option<Self::Item>>> + Send + '_;
 }
 
-pub trait StateStoreIterStreamTrait<Item> = Stream<Item = StorageResult<Item>> + Send + 'static;
 pub trait StateStoreIterExt: StateStoreIter {
-    type ItemStream: StateStoreIterStreamTrait<<Self as StateStoreIter>::Item>;
+    type ItemStream: Stream<Item = StorageResult<<Self as StateStoreIter>::Item>> + Send;
 
     fn into_stream(self) -> Self::ItemStream;
 }
@@ -120,7 +119,7 @@ impl<S: StateStoreRead> StateStoreReadExt for S {
         mut read_options: ReadOptions,
     ) -> StorageResult<Vec<StateStoreIterItem>> {
         if limit.is_some() {
-            read_options.prefetch_options.exhaust_iter = false;
+            read_options.prefetch_options.preload = false;
         }
         let limit = limit.unwrap_or(usize::MAX);
         self.iter(key_range, epoch, read_options)
@@ -274,23 +273,25 @@ pub trait LocalStateStore: StaticSendSync {
 pub struct PrefetchOptions {
     /// `exhaust_iter` is set `true` only if the return value of `iter()` will definitely be
     /// exhausted, i.e., will iterate until end.
-    pub exhaust_iter: bool,
+    pub preload: bool,
 }
 
 impl PrefetchOptions {
-    pub fn new_for_exhaust_iter() -> Self {
+    pub fn new_for_large_range_scan() -> Self {
         Self::new_with_exhaust_iter(true)
     }
 
     pub fn new_with_exhaust_iter(exhaust_iter: bool) -> Self {
-        Self { exhaust_iter }
+        Self {
+            preload: exhaust_iter,
+        }
     }
 }
 
 impl From<TracedPrefetchOptions> for PrefetchOptions {
     fn from(value: TracedPrefetchOptions) -> Self {
         Self {
-            exhaust_iter: value.exhaust_iter,
+            preload: value.exhaust_iter,
         }
     }
 }
@@ -298,7 +299,7 @@ impl From<TracedPrefetchOptions> for PrefetchOptions {
 impl From<PrefetchOptions> for TracedPrefetchOptions {
     fn from(value: PrefetchOptions) -> Self {
         Self {
-            exhaust_iter: value.exhaust_iter,
+            exhaust_iter: value.preload,
         }
     }
 }

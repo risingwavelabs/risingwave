@@ -25,7 +25,7 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_iterator_test_sstable_base, iterator_test_key_of,
+        default_builder_opt_for_test, gen_iterator_test_sstable_info, iterator_test_key_of,
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::HummockIterator;
@@ -34,7 +34,7 @@ mod tests {
     #[tokio::test]
     async fn test_backward_concat_iterator() {
         let sstable_store = mock_sstable_store();
-        let table0 = gen_iterator_test_sstable_base(
+        let table0 = gen_iterator_test_sstable_info(
             0,
             default_builder_opt_for_test(),
             |x| x,
@@ -42,7 +42,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table1 = gen_iterator_test_sstable_base(
+        let table1 = gen_iterator_test_sstable_info(
             1,
             default_builder_opt_for_test(),
             |x| TEST_KEYS_COUNT + x,
@@ -50,7 +50,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table2 = gen_iterator_test_sstable_base(
+        let table2 = gen_iterator_test_sstable_info(
             2,
             default_builder_opt_for_test(),
             |x| TEST_KEYS_COUNT * 2 + x,
@@ -59,11 +59,7 @@ mod tests {
         )
         .await;
         let mut iter = BackwardConcatIterator::new(
-            vec![
-                table2.get_sstable_info(),
-                table1.get_sstable_info(),
-                table0.get_sstable_info(),
-            ],
+            vec![table2, table1, table0],
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
         );
@@ -97,7 +93,7 @@ mod tests {
     #[tokio::test]
     async fn test_backward_concat_seek_exists() {
         let sstable_store = mock_sstable_store();
-        let table1 = gen_iterator_test_sstable_base(
+        let table1 = gen_iterator_test_sstable_info(
             0,
             default_builder_opt_for_test(),
             |x| TEST_KEYS_COUNT + x,
@@ -105,7 +101,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table2 = gen_iterator_test_sstable_base(
+        let table2 = gen_iterator_test_sstable_info(
             1,
             default_builder_opt_for_test(),
             |x| TEST_KEYS_COUNT * 2 + x,
@@ -113,7 +109,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table3 = gen_iterator_test_sstable_base(
+        let table3 = gen_iterator_test_sstable_info(
             2,
             default_builder_opt_for_test(),
             |x| TEST_KEYS_COUNT * 3 + x,
@@ -122,11 +118,7 @@ mod tests {
         )
         .await;
         let mut iter = BackwardConcatIterator::new(
-            vec![
-                table3.get_sstable_info(),
-                table2.get_sstable_info(),
-                table1.get_sstable_info(),
-            ],
+            vec![table3, table2, table1],
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
         );
@@ -178,7 +170,7 @@ mod tests {
     #[tokio::test]
     async fn test_backward_concat_seek_not_exists() {
         let sstable_store = mock_sstable_store();
-        let table0 = gen_iterator_test_sstable_base(
+        let table0 = gen_iterator_test_sstable_info(
             0,
             default_builder_opt_for_test(),
             |x| x * 2,
@@ -186,7 +178,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table1 = gen_iterator_test_sstable_base(
+        let table1 = gen_iterator_test_sstable_info(
             1,
             default_builder_opt_for_test(),
             |x| (TEST_KEYS_COUNT + x) * 2,
@@ -194,7 +186,7 @@ mod tests {
             TEST_KEYS_COUNT,
         )
         .await;
-        let table2 = gen_iterator_test_sstable_base(
+        let table2 = gen_iterator_test_sstable_info(
             2,
             default_builder_opt_for_test(),
             |x| (TEST_KEYS_COUNT * 2 + x) * 2,
@@ -203,11 +195,7 @@ mod tests {
         )
         .await;
         let mut iter = BackwardConcatIterator::new(
-            vec![
-                table2.get_sstable_info(),
-                table1.get_sstable_info(),
-                table0.get_sstable_info(),
-            ],
+            vec![table2, table1, table0],
             sstable_store,
             Arc::new(SstableIteratorReadOptions::default()),
         );

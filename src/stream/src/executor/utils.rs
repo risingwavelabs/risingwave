@@ -23,14 +23,8 @@ pub struct DummyExecutor {
 }
 
 impl DummyExecutor {
-    pub fn new() -> Self {
-        Self {
-            info: ExecutorInfo {
-                schema: Schema::empty().clone(),
-                pk_indices: vec![],
-                identity: "DummyExecutor".to_string(),
-            },
-        }
+    pub fn new(info: ExecutorInfo) -> Self {
+        Self { info }
     }
 }
 

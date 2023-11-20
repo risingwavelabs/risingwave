@@ -40,9 +40,9 @@ impl KinesisMessage {
     pub fn new(shard_id: SplitId, message: Record) -> Self {
         KinesisMessage {
             shard_id,
-            sequence_number: message.sequence_number.unwrap(),
-            partition_key: message.partition_key.unwrap(),
-            payload: message.data.unwrap().into_inner(),
+            sequence_number: message.sequence_number,
+            partition_key: message.partition_key,
+            payload: message.data.into_inner(),
         }
     }
 }

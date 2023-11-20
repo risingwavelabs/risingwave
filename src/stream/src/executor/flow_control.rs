@@ -32,12 +32,22 @@ use super::*;
 /// It is used to throttle problematic MVs that are consuming too much resources.
 pub struct FlowControlExecutor {
     input: BoxedExecutor,
+    identity: String,
     rate_limit: Option<u32>,
 }
 
 impl FlowControlExecutor {
     pub fn new(input: Box<dyn Executor>, rate_limit: Option<u32>) -> Self {
-        Self { input, rate_limit }
+        let identity = if rate_limit.is_some() {
+            format!("{} (flow controlled)", input.identity())
+        } else {
+            input.identity().to_owned()
+        };
+        Self {
+            input,
+            identity,
+            rate_limit,
+        }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -97,6 +107,6 @@ impl Executor for FlowControlExecutor {
     }
 
     fn identity(&self) -> &str {
-        "FlowControlExecutor"
+        &self.identity
     }
 }

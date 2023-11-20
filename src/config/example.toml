@@ -99,6 +99,7 @@ min_sst_size_for_streaming_upload = 33554432
 max_sub_compaction = 4
 max_concurrent_compaction_task_number = 16
 max_preload_wait_time_mill = 0
+max_version_pinning_duration_sec = 10800
 object_store_streaming_read_timeout_ms = 600000
 object_store_streaming_upload_timeout_ms = 600000
 object_store_upload_timeout_ms = 3600000
@@ -113,6 +114,7 @@ compactor_max_sst_key_count = 2097152
 compact_iter_recreate_timeout_ms = 600000
 compactor_max_sst_size = 536870912
 enable_fast_compaction = true
+max_preload_io_retry_times = 3
 mem_table_spill_threshold = 4194304
 
 [storage.data_file_cache]

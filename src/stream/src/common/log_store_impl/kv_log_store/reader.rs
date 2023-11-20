@@ -123,7 +123,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                         (Included(range_start), Excluded(range_end)),
                         MAX_EPOCH,
                         ReadOptions {
-                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                            prefetch_options: PrefetchOptions::default(),
                             cache_policy: CachePolicy::Fill(CachePriority::Low),
                             table_id,
                             ..Default::default()
@@ -234,8 +234,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                             (Included(range_start), Included(range_end)),
                                             MAX_EPOCH,
                                             ReadOptions {
-                                                prefetch_options:
-                                                    PrefetchOptions::new_for_exhaust_iter(),
+                                                prefetch_options: PrefetchOptions::default(),
                                                 cache_policy: CachePolicy::Fill(CachePriority::Low),
                                                 table_id,
                                                 ..Default::default()
