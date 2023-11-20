@@ -63,6 +63,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
             StreamScanType::Rearrange => {
                 RearrangedChainExecutor::new(params.info, snapshot, upstream, progress).boxed()
             }
+            // NOTE(kwannoel): This path is deprecated, only kept for backwards compatibility.
             StreamScanType::CdcBackfill => {
                 let table_desc: &ExternalTableDesc = node.get_cdc_table_desc()?;
 

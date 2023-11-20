@@ -27,7 +27,6 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
-    StreamScanType,
 };
 
 use super::id::GlobalFragmentIdsExt;
@@ -146,7 +145,7 @@ impl ActorBuilder {
                     link_id: stream_node.get_operator_id(),
                 }];
 
-                tracing::info!(
+                tracing::debug!(
                     "rewrite leaf exchange node: fields {:?}, upstreams {:?}",
                     stream_node.get_fields(),
                     upstreams,
@@ -166,9 +165,6 @@ impl ActorBuilder {
 
             // "Leaf" node `StreamScan`.
             NodeBody::StreamScan(stream_scan) => {
-                let cdc_backfill =
-                    stream_scan.stream_scan_type == StreamScanType::CdcBackfill as i32;
-
                 let input = stream_node.get_input();
                 assert_eq!(input.len(), 2);
 
@@ -194,16 +190,49 @@ impl ActorBuilder {
                         node_body: Some(NodeBody::Merge(MergeNode {
                             upstream_actor_id,
                             upstream_fragment_id: upstreams.fragment_id.as_global_id(),
-                            upstream_dispatcher_type: if cdc_backfill {
-                                DispatcherType::CdcTablename as _
-                            } else {
-                                DispatcherType::NoShuffle as _
-                            },
+                            upstream_dispatcher_type: DispatcherType::NoShuffle as _,
                             fields: merge_node.fields.clone(),
                         })),
                         ..merge_node.clone()
                     },
                     batch_plan_node.clone(),
+                ];
+
+                Ok(StreamNode {
+                    input,
+                    ..stream_node.clone()
+                })
+            }
+
+            // "Leaf" node `StreamScan`.
+            NodeBody::StreamCdcScan(stream_scan) => {
+                let input = stream_node.get_input();
+                assert_eq!(input.len(), 1);
+
+                let merge_node = &input[0];
+                assert_matches!(merge_node.node_body, Some(NodeBody::Merge(_)));
+
+                // Index the upstreams by the an external edge ID.
+                let upstreams = &self.upstreams[&EdgeId::UpstreamExternal {
+                    upstream_table_id: stream_scan.table_id.into(),
+                    downstream_fragment_id: self.fragment_id,
+                }];
+
+                // Upstream Cdc Source should be singleton.
+                let upstream_actor_id = upstreams.actors.as_global_ids();
+                assert_eq!(upstream_actor_id.len(), 1);
+
+                let input = vec![
+                    // Fill the merge node body with correct upstream info.
+                    StreamNode {
+                        node_body: Some(NodeBody::Merge(MergeNode {
+                            upstream_actor_id,
+                            upstream_fragment_id: upstreams.fragment_id.as_global_id(),
+                            upstream_dispatcher_type: DispatcherType::CdcTablename as _,
+                            fields: merge_node.fields.clone(),
+                        })),
+                        ..merge_node.clone()
+                    },
                 ];
 
                 Ok(StreamNode {

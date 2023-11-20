@@ -17,8 +17,8 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
-use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::PbStreamNode;
 
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
@@ -37,13 +37,12 @@ use crate::{Explain, TableCatalog};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamCdcTableScan {
     pub base: PlanBase<Stream>,
-    core: generic::Scan,
+    core: generic::CdcScan,
     batch_plan_id: PlanNodeId,
-    stream_scan_type: StreamScanType,
 }
 
 impl StreamCdcTableScan {
-    pub fn new(core: generic::Scan) -> Self {
+    pub fn new(core: generic::CdcScan) -> Self {
         let batch_plan_id = core.ctx.next_plan_node_id();
         let distribution = Distribution::SomeShard;
         let base = PlanBase::new_stream_with_core(
@@ -57,7 +56,6 @@ impl StreamCdcTableScan {
             base,
             core,
             batch_plan_id,
-            stream_scan_type: StreamScanType::CdcBackfill,
         }
     }
 
@@ -65,12 +63,8 @@ impl StreamCdcTableScan {
         &self.core.table_name
     }
 
-    pub fn core(&self) -> &generic::Scan {
+    pub fn core(&self) -> &generic::CdcScan {
         &self.core
-    }
-
-    pub fn stream_scan_type(&self) -> StreamScanType {
-        StreamScanType::CdcBackfill
     }
 
     /// Build catalog for cdc backfill state
@@ -166,20 +160,6 @@ impl StreamCdcTableScan {
             .map(ColumnId::get_id)
             .collect_vec();
 
-        // The schema of the snapshot read stream
-        let snapshot_schema = upstream_column_ids
-            .iter()
-            .map(|&id| {
-                let col = self
-                    .core
-                    .get_table_columns()
-                    .iter()
-                    .find(|c| c.column_id.get_id() == id)
-                    .unwrap();
-                Field::from(col).to_prost()
-            })
-            .collect_vec();
-
         // The schema of the shared cdc source upstream is different from snapshot,
         // refer to `debezium_cdc_source_schema()` for details.
         let (upstream_schema, row_id_index) = {
@@ -206,11 +186,6 @@ impl StreamCdcTableScan {
                     .unwrap() as u32
             })
             .collect_vec();
-
-        let batch_plan_node = BatchPlanNode {
-            table_desc: None,
-            column_ids: upstream_column_ids.clone(),
-        };
 
         let catalog = self
             .build_backfill_state_catalog(state)
@@ -296,21 +271,18 @@ impl StreamCdcTableScan {
             })),
         };
 
-        let stream_scan_body = PbNodeBody::StreamScan(StreamScanNode {
+        let stream_scan_body = PbNodeBody::StreamScan(StreamCdcScanNode {
             table_id: upstream_source_id,
-            stream_scan_type: self.stream_scan_type as i32,
-            // The column indices need to be forwarded to the downstream
-            output_indices,
             upstream_column_ids,
+            output_indices,
             // The table desc used by backfill executor
             state_table: Some(catalog),
-            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+            // rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
             cdc_table_desc: Some(self.core.cdc_table_desc.to_protobuf()),
-            ..Default::default()
         });
 
         // plan: merge -> filter -> exchange(simple) -> stream_scan
-        StreamNode {
+        PbStreamNode {
             fields: self.schema().to_prost(),
             input: vec![
                 exchange_stream_node,
@@ -340,7 +312,7 @@ impl ExprRewritable for StreamCdcTableScan {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut core = self.core.clone();
+        let core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core).into()
     }
