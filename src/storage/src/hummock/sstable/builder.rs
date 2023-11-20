@@ -140,7 +140,6 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     memory_limiter: Option<Arc<MemoryLimiter>>,
 
     vnode_bitmap_mapping: HashMap<u32, BitmapBuilder>,
-    last_vnode: usize,
     enable_vnode_bitmap: bool,
 }
 
@@ -192,7 +191,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             epoch_set: BTreeSet::default(),
             memory_limiter,
             vnode_bitmap_mapping: HashMap::default(),
-            last_vnode: usize::MAX,
             enable_vnode_bitmap,
         }
     }
@@ -344,7 +342,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
             // init vnode bitmap builder
             if self.enable_vnode_bitmap {
-                self.last_vnode = usize::MAX;
                 self.vnode_bitmap_mapping
                     .insert(table_id, BitmapBuilder::zeroed(VirtualNode::COUNT));
             }
@@ -373,11 +370,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         if self.enable_vnode_bitmap {
             let vnode_id = full_key.user_key.get_vnode_id();
-
-            if vnode_id != self.last_vnode {
-                let vnode_bitmap_builder = self.vnode_bitmap_mapping.get_mut(&table_id).unwrap();
-                vnode_bitmap_builder.set(vnode_id, true);
-                self.last_vnode = vnode_id;
+            if let Some(vnode_bitmap_builder) = self.vnode_bitmap_mapping.get_mut(&table_id) {
+                vnode_bitmap_builder.set(vnode_id, true)
             }
         }
 
