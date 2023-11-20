@@ -170,13 +170,20 @@ impl BuildingFragment {
         let mut table_columns = HashMap::new();
 
         stream_graph_visitor::visit_fragment(fragment, |node_body| {
-            if let NodeBody::StreamScan(stream_scan) = node_body {
-                let table_id = stream_scan.table_id.into();
-                let column_ids = stream_scan.upstream_column_ids.clone();
-                table_columns
-                    .try_insert(table_id, column_ids)
-                    .expect("currently there should be no two same upstream tables in a fragment");
-            }
+            let (table_id, column_ids) = match node_body {
+                NodeBody::StreamScan(stream_scan) => (
+                    stream_scan.table_id.into(),
+                    stream_scan.upstream_column_ids.clone(),
+                ),
+                NodeBody::StreamCdcScan(stream_cdc_scan) => (
+                    stream_cdc_scan.table_id.into(),
+                    stream_cdc_scan.upstream_column_ids.clone(),
+                ),
+                _ => return,
+            };
+            table_columns
+                .try_insert(table_id, column_ids)
+                .expect("currently there should be no two same upstream tables in a fragment");
         });
 
         assert_eq!(table_columns.len(), fragment.upstream_table_ids.len());
