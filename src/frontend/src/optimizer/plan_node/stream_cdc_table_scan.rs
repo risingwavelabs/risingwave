@@ -188,16 +188,13 @@ impl StreamCdcTableScan {
 
         // We need to pass the id of upstream source job here
         let upstream_source_id = self.core.cdc_table_desc.source_id.table_id;
-        let node_body = PbNodeBody::StreamScan(StreamScanNode {
+        let node_body = PbNodeBody::StreamCdcScan(StreamCdcScanNode {
             table_id: upstream_source_id,
-            // The column indices need to be forwarded to the downstream
-            output_indices,
             upstream_column_ids,
+            output_indices,
             // The table desc used by backfill executor
             state_table: Some(catalog),
-            rate_limit: None,
             cdc_table_desc: Some(self.core.cdc_table_desc.to_protobuf()),
-            ..Default::default()
         });
 
         PbStreamNode {
