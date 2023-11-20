@@ -111,12 +111,7 @@ impl StreamNode for StreamFsFetch {
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
             properties: source_catalog.properties.clone().into_iter().collect(),
-            rate_limit: self
-                .base
-                .ctx()
-                .session_ctx()
-                .config()
-                .get_streaming_rate_limit(),
+            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
         });
         NodeBody::StreamFsFetch(StreamFsFetchNode {
             node_inner: source_inner,

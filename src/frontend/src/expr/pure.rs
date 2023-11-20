@@ -239,7 +239,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::PgSleepFor
             | expr_node::Type::PgSleepUntil
             | expr_node::Type::ColDescription
-            | expr_node::Type::CastRegclass => true,
+            | expr_node::Type::CastRegclass
+            | expr_node::Type::MakeTimestamptz => true,
         }
     }
 }
