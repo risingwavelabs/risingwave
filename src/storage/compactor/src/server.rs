@@ -27,7 +27,7 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::resource_util;
+use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -87,18 +87,18 @@ pub async fn prepare_start_parameters(
         &system_params_reader,
         &storage_memory_config,
     )));
-    let total_memory_available_bytes =
-        (resource_util::memory::system_memory_available_bytes() as f64
-            * config.storage.compactor_memory_available_proportion) as usize;
+    let non_reserved_memory_bytes = (system_memory_available_bytes() as f64
+        * config.storage.compactor_memory_available_proportion)
+        as usize;
     let meta_cache_capacity_bytes = storage_opts.meta_cache_capacity_mb * (1 << 20);
     let compactor_memory_limit_bytes = match config.storage.compactor_memory_limit_mb {
         Some(compactor_memory_limit_mb) => compactor_memory_limit_mb as u64 * (1 << 20),
-        None => (total_memory_available_bytes - meta_cache_capacity_bytes) as u64,
+        None => (non_reserved_memory_bytes - meta_cache_capacity_bytes) as u64,
     };
 
     tracing::info!(
-        "Compactor total_memory_available_bytes {} meta_cache_capacity_bytes {} compactor_memory_limit_bytes {} sstable_size_bytes {} block_size_bytes {}",
-        total_memory_available_bytes, meta_cache_capacity_bytes, compactor_memory_limit_bytes,
+        "Compactor non_reserved_memory_bytes {} meta_cache_capacity_bytes {} compactor_memory_limit_bytes {} sstable_size_bytes {} block_size_bytes {}",
+        non_reserved_memory_bytes, meta_cache_capacity_bytes, compactor_memory_limit_bytes,
         storage_opts.sstable_size_mb * (1 << 20),
         storage_opts.block_size_kb * (1 << 10),
     );
@@ -145,7 +145,7 @@ pub async fn prepare_start_parameters(
     ));
 
     let heap_profiler = HeapProfiler::new(
-        total_memory_available_bytes,
+        system_memory_available_bytes(),
         config.server.heap_profiling.clone(),
     );
 
