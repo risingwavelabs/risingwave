@@ -56,6 +56,26 @@
       database.name = 'mydb',
       server.id = 5888
     );
+    explain (logical) create table t1_rw (
+      v1 int,
+      v2 int,
+      primary key(v1)
+    ) from mysql_mydb table 'mydb.t1';
+  explain_output: |
+    LogicalCdcScan { table: mydb.t1, columns: [v1, v2] }
+  with_config_map:
+    CDC_BACKFILL: 'true'
+- id: create_source_with_cdc_backfill
+  sql: |
+    create source mysql_mydb with (
+      connector = 'mysql-cdc',
+      hostname = '127.0.0.1',
+      port = '8306',
+      username = 'root',
+      password = '123456',
+      database.name = 'mydb',
+      server.id = 5888
+    );
     explain create table t1_rw (
       v1 int,
       v2 int,

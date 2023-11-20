@@ -77,8 +77,8 @@ risingwave playground
 ```
 **Ubuntu**
 ```
-wget https://github.com/risingwavelabs/risingwave/releases/download/v1.3.0/risingwave-v1.3.0-x86_64-unknown-linux.tar.gz
-tar xvf risingwave-v1.3.0-x86_64-unknown-linux.tar.gz
+wget https://github.com/risingwavelabs/risingwave/releases/download/v1.4.0/risingwave-v1.4.0-x86_64-unknown-linux-all-in-one.tar.gz
+tar xvf risingwave-v1.4.0-x86_64-unknown-linux-all-in-one.tar.gz
 ./risingwave playground
 ```
 Now connect to RisingWave using `psql`:
@@ -88,6 +88,7 @@ psql -h localhost -p 4566 -d dev -U root
 Learn more at [Quick Start](https://docs.risingwave.com/docs/current/get-started/).
 
 ## Production deployments
+
 For **single-node Docker deployments**, please refer to [Docker Compose](https://docs.risingwave.com/docs/current/risingwave-trial/?method=docker-compose).
 
 For **Kubernetes deployments**, please refer to [Kubernetes with Helm](https://docs.risingwave.com/docs/current/risingwave-k8s-helm/) or [Kubernetes with Operator](https://docs.risingwave.com/docs/current/risingwave-kubernetes/).
@@ -96,10 +97,13 @@ For **Kubernetes deployments**, please refer to [Kubernetes with Helm](https://d
 
 
 ## Why RisingWave for stream processing?
+
 RisingWave specializes in providing **incrementally updated, consistent materialized views** — a persistent data structure that represents the results of stream processing. RisingWave significantly reduces the complexity of building stream processing applications by allowing developers to express intricate stream processing logic through cascaded materialized views. Furthermore, it allows users to persist data directly within the system, eliminating the need to deliver results to external databases for storage and query serving.
 
-Compared to existing stream processing systems like [Apache Flink](https://flink.apache.org/), [Apache Spark Streaming](https://spark.apache.org/docs/latest/streaming-programming-guide.html), and [KsqlDB](https://ksqldb.io/), RisingWave stands out in two primary dimensions: **Ease-of-use** and **cost efficiency**, thanks to its **[PostgreSQL](https://www.postgresql.org/)-style interaction experience** and  **[Snowflake](https://snowflake.com/)-like architectural design** (i.e., decoupled storage and compute).
+Compared to existing stream processing systems like [Apache Flink](https://flink.apache.org/), [Apache Spark Streaming](https://spark.apache.org/docs/latest/streaming-programming-guide.html), and [ksqlDB](https://ksqldb.io/), RisingWave stands out in two primary dimensions: **Ease-of-use** and **cost efficiency**, thanks to its **[PostgreSQL](https://www.postgresql.org/)-style interaction experience** and  **[Snowflake](https://snowflake.com/)-like architectural design** (i.e., decoupled storage and compute).
+
 ### Ease-of-use
+
 * **Simple to learn**
   * RisingWave speaks PostgreSQL-style SQL, enabling users to dive into stream processing in much the same way as operating a PostgreSQL database.
 * **Simple to develop**
@@ -108,8 +112,9 @@ Compared to existing stream processing systems like [Apache Flink](https://flink
   * With integrations to a diverse range of cloud systems and the PostgreSQL ecosystem, RisingWave boasts a rich and expansive ecosystem, making it straightforward to incorporate into existing infrastructures.
 
 ### Cost efficiency
+
 * **Highly efficient in complex queries**
-  * RisingWave persists internal states in remote storages (e.g., S3), and users can confidently and efficiently perform complex streaming queries (e.g., joining dozens of data streams) in a production environment, without worrying about state size.
+  * RisingWave persists internal states in remote storage systems such as S3, and users can confidently and efficiently perform complex streaming queries (for example, joining dozens of data streams) in a production environment, without worrying about state size.
 * **Transparent dynamic scaling**
   * RisingWave's state management mechanism enables near-instantaneous dynamic scaling without any service interruptions.
 * **Instant failure recovery**
