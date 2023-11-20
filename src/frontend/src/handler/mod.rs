@@ -25,7 +25,7 @@ use pgwire::types::{Format, Row};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::*;
 
-use self::util::DataChunkToRowSetAdapter;
+use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
 use self::variable::handle_set_time_zone;
 use crate::catalog::table_catalog::TableType;
 use crate::handler::cancel_job::handle_cancel;
@@ -253,13 +253,7 @@ pub async fn handle(
                 )
                 .await;
             }
-            let (source_schema, notice) = match source_schema {
-                Some(s) => {
-                    let (s, notice) = s.into_source_schema_v2();
-                    (Some(s), notice)
-                }
-                None => (None, None),
-            };
+            let source_schema = source_schema.map(|s| s.into_v2_with_warning());
             create_table::handle_create_table(
                 handler_args,
                 name,
@@ -269,7 +263,6 @@ pub async fn handle(
                 source_schema,
                 source_watermarks,
                 append_only,
-                notice,
                 cdc_table_info,
             )
             .await
