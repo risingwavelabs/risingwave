@@ -18,7 +18,7 @@ BigQueryConfig:
     field_type: String
     required: true
   - name: s3_credentials
-    field_type: HashMap < String , String >
+    field_type: HashMap<String,String>
     comments: required keys refer to [`crate::aws_utils::AWS_DEFAULT_CONFIG`]
     required: false
   - name: r#type
@@ -104,7 +104,7 @@ IcebergConfig:
     field_type: String
     required: true
   - name: primary_key
-    field_type: Vec < String >
+    field_type: Vec<String>
     required: false
     default: Default::default
 KafkaConfig:
@@ -114,7 +114,7 @@ KafkaConfig:
     required: true
     alias: kafka.brokers
   - name: broker.rewrite.endpoints
-    field_type: HashMap < String , String >
+    field_type: HashMap<String,String>
     required: false
   - name: topic
     field_type: String
@@ -366,7 +366,7 @@ PulsarConfig:
     field_type: String
     required: false
   - name: s3_credentials
-    field_type: HashMap < String , String >
+    field_type: HashMap<String,String>
     comments: required keys refer to [`crate::aws_utils::AWS_DEFAULT_CONFIG`]
     required: false
   - name: properties.batch.size

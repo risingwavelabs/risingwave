@@ -16,6 +16,8 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::{env, fs};
 
+use itertools::Itertools;
+use quote::ToTokens;
 use serde::Serialize;
 use syn::{parse_file, Attribute, Field, Item, ItemFn, Lit, Meta, MetaNameValue, NestedMeta, Type};
 
@@ -98,10 +100,13 @@ fn generate_with_options_yaml_inner(path: &Path) -> String {
                     "HashMap" | "Option" => false,
                     _ => true,
                 };
-                let mut field_type = quote::quote!(#field_type).to_string();
-                // Option < T > -> T
+                let mut field_type = quote::quote!(#field_type)
+                    .to_token_stream()
+                    .into_iter()
+                    .join("");
+                // Option<T> -> T
                 if field_type.starts_with("Option") {
-                    field_type = field_type[9..field_type.len() - 2].to_string();
+                    field_type = field_type[7..field_type.len() - 1].to_string();
                 }
                 let comments = extract_comments(&field.attrs);
 

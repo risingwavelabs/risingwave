@@ -33,7 +33,7 @@ KafkaProperties:
     required: true
     alias: kafka.brokers
   - name: broker.rewrite.endpoints
-    field_type: HashMap < String , String >
+    field_type: HashMap<String,String>
     required: false
   - name: topic
     field_type: String
@@ -456,7 +456,7 @@ PulsarProperties:
     field_type: String
     required: false
   - name: s3_credentials
-    field_type: HashMap < String , String >
+    field_type: HashMap<String,String>
     comments: required keys refer to [`crate::aws_utils::AWS_DEFAULT_CONFIG`]
     required: false
   - name: iceberg.enabled
