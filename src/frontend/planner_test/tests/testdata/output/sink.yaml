@@ -48,4 +48,5 @@
     );
   explain_output: |
     StreamSink { type: upsert, columns: [v1, v2, v3, v5, t1.v4(hidden)], pk: [t1.v3, t1.v4] }
-    └─StreamTableScan { table: t1, columns: [v1, v2, v3, v5, v4] }
+    └─StreamExchange { dist: HashShard(t1.v1, t1.v2) }
+      └─StreamTableScan { table: t1, columns: [v1, v2, v3, v5, v4] }
