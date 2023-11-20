@@ -663,7 +663,12 @@ ORDER BY
 
 query II
 SELECT
-	*
+	"ID",
+  "firstName",
+  "lastName",
+  "age",
+  "height",
+  "weight"
 FROM
 	upsert_students
 ORDER BY
@@ -679,7 +684,12 @@ ORDER BY
 
 query II
 SELECT
-	*
+	"ID",
+  "firstName",
+  "lastName",
+  "age",
+  "height",
+  "weight"
 FROM
 	upsert_students_default_key
 ORDER BY
