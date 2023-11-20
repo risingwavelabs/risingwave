@@ -194,7 +194,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     }
                 }
             };
-            let rate_limit = source.get_rate_limit().cloned().ok();
+            let rate_limit = source.rate_limit.map(|x| x as _);
             Ok(FlowControlExecutor::new(executor, rate_limit).boxed())
         } else {
             // If there is no external stream source, then no data should be persisted. We pass a

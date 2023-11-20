@@ -249,6 +249,7 @@ pub(crate) mod tests {
                 WorkerType::ComputeNode,
                 HostAddress::default(),
                 Property::default(),
+                Default::default(),
             )
             .await
             .unwrap();

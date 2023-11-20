@@ -15,7 +15,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 anyhow = "1"
-apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "89c2c128de93586465a7ea85b0a1c1a53082bba2", features = [
+apache-avro = { git = "https://github.com/risingwavelabs/avro", rev = "b251943586e7fe7dd52319fc84f8be47921434aa", features = [
     "snappy",
     "zstandard",
     "bzip",
@@ -65,7 +65,7 @@ hyper = { version = "0.14", features = [
 hyper-tls = "0.5"
 icelake = { workspace = true }
 indexmap = { version = "1.9.3", features = ["serde"] }
-itertools = "0.11"
+itertools = "0.12"
 jni = { version = "0.21.1", features = ["invocation"] }
 jst = { package = 'jsonschema-transpiler', git = "https://github.com/mozilla/jsonschema-transpiler", rev = "c1a89d720d118843d8bcca51084deb0ed223e4b4" }
 maplit = "1.0.2"

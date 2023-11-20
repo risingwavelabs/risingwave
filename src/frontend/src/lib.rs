@@ -34,6 +34,7 @@
 #![feature(impl_trait_in_assoc_type)]
 #![feature(result_flattening)]
 #![feature(error_generic_member_access)]
+#![feature(round_ties_even)]
 #![recursion_limit = "256"]
 
 #[cfg(test)]

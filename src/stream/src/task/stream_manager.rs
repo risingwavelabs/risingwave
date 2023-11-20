@@ -509,6 +509,7 @@ impl LocalStreamManagerCore {
                     | NodeBody::DeltaIndexJoin(_)
                     | NodeBody::Lookup(_)
                     | NodeBody::StreamScan(_)
+                    | NodeBody::StreamCdcScan(_)
                     | NodeBody::DynamicFilter(_)
                     | NodeBody::GroupTopN(_)
                     | NodeBody::Now(_)
@@ -579,6 +580,12 @@ impl LocalStreamManagerCore {
             executor.pk_indices(),
             &pk_indices,
             "`pk_indices` of {} not consistent with what derived by optimizer",
+            executor.identity()
+        );
+        assert_eq!(
+            executor.schema(),
+            &schema,
+            "`schema` of {} not consistent with what derived by optimizer",
             executor.identity()
         );
 

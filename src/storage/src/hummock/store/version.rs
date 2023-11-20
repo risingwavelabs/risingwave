@@ -44,16 +44,16 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::store::HummockStorageIterator;
 use crate::hummock::utils::{
     check_subset_preserve_order, filter_single_sst, prune_nonoverlapping_ssts,
     prune_overlapping_ssts, range_overlap, search_sst_idx,
 };
 use crate::hummock::{
-    get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, Sstable,
-    SstableDeleteRangeIterator, SstableIterator,
+    get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, HummockStorageIterator,
+    HummockStorageIteratorInner, LocalHummockStorageIterator, Sstable, SstableDeleteRangeIterator,
+    SstableIterator,
 };
-use crate::mem_table::{ImmId, ImmutableMemtable};
+use crate::mem_table::{ImmId, ImmutableMemtable, MemTableHummockIterator};
 use crate::monitor::{
     GetLocalMetricsGuard, HummockStateStoreMetrics, MayExistLocalMetricsGuard, StoreLocalStatistic,
 };
@@ -729,6 +729,42 @@ impl HummockVersionReader {
         read_options: ReadOptions,
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
+        self.iter_inner(
+            table_key_range,
+            epoch,
+            read_options,
+            read_version_tuple,
+            None,
+        )
+        .await
+    }
+
+    pub async fn iter_with_memtable<'a>(
+        &'a self,
+        table_key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+        read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
+        memtable_iter: MemTableHummockIterator<'a>,
+    ) -> StorageResult<StreamTypeOfIter<LocalHummockStorageIterator<'_>>> {
+        self.iter_inner(
+            table_key_range,
+            epoch,
+            read_options,
+            read_version_tuple,
+            Some(memtable_iter),
+        )
+        .await
+    }
+
+    pub async fn iter_inner<'a, 'b>(
+        &'a self,
+        table_key_range: TableKeyRange,
+        epoch: u64,
+        read_options: ReadOptions,
+        read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
+        mem_table: Option<MemTableHummockIterator<'b>>,
+    ) -> StorageResult<StreamTypeOfIter<HummockStorageIteratorInner<'b>>> {
         let table_id_string = read_options.table_id.to_string();
         let table_id_label = table_id_string.as_str();
         let (imms, uncommitted_ssts, committed) = read_version_tuple;
@@ -946,7 +982,8 @@ impl HummockVersionReader {
                     non_overlapping_iters
                         .into_iter()
                         .map(HummockIteratorUnion::Third),
-                ),
+                )
+                .chain(mem_table.into_iter().map(HummockIteratorUnion::Fourth)),
         );
 
         let user_key_range = (
@@ -974,7 +1011,7 @@ impl HummockVersionReader {
             + local_stats.overlapping_iter_count
             + local_stats.non_overlapping_iter_count;
 
-        Ok(HummockStorageIterator::new(
+        Ok(HummockStorageIteratorInner::new(
             user_iter,
             self.state_store_metrics.clone(),
             read_options.table_id,

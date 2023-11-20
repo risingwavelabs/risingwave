@@ -65,7 +65,7 @@ use crate::handler::create_table::{
     ensure_table_constraints_supported, ColumnIdGenerator,
 };
 use crate::handler::util::{
-    get_connector, is_cdc_connector, is_kafka_connector, is_key_mq_connector,
+    get_connector, is_cdc_connector, is_kafka_connector, is_key_mq_connector, SourceSchemaCompatExt,
 };
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
@@ -1128,10 +1128,7 @@ pub async fn handle_create_source(
         )));
     }
 
-    let (source_schema, notice) = stmt.source_schema.into_source_schema_v2();
-    if let Some(notice) = notice {
-        session.notice_to_user(notice)
-    };
+    let source_schema = stmt.source_schema.into_v2_with_warning();
 
     let mut with_properties = handler_args
         .with_options
