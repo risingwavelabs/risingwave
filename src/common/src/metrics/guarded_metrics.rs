@@ -208,6 +208,14 @@ impl<T: MetricVecBuilder, const N: usize> LabelGuardedMetricVec<T, N> {
         }
     }
 
+    pub fn reset(&self) {
+        self.inner.reset()
+    }
+
+    pub fn remove_label_values(&self, labels: &[&str; N]) -> prometheus::Result<()> {
+        self.inner.remove_label_values(labels)
+    }
+
     pub fn with_label_values(&self, labels: &[&str; N]) -> LabelGuardedMetric<T::M, N> {
         let guard = LabelGuardedMetricsInfo::register_new_label(&self.info, labels);
         let inner = self.inner.with_label_values(labels);
