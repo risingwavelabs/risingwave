@@ -6,8 +6,8 @@ create table t1 (v1 int);
 
 # tracked in https://github.com/risingwavelabs/risingwave/issues/13474
 # create with duplicate streaming_rate_limit
-# statement error
-# create materialized view mv1 with (streaming_rate_limit = 1000, streaming_rate_limit = 2000) as select * from t1;
+statement error Duplicated option
+create materialized view mv1 with (streaming_rate_limit = 1000, streaming_rate_limit = 2000) as select * from t1;
 
 # create with unknown fields
 statement error unexpected options in WITH clause
