@@ -146,7 +146,7 @@ impl GlobalBarrierManager {
 
         let table_map = self
             .fragment_manager
-            .get_table_id_actor_mapping(&creating_table_ids)
+            .get_table_id_stream_scan_actor_mapping(&creating_table_ids)
             .await;
         let table_fragment_map = self
             .fragment_manager

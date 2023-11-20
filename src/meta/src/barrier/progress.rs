@@ -91,6 +91,7 @@ impl Progress {
     /// Update the progress of `actor`.
     fn update(&mut self, actor: ActorId, new_state: ChainState, upstream_total_key_count: u64) {
         self.upstream_total_key_count = upstream_total_key_count;
+        let total_actors = self.states.len();
         match self.states.remove(&actor).unwrap() {
             ChainState::Init => {}
             ChainState::ConsumingUpstream(_, old_consumed_rows) => {
@@ -104,8 +105,14 @@ impl Progress {
                 self.consumed_rows += new_consumed_rows;
             }
             ChainState::Done(new_consumed_rows) => {
+                tracing::debug!("actor {} done", actor);
                 self.consumed_rows += new_consumed_rows;
                 self.done_count += 1;
+                tracing::debug!(
+                    "{} actors out of {} complete",
+                    self.done_count,
+                    total_actors,
+                );
             }
         };
         self.states.insert(actor, new_state);
@@ -258,7 +265,7 @@ impl CreateMviewProgressTracker {
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
-        let table_map: HashMap<_, Vec<ActorId>> = table_map.into();
+        let table_map: HashMap<_, HashSet<ActorId>> = table_map.into();
         for (creating_table_id, actors) in table_map {
             // 1. Recover `ChainState` in the tracker.
             let mut states = HashMap::new();
