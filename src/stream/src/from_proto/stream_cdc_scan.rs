@@ -15,22 +15,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::anyhow;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::external::{CdcTableType, SchemaTableName};
-use risingwave_pb::plan_common::{ExternalTableDesc, StorageTableDesc};
+use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::stream_plan::StreamCdcScanNode;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
-use risingwave_storage::table::Distribution;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::external::ExternalStorageTable;
-use crate::executor::{
-    BackfillExecutor, CdcBackfillExecutor, ChainExecutor, FlowControlExecutor,
-    RearrangedChainExecutor,
-};
+use crate::executor::CdcBackfillExecutor;
 
 pub struct StreamCdcScanExecutorBuilder;
 

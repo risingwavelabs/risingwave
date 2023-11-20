@@ -159,20 +159,6 @@ impl StreamCdcTableScan {
             .map(ColumnId::get_id)
             .collect_vec();
 
-        // The schema of the snapshot read stream
-        let snapshot_schema = upstream_column_ids
-            .iter()
-            .map(|&id| {
-                let col = self
-                    .core
-                    .get_table_columns()
-                    .iter()
-                    .find(|c| c.column_id.get_id() == id)
-                    .unwrap();
-                Field::from(col).to_prost()
-            })
-            .collect_vec();
-
         // The schema of the shared cdc source upstream is different from snapshot,
         // refer to `debezium_cdc_source_schema()` for details.
         let upstream_schema = {
@@ -195,11 +181,6 @@ impl StreamCdcTableScan {
                     .unwrap() as u32
             })
             .collect_vec();
-
-        let batch_plan_node = BatchPlanNode {
-            table_desc: None,
-            column_ids: upstream_column_ids.clone(),
-        };
 
         let catalog = self
             .build_backfill_state_catalog(state)
