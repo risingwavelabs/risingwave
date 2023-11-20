@@ -17,9 +17,30 @@ BigQueryConfig:
   - name: bigquery.table
     field_type: String
     required: true
-  - name: s3_credentials
-    field_type: HashMap<String,String>
-    comments: required keys refer to [`crate::aws_utils::AWS_DEFAULT_CONFIG`]
+  - name: region
+    field_type: String
+    required: false
+  - name: endpoint
+    field_type: String
+    required: false
+    alias: endpoint_url
+  - name: access_key
+    field_type: String
+    required: false
+  - name: secret_key
+    field_type: String
+    required: false
+  - name: session_token
+    field_type: String
+    required: false
+  - name: arn
+    field_type: String
+    required: false
+  - name: external_id
+    field_type: String
+    required: false
+  - name: profile
+    field_type: String
     required: false
   - name: r#type
     field_type: String
@@ -365,9 +386,30 @@ PulsarConfig:
   - name: oauth.scope
     field_type: String
     required: false
-  - name: s3_credentials
-    field_type: HashMap<String,String>
-    comments: required keys refer to [`crate::aws_utils::AWS_DEFAULT_CONFIG`]
+  - name: region
+    field_type: String
+    required: false
+  - name: endpoint
+    field_type: String
+    required: false
+    alias: endpoint_url
+  - name: access_key
+    field_type: String
+    required: false
+  - name: secret_key
+    field_type: String
+    required: false
+  - name: session_token
+    field_type: String
+    required: false
+  - name: arn
+    field_type: String
+    required: false
+  - name: external_id
+    field_type: String
+    required: false
+  - name: profile
+    field_type: String
     required: false
   - name: properties.batch.size
     field_type: u32
