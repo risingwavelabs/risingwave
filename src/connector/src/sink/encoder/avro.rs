@@ -570,9 +570,7 @@ mod tests {
             Some(ScalarImpl::Interval(Interval::from_month_day_usec(
                 13, 2, 1000000,
             ))),
-            // https://github.com/apache/avro/pull/2283
-            // r#"{"type": "fixed", "name": "Duration", "size": 12, "logicalType": "duration"}"#,
-            r#"{"type": {"type": "fixed", "name": "Duration", "size": 12}, "logicalType": "duration"}"#,
+            r#"{"type": "fixed", "name": "Duration", "size": 12, "logicalType": "duration"}"#,
             Value::Duration(apache_avro::Duration::new(
                 apache_avro::Months::new(13),
                 apache_avro::Days::new(2),
@@ -648,8 +646,7 @@ mod tests {
                 -1,
                 i64::MAX,
             ))),
-            // https://github.com/apache/avro/pull/2283
-            r#"{"type": {"type": "fixed", "name": "Duration", "size": 12}, "logicalType": "duration"}"#,
+            r#"{"type": "fixed", "name": "Duration", "size": 12, "logicalType": "duration"}"#,
             "encode  error: -1 mons -1 days +2562047788:00:54.775807 overflows avro duration",
         );
 
