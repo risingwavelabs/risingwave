@@ -706,7 +706,6 @@ message RiseCtlListCompactTaskAssignmentResponse {
   repeated CompactTaskAssignment task_assignment = 1;
 }
 
-
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
