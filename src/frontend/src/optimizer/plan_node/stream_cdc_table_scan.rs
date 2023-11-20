@@ -22,7 +22,7 @@ use risingwave_pb::stream_plan::PbStreamNode;
 
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
+use super::{generic, ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::ExprRewriter;
 use crate::handler::create_source::debezium_cdc_source_schema;
@@ -37,12 +37,10 @@ use crate::{Explain, TableCatalog};
 pub struct StreamCdcTableScan {
     pub base: PlanBase<Stream>,
     core: generic::CdcScan,
-    batch_plan_id: PlanNodeId,
 }
 
 impl StreamCdcTableScan {
     pub fn new(core: generic::CdcScan) -> Self {
-        let batch_plan_id = core.ctx.next_plan_node_id();
         let distribution = Distribution::SomeShard;
         let base = PlanBase::new_stream_with_core(
             &core,
@@ -51,11 +49,7 @@ impl StreamCdcTableScan {
             false,
             core.watermark_columns(),
         );
-        Self {
-            base,
-            core,
-            batch_plan_id,
-        }
+        Self { base, core }
     }
 
     pub fn table_name(&self) -> &str {
