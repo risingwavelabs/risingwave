@@ -86,27 +86,6 @@ impl Default for AwsAuthProps {
 }
 
 impl AwsAuthProps {
-    pub fn from_pairs<'a>(iter: impl Iterator<Item = (&'a str, &'a str)>) -> Self {
-        let mut this = Self::default();
-        for (key, value) in iter {
-            if value.is_empty() {
-                continue;
-            }
-            match key {
-                "region" => this.region = Some(value.to_string()),
-                "endpoint" => this.endpoint = Some(value.to_string()),
-                "access_key" => this.access_key = Some(value.to_string()),
-                "secret_access" => this.secret_key = Some(value.to_string()),
-                "arn" => this.arn = Some(value.to_string()),
-                "session_token" => this.session_token = Some(value.to_string()),
-                "endpoint_url" => this.endpoint = Some(value.to_string()),
-                _ => {}
-            }
-        }
-
-        this
-    }
-
     async fn build_region(&self) -> anyhow::Result<Region> {
         if let Some(region_name) = &self.region {
             Ok(Region::new(region_name.clone()))
