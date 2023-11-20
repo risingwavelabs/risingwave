@@ -26,7 +26,7 @@ use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedPrefetchOptions, TracedReadOptions,
-    TracedWriteOptions,
+    TracedSealCurrentEpochOptions, TracedWriteOptions,
 };
 
 use crate::error::{StorageError, StorageResult};
@@ -245,12 +245,12 @@ pub trait LocalStateStore: StaticSendSync {
     /// In some cases like replicated state table, state table may not be empty initially,
     /// as such we need to wait for `epoch.prev` checkpoint to complete,
     /// hence this interface is made async.
-    fn init(&mut self, epoch: InitOptions) -> impl Future<Output = StorageResult<()>> + Send + '_;
+    fn init(&mut self, opts: InitOptions) -> impl Future<Output = StorageResult<()>> + Send + '_;
 
     /// Updates the monotonically increasing write epoch to `new_epoch`.
     /// All writes after this function is called will be tagged with `new_epoch`. In other words,
     /// the previous write epoch is sealed.
-    fn seal_current_epoch(&mut self, next_epoch: u64);
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
 
     /// Check existence of a given `key_range`.
     /// It is better to provide `prefix_hint` in `read_options`, which will be used
@@ -482,5 +482,34 @@ impl From<TracedInitOptions> for InitOptions {
         InitOptions {
             epoch: value.epoch.into(),
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SealCurrentEpochOptions {}
+
+impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
+    fn from(_value: SealCurrentEpochOptions) -> Self {
+        TracedSealCurrentEpochOptions {}
+    }
+}
+
+impl TryInto<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
+    type Error = anyhow::Error;
+
+    fn try_into(self) -> Result<SealCurrentEpochOptions, Self::Error> {
+        Ok(SealCurrentEpochOptions {})
+    }
+}
+
+impl SealCurrentEpochOptions {
+    #[expect(clippy::new_without_default)]
+    pub fn new() -> Self {
+        Self {}
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn for_test() -> Self {
+        Self::new()
     }
 }
