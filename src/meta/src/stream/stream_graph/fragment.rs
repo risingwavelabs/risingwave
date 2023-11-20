@@ -175,9 +175,13 @@ impl BuildingFragment {
                     stream_scan.table_id.into(),
                     stream_scan.upstream_column_ids.clone(),
                 ),
-                NodeBody::StreamCdcScan(stream_cdc_scan) => (
-                    stream_cdc_scan.table_id.into(),
-                    stream_cdc_scan.upstream_column_ids.clone(),
+                // NodeBody::StreamCdcScan(stream_cdc_scan) => (
+                //     stream_cdc_scan.table_id.into(),
+                //     stream_cdc_scan.upstream_column_ids.clone(),
+                // ),
+                NodeBody::CdcFilter(cdc_filter) => (
+                    cdc_filter.table_id.into(),
+                    cdc_filter.upstream_column_ids.clone(),
                 ),
                 _ => return,
             };
@@ -186,7 +190,12 @@ impl BuildingFragment {
                 .expect("currently there should be no two same upstream tables in a fragment");
         });
 
-        assert_eq!(table_columns.len(), fragment.upstream_table_ids.len());
+        assert_eq!(
+            table_columns.len(),
+            fragment.upstream_table_ids.len(),
+            "fragment type: {}",
+            fragment.fragment_type_mask
+        );
 
         table_columns
     }
@@ -566,6 +575,8 @@ impl CompleteStreamFragmentGraph {
             for (&id, fragment) in &mut graph.fragments {
                 for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
                     let (up_fragment_id, edge) = match table_job_type.as_ref() {
+                        // TODO: here we traverse all fragments of the graph, and we should find out the
+                        // CdcFilter fragment and add an edge between upstream source fragment and the fragment
                         Some(TableJobType::SharedCdcSource) => {
                             let source_fragment = upstream_root_fragments
                                 .get(&upstream_table_id)
@@ -575,6 +586,9 @@ impl CompleteStreamFragmentGraph {
                             tracing::debug!(
                                 ?source_job_id,
                                 ?output_columns,
+                                identity = ?fragment.inner.get_node().unwrap().get_identity(),
+                                current_frag_id=?id,
+                                ?fragment.inner.fragment_type_mask,
                                 "StreamScan with upstream source fragment"
                             );
                             let edge = StreamFragmentEdge {

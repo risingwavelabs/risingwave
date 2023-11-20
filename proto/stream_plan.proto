@@ -230,6 +230,12 @@ message FilterNode {
   expr.ExprNode search_condition = 1;
 }
 
+message CdcFilterNode {
+  expr.ExprNode search_condition = 1;
+  uint32 table_id = 2;
+  repeated int32 upstream_column_ids = 3;
+}
+
 // A materialized view is regarded as a table.
 // In addition, we also specify primary key to MV for efficient point lookup during update and deletion.
 //
@@ -718,6 +724,7 @@ message StreamNode {
     OverWindowNode over_window = 137;
     StreamFsFetchNode stream_fs_fetch = 138;
     StreamCdcScanNode stream_cdc_scan = 139;
+    CdcFilterNode cdc_filter = 140;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -817,6 +824,7 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_BARRIER_RECV = 32;
   FRAGMENT_TYPE_FLAG_VALUES = 64;
   FRAGMENT_TYPE_FLAG_DML = 128;
+  FRAGMENT_TYPE_FLAG_CDC_FILTER = 256;
 }
 
 // The environment associated with a stream plan

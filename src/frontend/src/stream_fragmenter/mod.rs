@@ -13,6 +13,9 @@
 // limitations under the License.
 
 mod graph;
+
+use std::assert_matches::assert_matches;
+
 use graph::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 mod rewrite;
@@ -290,14 +293,17 @@ fn build_fragment(
             current_fragment.upstream_table_ids.push(node.table_id);
         }
 
-        NodeBody::StreamCdcScan(node) => {
+        NodeBody::StreamCdcScan(_) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
-            // memorize table id for later use
-            // The table id could be a upstream CDC source
+        }
+
+        NodeBody::CdcFilter(node) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::CdcFilter as u32;
+            let upstream_source_id = node.table_id;
             state
                 .dependent_table_ids
-                .insert(TableId::new(node.table_id));
-            current_fragment.upstream_table_ids.push(node.table_id);
+                .insert(TableId::new(upstream_source_id));
+            current_fragment.upstream_table_ids.push(upstream_source_id);
         }
 
         NodeBody::Now(_) => {

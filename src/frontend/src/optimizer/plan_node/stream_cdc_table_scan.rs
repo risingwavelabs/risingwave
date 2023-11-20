@@ -38,12 +38,10 @@ use crate::{Explain, TableCatalog};
 pub struct StreamCdcTableScan {
     pub base: PlanBase<Stream>,
     core: generic::CdcScan,
-    batch_plan_id: PlanNodeId,
 }
 
 impl StreamCdcTableScan {
     pub fn new(core: generic::CdcScan) -> Self {
-        let batch_plan_id = core.ctx.next_plan_node_id();
         let distribution = Distribution::SomeShard;
         let base = PlanBase::new_stream_with_core(
             &core,
@@ -52,11 +50,7 @@ impl StreamCdcTableScan {
             false,
             core.watermark_columns(),
         );
-        Self {
-            base,
-            core,
-            batch_plan_id,
-        }
+        Self { base, core }
     }
 
     pub fn table_name(&self) -> &str {
@@ -233,7 +227,7 @@ impl StreamCdcTableScan {
             input: vec![
                 // The merge node body will be filled by the `ActorBuilder` on the meta service.
                 PbStreamNode {
-                    node_body: Some(NodeBody::Merge(MergeNode {
+                    node_body: Some(PbNodeBody::Merge(MergeNode {
                         upstream_fragment_id: upstream_source_id,
                         ..Default::default()
                     })),
@@ -245,10 +239,12 @@ impl StreamCdcTableScan {
             ],
             stream_key: vec![], // not used
             append_only: true,
-            identity: "Filter".to_string(),
+            identity: "CdcFilter".to_string(),
             fields: upstream_schema.clone(),
-            node_body: Some(NodeBody::Filter(FilterNode {
+            node_body: Some(PbNodeBody::CdcFilter(CdcFilterNode {
                 search_condition: Some(filter_expr.to_expr_proto()),
+                table_id: upstream_source_id,
+                upstream_column_ids: upstream_column_ids.clone(),
             })),
         };
 
@@ -261,7 +257,7 @@ impl StreamCdcTableScan {
             append_only: true,
             identity: "Exchange".to_string(),
             fields: upstream_schema.clone(),
-            node_body: Some(NodeBody::Exchange(ExchangeNode {
+            node_body: Some(PbNodeBody::Exchange(ExchangeNode {
                 strategy: Some(DispatchStrategy {
                     r#type: DispatcherType::Simple as _,
                     dist_key_indices: vec![], // simple exchange doesn't need dist key
@@ -271,7 +267,7 @@ impl StreamCdcTableScan {
             })),
         };
 
-        let stream_scan_body = PbNodeBody::StreamScan(StreamCdcScanNode {
+        let stream_scan_body = PbNodeBody::StreamCdcScan(StreamCdcScanNode {
             table_id: upstream_source_id,
             upstream_column_ids,
             output_indices,
@@ -284,19 +280,7 @@ impl StreamCdcTableScan {
         // plan: merge -> filter -> exchange(simple) -> stream_scan
         PbStreamNode {
             fields: self.schema().to_prost(),
-            input: vec![
-                exchange_stream_node,
-                // The BatchPlan node is only a placeholder
-                PbStreamNode {
-                    node_body: Some(PbNodeBody::BatchPlan(batch_plan_node)),
-                    operator_id: self.batch_plan_id.0 as u64,
-                    identity: "BatchPlanNode".into(),
-                    fields: snapshot_schema,
-                    stream_key: vec![], // not used
-                    input: vec![],
-                    append_only: true,
-                },
-            ],
+            input: vec![exchange_stream_node],
             node_body: Some(stream_scan_body),
             stream_key,
             operator_id: self.base.id().0 as u64,

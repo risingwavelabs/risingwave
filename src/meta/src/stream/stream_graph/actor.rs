@@ -145,12 +145,6 @@ impl ActorBuilder {
                     link_id: stream_node.get_operator_id(),
                 }];
 
-                tracing::debug!(
-                    "rewrite leaf exchange node: fields {:?}, upstreams {:?}",
-                    stream_node.get_fields(),
-                    upstreams,
-                );
-
                 Ok(StreamNode {
                     node_body: Some(NodeBody::Merge(MergeNode {
                         upstream_actor_id: upstreams.actors.as_global_ids(),
@@ -179,6 +173,12 @@ impl ActorBuilder {
                     downstream_fragment_id: self.fragment_id,
                 }];
 
+                tracing::debug!(
+                    "rewrite leaf stream_scan node: fields {:?}, upstreams {:?}",
+                    stream_node.get_fields(),
+                    upstreams,
+                );
+
                 // As we always use the `NoShuffle` exchange for MV on MV, there should be only one
                 // upstream.
                 let upstream_actor_id = upstreams.actors.as_global_ids();
@@ -204,63 +204,19 @@ impl ActorBuilder {
                 })
             }
 
-            // "Leaf" node `StreamScan`.
-            NodeBody::StreamCdcScan(stream_scan) => {
-                let input = stream_node.get_input();
-                assert_eq!(input.len(), 1);
-
-                let merge_node = &input[0];
-                assert_matches!(merge_node.node_body, Some(NodeBody::Merge(_)));
-
-                // Index the upstreams by the an external edge ID.
-                let upstreams = &self.upstreams[&EdgeId::UpstreamExternal {
-                    upstream_table_id: stream_scan.table_id.into(),
-                    downstream_fragment_id: self.fragment_id,
-                }];
-
-                // Upstream Cdc Source should be singleton.
-                let upstream_actor_id = upstreams.actors.as_global_ids();
-                assert_eq!(upstream_actor_id.len(), 1);
-
-                let input = vec![
-                    // Fill the merge node body with correct upstream info.
-                    StreamNode {
-                        node_body: Some(NodeBody::Merge(MergeNode {
-                            upstream_actor_id,
-                            upstream_fragment_id: upstreams.fragment_id.as_global_id(),
-                            upstream_dispatcher_type: DispatcherType::CdcTablename as _,
-                            fields: merge_node.fields.clone(),
-                        })),
-                        ..merge_node.clone()
-                    },
-                ];
-
-                Ok(StreamNode {
-                    input,
-                    ..stream_node.clone()
-                })
-            }
-
             // "Leaf" node `Filter` used in multi-table cdc backfill plan:
-            // filter -> backfill -> mview
-            NodeBody::Filter(_filter) => {
+            // cdc_filter -> backfill -> mview
+            NodeBody::CdcFilter(filter) => {
                 let input = stream_node.get_input();
                 assert_eq!(input.len(), 1);
 
                 let merge_node = &input[0];
                 assert_matches!(merge_node.node_body, Some(NodeBody::Merge(_)));
 
-                // we encoded the upstream source id in the merge node
-                let upstream_source_id = merge_node
-                    .get_node_body()
-                    .unwrap()
-                    .as_merge()
-                    .unwrap()
-                    .upstream_fragment_id;
-
-                tracing::info!(
-                    "rewrite leaf filter node: upstream source id {}",
-                    upstream_source_id
+                let upstream_source_id = filter.table_id;
+                tracing::debug!(
+                    "rewrite leaf cdc filter node: upstream source id {}",
+                    filter.table_id,
                 );
 
                 // Index the upstreams by the an external edge ID.

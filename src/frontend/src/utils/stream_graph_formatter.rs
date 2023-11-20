@@ -299,6 +299,7 @@ impl StreamGraphFormatter {
             }
             stream_node::NodeBody::Project(_)
             | stream_node::NodeBody::Filter(_)
+            | stream_node::NodeBody::CdcFilter(_)
             | stream_node::NodeBody::StatelessSimpleAgg(_)
             | stream_node::NodeBody::HopWindow(_)
             | stream_node::NodeBody::Merge(_)
