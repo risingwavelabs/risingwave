@@ -855,7 +855,7 @@ fn add_default_key_column(columns: &mut Vec<ColumnCatalog>) {
             generated_or_default_column: None,
             description: None,
         },
-        is_hidden: true,
+        is_hidden: false,
     };
     columns.push(column);
 }
