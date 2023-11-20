@@ -20,7 +20,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOpt
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::external::{CdcTableType, SchemaTableName};
 use risingwave_pb::plan_common::{ExternalTableDesc, StorageTableDesc};
-use risingwave_pb::stream_plan::{StreamCdcScanNode, StreamCdcScanType};
+use risingwave_pb::stream_plan::StreamCdcScanNode;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
 
@@ -43,7 +43,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         state_store: impl StateStore,
         stream: &mut LocalStreamManagerCore,
     ) -> StreamResult<BoxedExecutor> {
-        let [upstream, snapshot]: [_; 2] = params.input.try_into().unwrap();
+        let [upstream]: [_; 1] = params.input.try_into().unwrap();
         // For reporting the progress.
         let progress = stream
             .context
@@ -100,7 +100,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             StateTable::from_table_catalog(node.get_state_table()?, state_store, vnodes).await;
 
         // TODO(kwannoel): Should we apply flow control here as well?
-        CdcBackfillExecutor::new(
+        Ok(CdcBackfillExecutor::new(
             params.actor_context.clone(),
             params.info,
             external_table,
@@ -113,6 +113,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             true,
             params.env.config().developer.chunk_size,
         )
-        .boxed()
+        .boxed())
     }
 }

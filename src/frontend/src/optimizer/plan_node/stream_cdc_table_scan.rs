@@ -18,7 +18,7 @@ use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
+use risingwave_pb::stream_plan::PbStreamNode;
 
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
@@ -38,7 +38,6 @@ pub struct StreamCdcTableScan {
     pub base: PlanBase<Stream>,
     core: generic::CdcScan,
     batch_plan_id: PlanNodeId,
-    stream_scan_type: StreamScanType,
 }
 
 impl StreamCdcTableScan {
@@ -56,7 +55,6 @@ impl StreamCdcTableScan {
             base,
             core,
             batch_plan_id,
-            stream_scan_type: StreamScanType::CdcBackfill,
         }
     }
 
@@ -66,10 +64,6 @@ impl StreamCdcTableScan {
 
     pub fn core(&self) -> &generic::CdcScan {
         &self.core
-    }
-
-    pub fn stream_scan_type(&self) -> StreamScanType {
-        StreamScanType::CdcBackfill
     }
 
     /// Build catalog for cdc backfill state
@@ -215,7 +209,6 @@ impl StreamCdcTableScan {
         let upstream_source_id = self.core.cdc_table_desc.source_id.table_id;
         let node_body = PbNodeBody::StreamScan(StreamScanNode {
             table_id: upstream_source_id,
-            stream_scan_type: self.stream_scan_type as i32,
             // The column indices need to be forwarded to the downstream
             output_indices,
             upstream_column_ids,
@@ -236,15 +229,6 @@ impl StreamCdcTableScan {
                     fields: upstream_schema.clone(),
                     stream_key: vec![], // not used
                     ..Default::default()
-                },
-                PbStreamNode {
-                    node_body: Some(PbNodeBody::BatchPlan(batch_plan_node)),
-                    operator_id: self.batch_plan_id.0 as u64,
-                    identity: "BatchPlanNode".into(),
-                    fields: snapshot_schema,
-                    stream_key: vec![], // not used
-                    input: vec![],
-                    append_only: true,
                 },
             ],
 
