@@ -2508,6 +2508,9 @@ impl HummockManager {
         let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
         let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
         let partition_vnode_count = self.env.opts.partition_vnode_count;
+        let hybrid_vnode_count: u32 = self.env.opts.partition_vnode_count;
+        const SPLIT_BY_TABLE: u32 = 1;
+
         let window_size = HISTORY_TABLE_INFO_STATISTIC_TIME / (checkpoint_secs as usize);
 
         let mut group_to_table_vnode_partition = HashMap::default();
@@ -2547,13 +2550,18 @@ impl HummockManager {
                     }
                 }
                 let state_table_size = *table_size;
-
                 {
+                    // When in a hybrid compaction group, data from multiple state tables may exist in a single sst, and in order to make the data in the sub level more aligned, a proactive cut is made for the data.
+                    // https://github.com/risingwavelabs/risingwave/issues/13037
+                    // 1. In a backfill scenario, the state_table / mv may have high write throughput. Therefore, we relax the limit of `is_low_write_throughput` and partition the table with high write throughput by vnode to improve the parallel efficiency of compaction.
+                    // 2. For table with low throughput, partition by table_id to minimize amplification.
+                    // 3. When the write mode is changed (the above conditions are not met), the default behavior is restored
                     if !is_low_write_throughput {
-                        table_vnode_partition_mapping.insert(*table_id, 4_u32);
+                        table_vnode_partition_mapping.insert(*table_id, hybrid_vnode_count);
                     } else if state_table_size > self.env.opts.cut_table_size_limit {
-                        table_vnode_partition_mapping.insert(*table_id, 1_u32);
+                        table_vnode_partition_mapping.insert(*table_id, SPLIT_BY_TABLE);
                     } else {
+                        //
                         table_vnode_partition_mapping.remove(table_id);
                     }
                 }
@@ -2586,7 +2594,6 @@ impl HummockManager {
                     }
                 }
 
-                table_vnode_partition_mapping.insert(*table_id, partition_vnode_count);
                 let ret = self
                     .move_state_table_to_compaction_group(
                         parent_group_id,
@@ -2613,7 +2620,7 @@ impl HummockManager {
             }
         }
 
-        tracing::info!(
+        tracing::debug!(
             "group_to_table_vnode_partition {:?}",
             group_to_table_vnode_partition
         );

@@ -290,6 +290,9 @@ pub struct MetaConfig {
 
     #[serde(default)]
     pub compaction_config: CompactionConfig,
+
+    #[serde(default = "default::meta::hybird_partition_vnode_count")]
+    pub hybird_partition_vnode_count: u32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -973,6 +976,10 @@ pub mod default {
 
         pub fn cut_table_size_limit() -> u64 {
             1024 * 1024 * 1024 // 1GB
+        }
+
+        pub fn hybird_partition_vnode_count() -> u32 {
+            4
         }
     }
 

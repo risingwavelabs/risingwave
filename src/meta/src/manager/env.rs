@@ -172,6 +172,9 @@ pub struct MetaOpts {
 
     /// The size limit to split a state-table to independent sstable.
     pub cut_table_size_limit: u64,
+
+    /// hybird compaction group config
+    pub hybird_partition_vnode_count: u32,
 }
 
 impl MetaOpts {
@@ -213,6 +216,7 @@ impl MetaOpts {
             compaction_task_max_heartbeat_interval_secs: 0,
             compaction_config: None,
             cut_table_size_limit: 1024 * 1024 * 1024,
+            hybird_partition_vnode_count: 4,
         }
     }
 }
