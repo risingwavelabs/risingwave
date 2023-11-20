@@ -23,6 +23,7 @@ use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
+use risingwave_pb::common::Buffer;
 use risingwave_pb::hummock::{BloomFilterType, SstableInfo};
 
 use super::utils::CompressionAlgorithm;
@@ -139,8 +140,8 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     epoch_set: BTreeSet<u64>,
     memory_limiter: Option<Arc<MemoryLimiter>>,
 
-    vnode_bitmap_mapping: HashMap<u32, BitmapBuilder>,
-    enable_vnode_bitmap: bool,
+    vnode_bitmap_mapping: HashMap<u32, Buffer>,
+    vnode_bitmap_builder: Option<BitmapBuilder>,
 }
 
 impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
@@ -191,7 +192,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             epoch_set: BTreeSet::default(),
             memory_limiter,
             vnode_bitmap_mapping: HashMap::default(),
-            enable_vnode_bitmap,
+            vnode_bitmap_builder: if enable_vnode_bitmap {
+                Some(BitmapBuilder::zeroed(VirtualNode::COUNT))
+            } else {
+                None
+            },
         }
     }
 
@@ -335,15 +340,16 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             assert!(could_switch_block);
             self.table_ids.insert(table_id);
             self.finalize_last_table_stats();
+
+            if let Some(table_id) = self.last_table_id && let Some(vnode_bitmap_builder) = self.vnode_bitmap_builder.take() {
+                self.vnode_bitmap_mapping
+                    .insert(table_id, vnode_bitmap_builder.finish().to_protobuf());
+                self.vnode_bitmap_builder = Some(BitmapBuilder::zeroed(VirtualNode::COUNT));
+            }
+
             self.last_table_id = Some(table_id);
             if !self.block_builder.is_empty() {
                 self.build_block().await?;
-            }
-
-            // init vnode bitmap builder
-            if self.enable_vnode_bitmap {
-                self.vnode_bitmap_mapping
-                    .insert(table_id, BitmapBuilder::zeroed(VirtualNode::COUNT));
             }
         } else if is_new_user_key
             && self.block_builder.approximate_len() >= self.options.block_capacity
@@ -367,12 +373,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         }
 
         let table_id = full_key.user_key.table_id.table_id();
-
-        if self.enable_vnode_bitmap {
+        if let Some(vnode_bitmap_builder) = self.vnode_bitmap_builder.as_mut() {
             let vnode_id = full_key.user_key.get_vnode_id();
-            if let Some(vnode_bitmap_builder) = self.vnode_bitmap_mapping.get_mut(&table_id) {
-                vnode_bitmap_builder.set(vnode_id, true)
-            }
+            vnode_bitmap_builder.set(vnode_id, true);
         }
 
         let mut extract_key = user_key(&self.raw_key);
@@ -569,16 +572,12 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }
         };
 
-        let vnode_bitmap_mapping = {
-            let mut mapping = HashMap::default();
-
-            for (table_id, vnode_bitmap_builder) in self.vnode_bitmap_mapping {
-                let buf = vnode_bitmap_builder.finish().to_protobuf();
-                mapping.insert(table_id, buf);
-            }
-
-            mapping
-        };
+        if let Some(vnode_bitmap_builder) = self.vnode_bitmap_builder {
+            self.vnode_bitmap_mapping.insert(
+                self.last_table_id.unwrap(),
+                vnode_bitmap_builder.finish().to_protobuf(),
+            );
+        }
 
         let sst_info = SstableInfo {
             object_id: self.sstable_id,
@@ -598,7 +597,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             min_epoch: cmp::min(min_epoch, tombstone_min_epoch),
             max_epoch: cmp::max(max_epoch, tombstone_max_epoch),
             range_tombstone_count: meta.monotonic_tombstone_events.len() as u64,
-            vnode_bitmap_mapping,
+            vnode_bitmap_mapping: self.vnode_bitmap_mapping,
         };
         tracing::trace!(
             "meta_size {} bloom_filter_size {}  add_key_counts {} stale_key_count {} min_epoch {} max_epoch {} epoch_count {}",
@@ -908,7 +907,7 @@ pub(super) mod tests {
         let mut filter = MultiFilterKeyExtractor::default();
         filter.register(
             1,
-            Arc::new(FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor)),
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
         filter.register(
             2,
@@ -916,7 +915,7 @@ pub(super) mod tests {
         );
         filter.register(
             3,
-            Arc::new(FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor)),
+            Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor)),
         );
         let mut builder = SstableBuilder::new(
             object_id,
@@ -930,7 +929,8 @@ pub(super) mod tests {
 
         let key_count: usize = 10000;
         let vnode_vec = vec![0, 63, 127, 255];
-        for table_id in 1..4 {
+        let table_id_vec = vec![1_u32, 2_u32, 3_u32];
+        for table_id in &table_id_vec {
             let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
             let mut vnode_idx = 1;
             for idx in 0..key_count {
@@ -943,7 +943,7 @@ pub(super) mod tests {
 
                 table_key.resize(VirtualNode::SIZE, 0);
                 table_key.extend_from_slice(format!("key_test_{:05}", idx * 2).as_bytes());
-                let k = UserKey::for_test(TableId::new(table_id), table_key.as_ref());
+                let k = UserKey::for_test(TableId::new(*table_id), table_key.as_ref());
                 let v = test_value_of(idx);
                 builder
                     .add(FullKey::from_user_key(k, 1), HummockValue::put(v.as_ref()))
@@ -953,6 +953,7 @@ pub(super) mod tests {
         }
         let ret = builder.finish().await.unwrap();
         let sst_info = ret.sst_info.sst_info.clone();
+        assert_eq!(table_id_vec.len(), sst_info.vnode_bitmap_mapping.len());
 
         for (_table_id, vnode_bitmap_buffer) in sst_info.vnode_bitmap_mapping {
             let bitmap = Bitmap::from(&vnode_bitmap_buffer);

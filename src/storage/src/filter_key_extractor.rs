@@ -220,7 +220,7 @@ impl FilterKeyExtractor for MultiFilterKeyExtractor {
         let table_id = get_table_id(full_key);
         self.id_to_filter_key_extractor
             .get(&table_id)
-            .unwrap()
+            .unwrap_or_else(|| panic!("table_id {}", table_id))
             .extract(full_key)
     }
 }
