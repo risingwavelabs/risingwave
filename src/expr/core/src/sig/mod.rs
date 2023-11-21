@@ -142,24 +142,16 @@ pub struct FuncSign {
     pub ret_type: SigDataType,
 
     /// A function to build the scalar function.
-    pub build_scalar: Option<
-        fn(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression>,
-    >,
+    pub build_scalar: Option<ScalarFunctionBuilder>,
 
     /// A function to build the table function.
-    pub build_table: Option<
-        fn(
-            return_type: DataType,
-            chunk_size: usize,
-            children: Vec<BoxedExpression>,
-        ) -> Result<BoxedTableFunction>,
-    >,
+    pub build_table: Option<TableFunctionBuilder>,
 
     /// A function to build the aggregate function (retractable version).
-    pub build_aggregate_retractable: Option<fn(agg: &AggCall) -> Result<BoxedAggregateFunction>>,
+    pub build_aggregate_retractable: Option<AggregateFunctionBuilder>,
 
     /// A function to build the aggregate function (append-only version).
-    pub build_aggregate_append_only: Option<fn(agg: &AggCall) -> Result<BoxedAggregateFunction>>,
+    pub build_aggregate_append_only: Option<AggregateFunctionBuilder>,
 
     /// A function to infer the return type from argument types.
     pub type_infer: fn(args: &[DataType]) -> Result<DataType>,
@@ -172,6 +164,17 @@ pub struct FuncSign {
     /// `None` means equal to the return type.
     pub state_type: Option<DataType>,
 }
+
+type ScalarFunctionBuilder =
+    fn(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression>;
+
+type TableFunctionBuilder = fn(
+    return_type: DataType,
+    chunk_size: usize,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedTableFunction>;
+
+type AggregateFunctionBuilder = fn(agg: &AggCall) -> Result<BoxedAggregateFunction>;
 
 impl fmt::Debug for FuncSign {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
