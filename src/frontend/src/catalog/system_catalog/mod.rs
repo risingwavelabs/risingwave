@@ -352,6 +352,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::View(&PG_KEYWORDS) },
     { BuiltinCatalog::View(&PG_ATTRDEF) },
     { BuiltinCatalog::View(&PG_ROLES) },
+    { BuiltinCatalog::View(&PG_AUTH_MEMBERS) },
     { BuiltinCatalog::View(&PG_SHDESCRIPTION) },
     { BuiltinCatalog::View(&PG_TABLESPACE) },
     { BuiltinCatalog::View(&PG_STAT_ACTIVITY) },
