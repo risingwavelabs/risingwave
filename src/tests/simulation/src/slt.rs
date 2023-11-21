@@ -312,12 +312,34 @@ pub async fn run_slt_task(
                             {
                                 break
                             }
-                            SqlCmd::CreateMaterializedView { .. }
+                            SqlCmd::CreateMaterializedView { ref name }
                                 if i != 0
                                     && e.to_string().contains("table is in creating procedure")
                                     && background_ddl_enabled =>
                             {
-                                break
+                                // wait for background ddl to finish and succeed.
+                                let rw = RisingWave::connect("frontend".into(), "dev".into())
+                                    .await
+                                    .unwrap();
+                                let client = rw.pg_client();
+                                if client.simple_query("WAIT;").await.is_ok()
+                                    && client
+                                    .query(
+                                        "select count(*) from pg_matviews where matviewname=$1;",
+                                        &[&name],
+                                    )
+                                    .await
+                                    .is_ok()
+                                {
+                                    if let Some(record) = reset_background_ddl_record {
+                                        tester.run_async(record).await.unwrap();
+                                        background_ddl_enabled = false;
+                                    }
+                                    break;
+                                }
+                                // If fail, recreate mv again.
+                                tracing::info!(name, "failed to run test: background_mv not created, retry after {delay:?}");
+                                continue;
                             }
                             // allow 'not found' error when retry DROP statement
                             SqlCmd::Drop
