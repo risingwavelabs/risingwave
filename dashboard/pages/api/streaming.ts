@@ -19,7 +19,7 @@ import _ from "lodash"
 import sortBy from "lodash/sortBy"
 import { Sink, Source, Table, View } from "../../proto/gen/catalog"
 import { ActorLocation, TableFragments } from "../../proto/gen/meta"
-import { ColumnCatalog, ColumnDesc, Field } from "../../proto/gen/plan_common"
+import { ColumnCatalog, Field } from "../../proto/gen/plan_common"
 import api from "./api"
 
 export async function getActors(): Promise<ActorLocation[]> {
@@ -104,7 +104,9 @@ export async function getSinks() {
 }
 
 export async function getDataSources() {
-  let sourceList: Source[] = (await api.get("/api/sources")).map(Source.fromJSON)
+  let sourceList: Source[] = (await api.get("/api/sources")).map(
+    Source.fromJSON
+  )
   sourceList = sortBy(sourceList, (x) => x.id)
   return sourceList
 }
@@ -112,5 +114,5 @@ export async function getDataSources() {
 export async function getViews() {
   let views: View[] = (await api.get("/api/views")).map(View.fromJSON)
   views = sortBy(views, (x) => x.id)
-  return views;
+  return views
 }

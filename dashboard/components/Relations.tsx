@@ -209,7 +209,7 @@ export function Relations<R extends Relation>(
                 ))}
                 <Td overflowWrap="normal">
                   {r.columns
-                    .filter((col) => "isHidden" in col ? !col.isHidden : true)
+                    .filter((col) => ("isHidden" in col ? !col.isHidden : true))
                     .map((col) => extractColumnInfo(col))
                     .join(", ")}
                 </Td>
