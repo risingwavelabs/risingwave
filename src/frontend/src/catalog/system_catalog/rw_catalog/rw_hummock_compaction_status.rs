@@ -21,8 +21,8 @@ use serde_json::json;
 
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
-pub const RW_HUMMOCK_COMPACT_TASK_ASSIGNMEN: BuiltinTable = BuiltinTable {
-    name: "rw_hummock_compact_task_assignment",
+pub const RW_HUMMOCK_COMPACTION_STATUS: BuiltinTable = BuiltinTable {
+    name: "RW_HUMMOCK_COMPACTION_STATUS",
     schema: RW_CATALOG_SCHEMA_NAME,
     columns: &[
         (DataType::Int64, "compaction_group_id"),
