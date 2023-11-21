@@ -103,8 +103,8 @@ export default function StreamingGraph() {
                 return (
                   <Link href={`?id=${r.id}`} key={r.id}>
                     <Button
-                      colorScheme={match ? "teal" : "gray"}
-                      color={match ? "teal.600" : "gray.500"}
+                      colorScheme={match ? "blue" : "gray"}
+                      color={match ? "blue.600" : "gray.500"}
                       variant={match ? "outline" : "ghost"}
                       width="full"
                       py={0}
