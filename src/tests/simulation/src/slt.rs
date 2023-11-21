@@ -264,6 +264,7 @@ pub async fn run_slt_task(
                 None
             };
             // retry up to 5 times until it succeed
+            let max_retry = 5;
             for i in 0usize.. {
                 let delay = Duration::from_secs(1 << i);
                 match tester
@@ -277,6 +278,7 @@ pub async fn run_slt_task(
                         // For background ddl
                         if let SqlCmd::CreateMaterializedView { ref name } = cmd && background_ddl_enabled
                         {
+                            tracing::info!(iteration=i, "Retry for background ddl");
                             // wait for background ddl to finish and succeed.
                             let rw = RisingWave::connect("frontend".into(), "dev".into())
                                 .await
@@ -292,14 +294,17 @@ pub async fn run_slt_task(
                                     .is_ok()
                             {
                                 if let Some(record) = reset_background_ddl_record {
-                                    tester.run_async(record).await.unwrap();
-                                    background_ddl_enabled = false;
+                                    tracing::debug!("Record with background_ddl {:?} finished", record);
+                                    if tester.run_async(record).await.is_ok() {
+                                        // Try to reset, but if the cluster killed again before reset,
+                                        // it is fine, we can leave it to the next mview to reset it.
+                                        background_ddl_enabled = false;
+                                    }
                                 }
-                                tracing::debug!("Record with background_ddl {:?} finished", record);
                                 break;
                             }
                             // If fail, recreate mv again.
-                            tracing::info!(name, "failed to run test: background_mv not created, retry after {delay:?}");
+                            tracing::info!(iteration=i, name, "failed to run test: background_mv not created, retry after {delay:?}");
                             continue;
                         }
                         break;
@@ -326,18 +331,21 @@ pub async fn run_slt_task(
                                 break
                             }
 
-                            // Keep i >= 5 for other errors. Since these errors indicate that the MV might not yet be created.
-                            _ if i >= 5 => panic!("failed to run test after retry {i} times: {e}"),
+                            // Keep i >= max_retry for other errors. Since these errors indicate that the MV might not yet be created.
+                            _ if i >= max_retry => {
+                                panic!("failed to run test after retry {i} times: {e}")
+                            }
                             SqlCmd::CreateMaterializedView { ref name }
                                 if i != 0
                                     && e.to_string().contains("table is in creating procedure")
                                     && background_ddl_enabled =>
                             {
+                                tracing::debug!(iteration=i, name, "Retry for background ddl");
                                 // wait for background ddl to finish and succeed.
                                 let Ok(rw) =
                                     RisingWave::connect("frontend".into(), "dev".into()).await
                                 else {
-                                    tracing::info!(name, "failed to run test: background_mv not created, retry after {delay:?}");
+                                    tracing::info!(iteration=i, name, "failed to run test: background_mv not created, retry after {delay:?}");
                                     continue;
                                 };
                                 let client = rw.pg_client();
@@ -359,7 +367,7 @@ pub async fn run_slt_task(
                                     }
 
                                 // If fail, recreate mv again.
-                                tracing::info!(name, "failed to run test: background_mv not created, retry after {delay:?}");
+                                tracing::info!(iteration=i, name, "failed to run test: background_mv not created, retry after {delay:?}");
                                 continue;
                             }
                             _ => tracing::error!("failed to run test: {e}\nretry after {delay:?}"),
