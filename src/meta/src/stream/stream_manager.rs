@@ -30,7 +30,7 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::{oneshot, Mutex, RwLock};
 use tokio::task::JoinHandle;
-use tokio::time::MissedTickBehavior;
+use tokio::time::{Instant, MissedTickBehavior};
 use tracing::Instrument;
 use uuid::Uuid;
 
@@ -767,8 +767,10 @@ impl GlobalStreamManager {
             .insert_local_sender(local_notification_tx)
             .await;
 
-        let mut ticker = tokio::time::interval(Duration::from_secs(1));
+        let check_period = Duration::from_secs(10);
+        let mut ticker = tokio::time::interval(check_period);
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        ticker.reset();
 
         let worker_nodes = self
             .cluster_manager
@@ -806,7 +808,7 @@ impl GlobalStreamManager {
                             changed = false;
                         }
                         Err(e) => {
-                            tracing::error!(error = ?e, "Failed to trigger scale out, waiting for next tick to retry after {}s", ticker.period().as_secs());
+                            tracing::warn!(error = e.to_string(), "Failed to trigger scale out, waiting for next tick to retry after {}s", ticker.period().as_secs());
                             ticker.reset();
                         }
                     }
