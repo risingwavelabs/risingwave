@@ -12,27 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::fmt::Formatter;
 
-use risingwave_pb::hummock::{HummockVersionDelta, PbGroupDelta, PbTableWatermarks};
+use risingwave_pb::hummock::HummockVersionDelta;
 use sea_orm::entity::prelude::*;
-use sea_orm::FromJsonQueryResult;
-use serde::{Deserialize, Serialize};
 
-use crate::{CompactionGroupId, Epoch, HummockSstableObjectId, HummockVersionId};
+use crate::{Epoch, HummockVersionId};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Default)]
 #[sea_orm(table_name = "hummock_version_delta")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: HummockVersionId,
     pub prev_id: HummockVersionId,
-    pub group_deltas: GroupDeltas,
     pub max_committed_epoch: Epoch,
     pub safe_epoch: Epoch,
     pub trivial_move: bool,
-    pub gc_object_ids: SstableObjectIds,
-    pub new_table_watermarks: NewTableWatermarks,
+    pub serialized_payload: SerializedHummockVersionDelta,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -40,44 +36,39 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
-crate::derive_from_json_struct!(SstableObjectIds, Vec<HummockSstableObjectId>);
+#[derive(Clone, PartialEq, Eq, DeriveValueType)]
+pub struct SerializedHummockVersionDelta(#[sea_orm] Vec<u8>);
 
-impl From<Vec<u64>> for SstableObjectIds {
-    fn from(value: Vec<u64>) -> Self {
-        Self(value.into_iter().map(|id| id as _).collect())
+impl SerializedHummockVersionDelta {
+    fn get_delta(&self) -> HummockVersionDelta {
+        prost::Message::decode(&*self.0).expect("should be able to decode")
+    }
+
+    pub fn from_delta(delta: &HummockVersionDelta) -> Self {
+        Self(prost::Message::encode_to_vec(delta))
     }
 }
 
-crate::derive_from_json_struct!(GroupDeltas, HashMap<CompactionGroupId, Vec<PbGroupDelta>>);
+impl std::fmt::Debug for SerializedHummockVersionDelta {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.get_delta().fmt(f)
+    }
+}
 
-crate::derive_from_json_struct!(NewTableWatermarks, HashMap<u64, PbTableWatermarks>);
+impl Default for SerializedHummockVersionDelta {
+    fn default() -> Self {
+        Self::from_delta(&HummockVersionDelta::default())
+    }
+}
 
 impl From<Model> for HummockVersionDelta {
     fn from(value: Model) -> Self {
-        use risingwave_pb::hummock::hummock_version_delta::GroupDeltas as PbGroupDeltas;
-        Self {
-            id: value.id as _,
-            prev_id: value.prev_id as _,
-            group_deltas: value
-                .group_deltas
-                .0
-                .into_iter()
-                .map(|(cg_id, group_deltas)| (cg_id as _, PbGroupDeltas { group_deltas }))
-                .collect(),
-            max_committed_epoch: value.max_committed_epoch as _,
-            safe_epoch: value.safe_epoch as _,
-            trivial_move: value.trivial_move as _,
-            gc_object_ids: value
-                .gc_object_ids
-                .into_inner()
-                .into_iter()
-                .map(|id| id as _)
-                .collect(),
-            new_table_watermarks: value
-                .new_table_watermarks
-                .into_inner()
-                .into_iter()
-                .collect(),
-        }
+        let ret = value.serialized_payload.get_delta();
+        assert_eq!(value.id, ret.id as i64);
+        assert_eq!(value.prev_id, ret.prev_id as i64);
+        assert_eq!(value.max_committed_epoch, ret.max_committed_epoch as i64);
+        assert_eq!(value.safe_epoch, ret.safe_epoch as i64);
+        assert_eq!(value.trivial_move, ret.trivial_move);
+        ret
     }
 }
