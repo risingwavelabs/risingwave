@@ -289,6 +289,7 @@ pub async fn run_slt_task(
                         tracing::debug!(iteration = i, "retry count (OK)");
                         // For background ddl
                         if let SqlCmd::CreateMaterializedView { ref name } = cmd && background_ddl_enabled
+                            && matches!(record, Record::Statement { expected_error: None, .. } | Record::Query { expected_error: None, ..})
                         {
                             tracing::debug!(iteration=i, "Retry for background ddl");
                             // wait for background ddl to finish and succeed.
