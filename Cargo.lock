@@ -8359,6 +8359,7 @@ dependencies = [
  "pretty_assertions",
  "prometheus",
  "rand",
+ "rand_chacha",
  "risingwave_common",
  "risingwave_compactor",
  "risingwave_compute",

@@ -16,8 +16,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rand::{thread_rng, Rng};
-use sqllogictest::ParallelTestError;
+use rand::{thread_rng, Rng, SeedableRng};
+use rand_chacha::ChaChaRng;
+use sqllogictest::{DefaultColumnType, ParallelTestError, Record};
 
 use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
@@ -117,7 +118,18 @@ const KILL_IGNORE_FILES: &[&str] = &[
 ];
 
 /// Run the sqllogictest files in `glob`.
-pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
+pub async fn run_slt_task(
+    cluster: Arc<Cluster>,
+    glob: &str,
+    opts: &KillOpts,
+    // Probability of background_ddl being set to true per ddl record.
+    background_ddl_weight: f64,
+) {
+    let seed = std::env::var("MADSIM_TEST_SEED")
+        .unwrap_or("0".to_string())
+        .parse::<u64>()
+        .unwrap();
+    let mut rng = ChaChaRng::seed_from_u64(seed);
     let kill = opts.kill_compute || opts.kill_meta || opts.kill_frontend || opts.kill_compactor;
     let files = glob::glob(glob).expect("failed to read glob pattern");
     for file in files {
@@ -167,6 +179,44 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                 sqllogictest::Record::Statement { sql, .. }
                 | sqllogictest::Record::Query { sql, .. } => extract_sql_command(sql),
                 _ => SqlCmd::Others,
+            };
+
+            if matches!(cmd, SqlCmd::SetBackgroundDdl { .. }) && background_ddl_weight > 0.0 {
+                panic!("We cannot run background_ddl statement with background_ddl_weight > 0.0, since it could be reset");
+            }
+
+            // Our background ddl strategy is as follows:
+            // 1. For each background ddl compatible statement, provide a chance for background_ddl=true.
+            // 2. Then later reset background_ddl after the statement is executed.
+            let reset_background_ddl_record = if let Record::Statement {
+                loc,
+                conditions,
+                connection,
+                ..
+            } = &record
+                && matches!(cmd, SqlCmd::CreateMaterializedView { .. })
+                && rng.gen_bool(background_ddl_weight) {
+                let enable_background_ddl = Record::Statement {
+                    loc: loc.clone(),
+                    conditions: conditions.clone(),
+                    connection: connection.clone(),
+                    expected_error: None,
+                    sql: "SET BACKGROUND_DDL=true;".to_string(),
+                    expected_count: None,
+                };
+                let disable_background_ddl: Record<DefaultColumnType> = Record::Statement {
+                    loc: loc.clone(),
+                    conditions: conditions.clone(),
+                    connection: connection.clone(),
+                    expected_error: None,
+                    sql: "SET BACKGROUND_DDL=false;".to_string(),
+                    expected_count: None,
+                };
+                tester.run_async(enable_background_ddl).await.unwrap();
+                background_ddl_enabled = true;
+                Some(disable_background_ddl)
+            } else {
+                None
             };
 
             if cmd.ignore_kill() {
@@ -237,6 +287,9 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                                     .await
                                     .is_ok()
                             {
+                                if let Some(record) = reset_background_ddl_record {
+                                    tester.run_async(record).await.unwrap();
+                                }
                                 break;
                             }
                             // If fail, recreate mv again.
