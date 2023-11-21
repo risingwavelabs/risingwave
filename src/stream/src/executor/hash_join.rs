@@ -469,6 +469,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .map(|&idx| original_schema[idx].clone())
             .collect();
 
+        println!("[rc] actor {}", ctx.id);
         println!("[rc] output_indices:  {:?}", output_indices);
         println!("[rc] original_schema: {:?}", original_schema.fields());
         println!("[rc] actual_schema:   {:?}", actual_schema.fields());

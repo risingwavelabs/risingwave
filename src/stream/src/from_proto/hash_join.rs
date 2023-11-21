@@ -136,6 +136,8 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         let degree_state_table_r =
             StateTable::from_table_catalog(degree_table_r, store, Some(vnodes)).await;
 
+        assert_eq!(params.info.pk_indices, params.pk_indices);
+
         let args = HashJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
             info: params.info,
