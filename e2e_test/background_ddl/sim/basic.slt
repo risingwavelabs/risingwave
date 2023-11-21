@@ -30,19 +30,24 @@ statement error
 CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
 
 query I
+select count(*) from rw_catalog.rw_ddl_progress;
+----
+3
+
+query I
 select count(*) from m1;
 ----
-10000000
+200000
 
 query I
 select count(*) from m2;
 ----
-10000000
+200000
 
 query I
 select count(*) from m3;
 ----
-10000000
+200000
 
 statement ok
 DROP MATERIALIZED VIEW m1;
