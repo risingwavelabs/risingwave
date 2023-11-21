@@ -172,6 +172,62 @@ def run_clickhouse_demo():
 
     assert len(output_content.strip()) > 0
 
+def run_cassandra_and_scylladb_sink_demo():
+    demo = "cassandra-and-scylladb-sink"
+    file_dir = dirname(abspath(__file__))
+    project_dir = dirname(file_dir)
+    demo_dir = os.path.join(project_dir, demo)
+    print("Running demo: {}".format(demo))
+
+    subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=demo_dir, check=True)
+    print("wait two min for cassandra and scylladb to start up")
+    sleep(120)
+
+    dbs = ['cassandra', 'scylladb']
+    for db in dbs:
+        subprocess.run(["docker", "compose", "exec", db, "cqlsh", "-f", "prepare_cassandra_and_scylladb.sql"], cwd=demo_dir, check=True)
+
+    sql_files = ['create_source.sql', 'create_mv.sql', 'create_sink.sql']
+    for fname in sql_files:
+        sql_file = os.path.join(demo_dir,  fname)
+        print("executing sql: ", open(sql_file).read())
+        run_sql_file(sql_file, demo_dir)
+
+    print("sink created. Wait for 1 min time for ingestion")
+
+    # wait for one minutes ingestion
+    sleep(60)
+
+    sink_check_file = os.path.join(demo_dir, 'sink_check')
+    with open(sink_check_file) as f:
+        relations = f.read().strip().split(",")
+        failed_cases = []
+        for rel in relations:
+            sql = 'select count(*) from {};'.format(rel)
+            for db in dbs:
+                print("Running SQL: {} on {}".format(sql, db))
+                query_output_file_name = os.path.join(demo_dir, "query_{}_outout.txt".format(db))
+                query_output_file = open(query_output_file_name, "wb+")
+
+                command = "docker compose exec scylladb cqlsh -e"
+                subprocess.run(["docker", "compose", "exec", db, "cqlsh", "-e", sql], cwd=demo_dir, check=True, stdout=query_output_file)
+
+                # output file:
+                #
+                #  count
+                # -------
+                #   1000
+                #
+                # (1 rows)
+                query_output_file.seek(0)
+                lines = query_output_file.readlines()
+                assert len(lines) >= 6
+                assert lines[1].decode('utf-8').strip().lower() == 'count'
+                rows = int(lines[3].decode('utf-8').strip())
+                if rows < 1:
+                    failed_cases.append(db + "_" + rel)
+        if len(failed_cases) != 0:
+            raise Exception("Data check failed for case {}".format(failed_cases))
 
 arg_parser = argparse.ArgumentParser(description='Run the demo')
 arg_parser.add_argument('--format',
@@ -199,5 +255,7 @@ elif args.case == "iceberg-cdc":
     iceberg_cdc_demo()
 elif args.case == "kafka-cdc-sink":
     run_kafka_cdc_demo()
+elif args.case == "cassandra-and-scylladb-sink":
+    run_cassandra_and_scylladb_sink_demo()
 else:
     run_demo(args.case, args.format)
