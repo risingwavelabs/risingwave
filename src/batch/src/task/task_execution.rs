@@ -38,7 +38,7 @@ use tokio_metrics::TaskMonitor;
 use tracing::Instrument;
 
 use crate::error::BatchError::SenderError;
-use crate::error::{BatchError, BatchSharedResult, Result};
+use crate::error::{BatchError, Result, SharedResult};
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
 use crate::rpc::service::exchange::ExchangeWriter;
 use crate::rpc::service::task_service::TaskInfoResponseResult;
@@ -193,6 +193,15 @@ pub struct TaskOutput {
     failure: Arc<Mutex<Option<Arc<BatchError>>>>,
 }
 
+impl std::fmt::Debug for TaskOutput {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TaskOutput")
+            .field("output_id", &self.output_id)
+            .field("failure", &self.failure)
+            .finish_non_exhaustive()
+    }
+}
+
 impl TaskOutput {
     /// Write the data in serialized format to `ExchangeWriter`.
     /// Return whether the data stream is finished.
@@ -255,7 +264,7 @@ impl TaskOutput {
     }
 
     /// Directly takes data without serialization.
-    pub async fn direct_take_data(&mut self) -> BatchSharedResult<Option<DataChunk>> {
+    pub async fn direct_take_data(&mut self) -> SharedResult<Option<DataChunk>> {
         Ok(self.receiver.recv().await?.map(|c| c.into_data_chunk()))
     }
 

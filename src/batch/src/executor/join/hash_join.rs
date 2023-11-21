@@ -1935,7 +1935,6 @@ mod tests {
     use futures_async_stream::for_await;
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::error::Result;
     use risingwave_common::hash::Key32;
     use risingwave_common::memory::MemoryContext;
     use risingwave_common::metrics::LabelGuardedIntGauge;
@@ -1947,6 +1946,7 @@ mod tests {
     use super::{
         ChunkedData, HashJoinExecutor, JoinType, LeftNonEquiJoinState, RightNonEquiJoinState, RowId,
     };
+    use crate::error::Result;
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::BoxedExecutor;
     use crate::task::ShutdownToken;

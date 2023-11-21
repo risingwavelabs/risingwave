@@ -27,9 +27,8 @@ use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
-use risingwave_rpc_client::error::ToTonicStatus;
 use tokio::sync::mpsc::Sender;
-use tonic::{Code, Status};
+use tonic::Status;
 
 use crate::error::Result;
 use crate::monitor::BatchManagerMetrics;
@@ -207,7 +206,7 @@ impl BatchManager {
                     );
                     Ok(())
                 }
-                Err(e) => tx.send(Err(e.to_status(Code::Internal, "batch"))).await,
+                Err(e) => tx.send(Err(e.into())).await,
             }
         });
         Ok(())
@@ -333,14 +332,12 @@ mod tests {
     use risingwave_pb::batch_plan::{
         ExchangeInfo, PbTaskId, PbTaskOutputId, PlanFragment, PlanNode, ValuesNode,
     };
-    use tonic::Code;
 
     use crate::monitor::BatchManagerMetrics;
     use crate::task::{BatchManager, TaskId};
 
     #[test]
     fn test_task_not_found() {
-        use tonic::Status;
         let manager = Arc::new(BatchManager::new(
             BatchConfig::default(),
             BatchManagerMetrics::for_test(),
@@ -352,10 +349,7 @@ mod tests {
         };
 
         let error = manager.check_if_task_running(&task_id).unwrap_err();
-        assert_eq!(
-            Status::from(manager.check_if_task_running(&task_id).unwrap_err()).code(),
-            Code::Internal
-        );
+        assert!(error.to_string().contains("not found"), "{:?}", error);
 
         let output_id = PbTaskOutputId {
             task_id: Some(risingwave_pb::batch_plan::TaskId {
@@ -365,10 +359,8 @@ mod tests {
             }),
             output_id: 0,
         };
-        match manager.take_output(&output_id) {
-            Err(e) => assert_eq!(Status::from(e).code(), Code::Internal),
-            Ok(_) => unreachable!(),
-        };
+        let error = manager.take_output(&output_id).unwrap_err();
+        assert!(error.to_string().contains("not found"), "{:?}", error);
     }
 
     #[tokio::test]

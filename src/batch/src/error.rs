@@ -25,12 +25,9 @@ use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tonic::Status;
 
-use crate::error::BatchError::Internal;
-use crate::task::TaskId;
-
 pub type Result<T> = std::result::Result<T, BatchError>;
 /// Batch result with shared error.
-pub type BatchSharedResult<T> = std::result::Result<T, Arc<BatchError>>;
+pub type SharedResult<T> = std::result::Result<T, Arc<BatchError>>;
 
 pub trait Error = std::error::Error + Send + Sync + 'static;
 
@@ -137,9 +134,10 @@ impl From<BatchError> for RwError {
 }
 
 // A temp workaround
+// TODO(error-handling): remove after eliminating RwError from connector.
 impl From<RwError> for BatchError {
     fn from(s: RwError) -> Self {
-        Internal(anyhow!(format!("{}", s)))
+        Self::Internal(anyhow!(s))
     }
 }
 
