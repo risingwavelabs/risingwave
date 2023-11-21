@@ -34,7 +34,8 @@
     {
       "name": "entrance_date",
       "type": "int",
-      "logicalType": "date"
+      "logicalType": "date",
+      "default": 0
     },
     {
       "name": "birthday",
