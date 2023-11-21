@@ -17,9 +17,8 @@ use std::sync::LazyLock;
 
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 use chrono::format::StrftimeItems;
-use risingwave_common::types::{DataType, Timestamp, Timestamptz};
-use risingwave_expr::expr::BoxedExpression;
-use risingwave_expr::{build_function, function, ExprError, Result};
+use risingwave_common::types::{Timestamp, Timestamptz};
+use risingwave_expr::{function, ExprError, Result};
 
 use super::timestamptz::time_zone_err;
 
@@ -120,16 +119,8 @@ fn timestamp_to_char(data: Timestamp, pattern: &ChronoPattern, writer: &mut impl
     write!(writer, "{}", format).unwrap();
 }
 
-// Only to register this signature to function signature map.
-#[build_function("to_char(timestamptz, varchar) -> varchar")]
-fn timestamptz_to_char(
-    _return_type: DataType,
-    _children: Vec<BoxedExpression>,
-) -> Result<BoxedExpression> {
-    Err(ExprError::UnsupportedFunction(
-        "to_char(timestamptz, varchar) should have been rewritten to include timezone".into(),
-    ))
-}
+#[function("to_char(timestamptz, varchar) -> varchar", unimplemented)]
+fn _timestamptz_to_char() {}
 
 #[function(
     "to_char(timestamptz, varchar, varchar) -> varchar",
