@@ -474,6 +474,19 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn alter_set_schema(
+        &self,
+        object: alter_set_schema_request::Object,
+        new_schema_id: u32,
+    ) -> Result<CatalogVersion> {
+        let request = AlterSetSchemaRequest {
+            new_schema_id,
+            object: Some(object),
+        };
+        let resp = self.inner.alter_set_schema(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn replace_table(
         &self,
         source: Option<PbSource>,
@@ -1759,6 +1772,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_relation_name, AlterRelationNameRequest, AlterRelationNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
+            ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }

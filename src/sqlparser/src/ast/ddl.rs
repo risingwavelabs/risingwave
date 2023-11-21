@@ -44,13 +44,9 @@ pub enum AlterTableOperation {
     /// `ADD <table_constraint>`
     AddConstraint(TableConstraint),
     /// `ADD [ COLUMN ] <column_def>`
-    AddColumn {
-        column_def: ColumnDef,
-    },
+    AddColumn { column_def: ColumnDef },
     /// TODO: implement `DROP CONSTRAINT <name>`
-    DropConstraint {
-        name: Ident,
-    },
+    DropConstraint { name: Ident },
     /// `DROP [ COLUMN ] [ IF EXISTS ] <column_name> [ CASCADE ]`
     DropColumn {
         column_name: Ident,
@@ -63,9 +59,7 @@ pub enum AlterTableOperation {
         new_column_name: Ident,
     },
     /// `RENAME TO <table_name>`
-    RenameTable {
-        table_name: ObjectName,
-    },
+    RenameTable { table_name: ObjectName },
     // CHANGE [ COLUMN ] <old_name> <new_name> <data_type> [ <options> ]
     ChangeColumn {
         old_name: Ident,
@@ -76,19 +70,16 @@ pub enum AlterTableOperation {
     /// `RENAME CONSTRAINT <old_constraint_name> TO <new_constraint_name>`
     ///
     /// Note: this is a PostgreSQL-specific operation.
-    RenameConstraint {
-        old_name: Ident,
-        new_name: Ident,
-    },
+    RenameConstraint { old_name: Ident, new_name: Ident },
     /// `ALTER [ COLUMN ]`
     AlterColumn {
         column_name: Ident,
         op: AlterColumnOperation,
     },
-
-    ChangeOwner {
-        new_owner_name: Ident,
-    },
+    /// `OWNER TO <owner_name>`
+    ChangeOwner { new_owner_name: Ident },
+    /// `SET SCHEMA <schema_name>`
+    SetSchema { new_schema_name: ObjectName },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -104,6 +95,7 @@ pub enum AlterIndexOperation {
 pub enum AlterViewOperation {
     RenameView { view_name: ObjectName },
     ChangeOwner { new_owner_name: Ident },
+    SetSchema { new_schema_name: ObjectName },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -112,6 +104,7 @@ pub enum AlterViewOperation {
 pub enum AlterSinkOperation {
     RenameSink { sink_name: ObjectName },
     ChangeOwner { new_owner_name: Ident },
+    SetSchema { new_schema_name: ObjectName },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -121,6 +114,21 @@ pub enum AlterSourceOperation {
     RenameSource { source_name: ObjectName },
     AddColumn { column_def: ColumnDef },
     ChangeOwner { new_owner_name: Ident },
+    SetSchema { new_schema_name: ObjectName },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterFunctionOperation {
+    SetSchema { new_schema_name: ObjectName },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterConnectionOperation {
+    SetSchema { new_schema_name: ObjectName },
 }
 
 impl fmt::Display for AlterDatabaseOperation {
@@ -195,6 +203,9 @@ impl fmt::Display for AlterTableOperation {
             AlterTableOperation::ChangeOwner { new_owner_name } => {
                 write!(f, "OWNER TO {}", new_owner_name)
             }
+            AlterTableOperation::SetSchema { new_schema_name } => {
+                write!(f, "SET SCHEMA {}", new_schema_name)
+            }
         }
     }
 }
@@ -218,6 +229,9 @@ impl fmt::Display for AlterViewOperation {
             AlterViewOperation::ChangeOwner { new_owner_name } => {
                 write!(f, "OWNER TO {}", new_owner_name)
             }
+            AlterViewOperation::SetSchema { new_schema_name } => {
+                write!(f, "SET SCHEMA {}", new_schema_name)
+            }
         }
     }
 }
@@ -230,6 +244,9 @@ impl fmt::Display for AlterSinkOperation {
             }
             AlterSinkOperation::ChangeOwner { new_owner_name } => {
                 write!(f, "OWNER TO {}", new_owner_name)
+            }
+            AlterSinkOperation::SetSchema { new_schema_name } => {
+                write!(f, "SET SCHEMA {}", new_schema_name)
             }
         }
     }
@@ -246,6 +263,29 @@ impl fmt::Display for AlterSourceOperation {
             }
             AlterSourceOperation::ChangeOwner { new_owner_name } => {
                 write!(f, "OWNER TO {}", new_owner_name)
+            }
+            AlterSourceOperation::SetSchema { new_schema_name } => {
+                write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterFunctionOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterFunctionOperation::SetSchema { new_schema_name } => {
+                write!(f, "SET SCHEMA {new_schema_name}")
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterConnectionOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterConnectionOperation::SetSchema { new_schema_name } => {
+                write!(f, "SET SCHEMA {new_schema_name}")
             }
         }
     }
