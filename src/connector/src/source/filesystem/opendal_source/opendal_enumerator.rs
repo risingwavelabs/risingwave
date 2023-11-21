@@ -60,7 +60,7 @@ where
     }
 
     async fn list_splits(&mut self) -> anyhow::Result<Vec<OpendalFsSplit<C>>> {
-        todo!()
+        Ok(vec![])
     }
 }
 
@@ -73,21 +73,23 @@ where
             Some(prefix) => prefix,
             None => "",
         };
+
         // Currently, we need to do full list and then filter the prefix and matcher,
         // After OpenDAL implementing the list prefix, we can use the user-specified prefix.
         // https://github.com/apache/incubator-opendal/issues/3247
+
         let object_lister = self
             .op
             .lister_with("/")
             .delimiter("")
             .metakey(Metakey::ContentLength | Metakey::ContentType)
             .await?;
-
         let stream = stream::unfold(object_lister, |mut object_lister| async move {
             match object_lister.next().await {
                 Some(Ok(object)) => {
                     // todo: manual filtering prefix
                     let name = object.path().to_string();
+
                     let om = object.metadata();
 
                     let t = match om.last_modified() {
@@ -118,6 +120,14 @@ where
         });
 
         Ok(stream.boxed())
+    }
+
+    pub fn get_prefix(&self) -> &Option<String> {
+        &self.prefix
+    }
+
+    pub fn get_matcher(&self) -> &Option<glob::Pattern> {
+        &self.matcher
     }
 }
 pub type ObjectMetadataIter = BoxStream<'static, anyhow::Result<FsPageItem>>;

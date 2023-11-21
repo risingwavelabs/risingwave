@@ -42,7 +42,8 @@ use super::nexmark::source::message::NexmarkMeta;
 use super::{GCS_CONNECTOR, OPENDAL_S3_CONNECTOR};
 use crate::parser::ParserConfig;
 pub(crate) use crate::source::common::CommonSplitReader;
-use crate::source::filesystem::{FsPageItem, S3Properties};
+use crate::source::filesystem::opendal_source::OpendalS3Properties;
+use crate::source::filesystem::{FsPageItem, GcsProperties, S3Properties};
 use crate::source::monitor::EnumeratorMetrics;
 use crate::source::S3_CONNECTOR;
 use crate::{
@@ -74,7 +75,7 @@ impl<P: DeserializeOwned> TryFromHashmap for P {
     }
 }
 
-pub async fn create_split_reader<P: SourceProperties>(
+pub async fn create_split_reader<P: SourceProperties + std::fmt::Debug>(
     prop: P,
     splits: Vec<SplitImpl>,
     parser_config: ParserConfig,
@@ -388,14 +389,6 @@ impl ConnectorProperties {
     pub fn rewrite_upstream_source_key_hash_map(props: &mut HashMap<String, String>) {
         let connector = props.remove(UPSTREAM_SOURCE_KEY).unwrap();
         match connector.as_str() {
-            // S3_V2_CONNECTOR => {
-            //     tracing::info!(
-            //         "using new fs source, rewrite connector from '{}' to '{}'",
-            //         S3_V2_CONNECTOR,
-            //         S3_CONNECTOR
-            //     );
-            //     props.insert(UPSTREAM_SOURCE_KEY.to_string(), S3_CONNECTOR.to_string());
-            // }
             OPENDAL_S3_CONNECTOR => {
                 tracing::info!(
                     "using new fs source, rewrite connector from '{}' to '{}'",
@@ -425,12 +418,26 @@ impl ConnectorProperties {
 impl ConnectorProperties {
     pub fn extract(mut props: HashMap<String, String>) -> Result<Self> {
         if Self::is_new_fs_connector_hash_map(&props) {
-            _ = props
+            let connector = props
                 .remove(UPSTREAM_SOURCE_KEY)
                 .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
-            return Ok(ConnectorProperties::S3(Box::new(
-                S3Properties::try_from_hashmap(props)?,
-            )));
+            match connector.as_str() {
+                "s3_v2" => {
+                    return Ok(ConnectorProperties::OpenDalS3(Box::new(
+                        OpendalS3Properties {
+                            s3_properties: S3Properties::try_from_hashmap(props)?,
+                        },
+                    )));
+                }
+                "gcs" => {
+                    return Ok(ConnectorProperties::Gcs(Box::new(
+                        GcsProperties::try_from_hashmap(props)?,
+                    )));
+                }
+                _ => {
+                    unreachable!()
+                }
+            }
         }
 
         let connector = props

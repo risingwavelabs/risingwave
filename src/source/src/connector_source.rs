@@ -105,11 +105,10 @@ impl ConnectorSource {
                     },
                     lister,
                 ))
-            }
-            ConnectorProperties::S3(prop) => {
-                // todo(wcy-fdu): use new s3 prop
+            }     
+            ConnectorProperties::OpenDalS3(prop) => {
                 let lister: OpendalEnumerator<OpendalS3Properties> =
-                    OpendalEnumerator::new_s3_source(*prop)?;
+                    OpendalEnumerator::new_s3_source(prop.s3_properties)?;
                 Ok(build_opendal_fs_list_stream(
                     FsListCtrlContext {
                         interval: Duration::from_secs(60),
@@ -154,14 +153,12 @@ impl ConnectorSource {
         };
 
         let support_multiple_splits = config.support_multiple_splits();
-
         dispatch_source_prop!(config, prop, {
             let readers = if support_multiple_splits {
                 tracing::info!(
                     "spawning connector split reader for multiple splits {:?}",
                     splits
                 );
-
                 let reader =
                     create_split_reader(*prop, splits, parser_config, source_ctx, data_gen_columns)
                         .await?;
@@ -205,8 +202,37 @@ async fn build_opendal_fs_list_stream<C: OpenDalProperties>(
     // let mut interval = time::interval(ctrl_ctx.interval);
     // interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
+    // let prefix = match lister.get_prefix().as_ref() {
+    //     Some(prefix) => prefix,
+    //     None => {
+    //         let empty_prefix = "".to_string();
+    //         &empty_prefix
+    //     }
+    // };
+    let prefix = lister
+        .get_prefix()
+        .as_ref()
+        .map(|s| s.as_str())
+        .unwrap_or("");
+
+    let matcher = lister.get_matcher();
     let mut object_metadata_iter = lister.list().await?;
+
     while let Some(list_res) = object_metadata_iter.next().await {
-        yield list_res.unwrap();
+        match list_res {
+            Ok(res) => {
+                if res.name.starts_with(prefix)
+                    && matcher
+                        .as_ref()
+                        .map(|m| m.matches(&res.name))
+                        .unwrap_or(true)
+                {
+                    yield res
+                } else {
+                    continue;
+                }
+            }
+            Err(_) => break,
+        }
     }
 }

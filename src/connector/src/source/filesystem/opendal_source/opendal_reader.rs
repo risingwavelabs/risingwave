@@ -59,13 +59,11 @@ where
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         let connector = Self::Properties::new_enumerator(properties)?;
-        // let connector = OpendalConnector::new_gcs_source(properties)?;
         let opendal_reader = OpendalReader {
             connector,
             splits,
             parser_config,
             source_ctx,
-            // marker: PhantomData,
         };
         Ok(opendal_reader)
     }
@@ -176,7 +174,6 @@ where
     }
 
     pub async fn get_object(op: Operator, object_name: &str, start: usize) -> Result<ByteStream> {
-        println!("读{:?}", object_name);
         let mut reader = op.reader_with(object_name).range(start as u64..).await?;
         let mut buffer = Vec::new();
         reader.read_to_end(&mut buffer).await?;

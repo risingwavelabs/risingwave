@@ -24,7 +24,8 @@ use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{ScalarRef, ScalarRefImpl};
-use risingwave_connector::source::filesystem::FsSplit;
+use risingwave_connector::source::filesystem::opendal_source::OpendalS3Properties;
+use risingwave_connector::source::filesystem::{GcsProperties, OpendalFsSplit};
 use risingwave_connector::source::{
     BoxSourceWithStateStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
     StreamChunkWithState,
@@ -110,13 +111,23 @@ impl<S: StateStore> FsFetchExecutor<S> {
                 )
                 .await?;
             pin_mut!(table_iter);
-
+            let properties = source_desc.source.config.clone();
             while let Some(item) = table_iter.next().await {
                 let row = item?;
                 let split = match row.datum_at(1) {
-                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                        SplitImpl::from(FsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?)
-                    }
+                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => match properties {
+                        risingwave_connector::source::ConnectorProperties::Gcs(_) => {
+                            let split: OpendalFsSplit<GcsProperties> =
+                                OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
+                            SplitImpl::from(split)
+                        }
+                        risingwave_connector::source::ConnectorProperties::OpenDalS3(_) => {
+                            let split: OpendalFsSplit<OpendalS3Properties> =
+                                OpendalFsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?;
+                            SplitImpl::from(split)
+                        }
+                        _ => unreachable!(),
+                    },
                     _ => unreachable!(),
                 };
                 batch.push(split);
@@ -126,7 +137,6 @@ impl<S: StateStore> FsFetchExecutor<S> {
                 }
             }
         }
-
         if batch.is_empty() {
             stream.replace_data_stream(stream::pending().boxed());
         } else {
@@ -265,16 +275,36 @@ impl<S: StateStore> FsFetchExecutor<S> {
                                 // Receiving file assignments from upstream list executor,
                                 // store into state table and try building a new reader.
                                 Message::Chunk(chunk) => {
-                                    let file_assignment = chunk
-                                        .data_chunk()
-                                        .rows()
-                                        .map(|row| {
-                                            let filename = row.datum_at(0).unwrap().into_utf8();
-                                            let size = row.datum_at(2).unwrap().into_int64();
-                                            FsSplit::new(filename.to_owned(), 0, size as usize)
-                                        })
-                                        .collect();
-                                    state_store_handler.take_snapshot(file_assignment).await?;
+                                    let properties = source_desc.source.config.clone();
+                                    match properties{
+                                        risingwave_connector::source::ConnectorProperties::Gcs(_) => {
+                                            let file_assignment = chunk
+                                            .data_chunk()
+                                            .rows()
+                                            .map(|row| {
+                                                let filename = row.datum_at(0).unwrap().into_utf8();
+                                                let size = row.datum_at(2).unwrap().into_int64();
+                                                    let split: OpendalFsSplit<GcsProperties>= OpendalFsSplit::new(filename.to_owned(), 0, size as usize);
+                                                    split
+                                            })
+                                            .collect();
+                                            state_store_handler.take_snapshot(file_assignment).await?;
+                                        },
+                                        risingwave_connector::source::ConnectorProperties::OpenDalS3(_) => {
+                                            let file_assignment = chunk
+                                            .data_chunk()
+                                            .rows()
+                                            .map(|row| {
+                                                let filename = row.datum_at(0).unwrap().into_utf8();
+                                                let size = row.datum_at(2).unwrap().into_int64();
+                                                    let split: OpendalFsSplit<OpendalS3Properties>= OpendalFsSplit::new(filename.to_owned(), 0, size as usize);
+                                                    split
+                                            })
+                                            .collect();
+                                            state_store_handler.take_snapshot(file_assignment).await?;
+                                        },
+                                        _ => unreachable!()
+                                    }
                                 }
                                 _ => unreachable!(),
                             }
@@ -291,12 +321,17 @@ impl<S: StateStore> FsFetchExecutor<S> {
                                     .get(split_id.clone())
                                     .await?
                                     .expect("The fs_split should be in the state table.");
-                                let fs_split = match row.datum_at(1) {
-                                    Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
-                                        FsSplit::restore_from_json(jsonb_ref.to_owned_scalar())?
-                                    }
-                                    _ => unreachable!(),
-                                };
+                                let properties = source_desc.source.config.clone();
+                                if let risingwave_connector::source::ConnectorProperties::OpenDalS3(_)=properties{
+                                    let fs_split: OpendalFsSplit<OpendalS3Properties> =
+                                    match row.datum_at(1) {
+                                        Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
+                                            OpendalFsSplit::restore_from_json(
+                                                jsonb_ref.to_owned_scalar(),
+                                            )?
+                                        }
+                                        _ => unreachable!(),
+                                    };
 
                                 if offset.parse::<usize>().unwrap() >= fs_split.size {
                                     splits_on_fetch -= 1;
@@ -305,6 +340,30 @@ impl<S: StateStore> FsFetchExecutor<S> {
                                     state_store_handler
                                         .set(split_id, fs_split.encode_to_json())
                                         .await?;
+                                }
+                                }
+                                else if let risingwave_connector::source::ConnectorProperties::Gcs(_)=properties{
+                                    let fs_split: OpendalFsSplit<GcsProperties> =
+                                    match row.datum_at(1) {
+                                        Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
+                                            OpendalFsSplit::restore_from_json(
+                                                jsonb_ref.to_owned_scalar(),
+                                            )?
+                                        }
+                                        _ => unreachable!(),
+                                    };
+
+                                if offset.parse::<usize>().unwrap() >= fs_split.size {
+                                    splits_on_fetch -= 1;
+                                    state_store_handler.delete(split_id).await?;
+                                } else {
+                                    state_store_handler
+                                        .set(split_id, fs_split.encode_to_json())
+                                        .await?;
+                                }
+                                }
+                                else{
+                                    unreachable!()
                                 }
                             }
 

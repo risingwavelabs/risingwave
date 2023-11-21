@@ -20,4 +20,3 @@ pub use file_common::{FsPage, FsPageItem, FsSplit, OpendalFsSplit};
 pub mod opendal_source;
 mod s3;
 pub mod s3_v2;
-pub const S3_V2_CONNECTOR: &str = "s3_v2";

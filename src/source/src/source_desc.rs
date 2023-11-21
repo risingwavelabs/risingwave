@@ -109,7 +109,6 @@ impl SourceDescBuilder {
             // new fs source requires `connector='s3_v2' but we simply reuse S3 connector`
             ConnectorProperties::rewrite_upstream_source_key_hash_map(&mut self.properties);
         }
-
         let source = ConnectorSource::new(
             self.properties,
             columns.clone(),

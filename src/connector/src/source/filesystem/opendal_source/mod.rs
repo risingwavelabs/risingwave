@@ -33,6 +33,8 @@ pub const OPENDAL_S3_CONNECTOR: &str = "s3_v2";
 pub struct GcsProperties {
     #[serde(rename = "gcs.bucket_name")]
     pub bucket_name: String,
+    #[serde(rename = "match_pattern", default)]
+    pub match_pattern: Option<String>,
 }
 
 impl SourceProperties for GcsProperties {

@@ -40,6 +40,6 @@ pub use manager::{SourceColumnDesc, SourceColumnType};
 pub use mock_external_table::MockExternalTableReader;
 
 pub use crate::source::filesystem::opendal_source::{GCS_CONNECTOR, OPENDAL_S3_CONNECTOR};
-pub use crate::source::filesystem::{S3_CONNECTOR, S3_V2_CONNECTOR};
+pub use crate::source::filesystem::S3_CONNECTOR;
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;

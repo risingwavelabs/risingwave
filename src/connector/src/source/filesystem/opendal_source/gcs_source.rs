@@ -14,12 +14,13 @@
 
 use std::marker::PhantomData;
 
+use anyhow::Context;
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::Gcs;
 use opendal::Operator;
 
 use super::opendal_enumerator::{EngineType, OpendalEnumerator};
-use super::{GcsProperties, OpenDalProperties};
+use super::{get_prefix, GcsProperties, OpenDalProperties};
 
 impl<C: OpenDalProperties> OpendalEnumerator<C>
 where
@@ -42,20 +43,19 @@ where
             .layer(RetryLayer::default())
             .finish();
 
-        // todo(wcy-fdu): add (prefix, matcher) for gcs_properties
-        // let (prefix, matcher) = if let Some(pattern) = gcs_properties.match_pattern.as_ref() {
-        //     let prefix = get_prefix(pattern);
-        //     let matcher = glob::Pattern::new(pattern)
-        //         .with_context(|| format!("Invalid match_pattern: {}", pattern))?;
-        //     (Some(prefix), Some(matcher))
-        // } else {
-        //     (None, None)
-        // };
+        let (prefix, matcher) = if let Some(pattern) = gcs_properties.match_pattern.as_ref() {
+            let prefix = get_prefix(pattern);
+            let matcher = glob::Pattern::new(pattern)
+                .with_context(|| format!("Invalid match_pattern: {}", pattern))?;
+            (Some(prefix), Some(matcher))
+        } else {
+            (None, None)
+        };
         Ok(Self {
             op,
             engine_type: EngineType::Gcs,
-            prefix: None,
-            matcher: None,
+            prefix,
+            matcher,
             marker: PhantomData,
         })
     }
