@@ -15,14 +15,25 @@
  *
  */
 
-import { ColumnCatalog, Field } from "../proto/gen/plan_common"
+import {
+  Column,
+  connectorColumn,
+  dependentsColumn,
+  Relations,
+} from "../components/Relations"
+import { Source } from "../proto/gen/catalog"
+import { getSources } from "./api/streaming"
 
-export default function extractColumnInfo(col: ColumnCatalog | Field) {
-  if ("columnDesc" in col) {
-    // ColumnCatalog
-    return `${col.columnDesc?.name} (${col.columnDesc?.columnType?.typeName})`
-  } else {
-    // Field
-    return `${col.name} (${col.dataType?.typeName})`
+export default function DataSources() {
+  const rowFormatColumn: Column<Source> = {
+    name: "Row Format",
+    width: 3,
+    content: (s) => s.info?.rowFormat ?? "unknown",
   }
+
+  return Relations("Sources", getSources, [
+    connectorColumn,
+    rowFormatColumn,
+    dependentsColumn,
+  ])
 }
