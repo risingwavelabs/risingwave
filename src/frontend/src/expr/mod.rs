@@ -1155,7 +1155,7 @@ mod tests {
             Some(r#"{"file": "2.binlog", "pos": 100}"#.into()),
         ]);
 
-        let mut expr: ExprImpl = FunctionCall::new(
+        let expr: ExprImpl = FunctionCall::new(
             ExprType::Equal,
             vec![
                 FunctionCall::new(

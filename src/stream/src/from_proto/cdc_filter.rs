@@ -20,7 +20,7 @@ use crate::executor::FilterExecutor;
 
 pub struct CdcFilterExecutorBuilder;
 
-/// CdcFilter is an extension to the Filter executor
+/// `CdcFilter` is an extension to the Filter executor
 impl ExecutorBuilder for CdcFilterExecutorBuilder {
     type Node = CdcFilterNode;
 
