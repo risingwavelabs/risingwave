@@ -925,10 +925,7 @@ impl ExprVisitor for TableScanIoEstimator<'_> {
                 .map(|x| {
                     let mut estimator = TableScanIoEstimator::new(self.table_scan, self.row_size);
                     estimator.visit_expr(x);
-                    estimator
-                        .cost
-                        .take()
-                        .unwrap_or_else(IndexCost::default)
+                    estimator.cost.take().unwrap_or_else(IndexCost::default)
                 })
                 .reduce(|x, y| x.add(&y))
                 .unwrap(),
