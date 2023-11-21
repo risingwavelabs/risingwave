@@ -21,14 +21,13 @@ use prometheus::core::{AtomicF64, GenericGaugeVec};
 use prometheus::{
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
     register_histogram_vec_with_registry, register_histogram_with_registry,
-    register_int_counter_with_registry, register_int_gauge_with_registry, Histogram, HistogramVec,
-    IntCounter, IntGauge, Registry,
+    register_int_counter_vec_with_registry, register_int_counter_with_registry,
+    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
+    HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
-use risingwave_common::metrics::{LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec};
+use risingwave_common::metrics::LabelGuardedIntGaugeVec;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
-use risingwave_common::{
-    register_guarded_int_counter_vec_with_registry, register_guarded_int_gauge_vec_with_registry,
-};
+use risingwave_common::register_guarded_int_gauge_vec_with_registry;
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_object_store::object::object_metrics::{
     ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
@@ -46,9 +45,9 @@ use crate::rpc::ElectionClientRef;
 pub struct MetaMetrics {
     /// ********************************** Meta ************************************
     /// The number of workers in the cluster.
-    pub worker_num: LabelGuardedIntGaugeVec<1>,
+    pub worker_num: IntGaugeVec,
     /// The roles of all meta nodes in the cluster.
-    pub meta_type: LabelGuardedIntGaugeVec<2>,
+    pub meta_type: IntGaugeVec,
 
     /// ********************************** gRPC ************************************
     /// gRPC latency of meta services
@@ -80,13 +79,13 @@ pub struct MetaMetrics {
     /// The smallest epoch that is being pinned.
     pub min_pinned_epoch: IntGauge,
     /// The number of SSTs in each level
-    pub level_sst_num: LabelGuardedIntGaugeVec<1>,
+    pub level_sst_num: IntGaugeVec,
     /// The number of SSTs to be merged to next level in each level
-    pub level_compact_cnt: LabelGuardedIntGaugeVec<1>,
+    pub level_compact_cnt: IntGaugeVec,
     /// The number of compact tasks
-    pub compact_frequency: LabelGuardedIntCounterVec<4>,
+    pub compact_frequency: IntCounterVec,
     /// Size of each level
-    pub level_file_size: LabelGuardedIntGaugeVec<1>,
+    pub level_file_size: IntGaugeVec,
     /// Hummock version size
     pub version_size: IntGauge,
     /// The version Id of current version.
@@ -98,7 +97,7 @@ pub struct MetaMetrics {
     /// The smallest version id that is being guarded by meta node safe points.
     pub min_safepoint_version_id: IntGauge,
     /// Compaction groups that is in write stop state.
-    pub write_stop_compaction_groups: LabelGuardedIntGaugeVec<1>,
+    pub write_stop_compaction_groups: IntGaugeVec,
     /// The object id watermark used in last full GC.
     pub full_gc_last_object_id_watermark: IntGauge,
     /// The number of attempts to trigger full GC.
@@ -108,9 +107,9 @@ pub struct MetaMetrics {
     /// The number of object to delete after filtering by meta node.
     pub full_gc_selected_object_count: Histogram,
     /// Hummock version stats
-    pub version_stats: LabelGuardedIntGaugeVec<2>,
+    pub version_stats: IntGaugeVec,
     /// Hummock version stats
-    pub materialized_view_stats: LabelGuardedIntGaugeVec<2>,
+    pub materialized_view_stats: IntGaugeVec,
     /// Total number of objects that is no longer referenced by versions.
     pub stale_object_count: IntGauge,
     /// Total size of objects that is no longer referenced by versions.
@@ -136,20 +135,20 @@ pub struct MetaMetrics {
     /// Latency for hummock manager to really process a request after acquire the lock
     pub hummock_manager_real_process_time: HistogramVec,
     /// The number of compactions from one level to another level that have been skipped
-    pub compact_skip_frequency: LabelGuardedIntCounterVec<2>,
+    pub compact_skip_frequency: IntCounterVec,
     /// Bytes of lsm tree needed to reach balance
-    pub compact_pending_bytes: LabelGuardedIntGaugeVec<1>,
+    pub compact_pending_bytes: IntGaugeVec,
     /// Per level compression ratio
     pub compact_level_compression_ratio: GenericGaugeVec<AtomicF64>,
     /// Per level number of running compaction task
-    pub level_compact_task_cnt: LabelGuardedIntGaugeVec<1>,
+    pub level_compact_task_cnt: IntGaugeVec,
     pub time_after_last_observation: Arc<AtomicU64>,
     pub l0_compact_level_count: HistogramVec,
     pub compact_task_size: HistogramVec,
     pub compact_task_file_count: HistogramVec,
-    pub move_state_table_count: LabelGuardedIntCounterVec<1>,
-    pub state_table_count: LabelGuardedIntGaugeVec<1>,
-    pub branched_sst_count: LabelGuardedIntGaugeVec<1>,
+    pub move_state_table_count: IntCounterVec,
+    pub state_table_count: IntGaugeVec,
+    pub branched_sst_count: IntGaugeVec,
 
     pub compaction_event_consumed_latency: Histogram,
     pub compaction_event_loop_iteration_latency: Histogram,
@@ -165,14 +164,14 @@ pub struct MetaMetrics {
 
     /// ********************************** Fragment ************************************
     /// A dummpy gauge metrics with its label to be the mapping from actor id to fragment id
-    pub actor_info: LabelGuardedIntGaugeVec<3>,
+    pub actor_info: IntGaugeVec,
     /// A dummpy gauge metrics with its label to be the mapping from table id to actor id
-    pub table_info: LabelGuardedIntGaugeVec<6>,
+    pub table_info: IntGaugeVec,
     /// A dummy gauge metrics with its label to be the mapping from actor id to sink id
-    pub sink_info: LabelGuardedIntGaugeVec<3>,
+    pub sink_info: IntGaugeVec,
 
     /// Write throughput of commit epoch for each stable
-    pub table_write_throughput: LabelGuardedIntCounterVec<1>,
+    pub table_write_throughput: IntCounterVec,
 }
 
 pub static GLOBAL_META_METRICS: LazyLock<MetaMetrics> =
@@ -241,7 +240,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let level_sst_num = register_guarded_int_gauge_vec_with_registry!(
+        let level_sst_num = register_int_gauge_vec_with_registry!(
             "storage_level_sst_num",
             "num of SSTs in each level",
             &["level_index"],
@@ -249,7 +248,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let level_compact_cnt = register_guarded_int_gauge_vec_with_registry!(
+        let level_compact_cnt = register_int_gauge_vec_with_registry!(
             "storage_level_compact_cnt",
             "num of SSTs to be merged to next level in each level",
             &["level_index"],
@@ -257,14 +256,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let compact_frequency = register_guarded_int_counter_vec_with_registry!(
+        let compact_frequency = register_int_counter_vec_with_registry!(
             "storage_level_compact_frequency",
             "The number of compactions from one level to another level that have completed or failed.",
             &["compactor", "group", "task_type", "result"],
             registry
         )
         .unwrap();
-        let compact_skip_frequency = register_guarded_int_counter_vec_with_registry!(
+        let compact_skip_frequency = register_int_counter_vec_with_registry!(
             "storage_skip_compact_frequency",
             "The number of compactions from one level to another level that have been skipped.",
             &["level", "type"],
@@ -297,7 +296,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let write_stop_compaction_groups = register_guarded_int_gauge_vec_with_registry!(
+        let write_stop_compaction_groups = register_int_gauge_vec_with_registry!(
             "storage_write_stop_compaction_groups",
             "compaction groups of write stop state",
             &["compaction_group_id"],
@@ -342,7 +341,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let level_file_size = register_guarded_int_gauge_vec_with_registry!(
+        let level_file_size = register_int_gauge_vec_with_registry!(
             "storage_level_total_file_size",
             "KBs total file bytes in each level",
             &["level_index"],
@@ -350,7 +349,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let version_stats = register_guarded_int_gauge_vec_with_registry!(
+        let version_stats = register_int_gauge_vec_with_registry!(
             "storage_version_stats",
             "per table stats in current hummock version",
             &["table_id", "metric"],
@@ -358,7 +357,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let materialized_view_stats = register_guarded_int_gauge_vec_with_registry!(
+        let materialized_view_stats = register_int_gauge_vec_with_registry!(
             "storage_materialized_view_stats",
             "per materialized view stats in current hummock version",
             &["table_id", "metric"],
@@ -450,7 +449,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let worker_num = register_guarded_int_gauge_vec_with_registry!(
+        let worker_num = register_int_gauge_vec_with_registry!(
             "worker_num",
             "number of nodes in the cluster",
             &["worker_type"],
@@ -458,7 +457,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let meta_type = register_guarded_int_gauge_vec_with_registry!(
+        let meta_type = register_int_gauge_vec_with_registry!(
             "meta_num",
             "role of meta nodes in the cluster",
             &["worker_addr", "role"],
@@ -466,7 +465,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let compact_pending_bytes = register_guarded_int_gauge_vec_with_registry!(
+        let compact_pending_bytes = register_int_gauge_vec_with_registry!(
             "storage_compact_pending_bytes",
             "bytes of lsm tree needed to reach balance",
             &["group"],
@@ -482,7 +481,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let level_compact_task_cnt = register_guarded_int_gauge_vec_with_registry!(
+        let level_compact_task_cnt = register_int_gauge_vec_with_registry!(
             "storage_level_compact_task_cnt",
             "num of compact_task organized by group and level",
             &["task"],
@@ -513,7 +512,7 @@ impl MetaMetrics {
         .unwrap();
         let source_enumerator_metrics = Arc::new(SourceEnumeratorMetrics::default());
 
-        let actor_info = register_guarded_int_gauge_vec_with_registry!(
+        let actor_info = register_int_gauge_vec_with_registry!(
             "actor_info",
             "Mapping from actor id to (fragment id, compute node",
             &["actor_id", "fragment_id", "compute_node"],
@@ -521,7 +520,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let table_info = register_guarded_int_gauge_vec_with_registry!(
+        let table_info = register_int_gauge_vec_with_registry!(
             "table_info",
             "Mapping from table id to (actor id, table name)",
             &[
@@ -536,7 +535,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let sink_info = register_guarded_int_gauge_vec_with_registry!(
+        let sink_info = register_int_gauge_vec_with_registry!(
             "sink_info",
             "Mapping from actor id to (actor id, sink name)",
             &["actor_id", "sink_id", "sink_name",],
@@ -568,7 +567,7 @@ impl MetaMetrics {
             registry
         )
         .unwrap();
-        let table_write_throughput = register_guarded_int_counter_vec_with_registry!(
+        let table_write_throughput = register_int_counter_vec_with_registry!(
             "storage_commit_write_throughput",
             "The number of compactions from one level to another level that have been skipped.",
             &["table_id"],
@@ -576,7 +575,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let move_state_table_count = register_guarded_int_counter_vec_with_registry!(
+        let move_state_table_count = register_int_counter_vec_with_registry!(
             "storage_move_state_table_count",
             "Count of trigger move state table",
             &["group"],
@@ -584,7 +583,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let state_table_count = register_guarded_int_gauge_vec_with_registry!(
+        let state_table_count = register_int_gauge_vec_with_registry!(
             "storage_state_table_count",
             "Count of stable table per compaction group",
             &["group"],
@@ -592,7 +591,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let branched_sst_count = register_guarded_int_gauge_vec_with_registry!(
+        let branched_sst_count = register_int_gauge_vec_with_registry!(
             "storage_branched_sst_count",
             "Count of branched sst per compaction group",
             &["group"],
