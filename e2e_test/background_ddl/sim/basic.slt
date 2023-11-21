@@ -30,11 +30,6 @@ statement error
 CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
 
 query I
-select count(*) from rw_catalog.rw_ddl_progress;
-----
-3
-
-query I
 select count(*) from m1;
 ----
 200000

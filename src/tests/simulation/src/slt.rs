@@ -220,9 +220,10 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                     .await
                 {
                     Ok(_) => {
+                        // For background ddl
                         if let SqlCmd::CreateMaterializedView { ref name } = cmd && background_ddl_enabled
                         {
-                            // wait for background ddl to finish
+                            // wait for background ddl to finish and succeed.
                             let rw = RisingWave::connect("frontend".into(), "dev".into())
                                 .await
                                 .unwrap();
