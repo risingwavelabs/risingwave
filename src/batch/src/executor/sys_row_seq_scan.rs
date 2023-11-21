@@ -16,11 +16,11 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, SysCatalogReaderRef, TableId};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -105,7 +105,7 @@ impl Executor for SysRowSeqScanExecutor {
 }
 
 impl SysRowSeqScanExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_executor(self: Box<Self>) {
         let rows = self.sys_catalog_reader.read_table(&self.table_id).await?;
         let filtered_rows = rows

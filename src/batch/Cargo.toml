@@ -25,6 +25,7 @@ futures-util = "0.3"
 hashbrown = { workspace = true }
 hytra = "0.1.2"
 itertools = "0.12"
+memcomparable = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }

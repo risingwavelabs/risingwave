@@ -16,11 +16,10 @@ use std::collections::{hash_map, HashMap};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use anyhow::Context;
 use hytra::TrAdder;
 use parking_lot::Mutex;
 use risingwave_common::config::BatchConfig;
-use risingwave_common::error::ErrorCode::{self, TaskNotFound};
-use risingwave_common::error::Result;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tracing::TracingContext;
@@ -28,9 +27,11 @@ use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
+use risingwave_rpc_client::error::ToTonicStatus;
 use tokio::sync::mpsc::Sender;
-use tonic::Status;
+use tonic::{Code, Status};
 
+use crate::error::Result;
 use crate::monitor::BatchManagerMetrics;
 use crate::rpc::service::exchange::GrpcExchangeWriter;
 use crate::task::{
@@ -120,11 +121,10 @@ impl BatchManager {
 
             Ok(())
         } else {
-            Err(ErrorCode::InternalError(format!(
+            bail!(
                 "can not create duplicate task with the same id: {:?}",
                 task_id,
-            ))
-            .into())
+            );
         };
         task.async_execute(Some(state_reporter), tracing_context)
             .await
@@ -207,7 +207,7 @@ impl BatchManager {
                     );
                     Ok(())
                 }
-                Err(e) => tx.send(Err(e.into())).await,
+                Err(e) => tx.send(Err(e.to_status(Code::Internal, "batch"))).await,
             }
         });
         Ok(())
@@ -218,7 +218,7 @@ impl BatchManager {
         self.tasks
             .lock()
             .get(&task_id)
-            .ok_or(TaskNotFound)?
+            .with_context(|| format!("task {:?} not found", task_id))?
             .get_task_output(output_id)
     }
 
@@ -245,14 +245,14 @@ impl BatchManager {
     pub fn check_if_task_running(&self, task_id: &TaskId) -> Result<()> {
         match self.tasks.lock().get(task_id) {
             Some(task) => task.check_if_running(),
-            None => Err(TaskNotFound.into()),
+            None => bail!("task {:?} not found", task_id),
         }
     }
 
     pub fn check_if_task_aborted(&self, task_id: &TaskId) -> Result<bool> {
         match self.tasks.lock().get(task_id) {
             Some(task) => task.check_if_aborted(),
-            None => Err(TaskNotFound.into()),
+            None => bail!("task {:?} not found", task_id),
         }
     }
 
@@ -269,7 +269,7 @@ impl BatchManager {
                         Err(err) => return Err(err),
                     }
                 }
-                None => return Err(TaskNotFound.into()),
+                None => bail!("task {:?} not found", task_id),
             }
             tokio::time::sleep(Duration::from_millis(100)).await
         }
@@ -351,6 +351,7 @@ mod tests {
             query_id: "abc".to_string(),
         };
 
+        let error = manager.check_if_task_running(&task_id).unwrap_err();
         assert_eq!(
             Status::from(manager.check_if_task_running(&task_id).unwrap_err()).code(),
             Code::Internal

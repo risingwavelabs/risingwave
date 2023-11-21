@@ -20,8 +20,6 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
-use risingwave_common::error::ErrorCode::ConnectorError;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::parser::SpecificParserConfig;
 use risingwave_connector::source::monitor::SourceMetrics;
@@ -32,7 +30,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::connector_source::ConnectorSource;
 
 use super::Executor;
-use crate::error::BatchError;
+use crate::error::{BatchError, Result};
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 use crate::task::BatchTaskContext;
 
@@ -67,7 +65,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
         let source_props: HashMap<String, String> =
             HashMap::from_iter(source_node.properties.clone());
         let config = ConnectorProperties::extract(source_props)
-            .map_err(|e| RwError::from(ConnectorError(e.into())))?;
+            .map_err(|e| BatchError::Connector(e.into()))?;
 
         let info = source_node.get_info().unwrap();
         let parser_config = SpecificParserConfig::new(info, &source_node.properties)?;
@@ -140,7 +138,7 @@ impl Executor for SourceExecutor {
 }
 
 impl SourceExecutor {
-    #[try_stream(ok = DataChunk, error = RwError)]
+    #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let source_ctx = Arc::new(SourceContext::new(
             u32::MAX,
@@ -165,7 +163,7 @@ impl SourceExecutor {
                     }
                 }
                 Err(e) => {
-                    return Err(e);
+                    return Err(BatchError::Connector(e.into()));
                 }
             }
         }
@@ -177,9 +175,9 @@ fn covert_stream_chunk_to_batch_chunk(chunk: StreamChunk) -> Result<DataChunk> {
     assert!(chunk.data_chunk().is_compacted());
 
     if chunk.ops().iter().any(|op| *op != Op::Insert) {
-        return Err(RwError::from(BatchError::Internal(anyhow!(
+        return Err(BatchError::Internal(anyhow!(
             "Only support insert op in batch source executor"
-        ))));
+        )));
     }
 
     Ok(chunk.data_chunk().clone())

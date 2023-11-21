@@ -16,12 +16,17 @@ use std::sync::Arc;
 
 pub use anyhow::anyhow;
 use risingwave_common::array::ArrayError;
-use risingwave_common::error::{ErrorCode, RwError};
-use risingwave_rpc_client::error::ToTonicStatus;
+use risingwave_common::error::{BoxedError, ErrorCode, RwError};
+use risingwave_common::util::value_encoding::error::ValueEncodingError;
+use risingwave_expr::ExprError;
+use risingwave_pb::PbFieldNotFound;
+use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
+use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tonic::Status;
 
 use crate::error::BatchError::Internal;
+use crate::task::TaskId;
 
 pub type Result<T> = std::result::Result<T, BatchError>;
 /// Batch result with shared error.
@@ -37,11 +42,32 @@ pub enum BatchError {
     #[error("Can't cast {0} to {1}")]
     Cast(&'static str, &'static str),
 
+    #[error("Storage error: {0}")]
+    Storage(
+        #[backtrace]
+        #[from]
+        StorageError,
+    ),
+
     #[error("Array error: {0}")]
     Array(
         #[from]
         #[backtrace]
         ArrayError,
+    ),
+
+    #[error("Expr error: {0}")]
+    Expr(
+        #[from]
+        #[backtrace]
+        ExprError,
+    ),
+
+    #[error("Serialize/deserialize error: {0}")]
+    Serde(
+        #[source]
+        #[backtrace]
+        BoxedError,
     ),
 
     #[error("Failed to send result to channel")]
@@ -59,16 +85,55 @@ pub enum BatchError {
 
     #[error("Task aborted: {0}")]
     Aborted(String),
+
+    #[error(transparent)]
+    PbFieldNotFound(#[from] PbFieldNotFound),
+
+    #[error(transparent)]
+    RpcError(
+        #[from]
+        #[backtrace]
+        RpcError,
+    ),
+
+    #[error("Connector error: {0}")]
+    Connector(
+        #[source]
+        #[backtrace]
+        BoxedError,
+    ),
+
+    #[error(transparent)]
+    Shared(
+        #[from]
+        #[backtrace]
+        Arc<Self>,
+    ),
+}
+
+/// Serialize/deserialize error.
+impl From<memcomparable::Error> for BatchError {
+    fn from(m: memcomparable::Error) -> Self {
+        Self::Serde(m.into())
+    }
+}
+impl From<ValueEncodingError> for BatchError {
+    fn from(e: ValueEncodingError) -> Self {
+        Self::Serde(e.into())
+    }
+}
+
+impl From<tonic::Status> for BatchError {
+    fn from(status: tonic::Status) -> Self {
+        // Always wrap the status into a `RpcError`.
+        Self::from(RpcError::from(status))
+    }
 }
 
 impl From<BatchError> for RwError {
     fn from(s: BatchError) -> Self {
         ErrorCode::BatchError(Box::new(s)).into()
     }
-}
-
-pub fn to_rw_error(e: Arc<BatchError>) -> RwError {
-    ErrorCode::BatchError(Box::new(e)).into()
 }
 
 // A temp workaround
@@ -81,5 +146,11 @@ impl From<RwError> for BatchError {
 impl<'a> From<&'a BatchError> for Status {
     fn from(err: &'a BatchError) -> Self {
         err.to_status(tonic::Code::Internal, "batch")
+    }
+}
+
+impl From<BatchError> for Status {
+    fn from(err: BatchError) -> Self {
+        Self::from(&err)
     }
 }
