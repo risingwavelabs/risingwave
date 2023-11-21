@@ -475,7 +475,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         println!("[rc] actual_schema:   {:?}", actual_schema.fields());
         println!("[rc] info.schema:     {:?}", info.schema.fields());
 
-        info.schema = actual_schema;
+        assert_eq!(actual_schema.data_types(), info.schema.data_types());
 
         let original_output_data_types = original_schema.data_types();
         let actual_output_data_types = output_indices
