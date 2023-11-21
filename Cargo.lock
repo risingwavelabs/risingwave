@@ -8344,6 +8344,7 @@ dependencies = [
  "cfg-or-panic",
  "clap",
  "console",
+ "expect-test",
  "futures",
  "glob",
  "itertools 0.12.0",

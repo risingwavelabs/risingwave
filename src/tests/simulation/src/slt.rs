@@ -29,9 +29,12 @@ fn is_create_table_as(sql: &str) -> bool {
     parts.len() >= 4 && parts[0] == "create" && parts[1] == "table" && parts[3] == "as"
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 enum SqlCmd {
+    /// Other create statements.
     Create { is_create_table_as: bool },
+    /// Create Materialized views
+    CreateMaterializedView { name: String },
     Drop,
     Dml,
     Flush,
@@ -59,16 +62,25 @@ impl SqlCmd {
 }
 
 fn extract_sql_command(sql: &str) -> SqlCmd {
-    let cmd = sql
+    let mut tokens = sql
         .trim_start()
-        .split_once(' ')
-        .unwrap_or_default()
-        .0
-        .to_lowercase();
-    match cmd.as_str() {
-        "create" => SqlCmd::Create {
-            is_create_table_as: is_create_table_as(sql),
-        },
+        .split_whitespace()
+        .map(|s| s.to_lowercase());
+    match tokens.next().unwrap().as_str() {
+        "create" => match tokens.next().unwrap().as_str() {
+            "materialized" => {
+                // view
+                tokens.next();
+                // name
+                let name = tokens.next().unwrap().to_string();
+                SqlCmd::CreateMaterializedView {
+                    name,
+                }
+            }
+            _ => SqlCmd::Create {
+                is_create_table_as: is_create_table_as(sql),
+            },
+        }
         "drop" => SqlCmd::Drop,
         "insert" | "update" | "delete" => SqlCmd::Dml,
         "flush" => SqlCmd::Flush,
@@ -278,7 +290,15 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Debug;
     use super::*;
+    use expect_test::{expect, Expect};
+
+    fn check(actual: impl Debug, expect: Expect) {
+        let actual = format!("{:#?}", actual);
+        expect.assert_eq(&actual);
+    }
+
     #[test]
     fn test_is_create_table_as() {
         assert!(is_create_table_as("     create     table xx  as select 1;"));
@@ -286,5 +306,30 @@ mod tests {
             "     create table xx not  as select 1;"
         ));
         assert!(!is_create_table_as("     create view xx as select 1;"));
+    }
+
+    #[test]
+    fn test_extract_sql_command() {
+        check(
+            extract_sql_command("create  table  t as select 1;"),
+            expect![[r#"
+                Create {
+                    is_create_table_as: true,
+                }"#]]
+        );
+        check(
+            extract_sql_command("  create table  t (a int);"),
+            expect![[r#"
+                Create {
+                    is_create_table_as: false,
+                }"#]]
+        );
+        check(
+            extract_sql_command(" create materialized   view  m_1 as select 1;"),
+            expect![[r#"
+                CreateMaterializedView {
+                    name: "m_1",
+                }"#]]
+        );
     }
 }
