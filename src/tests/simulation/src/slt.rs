@@ -220,7 +220,8 @@ pub async fn run_slt_task(
             };
 
             if cmd.ignore_kill()
-                || (reset_background_ddl_record.is_none()
+                // Foreground MVs should ignore kill, only background mvs must be recoverable.
+                || (!background_ddl_enabled
                     && matches!(cmd, SqlCmd::CreateMaterializedView { .. }))
             {
                 for i in 0usize.. {
