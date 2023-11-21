@@ -45,10 +45,10 @@ sha2 = "0.10"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["time"] }
 tracing = "0.1"
-# sql_json_path = { git = "https://github.com/risingwavelabs/sql-json-path.git", features = [
-#     "jsonbb",
-# ] }
-sql-json-path = { path = "../../../../sql-json-path", features = ["jsonbb"] }
+sql-json-path = { git = "https://github.com/risingwavelabs/sql-json-path.git", rev = "d70e93e", features = [
+    "jsonbb",
+] }
+# sql-json-path = { path = "../../../../sql-json-path", features = ["jsonbb"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
