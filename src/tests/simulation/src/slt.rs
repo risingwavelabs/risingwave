@@ -266,6 +266,7 @@ pub async fn run_slt_task(
             // retry up to 5 times until it succeed
             let max_retry = 5;
             for i in 0usize.. {
+                tracing::debug!(iteration = i, "retry count");
                 let delay = Duration::from_secs(1 << i);
                 match tester
                     .run_async(record.clone())
@@ -275,10 +276,11 @@ pub async fn run_slt_task(
                     .await
                 {
                     Ok(_) => {
+                        tracing::debug!(iteration = i, "retry count (OK)");
                         // For background ddl
                         if let SqlCmd::CreateMaterializedView { ref name } = cmd && background_ddl_enabled
                         {
-                            tracing::info!(iteration=i, "Retry for background ddl");
+                            tracing::debug!(iteration=i, "Retry for background ddl");
                             // wait for background ddl to finish and succeed.
                             let rw = RisingWave::connect("frontend".into(), "dev".into())
                                 .await
@@ -304,12 +306,13 @@ pub async fn run_slt_task(
                                 break;
                             }
                             // If fail, recreate mv again.
-                            tracing::info!(iteration=i, name, "failed to run test: background_mv not created, retry after {delay:?}");
+                            tracing::debug!(iteration=i, name, "failed to run test: background_mv not created, retry after {delay:?}");
                             continue;
                         }
                         break;
                     }
                     Err(e) => {
+                        tracing::debug!(iteration = i, "retry count (ERR)");
                         match cmd {
                             // allow 'table exists' error when retry CREATE statement
                             SqlCmd::Create {
@@ -340,12 +343,12 @@ pub async fn run_slt_task(
                                     && e.to_string().contains("table is in creating procedure")
                                     && background_ddl_enabled =>
                             {
-                                tracing::debug!(iteration=i, name, "Retry for background ddl");
+                                tracing::debug!(iteration = i, name, "Retry for background ddl");
                                 // wait for background ddl to finish and succeed.
                                 let Ok(rw) =
                                     RisingWave::connect("frontend".into(), "dev".into()).await
                                 else {
-                                    tracing::info!(iteration=i, name, "failed to run test: background_mv not created, retry after {delay:?}");
+                                    tracing::debug!(iteration=i, name, "failed to run test: background_mv not created, retry after {delay:?}");
                                     continue;
                                 };
                                 let client = rw.pg_client();
@@ -370,7 +373,10 @@ pub async fn run_slt_task(
                                 tracing::info!(iteration=i, name, "failed to run test: background_mv not created, retry after {delay:?}");
                                 continue;
                             }
-                            _ => tracing::error!("failed to run test: {e}\nretry after {delay:?}"),
+                            _ => tracing::error!(
+                                iteration = i,
+                                "failed to run test: {e}\nretry after {delay:?}"
+                            ),
                         }
                     }
                 }
