@@ -18,12 +18,13 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use futures::stream::BoxStream;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
 use rand::seq::SliceRandom;
-use risingwave_batch::executor::{BoxedDataChunkStream, ExecutorBuilder};
+use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::{ShutdownToken, TaskId};
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
@@ -129,7 +130,7 @@ impl LocalQueryExecution {
         }
     }
 
-    fn run(self) -> BoxedDataChunkStream {
+    fn run(self) -> BoxStream<'static, Result<DataChunk, RwError>> {
         let span = tracing::info_span!(
             "local_execute",
             query_id = self.query.query_id.id,

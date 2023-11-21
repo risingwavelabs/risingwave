@@ -21,7 +21,6 @@ use prometheus::Histogram;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -37,6 +36,7 @@ use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{collect_data_chunk, Distribution};
 use risingwave_storage::{dispatch_state_store, StateStore};
 
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -296,7 +296,7 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
 }
 
 impl<S: StateStore> RowSeqScanExecutor<S> {
-    #[try_stream(ok = DataChunk, error = RwError)]
+    #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let Self {
             chunk_size,
@@ -384,7 +384,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         Ok(row)
     }
 
-    #[try_stream(ok = DataChunk, error = RwError)]
+    #[try_stream(ok = DataChunk, error = BatchError)]
     async fn execute_range(
         table: Arc<StorageTable<S>>,
         scan_range: ScanRange,
@@ -453,7 +453,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
 
             let chunk = collect_data_chunk(&mut iter, table.schema(), Some(chunk_size))
                 .await
-                .map_err(RwError::from)?;
+                .map_err(BatchError::from)?;
 
             if let Some(timer) = timer {
                 timer.observe_duration()
