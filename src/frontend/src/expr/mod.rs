@@ -15,7 +15,6 @@
 use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
 use futures::FutureExt;
-use itertools::Itertools;
 use paste::paste;
 use risingwave_common::array::ListValue;
 use risingwave_common::error::{ErrorCode, Result as RwResult};
@@ -216,7 +215,8 @@ impl ExprImpl {
     /// Count `Now`s in the expression.
     pub fn count_nows(&self) -> usize {
         let mut visitor = CountNow::default();
-        visitor.visit_expr(self)
+        visitor.visit_expr(self);
+        visitor.count()
     }
 
     /// Check whether self is literal NULL.
@@ -350,23 +350,17 @@ macro_rules! impl_has_variant {
             impl ExprImpl {
                 $(
                     pub fn [<has_ $variant:snake>](&self) -> bool {
-                        struct Has {}
+                        struct Has { has: bool }
 
                         impl ExprVisitor for Has {
-
-                            type Result = bool;
-
-                            fn merge(&mut self, a: bool, b: bool) -> bool {
-                                a | b
-                            }
-
-                            fn [<visit_ $variant:snake>](&mut self, _: &$variant) -> bool {
-                                true
+                            fn [<visit_ $variant:snake>](&mut self, _: &$variant) {
+                                self.has = true;
                             }
                         }
 
-                        let mut visitor = Has {};
-                        visitor.visit_expr(self)
+                        let mut visitor = Has { has: false };
+                        visitor.visit_expr(self);
+                        visitor.has
                     }
                 )*
             }
@@ -423,119 +417,96 @@ impl ExprImpl {
     pub fn has_correlated_input_ref_by_depth(&self, depth: Depth) -> bool {
         struct Has {
             depth: usize,
+            has: bool,
         }
 
         impl ExprVisitor for Has {
-            type Result = bool;
-
-            fn merge(&mut self, a: bool, b: bool) -> bool {
-                a | b
+            fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
+                if correlated_input_ref.depth() == self.depth {
+                    self.has = true;
+                }
             }
 
-            fn visit_correlated_input_ref(
-                &mut self,
-                correlated_input_ref: &CorrelatedInputRef,
-            ) -> bool {
-                correlated_input_ref.depth() == self.depth
-            }
-
-            fn visit_subquery(&mut self, subquery: &Subquery) -> bool {
+            fn visit_subquery(&mut self, subquery: &Subquery) {
                 self.depth += 1;
-                let has = self.visit_bound_set_expr(&subquery.query.body);
+                self.visit_bound_set_expr(&subquery.query.body);
                 self.depth -= 1;
-
-                has
             }
         }
 
         impl Has {
-            fn visit_bound_set_expr(&mut self, set_expr: &BoundSetExpr) -> bool {
-                let mut has = false;
+            fn visit_bound_set_expr(&mut self, set_expr: &BoundSetExpr) {
                 match set_expr {
                     BoundSetExpr::Select(select) => {
-                        select.exprs().for_each(|expr| has |= self.visit_expr(expr));
-                        has |= match select.from.as_ref() {
+                        select.exprs().for_each(|expr| self.visit_expr(expr));
+                        match select.from.as_ref() {
                             Some(from) => from.is_correlated(self.depth),
                             None => false,
                         };
                     }
                     BoundSetExpr::Values(values) => {
-                        values.exprs().for_each(|expr| has |= self.visit_expr(expr))
+                        values.exprs().for_each(|expr| self.visit_expr(expr))
                     }
                     BoundSetExpr::Query(query) => {
                         self.depth += 1;
-                        has = self.visit_bound_set_expr(&query.body);
+                        self.visit_bound_set_expr(&query.body);
                         self.depth -= 1;
                     }
                     BoundSetExpr::SetOperation { left, right, .. } => {
-                        has |= self.visit_bound_set_expr(left);
-                        has |= self.visit_bound_set_expr(right);
+                        self.visit_bound_set_expr(left);
+                        self.visit_bound_set_expr(right);
                     }
                 };
-                has
             }
         }
 
-        let mut visitor = Has { depth };
-        visitor.visit_expr(self)
+        let mut visitor = Has { depth, has: false };
+        visitor.visit_expr(self);
+        visitor.has
     }
 
     pub fn has_correlated_input_ref_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
         struct Has {
             correlated_id: CorrelatedId,
+            has: bool,
         }
 
         impl ExprVisitor for Has {
-            type Result = bool;
-
-            fn merge(&mut self, a: bool, b: bool) -> bool {
-                a | b
+            fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
+                if correlated_input_ref.correlated_id() == self.correlated_id {
+                    self.has = true;
+                }
             }
 
-            fn visit_correlated_input_ref(
-                &mut self,
-                correlated_input_ref: &CorrelatedInputRef,
-            ) -> bool {
-                correlated_input_ref.correlated_id() == self.correlated_id
-            }
-
-            fn visit_subquery(&mut self, subquery: &Subquery) -> bool {
-                self.visit_bound_set_expr(&subquery.query.body)
+            fn visit_subquery(&mut self, subquery: &Subquery) {
+                self.visit_bound_set_expr(&subquery.query.body);
             }
         }
 
         impl Has {
-            fn visit_bound_set_expr(&mut self, set_expr: &BoundSetExpr) -> bool {
+            fn visit_bound_set_expr(&mut self, set_expr: &BoundSetExpr) {
                 match set_expr {
                     BoundSetExpr::Select(select) => {
-                        let vec = select
-                            .exprs()
-                            .map(|expr| self.visit_expr(expr))
-                            .collect_vec();
-
-                        vec.into_iter()
-                            .reduce(self.gen_merge_fn())
-                            .unwrap_or_default()
+                        select.exprs().for_each(|expr| self.visit_expr(expr))
                     }
                     BoundSetExpr::Values(values) => {
-                        let vec = values
-                            .exprs()
-                            .map(|expr| self.visit_expr(expr))
-                            .collect_vec();
-                        vec.into_iter()
-                            .reduce(self.gen_merge_fn())
-                            .unwrap_or_default()
+                        values.exprs().for_each(|expr| self.visit_expr(expr));
                     }
                     BoundSetExpr::Query(query) => self.visit_bound_set_expr(&query.body),
                     BoundSetExpr::SetOperation { left, right, .. } => {
-                        self.visit_bound_set_expr(left) | self.visit_bound_set_expr(right)
+                        self.visit_bound_set_expr(left);
+                        self.visit_bound_set_expr(right);
                     }
                 }
             }
         }
 
-        let mut visitor = Has { correlated_id };
-        visitor.visit_expr(self)
+        let mut visitor = Has {
+            correlated_id,
+            has: false,
+        };
+        visitor.visit_expr(self);
+        visitor.has
     }
 
     /// Collect `CorrelatedInputRef`s in `ExprImpl` by relative `depth`, return their indices, and
@@ -617,10 +588,6 @@ impl ExprImpl {
                 has_others: bool,
             }
             impl ExprVisitor for HasOthers {
-                type Result = ();
-
-                fn merge(&mut self, _: (), _: ()) {}
-
                 fn visit_expr(&mut self, expr: &ExprImpl) {
                     match expr {
                         ExprImpl::CorrelatedInputRef(_)

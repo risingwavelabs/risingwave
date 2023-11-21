@@ -23,10 +23,6 @@ pub struct InputRefCounter {
 }
 
 impl ExprVisitor for InputRefCounter {
-    type Result = ();
-
-    fn merge(&mut self, _: (), _: ()) {}
-
     fn visit_input_ref(&mut self, input_ref: &InputRef) {
         self.counter
             .entry(input_ref.index)

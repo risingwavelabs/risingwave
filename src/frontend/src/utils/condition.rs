@@ -844,15 +844,10 @@ impl Condition {
         .simplify()
     }
 
-    pub fn visit_expr<V: ExprVisitor + ?Sized>(&self, visitor: &mut V) -> V::Result {
-        let vec = self
-            .conjunctions
+    pub fn visit_expr<V: ExprVisitor + ?Sized>(&self, visitor: &mut V) {
+        self.conjunctions
             .iter()
-            .map(|expr| visitor.visit_expr(expr))
-            .collect_vec();
-        vec.into_iter()
-            .reduce(visitor.gen_merge_fn())
-            .unwrap_or_default()
+            .for_each(|expr| visitor.visit_expr(expr));
     }
 
     pub fn visit_expr_mut(&mut self, mutator: &mut (impl ExprMutator + ?Sized)) {

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
-
 use super::{
     AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, FunctionCallWithLambda, InputRef, Literal,
     Now, Parameter, Subquery, TableFunction, UserDefinedFunction, WindowFunction,
@@ -28,19 +26,7 @@ use super::{
 /// Note: The default implementation for `visit_subquery` is a no-op, i.e., expressions inside
 /// subqueries are not traversed.
 pub trait ExprVisitor {
-    type Result: Default;
-
-    /// This merge function is used to reduce results of expr inputs.
-    /// In order to always remind users to implement themselves, we don't provide an default
-    /// implementation.
-    fn merge(&mut self, a: Self::Result, b: Self::Result) -> Self::Result;
-
-    #[allow(clippy::type_complexity)]
-    fn gen_merge_fn(&mut self) -> Box<dyn FnMut(Self::Result, Self::Result) -> Self::Result + '_> {
-        Box::new(|a: Self::Result, b: Self::Result| -> Self::Result { self.merge(a, b) })
-    }
-
-    fn visit_expr(&mut self, expr: &ExprImpl) -> Self::Result {
+    fn visit_expr(&mut self, expr: &ExprImpl) {
         match expr {
             ExprImpl::InputRef(inner) => self.visit_input_ref(inner),
             ExprImpl::Literal(inner) => self.visit_literal(inner),
@@ -56,87 +42,37 @@ pub trait ExprVisitor {
             ExprImpl::Now(inner) => self.visit_now(inner),
         }
     }
-    fn visit_function_call(&mut self, func_call: &FunctionCall) -> Self::Result {
-        let vec = func_call
+    fn visit_function_call(&mut self, func_call: &FunctionCall) {
+        func_call
             .inputs()
             .iter()
-            .map(|expr| self.visit_expr(expr))
-            .collect_vec();
-        vec.into_iter()
-            .reduce(self.gen_merge_fn())
-            .unwrap_or_default()
+            .for_each(|expr| self.visit_expr(expr));
     }
-    fn visit_function_call_with_lambda(
-        &mut self,
-        func_call: &FunctionCallWithLambda,
-    ) -> Self::Result {
+    fn visit_function_call_with_lambda(&mut self, func_call: &FunctionCallWithLambda) {
         self.visit_function_call(func_call.base())
     }
-    fn visit_agg_call(&mut self, agg_call: &AggCall) -> Self::Result {
-        let vec = agg_call
+    fn visit_agg_call(&mut self, agg_call: &AggCall) {
+        agg_call
             .args()
             .iter()
-            .map(|expr| self.visit_expr(expr))
-            .collect_vec();
-        let mut r = vec
-            .into_iter()
-            .reduce(self.gen_merge_fn())
-            .unwrap_or_default();
-        let agg_call_order_by_result = agg_call.order_by().visit_expr(self);
-        r = self.merge(r, agg_call_order_by_result);
-        let agg_call_filter_result = agg_call.filter().visit_expr(self);
-        r = self.merge(r, agg_call_filter_result);
-        r
+            .for_each(|expr| self.visit_expr(expr));
+        agg_call.order_by().visit_expr(self);
+        agg_call.filter().visit_expr(self);
     }
-    fn visit_parameter(&mut self, _: &Parameter) -> Self::Result {
-        Self::Result::default()
-    }
-    fn visit_literal(&mut self, _: &Literal) -> Self::Result {
-        Self::Result::default()
-    }
-    fn visit_input_ref(&mut self, _: &InputRef) -> Self::Result {
-        Self::Result::default()
-    }
-    fn visit_subquery(&mut self, _: &Subquery) -> Self::Result {
-        Self::Result::default()
-    }
-    fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) -> Self::Result {
-        Self::Result::default()
-    }
-    fn visit_table_function(&mut self, func_call: &TableFunction) -> Self::Result {
-        let vec = func_call
-            .args
-            .iter()
-            .map(|expr| self.visit_expr(expr))
-            .collect_vec();
+    fn visit_parameter(&mut self, _: &Parameter) {}
+    fn visit_literal(&mut self, _: &Literal) {}
+    fn visit_input_ref(&mut self, _: &InputRef) {}
+    fn visit_subquery(&mut self, _: &Subquery) {}
+    fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) {}
 
-        vec.into_iter()
-            .reduce(self.gen_merge_fn())
-            .unwrap_or_default()
+    fn visit_table_function(&mut self, func_call: &TableFunction) {
+        func_call.args.iter().for_each(|expr| self.visit_expr(expr));
     }
-    fn visit_window_function(&mut self, func_call: &WindowFunction) -> Self::Result {
-        let vec = func_call
-            .args
-            .iter()
-            .map(|expr| self.visit_expr(expr))
-            .collect_vec();
-
-        vec.into_iter()
-            .reduce(self.gen_merge_fn())
-            .unwrap_or_default()
+    fn visit_window_function(&mut self, func_call: &WindowFunction) {
+        func_call.args.iter().for_each(|expr| self.visit_expr(expr));
     }
-    fn visit_user_defined_function(&mut self, func_call: &UserDefinedFunction) -> Self::Result {
-        let vec = func_call
-            .args
-            .iter()
-            .map(|expr| self.visit_expr(expr))
-            .collect_vec();
-
-        vec.into_iter()
-            .reduce(self.gen_merge_fn())
-            .unwrap_or_default()
+    fn visit_user_defined_function(&mut self, func_call: &UserDefinedFunction) {
+        func_call.args.iter().for_each(|expr| self.visit_expr(expr));
     }
-    fn visit_now(&mut self, _: &Now) -> Self::Result {
-        Self::Result::default()
-    }
+    fn visit_now(&mut self, _: &Now) {}
 }

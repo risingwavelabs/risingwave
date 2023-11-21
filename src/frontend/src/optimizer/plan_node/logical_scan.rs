@@ -387,21 +387,25 @@ impl PredicatePushdown for LogicalScan {
     ) -> PlanRef {
         // If the predicate contains `CorrelatedInputRef` or `now()`. We don't push down.
         // This case could come from the predicate push down before the subquery unnesting.
-        struct HasCorrelated {}
+        struct HasCorrelated {
+            has: bool,
+        }
         impl ExprVisitor for HasCorrelated {
-            type Result = bool;
-
-            fn merge(&mut self, a: bool, b: bool) -> bool {
-                a | b
-            }
-
-            fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) -> bool {
-                true
+            fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) {
+                self.has = true;
             }
         }
         let non_pushable_predicate: Vec<_> = predicate
             .conjunctions
-            .extract_if(|expr| expr.count_nows() > 0 || HasCorrelated {}.visit_expr(expr))
+            .extract_if(|expr| {
+                if expr.count_nows() > 0 {
+                    true
+                } else {
+                    let mut visitor = HasCorrelated { has: false };
+                    visitor.visit_expr(expr);
+                    visitor.has
+                }
+            })
             .collect();
         let predicate = predicate.rewrite_expr(&mut ColIndexMapping::new(
             self.output_col_idx().iter().map(|i| Some(*i)).collect(),
