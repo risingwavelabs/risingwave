@@ -297,13 +297,13 @@ pub async fn run_slt_task(
                                 .unwrap();
                             let client = rw.pg_client();
                             if client.simple_query("WAIT;").await.is_ok()
-                                && client
+                                && let Ok(result) = client
                                     .query(
                                         "select count(*) from pg_matviews where matviewname=$1;",
                                         &[&name],
                                     )
                                     .await
-                                    .is_ok()
+                                && let Ok(1) = result[0].try_get::<_, i64>(0)
                             {
                                 if let Some(record) = reset_background_ddl_record {
                                     tracing::debug!("Record with background_ddl {:?} finished", record);
@@ -364,13 +364,13 @@ pub async fn run_slt_task(
                                 };
                                 let client = rw.pg_client();
                                 if client.simple_query("WAIT;").await.is_ok()
-                                        && client
-                                        .query(
-                                            "select count(*) from pg_matviews where matviewname=$1;",
-                                            &[&name],
-                                        )
-                                        .await
-                                        .is_ok()
+                                    && let Ok(result) = client
+                                    .query(
+                                        "select count(*) from pg_matviews where matviewname=$1;",
+                                        &[&name],
+                                    )
+                                    .await
+                                    && let Ok(1) = result[0].try_get::<_, i64>(0)
                                     {
                                         if let Some(record) = reset_background_ddl_record {
                                             tester.run_async(record).await.unwrap();
