@@ -23,7 +23,7 @@ use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::sink::log_store::{LogStoreResult, LogWriter};
-use risingwave_storage::store::{InitOptions, LocalStateStore};
+use risingwave_storage::store::{InitOptions, LocalStateStore, SealCurrentEpochOptions};
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender;
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
@@ -143,7 +143,8 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
             }
         }
         self.state_store.flush(delete_range).await?;
-        self.state_store.seal_current_epoch(next_epoch);
+        self.state_store
+            .seal_current_epoch(next_epoch, SealCurrentEpochOptions::new());
         self.tx.barrier(epoch, is_checkpoint, next_epoch);
         self.seq_id = FIRST_SEQ_ID;
         Ok(())

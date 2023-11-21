@@ -409,7 +409,7 @@ impl LocalStateStore for LocalHummockStorage {
         Ok(())
     }
 
-    fn seal_current_epoch(&mut self, next_epoch: u64) {
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
         assert!(!self.is_dirty());
         let prev_epoch = self
             .epoch
@@ -422,6 +422,14 @@ impl LocalStateStore for LocalHummockStorage {
             next_epoch,
             prev_epoch
         );
+        self.event_sender
+            .send(HummockEvent::LocalSealEpoch {
+                instance_id: self.instance_id(),
+                table_id: self.table_id,
+                epoch: prev_epoch,
+                opts,
+            })
+            .expect("should be able to send")
     }
 }
 
