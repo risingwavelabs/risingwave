@@ -186,9 +186,14 @@ It only indicates the physical clustering of the data, which may improve the per
             gen_create_mv_plan(&session, context.into(), query, name, columns, emit_mode)?;
         // All leaf nodes must be stream table scan, no other scan operators support recovery.
         fn plan_has_backfill_leaf_nodes(plan: &PlanRef) -> bool {
-            if let Some(scan) = plan.as_stream_table_scan() {
-                scan.stream_scan_type() == StreamScanType::Backfill
+            if plan.inputs().is_empty() {
+                if let Some(scan) = plan.as_stream_table_scan() {
+                    scan.stream_scan_type() == StreamScanType::Backfill
+                } else {
+                    false
+                }
             } else {
+                assert!(!plan.inputs().is_empty());
                 plan.inputs().iter().all(plan_has_backfill_leaf_nodes)
             }
         }

@@ -292,9 +292,15 @@ pub async fn run_slt_task(
                         {
                             tracing::debug!(iteration=i, "Retry for background ddl");
                             // wait for background ddl to finish and succeed.
-                            let rw = RisingWave::connect("frontend".into(), "dev".into())
-                                .await
-                                .unwrap();
+                            let Ok(rw) =
+                                RisingWave::connect("frontend".into(), "dev".into()).await
+                            else {
+                                tracing::debug!(iteration=i, name, "failed to run test: background_mv not created, retry after {delay:?}");
+                                if i >= max_retry {
+                                    panic!("failed to run test after retry {i} times, while waiting for background ddl");
+                                }
+                                continue;
+                            };
                             let client = rw.pg_client();
                             if client.simple_query("WAIT;").await.is_ok()
                                 && let Ok(result) = client
