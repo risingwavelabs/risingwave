@@ -271,7 +271,8 @@ impl AsyncTruncateSinkWriter for RedisSinkWriter {
         _add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
         dispatch_sink_formatter_str_key_impl!(&self.formatter, formatter, {
-            self.payload_writer.write_chunk(chunk, formatter).await
+            self.payload_writer.write_chunk(chunk, formatter).await?;
+            self.payload_writer.commit().await
         })
     }
 }
