@@ -440,4 +440,15 @@
   expected_outputs:
     - batch_plan
     - stream_plan
-
+- name: test correlated input ref predicate and share operator
+  sql: |
+    create table t (a int, b int, c int);
+    create table dl(c1 int, c2 int);
+    create table di(d1 int, d2 int);
+    
+    select
+    (select 1 from t, di where t.a = dl.c1 and t.b = di.d1 limit 1) name,
+    (select 1 from t, di where t.a = dl.c2 and t.c = di.d2 limit 1) name2
+    from dl;
+  expected_outputs:
+    - optimized_logical_plan_for_stream
