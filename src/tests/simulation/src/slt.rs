@@ -289,11 +289,12 @@ pub async fn run_slt_task(
                             {
                                 if let Some(record) = reset_background_ddl_record {
                                     tester.run_async(record).await.unwrap();
+                                    background_ddl_enabled = false;
                                 }
                                 break;
                             }
                             // If fail, recreate mv again.
-                            tracing::info!("failed to run test: background_mv not created, retry after {delay:?}");
+                            tracing::info!(name, "failed to run test: background_mv not created, retry after {delay:?}");
                             continue;
                         }
                         break;
