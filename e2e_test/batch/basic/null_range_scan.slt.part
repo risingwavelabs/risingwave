@@ -17,6 +17,16 @@ SELECT * FROM t0 WHERE (c1 > 1);
 ----
 
 statement ok
+create materialized view mv as select * from t0 order by c1 desc nulls last;
+
+query II rowsort
+select * from mv where (c1 > 1);
+----
+
+statement ok
+drop materialized view mv;
+
+statement ok
 drop table t0;
 
 statement ok
