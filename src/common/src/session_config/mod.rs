@@ -32,7 +32,7 @@ use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 pub use crate::session_config::visibility_mode::VisibilityMode;
 
-pub const GUC_LIST_SEP: &str = ",";
+pub const GUC_LIST_SEP: &str = ", ";
 
 #[derive(Guc)]
 pub struct ConfigMap {
@@ -53,6 +53,11 @@ pub struct ConfigMap {
     #[guc_opts(default = QueryMode::Auto)]
     query_mode: QueryMode,
 
+    /// Sets the number of digits displayed for floating-point values.
+    /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#:~:text=for%20more%20information.-,extra_float_digits,-(integer)>
+    #[guc_opts(default = 1)]
+    extra_float_digits: i32,
+
     /// Sets the application name to be reported in statistics and logs.
     /// See <https://www.postgresql.org/docs/14/runtime-config-logging.html#:~:text=What%20to%20Log-,application_name,-(string)>
     #[guc_opts(default = "", flags = "REPORT")]
@@ -60,7 +65,7 @@ pub struct ConfigMap {
 
     /// It is typically set by an application upon connection to the server.
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-DATESTYLE>
-    #[guc_opts(default = "")]
+    #[guc_opts(default = "", rename = "DATESTYLE")]
     date_style: String,
 
     /// Force the use of lookup join instead of hash join when possible for local batch execution.
@@ -142,7 +147,7 @@ pub struct ConfigMap {
     force_split_distinct_agg: bool,
 
     /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-INTERVALSTYLE>
-    #[guc_opts(default = "")]
+    #[guc_opts(default = "", rename = "INTERVALSTYLE")]
     interval_style: String,
 
     /// If `BATCH_PARALLELISM` is non-zero, batch queries will use this parallelism.

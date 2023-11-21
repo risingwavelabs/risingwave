@@ -44,7 +44,6 @@ pub(crate) fn derive_guc(input: DeriveInput) -> TokenStream {
         let ty = field.ty;
 
         let mut doc_list = vec![];
-        // abort!("{:?}", &field.attrs[0].to_token_stream());
         for attr in &field.attrs {
             if attr.path.is_ident("doc") {
                 let meta = attr.parse_meta().expect_or_abort("Failed to parse meta");
