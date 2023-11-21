@@ -15,6 +15,7 @@
 pub mod pg_am;
 pub mod pg_attrdef;
 pub mod pg_attribute;
+pub mod pg_auth_members;
 pub mod pg_cast;
 pub mod pg_class;
 pub mod pg_collation;
@@ -45,12 +46,11 @@ pub mod pg_tablespace;
 pub mod pg_type;
 pub mod pg_user;
 pub mod pg_views;
-pub mod pg_auth_members;
 
 pub use pg_am::*;
-pub use pg_auth_members::*;
 pub use pg_attrdef::*;
 pub use pg_attribute::*;
+pub use pg_auth_members::*;
 pub use pg_cast::*;
 pub use pg_class::*;
 pub use pg_collation::*;
