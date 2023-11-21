@@ -87,10 +87,6 @@ pub fn is_system_schema(schema_name: &str) -> bool {
 
 pub const ROWID_PREFIX: &str = "_row_id";
 
-pub fn row_id_column_name() -> String {
-    ROWID_PREFIX.to_string()
-}
-
 pub fn is_row_id_column_name(name: &str) -> bool {
     name.starts_with(ROWID_PREFIX)
 }
@@ -105,28 +101,13 @@ pub const USER_COLUMN_ID_OFFSET: i32 = ROW_ID_COLUMN_ID.next().get_id();
 
 /// Creates a row ID column (for implicit primary key). It'll always have the ID `0` for now.
 pub fn row_id_column_desc() -> ColumnDesc {
-    ColumnDesc {
-        data_type: DataType::Serial,
-        column_id: ROW_ID_COLUMN_ID,
-        name: row_id_column_name(),
-        field_descs: vec![],
-        type_name: "".to_string(),
-        generated_or_default_column: None,
-        description: None,
-    }
+    ColumnDesc::named(ROWID_PREFIX, ROW_ID_COLUMN_ID, DataType::Serial)
 }
 
 pub const OFFSET_COLUMN_NAME: &str = "_rw_offset";
 
-pub fn offset_column_name() -> String {
-    OFFSET_COLUMN_NAME.to_string()
-}
-
 pub const CDC_SOURCE_COLUMN_NUM: u32 = 4;
 pub const TABLE_NAME_COLUMN_NAME: &str = "_rw_table_name";
-pub fn cdc_table_name_column_name() -> String {
-    TABLE_NAME_COLUMN_NAME.to_string()
-}
 
 pub fn is_offset_column_name(name: &str) -> bool {
     name.starts_with(OFFSET_COLUMN_NAME)
@@ -134,28 +115,20 @@ pub fn is_offset_column_name(name: &str) -> bool {
 /// Creates a offset column for storing upstream offset
 /// Used in cdc source currently
 pub fn offset_column_desc() -> ColumnDesc {
-    ColumnDesc {
-        data_type: DataType::Varchar,
-        column_id: ColumnId::placeholder(),
-        name: offset_column_name(),
-        field_descs: vec![],
-        type_name: "".to_string(),
-        generated_or_default_column: None,
-        description: None,
-    }
+    ColumnDesc::named(
+        OFFSET_COLUMN_NAME,
+        ColumnId::placeholder(),
+        DataType::Varchar,
+    )
 }
 
 /// A column to store the upstream table name of the cdc table
 pub fn cdc_table_name_column_desc() -> ColumnDesc {
-    ColumnDesc {
-        data_type: DataType::Varchar,
-        column_id: ColumnId::placeholder(),
-        name: cdc_table_name_column_name(),
-        field_descs: vec![],
-        type_name: "".to_string(),
-        generated_or_default_column: None,
-        description: None,
-    }
+    ColumnDesc::named(
+        TABLE_NAME_COLUMN_NAME,
+        ColumnId::placeholder(),
+        DataType::Varchar,
+    )
 }
 
 /// The local system catalog reader in the frontend node.
