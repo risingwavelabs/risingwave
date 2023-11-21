@@ -219,8 +219,7 @@ impl ActorBuilder {
                     downstream_fragment_id: self.fragment_id,
                 }];
 
-                // As we always use the `NoShuffle` exchange for Table on Source,
-                // there should be only one upstream.
+                // Upstream Cdc Source should be singleton.
                 let upstream_actor_id = upstreams.actors.as_global_ids();
                 assert_eq!(upstream_actor_id.len(), 1);
 

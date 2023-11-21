@@ -122,16 +122,12 @@ impl FilterExecutor {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use assert_matches::assert_matches;
     use futures::stream::StreamExt;
     use risingwave_common::array::{Array, DataChunk};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::row::OwnedRow;
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::transaction::transaction_message::TxnMsg::Data;
-    use risingwave_common::types::{DataType, Datum, JsonbVal};
+    use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_pretty;
 
     use crate::executor::test_utils::MockExecutor;
