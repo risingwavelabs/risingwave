@@ -892,7 +892,7 @@ impl LocalStreamManagerCore {
     }
 }
 
-/// Tries to find the root cause of previous actor failures, based on hard-coded rules.
+/// Tries to find the root cause of previous failures, based on hard-coded rules.
 pub fn try_find_root_cause(
     actor_errors: impl IntoIterator<Item = StreamError>,
 ) -> Option<StreamError> {

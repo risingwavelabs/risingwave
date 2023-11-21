@@ -170,6 +170,7 @@ impl StreamService for StreamServiceImpl {
             .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)
             .await
             .map_err(|e| {
+                // There is no guarantee all actor have reported failure, including the one that could potentially be the root cause.
                 let actor_failures = self.mgr.take_actor_failures();
                 try_find_root_cause(actor_failures.into_iter().chain(iter::once(e))).unwrap()
             })?;
@@ -196,6 +197,7 @@ impl StreamService for StreamServiceImpl {
             .await
             .inspect_err(|err| tracing::error!("failed to collect barrier: {}", err))
             .map_err(|e| {
+                // There is no guarantee all actor have reported failure, including the one that could potentially be the root cause.
                 let actor_failures = self.mgr.take_actor_failures();
                 try_find_root_cause(actor_failures.into_iter().chain(iter::once(e))).unwrap()
             })?;

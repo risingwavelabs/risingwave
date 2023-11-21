@@ -21,7 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fail::fail_point;
-use futures::future::try_join_all;
+use futures::future::join_all;
 use itertools::Itertools;
 use prometheus::HistogramTimer;
 use risingwave_common::bail;
@@ -39,6 +39,7 @@ use risingwave_pb::stream_plan::Barrier;
 use risingwave_pb::stream_service::{
     BarrierCompleteRequest, BarrierCompleteResponse, InjectBarrierRequest,
 };
+use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::StreamClientPoolRef;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot::{Receiver, Sender};
@@ -832,7 +833,12 @@ impl GlobalBarrierManager {
                     passed_actors: vec![],
                 };
                 async move {
-                    let client = self.env.stream_client_pool().get(node).await?;
+                    let client = self
+                        .env
+                        .stream_client_pool()
+                        .get(node)
+                        .await
+                        .map_err(|e| (*node_id, e))?;
 
                     let request = InjectBarrierRequest {
                         request_id,
@@ -846,12 +852,29 @@ impl GlobalBarrierManager {
                     );
 
                     // This RPC returns only if this worker node has injected this barrier.
-                    client.inject_barrier(request).await
+                    client
+                        .inject_barrier(request)
+                        .await
+                        .map_err(|e| (*node_id, e))
                 }
                 .into()
             }
         });
-        try_join_all(inject_futures).await?;
+        // join_all rather than try_join_all, in order to gather errors from all compute nodes.
+        let inject_results = join_all(inject_futures).await;
+        let mut errors = inject_results
+            .into_iter()
+            .filter_map(|r| match r {
+                Ok(_) => None,
+                Err(e) => Some(e),
+            })
+            .peekable();
+        if errors.peek().is_some() {
+            return Err(merge_compute_node_rpc_error(
+                "inject barrier failure",
+                errors,
+            ));
+        }
         Ok(node_need_collect)
     }
 
@@ -876,7 +899,7 @@ impl GlobalBarrierManager {
                 let request_id = Uuid::new_v4().to_string();
                 let tracing_context = tracing_context.clone();
                 async move {
-                    let client = client_pool.get(node).await?;
+                    let client = client_pool.get(node).await.map_err(|e| (*node_id, e))?;
                     let request = BarrierCompleteRequest {
                         request_id,
                         prev_epoch,
@@ -888,13 +911,29 @@ impl GlobalBarrierManager {
                     );
 
                     // This RPC returns only if this worker node has collected this barrier.
-                    client.barrier_complete(request).await
+                    client
+                        .barrier_complete(request)
+                        .await
+                        .map_err(|e| (*node_id, e))
                 }
                 .into()
             }
         });
 
-        let result = try_join_all(collect_futures).await.map_err(Into::into);
+        // join_all rather than try_join_all, in order to gather errors from all compute nodes.
+        let collect_result = join_all(collect_futures).await;
+        let result = if collect_result.iter().all(|r| r.is_ok()) {
+            Ok(collect_result.into_iter().map(|r| r.unwrap()).collect_vec())
+        } else {
+            let errors = collect_result.into_iter().filter_map(|r| match r {
+                Ok(_) => None,
+                Err(e) => Some(e),
+            });
+            Err(merge_compute_node_rpc_error(
+                "collect barrier failure",
+                errors,
+            ))
+        };
         let _ = barrier_complete_tx
             .send(BarrierCompletion { prev_epoch, result })
             .inspect_err(|err| tracing::warn!("failed to complete barrier: {err}"));
@@ -927,7 +966,7 @@ impl GlobalBarrierManager {
             // back to frontend
             fail_point!("inject_barrier_err_success");
             let fail_node = checkpoint_control.barrier_failed();
-            tracing::warn!("Failed to complete epoch {}: {:?}", prev_epoch, err);
+            tracing::warn!("Failed to complete epoch {}: {}", prev_epoch, err);
             self.failure_recovery(err, fail_node, state, checkpoint_control)
                 .await;
             return;
@@ -1194,4 +1233,16 @@ fn collect_synced_ssts(
         synced_ssts.append(&mut t);
     }
     (sst_to_worker, synced_ssts)
+}
+
+fn merge_compute_node_rpc_error(
+    message: &str,
+    errors: impl IntoIterator<Item = (WorkerId, RpcError)>,
+) -> MetaError {
+    use std::fmt::Write;
+    let concat: String = errors.into_iter().fold(String::new(), |mut s, (w, e)| {
+        write!(&mut s, " worker {}, {};", w, e).unwrap();
+        s
+    });
+    anyhow::anyhow!(format!("{}:{}", message, concat)).into()
 }
