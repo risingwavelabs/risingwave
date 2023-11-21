@@ -438,8 +438,8 @@
     create table t2 (v2 int, k2 int);
     select * from t1 where v1 in ( select v2 from t2 where k2 = k1 limit 1);
   expected_outputs:
-    - batch_plan
-    - stream_plan
+  - batch_plan
+  - stream_plan
 - name: test correlated input ref predicate and share operator
   sql: |
     create table t (a int, b int, c int);
@@ -451,4 +451,4 @@
     (select 1 from t, di where t.a = dl.c2 and t.c = di.d2 limit 1) name2
     from dl;
   expected_outputs:
-    - optimized_logical_plan_for_stream
+  - optimized_logical_plan_for_stream
