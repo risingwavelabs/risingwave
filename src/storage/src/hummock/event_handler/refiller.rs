@@ -62,6 +62,8 @@ pub struct CacheRefillMetrics {
 
     pub data_refill_parent_meta_lookup_hit_total: GenericCounter<AtomicU64>,
     pub data_refill_parent_meta_lookup_miss_total: GenericCounter<AtomicU64>,
+    pub data_refill_unit_inheritance_hit_total: GenericCounter<AtomicU64>,
+    pub data_refill_unit_inheritance_miss_total: GenericCounter<AtomicU64>,
 
     pub data_refill_ideal_bytes: GenericCounter<AtomicU64>,
     pub data_refill_success_bytes: GenericCounter<AtomicU64>,
@@ -119,6 +121,12 @@ impl CacheRefillMetrics {
         let data_refill_parent_meta_lookup_miss_total = refill_total
             .get_metric_with_label_values(&["parent_meta", "miss"])
             .unwrap();
+        let data_refill_unit_inheritance_hit_total = refill_total
+            .get_metric_with_label_values(&["unit_inheritance", "hit"])
+            .unwrap();
+        let data_refill_unit_inheritance_miss_total = refill_total
+            .get_metric_with_label_values(&["unit_inheritance", "miss"])
+            .unwrap();
 
         let data_refill_ideal_bytes = refill_bytes
             .get_metric_with_label_values(&["data", "ideal"])
@@ -148,6 +156,8 @@ impl CacheRefillMetrics {
 
             data_refill_parent_meta_lookup_hit_total,
             data_refill_parent_meta_lookup_miss_total,
+            data_refill_unit_inheritance_hit_total,
+            data_refill_unit_inheritance_miss_total,
 
             data_refill_ideal_bytes,
             data_refill_success_bytes,
@@ -507,8 +517,17 @@ impl CacheRefillTask {
                     .any(|exists| exists);
                 let sst = ssts.get(&unit.sst_obj_id).unwrap();
 
-                if refill && let Err(e) = Self::data_file_cache_refill_unit(context, sst, unit).await {
-                    tracing::error!("data file cache unit refill error: {}", e);
+                if refill {
+                    GLOBAL_CACHE_REFILL_METRICS
+                        .data_refill_unit_inheritance_hit_total
+                        .inc();
+                    if let Err(e) = Self::data_file_cache_refill_unit(context, sst, unit).await {
+                        tracing::error!("data file cache unit refill error: {}", e);
+                    }
+                } else {
+                    GLOBAL_CACHE_REFILL_METRICS
+                        .data_refill_unit_inheritance_miss_total
+                        .inc();
                 }
             }
         });
