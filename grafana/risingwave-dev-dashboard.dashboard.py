@@ -690,7 +690,7 @@ def section_streaming(outer_panels):
                     "each parallelism. The throughput of all the parallelism added up is equal to Source Throughput(rows).",
                     [
                         panels.target(
-                            f"rate({metric('partition_input_count')}[$__rate_interval])",
+                            f"rate({metric('source_partition_input_count')}[$__rate_interval])",
                             "actor={{actor_id}} source={{source_id}} partition={{partition}}",
                         )
                     ],
@@ -700,7 +700,7 @@ def section_streaming(outer_panels):
                     "The figure shows the number of bytes read by each source per second.",
                     [
                         panels.target(
-                            f"(sum by (source_id)(rate({metric('partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
+                            f"(sum by (source_id)(rate({metric('source_partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
                             "source={{source_id}}",
                         )
                     ],
@@ -711,7 +711,7 @@ def section_streaming(outer_panels):
                     "each parallelism. The throughput of all the parallelism added up is equal to Source Throughput(MB/s).",
                     [
                         panels.target(
-                            f"(rate({metric('partition_input_bytes')}[$__rate_interval]))/(1000*1000)",
+                            f"(rate({metric('source_partition_input_bytes')}[$__rate_interval]))/(1000*1000)",
                             "actor={{actor_id}} source={{source_id}} partition={{partition}}",
                         )
                     ],
@@ -3493,7 +3493,7 @@ def section_connector_node(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"rate({metric('connector_source_rows_received')}[$__rate_interval])",
+                            f"rate({metric('source_rows_received')}[$__rate_interval])",
                             "source={{source_type}} @ {{source_id}}",
                         ),
                     ],

@@ -73,14 +73,14 @@ pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
 impl SourceMetrics {
     fn new(registry: &Registry) -> Self {
         let partition_input_count = register_int_counter_vec_with_registry!(
-            "partition_input_count",
+            "source_partition_input_count",
             "Total number of rows that have been input from specific partition",
             &["actor_id", "source_id", "partition"],
             registry
         )
         .unwrap();
         let partition_input_bytes = register_int_counter_vec_with_registry!(
-            "partition_input_bytes",
+            "source_partition_input_bytes",
             "Total bytes that have been input from specific partition",
             &["actor_id", "source_id", "partition"],
             registry
@@ -95,7 +95,7 @@ impl SourceMetrics {
         .unwrap();
 
         let connector_source_rows_received = register_int_counter_vec_with_registry!(
-            "connector_source_rows_received",
+            "source_rows_received",
             "Number of rows received by source",
             &["source_type", "source_id"],
             registry
