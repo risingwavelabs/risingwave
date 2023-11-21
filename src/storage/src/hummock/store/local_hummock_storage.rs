@@ -423,13 +423,13 @@ impl LocalStateStore for LocalHummockStorage {
             prev_epoch
         );
         if !opts.watermark.is_empty() {
-            self.read_version
-                .write()
-                .update(VersionUpdate::NewTableWatermark {
-                    direction: opts.watermark_direction,
-                    epoch: prev_epoch,
-                    vnode_watermarks: opts.watermark.clone(),
-                });
+            let mut read_version = self.read_version.write();
+            let vnode_watermarks = read_version.filter_regress_watermarks(opts.watermark.clone());
+            read_version.update(VersionUpdate::NewTableWatermark {
+                direction: opts.watermark_direction,
+                epoch: prev_epoch,
+                vnode_watermarks,
+            });
         }
         self.event_sender
             .send(HummockEvent::LocalSealEpoch {

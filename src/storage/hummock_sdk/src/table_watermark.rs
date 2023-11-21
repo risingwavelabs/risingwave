@@ -59,6 +59,50 @@ impl TableWatermarksIndex {
         self.table_watermark(vnode, HummockEpoch::MAX)
     }
 
+    pub fn filter_regress_watermarks(
+        &self,
+        watermarks: Vec<VnodeWatermark>,
+    ) -> Vec<VnodeWatermark> {
+        let mut ret = Vec::with_capacity(watermarks.len());
+        for watermark in watermarks {
+            let mut regress_vnodes = HashSet::new();
+            for vnode in watermark.vnodes.vnodes() {
+                if let Some(prev_watermark) = self.latest_watermark(vnode) {
+                    let is_regress = match self.direction() {
+                        WatermarkDirection::Ascending => prev_watermark > watermark.watermark,
+                        WatermarkDirection::Descending => prev_watermark < watermark.watermark,
+                    };
+                    if is_regress {
+                        warn!(
+                            "table watermark regress: {:?} {} {:?} {:?}",
+                            self.direction(),
+                            vnode,
+                            watermark.watermark,
+                            prev_watermark
+                        );
+                        regress_vnodes.insert(vnode);
+                    }
+                }
+            }
+            if regress_vnodes.is_empty() {
+                // no vnode has regress watermark
+                ret.push(watermark);
+            } else {
+                let mut bitmap_builder = BitmapBuilder::with_capacity(VirtualNode::COUNT);
+                for vnode in watermark.vnodes.vnodes() {
+                    if !regress_vnodes.contains(&vnode) {
+                        bitmap_builder.set(vnode.to_index(), true);
+                    }
+                }
+                ret.push(VnodeWatermark::new(
+                    Vnodes::Bitmap(Arc::new(bitmap_builder.finish())),
+                    watermark.watermark,
+                ));
+            }
+        }
+        ret
+    }
+
     pub fn direction(&self) -> WatermarkDirection {
         self.watermark_direction
     }
@@ -75,34 +119,22 @@ impl TableWatermarksIndex {
         for vnode_watermark in vnode_watermark_list {
             for vnode in vnode_watermark.vnodes.vnodes() {
                 let epoch_watermarks = self.index.entry(vnode).or_default();
-                let new_watermark =
-                    if let Some((prev_epoch, prev_watermark)) = epoch_watermarks.last_key_value() {
-                        assert!(*prev_epoch < epoch);
-                        let watermark_regress = match self.watermark_direction {
-                            WatermarkDirection::Ascending => {
-                                vnode_watermark.watermark <= prev_watermark
-                            }
-                            WatermarkDirection::Descending => {
-                                vnode_watermark.watermark >= prev_watermark
-                            }
-                        };
-                        if watermark_regress {
-                            warn!(
-                                "table watermark regress: {} {:?} {:?}",
-                                vnode, vnode_watermark.watermark, prev_watermark
-                            );
-                            prev_watermark.clone()
-                        } else {
-                            vnode_watermark.watermark.clone()
+                if let Some((prev_epoch, prev_watermark)) = epoch_watermarks.last_key_value() {
+                    assert!(*prev_epoch < epoch);
+                    match self.watermark_direction {
+                        WatermarkDirection::Ascending => {
+                            assert!(vnode_watermark.watermark >= prev_watermark);
                         }
-                    } else {
-                        vnode_watermark.watermark.clone()
+                        WatermarkDirection::Descending => {
+                            assert!(vnode_watermark.watermark <= prev_watermark);
+                        }
                     };
+                };
                 assert!(self
                     .index
                     .entry(vnode)
                     .or_default()
-                    .insert(epoch, new_watermark)
+                    .insert(epoch, vnode_watermark.watermark.clone())
                     .is_none());
             }
         }

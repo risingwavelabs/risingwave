@@ -435,6 +435,17 @@ impl HummockReadVersion {
         &self.committed
     }
 
+    pub fn filter_regress_watermarks(
+        &self,
+        watermarks: Vec<VnodeWatermark>,
+    ) -> Vec<VnodeWatermark> {
+        if let Some(watermark_index) = &self.table_watermarks {
+            watermark_index.filter_regress_watermarks(watermarks)
+        } else {
+            watermarks
+        }
+    }
+
     pub fn clear_uncommitted(&mut self) {
         self.staging.imm.clear();
         self.staging.merged_imm.clear();
