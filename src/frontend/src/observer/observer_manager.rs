@@ -298,6 +298,7 @@ impl FrontendObserverNode {
                     function.schema_id,
                     function.id.into(),
                 ),
+                Operation::Update => catalog_guard.update_function(function),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Connection(connection) => match resp.operation() {
@@ -307,6 +308,7 @@ impl FrontendObserverNode {
                     connection.schema_id,
                     connection.id,
                 ),
+                Operation::Update => catalog_guard.update_connection(connection),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             _ => unreachable!(),

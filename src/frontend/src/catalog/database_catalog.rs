@@ -75,6 +75,10 @@ impl DatabaseCatalog {
         self.schema_by_name.values()
     }
 
+    pub fn iter_schemas_mut(&mut self) -> impl Iterator<Item = &mut SchemaCatalog> {
+        self.schema_by_name.values_mut()
+    }
+
     pub fn get_schema_by_name(&self, name: &str) -> Option<&SchemaCatalog> {
         self.schema_by_name.get(name)
     }

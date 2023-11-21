@@ -199,6 +199,11 @@ fn visit_stream_node_tables_inner<F>(
                 optional!(node.state_table, "StreamScan")
             }
 
+            // Stream Cdc Scan
+            NodeBody::StreamCdcScan(node) => {
+                always!(node.state_table, "StreamCdcScan")
+            }
+
             // Note: add internal tables for new nodes here.
             NodeBody::Materialize(node) if !internal_tables_only => {
                 always!(node.table, "Materialize")
