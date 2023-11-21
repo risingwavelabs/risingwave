@@ -139,6 +139,8 @@ impl Binder {
             BinaryOperator::Exists => ExprType::JsonbExists,
             BinaryOperator::ExistsAny => ExprType::JsonbExistsAny,
             BinaryOperator::ExistsAll => ExprType::JsonbExistsAll,
+            BinaryOperator::PathMatch => ExprType::JsonbPathMatch,
+            BinaryOperator::PathExists => ExprType::JsonbPathExists,
             BinaryOperator::Concat => {
                 let left_type = (!bound_left.is_untyped()).then(|| bound_left.return_type());
                 let right_type = (!bound_right.is_untyped()).then(|| bound_right.return_type());

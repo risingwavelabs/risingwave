@@ -190,6 +190,10 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::JsonbStripNulls
             | expr_node::Type::JsonbBuildArray
             | expr_node::Type::JsonbBuildObject
+            | expr_node::Type::JsonbPathExists
+            | expr_node::Type::JsonbPathMatch
+            | expr_node::Type::JsonbPathQueryArray
+            | expr_node::Type::JsonbPathQueryFirst
             | expr_node::Type::IsJson
             | expr_node::Type::ToJsonb
             | expr_node::Type::Sind
