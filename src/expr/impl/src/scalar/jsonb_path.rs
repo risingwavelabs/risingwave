@@ -70,36 +70,40 @@ fn jsonb_path_exists4(
     "jsonb_path_match(jsonb, varchar) -> boolean",
     prebuild = "JsonPath::new($1).map_err(parse_error)?"
 )]
-fn jsonb_path_match2(target: JsonbRef<'_>, path: &JsonPath) -> Result<bool> {
+fn jsonb_path_match2(target: JsonbRef<'_>, path: &JsonPath) -> Result<Option<bool>> {
     let matched = path
         .query::<ValueRef<'_>>(target.into())
         .map_err(eval_error)?;
 
-    if matched.len() != 1 && matched[0].as_ref().is_boolean() {
+    if matched.len() != 1 {
         return Err(ExprError::InvalidParam {
             name: "jsonb_path_match",
             reason: "single boolean result is expected".into(),
         });
     }
-    Ok(matched[0].as_ref().as_bool().unwrap())
+    Ok(matched[0].as_ref().as_bool())
 }
 
 #[function(
     "jsonb_path_match(jsonb, varchar, jsonb) -> boolean",
     prebuild = "JsonPath::new($1).map_err(parse_error)?"
 )]
-fn jsonb_path_match3(target: JsonbRef<'_>, vars: JsonbRef<'_>, path: &JsonPath) -> Result<bool> {
+fn jsonb_path_match3(
+    target: JsonbRef<'_>,
+    vars: JsonbRef<'_>,
+    path: &JsonPath,
+) -> Result<Option<bool>> {
     let matched = path
         .query_with_vars::<ValueRef<'_>>(target.into(), vars.into())
         .map_err(eval_error)?;
 
-    if matched.len() != 1 && matched[0].as_ref().is_boolean() {
+    if matched.len() != 1 {
         return Err(ExprError::InvalidParam {
             name: "jsonb_path_match",
             reason: "single boolean result is expected".into(),
         });
     }
-    Ok(matched[0].as_ref().as_bool().unwrap())
+    Ok(matched[0].as_ref().as_bool())
 }
 
 /// Returns the result of a JSON path predicate check for the specified JSON value.
@@ -126,7 +130,7 @@ fn jsonb_path_match4(
     path: &JsonPath,
 ) -> Result<Option<bool>> {
     match jsonb_path_match3(target, vars, path) {
-        Ok(x) => Ok(Some(x)),
+        Ok(x) => Ok(x),
         Err(_) if silent => Ok(None),
         Err(e) => Err(e),
     }
