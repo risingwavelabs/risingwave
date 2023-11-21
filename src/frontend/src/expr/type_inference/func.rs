@@ -629,14 +629,11 @@ fn infer_type_name<'a>(
     let mut candidates = top_matches(&candidates, inputs);
 
     if candidates.is_empty() {
-        return Err(ErrorCode::NotImplemented(
-            format!(
-                "{:?}{:?}",
-                func_name,
-                inputs.iter().map(TypeDebug).collect_vec()
-            ),
-            112.into(),
-        )
+        return Err(ErrorCode::NoFunction(format!(
+            "{}({})",
+            func_name,
+            inputs.iter().map(TypeDisplay).format(", ")
+        ))
         .into());
     }
 
@@ -651,9 +648,9 @@ fn infer_type_name<'a>(
         [] => unreachable!(),
         [sig] => Ok(*sig),
         _ => Err(ErrorCode::BindError(format!(
-            "function {:?}{:?} is not unique\nHINT:  Could not choose a best candidate function. You might need to add explicit type casts.",
+            "function {}({}) is not unique\nHINT:  Could not choose a best candidate function. You might need to add explicit type casts.",
             func_name,
-            inputs.iter().map(TypeDebug).collect_vec(),
+            inputs.iter().map(TypeDisplay).format(", "),
         ))
         .into()),
     }
@@ -883,8 +880,8 @@ fn narrow_same_type<'a>(
     }
 }
 
-struct TypeDebug<'a>(&'a Option<DataType>);
-impl<'a> std::fmt::Debug for TypeDebug<'a> {
+struct TypeDisplay<'a>(&'a Option<DataType>);
+impl<'a> std::fmt::Display for TypeDisplay<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             Some(t) => t.fmt(f),
