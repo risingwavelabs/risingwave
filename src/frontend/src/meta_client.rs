@@ -99,7 +99,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_hummock_meta_configs(&self) -> Result<HashMap<String, String>>;
 
-    async fn list_compact_task_assignment(&self) -> Result<Vec<CompactTaskAssignment>>;
+    async fn list_compaction_status(&self) -> Result<Vec<CompactTaskAssignment>>;
     async fn list_all_nodes(&self) -> Result<Vec<WorkerNode>>;
 }
 
@@ -246,7 +246,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_hummock_meta_config().await
     }
 
-    async fn list_compact_task_assignment(&self) -> Result<Vec<CompactTaskAssignment>> {
+    async fn list_compaction_status(&self) -> Result<Vec<CompactTaskAssignment>> {
         self.0.rise_ctl_list_compact_task_assignment().await
     }
 

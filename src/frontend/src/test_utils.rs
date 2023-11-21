@@ -898,7 +898,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
-    async fn list_compact_task_assignment(&self) -> RpcResult<Vec<CompactTaskAssignment>> {
+    async fn list_compaction_status(&self) -> RpcResult<Vec<CompactTaskAssignment>> {
         unimplemented!()
     }
 
