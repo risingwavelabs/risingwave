@@ -63,8 +63,7 @@ impl BoxedExecutorBuilder for SourceExecutor {
         // prepare connector source
         let source_props: HashMap<String, String> =
             HashMap::from_iter(source_node.properties.clone());
-        let config = ConnectorProperties::extract(source_props)
-            .map_err(|e| BatchError::Connector(e.into()))?;
+        let config = ConnectorProperties::extract(source_props).map_err(BatchError::connector)?;
 
         let info = source_node.get_info().unwrap();
         let parser_config = SpecificParserConfig::new(info, &source_node.properties)?;
@@ -154,16 +153,10 @@ impl SourceExecutor {
 
         #[for_await]
         for chunk in stream {
-            match chunk {
-                Ok(chunk) => {
-                    let data_chunk = covert_stream_chunk_to_batch_chunk(chunk.chunk)?;
-                    if data_chunk.capacity() > 0 {
-                        yield data_chunk;
-                    }
-                }
-                Err(e) => {
-                    return Err(BatchError::Connector(e.into()));
-                }
+            let chunk = chunk.map_err(BatchError::connector)?;
+            let data_chunk = covert_stream_chunk_to_batch_chunk(chunk.chunk)?;
+            if data_chunk.capacity() > 0 {
+                yield data_chunk;
             }
         }
     }

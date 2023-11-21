@@ -25,6 +25,7 @@ use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::{RpcError, ToTonicStatus};
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
+use thiserror_ext::Construct;
 use tonic::Status;
 
 pub type Result<T> = std::result::Result<T, BatchError>;
@@ -33,7 +34,7 @@ pub type SharedResult<T> = std::result::Result<T, Arc<BatchError>>;
 
 pub trait Error = std::error::Error + Send + Sync + 'static;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Construct)]
 pub enum BatchError {
     #[error("Storage error: {0}")]
     Storage(

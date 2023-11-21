@@ -72,10 +72,10 @@ impl Executor for ManagedExecutor {
 
         match self.shutdown_rx.message() {
             ShutdownMsg::Abort(reason) => {
-                return Err(BatchError::Aborted(reason));
+                return Err(BatchError::aborted(reason));
             }
             ShutdownMsg::Cancel => {
-                return Err(BatchError::Aborted("cancelled".to_string()));
+                return Err(BatchError::aborted("cancelled"));
             }
             ShutdownMsg::Init => {}
         }
