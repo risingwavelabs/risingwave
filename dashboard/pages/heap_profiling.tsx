@@ -179,7 +179,7 @@ export default function HeapProfiling() {
           height="full"
         >
           <FormControl>
-            <FormLabel textColor="teal.500">Dump Heap Profile</FormLabel>
+            <FormLabel textColor="blue.500">Dump Heap Profile</FormLabel>
             <VStack>
               <FormLabel>Compute Nodes</FormLabel>
               <Select
@@ -200,7 +200,7 @@ export default function HeapProfiling() {
             </VStack>
           </FormControl>
           <FormControl>
-            <FormLabel textColor="teal.500">Analyze Heap Profile</FormLabel>
+            <FormLabel textColor="blue.500">Analyze Heap Profile</FormLabel>
             <VStack>
               <FormLabel>Dumped By</FormLabel>
               <Select onChange={(event) => setProfileType(event.target.value)}>

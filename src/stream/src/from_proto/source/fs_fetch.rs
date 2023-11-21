@@ -14,8 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
-use risingwave_common::types::DataType;
+use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_connector::source::SourceCtrlOpts;
 use risingwave_pb::stream_plan::StreamFsFetchNode;
 use risingwave_source::source_desc::SourceDescBuilder;
@@ -56,29 +55,18 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             source_info.clone(),
             params.env.connector_params(),
             params.env.config().developer.connector_message_buffer_size,
-            params.pk_indices.clone(),
+            params.info.pk_indices.clone(),
         );
 
         let source_ctrl_opts = SourceCtrlOpts {
             chunk_size: params.env.config().developer.chunk_size,
         };
 
-        let column_ids: Vec<_> = source
+        let source_column_ids: Vec<_> = source
             .columns
             .iter()
             .map(|column| ColumnId::from(column.get_column_desc().unwrap().column_id))
             .collect();
-        let fields = source
-            .columns
-            .iter()
-            .map(|prost| {
-                let column_desc = prost.column_desc.as_ref().unwrap();
-                let data_type = DataType::from(column_desc.column_type.as_ref().unwrap());
-                let name = column_desc.name.clone();
-                Field::with_name(data_type, name)
-            })
-            .collect();
-        let schema = Schema::new(fields);
 
         let vnodes = Some(Arc::new(
             params
@@ -94,24 +82,22 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         let stream_source_core = StreamSourceCore::new(
             source_id,
             source_name,
-            column_ids,
+            source_column_ids,
             source_desc_builder,
             state_table_handler,
         );
 
         let executor = FsFetchExecutor::new(
             params.actor_context,
-            schema,
-            params.pk_indices,
+            params.info,
             stream_source_core,
-            params.executor_id,
             upstream,
             source_ctrl_opts,
             params.env.connector_params(),
         )
         .boxed();
 
-        let rate_limit = source.get_rate_limit().cloned().ok();
+        let rate_limit = source.rate_limit.map(|x| x as _);
         Ok(FlowControlExecutor::new(executor, rate_limit).boxed())
     }
 }

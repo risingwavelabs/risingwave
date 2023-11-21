@@ -85,12 +85,12 @@ public class CassandraFactory implements SinkFactory {
         // 3. close client
         session.close();
         switch (sinkType) {
-            case UPSERT:
+            case SINK_TYPE_UPSERT:
                 CassandraUtil.checkPrimaryKey(
                         tableMetadata.getPrimaryKey(), tableSchema.getPrimaryKeys());
                 break;
-            case APPEND_ONLY:
-            case FORCE_APPEND_ONLY:
+            case SINK_TYPE_APPEND_ONLY:
+            case SINK_TYPE_FORCE_APPEND_ONLY:
                 break;
             default:
                 throw Status.INTERNAL.asRuntimeException();

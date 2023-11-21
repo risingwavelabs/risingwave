@@ -203,11 +203,12 @@ mod test {
     use std::ops::Sub;
     use std::path::PathBuf;
 
+    use apache_avro::schema::RecordSchema;
     use apache_avro::types::{Record, Value};
     use apache_avro::{Codec, Days, Duration, Millis, Months, Reader, Schema, Writer};
     use itertools::Itertools;
     use risingwave_common::array::Op;
-    use risingwave_common::catalog::ColumnId;
+    use risingwave_common::catalog::{ColumnId, DEFAULT_KEY_COLUMN_NAME};
     use risingwave_common::row::Row;
     use risingwave_common::types::{DataType, Date, Interval, ScalarImpl, Timestamptz};
     use risingwave_common::{error, try_match_expand};
@@ -220,10 +221,12 @@ mod test {
         AvroParserConfig,
     };
     use crate::aws_auth::AwsAuthProps;
+    use crate::parser::bytes_parser::BytesAccessBuilder;
     use crate::parser::plain_parser::PlainParser;
     use crate::parser::unified::avro::unix_epoch_days;
     use crate::parser::{
-        AccessBuilderImpl, EncodingType, SourceStreamChunkBuilder, SpecificParserConfig,
+        AccessBuilderImpl, BytesProperties, EncodingProperties, EncodingType,
+        SourceStreamChunkBuilder, SpecificParserConfig,
     };
     use crate::source::SourceColumnDesc;
 
@@ -309,6 +312,11 @@ mod test {
         let conf = new_avro_conf_from_local(file_name).await?;
 
         Ok(PlainParser {
+            key_builder: AccessBuilderImpl::Bytes(BytesAccessBuilder::new(
+                EncodingProperties::Bytes(BytesProperties {
+                    column_name: Some(DEFAULT_KEY_COLUMN_NAME.into()),
+                }),
+            )?),
             payload_builder: AccessBuilderImpl::Avro(AvroAccessBuilder::new(
                 conf,
                 EncodingType::Value,
@@ -332,68 +340,75 @@ mod test {
         let flush = writer.flush().unwrap();
         assert!(flush > 0);
         let input_data = writer.into_inner().unwrap();
+        // _rw_key test cases
+        let key_testcases = vec![Some(br#"r"#.to_vec()), Some(vec![]), None];
         let columns = build_rw_columns();
-        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 1);
-        {
-            let writer = builder.row_writer();
-            parser.parse_inner(input_data, writer).await.unwrap();
-        }
-        let chunk = builder.finish();
-        let (op, row) = chunk.rows().next().unwrap();
-        assert_eq!(op, Op::Insert);
-        let row = row.into_owned_row();
-        for (i, field) in record.fields.iter().enumerate() {
-            let value = field.clone().1;
-            match value {
-                Value::String(str) | Value::Union(_, box Value::String(str)) => {
-                    assert_eq!(row[i], Some(ScalarImpl::Utf8(str.into_boxed_str())));
-                }
-                Value::Boolean(bool_val) => {
-                    assert_eq!(row[i], Some(ScalarImpl::Bool(bool_val)));
-                }
-                Value::Int(int_val) => {
-                    assert_eq!(row[i], Some(ScalarImpl::Int32(int_val)));
-                }
-                Value::Long(i64_val) => {
-                    assert_eq!(row[i], Some(ScalarImpl::Int64(i64_val)));
-                }
-                Value::Float(f32_val) => {
-                    assert_eq!(row[i], Some(ScalarImpl::Float32(f32_val.into())));
-                }
-                Value::Double(f64_val) => {
-                    assert_eq!(row[i], Some(ScalarImpl::Float64(f64_val.into())));
-                }
-                Value::Date(days) => {
-                    assert_eq!(
-                        row[i],
-                        Some(ScalarImpl::Date(
-                            Date::with_days(days + unix_epoch_days()).unwrap(),
-                        ))
-                    );
-                }
-                Value::TimestampMillis(millis) => {
-                    assert_eq!(
-                        row[i],
-                        Some(Timestamptz::from_millis(millis).unwrap().into())
-                    );
-                }
-                Value::TimestampMicros(micros) => {
-                    assert_eq!(row[i], Some(Timestamptz::from_micros(micros).into()));
-                }
-                Value::Bytes(bytes) => {
-                    assert_eq!(row[i], Some(ScalarImpl::Bytea(bytes.into_boxed_slice())));
-                }
-                Value::Duration(duration) => {
-                    let months = u32::from(duration.months()) as i32;
-                    let days = u32::from(duration.days()) as i32;
-                    let usecs = (u32::from(duration.millis()) as i64) * 1000; // never overflows
-                    assert_eq!(
-                        row[i],
-                        Some(Interval::from_month_day_usec(months, days, usecs).into())
-                    );
-                }
-                _ => {
-                    unreachable!()
+        for key_data in key_testcases {
+            let mut builder = SourceStreamChunkBuilder::with_capacity(columns.clone(), 1);
+            {
+                let writer = builder.row_writer();
+                parser
+                    .parse_inner(key_data, Some(input_data.clone()), writer)
+                    .await
+                    .unwrap();
+            }
+            let chunk = builder.finish();
+            let (op, row) = chunk.rows().next().unwrap();
+            assert_eq!(op, Op::Insert);
+            let row = row.into_owned_row();
+            for (i, field) in record.fields.iter().enumerate() {
+                let value = field.clone().1;
+                match value {
+                    Value::String(str) | Value::Union(_, box Value::String(str)) => {
+                        assert_eq!(row[i], Some(ScalarImpl::Utf8(str.into_boxed_str())));
+                    }
+                    Value::Boolean(bool_val) => {
+                        assert_eq!(row[i], Some(ScalarImpl::Bool(bool_val)));
+                    }
+                    Value::Int(int_val) => {
+                        assert_eq!(row[i], Some(ScalarImpl::Int32(int_val)));
+                    }
+                    Value::Long(i64_val) => {
+                        assert_eq!(row[i], Some(ScalarImpl::Int64(i64_val)));
+                    }
+                    Value::Float(f32_val) => {
+                        assert_eq!(row[i], Some(ScalarImpl::Float32(f32_val.into())));
+                    }
+                    Value::Double(f64_val) => {
+                        assert_eq!(row[i], Some(ScalarImpl::Float64(f64_val.into())));
+                    }
+                    Value::Date(days) => {
+                        assert_eq!(
+                            row[i],
+                            Some(ScalarImpl::Date(
+                                Date::with_days(days + unix_epoch_days()).unwrap(),
+                            ))
+                        );
+                    }
+                    Value::TimestampMillis(millis) => {
+                        assert_eq!(
+                            row[i],
+                            Some(Timestamptz::from_millis(millis).unwrap().into())
+                        );
+                    }
+                    Value::TimestampMicros(micros) => {
+                        assert_eq!(row[i], Some(Timestamptz::from_micros(micros).into()));
+                    }
+                    Value::Bytes(bytes) => {
+                        assert_eq!(row[i], Some(ScalarImpl::Bytea(bytes.into_boxed_slice())));
+                    }
+                    Value::Duration(duration) => {
+                        let months = u32::from(duration.months()) as i32;
+                        let days = u32::from(duration.days()) as i32;
+                        let usecs = (u32::from(duration.millis()) as i64) * 1000; // never overflows
+                        assert_eq!(
+                            row[i],
+                            Some(Interval::from_month_day_usec(months, days, usecs).into())
+                        );
+                    }
+                    _ => {
+                        unreachable!()
+                    }
                 }
             }
         }
@@ -457,12 +472,17 @@ mod test {
 
                 match build_field(inner_schema) {
                     None => {
-                        let index_of_union =
-                            union_schema.find_schema(&Value::Null).unwrap().0 as u32;
+                        let index_of_union = union_schema
+                            .find_schema_with_known_schemata::<&Schema>(&Value::Null, None, &None)
+                            .unwrap()
+                            .0 as u32;
                         Some(Value::Union(index_of_union, Box::new(Value::Null)))
                     }
                     Some(value) => {
-                        let index_of_union = union_schema.find_schema(&value).unwrap().0 as u32;
+                        let index_of_union = union_schema
+                            .find_schema_with_known_schemata::<&Schema>(&value, None, &None)
+                            .unwrap()
+                            .0 as u32;
                         Some(Value::Union(index_of_union, Box::new(value)))
                     }
                 }
@@ -473,9 +493,9 @@ mod test {
 
     fn build_avro_data(schema: &Schema) -> Record<'_> {
         let mut record = Record::new(schema).unwrap();
-        if let Schema::Record {
+        if let Schema::Record(RecordSchema {
             name: _, fields, ..
-        } = schema.clone()
+        }) = schema.clone()
         {
             for field in &fields {
                 let value = build_field(&field.schema)
@@ -499,7 +519,6 @@ mod test {
     #[tokio::test]
     async fn test_new_avro_parser() {
         let avro_parser_rs = new_avro_parser_from_local("simple-schema.avsc").await;
-        assert!(avro_parser_rs.is_ok());
         let avro_parser = avro_parser_rs.unwrap();
         println!("avro_parser = {:?}", avro_parser);
     }

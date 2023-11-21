@@ -398,12 +398,15 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             next_col_bounds,
         } = scan_range;
 
-        let (start_bound, end_bound) =
+        let (start_bound, end_bound, null_is_largest) =
             if table.pk_serializer().get_order_types()[pk_prefix.len()].is_ascending() {
-                (next_col_bounds.0, next_col_bounds.1)
+                (next_col_bounds.0, next_col_bounds.1, true)
             } else {
-                (next_col_bounds.1, next_col_bounds.0)
+                (next_col_bounds.1, next_col_bounds.0, false)
             };
+
+        let start_bound_is_bounded = !matches!(start_bound, Bound::Unbounded);
+        let end_bound_is_bounded = !matches!(end_bound, Bound::Unbounded);
 
         // Range Scan.
         assert!(pk_prefix.len() < table.pk_indices().len());
@@ -412,11 +415,35 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 epoch.into(),
                 &pk_prefix,
                 (
-                    start_bound.map(|x| OwnedRow::new(vec![x])),
-                    end_bound.map(|x| OwnedRow::new(vec![x])),
+                    match start_bound {
+                        Bound::Unbounded => {
+                            if end_bound_is_bounded && !null_is_largest {
+                                // Since Null is the smallest value, we need to skip it for range scan to meet the sql semantics.
+                                Bound::Excluded(OwnedRow::new(vec![None]))
+                            } else {
+                                // Both start and end are unbounded, so we need to select all rows.
+                                Bound::Unbounded
+                            }
+                        }
+                        Bound::Included(x) => Bound::Included(OwnedRow::new(vec![x])),
+                        Bound::Excluded(x) => Bound::Excluded(OwnedRow::new(vec![x])),
+                    },
+                    match end_bound {
+                        Bound::Unbounded => {
+                            if start_bound_is_bounded && null_is_largest {
+                                // Since Null is the largest value, we need to skip it for range scan to meet the sql semantics.
+                                Bound::Excluded(OwnedRow::new(vec![None]))
+                            } else {
+                                // Both start and end are unbounded, so we need to select all rows.
+                                Bound::Unbounded
+                            }
+                        }
+                        Bound::Included(x) => Bound::Included(OwnedRow::new(vec![x])),
+                        Bound::Excluded(x) => Bound::Excluded(OwnedRow::new(vec![x])),
+                    },
                 ),
                 ordered,
-                PrefetchOptions::new_for_exhaust_iter(),
+                PrefetchOptions::new_for_large_range_scan(),
             )
             .await?;
 

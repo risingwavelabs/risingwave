@@ -15,6 +15,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
+use risingwave_pb::meta::table_fragments::PbState as PbStreamJobState;
 use sea_orm::{DeriveActiveEnum, EnumIter, FromJsonQueryResult};
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +40,7 @@ pub mod object_dependency;
 pub mod schema;
 pub mod sink;
 pub mod source;
+pub mod streaming_job;
 pub mod system_parameter;
 pub mod table;
 pub mod user;
@@ -88,6 +90,16 @@ impl From<JobStatus> for PbStreamJobStatus {
         match job_status {
             JobStatus::Creating => Self::Creating,
             JobStatus::Created => Self::Created,
+        }
+    }
+}
+
+// todo: deprecate job status in catalog and unify with this one.
+impl From<JobStatus> for PbStreamJobState {
+    fn from(status: JobStatus) -> Self {
+        match status {
+            JobStatus::Creating => PbStreamJobState::Creating,
+            JobStatus::Created => PbStreamJobState::Created,
         }
     }
 }
@@ -187,10 +199,6 @@ derive_from_json_struct!(StreamNode, risingwave_pb::stream_plan::PbStreamNode);
 derive_from_json_struct!(Dispatchers, Vec<risingwave_pb::stream_plan::Dispatcher>);
 
 derive_from_json_struct!(ConnectorSplits, risingwave_pb::source::ConnectorSplits);
-derive_from_json_struct!(
-    ActorStatus,
-    risingwave_pb::meta::table_fragments::PbActorStatus
-);
 derive_from_json_struct!(VnodeBitmap, risingwave_pb::common::Buffer);
 
 derive_from_json_struct!(

@@ -768,7 +768,7 @@ pub fn start_fragment_info_monitor(
             meta_metrics.actor_info.reset();
             meta_metrics.table_info.reset();
             let workers: HashMap<u32, String> = cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None)
+                .list_worker_node(Some(WorkerType::ComputeNode), None)
                 .await
                 .into_iter()
                 .map(|worker_node| match worker_node.host {

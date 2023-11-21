@@ -21,11 +21,12 @@ use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use either::Either;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
 use pgwire::net::{Address, AddressRef};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_message::TransactionStatus;
-use pgwire::pg_response::PgResponse;
+use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::pg_server::{
     BoxedError, ExecContext, ExecContextGuard, Session, SessionId, SessionManager,
     UserAuthenticator,
@@ -77,9 +78,9 @@ use crate::catalog::{
 use crate::handler::extended_handle::{
     handle_bind, handle_execute, handle_parse, Portal, PrepareStatement,
 };
-use crate::handler::handle;
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::util::to_pg_field;
+use crate::handler::{handle, RwPgResponse};
 use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::{FrontendMetrics, GLOBAL_FRONTEND_METRICS};
@@ -98,6 +99,7 @@ use crate::user::UserId;
 use crate::utils::infer_stmt_row_desc::{infer_show_object, infer_show_variable};
 use crate::{FrontendOpts, PgResponseStream};
 
+pub(crate) mod current;
 pub(crate) mod transaction;
 
 /// The global environment for the frontend server.
@@ -439,6 +441,32 @@ impl FrontendEnv {
                 .unwrap(),
         ))
     }
+
+    /// Cancel queries (i.e. batch queries) in session.
+    /// If the session exists return true, otherwise, return false.
+    pub fn cancel_queries_in_session(&self, session_id: SessionId) -> bool {
+        let guard = self.sessions_map.read();
+        if let Some(session) = guard.get(&session_id) {
+            session.cancel_current_query();
+            true
+        } else {
+            info!("Current session finished, ignoring cancel query request");
+            false
+        }
+    }
+
+    /// Cancel creating jobs (i.e. streaming queries) in session.
+    /// If the session exists return true, otherwise, return false.
+    pub fn cancel_creating_jobs_in_session(&self, session_id: SessionId) -> bool {
+        let guard = self.sessions_map.read();
+        if let Some(session) = guard.get(&session_id) {
+            session.cancel_current_creating_job();
+            true
+        } else {
+            info!("Current session finished, ignoring cancel creating request");
+            false
+        }
+    }
 }
 
 pub struct AuthContext {
@@ -619,7 +647,9 @@ impl SessionImpl {
     pub fn check_relation_name_duplicated(
         &self,
         name: ObjectName,
-    ) -> std::result::Result<(), CheckRelationError> {
+        stmt_type: StatementType,
+        if_not_exists: bool,
+    ) -> std::result::Result<Either<(), RwPgResponse>, CheckRelationError> {
         let db_name = self.database();
         let catalog_reader = self.env().catalog_reader().read_guard();
         let (schema_name, relation_name) = {
@@ -635,9 +665,15 @@ impl SessionImpl {
             };
             (schema_name, relation_name)
         };
-        catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name)?;
-
-        Ok(())
+        match catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name) {
+            Err(CatalogError::Duplicated(_, name)) if if_not_exists => Ok(Either::Right(
+                PgResponse::builder(stmt_type)
+                    .notice(format!("relation \"{}\" already exists, skipping", name))
+                    .into(),
+            )),
+            Err(e) => Err(e.into()),
+            Ok(_) => Ok(Either::Left(())),
+        }
     }
 
     pub fn check_connection_name_duplicated(&self, name: ObjectName) -> Result<()> {
@@ -911,21 +947,11 @@ impl SessionManager for SessionManagerImpl {
 
     /// Used when cancel request happened.
     fn cancel_queries_in_session(&self, session_id: SessionId) {
-        let guard = self.env.sessions_map.read();
-        if let Some(session) = guard.get(&session_id) {
-            session.cancel_current_query()
-        } else {
-            info!("Current session finished, ignoring cancel query request")
-        }
+        self.env.cancel_queries_in_session(session_id);
     }
 
     fn cancel_creating_jobs_in_session(&self, session_id: SessionId) {
-        let guard = self.env.sessions_map.read();
-        if let Some(session) = guard.get(&session_id) {
-            session.cancel_current_creating_job()
-        } else {
-            info!("Current session finished, ignoring cancel creating request")
-        }
+        self.env.cancel_creating_jobs_in_session(session_id);
     }
 
     fn end_session(&self, session: &Self::Session) {

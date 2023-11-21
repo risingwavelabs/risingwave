@@ -15,18 +15,18 @@
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use sea_orm::entity::prelude::*;
 
-use crate::{FragmentId, FragmentVnodeMapping, I32Array, StreamNode, TableId};
+use crate::{FragmentId, FragmentVnodeMapping, I32Array, ObjectId, StreamNode};
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "fragment")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub fragment_id: FragmentId,
-    pub table_id: TableId,
+    pub job_id: ObjectId,
     pub fragment_type_mask: i32,
     pub distribution_type: DistributionType,
     pub stream_node: StreamNode,
-    pub vnode_mapping: Option<FragmentVnodeMapping>,
+    pub vnode_mapping: FragmentVnodeMapping,
     pub state_table_ids: I32Array,
     pub upstream_fragment_id: I32Array,
 }
@@ -65,7 +65,7 @@ pub enum Relation {
     Actor,
     #[sea_orm(
         belongs_to = "super::object::Entity",
-        from = "Column::TableId",
+        from = "Column::JobId",
         to = "super::object::Column::Oid",
         on_update = "NoAction",
         on_delete = "Cascade"

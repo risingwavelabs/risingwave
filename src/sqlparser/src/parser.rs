@@ -240,6 +240,7 @@ impl Parser {
                     }
                 }
                 Keyword::CANCEL => Ok(self.parse_cancel_job()?),
+                Keyword::KILL => Ok(self.parse_kill_process()?),
                 Keyword::DESCRIBE => Ok(Statement::Describe {
                     name: self.parse_object_name()?,
                 }),
@@ -4120,6 +4121,11 @@ impl Parser {
             }
         }
         Ok(Statement::CancelJobs(JobIdents(job_ids)))
+    }
+
+    pub fn parse_kill_process(&mut self) -> Result<Statement, ParserError> {
+        let process_id = self.parse_literal_uint()? as i32;
+        Ok(Statement::Kill(process_id))
     }
 
     /// Parser `from schema` after `show tables` and `show materialized views`, if not conclude

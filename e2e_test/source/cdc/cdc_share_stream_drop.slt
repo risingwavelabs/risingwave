@@ -1,0 +1,10 @@
+# drop relations created in cdc_share_stream.slt
+
+statement ok
+drop source mysql_mytest cascade;
+
+statement error
+drop materialized view products_test_cnt;
+
+statement error
+drop table products_test cascade;

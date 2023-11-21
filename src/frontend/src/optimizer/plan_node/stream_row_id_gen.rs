@@ -30,13 +30,16 @@ pub struct StreamRowIdGen {
 
 impl StreamRowIdGen {
     pub fn new(input: PlanRef, row_id_index: usize) -> Self {
-        let distribution = if input.append_only() {
-            // remove exchange for append only source
-            Distribution::HashShard(vec![row_id_index])
-        } else {
-            input.distribution().clone()
-        };
+        let distribution = input.distribution().clone();
+        Self::new_with_dist(input, row_id_index, distribution)
+    }
 
+    /// Create a new `StreamRowIdGen` with a custom distribution.
+    pub fn new_with_dist(
+        input: PlanRef,
+        row_id_index: usize,
+        distribution: Distribution,
+    ) -> StreamRowIdGen {
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
@@ -68,7 +71,7 @@ impl PlanTreeNodeUnary for StreamRowIdGen {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.row_id_index)
+        Self::new_with_dist(input, self.row_id_index, self.distribution().clone())
     }
 }
 

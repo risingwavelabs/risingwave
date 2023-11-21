@@ -205,8 +205,8 @@ message SinkDesc {
 enum SinkLogStoreType {
   /// Default value is the normal in memory log store to be backward compatible with the previously unset value
   SINK_LOG_STORE_TYPE_UNSPECIFIED = 0;
-  KV_LOG_STORE = 1;
-  IN_MEMORY_LOG_STORE = 2;
+  SINK_LOG_STORE_TYPE_KV_LOG_STORE = 1;
+  SINK_LOG_STORE_TYPE_IN_MEMORY_LOG_STORE = 2;
 }
 
 message SinkNode {
@@ -258,6 +258,7 @@ message AggCallState {
     // for constructing state table column mapping
     repeated uint32 included_upstream_indices = 2;
     repeated uint32 table_value_indices = 3;
+    repeated common.ColumnOrder order_columns = 4;
   }
 
   oneof inner {
@@ -449,22 +450,19 @@ message ExchangeNode {
 
 // Decides which kind of Executor will be used
 enum StreamScanType {
-  CHAIN_UNSPECIFIED = 0;
+  STREAM_SCAN_TYPE_UNSPECIFIED = 0;
 
   // ChainExecutor
-  CHAIN = 1;
+  STREAM_SCAN_TYPE_CHAIN = 1;
 
   // RearrangedChainExecutor
-  REARRANGE = 2;
+  STREAM_SCAN_TYPE_REARRANGE = 2;
 
   // BackfillExecutor
-  BACKFILL = 3;
+  STREAM_SCAN_TYPE_BACKFILL = 3;
 
   // ChainExecutor with upstream_only = true
-  UPSTREAM_ONLY = 4;
-
-  // CdcBackfillExecutor
-  CDC_BACKFILL = 5;
+  STREAM_SCAN_TYPE_UPSTREAM_ONLY = 4;
 }
 
 // StreamScanNode reads data from upstream table first, and then pass all events to downstream.
@@ -501,9 +499,23 @@ message StreamScanNode {
 
   // Snapshot read every N barriers
   uint32 snapshot_read_barrier_interval = 9 [deprecated = true];
+}
+
+message StreamCdcScanNode {
+  uint32 table_id = 1;
+
+  // The columns from the upstream table that'll be internally required by this stream scan node.
+  // Contains Primary Keys and Output columns.
+  repeated int32 upstream_column_ids = 2;
+
+  // Strips the primary key columns if they're unnecessary.
+  repeated uint32 output_indices = 3;
+
+  /// The state table used by Backfill operator for persisting internal state
+  catalog.Table state_table = 4;
 
   // The external table that will be backfilled for CDC.
-  plan_common.ExternalTableDesc cdc_table_desc = 10;
+  plan_common.ExternalTableDesc cdc_table_desc = 5;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -699,6 +711,7 @@ message StreamNode {
     EowcOverWindowNode eowc_over_window = 136;
     OverWindowNode over_window = 137;
     StreamFsFetchNode stream_fs_fetch = 138;
+    StreamCdcScanNode stream_cdc_scan = 139;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -713,25 +726,25 @@ message StreamNode {
 }
 
 enum DispatcherType {
-  UNSPECIFIED = 0;
+  DISPATCHER_TYPE_UNSPECIFIED = 0;
   // Dispatch by hash key, hashed by consistent hash.
-  HASH = 1;
+  DISPATCHER_TYPE_HASH = 1;
   // Broadcast to all downstreams.
   //
   // Note a broadcast cannot be represented as multiple simple dispatchers, since they are
   // different when we update dispatchers during scaling.
-  BROADCAST = 2;
+  DISPATCHER_TYPE_BROADCAST = 2;
   // Only one downstream.
-  SIMPLE = 3;
+  DISPATCHER_TYPE_SIMPLE = 3;
   // A special kind of exchange that doesn't involve shuffle. The upstream actor will be directly
   // piped into the downstream actor, if there are the same number of actors. If number of actors
   // are not the same, should use hash instead. Should be only used when distribution is the same.
-  NO_SHUFFLE = 4;
+  DISPATCHER_TYPE_NO_SHUFFLE = 4;
 
   // Dispatch by table name from upstream DB, used in CDC scenario which should has only one downstream actor.
   // From the optimizer's point of view, it can be treated as a specialized version of HASH distribution
   // that the hash key is the upstream table name.
-  CDC_TABLENAME = 5;
+  DISPATCHER_TYPE_CDC_TABLENAME = 5;
 }
 
 // The property of an edge in the fragment graph.

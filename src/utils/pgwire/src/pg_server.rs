@@ -31,7 +31,9 @@ use crate::pg_response::{PgResponse, ValuesStream};
 use crate::types::Format;
 
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
-pub type SessionId = (i32, i32);
+type ProcessId = i32;
+type SecretKey = i32;
+pub type SessionId = (ProcessId, SecretKey);
 
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.

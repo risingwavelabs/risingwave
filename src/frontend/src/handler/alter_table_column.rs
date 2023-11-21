@@ -30,6 +30,7 @@ use risingwave_sqlparser::parser::Parser;
 
 use super::create_source::get_json_schema_location;
 use super::create_table::{gen_create_table_plan, ColumnIdGenerator};
+use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
@@ -92,7 +93,7 @@ pub async fn handle_alter_table_column(
     };
     let source_schema = source_schema
         .clone()
-        .map(|source_schema| source_schema.into_source_schema_v2().0);
+        .map(|source_schema| source_schema.into_v2_with_warning());
 
     if let Some(source_schema) = &source_schema {
         if schema_has_schema_registry(source_schema) {

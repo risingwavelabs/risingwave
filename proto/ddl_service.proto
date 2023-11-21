@@ -144,11 +144,11 @@ message DropViewResponse {
 // - SHARED_CDC_SOURCE: The table streaming job is created based on a shared CDC source job (risingwavelabs/rfcs#73).
 // And one may add other types to support Table jobs that based on other backfill-able sources (risingwavelabs/rfcs#72).
 enum TableJobType {
-  UNSPECIFIED = 0;
+  TABLE_JOB_TYPE_UNSPECIFIED = 0;
   // table streaming jobs excepts the `SHARED_CDC_SOURCE` type
-  GENERAL = 1;
+  TABLE_JOB_TYPE_GENERAL = 1;
   // table streaming job sharing a CDC source job
-  SHARED_CDC_SOURCE = 2;
+  TABLE_JOB_TYPE_SHARED_CDC_SOURCE = 2;
 }
 
 message CreateTableRequest {

@@ -87,13 +87,7 @@ impl StreamNode for StreamSource {
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
             properties: source_catalog.properties.clone().into_iter().collect(),
-            rate_limit: self
-                .base
-                .ctx()
-                .session_ctx()
-                .config()
-                .streaming_rate_limit()
-                .map(|limit| limit.get() as u32),
+            rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
         });
         PbNodeBody::Source(SourceNode { source_inner })
     }

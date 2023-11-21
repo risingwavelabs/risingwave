@@ -1197,6 +1197,9 @@ pub enum Statement {
     },
     /// CANCEL JOBS COMMAND
     CancelJobs(JobIdents),
+    /// KILL COMMAND
+    /// Kill process in the show processlist.
+    Kill(i32),
     /// DROP
     Drop(DropStatement),
     /// DROP Function
@@ -1573,7 +1576,7 @@ impl fmt::Display for Statement {
                 }
                 if let Some(info) = cdc_table_info {
                     write!(f, " FROM {}", info.source_name)?;
-                    write!(f, " TABLE {}", info.external_table_name)?;
+                    write!(f, " TABLE '{}'", info.external_table_name)?;
                 }
                 Ok(())
             }
@@ -1833,6 +1836,10 @@ impl fmt::Display for Statement {
             }
             Statement::CancelJobs(jobs) => {
                 write!(f, "CANCEL JOBS {}", display_comma_separated(&jobs.0))?;
+                Ok(())
+            }
+            Statement::Kill(process_id) => {
+                write!(f, "KILL {}", process_id)?;
                 Ok(())
             }
         }
