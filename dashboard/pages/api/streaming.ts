@@ -67,7 +67,7 @@ export async function getRelations() {
     await getTables(),
     await getIndexes(),
     await getSinks(),
-    await getDataSources()
+    await getSources()
   )
   relations = sortBy(relations, (x) => x.id)
   return relations
@@ -103,7 +103,7 @@ export async function getSinks() {
   return sinkList
 }
 
-export async function getDataSources() {
+export async function getSources() {
   let sourceList: Source[] = (await api.get("/api/sources")).map(
     Source.fromJSON
   )

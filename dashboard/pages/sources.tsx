@@ -22,7 +22,7 @@ import {
   Relations,
 } from "../components/Relations"
 import { Source } from "../proto/gen/catalog"
-import { getDataSources } from "./api/streaming"
+import { getSources } from "./api/streaming"
 
 export default function DataSources() {
   const rowFormatColumn: Column<Source> = {
@@ -31,7 +31,7 @@ export default function DataSources() {
     content: (s) => s.info?.rowFormat ?? "unknown",
   }
 
-  return Relations("Data Sources", getDataSources, [
+  return Relations("Sources", getSources, [
     connectorColumn,
     rowFormatColumn,
     dependentsColumn,
