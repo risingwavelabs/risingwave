@@ -15,9 +15,10 @@
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
+use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_expr::window_function::{Frame, WindowFuncKind};
 
-use super::{AggCall, Expr, ExprImpl, OrderBy, RwResult};
+use super::{Expr, ExprImpl, OrderBy, RwResult};
 
 /// A window function performs a calculation across a set of table rows that are somehow related to
 /// the current row, according to the window spec `OVER (PARTITION BY .. ORDER BY ..)`.
@@ -91,7 +92,8 @@ impl WindowFunction {
 
             (Aggregate(agg_kind), args) => {
                 let arg_types = args.iter().map(ExprImpl::return_type).collect::<Vec<_>>();
-                AggCall::infer_return_type(agg_kind, &arg_types)
+                let return_type = FUNCTION_REGISTRY.get_return_type(agg_kind, &arg_types)?;
+                Ok(return_type)
             }
 
             _ => {
