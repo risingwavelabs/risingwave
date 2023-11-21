@@ -224,6 +224,7 @@ def run_cassandra_and_scylladb_sink_demo():
                 assert len(lines) >= 6
                 assert lines[1].decode('utf-8').strip().lower() == 'count'
                 rows = int(lines[3].decode('utf-8').strip())
+                print("{} rows in {}.{}".format(rows, db, rel))
                 if rows < 1:
                     failed_cases.append(db + "_" + rel)
         if len(failed_cases) != 0:
