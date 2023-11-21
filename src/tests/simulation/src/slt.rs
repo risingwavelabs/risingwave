@@ -71,12 +71,13 @@ impl SqlCmd {
 }
 
 fn extract_sql_command(sql: &str) -> SqlCmd {
-    let mut tokens = sql.split_whitespace().map(|s| s.to_lowercase());
-    fn next_token(tokens: &mut impl Iterator<Item = String>) -> String {
+    let sql = sql.to_lowercase();
+    let mut tokens = sql.split_whitespace();
+    fn next_token<'a>(tokens: &mut impl Iterator<Item = &'a str>) -> &'a str {
         tokens.next().unwrap()
     }
-    match next_token(&mut tokens).as_str() {
-        "create" => match next_token(&mut tokens).as_str() {
+    match next_token(&mut tokens) {
+        "create" => match next_token(&mut tokens) {
             "materialized" => {
                 // view
                 tokens.next();
@@ -85,7 +86,7 @@ fn extract_sql_command(sql: &str) -> SqlCmd {
                 SqlCmd::CreateMaterializedView { name }
             }
             _ => SqlCmd::Create {
-                is_create_table_as: is_create_table_as(sql),
+                is_create_table_as: is_create_table_as(&sql),
             },
         },
         "set" => {
@@ -125,6 +126,7 @@ pub async fn run_slt_task(
     // Probability of background_ddl being set to true per ddl record.
     background_ddl_weight: f64,
 ) {
+    tracing::info!("background_ddl_weight: {}", background_ddl_weight);
     let seed = std::env::var("MADSIM_TEST_SEED")
         .unwrap_or("0".to_string())
         .parse::<u64>()
@@ -180,6 +182,7 @@ pub async fn run_slt_task(
                 | sqllogictest::Record::Query { sql, .. } => extract_sql_command(sql),
                 _ => SqlCmd::Others,
             };
+            tracing::debug!(?cmd, "Running");
 
             if matches!(cmd, SqlCmd::SetBackgroundDdl { .. }) && background_ddl_weight > 0.0 {
                 panic!("We cannot run background_ddl statement with background_ddl_weight > 0.0, since it could be reset");
@@ -504,5 +507,12 @@ mod tests {
                     enable: true,
                 }"#]],
         );
+        check(
+            extract_sql_command("SET BACKGROUND_DDL=true;"),
+            expect![[r#"
+                SetBackgroundDdl {
+                    enable: true,
+                }"#]],
+        )
     }
 }
