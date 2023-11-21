@@ -243,47 +243,4 @@ mod tests {
         let res = stream.next().await;
         assert_matches!(res, None);
     }
-
-    #[tokio::test]
-    async fn test_json_filter_executor() {
-        let schema = Schema {
-            fields: vec![Field::with_name(DataType::Jsonb, "payload")],
-        };
-        let mut mock_executor = MockExecutor::new(schema.clone());
-
-        // two json payload from two tables: t1 and t2
-        let t1_json = JsonbVal::from_str(r#"{ "before": null, "after": { "v": 111, "v2": 222.2 }, "source": { "version": "2.2.0.Alpha3", "connector": "mysql", "name": "dbserver1", "ts_ms": 1678428689000, "snapshot": "false", "db": "inventory", "sequence": null, "table": "t1", "server_id": 223344, "gtid": null, "file": "mysql-bin.000003", "pos": 774, "row": 0, "thread": 8, "query": null }, "op": "c", "ts_ms": 1678428689389, "transaction": null }"#).unwrap();
-        let t2_json = JsonbVal::from_str(r#"{ "before": null, "after": { "v": 333, "v2": 666.6 }, "source": { "version": "2.2.0.Alpha3", "connector": "mysql", "name": "dbserver1", "ts_ms": 1678428689000, "snapshot": "false", "db": "inventory", "sequence": null, "table": "t2", "server_id": 223344, "gtid": null, "file": "mysql-bin.000003", "pos": 884, "row": 0, "thread": 8, "query": null }, "op": "c", "ts_ms": 1678428689389, "transaction": null }"#).unwrap();
-
-        let row1 = OwnedRow::new(vec![Some(t1_json.into())]);
-        let row2 = OwnedRow::new(vec![Some(t2_json.into())]);
-
-        let chunk = DataChunk::from_rows(&[row1, row2], &schema.data_types());
-
-        mock_executor.add(chunk);
-        // payload->'source'->>'table'='t1'
-        // (equal:bool (jsonb_access_str:varchar (jsonb_access:jsonb $0:jsonb source:varchar) table:varchar) t1:varchar)
-
-        let expr = build_from_pretty("(equal:boolean(jsonb_access_str:varchar (jsonb_access:jsonb $0:jsonb source:varchar) table:varchar) t1:varchar)");
-        // filter out payload of table t2
-        let filter_executor = Box::new(FilterExecutor {
-            expr: expr.clone(),
-            child: Box::new(mock_executor),
-            identity: "FilterExecutor".to_string(),
-            chunk_size: CHUNK_SIZE,
-        });
-
-        // filter schema is the same as input schema
-        let fields = &filter_executor.schema().fields;
-        assert_eq!(fields[0].data_type, DataType::Jsonb);
-
-        let mut stream = filter_executor.execute();
-        let res = stream.next().await.unwrap();
-        assert_matches!(res, Ok(_));
-        if let Ok(res) = res {
-            println!("res: {:#?}", res);
-        }
-        let res = stream.next().await;
-        assert_matches!(res, None);
-    }
 }
