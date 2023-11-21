@@ -899,6 +899,7 @@ mod tests {
                         is_serving: true,
                         is_unschedulable: false,
                     },
+                    Default::default(),
                 )
                 .await?;
             cluster_manager.activate_worker_node(host).await?;

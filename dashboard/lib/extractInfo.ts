@@ -15,8 +15,14 @@
  *
  */
 
-import { ColumnCatalog } from "../proto/gen/plan_common"
+import { ColumnCatalog, Field } from "../proto/gen/plan_common"
 
-export default function extractColumnInfo(col: ColumnCatalog) {
-  return `${col.columnDesc?.name} (${col.columnDesc?.columnType?.typeName})`
+export default function extractColumnInfo(col: ColumnCatalog | Field) {
+  if ("columnDesc" in col) {
+    // ColumnCatalog
+    return `${col.columnDesc?.name} (${col.columnDesc?.columnType?.typeName})`
+  } else {
+    // Field
+    return `${col.name} (${col.dataType?.typeName})`
+  }
 }
