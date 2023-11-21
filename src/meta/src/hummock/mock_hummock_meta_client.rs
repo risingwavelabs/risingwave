@@ -43,7 +43,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::hummock::compaction::selector::{
     default_compaction_selector, CompactionSelector, SpaceReclaimCompactionSelector,
 };
-use crate::hummock::HummockManager;
+use crate::hummock::{CommitEpochInfo, HummockManager};
 
 pub struct MockHummockMetaClient {
     hummock_manager: Arc<HummockManager>,
@@ -163,7 +163,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), self.context_id))
             .collect();
         self.hummock_manager
-            .commit_epoch(epoch, sstables, sst_to_worker)
+            .commit_epoch(epoch, CommitEpochInfo::for_test(sstables, sst_to_worker))
             .await
             .map_err(mock_err)?;
         Ok(())

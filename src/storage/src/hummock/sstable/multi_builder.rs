@@ -455,9 +455,8 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::test_utils::{
-        default_builder_opt_for_test, test_key_of, test_user_key_of, CompactionDeleteRangesBuilder,
-    };
+    use crate::hummock::test_utils::delete_range::CompactionDeleteRangesBuilder;
+    use crate::hummock::test_utils::{default_builder_opt_for_test, test_key_of, test_user_key_of};
     use crate::hummock::{SstableBuilderOptions, DEFAULT_RESTART_INTERVAL};
 
     #[tokio::test]

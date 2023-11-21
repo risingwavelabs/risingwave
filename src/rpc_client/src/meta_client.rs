@@ -474,6 +474,19 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn alter_set_schema(
+        &self,
+        object: alter_set_schema_request::Object,
+        new_schema_id: u32,
+    ) -> Result<CatalogVersion> {
+        let request = AlterSetSchemaRequest {
+            new_schema_id,
+            object: Some(object),
+        };
+        let resp = self.inner.alter_set_schema(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn replace_table(
         &self,
         source: Option<PbSource>,
@@ -1160,6 +1173,17 @@ impl MetaClient {
     pub async fn sink_coordinate_client(&self) -> SinkCoordinationRpcClient {
         self.inner.core.read().await.sink_coordinate_client.clone()
     }
+
+    pub async fn rise_ctl_list_compact_task_assignment(
+        &self,
+    ) -> Result<Vec<CompactTaskAssignment>> {
+        let req = RiseCtlListCompactTaskAssignmentRequest {};
+        let resp = self
+            .inner
+            .rise_ctl_list_compact_task_assignment(req)
+            .await?;
+        Ok(resp.task_assignment)
+    }
 }
 
 #[async_trait]
@@ -1748,6 +1772,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_relation_name, AlterRelationNameRequest, AlterRelationNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
+            ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
@@ -1808,6 +1833,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_branched_object, ListBranchedObjectRequest, ListBranchedObjectResponse }
             ,{ hummock_client, list_active_write_limit, ListActiveWriteLimitRequest, ListActiveWriteLimitResponse }
             ,{ hummock_client, list_hummock_meta_config, ListHummockMetaConfigRequest, ListHummockMetaConfigResponse }
+            ,{ hummock_client, rise_ctl_list_compact_task_assignment, RiseCtlListCompactTaskAssignmentRequest, RiseCtlListCompactTaskAssignmentResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

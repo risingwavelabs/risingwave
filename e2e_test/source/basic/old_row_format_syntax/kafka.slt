@@ -663,7 +663,12 @@ ORDER BY
 
 query II
 SELECT
-	*
+	"ID",
+  "firstName",
+  "lastName",
+  "age",
+  "height",
+  "weight"
 FROM
 	upsert_students
 ORDER BY
@@ -679,7 +684,12 @@ ORDER BY
 
 query II
 SELECT
-	*
+	"ID",
+  "firstName",
+  "lastName",
+  "age",
+  "height",
+  "weight"
 FROM
 	upsert_students_default_key
 ORDER BY
@@ -707,7 +717,7 @@ order by
 56166    2
 
 query I
-SELECT * FROM source_mv3 ORDER BY id;
+SELECT id FROM source_mv3 ORDER BY id;
 ----
 \x6b6b
 \x776561776566776566

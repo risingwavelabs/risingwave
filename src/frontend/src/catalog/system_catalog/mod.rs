@@ -352,6 +352,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::View(&PG_KEYWORDS) },
     { BuiltinCatalog::View(&PG_ATTRDEF) },
     { BuiltinCatalog::View(&PG_ROLES) },
+    { BuiltinCatalog::View(&PG_AUTH_MEMBERS) },
     { BuiltinCatalog::View(&PG_SHDESCRIPTION) },
     { BuiltinCatalog::View(&PG_TABLESPACE) },
     { BuiltinCatalog::View(&PG_STAT_ACTIVITY) },
@@ -404,6 +405,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_HUMMOCK_BRANCHED_OBJECTS), read_hummock_branched_objects await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACTION_GROUP_CONFIGS), read_hummock_compaction_group_configs await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_META_CONFIGS), read_hummock_meta_configs await},
+    { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACT_TASK_ASSIGNMEN), read_hummock_compaction_status await },
     { BuiltinCatalog::Table(&RW_DESCRIPTION), read_rw_description },
 }
 
