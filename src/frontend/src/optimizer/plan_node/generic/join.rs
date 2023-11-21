@@ -141,6 +141,7 @@ impl<I: stream::StreamPlanRef> Join<I> {
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
     fn schema(&self) -> Schema {
+        println!("[rc] fe self.output_indices: {:?}", self.output_indices);
         let left_schema = self.left.schema();
         let right_schema = self.right.schema();
         let i2l = self.i2l_col_mapping();
@@ -161,6 +162,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
                 ),
             })
             .collect();
+        println!("[rc] fe fields: {:?}", fields);
         Schema { fields }
     }
 

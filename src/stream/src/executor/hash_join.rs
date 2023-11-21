@@ -461,10 +461,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .concat(),
         };
 
-        let original_output_data_types = schema_fields
+        let original_schema = Schema {
+            fields: schema_fields,
+        };
+        let actual_schema: Schema = output_indices
             .iter()
-            .map(|field| field.data_type())
-            .collect_vec();
+            .map(|&idx| original_schema[idx].clone())
+            .collect();
+
+        println!("[rc] original_schema: {:?}", original_schema.fields());
+        println!("[rc] actual_schema: {:?}", actual_schema.fields());
+        println!("[rc] info.schema: {:?}", info.schema.fields());
+
+        let original_output_data_types = original_schema.data_types();
         let actual_output_data_types = output_indices
             .iter()
             .map(|&idx| original_output_data_types[idx].clone())
