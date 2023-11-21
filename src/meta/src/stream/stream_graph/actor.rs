@@ -198,16 +198,16 @@ impl ActorBuilder {
                 })
             }
 
-            // "Leaf" node `Filter` used in multi-table cdc backfill plan:
+            // "Leaf" node `CdcFilter` used in multi-table cdc backfill plan:
             // cdc_filter -> backfill -> mview
-            NodeBody::CdcFilter(filter) => {
+            NodeBody::CdcFilter(node) => {
                 let input = stream_node.get_input();
                 assert_eq!(input.len(), 1);
 
                 let merge_node = &input[0];
                 assert_matches!(merge_node.node_body, Some(NodeBody::Merge(_)));
 
-                let upstream_source_id = filter.upstream_source_id;
+                let upstream_source_id = node.upstream_source_id;
                 tracing::debug!(
                     "rewrite leaf cdc filter node: upstream source id {}",
                     upstream_source_id,
@@ -223,7 +223,7 @@ impl ActorBuilder {
                 let upstream_actor_id = upstreams.actors.as_global_ids();
                 assert_eq!(upstream_actor_id.len(), 1);
 
-                // rewrite the input of `Filter`
+                // rewrite the input of `CdcFilter`
                 let input = vec![
                     // Fill the merge node body with correct upstream info.
                     StreamNode {

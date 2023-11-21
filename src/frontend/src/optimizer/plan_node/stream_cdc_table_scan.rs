@@ -224,10 +224,7 @@ impl StreamCdcTableScan {
             input: vec![
                 // The merge node body will be filled by the `ActorBuilder` on the meta service.
                 PbStreamNode {
-                    node_body: Some(PbNodeBody::Merge(MergeNode {
-                        upstream_fragment_id: upstream_source_id,
-                        ..Default::default()
-                    })),
+                    node_body: Some(PbNodeBody::Merge(Default::default())),
                     identity: "Upstream".into(),
                     fields: upstream_schema.clone(),
                     stream_key: vec![], // not used
@@ -269,7 +266,6 @@ impl StreamCdcTableScan {
             output_indices,
             // The table desc used by backfill executor
             state_table: Some(catalog),
-            // rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
             cdc_table_desc: Some(self.core.cdc_table_desc.to_protobuf()),
         });
 

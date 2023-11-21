@@ -1,0 +1,39 @@
+# This script depends on the cdc_share_stream_plan.slt
+
+control substitution on
+
+# enable cdc backfill in ci
+statement ok
+set cdc_backfill='true';
+
+# create a cdc source job, which format fixed to `FORMAT PLAIN ENCODE JSON`
+statement ok
+create source mysql_source with (
+ connector = 'mysql-cdc',
+ hostname = '${MYSQL_HOST:localhost}',
+ port = '${MYSQL_TCP_PORT:8306}',
+ username = 'dbz',
+ password = '${MYSQL_PWD:}',
+ database.name = 'mytest',
+ server.id = '5601'
+);
+
+statement ok
+create table products_test ( id INT,
+ name STRING,
+ description STRING,
+ PRIMARY KEY (id)
+) from mysql_source table 'mytest.products';
+
+# check the fragment distribution
+query TT
+select distribution_type,flags from rw_fragments order by fragment_id;
+----
+SINGLE {SOURCE}
+HASH {MVIEW}
+SINGLE {STREAM_SCAN}
+SINGLE {CDC_FILTER}
+HASH {SOURCE,DML}
+
+statement ok
+drop source mysql_source cascade;
