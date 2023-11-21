@@ -123,7 +123,8 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                         (Included(range_start), Excluded(range_end)),
                         MAX_EPOCH,
                         ReadOptions {
-                            prefetch_options: PrefetchOptions::default(),
+                            // TODO: if this stream lives too long ,the connection of prefetch object may break. We may need optimize it because if a connection break too many times, we will disable prefetch for current object.
+                            prefetch_options: PrefetchOptions::new_for_large_range_scan(),
                             cache_policy: CachePolicy::Fill(CachePriority::Low),
                             table_id,
                             ..Default::default()
@@ -234,7 +235,8 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                             (Included(range_start), Included(range_end)),
                                             MAX_EPOCH,
                                             ReadOptions {
-                                                prefetch_options: PrefetchOptions::default(),
+                                                prefetch_options:
+                                                    PrefetchOptions::new_for_large_range_scan(),
                                                 cache_policy: CachePolicy::Fill(CachePriority::Low),
                                                 table_id,
                                                 ..Default::default()
