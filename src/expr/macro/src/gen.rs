@@ -552,6 +552,8 @@ impl FunctionAttr {
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.as_fn().name);
             quote! { #name }
+        } else if self.unimplemented {
+            quote! { |_| Err(ExprError::UnsupportedFunction(#name.into())) }
         } else {
             self.generate_agg_build_fn(user_fn)?
         };

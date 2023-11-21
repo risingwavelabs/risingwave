@@ -42,12 +42,89 @@ where
     }
 }
 
-#[aggregate("min(*) -> auto", state = "ref")]
+#[aggregate("avg(int2) -> decimal", unimplemented)]
+#[aggregate("avg(int4) -> decimal", unimplemented)]
+#[aggregate("avg(int8) -> decimal", unimplemented)]
+#[aggregate("avg(decimal) -> decimal", unimplemented)]
+#[aggregate("avg(float4) -> float8", unimplemented)]
+#[aggregate("avg(float8) -> float8", unimplemented)]
+#[aggregate("avg(int256) -> float8", unimplemented)]
+#[aggregate("avg(interval) -> interval", unimplemented)]
+fn _avg() {}
+
+#[aggregate("stddev_pop(int2) -> decimal", unimplemented)]
+#[aggregate("stddev_pop(int4) -> decimal", unimplemented)]
+#[aggregate("stddev_pop(int8) -> decimal", unimplemented)]
+#[aggregate("stddev_pop(decimal) -> decimal", unimplemented)]
+#[aggregate("stddev_pop(float4) -> float8", unimplemented)]
+#[aggregate("stddev_pop(float8) -> float8", unimplemented)]
+#[aggregate("stddev_pop(int256) -> float8", unimplemented)]
+fn _stddev_pop() {}
+
+#[aggregate("stddev_samp(int2) -> decimal", unimplemented)]
+#[aggregate("stddev_samp(int4) -> decimal", unimplemented)]
+#[aggregate("stddev_samp(int8) -> decimal", unimplemented)]
+#[aggregate("stddev_samp(decimal) -> decimal", unimplemented)]
+#[aggregate("stddev_samp(float4) -> float8", unimplemented)]
+#[aggregate("stddev_samp(float8) -> float8", unimplemented)]
+#[aggregate("stddev_samp(int256) -> float8", unimplemented)]
+fn _stddev_samp() {}
+
+#[aggregate("var_pop(int2) -> decimal", unimplemented)]
+#[aggregate("var_pop(int4) -> decimal", unimplemented)]
+#[aggregate("var_pop(int8) -> decimal", unimplemented)]
+#[aggregate("var_pop(decimal) -> decimal", unimplemented)]
+#[aggregate("var_pop(float4) -> float8", unimplemented)]
+#[aggregate("var_pop(float8) -> float8", unimplemented)]
+#[aggregate("var_pop(int256) -> float8", unimplemented)]
+fn _var_pop() {}
+
+#[aggregate("var_samp(int2) -> decimal", unimplemented)]
+#[aggregate("var_samp(int4) -> decimal", unimplemented)]
+#[aggregate("var_samp(int8) -> decimal", unimplemented)]
+#[aggregate("var_samp(decimal) -> decimal", unimplemented)]
+#[aggregate("var_samp(float4) -> float8", unimplemented)]
+#[aggregate("var_samp(float8) -> float8", unimplemented)]
+#[aggregate("var_samp(int256) -> float8", unimplemented)]
+fn _var_samp() {}
+
+#[aggregate("grouping(any) -> int4", unimplemented)]
+fn _grouping() {}
+
+// no `min(boolean)` and `min(jsonb)`
+#[aggregate("min(*int) -> auto", state = "ref")]
+#[aggregate("min(*float) -> auto", state = "ref")]
+#[aggregate("min(decimal) -> auto", state = "ref")]
+#[aggregate("min(int256) -> auto", state = "ref")]
+#[aggregate("min(serial) -> auto", state = "ref")]
+#[aggregate("min(date) -> auto", state = "ref")]
+#[aggregate("min(time) -> auto", state = "ref")]
+#[aggregate("min(interval) -> auto", state = "ref")]
+#[aggregate("min(timestamp) -> auto", state = "ref")]
+#[aggregate("min(timestamptz) -> auto", state = "ref")]
+#[aggregate("min(varchar) -> auto", state = "ref")]
+#[aggregate("min(bytea) -> auto", state = "ref")]
+#[aggregate("min(anyarray) -> auto", state = "ref")]
+#[aggregate("min(struct) -> auto", state = "ref")]
 fn min<T: Ord>(state: T, input: T) -> T {
     state.min(input)
 }
 
-#[aggregate("max(*) -> auto", state = "ref")]
+// no `max(boolean)` and `max(jsonb)`
+#[aggregate("max(*int) -> auto", state = "ref")]
+#[aggregate("max(*float) -> auto", state = "ref")]
+#[aggregate("max(decimal) -> auto", state = "ref")]
+#[aggregate("max(int256) -> auto", state = "ref")]
+#[aggregate("max(serial) -> auto", state = "ref")]
+#[aggregate("max(date) -> auto", state = "ref")]
+#[aggregate("max(time) -> auto", state = "ref")]
+#[aggregate("max(interval) -> auto", state = "ref")]
+#[aggregate("max(timestamp) -> auto", state = "ref")]
+#[aggregate("max(timestamptz) -> auto", state = "ref")]
+#[aggregate("max(varchar) -> auto", state = "ref")]
+#[aggregate("max(bytea) -> auto", state = "ref")]
+#[aggregate("max(anyarray) -> auto", state = "ref")]
+#[aggregate("max(struct) -> auto", state = "ref")]
 fn max<T: Ord>(state: T, input: T) -> T {
     state.max(input)
 }
