@@ -824,7 +824,6 @@ impl GlobalStreamManager {
                             }
 
                             changed = true;
-                            ticker.reset_immediately();
                         }
 
                         // Since our logic for handling passive scale-in is within the barrier manager,
