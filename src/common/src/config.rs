@@ -949,7 +949,7 @@ pub mod default {
         }
 
         pub fn periodic_tombstone_reclaim_compaction_interval_sec() -> u64 {
-            600
+            180
         }
 
         pub fn move_table_size_limit() -> u64 {
@@ -1316,7 +1316,7 @@ pub mod default {
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 96;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 6;
-        const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
+        const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 30;
         const DEFAULT_EMERGENCY_PICKER: bool = true;
 
         use crate::catalog::hummock::CompactionFilterFlag;
