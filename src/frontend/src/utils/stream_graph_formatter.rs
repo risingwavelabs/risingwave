@@ -148,8 +148,6 @@ impl StreamGraphFormatter {
                         DispatcherType::Broadcast => "Broadcast".to_string(),
                         DispatcherType::Simple => "Single".to_string(),
                         DispatcherType::NoShuffle => "NoShuffle".to_string(),
-                        DispatcherType::CdcTablename =>
-                            format!("CdcTableName({:?})", dist.downstream_table_name),
                     },
                     upstream_fragment_id
                 )

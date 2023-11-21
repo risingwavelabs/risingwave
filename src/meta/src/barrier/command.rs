@@ -19,7 +19,7 @@ use futures::future::try_join_all;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
-use risingwave_common::util::stream_graph_visitor::visit_fragment;
+
 use risingwave_connector::source::SplitImpl;
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::meta::PausedReason;

@@ -156,17 +156,13 @@ impl StreamCdcTableScan {
 
         // The schema of the shared cdc source upstream is different from snapshot,
         // refer to `debezium_cdc_source_schema()` for details.
-        let (upstream_schema, row_id_index) = {
+        let upstream_schema = {
             let mut columns = debezium_cdc_source_schema();
             columns.push(ColumnCatalog::row_id_column());
-            let index = columns.len() - 1;
-            (
-                columns
-                    .into_iter()
-                    .map(|c| Field::from(c.column_desc).to_prost())
-                    .collect_vec(),
-                index,
-            )
+            columns
+                .into_iter()
+                .map(|c| Field::from(c.column_desc).to_prost())
+                .collect_vec()
         };
 
         let output_indices = self
@@ -239,7 +235,7 @@ impl StreamCdcTableScan {
             ],
             stream_key: vec![], // not used
             append_only: true,
-            identity: "CdcFilter".to_string(),
+            identity: "StreamCdcFilter".to_string(),
             fields: upstream_schema.clone(),
             node_body: Some(PbNodeBody::CdcFilter(CdcFilterNode {
                 search_condition: Some(filter_expr.to_expr_proto()),
@@ -262,7 +258,6 @@ impl StreamCdcTableScan {
                     r#type: DispatcherType::Simple as _,
                     dist_key_indices: vec![], // simple exchange doesn't need dist key
                     output_indices: output_indices.clone(),
-                    downstream_table_name: None,
                 }),
             })),
         };

@@ -22,11 +22,11 @@ use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    generate_internal_table_name_with_type, TableId, CDC_SOURCE_COLUMN_NUM, TABLE_NAME_COLUMN_NAME,
+    generate_internal_table_name_with_type, TableId, CDC_SOURCE_COLUMN_NUM,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
-use risingwave_common::util::stream_graph_visitor::visit_fragment;
+
 use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -575,21 +575,25 @@ impl CompleteStreamFragmentGraph {
             for (&id, fragment) in &mut graph.fragments {
                 for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
                     let (up_fragment_id, edge) = match table_job_type.as_ref() {
-                        // TODO: here we traverse all fragments of the graph, and we should find out the
-                        // CdcFilter fragment and add an edge between upstream source fragment and the fragment
                         Some(TableJobType::SharedCdcSource) => {
                             let source_fragment = upstream_root_fragments
                                 .get(&upstream_table_id)
                                 .context("upstream source fragment not found")?;
                             let source_job_id = GlobalFragmentId::new(source_fragment.fragment_id);
 
+                            // we traverse all fragments in the graph, and we should find out the
+                            // CdcFilter fragment and add an edge between upstream source fragment and it.
+                            assert_ne!(
+                                (fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32),
+                                0
+                            );
+
                             tracing::debug!(
                                 ?source_job_id,
                                 ?output_columns,
                                 identity = ?fragment.inner.get_node().unwrap().get_identity(),
                                 current_frag_id=?id,
-                                ?fragment.inner.fragment_type_mask,
-                                "StreamScan with upstream source fragment"
+                                "CdcFilter with upstream source fragment"
                             );
                             let edge = StreamFragmentEdge {
                                 id: EdgeId::UpstreamExternal {
@@ -602,7 +606,6 @@ impl CompleteStreamFragmentGraph {
                                     r#type: DispatcherType::NoShuffle as _,
                                     dist_key_indices: vec![], // not used for `NoShuffle`
                                     output_indices: (0..CDC_SOURCE_COLUMN_NUM as _).collect(),
-                                    downstream_table_name: None,
                                 },
                             };
 
@@ -651,7 +654,6 @@ impl CompleteStreamFragmentGraph {
                                     r#type: DispatcherType::NoShuffle as _,
                                     dist_key_indices: vec![], // not used for `NoShuffle`
                                     output_indices,
-                                    downstream_table_name: None,
                                 },
                             };
 

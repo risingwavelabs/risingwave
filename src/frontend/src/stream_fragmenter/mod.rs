@@ -295,6 +295,8 @@ fn build_fragment(
 
         NodeBody::StreamCdcScan(_) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
+            // the backfill algorithm is not parallel safe
+            current_fragment.requires_singleton = true;
         }
 
         NodeBody::CdcFilter(node) => {
@@ -380,7 +382,6 @@ fn build_fragment(
                             r#type: DispatcherType::NoShuffle as i32,
                             dist_key_indices: vec![],
                             output_indices: (0..ref_fragment_node.fields.len() as u32).collect(),
-                            downstream_table_name: None,
                         };
 
                         let no_shuffle_exchange_operator_id = state.gen_operator_id() as u64;
