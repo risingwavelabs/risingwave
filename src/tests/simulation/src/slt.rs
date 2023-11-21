@@ -248,6 +248,20 @@ pub async fn run_slt_task(
             let should_kill = thread_rng().gen_bool(opts.kill_rate as f64);
             // spawn a background task to kill nodes
             let handle = if should_kill {
+                if background_ddl_enabled && matches!(cmd, SqlCmd::CreateMaterializedView { .. }) {
+                    // For materialized views, we should kill them at most twice.
+                    // Otherwise the test may not complete in a timely manner.
+                    let t = thread_rng().gen_range(Duration::default()..Duration::from_secs(1));
+                    tokio::time::sleep(t).await;
+                    cluster.kill_node(opts).await;
+
+                    // Make the second kill inversely proportional to the weight of background ddl.
+                    // This is to balance it out.
+                    if rng.gen_bool(1.0 - background_ddl_weight) {
+                        tokio::time::sleep(t).await;
+                        cluster.kill_node(opts).await;
+                    }
+                };
                 let cluster = cluster.clone();
                 let opts = *opts;
                 Some(tokio::spawn(async move {
@@ -291,6 +305,7 @@ pub async fn run_slt_task(
                                     tester.run_async(record).await.unwrap();
                                     background_ddl_enabled = false;
                                 }
+                                tracing::debug!("Record with background_ddl {:?} finished", record);
                                 break;
                             }
                             // If fail, recreate mv again.
@@ -349,6 +364,7 @@ pub async fn run_slt_task(
                                             tester.run_async(record).await.unwrap();
                                             background_ddl_enabled = false;
                                         }
+                                        tracing::debug!("Record with background_ddl {:?} finished", record);
                                         break;
                                     }
 
