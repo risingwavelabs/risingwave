@@ -431,7 +431,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
-        info: ExecutorInfo,
+        mut info: ExecutorInfo,
         input_l: BoxedExecutor,
         input_r: BoxedExecutor,
         params_l: JoinParams,
@@ -469,9 +469,12 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .map(|&idx| original_schema[idx].clone())
             .collect();
 
+        println!("[rc] output_indices:  {:?}", output_indices);
         println!("[rc] original_schema: {:?}", original_schema.fields());
-        println!("[rc] actual_schema: {:?}", actual_schema.fields());
-        println!("[rc] info.schema: {:?}", info.schema.fields());
+        println!("[rc] actual_schema:   {:?}", actual_schema.fields());
+        println!("[rc] info.schema:     {:?}", info.schema.fields());
+
+        info.schema = actual_schema;
 
         let original_output_data_types = original_schema.data_types();
         let actual_output_data_types = output_indices
