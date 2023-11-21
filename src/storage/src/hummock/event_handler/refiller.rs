@@ -506,21 +506,24 @@ impl CacheRefillTask {
             let store = &sstable_store;
             let ssts = &ssts;
             async move {
-                let refill = pblks
-                    .into_iter()
-                    .flat_map(|pblk| {
-                        store.data_file_cache().exists(&SstableBlockIndex {
-                            sst_id: pblk.sst_obj_id,
-                            block_idx: pblk.blk_idx as u64,
-                        })
-                    })
-                    .any(|exists| exists);
-                let sst = ssts.get(&unit.sst_obj_id).unwrap();
+                let refill = pblks.into_iter().any(|pblk| {
+                    store
+                        .data_cache()
+                        .exists_block(pblk.sst_obj_id, pblk.blk_idx as u64)
+                        || store
+                            .data_file_cache()
+                            .exists(&SstableBlockIndex {
+                                sst_id: pblk.sst_obj_id,
+                                block_idx: pblk.blk_idx as u64,
+                            })
+                            .unwrap_or_default()
+                });
 
                 if refill {
                     GLOBAL_CACHE_REFILL_METRICS
                         .data_refill_unit_inheritance_hit_total
                         .inc();
+                    let sst = ssts.get(&unit.sst_obj_id).unwrap();
                     if let Err(e) = Self::data_file_cache_refill_unit(context, sst, unit).await {
                         tracing::error!("data file cache unit refill error: {}", e);
                     }

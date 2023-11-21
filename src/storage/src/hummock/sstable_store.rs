@@ -639,6 +639,10 @@ impl SstableStore {
     pub fn data_file_cache(&self) -> &FileCache<SstableBlockIndex, CachedBlock> {
         &self.data_file_cache
     }
+
+    pub fn data_cache(&self) -> &BlockCache {
+        &self.block_cache
+    }
 }
 
 pub type SstableStoreRef = Arc<SstableStore>;
