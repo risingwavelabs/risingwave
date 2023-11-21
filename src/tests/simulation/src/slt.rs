@@ -318,6 +318,9 @@ pub async fn run_slt_task(
                             }
                             // If fail, recreate mv again.
                             tracing::debug!(iteration=i, name, "failed to run test: background_mv not created, retry after {delay:?}");
+                            if i >= max_retry {
+                                panic!("failed to run test after retry {i} times, while waiting for background ddl");
+                            }
                             continue;
                         }
                         break;
@@ -360,6 +363,9 @@ pub async fn run_slt_task(
                                     RisingWave::connect("frontend".into(), "dev".into()).await
                                 else {
                                     tracing::debug!(iteration=i, name, "failed to run test: background_mv not created, retry after {delay:?}");
+                                    if i >= max_retry {
+                                        panic!("failed to run test after retry {i} times, while waiting for background ddl");
+                                    }
                                     continue;
                                 };
                                 let client = rw.pg_client();
@@ -382,6 +388,9 @@ pub async fn run_slt_task(
 
                                 // If fail, recreate mv again.
                                 tracing::info!(iteration=i, name, "failed to run test: background_mv not created, retry after {delay:?}");
+                                if i >= max_retry {
+                                    panic!("failed to run test after retry {i} times, while waiting for background ddl");
+                                }
                                 continue;
                             }
                             _ => tracing::error!(
