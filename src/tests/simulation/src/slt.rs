@@ -219,7 +219,10 @@ pub async fn run_slt_task(
                 None
             };
 
-            if cmd.ignore_kill() {
+            if cmd.ignore_kill()
+                || (reset_background_ddl_record.is_none()
+                    && matches!(cmd, SqlCmd::CreateMaterializedView { .. }))
+            {
                 for i in 0usize.. {
                     let delay = Duration::from_secs(1 << i);
                     if let Err(err) = tester
