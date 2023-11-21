@@ -263,8 +263,19 @@ pub async fn run_slt_task(
             } else {
                 None
             };
-            // retry up to 5 times until it succeed
-            let max_retry = 5;
+
+            // retry up to 5 times until it succeed,
+            // unless it's CREATE MATERIALIZED VIEW (in background).
+            // For CREATE MATERIALIZED VIEW, we retry up to 10 times since it needs to:
+            // 1. Wait for recovery to complete if cluster goes down.
+            // 2. Wait for background ddl to finish.
+            // Other cases just need to wait for 1., so they are faster to complete.
+            let max_retry =
+                if matches!(cmd, SqlCmd::CreateMaterializedView { .. }) && background_ddl_enabled {
+                    10
+                } else {
+                    5
+                };
             for i in 0usize.. {
                 tracing::debug!(iteration = i, "retry count");
                 let delay = Duration::from_secs(1 << i);
@@ -303,6 +314,7 @@ pub async fn run_slt_task(
                                         background_ddl_enabled = false;
                                     }
                                 }
+                                tracing::debug!("Record with background_ddl {:?} finished", record);
                                 break;
                             }
                             // If fail, recreate mv again.
