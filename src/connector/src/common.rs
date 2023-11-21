@@ -56,7 +56,7 @@ use aws_credential_types::provider::SharedCredentialsProvider;
 use aws_types::region::Region;
 use aws_types::SdkConfig;
 
-/// A flatten cofig map for aws auth.
+/// A flatten config map for aws auth.
 #[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
 pub struct AwsAuthProps {
     pub region: Option<String>,
