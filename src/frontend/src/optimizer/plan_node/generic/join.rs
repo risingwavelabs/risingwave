@@ -486,16 +486,9 @@ pub fn push_down_into_join(
     );
 
     let on = if can_push_on_from_filter(ty) {
-        let mut conjunctions = std::mem::take(&mut predicate.conjunctions);
-
-        // Do not push now on to the on, it will be pulled up into a filter instead.
-        let on = Condition {
-            conjunctions: conjunctions
-                .extract_if(|expr| expr.count_nows() == 0)
-                .collect(),
-        };
-        predicate.conjunctions = conjunctions;
-        on
+        Condition {
+            conjunctions: std::mem::take(&mut predicate.conjunctions),
+        }
     } else {
         Condition::true_cond()
     };
