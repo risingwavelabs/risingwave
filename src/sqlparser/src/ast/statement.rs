@@ -362,12 +362,10 @@ impl fmt::Display for CompatibleSourceSchema {
 }
 
 impl CompatibleSourceSchema {
-    pub fn into_source_schema_v2(self) -> (ConnectorSchema, Option<String>) {
+    pub(crate) fn into_v2(self) -> ConnectorSchema {
         match self {
-            CompatibleSourceSchema::RowFormat(inner) => (
-                inner.into_source_schema_v2(),
-                Some("RisingWave will stop supporting the syntax \"ROW FORMAT\" in future versions, which will be changed to \"FORMAT ... ENCODE ...\" syntax.".to_string())),
-            CompatibleSourceSchema::V2(inner) => (inner, None),
+            CompatibleSourceSchema::RowFormat(inner) => inner.into_source_schema_v2(),
+            CompatibleSourceSchema::V2(inner) => inner,
         }
     }
 }
@@ -457,7 +455,7 @@ impl Parser {
                 ConnectorSchema::debezium_json()
             };
             if self.peek_source_schema_format() {
-                let schema = parse_source_schema(self)?.into_source_schema_v2().0;
+                let schema = parse_source_schema(self)?.into_v2();
                 if schema != expected {
                     return Err(ParserError::ParserError(format!(
                         "Row format for CDC connectors should be \
@@ -469,7 +467,7 @@ impl Parser {
         } else if connector.contains("nexmark") {
             let expected = ConnectorSchema::native();
             if self.peek_source_schema_format() {
-                let schema = parse_source_schema(self)?.into_source_schema_v2().0;
+                let schema = parse_source_schema(self)?.into_v2();
                 if schema != expected {
                     return Err(ParserError::ParserError(format!(
                         "Row format for nexmark connectors should be \

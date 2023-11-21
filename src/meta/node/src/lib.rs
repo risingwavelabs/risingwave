@@ -86,6 +86,12 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
     prometheus_endpoint: Option<String>,
 
+    /// The additional selector used when querying Prometheus.
+    ///
+    /// The format is same as PromQL. Example: `instance="foo",namespace="bar"`
+    #[clap(long, env = "RW_PROMETHEUS_SELECTOR")]
+    prometheus_selector: Option<String>,
+
     /// Endpoint of the connector node, there will be a sidecar connector node
     /// colocated with Meta node in the cloud environment
     #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]
@@ -234,7 +240,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             });
 
         let add_info = AddressInfo {
-            advertise_addr: opts.advertise_addr,
+            advertise_addr: opts.advertise_addr.to_owned(),
             listen_addr,
             prometheus_addr,
             dashboard_addr,
@@ -271,6 +277,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
                 prometheus_endpoint: opts.prometheus_endpoint,
+                prometheus_selector: opts.prometheus_selector,
                 vpc_id: opts.vpc_id,
                 security_group_id: opts.security_group_id,
                 connector_rpc_endpoint: opts.connector_rpc_endpoint,
@@ -302,6 +309,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 compaction_config: Some(config.meta.compaction_config),
                 cut_table_size_limit: config.meta.cut_table_size_limit,
                 hybird_partition_vnode_count: config.meta.hybird_partition_vnode_count,
+                advertise_addr: opts.advertise_addr,
             },
             config.system.into_init_system_params(),
         )

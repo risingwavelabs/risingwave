@@ -18,11 +18,11 @@ use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
+use risingwave_pb::stream_plan::PbStreamNode;
 
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
+use super::{generic, ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::ExprRewriter;
 use crate::handler::create_source::debezium_cdc_source_schema;
@@ -37,13 +37,10 @@ use crate::{Explain, TableCatalog};
 pub struct StreamCdcTableScan {
     pub base: PlanBase<Stream>,
     core: generic::CdcScan,
-    batch_plan_id: PlanNodeId,
-    stream_scan_type: StreamScanType,
 }
 
 impl StreamCdcTableScan {
     pub fn new(core: generic::CdcScan) -> Self {
-        let batch_plan_id = core.ctx.next_plan_node_id();
         let distribution = Distribution::SomeShard;
         let base = PlanBase::new_stream_with_core(
             &core,
@@ -52,12 +49,7 @@ impl StreamCdcTableScan {
             false,
             core.watermark_columns(),
         );
-        Self {
-            base,
-            core,
-            batch_plan_id,
-            stream_scan_type: StreamScanType::CdcBackfill,
-        }
+        Self { base, core }
     }
 
     pub fn table_name(&self) -> &str {
@@ -66,10 +58,6 @@ impl StreamCdcTableScan {
 
     pub fn core(&self) -> &generic::CdcScan {
         &self.core
-    }
-
-    pub fn stream_scan_type(&self) -> StreamScanType {
-        StreamScanType::CdcBackfill
     }
 
     /// Build catalog for cdc backfill state
@@ -165,20 +153,6 @@ impl StreamCdcTableScan {
             .map(ColumnId::get_id)
             .collect_vec();
 
-        // The schema of the snapshot read stream
-        let snapshot_schema = upstream_column_ids
-            .iter()
-            .map(|&id| {
-                let col = self
-                    .core
-                    .get_table_columns()
-                    .iter()
-                    .find(|c| c.column_id.get_id() == id)
-                    .unwrap();
-                Field::from(col).to_prost()
-            })
-            .collect_vec();
-
         // The schema of the shared cdc source upstream is different from snapshot,
         // refer to `debezium_cdc_source_schema()` for details.
         let upstream_schema = {
@@ -202,28 +176,19 @@ impl StreamCdcTableScan {
             })
             .collect_vec();
 
-        let batch_plan_node = BatchPlanNode {
-            table_desc: None,
-            column_ids: upstream_column_ids.clone(),
-        };
-
         let catalog = self
             .build_backfill_state_catalog(state)
             .to_internal_table_prost();
 
         // We need to pass the id of upstream source job here
         let upstream_source_id = self.core.cdc_table_desc.source_id.table_id;
-        let node_body = PbNodeBody::StreamScan(StreamScanNode {
+        let node_body = PbNodeBody::StreamCdcScan(StreamCdcScanNode {
             table_id: upstream_source_id,
-            stream_scan_type: self.stream_scan_type as i32,
-            // The column indices need to be forwarded to the downstream
-            output_indices,
             upstream_column_ids,
+            output_indices,
             // The table desc used by backfill executor
             state_table: Some(catalog),
-            rate_limit: None,
             cdc_table_desc: Some(self.core.cdc_table_desc.to_protobuf()),
-            ..Default::default()
         });
 
         PbStreamNode {
@@ -236,15 +201,6 @@ impl StreamCdcTableScan {
                     fields: upstream_schema.clone(),
                     stream_key: vec![], // not used
                     ..Default::default()
-                },
-                PbStreamNode {
-                    node_body: Some(PbNodeBody::BatchPlan(batch_plan_node)),
-                    operator_id: self.batch_plan_id.0 as u64,
-                    identity: "BatchPlanNode".into(),
-                    fields: snapshot_schema,
-                    stream_key: vec![], // not used
-                    input: vec![],
-                    append_only: true,
                 },
             ],
 

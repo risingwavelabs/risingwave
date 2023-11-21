@@ -891,8 +891,9 @@ mod tests {
     use super::*;
     use crate::hummock::compactor::StateCleanUpCompactionFilter;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::test_utils::delete_range::create_monotonic_events;
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_impl};
-    use crate::hummock::{create_monotonic_events, DeleteRangeTombstone, Xor16FilterBuilder};
+    use crate::hummock::{DeleteRangeTombstone, Xor16FilterBuilder};
 
     #[tokio::test]
     async fn test_delete_range_aggregator_with_filter() {
