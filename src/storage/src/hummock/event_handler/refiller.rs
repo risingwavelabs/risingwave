@@ -60,6 +60,9 @@ pub struct CacheRefillMetrics {
     pub data_refill_started_total: GenericCounter<AtomicU64>,
     pub meta_refill_attempts_total: GenericCounter<AtomicU64>,
 
+    pub data_refill_parent_meta_lookup_hit_total: GenericCounter<AtomicU64>,
+    pub data_refill_parent_meta_lookup_miss_total: GenericCounter<AtomicU64>,
+
     pub data_refill_ideal_bytes: GenericCounter<AtomicU64>,
     pub data_refill_success_bytes: GenericCounter<AtomicU64>,
 
@@ -110,6 +113,13 @@ impl CacheRefillMetrics {
             .get_metric_with_label_values(&["meta", "attempts"])
             .unwrap();
 
+        let data_refill_parent_meta_lookup_hit_total = refill_total
+            .get_metric_with_label_values(&["parent_meta", "hit"])
+            .unwrap();
+        let data_refill_parent_meta_lookup_miss_total = refill_total
+            .get_metric_with_label_values(&["parent_meta", "miss"])
+            .unwrap();
+
         let data_refill_ideal_bytes = refill_bytes
             .get_metric_with_label_values(&["data", "ideal"])
             .unwrap();
@@ -135,6 +145,9 @@ impl CacheRefillMetrics {
             data_refill_attempts_total,
             data_refill_started_total,
             meta_refill_attempts_total,
+
+            data_refill_parent_meta_lookup_hit_total,
+            data_refill_parent_meta_lookup_miss_total,
 
             data_refill_ideal_bytes,
             data_refill_success_bytes,
@@ -304,7 +317,8 @@ impl CacheRefillTask {
         Ok(holders)
     }
 
-    fn filter(
+    /// Get sstable inheritance info in unit level.
+    fn get_inheritance_info(
         context: &CacheRefillContext,
         ssts: &[TableHolder],
         parent_ssts: &[impl Deref<Target = Box<Sstable>>],
@@ -326,23 +340,15 @@ impl CacheRefillTask {
             })
             .collect_vec();
 
-        // if cfg!(debug_assertions) {
-        //     // assert units in asc order
-        //     units.iter().tuple_windows().for_each(|(a, b)| {
-        //         debug_assert_ne!(
-        //             KeyComparator::compare_encoded_full_key(a.largest_key(), b.smallest_key()),
-        //             std::cmp::Ordering::Greater
-        //         )
-        //     });
-        // }
-
-        // assert units in asc order
-        units.iter().tuple_windows().for_each(|(a, b)| {
-            assert_ne!(
-                KeyComparator::compare_encoded_full_key(a.largest_key(), b.smallest_key()),
-                std::cmp::Ordering::Greater
-            )
-        });
+        if cfg!(debug_assertions) {
+            // assert units in asc order
+            units.iter().tuple_windows().for_each(|(a, b)| {
+                debug_assert_ne!(
+                    KeyComparator::compare_encoded_full_key(a.largest_key(), b.smallest_key()),
+                    std::cmp::Ordering::Greater
+                )
+            });
+        }
 
         for psst in parent_ssts {
             let mut idx = 0;
@@ -369,7 +375,7 @@ impl CacheRefillTask {
                     continue;
                 }
 
-                // uleft <= pright && uleft >= pleft
+                // uleft <= pright && uright >= pleft
                 if KeyComparator::compare_encoded_full_key(uleft, pright)
                     != std::cmp::Ordering::Greater
                     && KeyComparator::compare_encoded_full_key(uright, pleft)
@@ -465,13 +471,25 @@ impl CacheRefillTask {
         let sstable_store = context.sstable_store.clone();
         let futures = delta.delete_sst_object_ids.iter().map(|sst_obj_id| {
             let store = &sstable_store;
-            async move { store.sstable_cached(*sst_obj_id).await }
+            async move {
+                let res = store.sstable_cached(*sst_obj_id).await;
+                match res {
+                    Ok(Some(_)) => GLOBAL_CACHE_REFILL_METRICS
+                        .data_refill_parent_meta_lookup_hit_total
+                        .inc(),
+                    Ok(None) => GLOBAL_CACHE_REFILL_METRICS
+                        .data_refill_parent_meta_lookup_miss_total
+                        .inc(),
+                    _ => {}
+                }
+                res
+            }
         });
         let parent_ssts = match try_join_all(futures).await {
             Ok(parent_ssts) => parent_ssts.into_iter().flatten().collect_vec(),
             Err(e) => return tracing::error!("get old meta from cache error: {}", e),
         };
-        let units = Self::filter(context, &holders, &parent_ssts);
+        let units = Self::get_inheritance_info(context, &holders, &parent_ssts);
         let ssts: HashMap<HummockSstableObjectId, TableHolder> =
             holders.into_iter().map(|meta| (meta.id, meta)).collect();
         let futures = units.into_iter().map(|(unit, pblks)| {
