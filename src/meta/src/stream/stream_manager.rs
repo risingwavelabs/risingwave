@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
+use std::time::Duration;
 
 use futures::future::{join_all, try_join_all, BoxFuture};
 use itertools::Itertools;
@@ -29,6 +30,8 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::{oneshot, Mutex, RwLock};
 use tokio::task::JoinHandle;
+use tokio::time;
+use tokio::time::{Instant, MissedTickBehavior};
 use tracing::Instrument;
 use uuid::Uuid;
 
@@ -741,6 +744,10 @@ impl GlobalStreamManager {
             )
             .await?;
 
+        if reschedules.is_empty() {
+            return Ok(());
+        }
+
         self.reschedule_actors(
             reschedules,
             RescheduleOptions {
@@ -761,6 +768,21 @@ impl GlobalStreamManager {
             .insert_local_sender(local_notification_tx)
             .await;
 
+        let mut ticker = tokio::time::interval(Duration::from_secs(1));
+        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+        let worker_nodes = self
+            .cluster_manager
+            .list_active_streaming_compute_nodes()
+            .await;
+
+        let mut worker_cache: BTreeMap<_, _> = worker_nodes
+            .into_iter()
+            .map(|worker| (worker.id, worker))
+            .collect();
+
+        let mut changed = true;
+
         loop {
             tokio::select! {
                 biased;
@@ -770,19 +792,57 @@ impl GlobalStreamManager {
                     break;
                 }
 
+                _ = ticker.tick(), if changed => {
+                    let include_workers = worker_cache.keys().copied().collect_vec();
+
+                    if include_workers.is_empty() {
+                        tracing::debug!("no available worker nodes");
+                        changed = false;
+                        continue;
+                    }
+
+                    match self.trigger_scale_out(include_workers).await {
+                        Ok(_) => {
+                            worker_cache.clear();
+                            changed = false;
+                        }
+                        Err(e) => {
+                            tracing::error!(error = ?e, "Failed to trigger scale out, waiting for next tick to retry after {}s", ticker.period().as_secs());
+                            ticker.reset();
+                        }
+                    }
+                }
+
                 notification = local_notification_rx.recv() => {
                     let notification = notification.expect("local notification channel closed in loop of stream manager");
-                    if let LocalNotification::WorkerNodeActivated(worker) = &notification {
-                        if self.env.opts.enable_automatic_parallelism_control {
-                            if let Some(worker) = self.cluster_manager.get_worker_by_id(worker.id).await {
-                                tracing::debug!("Worker node {} is re-activated, skipping in stream manager scaling loop", worker.worker_id());
-                                continue
+
+                    match notification {
+                        LocalNotification::WorkerNodeActivated(worker) => {
+                            let prev_worker = worker_cache.insert(worker.id, worker.clone());
+
+                            if let Some(prev_worker) = prev_worker && prev_worker.parallel_units != worker.parallel_units {
+                                tracing::info!(worker = worker.id, "worker parallelism changed");
                             }
 
-                            if let Err(e) = self.trigger_scale_out(vec![worker.id]).await {
-                                tracing::error!(error = ?e, "Failed to trigger scale out");
+                            changed = true;
+                            ticker.reset_immediately();
+                        }
+
+                        // Since our logic for handling passive scale-in is within the barrier manager,
+                        // there’s not much we can do here. All we can do is proactively remove the entries from our cache.
+                        LocalNotification::WorkerNodeDeleted(worker) => {
+                            match worker_cache.remove(&worker.id) {
+                                Some(prev_worker) => {
+                                    tracing::info!(worker = prev_worker.id, "worker removed from stream manager cache");
+                                }
+
+                                None => {
+                                    tracing::warn!(worker = worker.id, "worker not found in stream manager cache, but it was removed");
+                                }
                             }
                         }
+
+                        _ => {}
                     }
                 }
             }
