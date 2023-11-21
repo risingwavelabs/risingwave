@@ -19,14 +19,14 @@ use risingwave_expr::{aggregate, ExprError, Result};
 
 #[aggregate("sum(int2) -> int8")]
 #[aggregate("sum(int4) -> int8")]
-#[aggregate("sum(int8) -> int8")]
 #[aggregate("sum(int8) -> decimal")]
 #[aggregate("sum(float4) -> float4")]
 #[aggregate("sum(float8) -> float8")]
 #[aggregate("sum(decimal) -> decimal")]
 #[aggregate("sum(interval) -> interval")]
 #[aggregate("sum(int256) -> int256")]
-#[aggregate("sum0(int8) -> int8", init_state = "0i64")]
+#[aggregate("sum(int8) -> int8", deprecated)] // used internally for 2-phase sum(int2) and sum(int4)
+#[aggregate("sum0(int8) -> int8", deprecated, init_state = "0i64")] // used internally for 2-phase count
 fn sum<S, T>(state: S, input: T, retract: bool) -> Result<S>
 where
     S: Default + From<T> + CheckedAdd<Output = S> + CheckedSub<Output = S>,
@@ -87,9 +87,6 @@ fn _var_pop() {}
 #[aggregate("var_samp(float8) -> float8", unimplemented)]
 #[aggregate("var_samp(int256) -> float8", unimplemented)]
 fn _var_samp() {}
-
-#[aggregate("grouping(any) -> int4", unimplemented)]
-fn _grouping() {}
 
 // no `min(boolean)` and `min(jsonb)`
 #[aggregate("min(*int) -> auto", state = "ref")]
