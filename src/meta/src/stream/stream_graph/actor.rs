@@ -173,12 +173,6 @@ impl ActorBuilder {
                     downstream_fragment_id: self.fragment_id,
                 }];
 
-                tracing::debug!(
-                    "rewrite leaf stream_scan node: fields {:?}, upstreams {:?}",
-                    stream_node.get_fields(),
-                    upstreams,
-                );
-
                 // As we always use the `NoShuffle` exchange for MV on MV, there should be only one
                 // upstream.
                 let upstream_actor_id = upstreams.actors.as_global_ids();
@@ -213,10 +207,10 @@ impl ActorBuilder {
                 let merge_node = &input[0];
                 assert_matches!(merge_node.node_body, Some(NodeBody::Merge(_)));
 
-                let upstream_source_id = filter.table_id;
+                let upstream_source_id = filter.upstream_source_id;
                 tracing::debug!(
                     "rewrite leaf cdc filter node: upstream source id {}",
-                    filter.table_id,
+                    upstream_source_id,
                 );
 
                 // Index the upstreams by the an external edge ID.

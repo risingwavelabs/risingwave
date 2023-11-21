@@ -13,9 +13,6 @@
 // limitations under the License.
 
 mod graph;
-
-use std::assert_matches::assert_matches;
-
 use graph::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 mod rewrite;
@@ -301,11 +298,13 @@ fn build_fragment(
 
         NodeBody::CdcFilter(node) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::CdcFilter as u32;
-            let upstream_source_id = node.table_id;
+            // memorize upstream source id for later use
             state
                 .dependent_table_ids
-                .insert(TableId::new(upstream_source_id));
-            current_fragment.upstream_table_ids.push(upstream_source_id);
+                .insert(TableId::new(node.upstream_source_id));
+            current_fragment
+                .upstream_table_ids
+                .push(node.upstream_source_id);
         }
 
         NodeBody::Now(_) => {

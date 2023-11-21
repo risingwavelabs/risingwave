@@ -26,7 +26,6 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
-
 use risingwave_pb::catalog::Table;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::table_fragments::Fragment;
@@ -175,12 +174,8 @@ impl BuildingFragment {
                     stream_scan.table_id.into(),
                     stream_scan.upstream_column_ids.clone(),
                 ),
-                // NodeBody::StreamCdcScan(stream_cdc_scan) => (
-                //     stream_cdc_scan.table_id.into(),
-                //     stream_cdc_scan.upstream_column_ids.clone(),
-                // ),
                 NodeBody::CdcFilter(cdc_filter) => (
-                    cdc_filter.table_id.into(),
+                    cdc_filter.upstream_source_id.into(),
                     cdc_filter.upstream_column_ids.clone(),
                 ),
                 _ => return,

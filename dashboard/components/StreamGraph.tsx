@@ -110,7 +110,7 @@ export function StreamGraph({
         )
         .attr("stroke", (d: any) =>
           isSelected(d.source) || isSelected(d.target)
-            ? theme.colors.teal["500"]
+            ? theme.colors.blue["500"]
             : theme.colors.gray["300"]
         )
 
@@ -135,7 +135,7 @@ export function StreamGraph({
         .attr("r", nodeRadius)
         .style("cursor", "pointer")
         .attr("fill", ({ id }: ActorPointPosition) =>
-          isSelected(id) ? theme.colors.teal["500"] : theme.colors.gray["500"]
+          isSelected(id) ? theme.colors.blue["500"] : theme.colors.gray["500"]
         )
 
       let text = g.select("text")

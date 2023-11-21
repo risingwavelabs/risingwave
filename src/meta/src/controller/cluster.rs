@@ -86,6 +86,8 @@ impl From<WorkerInfo> for PbWorkerNode {
                 is_unschedulable: p.is_unschedulable,
             }),
             transactional_id: info.0.transaction_id.map(|id| id as _),
+            resource: None,
+            started_at: None,
         }
     }
 }
@@ -293,7 +295,7 @@ impl ClusterController {
     /// * `worker_state` Filter by this state if it is not None.
     pub async fn list_workers(
         &self,
-        worker_type: WorkerType,
+        worker_type: Option<WorkerType>,
         worker_status: Option<WorkerStatus>,
     ) -> MetaResult<Vec<PbWorkerNode>> {
         self.inner
@@ -661,27 +663,20 @@ impl ClusterControllerInner {
 
     pub async fn list_workers(
         &self,
-        worker_type: WorkerType,
+        worker_type: Option<WorkerType>,
         worker_status: Option<WorkerStatus>,
     ) -> MetaResult<Vec<PbWorkerNode>> {
-        let workers = if let Some(status) = worker_status {
-            Worker::find()
-                .filter(
-                    worker::Column::WorkerType
-                        .eq(worker_type)
-                        .and(worker::Column::Status.eq(status)),
-                )
-                .find_also_related(WorkerProperty)
-                .all(&self.db)
-                .await?
-        } else {
-            Worker::find()
-                .filter(worker::Column::WorkerType.eq(worker_type))
-                .find_also_related(WorkerProperty)
-                .all(&self.db)
-                .await?
-        };
-
+        let mut find = Worker::find();
+        if let Some(worker_type) = worker_type {
+            find = find.filter(worker::Column::WorkerType.eq(worker_type));
+        }
+        if let Some(worker_status) = worker_status {
+            find = find.filter(worker::Column::Status.eq(worker_status));
+        }
+        let workers = find.find_also_related(WorkerProperty).all(&self.db).await?;
+        // TODO include meta node
+        // TODO include resource spec
+        // TODO set started_at
         Ok(workers
             .into_iter()
             .map(|(worker, property)| WorkerInfo(worker, property).into())

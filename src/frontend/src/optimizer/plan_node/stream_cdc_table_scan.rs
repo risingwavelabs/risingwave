@@ -22,12 +22,11 @@ use risingwave_pb::stream_plan::PbStreamNode;
 
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
+use super::{generic, ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::handler::create_source::debezium_cdc_source_schema;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
-use crate::optimizer::plan_node::{StreamExchange, StreamFilter};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{Explain, TableCatalog};
@@ -183,6 +182,8 @@ impl StreamCdcTableScan {
 
         // We need to pass the id of upstream source job here
         let upstream_source_id = self.core.cdc_table_desc.source_id.table_id;
+
+        // split the table name from the qualified table name, e.g. `database_name.table_name`
         let (_, cdc_table_name) = self
             .core
             .cdc_table_desc
@@ -239,7 +240,7 @@ impl StreamCdcTableScan {
             fields: upstream_schema.clone(),
             node_body: Some(PbNodeBody::CdcFilter(CdcFilterNode {
                 search_condition: Some(filter_expr.to_expr_proto()),
-                table_id: upstream_source_id,
+                upstream_source_id,
                 upstream_column_ids: upstream_column_ids.clone(),
             })),
         };
