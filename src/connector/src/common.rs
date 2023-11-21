@@ -70,21 +70,6 @@ pub struct AwsAuthProps {
     pub profile: Option<String>,
 }
 
-impl Default for AwsAuthProps {
-    fn default() -> Self {
-        Self {
-            region: Default::default(),
-            endpoint: Default::default(),
-            access_key: Default::default(),
-            secret_key: Default::default(),
-            session_token: Default::default(),
-            arn: Default::default(),
-            external_id: Default::default(),
-            profile: Some("default".to_string()),
-        }
-    }
-}
-
 impl AwsAuthProps {
     async fn build_region(&self) -> anyhow::Result<Region> {
         if let Some(region_name) = &self.region {
@@ -397,15 +382,8 @@ impl PulsarCommon {
             let url = Url::parse(&oauth.credentials_url)?;
             match url.scheme() {
                 "s3" => {
-                    let credentials = load_file_descriptor_from_s3(
-                        &url,
-                        &self
-                            .oauth
-                            .as_ref()
-                            .map(|o| o.aws_auth_props.clone())
-                            .unwrap_or_default(),
-                    )
-                    .await?;
+                    let credentials =
+                        load_file_descriptor_from_s3(&url, &oauth.aws_auth_props).await?;
                     let mut f = NamedTempFile::new()?;
                     f.write_all(&credentials)?;
                     f.as_file().sync_all()?;
