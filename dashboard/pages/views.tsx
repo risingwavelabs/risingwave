@@ -15,25 +15,9 @@
  *
  */
 
-import {
-  Column,
-  connectorColumn,
-  dependentsColumn,
-  Relations,
-} from "../components/Relations"
-import { Source } from "../proto/gen/catalog"
-import { getDataSources } from "./api/streaming"
+import { Relations } from "../components/Relations"
+import { getViews } from "./api/streaming"
 
-export default function DataSources() {
-  const rowFormatColumn: Column<Source> = {
-    name: "Row Format",
-    width: 3,
-    content: (s) => s.info?.rowFormat ?? "unknown",
-  }
-
-  return Relations("Data Sources", getDataSources, [
-    connectorColumn,
-    rowFormatColumn,
-    dependentsColumn,
-  ])
+export default function Views() {
+  return Relations("Views", getViews, [])
 }

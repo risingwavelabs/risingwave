@@ -115,7 +115,7 @@ function Layout({ children }: { children: React.ReactNode }) {
           </NavButton>
           <VStack width="full" alignItems="flex-start" px={3}>
             <NavTitle>Catalog</NavTitle>
-            <NavButton href="/data_sources/">Data Sources</NavButton>
+            <NavButton href="/sources/">Sources</NavButton>
             <NavButton href="/tables/">Tables</NavButton>
             <NavButton href="/materialized_views/">
               Materialized Views
@@ -123,6 +123,7 @@ function Layout({ children }: { children: React.ReactNode }) {
             <NavButton href="/indexes/">Indexes</NavButton>
             <NavButton href="/internal_tables/">Internal Tables</NavButton>
             <NavButton href="/sinks/">Sinks</NavButton>
+            <NavButton href="/views/">Views</NavButton>
           </VStack>
           <VStack width="full" alignItems="flex-start" px={3}>
             <NavTitle>Streaming</NavTitle>
