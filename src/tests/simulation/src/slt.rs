@@ -219,11 +219,7 @@ pub async fn run_slt_task(
                 None
             };
 
-            if cmd.ignore_kill()
-                // Foreground MVs should ignore kill, only background mvs must be recoverable.
-                || (!background_ddl_enabled
-                    && matches!(cmd, SqlCmd::CreateMaterializedView { .. }))
-            {
+            if cmd.ignore_kill() {
                 for i in 0usize.. {
                     let delay = Duration::from_secs(1 << i);
                     if let Err(err) = tester
