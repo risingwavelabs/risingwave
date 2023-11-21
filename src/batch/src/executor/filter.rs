@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
@@ -67,9 +66,7 @@ impl FilterExecutor {
                     yield data_chunk;
                 }
             } else {
-                return Err(
-                    BatchError::Internal(anyhow!("Filter can only receive bool array")).into(),
-                );
+                bail!("Filter can only receive bool array");
             }
         }
 

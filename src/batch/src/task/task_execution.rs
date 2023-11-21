@@ -633,12 +633,12 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                                 // There is no message received from shutdown channel, which means it caused
                                 // task failed.
                                 error!("Batch task failed: {:?}", e);
-                                error = Some(BatchError::from(e));
+                                error = Some(e);
                                 state = TaskStatus::Failed;
                                 break;
                             }
                             ShutdownMsg::Abort(_) => {
-                                error = Some(BatchError::from(e));
+                                error = Some(e);
                                 state = TaskStatus::Aborted;
                                 break;
                             }

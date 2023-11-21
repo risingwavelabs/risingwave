@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::disallowed_types, clippy::disallowed_methods)]
+
 use std::sync::Arc;
 
 pub use anyhow::anyhow;

@@ -25,7 +25,7 @@ use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;
 
 use crate::error::BatchError::{Internal, SenderError};
-use crate::error::{BatchError, SharedResult, Result as BatchResult};
+use crate::error::{BatchError, Result as BatchResult, SharedResult};
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 #[derive(Clone)]

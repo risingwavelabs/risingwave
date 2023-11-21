@@ -129,8 +129,7 @@ fn concatenate(left: &DataChunk, right: &DataChunk) -> Result<DataChunk> {
         (false, false) => {
             return Err(BatchError::UnsupportedFunction(
                 "The concatenate behaviour of two chunk with visibility is undefined".to_string(),
-            )
-            .into())
+            ));
         }
     };
     let data_chunk = DataChunk::new(concated_columns, vis);
