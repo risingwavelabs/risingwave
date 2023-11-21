@@ -232,6 +232,7 @@ impl MaterializedInputState {
     }
 }
 
+/// Copied from old code before https://github.com/risingwavelabs/risingwave/commit/0020507edbc4010b20aeeb560c7bea9159315602.
 fn generate_order_columns_before_version_issue_13465(
     agg_call: &AggCall,
     pk_indices: &PkIndices,
