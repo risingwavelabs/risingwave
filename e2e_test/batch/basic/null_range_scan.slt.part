@@ -32,3 +32,6 @@ query I rowsort
 select * from rev_t where v > 15;
 ----
 20
+
+statement ok
+drop table t cascade;
