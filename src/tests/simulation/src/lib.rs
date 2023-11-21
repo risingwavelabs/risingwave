@@ -15,6 +15,7 @@
 #![feature(trait_alias)]
 #![feature(lint_reasons)]
 #![feature(lazy_cell)]
+#![feature(let_chains)]
 
 pub mod client;
 pub mod cluster;

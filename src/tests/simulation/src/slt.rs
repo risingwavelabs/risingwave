@@ -32,9 +32,17 @@ fn is_create_table_as(sql: &str) -> bool {
 #[derive(Debug, PartialEq, Eq)]
 enum SqlCmd {
     /// Other create statements.
-    Create { is_create_table_as: bool },
+    Create {
+        is_create_table_as: bool,
+    },
     /// Create Materialized views
-    CreateMaterializedView { name: String },
+    CreateMaterializedView {
+        name: String,
+    },
+    /// Set background ddl
+    SetBackgroundDdl {
+        enable: bool,
+    },
     Drop,
     Dml,
     Flush,
@@ -62,24 +70,30 @@ impl SqlCmd {
 }
 
 fn extract_sql_command(sql: &str) -> SqlCmd {
-    let mut tokens = sql
-        .trim_start()
-        .split_whitespace()
-        .map(|s| s.to_lowercase());
-    match tokens.next().unwrap().as_str() {
-        "create" => match tokens.next().unwrap().as_str() {
+    let mut tokens = sql.split_whitespace().map(|s| s.to_lowercase());
+    fn next_token(tokens: &mut impl Iterator<Item = String>) -> String {
+        tokens.next().unwrap()
+    }
+    match next_token(&mut tokens).as_str() {
+        "create" => match next_token(&mut tokens).as_str() {
             "materialized" => {
                 // view
                 tokens.next();
                 // name
-                let name = tokens.next().unwrap().to_string();
-                SqlCmd::CreateMaterializedView {
-                    name,
-                }
+                let name = next_token(&mut tokens).to_string();
+                SqlCmd::CreateMaterializedView { name }
             }
             _ => SqlCmd::Create {
                 is_create_table_as: is_create_table_as(sql),
             },
+        },
+        "set" => {
+            if sql.contains("background_ddl") {
+                let enable = sql.contains("true");
+                SqlCmd::SetBackgroundDdl { enable }
+            } else {
+                SqlCmd::Others
+            }
         }
         "drop" => SqlCmd::Drop,
         "insert" | "update" | "delete" => SqlCmd::Dml,
@@ -121,6 +135,10 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
         let tempfile = (path.ends_with("kafka.slt") || path.ends_with("kafka_batch.slt"))
             .then(|| hack_kafka_test(path));
         let path = tempfile.as_ref().map(|p| p.path()).unwrap_or(path);
+
+        // NOTE(kwannoel): For background ddl
+        let mut background_ddl_enabled = false;
+
         for record in sqllogictest::parse_file(path).expect("failed to parse file") {
             // uncomment to print metrics for task counts
             // let metrics = madsim::runtime::Handle::current().metrics();
@@ -201,7 +219,31 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                     })
                     .await
                 {
-                    Ok(_) => break,
+                    Ok(_) => {
+                        if let SqlCmd::CreateMaterializedView { ref name } = cmd && background_ddl_enabled
+                        {
+                            // wait for background ddl to finish
+                            let rw = RisingWave::connect("frontend".into(), "dev".into())
+                                .await
+                                .unwrap();
+                            let client = rw.pg_client();
+                            if client.simple_query("WAIT;").await.is_ok()
+                                && client
+                                    .query(
+                                        "select count(*) from pg_matviews where matviewname=$1;",
+                                        &[&name],
+                                    )
+                                    .await
+                                    .is_ok()
+                            {
+                                break;
+                            }
+                            // If fail, recreate mv again.
+                            tracing::info!("failed to run test: background_mv not created, retry after {delay:?}");
+                            continue;
+                        }
+                        break;
+                    }
                     // allow 'table exists' error when retry CREATE statement
                     Err(e)
                         if matches!(
@@ -229,6 +271,9 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                 }
                 tokio::time::sleep(delay).await;
             }
+            if let SqlCmd::SetBackgroundDdl { enable } = cmd {
+                background_ddl_enabled = enable;
+            };
             if let Some(handle) = handle {
                 handle.await.unwrap();
             }
@@ -291,8 +336,10 @@ fn hack_kafka_test(path: &Path) -> tempfile::NamedTempFile {
 #[cfg(test)]
 mod tests {
     use std::fmt::Debug;
-    use super::*;
+
     use expect_test::{expect, Expect};
+
+    use super::*;
 
     fn check(actual: impl Debug, expect: Expect) {
         let actual = format!("{:#?}", actual);
@@ -315,21 +362,28 @@ mod tests {
             expect![[r#"
                 Create {
                     is_create_table_as: true,
-                }"#]]
+                }"#]],
         );
         check(
             extract_sql_command("  create table  t (a int);"),
             expect![[r#"
                 Create {
                     is_create_table_as: false,
-                }"#]]
+                }"#]],
         );
         check(
             extract_sql_command(" create materialized   view  m_1 as select 1;"),
             expect![[r#"
                 CreateMaterializedView {
                     name: "m_1",
-                }"#]]
+                }"#]],
+        );
+        check(
+            extract_sql_command("set background_ddl= true;"),
+            expect![[r#"
+                SetBackgroundDdl {
+                    enable: true,
+                }"#]],
         );
     }
 }
