@@ -398,12 +398,12 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             next_col_bounds,
         } = scan_range;
 
-        let (start_bound, end_bound, null_is_largest) =
-            if table.pk_serializer().get_order_types()[pk_prefix.len()].is_ascending() {
-                (next_col_bounds.0, next_col_bounds.1, true)
-            } else {
-                (next_col_bounds.1, next_col_bounds.0, false)
-            };
+        let order_type = table.pk_serializer().get_order_types()[pk_prefix.len()];
+        let (start_bound, end_bound) = if order_type.is_ascending() {
+            (next_col_bounds.0, next_col_bounds.1)
+        } else {
+            (next_col_bounds.1, next_col_bounds.0)
+        };
 
         let start_bound_is_bounded = !matches!(start_bound, Bound::Unbounded);
         let end_bound_is_bounded = !matches!(end_bound, Bound::Unbounded);
@@ -417,8 +417,8 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                 (
                     match start_bound {
                         Bound::Unbounded => {
-                            if end_bound_is_bounded && !null_is_largest {
-                                // Since Null is the smallest value, we need to skip it for range scan to meet the sql semantics.
+                            if end_bound_is_bounded && order_type.nulls_are_first() {
+                                // `NULL`s are at the start bound side, we should exclude them to meet SQL semantics.
                                 Bound::Excluded(OwnedRow::new(vec![None]))
                             } else {
                                 // Both start and end are unbounded, so we need to select all rows.
@@ -430,8 +430,8 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     },
                     match end_bound {
                         Bound::Unbounded => {
-                            if start_bound_is_bounded && null_is_largest {
-                                // Since Null is the largest value, we need to skip it for range scan to meet the sql semantics.
+                            if start_bound_is_bounded && order_type.nulls_are_last() {
+                                // `NULL`s are at the end bound side, we should exclude them to meet SQL semantics.
                                 Bound::Excluded(OwnedRow::new(vec![None]))
                             } else {
                                 // Both start and end are unbounded, so we need to select all rows.
