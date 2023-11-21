@@ -14,6 +14,9 @@ statement ok
 FLUSH;
 
 statement ok
+SET STREAMING_RATE_LIMIT=4000;
+
+statement ok
 CREATE MATERIALIZED VIEW m1 as SELECT * FROM t;
 
 statement ok
@@ -25,9 +28,6 @@ CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
 # Meta should always reject duplicate mview.
 statement error
 CREATE MATERIALIZED VIEW m3 as SELECT * FROM t;
-
-# Wait for background ddl to finish
-sleep 30s
 
 query I
 select count(*) from m1;
