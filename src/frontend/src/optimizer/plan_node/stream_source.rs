@@ -92,7 +92,8 @@ impl StreamNode for StreamSource {
                 .ctx()
                 .session_ctx()
                 .config()
-                .get_streaming_rate_limit(),
+                .streaming_rate_limit()
+                .map(|limit| limit.get() as u32),
         });
         PbNodeBody::Source(SourceNode { source_inner })
     }

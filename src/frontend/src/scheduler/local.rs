@@ -146,7 +146,7 @@ impl LocalQueryExecution {
         let catalog_reader = self.front_env.catalog_reader().clone();
         let auth_context = self.session.auth_context().clone();
         let db_name = self.session.database().to_string();
-        let search_path = self.session.config().get_search_path().clone();
+        let search_path = self.session.config().search_path();
 
         let exec = async move {
             let mut data_stream = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));

@@ -116,7 +116,7 @@ pub fn gen_create_mv_plan(
     let materialize =
         plan_root.gen_materialize_plan(table_name, definition, emit_on_window_close)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
-    if session.config().get_create_compaction_group_for_mv() {
+    if session.config().create_compaction_group_for_mv() {
         table.properties.insert(
             String::from("independent_compaction_group"),
             String::from("1"),
@@ -178,10 +178,13 @@ It only indicates the physical clustering of the data, which may improve the per
             gen_create_mv_plan(&session, context.into(), query, name, columns, emit_mode)?;
         let context = plan.plan_base().ctx().clone();
         let mut graph = build_graph(plan);
-        graph.parallelism = session
-            .config()
-            .get_streaming_parallelism()
-            .map(|parallelism| Parallelism { parallelism });
+        graph.parallelism =
+            session
+                .config()
+                .streaming_parallelism()
+                .map(|parallelism| Parallelism {
+                    parallelism: parallelism.get(),
+                });
         // Set the timezone for the stream environment
         let env = graph.env.as_mut().unwrap();
         env.timezone = context.get_session_timezone();
@@ -201,7 +204,7 @@ It only indicates the physical clustering of the data, which may improve the per
                 table.name.clone(),
             ));
 
-    let run_in_background = session.config().get_background_ddl();
+    let run_in_background = session.config().background_ddl();
     let create_type = if run_in_background {
         CreateType::Background
     } else {

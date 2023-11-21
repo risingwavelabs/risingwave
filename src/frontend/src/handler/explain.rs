@@ -197,7 +197,7 @@ async fn do_handle_explain(
                             batch_plan_fragmenter = Some(BatchPlanFragmenter::new(
                                 worker_node_manager_reader,
                                 session.env().catalog_reader().clone(),
-                                session.config().get_batch_parallelism(),
+                                session.config().batch_parallelism().0,
                                 plan.clone(),
                             )?);
                         }

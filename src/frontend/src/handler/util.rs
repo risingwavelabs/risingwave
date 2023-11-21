@@ -73,7 +73,7 @@ where
         session: Arc<SessionImpl>,
     ) -> Self {
         let session_data = StaticSessionData {
-            timezone: session.config().get_timezone().into(),
+            timezone: session.config().timezone(),
         };
         Self {
             chunk_stream,

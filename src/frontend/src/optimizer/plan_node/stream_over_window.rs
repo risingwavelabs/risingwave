@@ -127,7 +127,7 @@ impl StreamNode for StreamOverWindow {
             .ctx()
             .session_ctx()
             .config()
-            .get_streaming_over_window_cache_policy();
+            .streaming_over_window_cache_policy();
 
         PbNodeBody::OverWindow(OverWindowNode {
             calls,

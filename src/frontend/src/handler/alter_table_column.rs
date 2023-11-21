@@ -47,7 +47,7 @@ pub async fn handle_alter_table_column(
     let db_name = session.database();
     let (schema_name, real_table_name) =
         Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
-    let search_path = session.config().get_search_path();
+    let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -224,8 +224,10 @@ pub async fn handle_alter_table_column(
         let graph = StreamFragmentGraph {
             parallelism: session
                 .config()
-                .get_streaming_parallelism()
-                .map(|parallelism| Parallelism { parallelism }),
+                .streaming_parallelism()
+                .map(|parallelism| Parallelism {
+                    parallelism: parallelism.get(),
+                }),
             ..build_graph(plan)
         };
 

@@ -579,17 +579,17 @@ impl SessionImpl {
         self.config_map.read()
     }
 
-    pub fn set_config(&self, key: &str, value: Vec<String>) -> Result<()> {
-        self.config_map.write().set(key, value, ())
+    pub fn set_config(&self, key: &str, value: String) -> Result<()> {
+        self.config_map.write().set(key, value, &mut ())
     }
 
     pub fn set_config_report(
         &self,
         key: &str,
-        value: Vec<String>,
-        reporter: impl ConfigReporter,
+        value: String,
+        mut reporter: impl ConfigReporter,
     ) -> Result<()> {
-        self.config_map.write().set(key, value, reporter)
+        self.config_map.write().set(key, value, &mut reporter)
     }
 
     pub fn session_id(&self) -> SessionId {
@@ -625,7 +625,7 @@ impl SessionImpl {
         let (schema_name, relation_name) = {
             let (schema_name, relation_name) =
                 Binder::resolve_schema_qualified_name(db_name, name)?;
-            let search_path = self.config().get_search_path();
+            let search_path = self.config().search_path();
             let user_name = &self.auth_context().user_name;
             let schema_name = match schema_name {
                 Some(schema_name) => schema_name,
@@ -646,7 +646,7 @@ impl SessionImpl {
         let (schema_name, connection_name) = {
             let (schema_name, connection_name) =
                 Binder::resolve_schema_qualified_name(db_name, name)?;
-            let search_path = self.config().get_search_path();
+            let search_path = self.config().search_path();
             let user_name = &self.auth_context().user_name;
             let schema_name = match schema_name {
                 Some(schema_name) => schema_name,
@@ -668,7 +668,7 @@ impl SessionImpl {
     ) -> Result<(DatabaseId, SchemaId)> {
         let db_name = self.database();
 
-        let search_path = self.config().get_search_path();
+        let search_path = self.config().search_path();
         let user_name = &self.auth_context().user_name;
 
         let catalog_reader = self.env().catalog_reader().read_guard();
@@ -696,7 +696,7 @@ impl SessionImpl {
         connection_name: &str,
     ) -> Result<Arc<ConnectionCatalog>> {
         let db_name = self.database();
-        let search_path = self.config().get_search_path();
+        let search_path = self.config().search_path();
         let user_name = &self.auth_context().user_name;
 
         let catalog_reader = self.env().catalog_reader().read_guard();
@@ -805,7 +805,7 @@ impl SessionImpl {
     }
 
     pub fn is_barrier_read(&self) -> bool {
-        match self.config().get_visible_mode() {
+        match self.config().visibility_mode() {
             VisibilityMode::Default => self.env.batch_config.enable_barrier_read,
             VisibilityMode::All => true,
             VisibilityMode::Checkpoint => false,
@@ -1103,7 +1103,7 @@ impl Session for SessionImpl {
         }
     }
 
-    fn set_config(&self, key: &str, value: Vec<String>) -> std::result::Result<(), BoxedError> {
+    fn set_config(&self, key: &str, value: String) -> std::result::Result<(), BoxedError> {
         Self::set_config(self, key, value).map_err(Into::into)
     }
 

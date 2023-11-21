@@ -341,7 +341,9 @@ impl StreamTableScan {
                     .ctx()
                     .session_ctx()
                     .config()
-                    .get_streaming_rate_limit(),
+                    .streaming_rate_limit()
+                    .map(|limit| limit.get() as u32),
+
                 ..Default::default()
             })
         };

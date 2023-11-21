@@ -539,7 +539,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
 
     let cdc_table_type = CdcTableType::from_properties(&properties);
-    if cdc_table_type.can_backfill() && context.session_ctx().config().get_cdc_backfill() {
+    if cdc_table_type.can_backfill() && context.session_ctx().config().cdc_backfill() {
         // debezium connector will only consume changelogs from latest offset on this mode
         properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
 
@@ -1018,10 +1018,13 @@ pub async fn handle_create_table(
             .into()),
         };
         let mut graph = build_graph(plan);
-        graph.parallelism = session
-            .config()
-            .get_streaming_parallelism()
-            .map(|parallelism| Parallelism { parallelism });
+        graph.parallelism =
+            session
+                .config()
+                .streaming_parallelism()
+                .map(|parallelism| Parallelism {
+                    parallelism: parallelism.get(),
+                });
         (graph, source, table, job_type)
     };
 

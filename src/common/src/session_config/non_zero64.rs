@@ -12,38 +12,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::num::NonZeroU64;
 use std::str::FromStr;
 
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
-pub enum SinkDecouple {
-    // default sink couple config of specific sink
-    #[default]
-    Default,
-    // enable sink decouple
-    Enable,
-    // disable sink decouple
-    Disable,
-}
+pub struct ConfigNonZeroU64(pub Option<NonZeroU64>);
 
-impl FromStr for SinkDecouple {
+impl FromStr for ConfigNonZeroU64 {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_ascii_lowercase().as_str() {
-            "true" | "enable" => Ok(Self::Enable),
-            "false" | "disable" => Ok(Self::Disable),
-            "default" => Ok(Self::Default),
-            _ => Err(()),
+        let parsed = s.parse::<u64>().map_err(|_| ())?;
+        if parsed == 0 {
+            Ok(Self(None))
+        } else {
+            Ok(Self(NonZeroU64::new(parsed)))
         }
     }
 }
 
-impl ToString for SinkDecouple {
-    fn to_string(&self) -> String {
-        match self {
-            Self::Default => "default".to_string(),
-            Self::Enable => "enable".to_string(),
-            Self::Disable => "disable".to_string(),
+impl std::fmt::Display for ConfigNonZeroU64 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let ConfigNonZeroU64(Some(inner)) = self {
+            write!(f, "{}", inner)
+        } else {
+            write!(f, "0")
         }
+    }
+}
+impl ConfigNonZeroU64 {
+    pub fn map<U, F>(self, f: F) -> Option<U>
+    where
+        F: FnOnce(NonZeroU64) -> U,
+    {
+        self.0.map(f)
     }
 }

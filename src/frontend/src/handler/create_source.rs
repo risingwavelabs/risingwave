@@ -1118,7 +1118,7 @@ pub async fn handle_create_source(
 
     // gated the feature with a session variable
     let create_cdc_source_job =
-        is_cdc_connector(&with_properties) && session.config().get_cdc_backfill();
+        is_cdc_connector(&with_properties) && session.config().cdc_backfill();
 
     let (columns_from_resolve_source, source_info) =
         bind_columns_from_source(&source_schema, &with_properties, create_cdc_source_job).await?;
@@ -1227,10 +1227,13 @@ pub async fn handle_create_source(
             // generate stream graph for cdc source job
             let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
             let mut graph = build_graph(stream_plan);
-            graph.parallelism = session
-                .config()
-                .get_streaming_parallelism()
-                .map(|parallelism| Parallelism { parallelism });
+            graph.parallelism =
+                session
+                    .config()
+                    .streaming_parallelism()
+                    .map(|parallelism| Parallelism {
+                        parallelism: parallelism.get(),
+                    });
             graph
         };
         catalog_writer
@@ -1310,7 +1313,7 @@ pub mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
         let session = frontend.session_ref();
         session
-            .set_config("cdc_backfill", vec!["true".to_string()])
+            .set_config("cdc_backfill", "true".to_string())
             .unwrap();
 
         frontend

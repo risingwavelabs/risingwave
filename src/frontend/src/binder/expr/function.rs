@@ -1180,7 +1180,7 @@ impl Binder {
                     let mut session_config = binder.session_config.write();
 
                     // TODO: report session config changes if necessary.
-                    session_config.set(setting_name, vec![new_value.to_string()], ())?;
+                    session_config.set(setting_name, new_value.to_string(), &mut())?;
 
                     Ok(ExprImpl::literal_varchar(new_value.to_string()))
                 }))),

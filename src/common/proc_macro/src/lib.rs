@@ -24,6 +24,7 @@ use syn::parse_macro_input;
 
 mod config;
 mod estimate_size;
+mod guc;
 
 /// Sections in the configuration file can use `#[derive(OverrideConfig)]` to generate the
 /// implementation of overwriting configs from the file.
@@ -246,4 +247,11 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
             gen.into()
         }
     }
+}
+
+#[proc_macro_derive(Guc, attributes(guc_opts))]
+#[proc_macro_error]
+pub fn guc(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input);
+    guc::derive_guc(input).into()
 }

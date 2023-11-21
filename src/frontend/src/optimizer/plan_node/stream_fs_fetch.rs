@@ -116,7 +116,8 @@ impl StreamNode for StreamFsFetch {
                 .ctx()
                 .session_ctx()
                 .config()
-                .get_streaming_rate_limit(),
+                .streaming_rate_limit()
+                .map(|limit| limit.get() as u32),
         });
         NodeBody::StreamFsFetch(StreamFsFetchNode {
             node_inner: source_inner,
