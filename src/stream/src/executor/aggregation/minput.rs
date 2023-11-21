@@ -72,7 +72,7 @@ impl MaterializedInputState {
         version: PbAggNodeVersion,
         agg_call: &AggCall,
         pk_indices: &PkIndices,
-        order_columns: &Vec<ColumnOrder>,
+        order_columns: &[ColumnOrder],
         col_mapping: &StateTableColumnMapping,
         extreme_cache_size: usize,
         input_schema: &Schema,
