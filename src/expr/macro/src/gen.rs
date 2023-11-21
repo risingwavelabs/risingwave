@@ -945,10 +945,9 @@ impl FunctionAttr {
         let child: Vec<_> = arg_ids.iter().map(|i| format_ident!("child{i}")).collect();
         let array_refs: Vec<_> = arg_ids.iter().map(|i| format_ident!("array{i}")).collect();
         let arrays: Vec<_> = arg_ids.iter().map(|i| format_ident!("a{i}")).collect();
-        let arg_arrays = self
-            .args
+        let arg_arrays = arg_ids
             .iter()
-            .map(|t| format_ident!("{}", types::array_type(t)));
+            .map(|i| format_ident!("{}", types::array_type(&self.args[*i])));
         let outputs = (0..return_types.len())
             .map(|i| format_ident!("o{i}"))
             .collect_vec();
@@ -1006,9 +1005,11 @@ impl FunctionAttr {
         };
         let iter = match user_fn.return_type_kind {
             ReturnTypeKind::T => quote! { iter },
-            ReturnTypeKind::Option => quote! { iter.flatten() },
+            ReturnTypeKind::Option => quote! { if let Some(it) = iter { it } else { continue; } },
             ReturnTypeKind::Result => quote! { iter? },
-            ReturnTypeKind::ResultOption => quote! { value?.flatten() },
+            ReturnTypeKind::ResultOption => {
+                quote! { if let Some(it) = iter? { it } else { continue; } }
+            }
         };
         let iterator_item_type = user_fn.iterator_item_kind.clone().ok_or_else(|| {
             Error::new(
