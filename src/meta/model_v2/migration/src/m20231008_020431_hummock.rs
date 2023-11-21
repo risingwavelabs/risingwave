@@ -251,7 +251,7 @@ enum HummockVersionDelta {
     MaxCommittedEpoch,
     SafeEpoch,
     TrivialMove,
-    SerializedPayload
+    SerializedPayload,
 }
 
 #[derive(DeriveIden)]
