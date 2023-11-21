@@ -72,6 +72,22 @@ where
         inner.layers.back().unwrap().write().insert(key);
     }
 
+    pub fn extend(&self, keys: impl IntoIterator<Item = K>) {
+        if let Some(mut inner) = self.inner.try_write() {
+            if inner.last_refresh.elapsed() > self.refresh_interval {
+                inner.layers.pop_front();
+                inner.layers.push_back(RwLock::new(BTreeSet::new()));
+                inner.last_refresh = Instant::now();
+            }
+        }
+
+        let inner = self.inner.read();
+        let mut guard = inner.layers.back().unwrap().write();
+        for key in keys {
+            guard.insert(key);
+        }
+    }
+
     pub fn contains(&self, key: &K) -> bool {
         let inner = self.inner.read();
         for layer in inner.layers.iter().rev() {

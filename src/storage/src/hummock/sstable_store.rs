@@ -165,7 +165,10 @@ pub struct SstableStore {
     data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
     meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
 
-    recent_filter: Option<Arc<RecentFilter<HummockSstableObjectId>>>,
+    /// Recent filter for `(sst_obj_id, blk_idx)`.
+    ///
+    /// `blk_idx == USIZE::MAX` stands for `sst_obj_id` only entry.
+    recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
     pending_streaming_loading: Arc<AtomicUsize>,
     large_query_memory_usage: usize,
 }
@@ -180,7 +183,7 @@ impl SstableStore {
         large_query_memory_usage: usize,
         data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
         meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
-        recent_filter: Option<Arc<RecentFilter<HummockSstableObjectId>>>,
+        recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
     ) -> Self {
         // TODO: We should validate path early. Otherwise object store won't report invalid path
         // error until first write attempt.
@@ -390,7 +393,7 @@ impl SstableStore {
         };
 
         if let Some(filter) = self.recent_filter.as_ref() {
-            filter.insert(object_id);
+            filter.extend([(object_id, usize::MAX), (object_id, block_index)]);
         }
 
         match policy {
@@ -592,7 +595,7 @@ impl SstableStore {
         block: Box<Block>,
     ) {
         if let Some(filter) = self.recent_filter.as_ref() {
-            filter.insert(object_id);
+            filter.extend([(object_id, usize::MAX), (object_id, block_index as usize)]);
         }
         self.block_cache
             .insert(object_id, block_index, block, CachePriority::High);
@@ -632,7 +635,9 @@ impl SstableStore {
         ))
     }
 
-    pub fn data_recent_filter(&self) -> Option<&Arc<RecentFilter<HummockSstableObjectId>>> {
+    pub fn data_recent_filter(
+        &self,
+    ) -> Option<&Arc<RecentFilter<(HummockSstableObjectId, usize)>>> {
         self.recent_filter.as_ref()
     }
 
@@ -822,8 +827,9 @@ impl SstableWriter for BatchUploadWriter {
                 .await?;
             self.sstable_store.insert_meta_cache(self.object_id, meta);
 
+            // Only update recent filter with sst obj id is okay here, for l0 is only filter by sst obj id with recent filter.
             if let Some(filter) = self.sstable_store.recent_filter.as_ref() {
-                filter.insert(self.object_id);
+                filter.insert((self.object_id, usize::MAX));
             }
 
             // Add block cache.

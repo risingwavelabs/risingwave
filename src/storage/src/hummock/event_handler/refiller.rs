@@ -434,7 +434,7 @@ impl CacheRefillTask {
             || !delta
                 .delete_sst_object_ids
                 .iter()
-                .any(|id| filter.contains(id))
+                .any(|&id| filter.contains(&(id, usize::MAX)))
         {
             GLOBAL_CACHE_REFILL_METRICS.data_refill_filtered_total.inc();
             return;
@@ -506,17 +506,25 @@ impl CacheRefillTask {
             let store = &sstable_store;
             let ssts = &ssts;
             async move {
+                // refill if:
+                //
+                // 1. pblk in recent filter
+                // 2. in data memory cache or in data file cache
                 let refill = pblks.into_iter().any(|pblk| {
                     store
-                        .data_cache()
-                        .exists_block(pblk.sst_obj_id, pblk.blk_idx as u64)
-                        || store
-                            .data_file_cache()
-                            .exists(&SstableBlockIndex {
-                                sst_id: pblk.sst_obj_id,
-                                block_idx: pblk.blk_idx as u64,
-                            })
-                            .unwrap_or_default()
+                        .data_recent_filter()
+                        .unwrap()
+                        .contains(&(pblk.sst_obj_id, pblk.blk_idx))
+                        && (store
+                            .data_cache()
+                            .exists_block(pblk.sst_obj_id, pblk.blk_idx as u64)
+                            || store
+                                .data_file_cache()
+                                .exists(&SstableBlockIndex {
+                                    sst_id: pblk.sst_obj_id,
+                                    block_idx: pblk.blk_idx as u64,
+                                })
+                                .unwrap_or_default())
                 });
 
                 if refill {
@@ -546,8 +554,9 @@ impl CacheRefillTask {
         let object_id = sst.id;
         let threshold = context.config.threshold;
 
+        // Avoid newly refilled sst being filtered.
         if let Some(filter) = sstable_store.data_recent_filter() {
-            filter.insert(object_id);
+            filter.insert((object_id, usize::MAX));
         }
 
         let blocks = unit.blks.size().unwrap();
