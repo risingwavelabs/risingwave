@@ -449,7 +449,6 @@ pub(crate) mod tests {
     use crate::catalog::catalog_service::CatalogReader;
     use crate::catalog::root_catalog::Catalog;
     use crate::expr::InputRef;
-    use crate::optimizer::plan_node::generic::ScanTableType;
     use crate::optimizer::plan_node::{
         generic, BatchExchange, BatchFilter, BatchHashJoin, EqJoinPredicate, LogicalScan, ToBatch,
     };
@@ -513,7 +512,6 @@ pub(crate) mod tests {
         let table_id = 0.into();
         let batch_plan_node: PlanRef = LogicalScan::create(
             "".to_string(),
-            ScanTableType::default(),
             Rc::new(TableDesc {
                 table_id,
                 stream_key: vec![],
@@ -613,6 +611,7 @@ pub(crate) mod tests {
                 is_streaming: true,
             }),
             transactional_id: Some(0),
+            ..Default::default()
         };
         let worker2 = WorkerNode {
             id: 1,
@@ -629,6 +628,7 @@ pub(crate) mod tests {
                 is_streaming: true,
             }),
             transactional_id: Some(1),
+            ..Default::default()
         };
         let worker3 = WorkerNode {
             id: 2,
@@ -645,6 +645,7 @@ pub(crate) mod tests {
                 is_streaming: true,
             }),
             transactional_id: Some(2),
+            ..Default::default()
         };
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));

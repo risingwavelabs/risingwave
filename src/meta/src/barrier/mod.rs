@@ -100,7 +100,7 @@ impl<T> From<TableMap<T>> for HashMap<TableId, T> {
     }
 }
 
-pub(crate) type TableActorMap = TableMap<Vec<ActorId>>;
+pub(crate) type TableActorMap = TableMap<HashSet<ActorId>>;
 pub(crate) type TableUpstreamMvCountMap = TableMap<HashMap<TableId, usize>>;
 pub(crate) type TableDefinitionMap = TableMap<String>;
 pub(crate) type TableNotifierMap = TableMap<Notifier>;
@@ -1081,7 +1081,9 @@ impl GlobalBarrierManager {
                         commands.push(command);
                     }
                     for progress in resps.iter().flat_map(|r| &r.create_mview_progress) {
+                        tracing::trace!(?progress, "update progress");
                         if let Some(command) = tracker.update(progress, &version_stats) {
+                            tracing::trace!(?progress, "update progress");
                             commands.push(command);
                         }
                     }

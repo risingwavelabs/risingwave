@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::any::Any;
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::Utf8Error;
-use std::sync::{Arc, LazyLock};
+use std::sync::{Arc, LazyLock, Weak};
 use std::time::Instant;
 use std::{io, str};
 
 use bytes::{Bytes, BytesMut};
+use futures::future::Either;
 use futures::stream::StreamExt;
 use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
@@ -58,6 +60,11 @@ static RW_QUERY_LOG_TRUNCATE_LEN: LazyLock<usize> =
             }
         }
     });
+
+tokio::task_local! {
+    /// The current session. Concrete type is erased for different session implementations.
+    pub static CURRENT_SESSION: Weak<dyn Any + Send + Sync>
+}
 
 /// The state machine for each psql connection.
 /// Read pg messages from tcp stream and write results back.
@@ -196,7 +203,23 @@ where
     /// - `None` means to terminate the current connection
     /// - `Some(())` means to continue processing the next message
     async fn do_process(&mut self, msg: FeMessage) -> Option<()> {
-        let result = AssertUnwindSafe(self.do_process_inner(msg))
+        let fut = {
+            // Set the current session as the context when processing the message, if exists.
+            let weak_session = self
+                .session
+                .as_ref()
+                .map(|s| Arc::downgrade(s) as Weak<dyn Any + Send + Sync>);
+
+            let fut = self.do_process_inner(msg);
+
+            if let Some(session) = weak_session {
+                Either::Left(CURRENT_SESSION.scope(session, fut))
+            } else {
+                Either::Right(fut)
+            }
+        };
+
+        let result = AssertUnwindSafe(fut)
             .rw_catch_unwind()
             .await
             .unwrap_or_else(|payload| {

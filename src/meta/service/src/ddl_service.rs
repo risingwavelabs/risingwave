@@ -912,7 +912,7 @@ fn fill_table_stream_graph_info(
             }
 
             // fill table id for cdc backfill
-            if let NodeBody::StreamScan(node) = node_body && table_job_type == TableJobType::SharedCdcSource {
+            if let NodeBody::StreamCdcScan(node) = node_body && table_job_type == TableJobType::SharedCdcSource {
                 if let Some(table) = node.cdc_table_desc.as_mut() {
                     table.table_id = table_id;
                 }

@@ -382,6 +382,7 @@ async fn test_release_context_resource() {
                 is_serving: true,
                 is_unschedulable: false,
             },
+            Default::default(),
         )
         .await
         .unwrap();
@@ -469,6 +470,7 @@ async fn test_hummock_manager_basic() {
                 is_serving: true,
                 is_unschedulable: false,
             },
+            Default::default(),
         )
         .await
         .unwrap();
