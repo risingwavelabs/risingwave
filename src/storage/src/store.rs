@@ -36,15 +36,14 @@ use crate::storage_value::StorageValue;
 
 pub trait StaticSendSync = Send + Sync + 'static;
 
-pub trait StateStoreIter: StaticSendSync {
+pub trait StateStoreIter: Send + Sync {
     type Item: Send;
 
     fn next(&mut self) -> impl Future<Output = StorageResult<Option<Self::Item>>> + Send + '_;
 }
 
-pub trait StateStoreIterStreamTrait<Item> = Stream<Item = StorageResult<Item>> + Send + 'static;
 pub trait StateStoreIterExt: StateStoreIter {
-    type ItemStream: StateStoreIterStreamTrait<<Self as StateStoreIter>::Item>;
+    type ItemStream: Stream<Item = StorageResult<<Self as StateStoreIter>::Item>> + Send;
 
     fn into_stream(self) -> Self::ItemStream;
 }

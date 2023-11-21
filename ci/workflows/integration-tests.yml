@@ -114,6 +114,7 @@ steps:
           - "kinesis-s3-source"
           - "clickhouse-sink"
           - "cockroach-sink"
+          - "kafka-cdc-sink"
         format:
           - "json"
           - "protobuf"
@@ -152,5 +153,9 @@ steps:
           skip: true
         - with:
             testcase: "cockroach-sink"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "kafka-cdc-sink"
             format: "protobuf"
           skip: true

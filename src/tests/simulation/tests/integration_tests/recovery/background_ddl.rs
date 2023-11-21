@@ -38,7 +38,24 @@ async fn kill_cn_and_wait_recover(cluster: &Cluster) {
     sleep(Duration::from_secs(10)).await;
 }
 
-async fn kill_and_wait_recover(cluster: &Cluster) {
+async fn kill_cn_and_meta_and_wait_recover(cluster: &Cluster) {
+    cluster
+        .kill_nodes(
+            [
+                "compute-1",
+                "compute-2",
+                "compute-3",
+                "meta-1",
+                "meta-2",
+                "meta-3",
+            ],
+            0,
+        )
+        .await;
+    sleep(Duration::from_secs(10)).await;
+}
+
+async fn kill_random_and_wait_recover(cluster: &Cluster) {
     // Kill it again
     for _ in 0..3 {
         sleep(Duration::from_secs(2)).await;
@@ -102,7 +119,7 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
         .await?;
     session.flush().await?;
 
-    kill_and_wait_recover(&cluster).await;
+    kill_random_and_wait_recover(&cluster).await;
 
     // Now just wait for it to complete.
     session.run(WAIT).await?;
@@ -125,6 +142,46 @@ async fn test_background_mv_barrier_recovery() -> Result<()> {
     // it will not be dropped.
     session.run(DROP_MV1).await?;
     session.run(DROP_TABLE).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_background_join_mv_recovery() -> Result<()> {
+    init_logger();
+    let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
+    let mut session = cluster.start_session();
+
+    session.run("CREATE TABLE t1 (v1 int)").await?;
+    session.run("CREATE TABLE t2 (v1 int)").await?;
+    session
+        .run("INSERT INTO t1 SELECT generate_series FROM generate_series(1, 200);")
+        .await?;
+    session
+        .run("INSERT INTO t2 SELECT generate_series FROM generate_series(1, 200);")
+        .await?;
+    session.flush().await?;
+    session.run(SET_RATE_LIMIT_2).await?;
+    session.run(SET_BACKGROUND_DDL).await?;
+    session
+        .run("CREATE MATERIALIZED VIEW mv1 as select t1.v1 from t1 join t2 on t1.v1 = t2.v1;")
+        .await?;
+    sleep(Duration::from_secs(2)).await;
+
+    kill_cn_and_meta_and_wait_recover(&cluster).await;
+
+    // Now just wait for it to complete.
+    session.run(WAIT).await?;
+
+    let t_count = session.run("SELECT COUNT(v1) FROM t1").await?;
+    let mv1_count = session.run("SELECT COUNT(v1) FROM mv1").await?;
+    assert_eq!(t_count, mv1_count);
+
+    // Make sure that if MV killed and restarted
+    // it will not be dropped.
+    session.run("DROP MATERIALIZED VIEW mv1;").await?;
+    session.run("DROP TABLE t1;").await?;
+    session.run("DROP TABLE t2;").await?;
 
     Ok(())
 }
@@ -160,7 +217,7 @@ async fn test_background_ddl_cancel() -> Result<()> {
     create_mv(&mut session).await?;
 
     // Test cancel after kill meta
-    kill_and_wait_recover(&cluster).await;
+    kill_random_and_wait_recover(&cluster).await;
 
     let ids = cancel_stream_jobs(&mut session).await?;
     assert_eq!(ids.len(), 1);
