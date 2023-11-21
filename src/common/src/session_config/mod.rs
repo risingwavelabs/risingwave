@@ -39,7 +39,7 @@ pub struct ConfigMap {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
     /// be able to see the write.
-    #[guc_opts(default = false)]
+    #[guc_opts(default = false, rename = "RW_IMPLICIT_FLUSH")]
     implicit_flush: bool,
 
     /// If `CREATE_COMPACTION_GROUP_FOR_MV` is on, dedicated compaction groups will be created in
@@ -64,12 +64,12 @@ pub struct ConfigMap {
     date_style: String,
 
     /// Force the use of lookup join instead of hash join when possible for local batch execution.
-    #[guc_opts(default = true)]
+    #[guc_opts(default = true, rename = "RW_BATCH_ENABLE_LOOKUP_JOIN")]
     batch_enable_lookup_join: bool,
 
     /// Enable usage of sortAgg instead of hash agg when order property is satisfied in batch
     /// execution
-    #[guc_opts(default = true)]
+    #[guc_opts(default = true, rename = "RW_BATCH_ENABLE_SORT_AGG")]
     batch_enable_sort_agg: bool,
 
     /// The max gap allowed to transform small range scan scan into multi point lookup.
@@ -105,11 +105,11 @@ pub struct ConfigMap {
     streaming_parallelism: ConfigNonZeroU64,
 
     /// Enable delta join for streaming queries. Defaults to false.
-    #[guc_opts(default = false)]
+    #[guc_opts(default = false, rename = "RW_STREAMING_ENABLE_DELTA_JOIN")]
     streaming_enable_delta_join: bool,
 
     /// Enable bushy join for streaming queries. Defaults to true.
-    #[guc_opts(default = true)]
+    #[guc_opts(default = true, rename = "RW_STREAMING_ENABLE_BUSHY_JOIN")]
     streaming_enable_bushy_join: bool,
 
     /// Enable arrangement backfill for streaming queries. Defaults to false.
@@ -117,28 +117,28 @@ pub struct ConfigMap {
     streaming_enable_arrangement_backfill: bool,
 
     /// Enable join ordering for streaming and batch queries. Defaults to true.
-    #[guc_opts(default = true)]
+    #[guc_opts(default = true, rename = "RW_ENABLE_JOIN_ORDERING")]
     enable_join_ordering: bool,
 
     /// Enable two phase agg optimization. Defaults to true.
     /// Setting this to true will always set `FORCE_TWO_PHASE_AGG` to false.
-    #[guc_opts(default = true, flags = "SETTER")]
+    #[guc_opts(default = true, flags = "SETTER", rename = "RW_ENABLE_TWO_PHASE_AGG")]
     enable_two_phase_agg: bool,
 
     /// Force two phase agg optimization whenever there's a choice between
     /// optimizations. Defaults to false.
-    #[guc_opts(default = false, flags = "SETTER")]
     /// Setting this to true will always set `ENABLE_TWO_PHASE_AGG` to false.
+    #[guc_opts(default = false, flags = "SETTER", rename = "RW_FORCE_TWO_PHASE_AGG")]
     force_two_phase_agg: bool,
 
     /// Enable sharing of common sub-plans.
     /// This means that DAG structured query plans can be constructed,
-    #[guc_opts(default = true)]
+    #[guc_opts(default = true, rename = "RW_ENABLE_SHARE_PLAN")]
     /// rather than only tree structured query plans.
     enable_share_plan: bool,
 
     /// Enable split distinct agg
-    #[guc_opts(default = false)]
+    #[guc_opts(default = false, rename = "RW_FORCE_SPLIT_DISTINCT_AGG")]
     force_split_distinct_agg: bool,
 
     /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-INTERVALSTYLE>
@@ -205,7 +205,7 @@ pub struct ConfigMap {
 
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "recent_first_n" or "recent_last_n".
-    #[guc_opts(default = OverWindowCachePolicy::default())]
+    #[guc_opts(default = OverWindowCachePolicy::default(), rename = "RW_STREAMING_OVER_WINDOW_CACHE_POLICY")]
     streaming_over_window_cache_policy: OverWindowCachePolicy,
 
     /// Run DDL statements in background

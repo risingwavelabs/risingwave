@@ -631,7 +631,7 @@
     BatchNestedLoopJoin { type: Inner, predicate: true, output: [GenerateSeries(1:Int32, 2:Int32), ] }
     ├─BatchProjectSet { select_list: [GenerateSeries(1:Int32, 2:Int32)] }
     │ └─BatchValues { rows: [[]] }
-    └─BatchValues { rows: [[ARRAY["$user",  public]:List(Varchar)]] }
+    └─BatchValues { rows: [[ARRAY["$user", public]:List(Varchar)]] }
   stream_error: |-
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
