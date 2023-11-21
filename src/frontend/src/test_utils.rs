@@ -40,7 +40,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
     alter_set_schema_request, create_connection_request, DdlProgress, PbTableJobType,
-    ReplaceTableChange,
+    ReplaceTablePlan,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{

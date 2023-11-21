@@ -644,7 +644,7 @@ impl GlobalStreamManager {
                 .drop_streaming_jobs_impl(streaming_job_ids)
                 .await
                 .inspect_err(|err| {
-                    tracing::error!(error = ? err, "Failed to drop streaming jobs");
+                    tracing::error!(error = ?err, "Failed to drop streaming jobs");
                 });
         }
     }

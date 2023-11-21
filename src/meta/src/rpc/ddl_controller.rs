@@ -36,7 +36,8 @@ use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::{
     alter_name_request, alter_set_schema_request, alter_set_schema_request,
-    alter_set_schema_request, DdlProgress, DdlProgress, DdlProgress, DdlProgress, TableJobType,
+    alter_set_schema_request, alter_set_schema_request, DdlProgress, DdlProgress, DdlProgress,
+    DdlProgress, DdlProgress, TableJobType,
 };
 use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;

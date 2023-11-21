@@ -110,7 +110,6 @@ pub fn gen_create_mv_plan(
     }
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
-
     if let Some(col_names) = col_names {
         for name in &col_names {
             check_valid_column_name(name)?;
