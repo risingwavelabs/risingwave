@@ -1171,6 +1171,12 @@ impl MetaClient {
             .await?;
         Ok(resp.task_assignment)
     }
+
+    pub async fn rise_ctl_list_compact_task_progress(&self) -> Result<Vec<CompactTaskProgress>> {
+        let req = RiseCtlListCompactTaskProgressRequest {};
+        let resp = self.inner.rise_ctl_list_compact_task_progress(req).await?;
+        Ok(resp.task_progress)
+    }
 }
 
 #[async_trait]
@@ -1820,6 +1826,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_active_write_limit, ListActiveWriteLimitRequest, ListActiveWriteLimitResponse }
             ,{ hummock_client, list_hummock_meta_config, ListHummockMetaConfigRequest, ListHummockMetaConfigResponse }
             ,{ hummock_client, rise_ctl_list_compact_task_assignment, RiseCtlListCompactTaskAssignmentRequest, RiseCtlListCompactTaskAssignmentResponse }
+            ,{ hummock_client, rise_ctl_list_compact_task_progress, RiseCtlListCompactTaskProgressRequest, RiseCtlListCompactTaskProgressResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

@@ -22,8 +22,8 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    BranchedObject, CompactTaskAssignment, CompactionGroupInfo, HummockSnapshot, HummockVersion,
-    HummockVersionDelta,
+    BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
+    HummockSnapshot, HummockVersion, HummockVersionDelta,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -100,7 +100,10 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_hummock_meta_configs(&self) -> Result<HashMap<String, String>>;
 
     async fn list_compaction_status(&self) -> Result<Vec<CompactTaskAssignment>>;
+
     async fn list_all_nodes(&self) -> Result<Vec<WorkerNode>>;
+
+    async fn list_compact_task_progress(&self) -> Result<Vec<CompactTaskProgress>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -252,5 +255,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_all_nodes(&self) -> Result<Vec<WorkerNode>> {
         self.0.list_worker_nodes(None).await
+    }
+
+    async fn list_compact_task_progress(&self) -> Result<Vec<CompactTaskProgress>> {
+        self.0.rise_ctl_list_compact_task_progress().await
     }
 }

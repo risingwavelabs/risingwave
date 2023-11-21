@@ -359,6 +359,7 @@ impl CompactorManagerInner {
                 num_progress_key: hb.num_progress_key,
                 num_pending_read_io: hb.num_pending_read_io,
                 num_pending_write_io: hb.num_pending_write_io,
+                compaction_group_id: hb.task.compaction_group_id,
             })
             .collect()
     }

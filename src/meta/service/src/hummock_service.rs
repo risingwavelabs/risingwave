@@ -637,6 +637,17 @@ impl HummockManagerService for HummockServiceImpl {
             task_assignment,
         }))
     }
+
+    async fn rise_ctl_list_compact_task_progress(
+        &self,
+        _request: Request<RiseCtlListCompactTaskProgressRequest>,
+    ) -> Result<Response<RiseCtlListCompactTaskProgressResponse>, Status> {
+        let task_progress = self.hummock_manager.compactor_manager.get_progress();
+
+        Ok(Response::new(RiseCtlListCompactTaskProgressResponse {
+            task_progress,
+        }))
+    }
 }
 
 #[cfg(test)]

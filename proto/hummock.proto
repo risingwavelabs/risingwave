@@ -380,6 +380,7 @@ message CompactTaskProgress {
   uint64 num_progress_key = 4;
   uint64 num_pending_read_io = 5;
   uint64 num_pending_write_io = 6;
+  uint64 compaction_group_id = 7;
 }
 
 message SubscribeCompactionEventRequest {
@@ -706,6 +707,12 @@ message RiseCtlListCompactTaskAssignmentResponse {
   repeated CompactTaskAssignment task_assignment = 1;
 }
 
+message RiseCtlListCompactTaskProgressRequest {}
+
+message RiseCtlListCompactTaskProgressResponse {
+  repeated CompactTaskProgress task_progress = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -743,6 +750,7 @@ service HummockManagerService {
   rpc ListHummockMetaConfig(ListHummockMetaConfigRequest) returns (ListHummockMetaConfigResponse);
   rpc GetCompactionScore(GetCompactionScoreRequest) returns (GetCompactionScoreResponse);
   rpc RiseCtlListCompactTaskAssignment(RiseCtlListCompactTaskAssignmentRequest) returns (RiseCtlListCompactTaskAssignmentResponse);
+  rpc RiseCtlListCompactTaskProgress(RiseCtlListCompactTaskProgressRequest) returns (RiseCtlListCompactTaskProgressResponse);
 }
 
 message CompactionConfig {
