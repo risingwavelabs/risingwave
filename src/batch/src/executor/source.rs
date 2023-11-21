@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
@@ -175,9 +174,7 @@ fn covert_stream_chunk_to_batch_chunk(chunk: StreamChunk) -> Result<DataChunk> {
     assert!(chunk.data_chunk().is_compacted());
 
     if chunk.ops().iter().any(|op| *op != Op::Insert) {
-        return Err(BatchError::Internal(anyhow!(
-            "Only support insert op in batch source executor"
-        )));
+        bail!("Only support insert op in batch source executor");
     }
 
     Ok(chunk.data_chunk().clone())

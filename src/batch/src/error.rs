@@ -35,12 +35,6 @@ pub trait Error = std::error::Error + Send + Sync + 'static;
 
 #[derive(Error, Debug)]
 pub enum BatchError {
-    #[error("Unsupported function: {0}")]
-    UnsupportedFunction(String),
-
-    #[error("Can't cast {0} to {1}")]
-    Cast(&'static str, &'static str),
-
     #[error("Storage error: {0}")]
     Storage(
         #[backtrace]
@@ -79,9 +73,6 @@ pub enum BatchError {
         anyhow::Error,
     ),
 
-    #[error("Prometheus error: {0}")]
-    Prometheus(#[from] prometheus::Error),
-
     #[error("Task aborted: {0}")]
     Aborted(String),
 
@@ -102,6 +93,7 @@ pub enum BatchError {
         BoxedError,
     ),
 
+    // Make the ref-counted type to be a variant for easier code structuring.
     #[error(transparent)]
     Shared(
         #[from]
@@ -110,7 +102,7 @@ pub enum BatchError {
     ),
 }
 
-/// Serialize/deserialize error.
+// Serialize/deserialize error.
 impl From<memcomparable::Error> for BatchError {
     fn from(m: memcomparable::Error) -> Self {
         Self::Serde(m.into())
@@ -135,7 +127,6 @@ impl From<BatchError> for RwError {
     }
 }
 
-// A temp workaround
 // TODO(error-handling): remove after eliminating RwError from connector.
 impl From<RwError> for BatchError {
     fn from(s: RwError) -> Self {
