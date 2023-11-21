@@ -519,7 +519,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .zip_eq_fast(&mut out_fields[self.group_key.len()..])
         {
             let sig = FUNCTION_REGISTRY
-                .get_aggregate(
+                .get(
                     agg_call.agg_kind,
                     &agg_call
                         .inputs
@@ -527,10 +527,9 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         .map(|input| input.data_type.clone())
                         .collect_vec(),
                     &agg_call.return_type,
-                    in_append_only,
                 )
                 .expect("agg not found");
-            if !in_append_only && sig.append_only {
+            if !in_append_only && sig.is_append_only() {
                 // we use materialized input state for non-retractable aggregate function.
                 // for backward compatibility, the state type is same as the return type.
                 // its values in the intermediate state table are always null.

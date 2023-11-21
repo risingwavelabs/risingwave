@@ -131,18 +131,16 @@ pub fn build_retractable(agg: &AggCall) -> Result<BoxedAggregateFunction> {
     build(agg, false)
 }
 
-/// Build an `Aggregator` from `AggCall`.
+/// Build an aggregate function.
+///
+/// If `prefer_append_only` is true, and both append-only and retractable implementations exist,
+/// the append-only version will be used.
 ///
 /// NOTE: This function ignores argument indices, `column_orders`, `filter` and `distinct` in
 /// `AggCall`. Such operations should be done in batch or streaming executors.
-pub fn build(agg: &AggCall, append_only: bool) -> Result<BoxedAggregateFunction> {
-    let desc = crate::sig::FUNCTION_REGISTRY
-        .get_aggregate(
-            agg.kind,
-            agg.args.arg_types(),
-            &agg.return_type,
-            append_only,
-        )
+pub fn build(agg: &AggCall, prefer_append_only: bool) -> Result<BoxedAggregateFunction> {
+    let sig = crate::sig::FUNCTION_REGISTRY
+        .get(agg.kind, agg.args.arg_types(), &agg.return_type)
         .ok_or_else(|| {
             ExprError::UnsupportedFunction(format!(
                 "{}({}) -> {}",
@@ -152,5 +150,8 @@ pub fn build(agg: &AggCall, append_only: bool) -> Result<BoxedAggregateFunction>
             ))
         })?;
 
-    desc.build_aggregate(agg)
+    if let Some(build_append_only) = sig.build_aggregate_append_only && prefer_append_only {
+        return build_append_only(agg);
+    }
+    sig.build_aggregate(agg)
 }

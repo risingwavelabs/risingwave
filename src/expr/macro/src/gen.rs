@@ -129,18 +129,20 @@ impl FunctionAttr {
             #[risingwave_expr::codegen::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                use risingwave_expr::sig::{_register, FuncSign, SigDataType, FuncBuilder};
+                use risingwave_expr::sig::{_register, FuncSign, SigDataType};
 
                 unsafe { _register(FuncSign {
                     name: risingwave_pb::expr::expr_node::Type::#pb_type.into(),
                     inputs_type: vec![#(#args),*],
                     variadic: #variadic,
                     ret_type: #ret,
-                    build: FuncBuilder::Scalar(#build_fn),
+                    build_scalar: Some(#build_fn),
+                    build_table: None,
+                    build_aggregate_retractable: None,
+                    build_aggregate_append_only: None,
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
                     state_type: None,
-                    append_only: false,
                 }) };
             }
         })
@@ -557,6 +559,14 @@ impl FunctionAttr {
         } else {
             self.generate_agg_build_fn(user_fn)?
         };
+        let build_retractable = match append_only {
+            true => quote! { None },
+            false => quote! { Some(#build_fn) },
+        };
+        let build_append_only = match append_only {
+            false => quote! { None },
+            true => quote! { Some(#build_fn) },
+        };
         let type_infer_fn = self.generate_type_infer_fn()?;
         let deprecated = self.deprecated;
 
@@ -564,17 +574,19 @@ impl FunctionAttr {
             #[risingwave_expr::codegen::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                use risingwave_expr::sig::{_register, FuncSign, SigDataType, FuncBuilder};
+                use risingwave_expr::sig::{_register, FuncSign, SigDataType};
 
                 unsafe { _register(FuncSign {
                     name: risingwave_expr::aggregate::AggKind::#pb_type.into(),
                     inputs_type: vec![#(#args),*],
                     variadic: false,
                     ret_type: #ret,
-                    build: FuncBuilder::Aggregate(#build_fn),
+                    build_scalar: None,
+                    build_table: None,
+                    build_aggregate_retractable: #build_retractable,
+                    build_aggregate_append_only: #build_append_only,
                     type_infer: #type_infer_fn,
                     state_type: #state_type,
-                    append_only: #append_only,
                     deprecated: #deprecated,
                 }) };
             }
@@ -892,18 +904,20 @@ impl FunctionAttr {
             #[risingwave_expr::codegen::ctor]
             fn #ctor_name() {
                 use risingwave_common::types::{DataType, DataTypeName};
-                use risingwave_expr::sig::{_register, FuncSign, SigDataType, FuncBuilder};
+                use risingwave_expr::sig::{_register, FuncSign, SigDataType};
 
                 unsafe { _register(FuncSign {
                     name: risingwave_pb::expr::table_function::Type::#pb_type.into(),
                     inputs_type: vec![#(#args),*],
                     variadic: false,
                     ret_type: #ret,
-                    build: FuncBuilder::Table(#build_fn),
+                    build_scalar: None,
+                    build_table: Some(#build_fn),
+                    build_aggregate_retractable: None,
+                    build_aggregate_append_only: None,
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
                     state_type: None,
-                    append_only: false,
                 }) };
             }
         })
