@@ -14,7 +14,7 @@ datatypes:
     zero: 0
     minimum: 0
     maximum: 1
-    rw_type: smallint
+    rw_type: boolean
   - name: tinyint
     zero: 0
     minimum: -128

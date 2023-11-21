@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS mysql_all_types(
 c_boolean boolean,
-c_bit smallint,
+c_bit boolean,
 c_tinyint smallint,
 c_smallint smallint,
 c_mediumint integer,
