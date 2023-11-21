@@ -663,17 +663,9 @@ impl GlobalBarrierManager {
                     request_id: Uuid::new_v4().to_string(),
                 })
                 .await
-                .map(|resp| (worker_node.id, resp))
         });
 
-        let results = try_join_all(futures).await?;
-        for (worker_id, result) in results {
-            tracing::info!(
-                "cause of previous actor failure in worker node {}: {}",
-                worker_id,
-                result.previous_actor_failure_cause
-            );
-        }
+        try_join_all(futures).await?;
         debug!("all compute nodes have been reset.");
 
         Ok(())

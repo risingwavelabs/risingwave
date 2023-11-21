@@ -51,7 +51,6 @@ message ForceStopActorsRequest {
 message ForceStopActorsResponse {
   string request_id = 1;
   common.Status status = 2;
-  string previous_actor_failure_cause = 3;
 }
 
 message InjectBarrierRequest {

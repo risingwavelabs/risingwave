@@ -316,6 +316,10 @@ impl ManagedBarrierState {
 
         Ok(())
     }
+
+    pub fn take_actor_failures(&mut self) -> Vec<StreamError> {
+        self.failure_actors.drain().map(|(_k, v)| v).collect()
+    }
 }
 
 #[cfg(test)]

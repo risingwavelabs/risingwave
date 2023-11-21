@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -27,7 +28,9 @@ use risingwave_pb::stream_service::*;
 use risingwave_storage::dispatch_state_store;
 use risingwave_stream::error::StreamError;
 use risingwave_stream::executor::Barrier;
-use risingwave_stream::task::{CollectResult, LocalStreamManager, StreamEnvironment};
+use risingwave_stream::task::{
+    try_find_root_cause, CollectResult, LocalStreamManager, StreamEnvironment,
+};
 use tonic::{Code, Request, Response, Status};
 use tracing::Instrument;
 
@@ -124,12 +127,11 @@ impl StreamService for StreamServiceImpl {
         request: Request<ForceStopActorsRequest>,
     ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
         let req = request.into_inner();
-        let previous_actor_failure_cause = self.mgr.stop_all_actors().await;
+        self.mgr.stop_all_actors().await;
         self.env.dml_manager_ref().clear();
         Ok(Response::new(ForceStopActorsResponse {
             request_id: req.request_id,
             status: None,
-            previous_actor_failure_cause,
         }))
     }
 
@@ -166,7 +168,11 @@ impl StreamService for StreamServiceImpl {
 
         self.mgr
             .send_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)
-            .await?;
+            .await
+            .map_err(|e| {
+                let actor_failures = self.mgr.take_actor_failures();
+                try_find_root_cause(actor_failures.into_iter().chain(iter::once(e))).unwrap()
+            })?;
 
         Ok(Response::new(InjectBarrierResponse {
             request_id: req.request_id,
@@ -188,7 +194,11 @@ impl StreamService for StreamServiceImpl {
             .collect_barrier(req.prev_epoch)
             .instrument_await(format!("collect_barrier (epoch {})", req.prev_epoch))
             .await
-            .inspect_err(|err| tracing::error!("failed to collect barrier: {}", err))?;
+            .inspect_err(|err| tracing::error!("failed to collect barrier: {}", err))
+            .map_err(|e| {
+                let actor_failures = self.mgr.take_actor_failures();
+                try_find_root_cause(actor_failures.into_iter().chain(iter::once(e))).unwrap()
+            })?;
 
         let synced_sstables = match kind {
             BarrierKind::Unspecified => unreachable!(),

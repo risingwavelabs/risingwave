@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use core::time::Duration;
-use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::io::Write;
@@ -267,8 +266,8 @@ impl LocalStreamManager {
     }
 
     /// Reset the state of the barrier manager.
-    pub fn reset_barrier_manager(&self) -> Vec<StreamError> {
-        self.context.lock_barrier_manager().reset()
+    pub fn reset_barrier_manager(&self) {
+        self.context.lock_barrier_manager().reset();
     }
 
     /// Use `epoch` to find collect rx. And wait for all actor to be collected before
@@ -348,13 +347,10 @@ impl LocalStreamManager {
     }
 
     /// Force stop all actors on this worker, and then drop their resources.
-    /// Returns the root cause of previous actor failure.
-    pub async fn stop_all_actors(&self) -> String {
+    pub async fn stop_all_actors(&self) {
         self.core.lock().await.stop_all_actors().await;
-        let actor_errors = self.reset_barrier_manager();
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
-        try_find_root_cause(actor_errors)
     }
 
     pub async fn take_receiver(&self, ids: UpDownActorIds) -> StreamResult<Receiver> {
@@ -399,6 +395,11 @@ impl LocalStreamManager {
 
     pub fn total_mem_usage(&self) -> usize {
         self.total_mem_val.get() as usize
+    }
+
+    pub fn take_actor_failures(&self) -> Vec<StreamError> {
+        let mut barrier_manager = self.context.lock_barrier_manager();
+        barrier_manager.take_actor_failures()
     }
 }
 
@@ -891,8 +892,10 @@ impl LocalStreamManagerCore {
     }
 }
 
-/// Tries to find the root cause of last actor failures, based on hard-coded rules.
-fn try_find_root_cause(actor_errors: Vec<StreamError>) -> String {
+/// Tries to find the root cause of previous actor failures, based on hard-coded rules.
+pub fn try_find_root_cause(
+    actor_errors: impl IntoIterator<Item = StreamError>,
+) -> Option<StreamError> {
     let stream_executor_error_score = |e: &StreamExecutorError| {
         use crate::executor::error::ErrorKind;
         match e.kind() {
@@ -909,16 +912,13 @@ fn try_find_root_cause(actor_errors: Vec<StreamError>) -> String {
             _ => 3000,
         }
     };
-    let cmp_stream_error = |a: &StreamError, b: &StreamError| -> Ordering {
+    let cmp_stream_error = |a: &StreamError, b: &StreamError| -> core::cmp::Ordering {
         stream_error_score(a).cmp(&stream_error_score(b))
     };
     actor_errors
         .into_iter()
         .sorted_by(cmp_stream_error)
         .next_back()
-        // change to {:#?} to include backtrace
-        .map(|e| format!("{:#}", e))
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

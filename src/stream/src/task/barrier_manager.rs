@@ -210,17 +210,17 @@ impl LocalBarrierManager {
     }
 
     /// Reset all internal states.
-    pub fn reset(&mut self) -> Vec<StreamError> {
+    pub fn reset(&mut self) {
         self.senders.clear();
         self.collect_complete_receiver.clear();
 
         match &mut self.state {
             #[cfg(test)]
-            BarrierState::Local => {
-                vec![]
-            }
+            BarrierState::Local => {}
 
-            BarrierState::Managed(managed_state) => managed_state.clear_all_states(),
+            BarrierState::Managed(managed_state) => {
+                managed_state.clear_all_states();
+            }
         }
     }
 
@@ -247,6 +247,15 @@ impl LocalBarrierManager {
             BarrierState::Managed(managed_state) => {
                 managed_state.notify_failure(actor_id, err);
             }
+        }
+    }
+
+    pub fn take_actor_failures(&mut self) -> Vec<StreamError> {
+        match &mut self.state {
+            #[cfg(test)]
+            BarrierState::Local => vec![],
+
+            BarrierState::Managed(managed_state) => managed_state.take_actor_failures(),
         }
     }
 }
