@@ -251,7 +251,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                             cmd,
                             SqlCmd::Create {
                                 is_create_table_as: false
-                            }
+                            } | SqlCmd::CreateMaterializedView { .. }
                         ) && i != 0
                             && e.to_string().contains("exists")
                             && e.to_string().contains("Catalog error") =>
