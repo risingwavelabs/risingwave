@@ -299,30 +299,38 @@ pub async fn run_slt_task(
                         }
                         break;
                     }
-                    // allow 'table exists' error when retry CREATE statement
-                    Err(e)
-                        if matches!(
-                            cmd,
+                    Err(e) => {
+                        match cmd {
+                            // allow 'table exists' error when retry CREATE statement
                             SqlCmd::Create {
-                                is_create_table_as: false
-                            } | SqlCmd::CreateMaterializedView { .. }
-                        ) && i != 0
-                            && e.to_string().contains("exists")
-                            && e.to_string().contains("Catalog error") =>
-                    {
-                        break
+                                is_create_table_as: false,
+                            }
+                            | SqlCmd::CreateMaterializedView { .. }
+                                if i != 0
+                                    && e.to_string().contains("exists")
+                                    && e.to_string().contains("Catalog error") =>
+                            {
+                                break
+                            }
+                            SqlCmd::CreateMaterializedView { .. }
+                                if i != 0
+                                    && e.to_string().contains("table is in creating procedure")
+                                    && background_ddl_enabled =>
+                            {
+                                break
+                            }
+                            // allow 'not found' error when retry DROP statement
+                            SqlCmd::Drop
+                                if i != 0
+                                    && e.to_string().contains("not found")
+                                    && e.to_string().contains("Catalog error") =>
+                            {
+                                break
+                            }
+                            _ if i >= 5 => panic!("failed to run test after retry {i} times: {e}"),
+                            _ => tracing::error!("failed to run test: {e}\nretry after {delay:?}"),
+                        }
                     }
-                    // allow 'not found' error when retry DROP statement
-                    Err(e)
-                        if cmd == SqlCmd::Drop
-                            && i != 0
-                            && e.to_string().contains("not found")
-                            && e.to_string().contains("Catalog error") =>
-                    {
-                        break
-                    }
-                    Err(e) if i >= 5 => panic!("failed to run test after retry {i} times: {e}"),
-                    Err(e) => tracing::error!("failed to run test: {e}\nretry after {delay:?}"),
                 }
                 tokio::time::sleep(delay).await;
             }
