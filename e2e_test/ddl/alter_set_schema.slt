@@ -1,0 +1,107 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE SCHEMA test_schema;
+
+statement ok
+CREATE TABLE test_table (u INT, v INT) WITH (
+    connector = 'datagen',
+    fields.u.kind = 'sequence',
+    fields.u.start = '1',
+    fields.u.end  = '10',
+    fields.v.kind = 'sequence',
+    fields.v.start = '1',
+    fields.v.end  = '10',
+    datagen.rows.per.second='15',
+    datagen.split.num = '1'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE INDEX test_index1 ON test_table(u);
+
+statement ok
+CREATE INDEX test_index2 ON test_table(v);
+
+statement ok
+ALTER TABLE test_table SET SCHEMA public;
+
+statement ok
+ALTER TABLE test_table SET SCHEMA test_schema;
+
+query TT
+SELECT tablename, schemaname FROM pg_tables WHERE schemaname = 'test_schema';
+----
+test_table test_schema
+
+query TT rowsort
+SELECT indexname, schemaname FROM pg_indexes WHERE schemaname = 'test_schema';
+----
+test_index1 test_schema
+test_index2 test_schema
+
+statement ok
+CREATE SOURCE test_source (v INT) WITH (
+    connector = 'datagen',
+    fields.v.kind = 'sequence',
+    fields.v.start = '1',
+    fields.v.end  = '10',
+    datagen.rows.per.second='15',
+    datagen.split.num = '1'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+ALTER SOURCE test_source SET SCHEMA test_schema;
+
+query TT
+SELECT name AS sourcename, nspname AS schemaname
+FROM rw_sources
+JOIN pg_namespace ON pg_namespace.oid = rw_sources.schema_id
+WHERE nspname = 'test_schema';
+----
+test_source test_schema
+
+statement ok
+CREATE SINK test_sink AS SELECT u FROM test_schema.test_table WITH (
+    connector = 'blackhole'
+);
+
+statement ok
+ALTER SINK test_sink SET SCHEMA test_schema;
+
+query TT
+SELECT name AS sinkname, nspname AS schemaname
+FROM rw_sinks
+JOIN pg_namespace ON pg_namespace.oid = rw_sinks.schema_id
+WHERE nspname = 'test_schema';
+----
+test_sink test_schema
+
+statement ok
+CREATE CONNECTION test_conn WITH (type = 'privatelink', provider = 'mock');
+
+statement ok
+ALTER CONNECTION test_conn SET SCHEMA test_schema;
+
+query TT
+SELECT name AS connname, nspname AS schemaname
+FROM rw_connections
+JOIN pg_namespace ON pg_namespace.oid = rw_connections.schema_id
+WHERE nspname = 'test_schema';
+----
+test_conn test_schema
+
+statement ok
+DROP CONNECTION test_schema.test_conn;
+
+statement ok
+DROP SINK test_schema.test_sink;
+
+statement ok
+DROP SOURCE test_schema.test_source;
+
+statement ok
+DROP TABLE test_schema.test_table;
+
+statement ok
+DROP SCHEMA test_schema;

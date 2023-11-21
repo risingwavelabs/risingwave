@@ -237,6 +237,7 @@ mod test {
                             sql_endpoint: None,
                             dashboard_ui_path: None,
                             prometheus_endpoint: None,
+                            prometheus_selector: None,
                             connector_rpc_endpoint: None,
                             privatelink_endpoint_default_tags: None,
                             config_path: "src/config/test.toml",

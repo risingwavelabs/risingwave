@@ -466,9 +466,6 @@ enum StreamScanType {
 
   // ChainExecutor with upstream_only = true
   STREAM_SCAN_TYPE_UPSTREAM_ONLY = 4;
-
-  // CdcBackfillExecutor
-  STREAM_SCAN_TYPE_CDC_BACKFILL = 5;
 }
 
 // StreamScanNode reads data from upstream table first, and then pass all events to downstream.
@@ -505,9 +502,23 @@ message StreamScanNode {
 
   // Snapshot read every N barriers
   uint32 snapshot_read_barrier_interval = 9 [deprecated = true];
+}
+
+message StreamCdcScanNode {
+  uint32 table_id = 1;
+
+  // The columns from the upstream table that'll be internally required by this stream scan node.
+  // Contains Primary Keys and Output columns.
+  repeated int32 upstream_column_ids = 2;
+
+  // Strips the primary key columns if they're unnecessary.
+  repeated uint32 output_indices = 3;
+
+  /// The state table used by Backfill operator for persisting internal state
+  catalog.Table state_table = 4;
 
   // The external table that will be backfilled for CDC.
-  plan_common.ExternalTableDesc cdc_table_desc = 10;
+  plan_common.ExternalTableDesc cdc_table_desc = 5;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -703,6 +714,7 @@ message StreamNode {
     EowcOverWindowNode eowc_over_window = 136;
     OverWindowNode over_window = 137;
     StreamFsFetchNode stream_fs_fetch = 138;
+    StreamCdcScanNode stream_cdc_scan = 139;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

@@ -32,6 +32,9 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::resource_util::cpu::total_cpu_available;
+use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
+use risingwave_common::RW_VERSION;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
@@ -245,6 +248,11 @@ impl MetaClient {
                     worker_type: worker_type as i32,
                     host: Some(addr.to_protobuf()),
                     property: Some(property.clone()),
+                    resource: Some(risingwave_pb::common::worker_node::Resource {
+                        rw_version: RW_VERSION.to_string(),
+                        total_memory_bytes: system_memory_available_bytes() as _,
+                        total_cpu_cores: total_cpu_available() as _,
+                    }),
                 })
                 .await?;
             if let Some(status) = &add_worker_resp.status
@@ -466,6 +474,19 @@ impl MetaClient {
         Ok(resp.version)
     }
 
+    pub async fn alter_set_schema(
+        &self,
+        object: alter_set_schema_request::Object,
+        new_schema_id: u32,
+    ) -> Result<CatalogVersion> {
+        let request = AlterSetSchemaRequest {
+            new_schema_id,
+            object: Some(object),
+        };
+        let resp = self.inner.alter_set_schema(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn replace_table(
         &self,
         source: Option<PbSource>,
@@ -663,9 +684,12 @@ impl MetaClient {
         Ok(resp)
     }
 
-    pub async fn list_worker_nodes(&self, worker_type: WorkerType) -> Result<Vec<WorkerNode>> {
+    pub async fn list_worker_nodes(
+        &self,
+        worker_type: Option<WorkerType>,
+    ) -> Result<Vec<WorkerNode>> {
         let request = ListAllNodesRequest {
-            worker_type: worker_type as _,
+            worker_type: worker_type.map(Into::into),
             include_starting_nodes: true,
         };
         let resp = self.inner.list_all_nodes(request).await?;
@@ -1148,6 +1172,17 @@ impl MetaClient {
 
     pub async fn sink_coordinate_client(&self) -> SinkCoordinationRpcClient {
         self.inner.core.read().await.sink_coordinate_client.clone()
+    }
+
+    pub async fn rise_ctl_list_compact_task_assignment(
+        &self,
+    ) -> Result<Vec<CompactTaskAssignment>> {
+        let req = RiseCtlListCompactTaskAssignmentRequest {};
+        let resp = self
+            .inner
+            .rise_ctl_list_compact_task_assignment(req)
+            .await?;
+        Ok(resp.task_assignment)
     }
 }
 
@@ -1724,7 +1759,6 @@ macro_rules! for_all_meta_rpc {
             ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
             ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
             ,{ cluster_client, update_worker_node_schedulability, UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse }
-            //(not used) ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
@@ -1738,6 +1772,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
             ,{ ddl_client, alter_relation_name, AlterRelationNameRequest, AlterRelationNameResponse }
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
+            ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
@@ -1798,6 +1833,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_branched_object, ListBranchedObjectRequest, ListBranchedObjectResponse }
             ,{ hummock_client, list_active_write_limit, ListActiveWriteLimitRequest, ListActiveWriteLimitResponse }
             ,{ hummock_client, list_hummock_meta_config, ListHummockMetaConfigRequest, ListHummockMetaConfigResponse }
+            ,{ hummock_client, rise_ctl_list_compact_task_assignment, RiseCtlListCompactTaskAssignmentRequest, RiseCtlListCompactTaskAssignmentResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

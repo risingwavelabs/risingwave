@@ -28,7 +28,7 @@ use super::*;
 use crate::common::table::state_table::StateTable;
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, PkIndices};
+use crate::executor::ActorContextRef;
 use crate::task::AtomicU64Ref;
 
 pub struct HashJoinExecutorBuilder;
@@ -138,17 +138,15 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
 
         let args = HashJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
+            info: params.info,
             source_l,
             source_r,
             params_l,
             params_r,
             null_safe,
-            pk_indices: params.pk_indices,
             output_indices,
-            executor_id: params.executor_id,
             cond: condition,
             inequality_pairs,
-            op_info: params.op_info,
             state_table_l,
             degree_state_table_l,
             state_table_r,
@@ -167,17 +165,15 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
 
 struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     ctx: ActorContextRef,
+    info: ExecutorInfo,
     source_l: Box<dyn Executor>,
     source_r: Box<dyn Executor>,
     params_l: JoinParams,
     params_r: JoinParams,
     null_safe: Vec<bool>,
-    pk_indices: PkIndices,
     output_indices: Vec<usize>,
-    executor_id: u64,
     cond: Option<NonStrictExpression>,
     inequality_pairs: Vec<(usize, usize, bool, Option<NonStrictExpression>)>,
-    op_info: String,
     state_table_l: StateTable<S>,
     degree_state_table_l: StateTable<S>,
     state_table_r: StateTable<S>,
@@ -200,17 +196,15 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
                 Ok(Box::new(
                     HashJoinExecutor::<K, S, { JoinType::$join_type }>::new(
                         self.ctx,
+                        self.info,
                         self.source_l,
                         self.source_r,
                         self.params_l,
                         self.params_r,
                         self.null_safe,
-                        self.pk_indices,
                         self.output_indices,
-                        self.executor_id,
                         self.cond,
                         self.inequality_pairs,
-                        self.op_info,
                         self.state_table_l,
                         self.degree_state_table_l,
                         self.state_table_r,

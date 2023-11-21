@@ -54,7 +54,7 @@ use self::progress::TrackingCommand;
 use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
-use crate::hummock::HummockManagerRef;
+use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification, MetaSrvEnv,
@@ -100,7 +100,7 @@ impl<T> From<TableMap<T>> for HashMap<TableId, T> {
     }
 }
 
-pub(crate) type TableActorMap = TableMap<Vec<ActorId>>;
+pub(crate) type TableActorMap = TableMap<HashSet<ActorId>>;
 pub(crate) type TableUpstreamMvCountMap = TableMap<HashMap<TableId, usize>>;
 pub(crate) type TableDefinitionMap = TableMap<String>;
 pub(crate) type TableNotifierMap = TableMap<Notifier>;
@@ -1014,24 +1014,20 @@ impl GlobalBarrierManager {
                 // the L0 layer files are generated.
                 // See https://github.com/risingwave-labs/risingwave/issues/1251
                 let kind = node.command_ctx.kind;
-                let (sst_to_worker, synced_ssts) = collect_synced_ssts(resps);
+                let commit_info = collect_commit_epoch_info(resps);
                 // hummock_manager commit epoch.
                 let mut new_snapshot = None;
 
                 match kind {
                     BarrierKind::Unspecified => unreachable!(),
                     BarrierKind::Initial => assert!(
-                        synced_ssts.is_empty(),
+                        commit_info.sstables.is_empty(),
                         "no sstables should be produced in the first epoch"
                     ),
                     BarrierKind::Checkpoint => {
                         new_snapshot = self
                             .hummock_manager
-                            .commit_epoch(
-                                node.command_ctx.prev_epoch.value().0,
-                                synced_ssts,
-                                sst_to_worker,
-                            )
+                            .commit_epoch(node.command_ctx.prev_epoch.value().0, commit_info)
                             .await?;
                     }
                     BarrierKind::Barrier => {
@@ -1085,7 +1081,9 @@ impl GlobalBarrierManager {
                         commands.push(command);
                     }
                     for progress in resps.iter().flat_map(|r| &r.create_mview_progress) {
+                        tracing::trace!(?progress, "update progress");
                         if let Some(command) = tracker.update(progress, &version_stats) {
+                            tracing::trace!(?progress, "update progress");
                             commands.push(command);
                         }
                     }
@@ -1169,12 +1167,7 @@ impl GlobalBarrierManager {
 
 pub type BarrierManagerRef = Arc<GlobalBarrierManager>;
 
-fn collect_synced_ssts(
-    resps: &mut [BarrierCompleteResponse],
-) -> (
-    HashMap<HummockSstableObjectId, WorkerId>,
-    Vec<ExtendedSstableInfo>,
-) {
+fn collect_commit_epoch_info(resps: &mut [BarrierCompleteResponse]) -> CommitEpochInfo {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, WorkerId> = HashMap::new();
     let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
     for resp in &mut *resps {
@@ -1193,5 +1186,5 @@ fn collect_synced_ssts(
             .collect_vec();
         synced_ssts.append(&mut t);
     }
-    (sst_to_worker, synced_ssts)
+    CommitEpochInfo::new(synced_ssts, sst_to_worker)
 }

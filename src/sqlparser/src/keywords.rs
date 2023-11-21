@@ -282,6 +282,7 @@ define_keywords!(
     JSON,
     KEY,
     KEYS,
+    KILL,
     LANGUAGE,
     LARGE,
     LAST,

@@ -30,6 +30,7 @@ MAX_RETRY=20
 while [[ $HTTP_CODE -ne 200 && MAX_RETRY -gt 0 ]]
 do
     HTTP_CODE=$(curl --connect-timeout 2 -s -o /dev/null -w ''%{http_code}'' http://pulsar:8080/admin/v2/clusters)
+    echo Got HTTP Code: $HTTP_CODE
     ((MAX_RETRY--))
     sleep 5
 done

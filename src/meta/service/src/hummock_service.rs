@@ -626,6 +626,17 @@ impl HummockManagerService for HummockServiceImpl {
             scores,
         }))
     }
+
+    async fn rise_ctl_list_compact_task_assignment(
+        &self,
+        _request: Request<RiseCtlListCompactTaskAssignmentRequest>,
+    ) -> Result<Response<RiseCtlListCompactTaskAssignmentResponse>, Status> {
+        let (_compaction_statuses, task_assignment) =
+            self.hummock_manager.list_compaction_status().await;
+        Ok(Response::new(RiseCtlListCompactTaskAssignmentResponse {
+            task_assignment,
+        }))
+    }
 }
 
 #[cfg(test)]
