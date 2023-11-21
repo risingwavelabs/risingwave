@@ -600,7 +600,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         Ok(())
     }
 
-    fn seal_current_epoch(&mut self, next_epoch: u64) {
+    fn seal_current_epoch(&mut self, next_epoch: u64, _opts: SealCurrentEpochOptions) {
         assert!(!self.is_dirty());
         let prev_epoch = self
             .epoch
