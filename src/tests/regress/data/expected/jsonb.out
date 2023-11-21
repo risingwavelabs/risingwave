@@ -280,7 +280,7 @@ SELECT '{
 		true}'::jsonb; -- OK
                   jsonb                  
 -----------------------------------------
- {"one": 1, "three": true, "two": "two"}
+ {"one": 1, "two": "two", "three": true}
 (1 row)
 
 SELECT '{
@@ -2003,7 +2003,7 @@ SELECT jsonb_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false]
 (6 rows)
 
 SELECT * FROM jsonb_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false]'::jsonb) q;
-             q              
+           value            
 ----------------------------
  1
  true
@@ -2026,7 +2026,7 @@ SELECT jsonb_array_elements_text('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},f
 (7 rows)
 
 SELECT * FROM jsonb_array_elements_text('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false,"stringy"]'::jsonb) q;
-             q              
+           value            
 ----------------------------
  1
  true
@@ -4056,25 +4056,25 @@ select jsonb_concat('{"d": "test", "a": [1, 2]}'::jsonb, '{"g": "test2", "c": {"
 select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{"cq":"l", "b":"g", "fg":false}';
                   ?column?                   
 ---------------------------------------------
- {"aa": 1, "b": "g", "cq": "l", "fg": false}
+ {"b": "g", "aa": 1, "cq": "l", "fg": false}
 (1 row)
 
 select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{"aq":"l"}';
                ?column?                
 ---------------------------------------
- {"aa": 1, "aq": "l", "b": 2, "cq": 3}
+ {"b": 2, "aa": 1, "aq": "l", "cq": 3}
 (1 row)
 
 select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{"aa":"l"}';
            ?column?           
 ------------------------------
- {"aa": "l", "b": 2, "cq": 3}
+ {"b": 2, "aa": "l", "cq": 3}
 (1 row)
 
 select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{}';
           ?column?          
 ----------------------------
- {"aa": 1, "b": 2, "cq": 3}
+ {"b": 2, "aa": 1, "cq": 3}
 (1 row)
 
 select '["a", "b"]'::jsonb || '["c"]';

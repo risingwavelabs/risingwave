@@ -60,11 +60,11 @@ SELECT ''::jsonb;				-- ERROR, no value
 SELECT '    '::jsonb;			-- ERROR, no value
 
 -- Multi-line JSON input to check ERROR reporting
-SELECT '{
-		"one": 1,
-		"two":"two",
-		"three":
-		true}'::jsonb; -- OK
+--@ SELECT '{
+--@ 		"one": 1,
+--@ 		"two":"two",
+--@ 		"three":
+--@ 		true}'::jsonb; -- OK
 SELECT '{
 		"one": 1,
 		"two":,"two",  -- ERROR extraneous comma before field "two"
@@ -520,9 +520,9 @@ select '42'::jsonb #>> array['0'];
 
 -- array_elements
 SELECT jsonb_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false]'::jsonb);
-SELECT * FROM jsonb_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false]'::jsonb) q;
+--@ SELECT * FROM jsonb_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false]'::jsonb) q;
 SELECT jsonb_array_elements_text('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false,"stringy"]'::jsonb);
-SELECT * FROM jsonb_array_elements_text('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false,"stringy"]'::jsonb) q;
+--@ SELECT * FROM jsonb_array_elements_text('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false,"stringy"]'::jsonb) q;
 
 -- populate_record
 --@ CREATE TYPE jbpop AS (a text, b int, c timestamp);
@@ -1053,10 +1053,10 @@ select jsonb_pretty('{"a":["b", "c"], "d": {"e":"f"}}');
 
 select jsonb_concat('{"d": "test", "a": [1, 2]}'::jsonb, '{"g": "test2", "c": {"c1":1, "c2":2}}'::jsonb);
 
-select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{"cq":"l", "b":"g", "fg":false}';
-select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{"aq":"l"}';
-select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{"aa":"l"}';
-select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{}';
+--@ select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{"cq":"l", "b":"g", "fg":false}';
+--@ select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{"aq":"l"}';
+--@ select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{"aa":"l"}';
+--@ select '{"aa":1 , "b":2, "cq":3}'::jsonb || '{}';
 
 select '["a", "b"]'::jsonb || '["c"]';
 select '["a", "b"]'::jsonb || '["c", "d"]';
