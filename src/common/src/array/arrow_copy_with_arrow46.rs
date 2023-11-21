@@ -15,11 +15,12 @@
 //! Converts between arrays and Apache Arrow arrays.
 
 use std::fmt::Write;
+
 use chrono::{NaiveDateTime, NaiveTime};
-use deltalake::arrow::compute::kernels::cast;
-use deltalake::arrow::datatypes::{SchemaRef , Schema, Field, DECIMAL256_MAX_PRECISION};
-use deltalake::arrow::array::Array as ArrowArray;
 use deltalake::arrow::array;
+use deltalake::arrow::array::Array as ArrowArray;
+use deltalake::arrow::compute::kernels::cast;
+use deltalake::arrow::datatypes::{Field, Schema, SchemaRef, DECIMAL256_MAX_PRECISION};
 use itertools::Itertools;
 
 use super::*;
@@ -81,8 +82,7 @@ impl TryFrom<&DataChunk> for array::RecordBatch {
             .collect();
 
         let schema = Arc::new(Schema::new(fields));
-        let opts =
-            array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
+        let opts = array::RecordBatchOptions::default().with_row_count(Some(chunk.capacity()));
         array::RecordBatch::try_new_with_options(schema, columns, &opts)
             .map_err(|err| ArrayError::ToArrow(err.to_string()))
     }
@@ -216,13 +216,20 @@ impl TryFrom<&DataType> for deltalake::arrow::datatypes::DataType {
             DataType::Float32 => Ok(Self::Float32),
             DataType::Float64 => Ok(Self::Float64),
             DataType::Date => Ok(Self::Date32),
-            DataType::Timestamp => Ok(Self::Timestamp(deltalake::arrow::datatypes::TimeUnit::Microsecond, None)),
+            DataType::Timestamp => Ok(Self::Timestamp(
+                deltalake::arrow::datatypes::TimeUnit::Microsecond,
+                None,
+            )),
             DataType::Timestamptz => Ok(Self::Timestamp(
                 deltalake::arrow::datatypes::TimeUnit::Microsecond,
                 Some("+00:00".into()),
             )),
-            DataType::Time => Ok(Self::Time64(deltalake::arrow::datatypes::TimeUnit::Microsecond)),
-            DataType::Interval => Ok(Self::Interval(deltalake::arrow::datatypes::IntervalUnit::MonthDayNano)),
+            DataType::Time => Ok(Self::Time64(
+                deltalake::arrow::datatypes::TimeUnit::Microsecond,
+            )),
+            DataType::Interval => Ok(Self::Interval(
+                deltalake::arrow::datatypes::IntervalUnit::MonthDayNano,
+            )),
             DataType::Varchar => Ok(Self::Utf8),
             DataType::Jsonb => Ok(Self::LargeUtf8),
             DataType::Bytea => Ok(Self::Binary),
@@ -453,8 +460,10 @@ impl From<&DecimalArray> for array::Decimal128Array {
             .filter_map(|o| o.map(|v| v.scale().unwrap_or(0)))
             .max()
             .unwrap_or(0) as u32;
-        let mut builder = array::builder::Decimal128Builder::with_capacity(array.len())
-            .with_data_type(deltalake::arrow::datatypes::DataType::Decimal128(38, max_scale as i8));
+        let mut builder =
+            array::builder::Decimal128Builder::with_capacity(array.len()).with_data_type(
+                deltalake::arrow::datatypes::DataType::Decimal128(38, max_scale as i8),
+            );
         for value in array.iter() {
             builder.append_option(value.map(|d| decimal_to_i128(d, max_scale)));
         }
@@ -530,12 +539,7 @@ impl TryFrom<&array::LargeStringArray> for JsonbArray {
 impl From<&ListArray> for array::ListArray {
     fn from(array: &ListArray) -> Self {
         use array::builder::*;
-        fn build<A, B, F>(
-            array: &ListArray,
-            a: &A,
-            builder: B,
-            mut append: F,
-        ) -> array::ListArray
+        fn build<A, B, F>(array: &ListArray, a: &A, builder: B, mut append: F) -> array::ListArray
         where
             A: Array,
             B: array::builder::ArrayBuilder,
@@ -592,8 +596,9 @@ impl From<&ListArray> for array::ListArray {
                 build(
                     array,
                     a,
-                    Decimal128Builder::with_capacity(a.len())
-                        .with_data_type(deltalake::arrow::datatypes::DataType::Decimal128(38, max_scale as i8)),
+                    Decimal128Builder::with_capacity(a.len()).with_data_type(
+                        deltalake::arrow::datatypes::DataType::Decimal128(38, max_scale as i8),
+                    ),
                     |b, v| b.append_option(v.map(|d| decimal_to_i128(d, max_scale))),
                 )
             }
@@ -659,16 +664,17 @@ impl TryFrom<&StructArray> for array::StructArray {
     type Error = ArrayError;
 
     fn try_from(array: &StructArray) -> Result<Self, Self::Error> {
-        let struct_data_vector: Vec<(deltalake::arrow::datatypes::FieldRef, array::ArrayRef)> = array
-            .fields()
-            .zip_eq_debug(array.data_type().as_struct().iter())
-            .map(|(arr, (name, ty))| {
-                Ok((
-                    Field::new(name, ty.try_into().map_err(ArrayError::ToArrow)?, true).into(),
-                    arr.as_ref().try_into()?,
-                ))
-            })
-            .try_collect::<_, _, ArrayError>()?;
+        let struct_data_vector: Vec<(deltalake::arrow::datatypes::FieldRef, array::ArrayRef)> =
+            array
+                .fields()
+                .zip_eq_debug(array.data_type().as_struct().iter())
+                .map(|(arr, (name, ty))| {
+                    Ok((
+                        Field::new(name, ty.try_into().map_err(ArrayError::ToArrow)?, true).into(),
+                        arr.as_ref().try_into()?,
+                    ))
+                })
+                .try_collect::<_, _, ArrayError>()?;
         Ok(array::StructArray::from(struct_data_vector))
     }
 }

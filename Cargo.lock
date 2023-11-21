@@ -976,29 +976,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "aws-sdk-dynamodb"
-version = "0.35.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "619c744e76f42f681cb7ccefb73eae9df6d111c08f292c5e390dee6fcae4e3ca"
-dependencies = [
- "aws-credential-types",
- "aws-http",
- "aws-runtime",
- "aws-smithy-async",
- "aws-smithy-http",
- "aws-smithy-json",
- "aws-smithy-runtime",
- "aws-smithy-runtime-api",
- "aws-smithy-types",
- "aws-types",
- "bytes",
- "fastrand 2.0.0",
- "http",
- "regex",
- "tracing",
-]
-
-[[package]]
 name = "aws-sdk-ec2"
 version = "0.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8095,7 +8072,6 @@ dependencies = [
  "auto_impl",
  "aws-config",
  "aws-credential-types",
- "aws-sdk-dynamodb",
  "aws-sdk-kinesis",
  "aws-sdk-s3",
  "aws-smithy-http",
@@ -12094,6 +12070,7 @@ dependencies = [
  "combine",
  "crossbeam-epoch",
  "crossbeam-utils",
+ "deltalake",
  "deranged",
  "digest 0.10.7",
  "either",
@@ -12136,6 +12113,7 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
+ "object_store",
  "opentelemetry_api",
  "opentelemetry_sdk",
  "ordered-float 3.9.1",
@@ -12157,9 +12135,9 @@ dependencies = [
  "redis",
  "regex",
  "regex-automata 0.4.1",
+ "regex-syntax 0.7.5",
  "regex-syntax 0.8.0",
  "reqwest",
- "ring 0.16.20",
  "rust_decimal",
  "rustls 0.21.8",
  "scopeguard",
@@ -12196,11 +12174,15 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-subscriber",
+ "twox-hash",
  "unicode-bidi",
  "unicode-normalization",
  "url",
  "uuid",
  "whoami",
+ "zstd 0.12.4",
+ "zstd-safe 6.0.6",
+ "zstd-sys",
 ]
 
 [[package]]
