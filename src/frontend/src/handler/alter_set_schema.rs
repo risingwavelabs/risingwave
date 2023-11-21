@@ -43,64 +43,79 @@ pub async fn handle_alter_set_schema(
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
     let new_schema_name = Binder::resolve_schema_name(new_schema_name)?;
-    let (object, old_schema_name) = {
+    let object = {
         let catalog_reader = session.env().catalog_reader().read_guard();
 
         match stmt_type {
             StatementType::ALTER_TABLE | StatementType::ALTER_MATERIALIZED_VIEW => {
                 let (table, old_schema_name) =
                     catalog_reader.get_table_by_name(db_name, schema_path, &real_obj_name)?;
+                if old_schema_name == new_schema_name {
+                    return Ok(RwPgResponse::empty_result(stmt_type));
+                }
                 session.check_privilege_for_drop_alter(old_schema_name, &**table)?;
                 catalog_reader.check_relation_name_duplicated(
                     db_name,
                     &new_schema_name,
                     table.name(),
                 )?;
-                (Object::TableId(table.id.table_id), old_schema_name)
+                Object::TableId(table.id.table_id)
             }
             StatementType::ALTER_VIEW => {
                 let (view, old_schema_name) =
                     catalog_reader.get_view_by_name(db_name, schema_path, &real_obj_name)?;
+                if old_schema_name == new_schema_name {
+                    return Ok(RwPgResponse::empty_result(stmt_type));
+                }
                 session.check_privilege_for_drop_alter(old_schema_name, &**view)?;
                 catalog_reader.check_relation_name_duplicated(
                     db_name,
                     &new_schema_name,
                     view.name(),
                 )?;
-                (Object::ViewId(view.id), old_schema_name)
+                Object::ViewId(view.id)
             }
             StatementType::ALTER_SOURCE => {
                 let (source, old_schema_name) =
                     catalog_reader.get_source_by_name(db_name, schema_path, &real_obj_name)?;
+                if old_schema_name == new_schema_name {
+                    return Ok(RwPgResponse::empty_result(stmt_type));
+                }
                 session.check_privilege_for_drop_alter(old_schema_name, &**source)?;
                 catalog_reader.check_relation_name_duplicated(
                     db_name,
                     &new_schema_name,
                     &source.name,
                 )?;
-                (Object::SourceId(source.id), old_schema_name)
+                Object::SourceId(source.id)
             }
             StatementType::ALTER_SINK => {
                 let (sink, old_schema_name) =
                     catalog_reader.get_sink_by_name(db_name, schema_path, &real_obj_name)?;
+                if old_schema_name == new_schema_name {
+                    return Ok(RwPgResponse::empty_result(stmt_type));
+                }
                 session.check_privilege_for_drop_alter(old_schema_name, &**sink)?;
                 catalog_reader.check_relation_name_duplicated(
                     db_name,
                     &new_schema_name,
                     &sink.name,
                 )?;
-                (Object::SinkId(sink.id.sink_id), old_schema_name)
+                Object::SinkId(sink.id.sink_id)
             }
             StatementType::ALTER_CONNECTION => {
                 let (connection, old_schema_name) =
                     catalog_reader.get_connection_by_name(db_name, schema_path, &real_obj_name)?;
+                if old_schema_name == new_schema_name {
+                    return Ok(RwPgResponse::empty_result(stmt_type));
+                }
                 session.check_privilege_for_drop_alter(old_schema_name, &**connection)?;
                 catalog_reader.check_connection_name_duplicated(
                     db_name,
                     &new_schema_name,
                     &connection.name,
                 )?;
-                (Object::ConnectionId(connection.id), old_schema_name)
+                Object::ConnectionId(connection.id)
             }
             StatementType::ALTER_FUNCTION => {
                 let (function, old_schema_name) = if let Some(args) = func_args {
@@ -128,6 +143,9 @@ pub async fn handle_alter_set_schema(
                         old_schema_name,
                     )
                 };
+                if old_schema_name == new_schema_name {
+                    return Ok(RwPgResponse::empty_result(stmt_type));
+                }
                 session.check_privilege_for_drop_alter(old_schema_name, &**function)?;
                 catalog_reader.check_function_name_duplicated(
                     db_name,
@@ -135,18 +153,11 @@ pub async fn handle_alter_set_schema(
                     &function.name,
                     &function.arg_types,
                 )?;
-                (
-                    Object::FunctionId(function.id.function_id()),
-                    old_schema_name,
-                )
+                Object::FunctionId(function.id.function_id())
             }
             _ => unreachable!(),
         }
     };
-
-    if old_schema_name == new_schema_name {
-        return Ok(RwPgResponse::empty_result(stmt_type));
-    }
 
     let (_, new_schema_id) =
         session.get_database_and_schema_id_for_create(Some(new_schema_name))?;

@@ -24,6 +24,9 @@ statement ok
 CREATE INDEX test_index2 ON test_table(v);
 
 statement ok
+ALTER TABLE test_table SET SCHEMA public;
+
+statement ok
 ALTER TABLE test_table SET SCHEMA test_schema;
 
 query TT
