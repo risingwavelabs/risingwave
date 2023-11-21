@@ -16,6 +16,7 @@ pub mod big_query;
 pub mod blackhole;
 pub mod boxed;
 pub mod catalog;
+pub mod deltalake;
 pub mod clickhouse;
 pub mod coordinate;
 pub mod doris;
@@ -38,6 +39,7 @@ pub mod writer;
 use std::collections::HashMap;
 
 use ::clickhouse::error::Error as ClickHouseError;
+use ::deltalake::DeltaTableError;
 use ::redis::RedisError;
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -81,6 +83,7 @@ macro_rules! for_all_sinks {
                 { Cassandra, $crate::sink::remote::CassandraSink },
                 { Doris, $crate::sink::doris::DorisSink },
                 { Starrocks, $crate::sink::starrocks::StarrocksSink },
+                { DeltaLakeRust, $crate::sink::deltalake::DeltaLakeSink },
                 { BigQuery, $crate::sink::big_query::BigQuerySink },
                 { Test, $crate::sink::test_sink::TestSink }
             }
@@ -426,6 +429,8 @@ pub enum SinkError {
     ),
     #[error("Doris error: {0}")]
     Doris(String),
+    #[error("DeltaLake error: {0}")]
+    DeltaLake(String),
     #[error("Starrocks error: {0}")]
     Starrocks(String),
     #[error("Pulsar error: {0}")]
@@ -463,6 +468,12 @@ impl From<RpcError> for SinkError {
 impl From<ClickHouseError> for SinkError {
     fn from(value: ClickHouseError) -> Self {
         SinkError::ClickHouse(format!("{}", value))
+    }
+}
+
+impl From<DeltaTableError> for SinkError {
+    fn from(value: DeltaTableError) -> Self {
+        SinkError::DeltaLake(format!("{}", value))
     }
 }
 

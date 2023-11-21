@@ -55,6 +55,8 @@ gcp-bigquery-client = "0.18.0"
 glob = "0.3"
 google-cloud-pubsub = "0.20"
 http = "0.2"
+deltalake = { version = "0.16.5" , features = ["s3"]}
+aws-sdk-dynamodb = "^0.35.0"
 hyper = { version = "0.14", features = [
     "client",
     "tcp",

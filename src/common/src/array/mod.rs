@@ -16,6 +16,8 @@
 
 mod arrow;
 pub use arrow::to_record_batch_with_schema;
+mod arrow_copy_with_arrow46;
+pub use arrow_copy_with_arrow46::to_record_batch_with_schema_arrow46;
 mod bool_array;
 pub mod bytes_array;
 mod chrono_array;
