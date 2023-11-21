@@ -275,6 +275,9 @@ enum AggNodeVersion {
   // https://github.com/risingwavelabs/risingwave/issues/12140#issuecomment-1776289808
   AGG_NODE_VERSION_ISSUE_12140 = 1;
 
+  // https://github.com/risingwavelabs/risingwave/issues/13465#issuecomment-1821016508
+  AGG_NODE_VERSION_ISSUE_13465 = 2;
+
   // Used for test only.
   AGG_NODE_VERSION_MAX = 2147483647;
 }
