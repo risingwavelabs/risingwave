@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_meta_model_v2::compaction_config::CompactionConfig;
 use risingwave_meta_model_v2::compaction_status::LevelHandlers;
 use risingwave_meta_model_v2::compaction_task::CompactionTask;
-use risingwave_meta_model_v2::hummock_version_delta::GroupDeltas;
+use risingwave_meta_model_v2::hummock_version_delta::SerializedHummockVersionDelta;
 use risingwave_meta_model_v2::{
     compaction_config, compaction_status, compaction_task, hummock_pinned_snapshot,
     hummock_pinned_version, hummock_version_delta, CompactionGroupId, CompactionTaskId,
@@ -189,27 +189,20 @@ impl Transactional<Transaction> for HummockVersionDelta {
         let m = hummock_version_delta::ActiveModel {
             id: Set(self.id as _),
             prev_id: Set(self.prev_id as _),
-            group_deltas: Set(GroupDeltas(
-                self.group_deltas
-                    .iter()
-                    .map(|(k, v)| (*k as _, v.group_deltas.to_owned()))
-                    .collect(),
-            )),
             max_committed_epoch: Set(self.max_committed_epoch as _),
             safe_epoch: Set(self.safe_epoch as _),
             trivial_move: Set(self.trivial_move),
-            gc_object_ids: Set(self.gc_object_ids.to_owned().into()),
+            serialized_payload: Set(SerializedHummockVersionDelta::from_delta(self)),
         };
         hummock_version_delta::Entity::insert(m)
             .on_conflict(
                 OnConflict::column(hummock_version_delta::Column::Id)
                     .update_columns([
                         hummock_version_delta::Column::PrevId,
-                        hummock_version_delta::Column::GroupDeltas,
                         hummock_version_delta::Column::MaxCommittedEpoch,
                         hummock_version_delta::Column::SafeEpoch,
                         hummock_version_delta::Column::TrivialMove,
-                        hummock_version_delta::Column::GcObjectIds,
+                        hummock_version_delta::Column::SerializedPayload,
                     ])
                     .to_owned(),
             )

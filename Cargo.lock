@@ -8133,6 +8133,7 @@ dependencies = [
 name = "risingwave_meta_model_v2"
 version = "1.3.0-alpha"
 dependencies = [
+ "prost 0.12.1",
  "risingwave_pb",
  "sea-orm",
  "serde",
