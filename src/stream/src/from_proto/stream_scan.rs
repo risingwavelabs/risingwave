@@ -148,19 +148,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                 let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
                 let versioned = table_desc.versioned;
                 // TODO: refactor it with from_table_catalog in the future.
-                let upstream_table = StorageTable::new_partial(
-                    state_store.clone(),
-                    table_id,
-                    column_descs,
-                    column_ids,
-                    table_pk_order_types,
-                    table_pk_indices,
-                    distribution,
-                    table_option,
-                    value_indices,
-                    prefix_hint_len,
-                    versioned,
-                );
+
                 let state_table = if let Ok(table) = node.get_state_table() {
                     Some(
                         StateTable::from_table_catalog(table, state_store.clone(), vnodes.clone())
@@ -172,12 +160,12 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
 
                 if node.stream_scan_type() == StreamScanType::Backfill {
                     let upstream_table = StorageTable::new_partial(
-                        state_store,
+                        state_store.clone(),
                         table_id,
                         column_descs,
                         column_ids,
-                        order_types,
-                        pk_indices,
+                        table_pk_order_types,
+                        table_pk_indices,
                         distribution,
                         table_option,
                         value_indices,
@@ -211,16 +199,15 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                                 .await;
                             // FIXME(kwannoel): Use executor info
                             ArrangementBackfillExecutor::<_, $SD>::new(
+                                params.info,
                                 upstream_table,
                                 upstream,
                                 state_table.unwrap(),
                                 output_indices,
                                 progress,
                                 schema,
-                                params.pk_indices,
                                 stream.streaming_metrics.clone(),
                                 params.env.config().developer.chunk_size,
-                                params.executor_id,
                             )
                             .boxed()
                         }};

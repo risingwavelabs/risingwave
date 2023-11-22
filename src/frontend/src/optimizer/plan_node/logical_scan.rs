@@ -22,6 +22,7 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, TableDesc};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_pb::stream_plan::StreamScanType;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{childless_record, Distill};
@@ -87,7 +88,6 @@ impl LogicalScan {
     /// Create a [`LogicalScan`] node. Used by planner.
     pub fn create(
         table_name: String, // explain-only
-        scan_table_type: ScanTableType,
         table_desc: Rc<TableDesc>,
         table_catalog: Option<Arc<TableCatalog>>,
         indexes: Vec<Rc<IndexCatalog>>,
@@ -97,7 +97,6 @@ impl LogicalScan {
     ) -> Self {
         generic::Scan::new(
             table_name,
-            scan_table_type,
             (0..table_desc.columns.len()).collect(),
             table_desc,
             table_catalog,

@@ -82,23 +82,18 @@ where
     #[allow(clippy::too_many_arguments)]
     #[allow(dead_code)]
     pub fn new(
+        info: ExecutorInfo,
         upstream_table: ReplicatedStateTable<S, SD>,
         upstream: BoxedExecutor,
         state_table: StateTable<S>,
         output_indices: Vec<usize>,
         progress: CreateMviewProgress,
-        schema: Schema,
-        pk_indices: PkIndices,
+        _schema: Schema,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
-        executor_id: u64,
     ) -> Self {
         Self {
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: format!("ArrangementBackfillExecutor {:X}", executor_id),
-            },
+            info,
             upstream_table,
             upstream,
             state_table,
