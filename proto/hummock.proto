@@ -655,14 +655,6 @@ message RiseCtlGetCheckpointVersionResponse {
   HummockVersion checkpoint_version = 1;
 }
 
-message RiseCtlListCompactionStatusRequest {}
-
-message RiseCtlListCompactionStatusResponse {
-  repeated CompactStatus compaction_statuses = 1;
-  repeated CompactTaskAssignment task_assignment = 2;
-  repeated CompactTaskProgress task_progress = 3;
-}
-
 message ListBranchedObjectRequest {}
 
 message ListBranchedObjectResponse {
@@ -742,7 +734,6 @@ service HummockManagerService {
   rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc SplitCompactionGroup(SplitCompactionGroupRequest) returns (SplitCompactionGroupResponse);
-  rpc RiseCtlListCompactionStatus(RiseCtlListCompactionStatusRequest) returns (RiseCtlListCompactionStatusResponse);
   rpc SubscribeCompactionEvent(stream SubscribeCompactionEventRequest) returns (stream SubscribeCompactionEventResponse);
   rpc ReportCompactionTask(ReportCompactionTaskRequest) returns (ReportCompactionTaskResponse);
   rpc ListBranchedObject(ListBranchedObjectRequest) returns (ListBranchedObjectResponse);
