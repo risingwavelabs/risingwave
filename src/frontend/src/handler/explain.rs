@@ -25,6 +25,7 @@ use super::create_mv::gen_create_mv_plan;
 use super::create_sink::gen_sink_plan;
 use super::create_table::ColumnIdGenerator;
 use super::query::gen_batch_plan_by_statement;
+use super::util::SourceSchemaCompatExt;
 use super::RwPgResponse;
 use crate::handler::create_table::handle_create_table_plan;
 use crate::handler::HandlerArgs;
@@ -63,14 +64,8 @@ async fn do_handle_explain(
                 ..
             } => {
                 let col_id_gen = ColumnIdGenerator::new_initial();
-                // TODO(st1page): refactor it
-                let (source_schema, notice) = match source_schema {
-                    Some(s) => {
-                        let (s, notice) = s.into_source_schema_v2();
-                        (Some(s), notice)
-                    }
-                    None => (None, None),
-                };
+
+                let source_schema = source_schema.map(|s| s.into_v2_with_warning());
 
                 let (plan, _source, _table, _job_type) = handle_create_table_plan(
                     context,
@@ -85,9 +80,6 @@ async fn do_handle_explain(
                 )
                 .await?;
                 let context = plan.ctx();
-                if let Some(notice) = notice {
-                    context.warn_to_user(notice);
-                }
                 (Ok(plan), context)
             }
 

@@ -170,18 +170,33 @@ impl FragmentManager {
     /// The `table_ids` here should correspond to stream jobs.
     /// We get their corresponding table fragment, and from there,
     /// we get the actors that are in the table fragment.
-    pub async fn get_table_id_actor_mapping(
+    pub async fn get_table_id_stream_scan_actor_mapping(
         &self,
         table_ids: &[TableId],
-    ) -> HashMap<TableId, Vec<ActorId>> {
+    ) -> HashMap<TableId, HashSet<ActorId>> {
         let map = &self.core.read().await.table_fragments;
         let mut table_map = HashMap::new();
+        // TODO(kwannoel): Can this be unified with `PlanVisitor`?
+        fn has_stream_scan(stream_node: &StreamNode) -> bool {
+            let is_node_scan = if let Some(node) = &stream_node.node_body {
+                node.is_stream_scan()
+            } else {
+                false
+            };
+            is_node_scan || stream_node.get_input().iter().any(has_stream_scan)
+        }
         for table_id in table_ids {
             if let Some(table_fragment) = map.get(table_id) {
-                let mut actors = vec![];
+                let mut actors = HashSet::new();
                 for fragment in table_fragment.fragments.values() {
                     for actor in &fragment.actors {
-                        actors.push(actor.actor_id)
+                        if let Some(node) = &actor.nodes
+                            && has_stream_scan(node)
+                        {
+                            actors.insert(actor.actor_id);
+                        } else {
+                            tracing::trace!("ignoring actor: {:?}", actor);
+                        }
                     }
                 }
                 table_map.insert(*table_id, actors);

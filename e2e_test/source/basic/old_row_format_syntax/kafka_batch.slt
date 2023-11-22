@@ -192,7 +192,7 @@ select count(*) from s8
 0
 
 query I
-select * from s9 order by id
+select id from s9 order by id
 ----
 \x6b6b
 \x776561776566776566

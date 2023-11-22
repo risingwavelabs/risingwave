@@ -36,6 +36,10 @@ pub struct HeapProfiler {
 }
 
 impl HeapProfiler {
+    /// # Arguments
+    ///
+    /// `total_memory` must be the total available memory for the process.
+    /// It will be compared with jemalloc's allocated memory.
     pub fn new(total_memory: usize, config: HeapProfilingConfig) -> Self {
         let threshold_auto_dump_heap_profile =
             (total_memory as f64 * config.threshold_auto as f64) as usize;

@@ -413,6 +413,7 @@ mod tests {
                     is_streaming: true,
                 }),
                 transactional_id: Some(1),
+                ..Default::default()
             },
             WorkerNode {
                 id: 2,
@@ -426,6 +427,7 @@ mod tests {
                     is_streaming: false,
                 }),
                 transactional_id: Some(2),
+                ..Default::default()
             },
         ];
         worker_nodes

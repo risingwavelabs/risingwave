@@ -36,11 +36,15 @@ use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
-use risingwave_pb::ddl_service::{create_connection_request, DdlProgress, PbTableJobType};
+use risingwave_pb::ddl_service::{
+    alter_set_schema_request, create_connection_request, DdlProgress, PbTableJobType,
+};
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    BranchedObject, CompactionGroupInfo, HummockSnapshot, HummockVersion, HummockVersionDelta,
+    BranchedObject, CompactTaskAssignment, CompactionGroupInfo, HummockSnapshot, HummockVersion,
+    HummockVersionDelta,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -525,6 +529,30 @@ impl CatalogWriter for MockCatalogWriter {
         Err(ErrorCode::ItemNotFound(format!("object not found: {:?}", object)).into())
     }
 
+    async fn alter_set_schema(
+        &self,
+        object: alter_set_schema_request::Object,
+        new_schema_id: u32,
+    ) -> Result<()> {
+        match object {
+            alter_set_schema_request::Object::TableId(table_id) => {
+                let &schema_id = self.table_id_to_schema_id.read().get(&table_id).unwrap();
+                let database_id = self.get_database_id_by_schema(schema_id);
+                let pb_table = {
+                    let reader = self.catalog.read();
+                    let table = reader.get_table_by_id(&table_id.into())?.to_owned();
+                    table.to_prost(new_schema_id, database_id)
+                };
+                self.catalog.write().update_table(&pb_table);
+                self.table_id_to_schema_id
+                    .write()
+                    .insert(table_id, new_schema_id);
+                Ok(())
+            }
+            _ => unreachable!(),
+        }
+    }
+
     async fn alter_view_name(&self, _view_id: u32, _view_name: &str) -> Result<()> {
         unreachable!()
     }
@@ -893,6 +921,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_hummock_meta_configs(&self) -> RpcResult<HashMap<String, String>> {
+        unimplemented!()
+    }
+
+    async fn list_compact_task_assignment(&self) -> RpcResult<Vec<CompactTaskAssignment>> {
+        unimplemented!()
+    }
+
+    async fn list_all_nodes(&self) -> RpcResult<Vec<WorkerNode>> {
         unimplemented!()
     }
 }

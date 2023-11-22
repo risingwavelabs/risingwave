@@ -25,7 +25,7 @@ use pgwire::types::{Format, Row};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::*;
 
-use self::util::DataChunkToRowSetAdapter;
+use self::util::{DataChunkToRowSetAdapter, SourceSchemaCompatExt};
 use self::variable::handle_set_time_zone;
 use crate::catalog::table_catalog::TableType;
 use crate::handler::cancel_job::handle_cancel;
@@ -36,6 +36,7 @@ use crate::utils::WithOptions;
 
 mod alter_owner;
 mod alter_relation_rename;
+mod alter_set_schema;
 mod alter_source_column;
 mod alter_system;
 mod alter_table_column;
@@ -253,13 +254,7 @@ pub async fn handle(
                 )
                 .await;
             }
-            let (source_schema, notice) = match source_schema {
-                Some(s) => {
-                    let (s, notice) = s.into_source_schema_v2();
-                    (Some(s), notice)
-                }
-                None => (None, None),
-            };
+            let source_schema = source_schema.map(|s| s.into_v2_with_warning());
             create_table::handle_create_table(
                 handler_args,
                 name,
@@ -269,7 +264,6 @@ pub async fn handle(
                 source_schema,
                 source_watermarks,
                 append_only,
-                notice,
                 cdc_table_info,
             )
             .await
@@ -513,6 +507,19 @@ pub async fn handle(
             )
             .await
         }
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::SetSchema { new_schema_name },
+        } => {
+            alter_set_schema::handle_alter_set_schema(
+                handler_args,
+                name,
+                new_schema_name,
+                StatementType::ALTER_TABLE,
+                None,
+            )
+            .await
+        }
         Statement::AlterIndex {
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },
@@ -557,6 +564,31 @@ pub async fn handle(
                 .await
             }
         }
+        Statement::AlterView {
+            materialized,
+            name,
+            operation: AlterViewOperation::SetSchema { new_schema_name },
+        } => {
+            if materialized {
+                alter_set_schema::handle_alter_set_schema(
+                    handler_args,
+                    name,
+                    new_schema_name,
+                    StatementType::ALTER_MATERIALIZED_VIEW,
+                    None,
+                )
+                .await
+            } else {
+                alter_set_schema::handle_alter_set_schema(
+                    handler_args,
+                    name,
+                    new_schema_name,
+                    StatementType::ALTER_VIEW,
+                    None,
+                )
+                .await
+            }
+        }
         Statement::AlterSink {
             name,
             operation: AlterSinkOperation::RenameSink { sink_name },
@@ -570,6 +602,19 @@ pub async fn handle(
                 name,
                 new_owner_name,
                 StatementType::ALTER_SINK,
+            )
+            .await
+        }
+        Statement::AlterSink {
+            name,
+            operation: AlterSinkOperation::SetSchema { new_schema_name },
+        } => {
+            alter_set_schema::handle_alter_set_schema(
+                handler_args,
+                name,
+                new_schema_name,
+                StatementType::ALTER_SINK,
+                None,
             )
             .await
         }
@@ -590,6 +635,46 @@ pub async fn handle(
                 name,
                 new_owner_name,
                 StatementType::ALTER_SOURCE,
+            )
+            .await
+        }
+        Statement::AlterSource {
+            name,
+            operation: AlterSourceOperation::SetSchema { new_schema_name },
+        } => {
+            alter_set_schema::handle_alter_set_schema(
+                handler_args,
+                name,
+                new_schema_name,
+                StatementType::ALTER_SOURCE,
+                None,
+            )
+            .await
+        }
+        Statement::AlterFunction {
+            name,
+            args,
+            operation: AlterFunctionOperation::SetSchema { new_schema_name },
+        } => {
+            alter_set_schema::handle_alter_set_schema(
+                handler_args,
+                name,
+                new_schema_name,
+                StatementType::ALTER_FUNCTION,
+                args,
+            )
+            .await
+        }
+        Statement::AlterConnection {
+            name,
+            operation: AlterConnectionOperation::SetSchema { new_schema_name },
+        } => {
+            alter_set_schema::handle_alter_set_schema(
+                handler_args,
+                name,
+                new_schema_name,
+                StatementType::ALTER_CONNECTION,
+                None,
             )
             .await
         }
