@@ -560,7 +560,9 @@ mod test {
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::sink::encoder::{JsonEncoder, TimestampHandlingMode, TimestamptzHandlingMode};
+    use crate::sink::encoder::{
+        DateHandlingMode, JsonEncoder, TimestampHandlingMode, TimestamptzHandlingMode,
+    };
     use crate::sink::formatter::AppendOnlyFormatter;
 
     #[test]
@@ -728,6 +730,7 @@ mod test {
                 JsonEncoder::new(
                     schema,
                     None,
+                    DateHandlingMode::FromCe,
                     TimestampHandlingMode::Milli,
                     TimestamptzHandlingMode::UtcString,
                 ),

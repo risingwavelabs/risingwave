@@ -7286,6 +7286,7 @@ dependencies = [
  "itertools 0.12.0",
  "madsim-tokio",
  "madsim-tonic",
+ "memcomparable",
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
@@ -7304,6 +7305,7 @@ dependencies = [
  "task_stats_alloc",
  "tempfile",
  "thiserror",
+ "thiserror-ext",
  "tikv-jemallocator",
  "tokio-metrics",
  "tokio-stream",
@@ -10195,9 +10197,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext"
-version = "0.0.6"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b253f2e76cc35b73c1e1b9fd4e28d920f47e27b33b8b3e455bacc62cc0e40bf5"
+checksum = "01e0feae8c8aff1b65f0bca5b24fe2b6e2331e03cd7c6daa681e43a8055f92f6"
 dependencies = [
  "thiserror",
  "thiserror-ext-derive",
@@ -10205,9 +10207,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext-derive"
-version = "0.0.6"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11737e1864ac6e6ec08409cdaba243912693de6b5c7fac56a6aeabb0d73a4ad3"
+checksum = "e32482e53bca3d022bdee662ea7d568835e0eb8a86ab410946104657e9e1b5b5"
 dependencies = [
  "proc-macro2",
  "quote",
