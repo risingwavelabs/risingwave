@@ -20,7 +20,7 @@ use anyhow::{bail, Result};
 use itertools::Itertools;
 use rand::{thread_rng, Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
-use sqllogictest::{DefaultColumnType, ParallelTestError, Record};
+use sqllogictest::{ParallelTestError, Record};
 
 use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
@@ -238,38 +238,25 @@ pub async fn run_slt_task(
                 panic!("We cannot run background_ddl statement with background_ddl_rate > 0.0, since it could be reset");
             }
 
-            // Our background ddl strategy is as follows:
-            // 1. For each background ddl compatible statement, provide a chance for background_ddl=true.
-            // 2. Then later reset background_ddl after the statement is executed.
-            let reset_background_ddl_record = if let Record::Statement {
+            // For each background ddl compatible statement, provide a chance for background_ddl=true.
+            if let Record::Statement {
                 loc,
                 conditions,
                 connection,
                 ..
             } = &record
-                && matches!(cmd, SqlCmd::CreateMaterializedView { .. })
-                && rng.gen_bool(background_ddl_rate) {
-                let enable_background_ddl = Record::Statement {
+                && matches!(cmd, SqlCmd::CreateMaterializedView { .. }) {
+                let background_ddl_setting = rng.gen_bool(background_ddl_rate);
+                let set_background_ddl = Record::Statement {
                     loc: loc.clone(),
                     conditions: conditions.clone(),
                     connection: connection.clone(),
                     expected_error: None,
-                    sql: "SET BACKGROUND_DDL=true;".to_string(),
+                    sql: format!("SET BACKGROUND_DDL={background_ddl_setting};"),
                     expected_count: None,
                 };
-                let disable_background_ddl: Record<DefaultColumnType> = Record::Statement {
-                    loc: loc.clone(),
-                    conditions: conditions.clone(),
-                    connection: connection.clone(),
-                    expected_error: None,
-                    sql: "SET BACKGROUND_DDL=false;".to_string(),
-                    expected_count: None,
-                };
-                tester.run_async(enable_background_ddl).await.unwrap();
-                background_ddl_enabled = true;
-                Some(disable_background_ddl)
-            } else {
-                None
+                tester.run_async(set_background_ddl).await.unwrap();
+                background_ddl_enabled = background_ddl_setting;
             };
 
             if cmd.ignore_kill() {
@@ -313,18 +300,8 @@ pub async fn run_slt_task(
                 None
             };
 
-            // retry up to 5 times until it succeed,
-            // unless it's CREATE MATERIALIZED VIEW (in background).
-            // For CREATE MATERIALIZED VIEW, we retry up to 10 times since it needs to:
-            // 1. Wait for recovery to complete if cluster goes down.
-            // 2. Wait for background ddl to finish.
-            // Other cases just need to wait for 1., so they are faster to complete.
-            let max_retry =
-                if matches!(cmd, SqlCmd::CreateMaterializedView { .. }) && background_ddl_enabled {
-                    10
-                } else {
-                    5
-                };
+            // retry up to 5 times until it succeed
+            let max_retry = 5;
             for i in 0usize.. {
                 tracing::debug!(iteration = i, "retry count");
                 let delay = Duration::from_secs(1 << i);
@@ -339,7 +316,6 @@ pub async fn run_slt_task(
                     .await
                 {
                     Ok(_) => {
-                        tracing::debug!(iteration = i, "retry count (OK)");
                         // For background ddl
                         if let SqlCmd::CreateMaterializedView { ref name } = cmd && background_ddl_enabled
                             && matches!(record, Record::Statement { expected_error: None, .. } | Record::Query { expected_error: None, ..})
@@ -347,20 +323,13 @@ pub async fn run_slt_task(
                             tracing::debug!(iteration=i, "Retry for background ddl");
                             match wait_background_mv_finished(name).await {
                                 Ok(_) => {
-                                    if let Some(record) = reset_background_ddl_record {
-                                        tracing::debug!("Record with background_ddl {:?} finished", record);
-                                        if tester.run_async(record).await.is_ok() {
-                                            // Try to reset, but if the cluster killed again before reset,
-                                            // it is fine, we can leave it to the next mview to reset it.
-                                            background_ddl_enabled = false;
-                                        }
-                                    }
+                                    tracing::debug!(iteration=i, "Record with background_ddl {:?} finished", record);
                                     break;
                                 }
                                 Err(err) => {
                                     tracing::error!(iteration=i, ?err, "failed to wait for background mv to finish creating");
                                     if i >= max_retry {
-                                        panic!("failed to run test after retry {i} times, while waiting for background ddl");
+                                        panic!("failed to run test after retry {i} times, error={err:#?}");
                                     }
                                     continue;
                                 }
@@ -369,7 +338,6 @@ pub async fn run_slt_task(
                         break;
                     }
                     Err(e) => {
-                        tracing::debug!(iteration = i, "retry count (ERR)");
                         match cmd {
                             // allow 'table exists' error when retry CREATE statement
                             SqlCmd::Create {
@@ -403,17 +371,11 @@ pub async fn run_slt_task(
                                 tracing::debug!(iteration = i, name, "Retry for background ddl");
                                 match wait_background_mv_finished(name).await {
                                     Ok(_) => {
-                                        if let Some(record) = reset_background_ddl_record {
-                                            tracing::debug!(
-                                                "Record with background_ddl {:?} finished",
-                                                record
-                                            );
-                                            if tester.run_async(record).await.is_ok() {
-                                                // Try to reset, but if the cluster killed again before reset,
-                                                // it is fine, we can leave it to the next mview to reset it.
-                                                background_ddl_enabled = false;
-                                            }
-                                        }
+                                        tracing::debug!(
+                                            iteration = i,
+                                            "Record with background_ddl {:?} finished",
+                                            record
+                                        );
                                         break;
                                     }
                                     Err(err) => {
@@ -423,7 +385,7 @@ pub async fn run_slt_task(
                                             "failed to wait for background mv to finish creating"
                                         );
                                         if i >= max_retry {
-                                            panic!("failed to run test after retry {i} times, while waiting for background ddl");
+                                            panic!("failed to run test after retry {i} times, error={err:#?}");
                                         }
                                         continue;
                                     }
