@@ -16,25 +16,22 @@ use risingwave_pb::expr::expr_node;
 
 use super::{ExprImpl, ExprVisitor};
 use crate::expr::FunctionCall;
-pub(crate) struct ImpureAnalyzer {}
+
+#[derive(Default)]
+pub(crate) struct ImpureAnalyzer {
+    pub(crate) impure: bool,
+}
 
 impl ExprVisitor for ImpureAnalyzer {
-    type Result = bool;
-
-    fn merge(a: bool, b: bool) -> bool {
-        // the expr will be impure if any of its input is impure
-        a || b
+    fn visit_user_defined_function(&mut self, _func_call: &super::UserDefinedFunction) {
+        self.impure = true;
     }
 
-    fn visit_user_defined_function(&mut self, _func_call: &super::UserDefinedFunction) -> bool {
-        true
+    fn visit_now(&mut self, _: &super::Now) {
+        self.impure = true;
     }
 
-    fn visit_now(&mut self, _: &super::Now) -> bool {
-        true
-    }
-
-    fn visit_function_call(&mut self, func_call: &super::FunctionCall) -> bool {
+    fn visit_function_call(&mut self, func_call: &super::FunctionCall) {
         match func_call.func_type() {
             expr_node::Type::Unspecified => unreachable!(),
             expr_node::Type::Add
@@ -224,13 +221,10 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::Least =>
             // expression output is deterministic(same result for the same input)
             {
-                let x = func_call
+                func_call
                     .inputs()
                     .iter()
-                    .map(|expr| self.visit_expr(expr))
-                    .reduce(Self::merge)
-                    .unwrap_or_default();
-                x
+                    .for_each(|expr| self.visit_expr(expr));
             }
             // expression output is not deterministic
             expr_node::Type::Vnode
@@ -239,7 +233,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::PgSleepFor
             | expr_node::Type::PgSleepUntil
             | expr_node::Type::ColDescription
-            | expr_node::Type::CastRegclass => true,
+            | expr_node::Type::CastRegclass
+            | expr_node::Type::MakeTimestamptz => self.impure = true,
         }
     }
 }
@@ -249,13 +244,15 @@ pub fn is_pure(expr: &ExprImpl) -> bool {
 }
 
 pub fn is_impure(expr: &ExprImpl) -> bool {
-    let mut a = ImpureAnalyzer {};
-    a.visit_expr(expr)
+    let mut a = ImpureAnalyzer::default();
+    a.visit_expr(expr);
+    a.impure
 }
 
 pub fn is_impure_func_call(func_call: &FunctionCall) -> bool {
-    let mut a = ImpureAnalyzer {};
-    a.visit_function_call(func_call)
+    let mut a = ImpureAnalyzer::default();
+    a.visit_function_call(func_call);
+    a.impure
 }
 
 #[cfg(test)]

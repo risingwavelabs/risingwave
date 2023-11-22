@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -56,7 +57,16 @@ pub async fn build_agg_state_storages_from_proto<S: StateStore>(
                             .collect(),
                     ),
                 );
-                AggStateStorage::MaterializedInput { table, mapping }
+                let order_columns = state
+                    .order_columns
+                    .iter()
+                    .map(ColumnOrder::from_protobuf)
+                    .collect();
+                AggStateStorage::MaterializedInput {
+                    table,
+                    mapping,
+                    order_columns,
+                }
             }
         };
 

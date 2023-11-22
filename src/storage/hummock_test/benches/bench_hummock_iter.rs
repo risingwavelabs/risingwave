@@ -99,7 +99,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             ))
             .unwrap();
     }
-    hummock_storage.seal_current_epoch(MAX_EPOCH);
+    hummock_storage.seal_current_epoch(MAX_EPOCH, SealCurrentEpochOptions::for_test());
 
     c.bench_function("bench-hummock-iter", move |b| {
         b.iter(|| {
@@ -109,7 +109,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                     epoch,
                     ReadOptions {
                         ignore_range_tombstone: true,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        prefetch_options: PrefetchOptions::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
                         ..Default::default()
                     },

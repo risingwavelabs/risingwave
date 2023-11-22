@@ -15,15 +15,14 @@
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnCatalog, Field};
-use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
+use risingwave_pb::stream_plan::PbStreamNode;
 
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
+use super::{generic, ExprRewritable, PlanBase, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::ExprRewriter;
 use crate::handler::create_source::debezium_cdc_source_schema;
@@ -37,15 +36,12 @@ use crate::{Explain, TableCatalog};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamCdcTableScan {
     pub base: PlanBase<Stream>,
-    core: generic::Scan,
-    batch_plan_id: PlanNodeId,
-    stream_scan_type: StreamScanType,
+    core: generic::CdcScan,
 }
 
 impl StreamCdcTableScan {
-    pub fn new(core: generic::Scan) -> Self {
-        let batch_plan_id = core.ctx.next_plan_node_id();
-        let distribution = Distribution::Single;
+    pub fn new(core: generic::CdcScan) -> Self {
+        let distribution = Distribution::SomeShard;
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
@@ -53,57 +49,20 @@ impl StreamCdcTableScan {
             false,
             core.watermark_columns(),
         );
-        Self {
-            base,
-            core,
-            batch_plan_id,
-            stream_scan_type: StreamScanType::CdcBackfill,
-        }
+        Self { base, core }
     }
 
     pub fn table_name(&self) -> &str {
         &self.core.table_name
     }
 
-    pub fn core(&self) -> &generic::Scan {
+    pub fn core(&self) -> &generic::CdcScan {
         &self.core
     }
 
-    pub fn stream_scan_type(&self) -> StreamScanType {
-        StreamScanType::CdcBackfill
-    }
-
-    /// Build catalog for backfill state
-    ///
-    /// Schema: | vnode | pk ... | `backfill_finished` | `row_count` |
-    ///
-    /// key:    | vnode |
-    /// value:  | pk ... | `backfill_finished` | `row_count` |
-    ///
-    /// When we update the backfill progress,
-    /// we update it for all vnodes.
-    ///
-    /// `pk` refers to the upstream pk which we use to track the backfill progress.
-    ///
-    /// `vnode` is the corresponding vnode of the upstream's distribution key.
-    ///         It should also match the vnode of the backfill executor.
-    ///
-    /// `backfill_finished` is a boolean which just indicates if backfill is done.
-    ///
-    /// `row_count` is a count of rows which indicates the # of rows per executor.
-    ///             We used to track this in memory.
-    ///             But for backfill persistence we have to also persist it.
-    ///
-    /// FIXME(kwannoel):
-    /// - Across all vnodes, the values are the same.
-    /// - e.g. | vnode | pk ...  | `backfill_finished` | `row_count` |
-    ///        | 1002 | Int64(1) | t                   | 10          |
-    ///        | 1003 | Int64(1) | t                   | 10          |
-    ///        | 1003 | Int64(1) | t                   | 10          |
-    /// Eventually we should track progress per vnode, to support scaling with both mview and
-    /// the corresponding `no_shuffle_backfill`.
-    /// However this is not high priority, since we are working on supporting arrangement backfill,
-    /// which already has this capability.
+    /// Build catalog for cdc backfill state
+    /// Right now we only persist whether the backfill is finished and the corresponding cdc offset
+    /// schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset` |
     pub fn build_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,
@@ -112,9 +71,9 @@ impl StreamCdcTableScan {
         let mut catalog_builder = TableCatalogBuilder::new(properties);
         let upstream_schema = &self.core.get_table_columns();
 
-        // We use vnode as primary key in state table.
-        // If `Distribution::Single`, vnode will just be `VirtualNode::default()`.
-        catalog_builder.add_column(&Field::with_name(VirtualNode::RW_TYPE, "vnode"));
+        // Use `split_id` as primary key in state table.
+        // Currently we only support single split for cdc backfill.
+        catalog_builder.add_column(&Field::with_name(DataType::Varchar, "split_id"));
         catalog_builder.add_order_column(0, OrderType::ascending());
 
         // pk columns
@@ -123,27 +82,17 @@ impl StreamCdcTableScan {
             catalog_builder.add_column(&Field::from(col));
         }
 
-        // `backfill_finished` column
-        catalog_builder.add_column(&Field::with_name(
-            DataType::Boolean,
-            format!("{}_backfill_finished", self.table_name()),
-        ));
+        catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
 
-        // `row_count` column
-        catalog_builder.add_column(&Field::with_name(
-            DataType::Int64,
-            format!("{}_row_count", self.table_name()),
-        ));
+        // `row_count` column, the number of rows read from snapshot
+        catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
 
-        // Reuse the state store pk (vnode) as the vnode as well.
-        catalog_builder.set_vnode_col_idx(0);
-        catalog_builder.set_dist_key_in_pk(vec![0]);
+        // The offset is only for observability, not for recovery right now
+        catalog_builder.add_column(&Field::with_name(DataType::Jsonb, "cdc_offset"));
 
-        let num_of_columns = catalog_builder.columns().len();
-        catalog_builder.set_value_indices((1..num_of_columns).collect_vec());
-
+        // leave dist key empty, since the cdc backfill executor is singleton
         catalog_builder
-            .build(vec![0], 1)
+            .build(vec![], 1)
             .with_id(state.gen_table_id_wrapped())
     }
 }
@@ -204,20 +153,6 @@ impl StreamCdcTableScan {
             .map(ColumnId::get_id)
             .collect_vec();
 
-        // The schema of the snapshot read stream
-        let snapshot_schema = upstream_column_ids
-            .iter()
-            .map(|&id| {
-                let col = self
-                    .core
-                    .get_table_columns()
-                    .iter()
-                    .find(|c| c.column_id.get_id() == id)
-                    .unwrap();
-                Field::from(col).to_prost()
-            })
-            .collect_vec();
-
         // The schema of the shared cdc source upstream is different from snapshot,
         // refer to `debezium_cdc_source_schema()` for details.
         let upstream_schema = {
@@ -241,29 +176,20 @@ impl StreamCdcTableScan {
             })
             .collect_vec();
 
-        let batch_plan_node = BatchPlanNode {
-            table_desc: None,
-            column_ids: upstream_column_ids.clone(),
-        };
-
         let catalog = self
             .build_backfill_state_catalog(state)
             .to_internal_table_prost();
 
-        let node_body =
-            // don't need batch plan for cdc source
-            PbNodeBody::StreamScan(StreamScanNode {
-                table_id: self.core.cdc_table_desc.table_id.table_id,
-                stream_scan_type: self.stream_scan_type as i32,
-                // The column indices need to be forwarded to the downstream
-                output_indices,
-                upstream_column_ids,
-                // The table desc used by backfill executor
-                state_table: Some(catalog),
-                rate_limit: None,
-                cdc_table_desc: Some(self.core.cdc_table_desc.to_protobuf()),
-                ..Default::default()
-            });
+        // We need to pass the id of upstream source job here
+        let upstream_source_id = self.core.cdc_table_desc.source_id.table_id;
+        let node_body = PbNodeBody::StreamCdcScan(StreamCdcScanNode {
+            table_id: upstream_source_id,
+            upstream_column_ids,
+            output_indices,
+            // The table desc used by backfill executor
+            state_table: Some(catalog),
+            cdc_table_desc: Some(self.core.cdc_table_desc.to_protobuf()),
+        });
 
         PbStreamNode {
             fields: self.schema().to_prost(),
@@ -275,15 +201,6 @@ impl StreamCdcTableScan {
                     fields: upstream_schema.clone(),
                     stream_key: vec![], // not used
                     ..Default::default()
-                },
-                PbStreamNode {
-                    node_body: Some(PbNodeBody::BatchPlan(batch_plan_node)),
-                    operator_id: self.batch_plan_id.0 as u64,
-                    identity: "BatchPlanNode".into(),
-                    fields: snapshot_schema,
-                    stream_key: vec![], // not used
-                    input: vec![],
-                    append_only: true,
                 },
             ],
 
@@ -302,7 +219,7 @@ impl ExprRewritable for StreamCdcTableScan {
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut core = self.core.clone();
+        let core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core).into()
     }

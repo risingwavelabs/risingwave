@@ -383,7 +383,6 @@ pub async fn start_service_as_election_leader(
             .expect("Failed to upgrade models in meta store");
     }
 
-    let prometheus_endpoint = opts.prometheus_endpoint.clone();
     let env = MetaSrvEnv::new(
         opts.clone(),
         init_system_params,
@@ -461,11 +460,11 @@ pub async fn start_service_as_election_leader(
     let dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
             dashboard_addr: *dashboard_addr,
-            prometheus_endpoint: prometheus_endpoint.clone(),
-            prometheus_client: prometheus_endpoint.as_ref().map(|x| {
+            prometheus_client: opts.prometheus_endpoint.as_ref().map(|x| {
                 use std::str::FromStr;
                 prometheus_http_query::Client::from_str(x).unwrap()
             }),
+            prometheus_selector: opts.prometheus_selector.unwrap_or_default(),
             cluster_manager: cluster_manager.clone(),
             fragment_manager: fragment_manager.clone(),
             compute_clients: ComputeClientPool::default(),

@@ -22,6 +22,7 @@ use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
+use risingwave_batch::error::BatchError;
 use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
@@ -56,7 +57,7 @@ use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
 use risingwave_stream::executor::source_executor::SourceExecutor;
 use risingwave_stream::executor::{
-    ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices,
+    ActorContext, Barrier, Executor, ExecutorInfo, MaterializeExecutor, Message, PkIndices,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -91,7 +92,7 @@ impl BatchExecutor for SingleChunkExecutor {
 }
 
 impl SingleChunkExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         yield self.chunk.unwrap()
     }
@@ -152,15 +153,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let column_descs = all_column_ids
         .iter()
         .zip_eq_fast(all_schema.fields.iter().cloned())
-        .map(|(column_id, field)| ColumnDesc {
-            data_type: field.data_type,
-            column_id: *column_id,
-            name: field.name,
-            field_descs: vec![],
-            type_name: "".to_string(),
-            generated_or_default_column: None,
-            description: None,
-        })
+        .map(|(column_id, field)| ColumnDesc::named(field.name, *column_id, field.data_type))
         .collect_vec();
     let (barrier_tx, barrier_rx) = unbounded_channel();
     let vnodes = Bitmap::from_bytes(&[0b11111111]);
@@ -171,23 +164,27 @@ async fn test_table_materialize() -> StreamResult<()> {
     // Create a `SourceExecutor` to read the changes.
     let source_executor = SourceExecutor::<PanicStateStore>::new(
         actor_ctx.clone(),
-        all_schema.clone(),
-        pk_indices.clone(),
+        ExecutorInfo {
+            schema: all_schema.clone(),
+            pk_indices: pk_indices.clone(),
+            identity: format!("SourceExecutor {:X}", 1),
+        },
         None, // There is no external stream source.
         Arc::new(StreamingMetrics::unused()),
         barrier_rx,
         system_params_manager.get_params(),
-        1,
         SourceCtrlOpts::default(),
         ConnectorParams::default(),
     );
 
     // Create a `DmlExecutor` to accept data change from users.
     let dml_executor = DmlExecutor::new(
+        ExecutorInfo {
+            schema: all_schema.clone(),
+            pk_indices: pk_indices.clone(),
+            identity: format!("DmlExecutor {:X}", 2),
+        },
         Box::new(source_executor),
-        all_schema.clone(),
-        pk_indices.clone(),
-        2,
         dml_manager.clone(),
         table_id,
         INITIAL_TABLE_VERSION_ID,
@@ -196,10 +193,12 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     let row_id_gen_executor = RowIdGenExecutor::new(
         actor_ctx,
+        ExecutorInfo {
+            schema: all_schema.clone(),
+            pk_indices: pk_indices.clone(),
+            identity: format!("RowIdGenExecutor {:X}", 3),
+        },
         Box::new(dml_executor),
-        all_schema.clone(),
-        pk_indices.clone(),
-        3,
         row_id_index,
         vnodes,
     );

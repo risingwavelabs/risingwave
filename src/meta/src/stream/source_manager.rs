@@ -45,6 +45,7 @@ use crate::MetaResult;
 
 pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
+pub type ThrottleConfig = HashMap<FragmentId, HashMap<ActorId, Option<u32>>>;
 
 pub struct SourceManager {
     pub paused: Mutex<()>,

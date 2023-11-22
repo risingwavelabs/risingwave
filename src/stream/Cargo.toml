@@ -34,7 +34,7 @@ governor = { version = "0.6", default-features = false, features = [
     "jitter",
 ] }
 hytra = "0.1.2"
-itertools = "0.11"
+itertools = "0.12"
 local_stats_alloc = { path = "../utils/local_stats_alloc" }
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }
 maplit = "1.0.2"

@@ -18,10 +18,12 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    BranchedObject, CompactionGroupInfo, HummockSnapshot, HummockVersion, HummockVersionDelta,
+    BranchedObject, CompactTaskAssignment, CompactionGroupInfo, HummockSnapshot, HummockVersion,
+    HummockVersionDelta,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -99,6 +101,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_hummock_meta_configs(&self) -> Result<HashMap<String, String>>;
 
     async fn list_event_log(&self) -> Result<Vec<EventLog>>;
+    async fn list_compact_task_assignment(&self) -> Result<Vec<CompactTaskAssignment>>;
+    async fn list_all_nodes(&self) -> Result<Vec<WorkerNode>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -246,5 +250,13 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_event_log(&self) -> Result<Vec<EventLog>> {
         self.0.list_event_log().await
+    }
+
+    async fn list_compact_task_assignment(&self) -> Result<Vec<CompactTaskAssignment>> {
+        self.0.rise_ctl_list_compact_task_assignment().await
+    }
+
+    async fn list_all_nodes(&self) -> Result<Vec<WorkerNode>> {
+        self.0.list_worker_nodes(None).await
     }
 }

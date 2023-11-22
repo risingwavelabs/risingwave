@@ -1,22 +1,6 @@
 ---
 version: "3"
 services:
-  cassandra:
-    image: cassandra:4.0
-    ports:
-      - 9042:9042
-    environment:
-      - CASSANDRA_CLUSTER_NAME=cloudinfra
-    profiles:
-      - cassandra
-  scylladb:
-    image: scylladb/scylla:5.1
-    ports:
-      - 9042:9042
-    environment:
-      - CASSANDRA_CLUSTER_NAME=cloudinfra
-    profiles:
-      - scylladb
   compactor-0:
     extends:
       file: ../../docker/docker-compose.yml
@@ -62,6 +46,26 @@ services:
       - /datagen --mode clickstream --qps 2 kafka --brokers message_queue:29092
     restart: always
     container_name: datagen
+  cockroachdb:
+    image: cockroachdb/cockroach:v23.1.11
+    command: start-single-node --insecure
+    ports:
+      - "26257:26257" # CockroachDB default port
+      - "8080:8080" # CockroachDB Web UI port
+    restart: always
+    container_name: cockroachdb
+  prepare_postgres:
+    image: postgres
+    depends_on:
+      - cockroachdb
+    command:
+      - /bin/sh
+      - -c
+      - "psql postgresql://root@cockroachdb:26257/defaultdb < postgres_prepare.sql"
+    volumes:
+      - "./postgres_prepare.sql:/postgres_prepare.sql"
+    container_name: prepare_postgres
+    restart: on-failure
 volumes:
   compute-node-0:
     external: false

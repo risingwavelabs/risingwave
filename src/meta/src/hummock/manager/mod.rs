@@ -251,6 +251,34 @@ pub enum CompactionResumeTrigger {
     TaskReport { original_task_num: usize },
 }
 
+pub struct CommitEpochInfo {
+    pub sstables: Vec<ExtendedSstableInfo>,
+    pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+}
+
+impl CommitEpochInfo {
+    pub fn new(
+        sstables: Vec<ExtendedSstableInfo>,
+        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+    ) -> Self {
+        Self {
+            sstables,
+            sst_to_context,
+        }
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub(crate) fn for_test(
+        sstables: Vec<impl Into<ExtendedSstableInfo>>,
+        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+    ) -> Self {
+        Self::new(
+            sstables.into_iter().map(Into::into).collect(),
+            sst_to_context,
+        )
+    }
+}
+
 impl HummockManager {
     pub async fn new(
         env: MetaSrvEnv,
@@ -352,7 +380,8 @@ impl HummockManager {
             if let risingwave_object_store::object::ObjectStoreImpl::S3(s3) = object_store.as_ref()
                 && !env.opts.do_not_config_object_storage_lifecycle
             {
-                let is_bucket_expiration_configured = s3.inner().configure_bucket_lifecycle(state_store_dir).await;
+                let is_bucket_expiration_configured =
+                    s3.inner().configure_bucket_lifecycle(state_store_dir).await;
                 if is_bucket_expiration_configured {
                     return Err(ObjectError::internal("Cluster cannot start with object expiration configured for bucket because RisingWave data will be lost when object expiration kicks in.
                     Please disable object expiration and restart the cluster.")
@@ -628,7 +657,7 @@ impl HummockManager {
 
     /// Unpin all pins which belongs to `context_id` and has an id which is older than
     /// `unpin_before`. All versions >= `unpin_before` will be treated as if they are all pinned by
-    /// this `context_id` so they will not be vacummed.
+    /// this `context_id` so they will not be vacuumed.
     #[named]
     pub async fn unpin_version_before(
         &self,
@@ -645,6 +674,12 @@ impl HummockManager {
                 context_id,
                 min_pinned_id: 0,
             },
+        );
+        assert!(
+            context_pinned_version.min_pinned_id <= unpin_before,
+            "val must be monotonically non-decreasing. old = {}, new = {}.",
+            context_pinned_version.min_pinned_id,
+            unpin_before
         );
         context_pinned_version.min_pinned_id = unpin_before;
         commit_multi_var!(
@@ -1402,10 +1437,12 @@ impl HummockManager {
     pub async fn commit_epoch(
         &self,
         epoch: HummockEpoch,
-        sstables: Vec<impl Into<ExtendedSstableInfo>>,
-        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
+        commit_info: CommitEpochInfo,
     ) -> Result<Option<HummockSnapshot>> {
-        let mut sstables = sstables.into_iter().map(|s| s.into()).collect_vec();
+        let CommitEpochInfo {
+            mut sstables,
+            sst_to_context,
+        } = commit_info;
         let mut versioning_guard = write_lock!(self, versioning).await;
         let _timer = start_measure_real_process_timer!(self);
         // Prevent commit new epochs if this flag is set

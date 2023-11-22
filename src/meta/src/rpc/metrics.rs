@@ -25,7 +25,9 @@ use prometheus::{
     register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
     HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
 };
+use risingwave_common::metrics::LabelGuardedIntGaugeVec;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common::register_guarded_int_gauge_vec_with_registry;
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_object_store::object::object_metrics::{
     ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
@@ -157,7 +159,7 @@ pub struct MetaMetrics {
 
     /// ********************************** Source ************************************
     /// supervisor for which source is still up.
-    pub source_is_up: IntGaugeVec,
+    pub source_is_up: LabelGuardedIntGaugeVec<2>,
     pub source_enumerator_metrics: Arc<SourceEnumeratorMetrics>,
 
     /// ********************************** Fragment ************************************
@@ -501,7 +503,7 @@ impl MetaMetrics {
         );
         let recovery_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
-        let source_is_up = register_int_gauge_vec_with_registry!(
+        let source_is_up = register_guarded_int_gauge_vec_with_registry!(
             "source_status_is_up",
             "source is up or not",
             &["source_id", "source_name"],
@@ -768,7 +770,7 @@ pub fn start_fragment_info_monitor(
             meta_metrics.actor_info.reset();
             meta_metrics.table_info.reset();
             let workers: HashMap<u32, String> = cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, None)
+                .list_worker_node(Some(WorkerType::ComputeNode), None)
                 .await
                 .into_iter()
                 .map(|worker_node| match worker_node.host {

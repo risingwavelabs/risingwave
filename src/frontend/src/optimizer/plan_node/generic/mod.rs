@@ -42,6 +42,12 @@ mod source;
 pub use source::*;
 mod scan;
 pub use scan::*;
+mod sys_scan;
+pub use sys_scan::*;
+
+mod cdc_scan;
+pub use cdc_scan::*;
+
 mod union;
 pub use union::*;
 mod top_n;

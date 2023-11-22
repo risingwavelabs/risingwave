@@ -105,10 +105,13 @@ pub enum ErrorCode {
         #[backtrace]
         BoxedError,
     ),
-    #[error("BatchError: {0}")]
+    // TODO(error-handling): there's a limitation that `#[transparent]` can't be used with `#[backtrace]` if no `#[from]`
+    // So we emulate a transparent error with "{0}" display here.
+    #[error("{0}")]
     BatchError(
         #[source]
         #[backtrace]
+        // `BatchError`
         BoxedError,
     ),
     #[error("Array error: {0}")]
@@ -123,9 +126,12 @@ pub enum ErrorCode {
         #[source]
         BoxedError,
     ),
-    #[error(transparent)]
+    // TODO(error-handling): there's a limitation that `#[transparent]` can't be used with `#[backtrace]` if no `#[from]`
+    // So we emulate a transparent error with "{0}" display here.
+    #[error("{0}")]
     RpcError(
-        // #[backtrace] // TODO(error-handling): there's a limitation that `#[transparent]` can't be used with `#[backtrace]` if no `#[from]`
+        #[source]
+        #[backtrace]
         // `tonic::transport::Error`, `TonicStatusWrapper`, or `RpcError`
         BoxedError,
     ),
@@ -156,6 +162,8 @@ pub enum ErrorCode {
     ),
     #[error("Task not found")]
     TaskNotFound,
+    #[error("Session not found")]
+    SessionNotFound,
     #[error("Item not found: {0}")]
     ItemNotFound(String),
     #[error("Invalid input syntax: {0}")]

@@ -123,8 +123,11 @@ pub struct MetaOpts {
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
 
-    /// The prometheus endpoint for dashboard service.
+    /// The Prometheus endpoint for dashboard service.
     pub prometheus_endpoint: Option<String>,
+
+    /// The additional selector used when querying Prometheus.
+    pub prometheus_selector: Option<String>,
 
     /// The VPC id of the cluster.
     pub vpc_id: Option<String>,
@@ -174,6 +177,7 @@ pub struct MetaOpts {
     pub compaction_config: Option<CompactionConfig>,
     pub event_log_enabled: bool,
     pub event_log_channel_max_size: u32,
+    pub advertise_addr: String,
 }
 
 impl MetaOpts {
@@ -197,6 +201,7 @@ impl MetaOpts {
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
             prometheus_endpoint: None,
+            prometheus_selector: None,
             vpc_id: None,
             security_group_id: None,
             connector_rpc_endpoint: None,
@@ -216,6 +221,7 @@ impl MetaOpts {
             compaction_config: None,
             event_log_enabled: false,
             event_log_channel_max_size: 1,
+            advertise_addr: "".to_string(),
         }
     }
 }
