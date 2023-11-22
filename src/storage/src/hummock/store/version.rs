@@ -39,7 +39,7 @@ use super::StagingDataIterator;
 use crate::error::StorageResult;
 use crate::hummock::iterator::{
     ConcatIterator, ForwardMergeRangeIterator, HummockIteratorUnion, OrderedMergeIteratorInner,
-    UnorderedMergeIteratorInner, UserIterator,
+    SkipWatermarkIterator, UnorderedMergeIteratorInner, UserIterator,
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -563,7 +563,11 @@ pub fn read_filter_for_batch(
     }
 
     if let Some(read_watermarks) = &mut table_watermark {
-        read_watermarks.vnode_watermarks.sort();
+        read_watermarks.vnode_watermarks = read_watermarks
+            .vnode_watermarks
+            .drain(..)
+            .sorted_by_key(|(vnode, _)| *vnode)
+            .collect();
     }
 
     Ok((imm_vec, sst_vec, table_watermark))
@@ -629,12 +633,7 @@ impl HummockVersionReader {
         table_key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
-        read_version_tuple: (
-            Vec<ImmutableMemtable>,
-            Vec<SstableInfo>,
-            CommittedVersion,
-            Option<ReadTableWatermark>,
-        ),
+        read_version_tuple: ReadVersionTuple,
     ) -> StorageResult<Option<Bytes>> {
         let (imms, uncommitted_ssts, committed_version, watermark) = read_version_tuple;
         let key_vnode = table_key.vnode_part();
@@ -797,12 +796,7 @@ impl HummockVersionReader {
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-        read_version_tuple: (
-            Vec<ImmutableMemtable>,
-            Vec<SstableInfo>,
-            CommittedVersion,
-            Option<ReadTableWatermark>,
-        ),
+        read_version_tuple: ReadVersionTuple,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
         self.iter_inner(
             table_key_range,
@@ -842,12 +836,7 @@ impl HummockVersionReader {
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-        read_version_tuple: (
-            Vec<ImmutableMemtable>,
-            Vec<SstableInfo>,
-            CommittedVersion,
-            Option<ReadTableWatermark>,
-        ),
+        read_version_tuple: ReadVersionTuple,
         mem_table: Option<MemTableHummockIterator<'b>>,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIteratorInner<'b>>> {
         let table_id_string = read_options.table_id.to_string();
@@ -1071,6 +1060,13 @@ impl HummockVersionReader {
                 .chain(mem_table.into_iter().map(HummockIteratorUnion::Fourth)),
         );
 
+        let watermark = watermark
+            .into_iter()
+            .map(|watermark| (read_options.table_id, watermark))
+            .collect();
+
+        let skip_watermark_iter = SkipWatermarkIterator::new(merge_iter, watermark);
+
         let user_key_range = (
             user_key_range.0.map(|key| key.cloned()),
             user_key_range.1.map(|key| key.cloned()),
@@ -1079,7 +1075,7 @@ impl HummockVersionReader {
         // the epoch_range left bound for iterator read
         let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
         let mut user_iter = UserIterator::new(
-            merge_iter,
+            skip_watermark_iter,
             user_key_range,
             epoch,
             min_epoch,

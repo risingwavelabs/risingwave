@@ -42,14 +42,15 @@ use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Thir
 
 mod concat_delete_range_iterator;
 mod delete_range_iterator;
+mod skip_watermark;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
-
 pub use delete_range_iterator::{
     DeleteRangeIterator, ForwardMergeRangeIterator, RangeIteratorTyped,
 };
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::EpochWithGap;
+pub use skip_watermark::*;
 
 use crate::monitor::StoreLocalStatistic;
 

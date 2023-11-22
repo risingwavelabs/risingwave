@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::iter::once;
 use std::ops::Bound::Included;
 use std::sync::Arc;
@@ -29,9 +29,10 @@ use tracing::warn;
 use crate::key::{vnode_range, TableKeyRange};
 use crate::HummockEpoch;
 
+#[derive(Clone)]
 pub struct ReadTableWatermark {
     pub direction: WatermarkDirection,
-    pub vnode_watermarks: Vec<(VirtualNode, Bytes)>,
+    pub vnode_watermarks: VecDeque<(VirtualNode, Bytes)>,
 }
 
 impl ReadTableWatermark {
@@ -77,12 +78,12 @@ impl TableWatermarksIndex {
         epoch: HummockEpoch,
         table_key_range: &TableKeyRange,
     ) -> Option<ReadTableWatermark> {
-        let mut ret = Vec::new();
+        let mut ret = VecDeque::new();
         let (left, right) = vnode_range(table_key_range);
         for i in left..right {
             let vnode = VirtualNode::from_index(i);
             if let Some(watermark) = self.table_watermark(vnode, epoch) {
-                ret.push((vnode, watermark))
+                ret.push_back((vnode, watermark))
             }
         }
         if ret.is_empty() {
