@@ -16,6 +16,7 @@
 #![feature(lint_reasons)]
 #![feature(lazy_cell)]
 #![feature(let_chains)]
+#![feature(try_blocks)]
 
 pub mod client;
 pub mod cluster;

@@ -16,6 +16,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use itertools::Itertools;
 use rand::{thread_rng, Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
 use sqllogictest::{DefaultColumnType, ParallelTestError, Record};
@@ -72,23 +73,44 @@ impl SqlCmd {
 
 fn extract_sql_command(sql: &str) -> SqlCmd {
     let sql = sql.to_lowercase();
-    let mut tokens = sql.split_whitespace();
-    fn next_token<'a>(tokens: &mut impl Iterator<Item = &'a str>) -> &'a str {
-        tokens.next().unwrap()
-    }
-    match next_token(&mut tokens) {
-        "create" => match next_token(&mut tokens) {
-            "materialized" => {
-                // view
-                tokens.next();
-                // name
-                let name = next_token(&mut tokens).to_string();
-                SqlCmd::CreateMaterializedView { name }
-            }
-            _ => SqlCmd::Create {
-                is_create_table_as: is_create_table_as(&sql),
-            },
-        },
+    let tokens = sql.split_whitespace();
+    let mut tokens = tokens.multipeek();
+    let first_token = tokens.next().unwrap_or("");
+
+    match first_token {
+        // Note(kwannoel):
+        // It's entirely possible for a malformed command to be parsed as a `create table as`
+        // BUT an error should be expected for such a test.
+        // So it should still succeed.
+        "create" => {
+            let result: Option<SqlCmd> = try {
+                match tokens.next()? {
+                    "materialized" => {
+                        // view
+                        tokens.next()?;
+
+                        // if not exists | name
+                        let next = *tokens.peek()?;
+                        if "if" == next
+                            && let Some("not") = tokens.peek().cloned()
+                            && let Some("exists") = tokens.peek().cloned() {
+                            tokens.next();
+                            tokens.next();
+                            tokens.next();
+                            let name = tokens.next()?.to_string();
+                            SqlCmd::CreateMaterializedView { name }
+                        } else {
+                            let name = next.to_string();
+                            SqlCmd::CreateMaterializedView { name }
+                        }
+                    }
+                    _ => SqlCmd::Create {
+                        is_create_table_as: is_create_table_as(&sql),
+                    },
+                }
+            };
+            result.unwrap_or(SqlCmd::Others)
+        }
         "set" => {
             if sql.contains("background_ddl") {
                 let enable = sql.contains("true");
