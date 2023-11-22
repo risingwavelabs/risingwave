@@ -818,6 +818,21 @@ impl MetaClient {
         Ok(resp)
     }
 
+    pub async fn apply_throttle(
+        &self,
+        kind: PbThrottleTarget,
+        id: u32,
+        rate: Option<u32>,
+    ) -> Result<ApplyThrottleResponse> {
+        let request = ApplyThrottleRequest {
+            kind: kind as i32,
+            id,
+            rate,
+        };
+        let resp = self.inner.apply_throttle(request).await?;
+        Ok(resp)
+    }
+
     pub async fn get_cluster_info(&self) -> Result<GetClusterInfoResponse> {
         let request = GetClusterInfoRequest {};
         let resp = self.inner.get_cluster_info(request).await?;
@@ -1764,6 +1779,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, flush, FlushRequest, FlushResponse }
             ,{ stream_client, pause, PauseRequest, PauseResponse }
             ,{ stream_client, resume, ResumeRequest, ResumeResponse }
+             ,{ stream_client, apply_throttle, ApplyThrottleRequest, ApplyThrottleResponse }
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ stream_client, list_table_fragment_states, ListTableFragmentStatesRequest, ListTableFragmentStatesResponse }

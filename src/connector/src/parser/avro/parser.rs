@@ -158,7 +158,7 @@ impl AvroParserConfig {
                     "avro upsert without schema registry is not supported".to_string(),
                 )));
             }
-            let url = url.get(0).unwrap();
+            let url = url.first().unwrap();
             let schema_content = match url.scheme() {
                 "file" => read_schema_from_local(url.path()),
                 "s3" => {
@@ -584,7 +584,7 @@ mod test {
                 Value::Union(0, Box::new(Value::Null)),
             ),
         ];
-        let null_record_value = reader.get(0).unwrap().as_ref().unwrap();
+        let null_record_value = reader.first().unwrap().as_ref().unwrap();
         match null_record_value {
             Value::Record(values) => {
                 assert_eq!(values, &null_record_expected)

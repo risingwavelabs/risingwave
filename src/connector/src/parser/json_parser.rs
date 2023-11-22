@@ -155,7 +155,7 @@ pub async fn schema_to_columns(
             .await?
             .content
     } else {
-        let url = url.get(0).unwrap();
+        let url = url.first().unwrap();
         match url.scheme() {
             "file" => read_schema_from_local(url.path()),
             "https" | "http" => read_schema_from_http(url).await,

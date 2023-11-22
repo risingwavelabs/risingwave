@@ -28,7 +28,7 @@ pub use upsert::UpsertFormatter;
 
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
 use super::encoder::template::TemplateEncoder;
-use super::encoder::{KafkaConnectParams, TimestamptzHandlingMode};
+use super::encoder::{DateHandlingMode, KafkaConnectParams, TimestamptzHandlingMode};
 use super::redis::{KEY_FORMAT, VALUE_FORMAT};
 use crate::sink::encoder::{
     AvroEncoder, AvroHeader, JsonEncoder, ProtoEncoder, TimestampHandlingMode,
@@ -99,6 +99,7 @@ impl SinkFormatterImpl {
                     JsonEncoder::new(
                         schema.clone(),
                         Some(pk_indices.clone()),
+                        DateHandlingMode::FromCe,
                         TimestampHandlingMode::Milli,
                         timestamptz_mode,
                     )
@@ -109,6 +110,7 @@ impl SinkFormatterImpl {
                         let val_encoder = JsonEncoder::new(
                             schema,
                             None,
+                            DateHandlingMode::FromCe,
                             TimestampHandlingMode::Milli,
                             timestamptz_mode,
                         );
@@ -169,12 +171,14 @@ impl SinkFormatterImpl {
                         let mut key_encoder = JsonEncoder::new(
                             schema.clone(),
                             Some(pk_indices),
+                            DateHandlingMode::FromCe,
                             TimestampHandlingMode::Milli,
                             timestamptz_mode,
                         );
                         let mut val_encoder = JsonEncoder::new(
                             schema,
                             None,
+                            DateHandlingMode::FromCe,
                             TimestampHandlingMode::Milli,
                             timestamptz_mode,
                         );

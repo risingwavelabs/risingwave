@@ -100,7 +100,7 @@ impl StreamNode for StreamStatelessSimpleAgg {
             intermediate_state_table: None,
             is_append_only: self.input().append_only(),
             distinct_dedup_tables: Default::default(),
-            version: AggNodeVersion::Issue12140 as _,
+            version: AggNodeVersion::Issue13465 as _,
         })
     }
 }

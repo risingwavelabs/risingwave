@@ -313,9 +313,11 @@ impl CatalogController {
 
                 visit_stream_node(&mut nodes, |body| {
                     if let NodeBody::Merge(m) = body
-                        && let Some(upstream_actor_ids) = upstream_fragment_actors.get(&(m.upstream_fragment_id as _))
+                        && let Some(upstream_actor_ids) =
+                            upstream_fragment_actors.get(&(m.upstream_fragment_id as _))
                     {
-                        m.upstream_actor_id = upstream_actor_ids.iter().map(|id| *id as _).collect();
+                        m.upstream_actor_id =
+                            upstream_actor_ids.iter().map(|id| *id as _).collect();
                     }
                 });
 

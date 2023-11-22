@@ -128,7 +128,7 @@ impl StreamNode for StreamSimpleAgg {
                 })
                 .collect(),
             row_count_index: self.row_count_idx as u32,
-            version: PbAggNodeVersion::Issue12140 as _,
+            version: PbAggNodeVersion::Issue13465 as _,
         })
     }
 }

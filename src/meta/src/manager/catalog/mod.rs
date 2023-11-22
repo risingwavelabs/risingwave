@@ -1282,7 +1282,9 @@ impl CatalogManager {
                     }
 
                     // cdc source streaming job
-                    if let Some(info) = source.info && info.cdc_source_job {
+                    if let Some(info) = source.info
+                        && info.cdc_source_job
+                    {
                         all_cdc_source_ids.insert(source.id);
                         let source_table_fragments = fragment_manager
                             .select_table_fragments_by_table_id(&source.id.into())

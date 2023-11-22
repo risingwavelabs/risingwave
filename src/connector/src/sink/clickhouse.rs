@@ -569,7 +569,8 @@ async fn query_column_engine_from_ck(
         )));
     }
 
-    let clickhouse_engine = ClickHouseEngine::from_query_engine(clickhouse_engine.get(0).unwrap())?;
+    let clickhouse_engine =
+        ClickHouseEngine::from_query_engine(clickhouse_engine.first().unwrap())?;
 
     if let Some(sign) = &clickhouse_engine.get_sign_name() {
         clickhouse_column.retain(|a| sign.ne(&a.name))

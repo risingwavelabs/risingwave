@@ -423,7 +423,15 @@ impl PlanRef {
                     .map(|mut c| Condition {
                         conjunctions: c
                             .conjunctions
-                            .extract_if(|e| e.count_nows() == 0 && e.is_pure())
+                            .extract_if(|e| {
+                                // If predicates contain now, impure or correlated input ref, don't push through share operator.
+                                // The predicate with now() function is regarded as a temporal filter predicate, which will be transformed to a temporal filter operator and can not do the OR operation with other predicates.
+                                let mut finder = ExprCorrelatedIdFinder::default();
+                                finder.visit_expr(e);
+                                e.count_nows() == 0
+                                    && e.is_pure()
+                                    && !finder.has_correlated_input_ref()
+                            })
                             .collect(),
                     })
                     .reduce(|a, b| a.or(b))
@@ -923,9 +931,10 @@ pub use stream_union::StreamUnion;
 pub use stream_values::StreamValues;
 pub use stream_watermark_filter::StreamWatermarkFilter;
 
-use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
+use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_rewriter::PlanCloner;
+use crate::optimizer::plan_visitor::ExprCorrelatedIdFinder;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition, DynEq, DynHash, Endo, Layer, Visit};
 

@@ -125,8 +125,10 @@ impl SstableIterator {
             return Ok(());
         }
         // Maybe the previous preload stream breaks on some cached block, so here we can try to preload some data again
-        if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx
-            && let Ok(preload_stream) = self.sstable_store
+        if self.preload_stream.is_none()
+            && idx + 1 < self.preload_end_block_idx
+            && let Ok(preload_stream) = self
+                .sstable_store
                 .preload_blocks(self.sst.value(), idx, self.preload_end_block_idx)
                 .await
         {
