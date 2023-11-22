@@ -91,6 +91,11 @@ datatypes:
     zero: "'00:00:00'"
     minimum: "'-838:59:59.000000'"
     maximum: "'838:59:59.000000'"
+  - name: datetime
+    zero: "'1000-01-01 00:00:00.000000'"
+    minimum: "'1000-01-01 00:00:00.000000'"
+    maximum: "'9999-12-31 23:59:59.499999'"
+    rw_type: timestamp
   - name: timestamp
     aliases:
       - timestamp without time zone
