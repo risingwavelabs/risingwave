@@ -46,8 +46,7 @@ use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
 pub use relation::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
-    BoundWindowTableFunction, Relation, ResolveQualifiedNameError,
-    WindowTableFunctionKind,
+    BoundWindowTableFunction, Relation, ResolveQualifiedNameError, WindowTableFunctionKind,
 };
 use risingwave_common::error::ErrorCode;
 pub use select::{BoundDistinct, BoundSelect};

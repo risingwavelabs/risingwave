@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
 

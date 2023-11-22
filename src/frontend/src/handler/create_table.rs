@@ -708,7 +708,9 @@ fn gen_table_plan_inner(
         row_id_index: row_id_index.map(|i| i as _),
         columns: {
             let mut source_columns = columns.clone();
-            if let Some(t) = cdc_table_type && t.can_backfill() {
+            if let Some(t) = cdc_table_type
+                && t.can_backfill()
+            {
                 // Append the offset column to be used in the cdc backfill
                 let offset_column = ColumnCatalog::offset_column();
                 source_columns.push(offset_column);

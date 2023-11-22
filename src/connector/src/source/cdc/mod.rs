@@ -25,7 +25,6 @@ use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
 pub use source::*;
 
-
 use crate::source::{SourceProperties, SplitImpl, TryFromHashmap};
 use crate::{for_all_classified_sources, impl_cdc_source_type};
 

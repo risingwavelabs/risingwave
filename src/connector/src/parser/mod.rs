@@ -182,9 +182,13 @@ impl MessageMeta<'_> {
                             .to_scalar_value()
                     })
                     .into()
-            },
+            }
             SourceColumnType::Meta if let SourceMeta::DebeziumCdc(cdc_meta) = self.meta => {
-                assert_eq!(desc.name.as_str(), TABLE_NAME_COLUMN_NAME, "unexpected cdc meta column name");
+                assert_eq!(
+                    desc.name.as_str(),
+                    TABLE_NAME_COLUMN_NAME,
+                    "unexpected cdc meta column name"
+                );
                 Datum::Some(cdc_meta.full_table_name.as_str().into()).into()
             }
 

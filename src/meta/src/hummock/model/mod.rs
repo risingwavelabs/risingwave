@@ -23,10 +23,6 @@ mod version_stats;
 
 pub use compaction_group_config::CompactionGroup;
 
-
-
-
-
 /// Column family names for hummock.
 /// Deprecated `cf_name` should be reserved for backward compatibility.
 const HUMMOCK_VERSION_DELTA_CF_NAME: &str = "cf/hummock_1";
