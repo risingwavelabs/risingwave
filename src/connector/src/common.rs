@@ -34,7 +34,6 @@ use time::OffsetDateTime;
 use url::Url;
 use with_options::WithOptions;
 
-use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::load_file_descriptor_from_s3;
 use crate::deserialize_duration_from_string;
 use crate::sink::SinkError;
@@ -49,6 +48,98 @@ pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
 pub struct AwsPrivateLinkItem {
     pub az_id: Option<String>,
     pub port: u16,
+}
+
+use aws_config::default_provider::region::DefaultRegionChain;
+use aws_config::sts::AssumeRoleProvider;
+use aws_credential_types::provider::SharedCredentialsProvider;
+use aws_types::region::Region;
+use aws_types::SdkConfig;
+
+/// A flatten config map for aws auth.
+#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
+pub struct AwsAuthProps {
+    pub region: Option<String>,
+    #[serde(alias = "endpoint_url")]
+    pub endpoint: Option<String>,
+    pub access_key: Option<String>,
+    pub secret_key: Option<String>,
+    pub session_token: Option<String>,
+    pub arn: Option<String>,
+    /// This field was added for kinesis. Not sure if it's useful for other connectors.
+    /// Please ignore it in the documentation for now.
+    pub external_id: Option<String>,
+    pub profile: Option<String>,
+}
+
+impl AwsAuthProps {
+    async fn build_region(&self) -> anyhow::Result<Region> {
+        if let Some(region_name) = &self.region {
+            Ok(Region::new(region_name.clone()))
+        } else {
+            let mut region_chain = DefaultRegionChain::builder();
+            if let Some(profile_name) = &self.profile {
+                region_chain = region_chain.profile_name(profile_name);
+            }
+
+            Ok(region_chain
+                .build()
+                .region()
+                .await
+                .ok_or_else(|| anyhow::format_err!("region should be provided"))?)
+        }
+    }
+
+    fn build_credential_provider(&self) -> anyhow::Result<SharedCredentialsProvider> {
+        if self.access_key.is_some() && self.secret_key.is_some() {
+            Ok(SharedCredentialsProvider::new(
+                aws_credential_types::Credentials::from_keys(
+                    self.access_key.as_ref().unwrap(),
+                    self.secret_key.as_ref().unwrap(),
+                    self.session_token.clone(),
+                ),
+            ))
+        } else {
+            Err(anyhow!(
+                "Both \"access_key\" and \"secret_access\" are required."
+            ))
+        }
+    }
+
+    async fn with_role_provider(
+        &self,
+        credential: SharedCredentialsProvider,
+    ) -> anyhow::Result<SharedCredentialsProvider> {
+        if let Some(role_name) = &self.arn {
+            let region = self.build_region().await?;
+            let mut role = AssumeRoleProvider::builder(role_name)
+                .session_name("RisingWave")
+                .region(region);
+            if let Some(id) = &self.external_id {
+                role = role.external_id(id);
+            }
+            let provider = role.build_from_provider(credential).await;
+            Ok(SharedCredentialsProvider::new(provider))
+        } else {
+            Ok(credential)
+        }
+    }
+
+    pub async fn build_config(&self) -> anyhow::Result<SdkConfig> {
+        let region = self.build_region().await?;
+        let credentials_provider = self
+            .with_role_provider(self.build_credential_provider()?)
+            .await?;
+        let mut config_loader = aws_config::from_env()
+            .region(region)
+            .credentials_provider(credentials_provider);
+
+        if let Some(endpoint) = self.endpoint.as_ref() {
+            config_loader = config_loader.endpoint_url(endpoint);
+        }
+
+        Ok(config_loader.load().await)
+    }
 }
 
 #[serde_as]
@@ -282,8 +373,7 @@ pub struct PulsarOauthCommon {
     pub scope: Option<String>,
 
     #[serde(flatten)]
-    /// required keys refer to [`crate::aws_utils::AWS_DEFAULT_CONFIG`]
-    pub s3_credentials: HashMap<String, String>,
+    pub aws_auth_props: AwsAuthProps,
 }
 
 impl PulsarCommon {
@@ -294,16 +384,8 @@ impl PulsarCommon {
             let url = Url::parse(&oauth.credentials_url)?;
             match url.scheme() {
                 "s3" => {
-                    let credentials = load_file_descriptor_from_s3(
-                        &url,
-                        &AwsAuthProps::from_pairs(
-                            oauth
-                                .s3_credentials
-                                .iter()
-                                .map(|(k, v)| (k.as_str(), v.as_str())),
-                        ),
-                    )
-                    .await?;
+                    let credentials =
+                        load_file_descriptor_from_s3(&url, &oauth.aws_auth_props).await?;
                     let mut f = NamedTempFile::new()?;
                     f.write_all(&credentials)?;
                     f.as_file().sync_all()?;

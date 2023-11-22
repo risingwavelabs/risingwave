@@ -36,8 +36,8 @@ use yup_oauth2::ServiceAccountKey;
 use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
 use super::writer::LogSinkerOf;
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
-use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::load_file_descriptor_from_s3;
+use crate::common::AwsAuthProps;
 use crate::sink::writer::SinkWriterExt;
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriter, SinkWriterParam,
@@ -59,8 +59,7 @@ pub struct BigQueryCommon {
     #[serde(rename = "bigquery.table")]
     pub table: String,
     #[serde(flatten)]
-    /// required keys refer to [`crate::aws_utils::AWS_DEFAULT_CONFIG`]
-    pub s3_credentials: HashMap<String, String>,
+    pub aws_auth_props: AwsAuthProps,
 }
 
 impl BigQueryCommon {
@@ -73,16 +72,9 @@ impl BigQueryCommon {
         } else if let Some(s3_path) = &self.s3_path {
             let url =
                 Url::parse(s3_path).map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
-            let auth_json = load_file_descriptor_from_s3(
-                &url,
-                &AwsAuthProps::from_pairs(
-                    self.s3_credentials
-                        .iter()
-                        .map(|(k, v)| (k.as_str(), v.as_str())),
-                ),
-            )
-            .await
-            .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
+            let auth_json = load_file_descriptor_from_s3(&url, &self.aws_auth_props)
+                .await
+                .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
             serde_json::from_slice::<ServiceAccountKey>(&auth_json)
                 .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?
         } else {
