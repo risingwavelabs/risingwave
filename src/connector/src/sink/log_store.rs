@@ -16,7 +16,6 @@ use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::future::{poll_fn, Future};
-use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -121,7 +120,11 @@ pub enum LogStoreReadItem {
 
 pub trait LogWriter: Send {
     /// Initialize the log writer with an epoch
-    fn init(&mut self, epoch: EpochPair) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+    fn init(
+        &mut self,
+        epoch: EpochPair,
+        pause_read_on_bootstrap: bool,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 
     /// Write a stream chunk to the log writer
     fn write_chunk(
@@ -141,6 +144,10 @@ pub trait LogWriter: Send {
         &mut self,
         new_vnodes: Arc<Bitmap>,
     ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+
+    fn pause(&mut self) -> LogStoreResult<()>;
+
+    fn resume(&mut self) -> LogStoreResult<()>;
 }
 
 pub trait LogReader: Send + Sized + 'static {
@@ -258,14 +265,18 @@ pub struct MonitoredLogWriter<W: LogWriter> {
 }
 
 impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
-    async fn init(&mut self, epoch: EpochPair) -> LogStoreResult<()> {
+    async fn init(
+        &mut self,
+        epoch: EpochPair,
+        pause_read_on_bootstrap: bool,
+    ) -> LogStoreResult<()> {
         self.metrics
             .log_store_first_write_epoch
             .set(epoch.curr as _);
         self.metrics
             .log_store_latest_write_epoch
             .set(epoch.curr as _);
-        self.inner.init(epoch).await
+        self.inner.init(epoch, pause_read_on_bootstrap).await
     }
 
     async fn write_chunk(&mut self, chunk: StreamChunk) -> LogStoreResult<()> {
@@ -292,6 +303,14 @@ impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
     async fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> LogStoreResult<()> {
         self.inner.update_vnode_bitmap(new_vnodes).await
     }
+
+    fn pause(&mut self) -> LogStoreResult<()> {
+        self.inner.pause()
+    }
+
+    fn resume(&mut self) -> LogStoreResult<()> {
+        self.inner.resume()
+    }
 }
 
 #[easy_ext::ext(LogWriterExt)]
@@ -317,74 +336,15 @@ impl<W> PausableLogWriter<W> {
         let _ = self
             .is_paused
             .send(true)
-            .inspect_err(|e| error!("unable to set pause"));
+            .inspect_err(|_| error!("unable to set pause"));
     }
 
     pub fn resume(&mut self) {
         let _ = self
             .is_paused
             .send(false)
-            .inspect_err(|e| error!("unable to set resume"));
+            .inspect_err(|_| error!("unable to set resume"));
     }
-}
-
-impl<W> Deref for PausableLogWriter<W> {
-    type Target = W;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<W> DerefMut for PausableLogWriter<W> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
-
-pub struct PausableLogReader<R: LogReader> {
-    inner: R,
-    is_paused: watch::Receiver<bool>,
-}
-
-impl<R: LogReader> LogReader for PausableLogReader<R> {
-    fn init(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
-        self.inner.init()
-    }
-
-    async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
-        while *self.is_paused.borrow_and_update() {
-            self.is_paused
-                .changed()
-                .await
-                .map_err(|e| anyhow!("unable to subscribe resume"))?;
-        }
-        self.inner.next_item().await
-    }
-
-    fn truncate(
-        &mut self,
-        offset: TruncateOffset,
-    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
-        self.inner.truncate(offset)
-    }
-}
-
-pub fn pausable_log_store<R: LogReader, W: LogWriter>(
-    reader: R,
-    writer: W,
-) -> (PausableLogReader<R>, PausableLogWriter<W>) {
-    let (tx, rx) = watch::channel(false);
-    (
-        PausableLogReader {
-            inner: reader,
-            is_paused: rx,
-        },
-        PausableLogWriter {
-            inner: writer,
-            is_paused: tx,
-        },
-    )
 }
 
 enum DeliveryFutureManagerItem<F> {

@@ -22,6 +22,7 @@ use risingwave_connector::sink::{SinkParam, SinkWriterParam};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::store::NewLocalOptions;
 use risingwave_storage::StateStore;
+use tokio::sync::watch;
 
 use crate::common::log_store_impl::kv_log_store::buffer::new_log_store_buffer;
 use crate::common::log_store_impl::kv_log_store::reader::KvLogStoreReader;
@@ -203,6 +204,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
 
     async fn build(self) -> (Self::Reader, Self::Writer) {
         let table_id = TableId::new(self.table_catalog.id);
+        let (pause_tx, pause_rx) = watch::channel(false);
         let serde = LogStoreRowSerde::new(&self.table_catalog, self.vnodes);
         let local_state_store = self
             .state_store
@@ -226,9 +228,17 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             serde.clone(),
             rx,
             self.metrics.clone(),
+            pause_rx,
         );
 
-        let writer = KvLogStoreWriter::new(table_id, local_state_store, serde, tx, self.metrics);
+        let writer = KvLogStoreWriter::new(
+            table_id,
+            local_state_store,
+            serde,
+            tx,
+            self.metrics,
+            pause_tx,
+        );
 
         (reader, writer)
     }
@@ -292,7 +302,7 @@ mod tests {
             .max_committed_epoch
             + 1;
         writer
-            .init(EpochPair::new_test_epoch(epoch1))
+            .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
@@ -385,7 +395,7 @@ mod tests {
             .max_committed_epoch
             + 1;
         writer
-            .init(EpochPair::new_test_epoch(epoch1))
+            .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();
@@ -464,7 +474,7 @@ mod tests {
         );
         let (mut reader, mut writer) = factory.build().await;
         writer
-            .init(EpochPair::new_test_epoch(epoch3))
+            .init(EpochPair::new_test_epoch(epoch3), false)
             .await
             .unwrap();
         reader.init().await.unwrap();
@@ -553,7 +563,7 @@ mod tests {
             .max_committed_epoch
             + 1;
         writer
-            .init(EpochPair::new_test_epoch(epoch1))
+            .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1_1.clone()).await.unwrap();
@@ -657,7 +667,7 @@ mod tests {
         let (mut reader, mut writer) = factory.build().await;
 
         writer
-            .init(EpochPair::new_test_epoch(epoch3))
+            .init(EpochPair::new_test_epoch(epoch3), false)
             .await
             .unwrap();
 
@@ -762,11 +772,11 @@ mod tests {
             .max_committed_epoch
             + 1;
         writer1
-            .init(EpochPair::new_test_epoch(epoch1))
+            .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer2
-            .init(EpochPair::new_test_epoch(epoch1))
+            .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         reader1.init().await.unwrap();
@@ -872,7 +882,10 @@ mod tests {
             KvLogStoreMetrics::for_test(),
         );
         let (mut reader, mut writer) = factory.build().await;
-        writer.init(EpochPair::new(epoch3, epoch2)).await.unwrap();
+        writer
+            .init(EpochPair::new(epoch3, epoch2), false)
+            .await
+            .unwrap();
         reader.init().await.unwrap();
         match reader.next_item().await.unwrap() {
             (epoch, LogStoreReadItem::StreamChunk { chunk, .. }) => {
@@ -935,7 +948,7 @@ mod tests {
             .max_committed_epoch
             + 1;
         writer
-            .init(EpochPair::new_test_epoch(epoch1))
+            .init(EpochPair::new_test_epoch(epoch1), false)
             .await
             .unwrap();
         writer.write_chunk(stream_chunk1.clone()).await.unwrap();

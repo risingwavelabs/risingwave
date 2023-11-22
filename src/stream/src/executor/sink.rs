@@ -26,8 +26,7 @@ use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::log_store::{
-    pausable_log_store, LogReader, LogReaderExt, LogStoreFactory, LogWriter, LogWriterExt,
-    PausableLogWriter,
+    LogReader, LogReaderExt, LogStoreFactory, LogWriter, LogWriterExt,
 };
 use risingwave_connector::sink::{
     build_sink, LogSinker, Sink, SinkImpl, SinkParam, SinkWriterParam,
@@ -117,16 +116,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 .any(|i| !self.sink_param.downstream_pk.contains(i))
         };
 
-        let (log_reader, log_writer) = pausable_log_store(
-            self.log_reader,
-            self.log_writer
-                .monitored(self.sink_writer_param.sink_metrics.clone()),
-        );
-
         let write_log_stream = Self::execute_write_log(
             self.input,
             stream_key,
-            log_writer,
+            self.log_writer
+                .monitored(self.sink_writer_param.sink_metrics.clone()),
             self.sink_param.sink_id,
             self.sink_param.sink_type,
             self.actor_context.clone(),
@@ -136,7 +130,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         dispatch_sink!(self.sink, sink, {
             let consume_log_stream = Self::execute_consume_log(
                 sink,
-                log_reader,
+                self.log_reader,
                 self.input_columns,
                 self.sink_writer_param,
                 self.actor_context,
@@ -150,7 +144,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     async fn execute_write_log(
         input: BoxedExecutor,
         stream_key: PkIndices,
-        mut log_writer: PausableLogWriter<impl LogWriter>,
+        mut log_writer: impl LogWriter,
         sink_id: SinkId,
         sink_type: SinkType,
         actor_context: ActorContextRef,
@@ -162,7 +156,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         let epoch_pair = barrier.epoch;
 
-        log_writer.init(epoch_pair).await?;
+        log_writer
+            .init(epoch_pair, barrier.is_pause_on_startup())
+            .await?;
 
         // Propagate the first barrier
         yield Message::Barrier(barrier);
@@ -246,8 +242,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
                         if let Some(mutation) = barrier.mutation.as_deref() {
                             match mutation {
-                                Mutation::Pause => log_writer.pause(),
-                                Mutation::Resume => log_writer.resume(),
+                                Mutation::Pause => log_writer.pause()?,
+                                Mutation::Resume => log_writer.resume()?,
                                 _ => (),
                             }
                         }
@@ -259,7 +255,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         {
                             log_writer.update_vnode_bitmap(vnode_bitmap).await?;
                         }
-
                         yield Message::Barrier(barrier);
                     }
                 }
@@ -290,8 +285,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     Message::Barrier(barrier) => {
                         if let Some(mutation) = barrier.mutation.as_deref() {
                             match mutation {
-                                Mutation::Pause => log_writer.pause(),
-                                Mutation::Resume => log_writer.resume(),
+                                Mutation::Pause => log_writer.pause()?,
+                                Mutation::Resume => log_writer.resume()?,
                                 _ => (),
                             }
                         }

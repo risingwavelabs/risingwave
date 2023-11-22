@@ -32,6 +32,7 @@ use risingwave_hummock_sdk::key::TableKey;
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::store::{PrefetchOptions, ReadOptions};
 use risingwave_storage::StateStore;
+use tokio::sync::watch;
 use tokio_stream::StreamExt;
 
 use crate::common::log_store_impl::kv_log_store::buffer::{
@@ -70,6 +71,8 @@ pub struct KvLogStoreReader<S: StateStore> {
     truncate_offset: TruncateOffset,
 
     metrics: KvLogStoreMetrics,
+
+    is_paused: watch::Receiver<bool>,
 }
 
 impl<S: StateStore> KvLogStoreReader<S> {
@@ -79,6 +82,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
         serde: LogStoreRowSerde,
         rx: LogStoreBufferReceiver,
         metrics: KvLogStoreMetrics,
+        is_paused: watch::Receiver<bool>,
     ) -> Self {
         Self {
             table_id,
@@ -91,6 +95,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
             latest_offset: TruncateOffset::Barrier { epoch: 0 },
             truncate_offset: TruncateOffset::Barrier { epoch: 0 },
             metrics,
+            is_paused,
         }
     }
 
@@ -149,6 +154,12 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
     }
 
     async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
+        while *self.is_paused.borrow_and_update() {
+            self.is_paused
+                .changed()
+                .await
+                .map_err(|_| anyhow!("unable to subscribe resume"))?;
+        }
         if let Some(state_store_stream) = &mut self.state_store_stream {
             match state_store_stream.try_next().await? {
                 Some((epoch, item)) => {
