@@ -32,6 +32,7 @@ use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::{GetClusterInfoResponse, GetReschedulePlanResponse};
 use risingwave_pb::stream_plan::StreamNode;
+use serde::de::IntoDeserializer;
 
 use self::predicate::BoxedPredicate;
 use crate::cluster::Cluster;
@@ -431,18 +432,15 @@ impl Cluster {
     pub async fn throttle_mv(&mut self, table_id: TableId, rate_limit: Option<u32>) -> Result<()> {
         self.ctl
             .spawn(async move {
-                let command: Vec<&str> = if let Some(rate_limit) = rate_limit {
-                    [
-                        "ctl",
-                        "throttle",
-                        "mv",
-                        &table_id.table_id.to_string(),
-                        &rate_limit.to_string(),
-                    ]
-                    .to_vec()
-                } else {
-                    ["ctl", "throttle", "mv", &table_id.table_id.to_string()].to_vec()
-                };
+                let mut command: Vec<String> = vec![
+                    "ctl".into(),
+                    "throttle".into(),
+                    "mv".into(),
+                    table_id.table_id.to_string(),
+                ];
+                if let Some(rate_limit) = rate_limit {
+                    command.push(rate_limit.to_string());
+                }
                 let opts = risingwave_ctl::CliOpts::parse_from(command);
                 risingwave_ctl::start(opts).await
             })
