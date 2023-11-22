@@ -16,6 +16,7 @@ use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::future::{poll_fn, Future};
+use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::task::Poll;
 
@@ -24,6 +25,8 @@ use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
+use tokio::sync::watch;
+use tracing::error;
 
 use crate::sink::SinkMetrics;
 
@@ -302,6 +305,86 @@ where
             metrics,
         }
     }
+}
+
+pub struct PausableLogWriter<W> {
+    inner: W,
+    is_paused: watch::Sender<bool>,
+}
+
+impl<W> PausableLogWriter<W> {
+    pub fn pause(&mut self) {
+        let _ = self
+            .is_paused
+            .send(true)
+            .inspect_err(|e| error!("unable to set pause"));
+    }
+
+    pub fn resume(&mut self) {
+        let _ = self
+            .is_paused
+            .send(false)
+            .inspect_err(|e| error!("unable to set resume"));
+    }
+}
+
+impl<W> Deref for PausableLogWriter<W> {
+    type Target = W;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<W> DerefMut for PausableLogWriter<W> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+pub struct PausableLogReader<R: LogReader> {
+    inner: R,
+    is_paused: watch::Receiver<bool>,
+}
+
+impl<R: LogReader> LogReader for PausableLogReader<R> {
+    fn init(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.inner.init()
+    }
+
+    async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
+        while *self.is_paused.borrow_and_update() {
+            self.is_paused
+                .changed()
+                .await
+                .map_err(|e| anyhow!("unable to subscribe resume"))?;
+        }
+        self.inner.next_item().await
+    }
+
+    fn truncate(
+        &mut self,
+        offset: TruncateOffset,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.inner.truncate(offset)
+    }
+}
+
+pub fn pausable_log_store<R: LogReader, W: LogWriter>(
+    reader: R,
+    writer: W,
+) -> (PausableLogReader<R>, PausableLogWriter<W>) {
+    let (tx, rx) = watch::channel(false);
+    (
+        PausableLogReader {
+            inner: reader,
+            is_paused: rx,
+        },
+        PausableLogWriter {
+            inner: writer,
+            is_paused: tx,
+        },
+    )
 }
 
 enum DeliveryFutureManagerItem<F> {
