@@ -60,16 +60,15 @@ echo "--- mysql & postgres cdc validate test"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.mysql.slt'
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.validate.postgres.slt'
 
+# cdc share stream test cases
+export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
+sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.share_stream.slt'
+
 echo "--- mysql & postgres load and check"
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.load.slt'
 # wait for cdc loading
 sleep 10
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check.slt'
-
-# cdc share stream test cases
-export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
-sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.share_stream.slt'
-
 
 # kill cluster
 cargo make kill
@@ -100,9 +99,6 @@ sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
 
 # drop relations
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc_share_stream_drop.slt'
-
-# check table-on-source stream plan
-sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc_share_stream_plan.slt'
 
 echo "--- Kill cluster"
 cargo make ci-kill

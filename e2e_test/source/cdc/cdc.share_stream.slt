@@ -34,6 +34,17 @@ create table products_test ( id INT,
  PRIMARY KEY (id)
 ) from mysql_mytest table 'mytest.products';
 
+# check the fragment distribution
+query TT
+select distribution_type,flags from rw_fragments order by fragment_id;
+----
+SINGLE {SOURCE}
+HASH {MVIEW}
+SINGLE {STREAM_SCAN}
+SINGLE {CDC_FILTER}
+HASH {SOURCE,DML}
+
+
 statement ok
 create table orders_test (
    order_id int,
