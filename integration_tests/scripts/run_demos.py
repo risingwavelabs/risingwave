@@ -259,7 +259,7 @@ def run_elasticsearch_sink_demo():
         relations = f.read().strip().split(",")
         failed_cases = []
         for rel in relations:
-            query = 'curl -XGET -u elastic:risingwave "http://localhost:9200/test/_count"  -H "Content-Type: application/json"'
+            query = 'curl -XGET -u elastic:risingwave "http://localhost:9200/{}/_count"  -H "Content-Type: application/json"'.format(rel)
             for v in versions:
                 es = 'elasticsearch{}'.format(v)
                 print("Running Query: {} on {}".format(query, es))
