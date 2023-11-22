@@ -23,12 +23,11 @@ use risingwave_sqlparser::ast::{ExplainOptions, ExplainType, Statement};
 use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::gen_sink_plan;
-use super::create_table::{
-    check_create_table_with_source, gen_create_table_plan, gen_create_table_plan_with_source,
-    ColumnIdGenerator,
-};
+use super::create_table::ColumnIdGenerator;
 use super::query::gen_batch_plan_by_statement;
+use super::util::SourceSchemaCompatExt;
 use super::RwPgResponse;
+use crate::handler::create_table::handle_create_table_plan;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{Convention, Explain};
@@ -61,49 +60,26 @@ async fn do_handle_explain(
                 source_schema,
                 source_watermarks,
                 append_only,
+                cdc_table_info,
                 ..
             } => {
-                // TODO(st1page): refacor it
-                let (source_schema, notice) = match source_schema {
-                    Some(s) => {
-                        let (s, notice) = s.into_source_schema_v2();
-                        (Some(s), notice)
-                    }
-                    None => (None, None),
-                };
-                let with_options = context.with_options();
-                let plan = match check_create_table_with_source(with_options, source_schema)? {
-                    Some(s) => {
-                        gen_create_table_plan_with_source(
-                            context,
-                            name,
-                            columns,
-                            constraints,
-                            s,
-                            source_watermarks,
-                            ColumnIdGenerator::new_initial(),
-                            append_only,
-                        )
-                        .await?
-                        .0
-                    }
-                    None => {
-                        gen_create_table_plan(
-                            context,
-                            name,
-                            columns,
-                            constraints,
-                            ColumnIdGenerator::new_initial(),
-                            source_watermarks,
-                            append_only,
-                        )?
-                        .0
-                    }
-                };
+                let col_id_gen = ColumnIdGenerator::new_initial();
+
+                let source_schema = source_schema.map(|s| s.into_v2_with_warning());
+
+                let (plan, _source, _table, _job_type) = handle_create_table_plan(
+                    context,
+                    col_id_gen,
+                    source_schema,
+                    cdc_table_info,
+                    name.clone(),
+                    columns,
+                    constraints,
+                    source_watermarks,
+                    append_only,
+                )
+                .await?;
                 let context = plan.ctx();
-                if let Some(notice) = notice {
-                    context.warn_to_user(notice);
-                }
                 (Ok(plan), context)
             }
 

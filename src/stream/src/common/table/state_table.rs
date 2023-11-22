@@ -49,7 +49,7 @@ use risingwave_storage::row_serde::row_serde_util::{
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     InitOptions, LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions,
-    StateStoreIterItemStream,
+    SealCurrentEpochOptions, StateStoreIterItemStream,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution, KeyedRow};
@@ -977,7 +977,8 @@ where
         self.watermark_buffer_strategy.tick();
         if !self.is_dirty() {
             // If the state table is not modified, go fast path.
-            self.local_store.seal_current_epoch(new_epoch.curr);
+            self.local_store
+                .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::new());
             return Ok(());
         } else {
             self.seal_current_epoch(new_epoch.curr)
@@ -1045,7 +1046,8 @@ where
         // Tick the watermark buffer here because state table is expected to be committed once
         // per epoch.
         self.watermark_buffer_strategy.tick();
-        self.local_store.seal_current_epoch(new_epoch.curr);
+        self.local_store
+            .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::new());
     }
 
     /// Write to state store.
@@ -1154,7 +1156,8 @@ where
         }
 
         self.local_store.flush(delete_ranges).await?;
-        self.local_store.seal_current_epoch(next_epoch);
+        self.local_store
+            .seal_current_epoch(next_epoch, SealCurrentEpochOptions::new());
         Ok(())
     }
 

@@ -289,8 +289,8 @@
     create table b(b1 int);
     create table c(c1 int);
     select * from a, b join c on a1 + b1 = c1;
-  binder_error: |-
-    Bind error: failed to bind expression: a1 + b1 = c1
+  binder_error: |
+    Failed to bind expression: a1 + b1 = c1
 
     Caused by:
       Item not found: Invalid column: a1

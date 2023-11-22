@@ -34,6 +34,7 @@ pub static PG_ROLES: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
         (DataType::Boolean, "rolcreatedb"),
         (DataType::Boolean, "rolcanlogin"),
         (DataType::Boolean, "rolreplication"),
+        (DataType::Int32, "rolconnlimit"),
         (DataType::Timestamptz, "rolvaliduntil"),
         (DataType::Boolean, "rolbypassrls"),
         (DataType::Varchar, "rolpassword"),
@@ -46,6 +47,7 @@ pub static PG_ROLES: LazyLock<BuiltinView> = LazyLock::new(|| BuiltinView {
                 create_db AS rolcreatedb, \
                 can_login AS rolcanlogin, \
                 true AS rolreplication, \
+                -1 AS rolconnlimit, \
                 NULL::timestamptz AS rolvaliduntil, \
                 true AS rolbypassrls, \
                 '********' AS rolpassword \

@@ -17,35 +17,26 @@ use std::fmt::Debug;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Array, I64Array};
-use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::DataType;
+use risingwave_common::catalog::Schema;
 
 use super::error::StreamExecutorError;
 use super::*;
 
 pub struct ExpandExecutor {
+    info: ExecutorInfo,
     input: BoxedExecutor,
-    schema: Schema,
-    pk_indices: PkIndices,
     column_subsets: Vec<Vec<usize>>,
 }
 
 impl ExpandExecutor {
     pub fn new(
+        info: ExecutorInfo,
         input: Box<dyn Executor>,
-        pk_indices: PkIndices,
         column_subsets: Vec<Vec<usize>>,
     ) -> Self {
-        let schema = {
-            let mut fields = input.schema().clone().into_fields();
-            fields.extend(fields.clone());
-            fields.push(Field::with_name(DataType::Int64, "flag"));
-            Schema::new(fields)
-        };
         Self {
+            info,
             input,
-            schema,
-            pk_indices,
             column_subsets,
         }
     }
@@ -84,15 +75,15 @@ impl Debug for ExpandExecutor {
 
 impl Executor for ExpandExecutor {
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        "ExpandExecutor"
+        &self.info.identity
     }
 
     fn execute(self: Box<Self>) -> BoxedMessageStream {
@@ -109,7 +100,7 @@ mod tests {
 
     use super::ExpandExecutor;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{Executor, PkIndices};
+    use crate::executor::{Executor, ExecutorInfo, PkIndices};
 
     #[tokio::test]
     async fn test_expand() {
@@ -120,21 +111,28 @@ mod tests {
             + 6 6 3
             - 7 5 4",
         );
-        let schema = Schema {
+        let input_schema = Schema {
             fields: vec![
                 Field::unnamed(DataType::Int64),
                 Field::unnamed(DataType::Int64),
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1]);
+        let source = MockSource::with_chunks(input_schema.clone(), PkIndices::new(), vec![chunk1]);
+        let schema = {
+            let mut fields = input_schema.into_fields();
+            fields.extend(fields.clone());
+            fields.push(Field::with_name(DataType::Int64, "flag"));
+            Schema::new(fields)
+        };
+        let info = ExecutorInfo {
+            schema,
+            pk_indices: vec![],
+            identity: "ExpandExecutor".to_string(),
+        };
 
         let column_subsets = vec![vec![0, 1], vec![1, 2]];
-        let expand = Box::new(ExpandExecutor::new(
-            Box::new(source),
-            PkIndices::new(),
-            column_subsets,
-        ));
+        let expand = Box::new(ExpandExecutor::new(info, Box::new(source), column_subsets));
         let mut expand = expand.execute();
 
         let chunk = expand.next().await.unwrap().unwrap().into_chunk().unwrap();

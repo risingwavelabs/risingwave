@@ -113,6 +113,9 @@ steps:
           - "citus-cdc"
           - "kinesis-s3-source"
           - "clickhouse-sink"
+          - "cockroach-sink"
+          - "kafka-cdc-sink"
+          - "cassandra-and-scylladb-sink"
         format:
           - "json"
           - "protobuf"
@@ -147,5 +150,17 @@ steps:
           skip: true
         - with:
             testcase: "clickhouse-sink"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "cockroach-sink"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "kafka-cdc-sink"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "cassandra-and-scylladb-sink"
             format: "protobuf"
           skip: true

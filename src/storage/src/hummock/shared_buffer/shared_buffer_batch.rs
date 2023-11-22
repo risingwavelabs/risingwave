@@ -703,34 +703,28 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
 impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<D> {
     type Direction = D;
 
-    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        async move {
-            assert!(self.is_valid());
-            match D::direction() {
-                DirectionEnum::Forward => {
-                    // If the current key has more versions, we need to advance the value index
-                    if self.current_version_idx + 1 < self.current_versions_len() {
-                        self.current_version_idx += 1;
-                    } else {
-                        self.current_idx += 1;
-                        self.current_version_idx = 0;
-                    }
-                }
-                DirectionEnum::Backward => {
-                    if self.current_version_idx > 0 {
-                        self.current_version_idx -= 1;
-                    } else {
-                        self.current_idx += 1;
-                        self.current_version_idx = self.current_versions_len() - 1;
-                    }
+    async fn next(&mut self) -> HummockResult<()> {
+        assert!(self.is_valid());
+        match D::direction() {
+            DirectionEnum::Forward => {
+                // If the current key has more versions, we need to advance the value index
+                if self.current_version_idx + 1 < self.current_versions_len() {
+                    self.current_version_idx += 1;
+                } else {
+                    self.current_idx += 1;
+                    self.current_version_idx = 0;
                 }
             }
-            Ok(())
+            DirectionEnum::Backward => {
+                if self.current_version_idx > 0 {
+                    self.current_version_idx -= 1;
+                } else {
+                    self.current_idx += 1;
+                    self.current_version_idx = self.current_versions_len() - 1;
+                }
+            }
         }
+        Ok(())
     }
 
     fn key(&self) -> FullKey<&[u8]> {
@@ -751,91 +745,87 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
             && self.current_version_idx < self.current_versions().len() as i32
     }
 
-    fn rewind(&mut self) -> Self::RewindFuture<'_> {
-        async move {
-            self.current_idx = 0;
+    async fn rewind(&mut self) -> HummockResult<()> {
+        self.current_idx = 0;
 
-            match D::direction() {
-                DirectionEnum::Forward => {
-                    self.current_version_idx = 0;
-                }
-                DirectionEnum::Backward => {
-                    self.current_version_idx = self.current_versions_len() - 1;
-                }
+        match D::direction() {
+            DirectionEnum::Forward => {
+                self.current_version_idx = 0;
             }
-            Ok(())
+            DirectionEnum::Backward => {
+                self.current_version_idx = self.current_versions_len() - 1;
+            }
         }
+        Ok(())
     }
 
-    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
-        async move {
-            debug_assert_eq!(key.user_key.table_id, self.table_id);
-            // Perform binary search on table key because the items in SharedBufferBatch is ordered
-            // by table key.
-            let partition_point = self
-                .inner
-                .binary_search_by(|probe| probe.0[..].cmp(*key.user_key.table_key));
-            let seek_key_epoch = key.epoch_with_gap;
-            match D::direction() {
-                DirectionEnum::Forward => match partition_point {
+    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+        debug_assert_eq!(key.user_key.table_id, self.table_id);
+        // Perform binary search on table key because the items in SharedBufferBatch is ordered
+        // by table key.
+        let partition_point = self
+            .inner
+            .binary_search_by(|probe| probe.0[..].cmp(*key.user_key.table_key));
+        let seek_key_epoch = key.epoch_with_gap;
+        match D::direction() {
+            DirectionEnum::Forward => match partition_point {
+                Ok(i) => {
+                    self.current_idx = i;
+                    // seek to the first version that is <= the seek key epoch
+                    let mut idx: i32 = 0;
+                    for (epoch_with_gap, _) in self.current_versions() {
+                        if epoch_with_gap <= &seek_key_epoch {
+                            break;
+                        }
+                        idx += 1;
+                    }
+
+                    // Move onto the next key for forward iteration if seek key epoch is smaller
+                    // than all versions
+                    if idx >= self.current_versions().len() as i32 {
+                        self.current_idx += 1;
+                        self.current_version_idx = 0;
+                    } else {
+                        self.current_version_idx = idx;
+                    }
+                }
+                Err(i) => {
+                    self.current_idx = i;
+                    self.current_version_idx = 0;
+                }
+            },
+            DirectionEnum::Backward => {
+                match partition_point {
                     Ok(i) => {
-                        self.current_idx = i;
-                        // seek to the first version that is <= the seek key epoch
-                        let mut idx: i32 = 0;
-                        for (epoch_with_gap, _) in self.current_versions() {
-                            if epoch_with_gap <= &seek_key_epoch {
+                        self.current_idx = self.inner.len() - i - 1;
+                        // seek from back to the first version that is >= seek_key_epoch
+                        let values = self.current_versions();
+                        let mut idx: i32 = (values.len() - 1) as i32;
+                        for (epoch_with_gap, _) in values.iter().rev() {
+                            if epoch_with_gap >= &seek_key_epoch {
                                 break;
                             }
-                            idx += 1;
+                            idx -= 1;
                         }
 
-                        // Move onto the next key for forward iteration if seek key epoch is smaller
-                        // than all versions
-                        if idx >= self.current_versions().len() as i32 {
+                        if idx < 0 {
                             self.current_idx += 1;
-                            self.current_version_idx = 0;
+                            self.current_version_idx = self.current_versions_len() - 1;
                         } else {
                             self.current_version_idx = idx;
                         }
                     }
+                    // Seek to one item before the seek partition_point:
+                    // If i == 0, the iterator will be invalidated with self.current_idx ==
+                    // self.inner.len().
                     Err(i) => {
-                        self.current_idx = i;
-                        self.current_version_idx = 0;
-                    }
-                },
-                DirectionEnum::Backward => {
-                    match partition_point {
-                        Ok(i) => {
-                            self.current_idx = self.inner.len() - i - 1;
-                            // seek from back to the first version that is >= seek_key_epoch
-                            let values = self.current_versions();
-                            let mut idx: i32 = (values.len() - 1) as i32;
-                            for (epoch_with_gap, _) in values.iter().rev() {
-                                if epoch_with_gap >= &seek_key_epoch {
-                                    break;
-                                }
-                                idx -= 1;
-                            }
-
-                            if idx < 0 {
-                                self.current_idx += 1;
-                                self.current_version_idx = self.current_versions_len() - 1;
-                            } else {
-                                self.current_version_idx = idx;
-                            }
-                        }
-                        // Seek to one item before the seek partition_point:
-                        // If i == 0, the iterator will be invalidated with self.current_idx ==
-                        // self.inner.len().
-                        Err(i) => {
-                            self.current_idx = self.inner.len() - i;
-                            self.current_version_idx = self.current_versions_len() - 1;
-                        }
+                        self.current_idx = self.inner.len() - i;
+                        self.current_version_idx = self.current_versions_len() - 1;
                     }
                 }
             }
-            Ok(())
         }
+        Ok(())
     }
 
     fn collect_local_statistic(&self, _stats: &mut crate::monitor::StoreLocalStatistic) {}

@@ -690,7 +690,7 @@ def section_streaming(outer_panels):
                     "each parallelism. The throughput of all the parallelism added up is equal to Source Throughput(rows).",
                     [
                         panels.target(
-                            f"rate({metric('partition_input_count')}[$__rate_interval])",
+                            f"rate({metric('source_partition_input_count')}[$__rate_interval])",
                             "actor={{actor_id}} source={{source_id}} partition={{partition}}",
                         )
                     ],
@@ -700,7 +700,7 @@ def section_streaming(outer_panels):
                     "The figure shows the number of bytes read by each source per second.",
                     [
                         panels.target(
-                            f"(sum by (source_id)(rate({metric('partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
+                            f"(sum by (source_id)(rate({metric('source_partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
                             "source={{source_id}}",
                         )
                     ],
@@ -711,7 +711,7 @@ def section_streaming(outer_panels):
                     "each parallelism. The throughput of all the parallelism added up is equal to Source Throughput(MB/s).",
                     [
                         panels.target(
-                            f"(rate({metric('partition_input_bytes')}[$__rate_interval]))/(1000*1000)",
+                            f"(rate({metric('source_partition_input_bytes')}[$__rate_interval]))/(1000*1000)",
                             "actor={{actor_id}} source={{source_id}} partition={{partition}}",
                         )
                     ],
@@ -756,11 +756,11 @@ def section_streaming(outer_panels):
                     "Kafka Consumer Lag Size by source_id, partition and actor_id",
                     [
                         panels.target(
-                            f"{metric('high_watermark')}",
+                            f"{metric('source_kafka_high_watermark')}",
                             "source={{source_id}} partition={{partition}}",
                         ),
                         panels.target(
-                            f"{metric('latest_message_id')}",
+                            f"{metric('source_latest_message_id')}",
                             "source={{source_id}} partition={{partition}} actor_id={{actor_id}}",
                         ),
                     ],
@@ -2346,6 +2346,16 @@ def section_hummock_write(outer_panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Mem Table Spill Count",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(irate({table_metric('state_store_mem_table_spill_counts')}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)",
+                            "mem table spill table id - {{table_id}} @ {{%s}}" % NODE_LABEL,
+                        ),
+                    ],
+                ),
                 panels.timeseries_bytes(
                     "Checkpoint Sync Size",
                     "",
@@ -3483,7 +3493,7 @@ def section_connector_node(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"rate({metric('connector_source_rows_received')}[$__rate_interval])",
+                            f"rate({metric('source_rows_received')}[$__rate_interval])",
                             "source={{source_type}} @ {{source_id}}",
                         ),
                     ],

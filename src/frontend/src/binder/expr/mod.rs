@@ -34,45 +34,19 @@ mod subquery;
 mod value;
 
 impl Binder {
+    /// Bind an expression with `bind_expr_inner`, attach the original expression
+    /// to the error message.
+    ///
+    /// This may only be called at the root of the expression tree or when crossing
+    /// the boundary of a subquery. Otherwise, the source chain might be too deep
+    /// and confusing to the user.
+    // TODO(error-handling): use a dedicated error type during binding to make it clear.
     pub fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {
-        // We use a different function instead `map_err` directly in `bind_expr_inner`, because in
-        // some cases, recursive error messages don't look good. Whole expr-level should be enough
-        // in most cases.
-        //
-        // e.g., too verbose:
-        //
-        // ```ignore
-        // Bind error: failed to bind expression: a1 + b1 = c1
-        //
-        // Caused by:
-        //   Bind error: failed to bind expression: a1 + b1
-        //
-        // Caused by:
-        //   Bind error: failed to bind expression: a1
-        //
-        // Caused by:
-        //   Item not found: Invalid column: a1
-        // ```
-        //
-        // confusing message with an unused subexpr, when the expr is rewritten while binding:
-        //
-        // ```ignore
-        // > create table t (v1 int);
-        // > select (case v1 when 1 then 1 when true then 2 else 0.0 end) from t;
-        //
-        // Bind error: failed to bind expression: CASE v1 WHEN 1 THEN 1 WHEN true THEN 2 ELSE 0.0 END
-        //
-        // Caused by:
-        //   Bind error: failed to bind expression: v1 = true
-        //
-        // Caused by:
-        //   Feature is not yet implemented: Equal[Int32, Boolean]
-        // ```
         self.bind_expr_inner(expr.clone()).map_err(|e| {
-            RwError::from(ErrorCode::BindError(format!(
-                "failed to bind expression: {}\n\nCaused by:\n  {}",
-                expr, e
-            )))
+            RwError::from(ErrorCode::BindErrorRoot {
+                expr: expr.to_string(),
+                error: Box::new(e),
+            })
         })
     }
 
@@ -596,16 +570,11 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
     let field_descs = if let AstDataType::Struct(defs) = &column_def.data_type {
         defs.iter()
             .map(|f| {
-                Ok(ColumnDesc {
-                    data_type: bind_data_type(&f.data_type)?,
-                    // Literals don't have `column_id`.
-                    column_id: ColumnId::new(0),
-                    name: f.name.real_value(),
-                    field_descs: vec![],
-                    type_name: "".to_string(),
-                    generated_or_default_column: None,
-                    description: None,
-                })
+                Ok(ColumnDesc::named(
+                    f.name.real_value(),
+                    ColumnId::new(0), // Literals don't have `column_id`.
+                    bind_data_type(&f.data_type)?,
+                ))
             })
             .collect::<Result<Vec<_>>>()?
     } else {

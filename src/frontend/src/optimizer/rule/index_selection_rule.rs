@@ -66,7 +66,7 @@ use crate::expr::{
     FunctionCall, InputRef,
 };
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::plan_node::generic::{GenericPlanRef, ScanTableType};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     generic, ColumnPruningContext, LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode,
     PlanTreeNodeBinary, PredicatePushdown, PredicatePushdownContext,
@@ -222,7 +222,6 @@ impl IndexSelectionRule {
 
         let index_scan = LogicalScan::create(
             index.index_table.name.clone(),
-            ScanTableType::default(),
             index.index_table.table_desc().into(),
             Some(index.index_table.clone()),
             vec![],
@@ -233,7 +232,6 @@ impl IndexSelectionRule {
 
         let primary_table_scan = LogicalScan::create(
             index.primary_table.name.clone(),
-            ScanTableType::default(),
             index.primary_table.table_desc().into(),
             Some((*index.primary_table).clone().into()),
             vec![],
@@ -334,7 +332,6 @@ impl IndexSelectionRule {
 
         let primary_table_scan = LogicalScan::create(
             logical_scan.table_name().to_string(),
-            ScanTableType::default(),
             primary_table_desc.clone().into(),
             logical_scan.table_catalog(),
             vec![],
@@ -563,7 +560,6 @@ impl IndexSelectionRule {
 
         let primary_access = generic::Scan::new(
             logical_scan.table_name().to_string(),
-            ScanTableType::default(),
             primary_table_desc
                 .pk
                 .iter()
@@ -608,7 +604,6 @@ impl IndexSelectionRule {
         Some(
             generic::Scan::new(
                 index.index_table.name.to_string(),
-                ScanTableType::default(),
                 index
                     .primary_table_pk_ref_to_index_table()
                     .iter()
@@ -719,6 +714,7 @@ impl IndexSelectionRule {
 struct TableScanIoEstimator<'a> {
     table_scan: &'a LogicalScan,
     row_size: usize,
+    cost: Option<IndexCost>,
 }
 
 impl<'a> TableScanIoEstimator<'a> {
@@ -726,6 +722,7 @@ impl<'a> TableScanIoEstimator<'a> {
         Self {
             table_scan,
             row_size,
+            cost: None,
         }
     }
 
@@ -777,7 +774,8 @@ impl<'a> TableScanIoEstimator<'a> {
     pub fn estimate(&mut self, predicate: &Condition) -> IndexCost {
         // try to deal with OR condition
         if predicate.conjunctions.len() == 1 {
-            self.visit_expr(&predicate.conjunctions[0])
+            self.visit_expr(&predicate.conjunctions[0]);
+            self.cost.take().unwrap_or_default()
         } else {
             self.estimate_conjunctions(&predicate.conjunctions)
         }
@@ -925,14 +923,16 @@ impl IndexCost {
 }
 
 impl ExprVisitor for TableScanIoEstimator<'_> {
-    type Result = IndexCost;
-
-    fn visit_function_call(&mut self, func_call: &FunctionCall) -> IndexCost {
-        match func_call.func_type() {
+    fn visit_function_call(&mut self, func_call: &FunctionCall) {
+        let cost = match func_call.func_type() {
             ExprType::Or => func_call
                 .inputs()
                 .iter()
-                .map(|x| self.visit_expr(x))
+                .map(|x| {
+                    let mut estimator = TableScanIoEstimator::new(self.table_scan, self.row_size);
+                    estimator.visit_expr(x);
+                    estimator.cost.take().unwrap_or_default()
+                })
                 .reduce(|x, y| x.add(&y))
                 .unwrap(),
             ExprType::And => self.estimate_conjunctions(func_call.inputs()),
@@ -940,11 +940,8 @@ impl ExprVisitor for TableScanIoEstimator<'_> {
                 let single = vec![ExprImpl::FunctionCall(func_call.clone().into())];
                 self.estimate_conjunctions(&single)
             }
-        }
-    }
-
-    fn merge(a: IndexCost, b: IndexCost) -> IndexCost {
-        a.add(&b)
+        };
+        self.cost = Some(cost);
     }
 }
 
@@ -954,10 +951,6 @@ struct ExprInputRefFinder {
 }
 
 impl ExprVisitor for ExprInputRefFinder {
-    type Result = ();
-
-    fn merge(_: (), _: ()) {}
-
     fn visit_input_ref(&mut self, input_ref: &InputRef) {
         self.input_ref_index_set.insert(input_ref.index);
     }

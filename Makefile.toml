@@ -1333,7 +1333,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - SQLLogicTest"
-install_crate = { version = "0.17.2", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { version = "0.18.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
   "--help",
 ], install_command = "binstall" }
 dependencies = ["check-risedev-env-file"]
@@ -1438,7 +1438,7 @@ private = true
 category = "Misc"
 description = "This command extracts WITH options from the Rust code and maintains them in a single source of truth `with_options.yaml`"
 script = '''
-UPDATE_EXPECT=1 cargo nextest run risingwave_connector tests::test_with_options_yaml_up_to_date
+UPDATE_EXPECT=1 cargo test -p risingwave_connector tests::test_with_options_yaml_up_to_date
 '''
 
 [tasks.backwards-compat-test]

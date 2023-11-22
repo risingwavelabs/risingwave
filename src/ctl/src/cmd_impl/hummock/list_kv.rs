@@ -43,7 +43,7 @@ pub async fn list_kv(
                 None,
                 ReadOptions {
                     table_id: TableId { table_id },
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::NotFill,
                     ..Default::default()
                 },

@@ -578,6 +578,9 @@ impl HummockEventHandler {
                     self.uploader.start_merge_imms(epoch);
                 }
             }
+
+            HummockEvent::LocalSealEpoch { .. } => {}
+
             #[cfg(any(test, feature = "test"))]
             HummockEvent::FlushEvent(sender) => {
                 let _ = sender.send(()).inspect_err(|e| {

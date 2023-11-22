@@ -1305,7 +1305,7 @@ fn convert_hms(c: &Vec<String>, t: &mut Vec<TimeStrToken>) -> Option<()> {
         return None;
     }
     let mut is_neg = false;
-    if let Some(s) = c.get(0) {
+    if let Some(s) = c.first() {
         let v = s.parse().ok()?;
         is_neg = s.starts_with('-');
         t.push(TimeStrToken::Num(v));
@@ -1349,7 +1349,7 @@ impl Interval {
             ))
             .into());
         }
-        let num = match tokens.get(0) {
+        let num = match tokens.first() {
             Some(TimeStrToken::Num(num)) => *num,
             _ => {
                 return Err(ErrorCode::InvalidInputSyntax(format!(

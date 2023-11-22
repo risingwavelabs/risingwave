@@ -12,31 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
-use anyhow::anyhow;
 
+use anyhow::anyhow;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::BasicSerde;
-use risingwave_connector::source::external::{CdcTableType, SchemaTableName};
-use risingwave_pb::plan_common::{ExternalTableDesc, StorageTableDesc};
+use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::{StreamScanNode, StreamScanType};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
 
 use super::*;
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
-use crate::executor::external::ExternalStorageTable;
 use crate::executor::{
-    ArrangementBackfillExecutor, BackfillExecutor, CdcBackfillExecutor, ChainExecutor,
-    FlowControlExecutor, RearrangedChainExecutor, SourceStateTableHandler,
+    ArrangementBackfillExecutor, BackfillExecutor, ChainExecutor, FlowControlExecutor,
+    RearrangedChainExecutor,
 };
 
-pub struct ChainExecutorBuilder;
+pub struct StreamScanExecutorBuilder;
 
-impl ExecutorBuilder for ChainExecutorBuilder {
+impl ExecutorBuilder for StreamScanExecutorBuilder {
     type Node = StreamScanNode;
 
     async fn new_boxed_executor(
@@ -74,11 +71,6 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     .map(|i| snapshot.schema().fields()[*i].clone())
                     .collect_vec(),
             )
-        } else if matches!(node.stream_scan_type(), StreamScanType::CdcBackfill) {
-            let table_desc: &ExternalTableDesc = node.get_cdc_table_desc()?;
-            let schema = Schema::new(table_desc.columns.iter().map(Into::into).collect());
-            assert_eq!(output_indices, (0..schema.len()).collect_vec());
-            schema
         } else {
             // For `Chain`s other than `Backfill`, there should be no extra mapping required. We can
             // directly output the columns received from the upstream or snapshot.
@@ -90,76 +82,10 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         let executor = match node.stream_scan_type() {
             StreamScanType::Chain | StreamScanType::UpstreamOnly => {
                 let upstream_only = matches!(node.stream_scan_type(), StreamScanType::UpstreamOnly);
-                ChainExecutor::new(
-                    snapshot,
-                    upstream,
-                    progress,
-                    schema,
-                    params.pk_indices,
-                    upstream_only,
-                )
-                .boxed()
+                ChainExecutor::new(params.info, snapshot, upstream, progress, upstream_only).boxed()
             }
-            StreamScanType::Rearrange => RearrangedChainExecutor::new(
-                snapshot,
-                upstream,
-                progress,
-                schema,
-                params.pk_indices,
-            )
-            .boxed(),
-            StreamScanType::CdcBackfill => {
-                let table_desc: &ExternalTableDesc = node.get_cdc_table_desc()?;
-                let properties: HashMap<String, String> = table_desc
-                    .connect_properties
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect();
-                let table_type = CdcTableType::from_properties(&properties);
-                let table_reader =
-                    table_type.create_table_reader(properties.clone(), schema.clone())?;
-
-                let order_types = table_desc
-                    .pk
-                    .iter()
-                    .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
-                    .collect_vec();
-
-                let pk_indices = table_desc
-                    .pk
-                    .iter()
-                    .map(|k| k.column_index as usize)
-                    .collect_vec();
-
-                let schema_table_name = SchemaTableName::from_properties(&properties);
-                let external_table = ExternalStorageTable::new(
-                    TableId::new(table_desc.table_id),
-                    schema_table_name,
-                    table_reader,
-                    schema.clone(),
-                    order_types,
-                    pk_indices.clone(),
-                    (0..table_desc.columns.len()).collect_vec(),
-                );
-
-                let source_state_handler = SourceStateTableHandler::from_table_catalog(
-                    node.get_state_table().as_ref().unwrap(),
-                    state_store.clone(),
-                )
-                .await;
-                CdcBackfillExecutor::new(
-                    params.actor_context.clone(),
-                    external_table,
-                    upstream,
-                    (0..table_desc.columns.len()).collect_vec(), /* eliminate the last column (_rw_offset) */
-                    Some(progress),
-                    schema.clone(),
-                    pk_indices,
-                    params.executor_stats,
-                    source_state_handler,
-                    true,
-                    params.env.config().developer.chunk_size,
-                ).boxed()
+            StreamScanType::Rearrange => {
+                RearrangedChainExecutor::new(params.info, snapshot, upstream, progress).boxed()
             }
             StreamScanType::Backfill | StreamScanType::ArrangementBackfill => {
                 let table_desc: &StorageTableDesc = node
@@ -168,12 +94,6 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 let table_id = TableId {
                     table_id: table_desc.table_id,
                 };
-
-                let order_types = table_desc
-                    .pk
-                    .iter()
-                    .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
-                    .collect_vec();
 
                 let column_descs = table_desc
                     .columns
@@ -186,8 +106,13 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     .map(ColumnId::from)
                     .collect_vec();
 
+                let table_pk_order_types = table_desc
+                    .pk
+                    .iter()
+                    .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
+                    .collect_vec();
                 // Use indices based on full table instead of streaming executor output.
-                let pk_indices = table_desc
+                let table_pk_indices = table_desc
                     .pk
                     .iter()
                     .map(|k| k.column_index as usize)
@@ -223,7 +148,19 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
                 let versioned = table_desc.versioned;
                 // TODO: refactor it with from_table_catalog in the future.
-
+                let upstream_table = StorageTable::new_partial(
+                    state_store.clone(),
+                    table_id,
+                    column_descs,
+                    column_ids,
+                    table_pk_order_types,
+                    table_pk_indices,
+                    distribution,
+                    table_option,
+                    value_indices,
+                    prefix_hint_len,
+                    versioned,
+                );
                 let state_table = if let Ok(table) = node.get_state_table() {
                     Some(
                         StateTable::from_table_catalog(table, state_store.clone(), vnodes.clone())
@@ -249,16 +186,14 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     );
 
                     BackfillExecutor::new(
+                        params.info,
                         upstream_table,
                         upstream,
                         state_table,
                         output_indices,
                         progress,
-                        schema,
-                        params.pk_indices,
                         stream.streaming_metrics.clone(),
                         params.env.config().developer.chunk_size,
-                        params.executor_id,
                     )
                     .boxed()
                 } else {
@@ -274,6 +209,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                                     vnodes,
                                 )
                                 .await;
+                            // FIXME(kwannoel): Use executor info
                             ArrangementBackfillExecutor::<_, $SD>::new(
                                 upstream_table,
                                 upstream,
@@ -296,9 +232,13 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     }
                 }
             }
-            StreamScanType::ChainUnspecified => unreachable!(),
+            StreamScanType::Unspecified => unreachable!(),
         };
-        let rate_limit = node.get_rate_limit().cloned().ok();
-        Ok(FlowControlExecutor::new(executor, rate_limit).boxed())
+        Ok(FlowControlExecutor::new(
+            executor,
+            params.actor_context,
+            node.rate_limit.map(|x| x as _),
+        )
+        .boxed())
     }
 }

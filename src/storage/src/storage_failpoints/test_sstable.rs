@@ -40,7 +40,7 @@ async fn test_failpoints_table_read() {
     // We should close buffer, so that table iterator must read in object_stores
     let kv_iter =
         (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
-    let info = gen_test_sstable(
+    let table = gen_test_sstable(
         default_builder_opt_for_test(),
         0,
         kv_iter,
@@ -48,12 +48,8 @@ async fn test_failpoints_table_read() {
     )
     .await;
 
-    let mut stats = StoreLocalStatistic::default();
     let mut sstable_iter = SstableIterator::create(
-        sstable_store
-            .sstable(&info.get_sstable_info(), &mut stats)
-            .await
-            .unwrap(),
+        table,
         sstable_store,
         Arc::new(SstableIteratorReadOptions::default()),
     );

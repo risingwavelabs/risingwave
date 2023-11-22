@@ -55,7 +55,9 @@ use risingwave_storage::hummock::{
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
-use risingwave_storage::store::{LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions};
+use risingwave_storage::store::{
+    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, SealCurrentEpochOptions,
+};
 use risingwave_storage::StateStore;
 
 use crate::CompactionTestOpts;
@@ -210,6 +212,7 @@ async fn compaction_test(
         storage_memory_config.block_cache_capacity_mb * (1 << 20),
         storage_memory_config.meta_cache_capacity_mb * (1 << 20),
         0,
+        storage_memory_config.large_query_memory_usage_mb * (1 << 20),
         FileCache::none(),
         FileCache::none(),
         None,
@@ -418,7 +421,8 @@ impl NormalState {
             .flush(delete_ranges)
             .await
             .map_err(|e| format!("{:?}", e))?;
-        self.storage.seal_current_epoch(next_epoch);
+        self.storage
+            .seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
         Ok(())
     }
 
@@ -453,7 +457,8 @@ impl NormalState {
                 ReadOptions {
                     ignore_range_tombstone,
                     table_id: self.table_id,
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    read_version_from_backup: false,
+                    prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
                 },
@@ -483,7 +488,8 @@ impl CheckState for NormalState {
                     ReadOptions {
                         ignore_range_tombstone: true,
                         table_id: self.table_id,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        read_version_from_backup: false,
+                        prefetch_options: PrefetchOptions::default(),
                         cache_policy: CachePolicy::Fill(CachePriority::High),
                         ..Default::default()
                     },

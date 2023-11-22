@@ -27,24 +27,24 @@ message WatermarkDesc {
 }
 
 enum SchemaRegistryNameStrategy {
-  TOPIC_NAME_STRATEGY_UNSPECIFIED = 0;
-  RECORD_NAME_STRATEGY = 1;
-  TOPIC_RECORD_NAME_STRATEGY = 2;
+  SCHEMA_REGISTRY_NAME_STRATEGY_UNSPECIFIED = 0;
+  SCHEMA_REGISTRY_NAME_STRATEGY_RECORD_NAME_STRATEGY = 1;
+  SCHEMA_REGISTRY_NAME_STRATEGY_TOPIC_RECORD_NAME_STRATEGY = 2;
 }
 
 enum StreamJobStatus {
   // Prefixed by `STREAM_JOB_STATUS` due to protobuf namespacing rules.
   STREAM_JOB_STATUS_UNSPECIFIED = 0;
-  CREATING = 1;
-  CREATED = 2;
+  STREAM_JOB_STATUS_CREATING = 1;
+  STREAM_JOB_STATUS_CREATED = 2;
 }
 
 // How the stream job was created will determine
 // whether they are persisted.
 enum CreateType {
   CREATE_TYPE_UNSPECIFIED = 0;
-  BACKGROUND = 1;
-  FOREGROUND = 2;
+  CREATE_TYPE_BACKGROUND = 1;
+  CREATE_TYPE_FOREGROUND = 2;
 }
 
 message StreamSourceInfo {
@@ -104,10 +104,10 @@ message Source {
 }
 
 enum SinkType {
-  UNSPECIFIED = 0;
-  APPEND_ONLY = 1;
-  FORCE_APPEND_ONLY = 2;
-  UPSERT = 3;
+  SINK_TYPE_UNSPECIFIED = 0;
+  SINK_TYPE_APPEND_ONLY = 1;
+  SINK_TYPE_FORCE_APPEND_ONLY = 2;
+  SINK_TYPE_UPSERT = 3;
 }
 
 // Similar to `StreamSourceInfo`, and may replace `SinkType` later.
@@ -298,10 +298,10 @@ message Table {
 }
 
 enum HandleConflictBehavior {
-  CONFLICT_BEHAVIOR_UNSPECIFIED = 0;
-  OVERWRITE = 1;
-  IGNORE = 2;
-  NO_CHECK = 3;
+  HANDLE_CONFLICT_BEHAVIOR_UNSPECIFIED = 0;
+  HANDLE_CONFLICT_BEHAVIOR_OVERWRITE = 1;
+  HANDLE_CONFLICT_BEHAVIOR_IGNORE = 2;
+  HANDLE_CONFLICT_BEHAVIOR_NO_CHECK = 3;
 }
 
 message View {

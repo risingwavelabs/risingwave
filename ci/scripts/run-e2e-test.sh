@@ -86,6 +86,7 @@ sleep 1
 sqllogictest -p 4566 -d dev './e2e_test/udf/udf.slt'
 pkill python3
 
+sqllogictest -p 4566 -d dev './e2e_test/udf/alter_function.slt'
 sqllogictest -p 4566 -d dev './e2e_test/udf/graceful_shutdown_python.slt'
 
 echo "--- e2e, $mode, java udf"
@@ -101,6 +102,14 @@ echo "--- e2e, $mode, generated"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 cluster_start
 sqllogictest -p 4566 -d dev './e2e_test/generated/**/*.slt' --junit "generated-${profile}"
+
+echo "--- Kill cluster"
+cluster_stop
+
+echo "--- e2e, $mode, error ui"
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+cluster_start
+sqllogictest -p 4566 -d dev './e2e_test/error_ui/**/*.slt'
 
 echo "--- Kill cluster"
 cluster_stop
