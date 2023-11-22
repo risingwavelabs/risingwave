@@ -22,8 +22,8 @@ use risingwave_common::error::ErrorCode::{
 };
 use risingwave_common::error::{Result, RwError};
 
-use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::{default_conn_config, s3_client};
+use crate::common::AwsAuthProps;
 
 const AVRO_SCHEMA_LOCATION_S3_REGION: &str = "region";
 
