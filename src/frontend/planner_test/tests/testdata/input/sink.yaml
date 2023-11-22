@@ -42,3 +42,14 @@
     );
   expected_outputs:
     - explain_output
+- id: downstream_pk_same_with_upstream
+  sql: |
+    create table t1 (v1 int, v2 double precision, v3 varchar, v4 bigint, v5 decimal, primary key (v3,v4));
+    explain create sink s1_mysql as select v2, v1, count(*) from t1 group by v1, v2 WITH (
+      connector='kafka',
+      topic='abc',
+      type='upsert',
+      primary_key='v2,v1'
+    );
+  expected_outputs:
+    - explain_output
