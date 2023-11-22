@@ -90,12 +90,27 @@ message TableFragments {
     // so we pre-generate and store it here, this member will only be initialized when creating the Fragment
     // and modified when creating the mv-on-mv
     repeated uint32 upstream_fragment_ids = 7;
+
+    optional stream_plan.StreamNode stream_node_template = 8;
   }
+
   uint32 table_id = 1;
   State state = 2;
   map<uint32, Fragment> fragments = 3;
   map<uint32, ActorStatus> actor_status = 4;
   map<uint32, source.ConnectorSplits> actor_splits = 5;
+
+  message ActorIds {
+    repeated uint32 actor_ids = 1;
+  }
+
+  map<uint32, ActorIds> actor_upstream_actors = 7;
+
+  enum CompressionType {
+    COMPRESSION_UNSPECIFIED = 0;
+    COMPRESSION_NONE = 1;
+    COMPRESSION_TEMPLATE = 2;
+  }
 
   stream_plan.StreamEnvironment env = 6;
 }
