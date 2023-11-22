@@ -476,6 +476,7 @@ PulsarProperties:
     required: false
   - name: external_id
     field_type: String
+    comments: This field was added for kinesis. Not sure if it's useful for other connectors.  Please ignore it in the documentation for now.
     required: false
   - name: profile
     field_type: String

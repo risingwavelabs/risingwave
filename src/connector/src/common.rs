@@ -66,6 +66,8 @@ pub struct AwsAuthProps {
     pub secret_key: Option<String>,
     pub session_token: Option<String>,
     pub arn: Option<String>,
+    /// This field was added for kinesis. Not sure if it's useful for other connectors.
+    /// Please ignore it in the documentation for now.
     pub external_id: Option<String>,
     pub profile: Option<String>,
 }
