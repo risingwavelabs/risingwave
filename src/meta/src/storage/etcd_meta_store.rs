@@ -182,10 +182,6 @@ impl EtcdMetaStore {
             client: KvClient::new(client),
         }
     }
-
-    pub fn client(&self) -> &KvClient {
-        &self.client
-    }
 }
 
 #[async_trait]
@@ -251,9 +247,5 @@ impl MetaStore for EtcdMetaStore {
         } else {
             Ok(())
         }
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 }

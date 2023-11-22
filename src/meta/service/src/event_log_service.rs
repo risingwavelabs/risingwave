@@ -14,9 +14,7 @@
 
 use risingwave_meta::manager::event_log::EventLogMangerRef;
 use risingwave_pb::meta::event_log_service_server::EventLogService;
-use risingwave_pb::meta::{
-    AddEventLogRequest, AddEventLogResponse, ListEventLogRequest, ListEventLogResponse,
-};
+use risingwave_pb::meta::{ListEventLogRequest, ListEventLogResponse};
 use tonic::{Request, Response, Status};
 
 pub struct EventLogServiceImpl {
@@ -31,20 +29,11 @@ impl EventLogServiceImpl {
 
 #[async_trait::async_trait]
 impl EventLogService for EventLogServiceImpl {
-    async fn add_event_log(
-        &self,
-        request: Request<AddEventLogRequest>,
-    ) -> Result<Response<AddEventLogResponse>, Status> {
-        self.event_log_manager
-            .add_event_logs(request.into_inner().event_logs)?;
-        Ok(Response::new(AddEventLogResponse {}))
-    }
-
     async fn list_event_log(
         &self,
         _request: Request<ListEventLogRequest>,
     ) -> Result<Response<ListEventLogResponse>, Status> {
-        let event_logs = self.event_log_manager.list_event_logs().await?;
+        let event_logs = self.event_log_manager.list_event_logs();
         Ok(Response::new(ListEventLogResponse { event_logs }))
     }
 }

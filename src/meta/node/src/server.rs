@@ -25,7 +25,6 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
-use risingwave_meta::manager::event_log::new_event_log;
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
 use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_meta_model_migration::{Migrator, MigratorTrait};
@@ -752,17 +751,14 @@ pub async fn start_service_as_election_leader(
     tracing::info!("Assigned cluster id {:?}", *env.cluster_id());
     tracing::info!("Starting meta services");
 
-    let info = serde_json::json!({
-        "advertise_addr": address_info.advertise_addr,
-        "listen_addr": address_info.listen_addr.to_string(),
-        "opts": env.opts,
-    });
-    let _ = env
-        .event_log_manager_ref()
-        .add_event_logs(vec![new_event_log(
-            risingwave_pb::meta::event_log::EventType::MetaNodeStart,
-            info.to_string(),
-        )]);
+    let event = risingwave_pb::meta::event_log::EventMetaNodeStart {
+        advertise_addr: address_info.advertise_addr,
+        listen_addr: address_info.listen_addr.to_string(),
+        opts: serde_json::to_string(&env.opts).unwrap(),
+    };
+    env.event_log_manager_ref().add_event_logs(vec![
+        risingwave_pb::meta::event_log::Event::MetaNodeStart(event),
+    ]);
 
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))

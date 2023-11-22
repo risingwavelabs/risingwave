@@ -855,25 +855,27 @@ impl CatalogManager {
         }
         commit_meta!(self, tables)?;
 
-        use crate::manager::event_log::new_event_log;
         // Note that `tables_to_clean` doesn't include sink/index/table_with_source creation,
         // because their states are not persisted in the first place, see `start_create_stream_job_procedure`.
-        let event_logs = tables_to_clean.iter()
-            .filter_map(|t|{
+        let event_logs = tables_to_clean
+            .iter()
+            .filter_map(|t| {
                 if t.table_type == TableType::Internal as i32 {
                     return None;
                 }
-                let info =
-                    serde_json::json!({"id": t.id, "name": t.name, "definition": t.definition, "error": "clear during recovery".to_string()})
-                        .to_string();
-                let event_log = new_event_log(
-                    risingwave_pb::meta::event_log::EventType::DirtyStreamJobClear,
-                    info,
-                );
-                Some(event_log)
-            }).collect_vec();
+                let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
+                    id: t.id,
+                    name: t.name.to_owned(),
+                    definition: t.definition.to_owned(),
+                    error: "clear during recovery".to_string(),
+                };
+                Some(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
+                    event,
+                ))
+            })
+            .collect_vec();
         if !event_logs.is_empty() {
-            let _ = self.env.event_log_manager_ref().add_event_logs(event_logs);
+            self.env.event_log_manager_ref().add_event_logs(event_logs);
         }
 
         database_core.clear_creating_stream_jobs();

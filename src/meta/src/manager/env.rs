@@ -173,9 +173,7 @@ pub struct MetaOpts {
     pub compaction_task_max_heartbeat_interval_secs: u64,
     pub compaction_config: Option<CompactionConfig>,
     pub event_log_enabled: bool,
-    pub event_log_flush_interval_ms: u64,
-    pub event_log_retention_sec: u64,
-    pub event_log_max_size_bytes: u64,
+    pub event_log_channel_max_size: u32,
 }
 
 impl MetaOpts {
@@ -217,9 +215,7 @@ impl MetaOpts {
             compaction_task_max_heartbeat_interval_secs: 0,
             compaction_config: None,
             event_log_enabled: false,
-            event_log_flush_interval_ms: 1000,
-            event_log_retention_sec: 3600,
-            event_log_max_size_bytes: 1000,
+            event_log_channel_max_size: 1,
         }
     }
 }
@@ -273,13 +269,9 @@ impl MetaSrvEnv {
         };
 
         let connector_client = ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref()).await;
-        // TODO config event log retention
         let event_log_manager = Arc::new(start_event_log_manager(
-            meta_store.clone(),
             opts.event_log_enabled,
-            opts.event_log_retention_sec,
-            opts.event_log_flush_interval_ms,
-            opts.event_log_max_size_bytes,
+            opts.event_log_channel_max_size,
         ));
 
         Ok(Self {
@@ -420,7 +412,7 @@ impl MetaSrvEnv {
             None
         };
 
-        let event_log_manager = Arc::new(EventLogManger::for_test(meta_store.clone()));
+        let event_log_manager = Arc::new(EventLogManger::for_test());
 
         Self {
             id_gen_manager,

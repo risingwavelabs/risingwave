@@ -50,7 +50,7 @@ event_log_flush_interval_ms = 10\
 }
 
 async fn assert_event_count(mut session: Session, expected_count: u64) {
-    let event_type = risingwave_pb::meta::event_log::EventType::CreateStreamJobFail.as_str_name();
+    let event_type = "CREATE_STREAM_JOB_FAIL";
     let count = session
         .run(format!(
             "select count(*) from rw_event_logs where event_type='{}'",
@@ -67,7 +67,7 @@ async fn assert_latest_event(
     definition: impl ToString,
     error: impl ToString,
 ) {
-    let event_type = risingwave_pb::meta::event_log::EventType::CreateStreamJobFail.as_str_name();
+    let event_type = "CREATE_STREAM_JOB_FAIL";
     let info = session
         .run(format!(
             "select info from rw_event_logs where event_type='{}' order by timestamp desc limit 1",
@@ -76,20 +76,22 @@ async fn assert_latest_event(
         .await
         .unwrap();
     let json = serde_json::from_str::<serde_json::Value>(&info).unwrap();
+    let inner = json.get("createStreamJobFail").unwrap();
     // the event log shows the detail of the failed creation.
     assert_eq!(
-        json.get("name").unwrap().as_str().unwrap(),
-        name.to_string()
+        inner.get("name").unwrap().as_str().unwrap(),
+        name.to_string(),
     );
     assert_eq!(
-        json.get("definition")
+        inner
+            .get("definition")
             .unwrap()
             .as_str()
             .unwrap()
             .to_lowercase(),
         definition.to_string().to_lowercase()
     );
-    assert!(json
+    assert!(inner
         .get("error")
         .unwrap()
         .as_str()

@@ -37,7 +37,6 @@ use tracing::log::warn;
 use tracing::Instrument;
 
 use crate::barrier::BarrierManagerRef;
-use crate::manager::event_log::new_event_log;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, ConnectionId, DatabaseId, FragmentManagerRef, FunctionId,
     IdCategory, IndexId, LocalNotification, MetaSrvEnv, NotificationVersion, RelationIdEnum,
@@ -769,15 +768,15 @@ impl DdlController {
         error: Option<&impl ToString>,
     ) -> MetaResult<()> {
         let error = error.map(ToString::to_string).unwrap_or_default();
-        let info = serde_json::json!({"id": stream_job.id(), "name": stream_job.name(), "definition": stream_job.definition(), "error": error}).to_string();
-        let event_log = new_event_log(
-            risingwave_pb::meta::event_log::EventType::CreateStreamJobFail,
-            info,
-        );
-        let _ = self
-            .env
-            .event_log_manager_ref()
-            .add_event_logs(vec![event_log]);
+        let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
+            id: stream_job.id(),
+            name: stream_job.name(),
+            definition: stream_job.definition(),
+            error,
+        };
+        self.env.event_log_manager_ref().add_event_logs(vec![
+            risingwave_pb::meta::event_log::Event::CreateStreamJobFail(event),
+        ]);
 
         let mut creating_internal_table_ids =
             internal_tables.into_iter().map(|t| t.id).collect_vec();

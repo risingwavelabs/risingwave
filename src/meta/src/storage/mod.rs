@@ -13,7 +13,7 @@
 // limitations under the License.
 
 mod etcd_meta_store;
-pub mod etcd_retry_client;
+mod etcd_retry_client;
 mod mem_meta_store;
 pub mod meta_store;
 #[cfg(test)]

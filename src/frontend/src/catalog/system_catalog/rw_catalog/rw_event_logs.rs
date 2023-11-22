@@ -17,6 +17,8 @@ use risingwave_common::catalog::RW_CATALOG_SCHEMA_NAME;
 use risingwave_common::error::Result;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl, Timestamptz};
+use risingwave_pb::meta::event_log::Event;
+use serde_json::json;
 
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
@@ -27,7 +29,7 @@ pub const RW_EVENT_LOGS: BuiltinTable = BuiltinTable {
         (DataType::Varchar, "unique_id"),
         (DataType::Timestamptz, "timestamp"),
         (DataType::Varchar, "event_type"),
-        (DataType::Varchar, "info"),
+        (DataType::Jsonb, "info"),
     ],
     pk: &[0],
 };
@@ -41,16 +43,25 @@ impl SysCatalogReaderImpl {
             .into_iter()
             .sorted_by(|a, b| a.timestamp.cmp(&b.timestamp))
             .map(|e| {
-                let event_type = e.event_type().as_str_name();
                 let ts = Timestamptz::from_millis(e.timestamp.unwrap() as i64).unwrap();
+                let event_type = event_type(e.event.as_ref().unwrap());
                 OwnedRow::new(vec![
-                    Some(ScalarImpl::Utf8(e.unique_id.unwrap().into())),
+                    Some(ScalarImpl::Utf8(e.unique_id.to_owned().unwrap().into())),
                     Some(ScalarImpl::Timestamptz(ts)),
                     Some(ScalarImpl::Utf8(event_type.into())),
-                    Some(ScalarImpl::Utf8(e.info.into())),
+                    Some(ScalarImpl::Jsonb(json!(e).into())),
                 ])
             })
             .collect_vec();
         Ok(configs)
     }
+}
+
+fn event_type(e: &Event) -> String {
+    match e {
+        Event::CreateStreamJobFail(_) => "CREATE_STREAM_JOB_FAIL",
+        Event::DirtyStreamJobClear(_) => "DIRTY_STREAM_JOB_CLEAR",
+        Event::MetaNodeStart(_) => "META_NODE_START",
+    }
+    .into()
 }
