@@ -26,7 +26,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::Deserialize;
 use serde_json::Value;
 use serde_with::serde_as;
 use url::Url;
@@ -46,7 +46,7 @@ use crate::sink::{
 pub const BIGQUERY_SINK: &str = "bigquery";
 const BIGQUERY_INSERT_MAX_NUMS: usize = 1024;
 
-#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct BigQueryCommon {
     #[serde(rename = "bigquery.local.path")]
     pub local_path: Option<String>,

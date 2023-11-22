@@ -26,7 +26,7 @@ use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
 use risingwave_common::error::ErrorCode::InvalidParameterValue;
 use risingwave_common::error::{anyhow_error, RwError};
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::Deserialize;
 use serde_with::json::JsonString;
 use serde_with::{serde_as, DisplayFromStr};
 use tempfile::NamedTempFile;
@@ -44,7 +44,7 @@ use crate::source::nats::source::NatsOffset;
 pub const BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
 pub const PRIVATE_LINK_TARGETS_KEY: &str = "privatelink.targets";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct AwsPrivateLinkItem {
     pub az_id: Option<String>,
     pub port: u16,
@@ -57,7 +57,7 @@ use aws_types::region::Region;
 use aws_types::SdkConfig;
 
 /// A flatten config map for aws auth.
-#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct AwsAuthProps {
     pub region: Option<String>,
     #[serde(alias = "endpoint_url")]
@@ -143,7 +143,7 @@ impl AwsAuthProps {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize, WithOptions)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct KafkaCommon {
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
@@ -229,7 +229,7 @@ const fn default_kafka_sync_call_timeout() -> Duration {
 }
 
 #[serde_as]
-#[derive(Debug, Clone, Serialize, Deserialize, WithOptions)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct RdKafkaPropertiesCommon {
     /// Maximum Kafka protocol request message size. Due to differing framing overhead between
     /// protocol versions the producer is unable to reliably enforce a strict max message limit at
@@ -434,7 +434,7 @@ impl PulsarCommon {
     }
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct KinesisCommon {
     #[serde(rename = "stream", alias = "kinesis.stream.name")]
     pub stream_name: String,
@@ -486,7 +486,7 @@ impl KinesisCommon {
         Ok(KinesisClient::from_conf(builder.build()))
     }
 }
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct UpsertMessage<'a> {
     #[serde(borrow)]
     pub primary_key: Cow<'a, [u8]>,
@@ -495,7 +495,7 @@ pub struct UpsertMessage<'a> {
 }
 
 #[serde_as]
-#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct NatsCommon {
     #[serde(rename = "server_url")]
     pub server_url: String,
