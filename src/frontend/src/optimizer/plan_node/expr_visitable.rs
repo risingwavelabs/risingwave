@@ -18,7 +18,7 @@ use super::*;
 use crate::expr::ExprVisitor;
 
 /// Vistis expressions in a `PlanRef`.
-/// To visit recursively, call `rewrite_exprs_recursive` on [`VisitExprsRecursive`].
+/// To visit recursively, call `visit_exprs_recursive` on [`VisitExprsRecursive`].
 pub trait ExprVisitable {
     fn visit_exprs(&self, _v: &mut dyn ExprVisitor) {}
 }
