@@ -1561,7 +1561,7 @@ impl DataChunkMutator {
         for build_column in columns.split_off(probe_column_count) {
             // Is it really safe to use Arc::try_unwrap here?
             let mut array = Arc::try_unwrap(build_column).unwrap();
-            array.set_bitmap(filter.clone());
+            array.set_bitmap(array.null_bitmap() & filter);
             columns.push(array.into());
         }
 
