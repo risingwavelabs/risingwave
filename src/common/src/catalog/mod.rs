@@ -122,7 +122,9 @@ pub fn offset_column_name() -> String {
     OFFSET_COLUMN_NAME.to_string()
 }
 
-pub const CDC_SOURCE_COLUMN_NUM: u32 = 4;
+// The number of columns output by the cdc source job
+// see `debezium_cdc_source_schema()` for details
+pub const CDC_SOURCE_COLUMN_NUM: u32 = 3;
 pub const TABLE_NAME_COLUMN_NAME: &str = "_rw_table_name";
 pub fn cdc_table_name_column_name() -> String {
     TABLE_NAME_COLUMN_NAME.to_string()

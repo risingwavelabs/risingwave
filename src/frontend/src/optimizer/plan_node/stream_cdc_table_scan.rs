@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, Field};
+use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -145,36 +145,15 @@ impl StreamCdcTableScan {
             .map(|x| *x as u32)
             .collect_vec();
 
-        // The required columns from the table (both scan and upstream).
-        let upstream_column_ids = self
-            .core
-            .output_and_pk_column_ids()
-            .iter()
-            .map(ColumnId::get_id)
-            .collect_vec();
-
         // The schema of the shared cdc source upstream is different from snapshot,
         // refer to `debezium_cdc_source_schema()` for details.
-        let upstream_schema = {
-            let mut columns = debezium_cdc_source_schema();
-            columns.push(ColumnCatalog::row_id_column());
+        let cdc_source_schema = {
+            let columns = debezium_cdc_source_schema();
             columns
                 .into_iter()
                 .map(|c| Field::from(c.column_desc).to_prost())
                 .collect_vec()
         };
-
-        let output_indices = self
-            .core
-            .output_column_ids()
-            .iter()
-            .map(|i| {
-                upstream_column_ids
-                    .iter()
-                    .position(|&x| x == i.get_id())
-                    .unwrap() as u32
-            })
-            .collect_vec();
 
         let catalog = self
             .build_backfill_state_catalog(state)
@@ -219,6 +198,7 @@ impl StreamCdcTableScan {
         .into();
 
         let filter_operator_id = self.core.ctx.next_plan_node_id();
+        // The filter node receive chunks in `(payload, _rw_offset, _rw_table_name)` schema
         let filter_stream_node = StreamNode {
             operator_id: filter_operator_id.0 as _,
             input: vec![
@@ -226,7 +206,7 @@ impl StreamCdcTableScan {
                 PbStreamNode {
                     node_body: Some(PbNodeBody::Merge(Default::default())),
                     identity: "Upstream".into(),
-                    fields: upstream_schema.clone(),
+                    fields: cdc_source_schema.clone(),
                     stream_key: vec![], // not used
                     ..Default::default()
                 },
@@ -234,11 +214,11 @@ impl StreamCdcTableScan {
             stream_key: vec![], // not used
             append_only: true,
             identity: "StreamCdcFilter".to_string(),
-            fields: upstream_schema.clone(),
+            fields: cdc_source_schema.clone(),
             node_body: Some(PbNodeBody::CdcFilter(CdcFilterNode {
                 search_condition: Some(filter_expr.to_expr_proto()),
                 upstream_source_id,
-                upstream_column_ids: upstream_column_ids.clone(),
+                upstream_column_ids: vec![], // not used,
             })),
         };
 
@@ -250,15 +230,42 @@ impl StreamCdcTableScan {
             stream_key: vec![], // not used
             append_only: true,
             identity: "Exchange".to_string(),
-            fields: upstream_schema.clone(),
+            fields: cdc_source_schema.clone(),
             node_body: Some(PbNodeBody::Exchange(ExchangeNode {
                 strategy: Some(DispatchStrategy {
                     r#type: DispatcherType::Simple as _,
                     dist_key_indices: vec![], // simple exchange doesn't need dist key
-                    output_indices: output_indices.clone(),
+                    output_indices: (0..cdc_source_schema.len() as u32).collect(),
                 }),
             })),
         };
+
+        // The required columns from the external table
+        let upstream_column_ids = self
+            .core
+            .output_and_pk_column_ids()
+            .iter()
+            .map(ColumnId::get_id)
+            .collect_vec();
+
+        let output_indices = self
+            .core
+            .output_column_ids()
+            .iter()
+            .map(|i| {
+                upstream_column_ids
+                    .iter()
+                    .position(|&x| x == i.get_id())
+                    .unwrap() as u32
+            })
+            .collect_vec();
+
+        tracing::debug!(
+            "output_column_ids: {:?}, upstream_column_ids: {:?}, output_indices: {:?}",
+            self.core.output_column_ids(),
+            upstream_column_ids,
+            output_indices
+        );
 
         let stream_scan_body = PbNodeBody::StreamCdcScan(StreamCdcScanNode {
             table_id: upstream_source_id,

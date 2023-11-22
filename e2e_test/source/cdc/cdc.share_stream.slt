@@ -51,13 +51,16 @@ create materialized view products_test_cnt as select count(*) as cnt from produc
 statement ok
 create materialized view orders_test_cnt as select count(*) as cnt from orders_test;
 
+system ok
+mysql --protocol=tcp -u root mytest -e "INSERT INTO products VALUES(default, 'Milk', '100ml Milk');"
+
 sleep 5s
 
 # check ingestion results
 query I
 SELECT * from products_test_cnt
 ----
-9
+10
 
 query I
 SELECT * from orders_test_cnt
