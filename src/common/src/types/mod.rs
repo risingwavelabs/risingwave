@@ -754,6 +754,7 @@ impl From<JsonbRef<'_>> for ScalarImpl {
     }
 }
 
+/// Error type for [`ScalarImpl::from_binary`] and [`ScalarImpl::from_text`].
 #[derive(Debug, thiserror::Error, thiserror_ext::Construct)]
 pub enum FromSqlError {
     #[error(transparent)]

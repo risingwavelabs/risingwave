@@ -1000,6 +1000,7 @@ impl ToText for crate::types::Interval {
     }
 }
 
+/// Error type for parsing an [`Interval`].
 #[derive(thiserror::Error, Debug, thiserror_ext::Construct)]
 pub enum IntervalParseError {
     #[error("Invalid interval: {0}")]

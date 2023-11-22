@@ -17,6 +17,7 @@ use std::process::Command;
 use std::result::Result;
 use std::{env, fs};
 
+/// Error type for running `jeprof`.
 #[derive(thiserror::Error, Debug, thiserror_ext::ContextInto)]
 pub enum JeprofError {
     #[error(transparent)]

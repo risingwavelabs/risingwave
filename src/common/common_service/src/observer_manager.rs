@@ -78,6 +78,7 @@ impl<S: ObserverState> ObserverManager<RpcNotificationClient, S> {
     }
 }
 
+/// Error type for [`ObserverManager`].
 #[derive(thiserror::Error, Debug)]
 pub enum ObserverError {
     #[error("notification channel closed")]

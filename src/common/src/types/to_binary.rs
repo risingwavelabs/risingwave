@@ -18,6 +18,7 @@ use postgres_types::{ToSql, Type};
 use super::{DataType, DatumRef, ScalarRefImpl, F32, F64};
 use crate::error::TrackingIssue;
 
+/// Error type for [`ToBinary`] trait.
 #[derive(thiserror::Error, Debug)]
 pub enum ToBinaryError {
     #[error(transparent)]
