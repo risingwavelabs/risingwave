@@ -1380,6 +1380,6 @@ pub mod tests {
     async fn test_cdc_source_job_schema() {
         let columns = debezium_cdc_source_schema();
         // make sure it doesn't broken by future PRs
-        assert_eq!(CDC_SOURCE_COLUMN_NUM, columns.len());
+        assert_eq!(CDC_SOURCE_COLUMN_NUM, columns.len() as u32);
     }
 }
