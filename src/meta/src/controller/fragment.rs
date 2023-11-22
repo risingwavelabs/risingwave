@@ -29,7 +29,7 @@ use risingwave_pb::common::PbParallelUnit;
 use risingwave_pb::ddl_service::PbTableJobType;
 use risingwave_pb::meta::table_fragments::actor_status::PbActorState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
-use risingwave_pb::meta::table_fragments::{PbActorStatus, PbFragment, PbState};
+use risingwave_pb::meta::table_fragments::{GraphRenderType, PbActorStatus, PbFragment, PbState};
 use risingwave_pb::meta::{FragmentParallelUnitMapping, PbTableFragments};
 use risingwave_pb::source::PbConnectorSplits;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -46,6 +46,7 @@ use sea_orm::{
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{get_actor_dispatchers, get_parallel_unit_mapping};
 use crate::manager::ActorInfos;
+use crate::model::downgrade_table_fragments;
 use crate::stream::SplitAssignment;
 use crate::MetaResult;
 
@@ -72,20 +73,22 @@ impl CatalogControllerInner {
 impl CatalogController {
     #[allow(clippy::type_complexity)]
     pub fn extract_fragment_and_actors_from_table_fragments(
-        PbTableFragments {
+        table_fragments: PbTableFragments,
+    ) -> MetaResult<Vec<(fragment::Model, Vec<actor::Model>)>> {
+        let mut table_fragments = table_fragments;
+
+        if table_fragments.graph_render_type == GraphRenderType::RenderTemplate as i32 {
+            downgrade_table_fragments(&mut table_fragments);
+        }
+
+        let PbTableFragments {
             table_id,
             fragments,
             actor_status,
             actor_splits,
             ..
-        }: PbTableFragments,
-    ) -> MetaResult<
-        Vec<(
-            fragment::Model,
-            Vec<actor::Model>,
-            HashMap<ActorId, Vec<actor_dispatcher::Model>>,
-        )>,
-    > {
+        } = table_fragments;
+
         let mut result = vec![];
 
         let fragments: BTreeMap<_, _> = fragments.into_iter().collect();
@@ -123,6 +126,7 @@ impl CatalogController {
             vnode_mapping: pb_vnode_mapping,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
+            ..
         } = pb_fragment;
 
         let state_table_ids = pb_state_table_ids.into();
@@ -170,6 +174,7 @@ impl CatalogController {
                 upstream_actor_id: pb_upstream_actor_id,
                 vnode_bitmap: pb_vnode_bitmap,
                 mview_definition: _,
+                upstream_actors_by_fragment: _upstream_actors_by_fragment,
             } = actor;
 
             let splits = pb_actor_splits.get(&actor_id).cloned().map(ConnectorSplits);
@@ -275,6 +280,7 @@ impl CatalogController {
             actor_status: pb_actor_status,
             actor_splits: pb_actor_splits,
             env,
+            graph_render_type: GraphRenderType::RenderUnspecified as _,
         };
 
         Ok(table_fragments)
@@ -388,6 +394,7 @@ impl CatalogController {
                 upstream_actor_id: pb_upstream_actor_id,
                 vnode_bitmap: pb_vnode_bitmap,
                 mview_definition: "".to_string(),
+                upstream_actors_by_fragment: Default::default(),
             })
         }
 
@@ -403,6 +410,7 @@ impl CatalogController {
             vnode_mapping: Some(pb_vnode_mapping),
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
+            stream_node_template: Default::default(),
         };
 
         Ok((pb_fragment, pb_actor_status, pb_actor_splits))
@@ -1047,6 +1055,7 @@ mod tests {
                         .cloned()
                         .map(|bitmap| bitmap.to_protobuf()),
                     mview_definition: "".to_string(),
+                    upstream_actors_by_fragment: Default::default(),
                 }
             })
             .collect_vec();
@@ -1062,6 +1071,7 @@ mod tests {
                 .values()
                 .flat_map(|m| m.keys().map(|x| *x as _))
                 .collect(),
+            stream_node_template: None,
         };
 
         let pb_actor_status = (0..actor_count)
@@ -1261,6 +1271,7 @@ mod tests {
                 upstream_actor_id: pb_upstream_actor_id,
                 vnode_bitmap: pb_vnode_bitmap,
                 mview_definition,
+                upstream_actors_by_fragment: _,
             },
         ) in actors.into_iter().zip_eq_debug(pb_actors.into_iter())
         {
@@ -1328,6 +1339,7 @@ mod tests {
             vnode_mapping: pb_vnode_mapping,
             state_table_ids: pb_state_table_ids,
             upstream_fragment_ids: pb_upstream_fragment_ids,
+            stream_node_template: _,
         } = pb_fragment;
 
         assert_eq!(fragment_id, TEST_FRAGMENT_ID as u32);

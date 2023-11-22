@@ -281,6 +281,7 @@ impl ActorBuilder {
             upstream_actor_id,
             vnode_bitmap: self.vnode_bitmap.map(|b| b.to_protobuf()),
             mview_definition,
+            upstream_actors_by_fragment: Default::default(),
         })
     }
 }

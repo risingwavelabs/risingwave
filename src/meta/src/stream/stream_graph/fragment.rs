@@ -836,6 +836,7 @@ impl CompleteStreamFragmentGraph {
             vnode_mapping: Some(distribution.into_mapping().to_protobuf()),
             state_table_ids,
             upstream_fragment_ids,
+            stream_node_template: None,
         }
     }
 

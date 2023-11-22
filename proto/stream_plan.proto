@@ -810,6 +810,14 @@ message StreamActor {
   common.Buffer vnode_bitmap = 8;
   // The SQL definition of this materialized view. Used for debugging only.
   string mview_definition = 9;
+
+  message ActorIds {
+    repeated uint32 actor_ids = 1;
+  }
+
+  // The upstream actors of this actor, grouped by fragment id.
+  // Content will only be present when using RENDER_TEMPLATE.
+  map<uint32, ActorIds> upstream_actors_by_fragment = 10;
 }
 
 enum FragmentTypeFlag {
