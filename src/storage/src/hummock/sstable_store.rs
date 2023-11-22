@@ -38,6 +38,7 @@ use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use zstd::zstd_safe::WriteBuf;
 
+use super::event_handler::refiller::SstableBlock;
 use super::utils::MemoryTracker;
 use super::{
     Block, BlockCache, BlockMeta, BlockResponse, CachedBlock, FileCache, RecentFilter, Sstable,
@@ -168,7 +169,7 @@ pub struct SstableStore {
     /// Recent filter for `(sst_obj_id, blk_idx)`.
     ///
     /// `blk_idx == USIZE::MAX` stands for `sst_obj_id` only entry.
-    recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
+    recent_filter: Option<Arc<RecentFilter<SstableBlock>>>,
     pending_streaming_loading: Arc<AtomicUsize>,
     large_query_memory_usage: usize,
 }
@@ -183,7 +184,7 @@ impl SstableStore {
         large_query_memory_usage: usize,
         data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
         meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
-        recent_filter: Option<Arc<RecentFilter<(HummockSstableObjectId, usize)>>>,
+        recent_filter: Option<Arc<RecentFilter<SstableBlock>>>,
     ) -> Self {
         // TODO: We should validate path early. Otherwise object store won't report invalid path
         // error until first write attempt.
@@ -393,7 +394,16 @@ impl SstableStore {
         };
 
         if let Some(filter) = self.recent_filter.as_ref() {
-            filter.extend([(object_id, usize::MAX), (object_id, block_index)]);
+            filter.extend([
+                SstableBlock {
+                    sst_obj_id: object_id,
+                    blk_idx: usize::MAX,
+                },
+                SstableBlock {
+                    sst_obj_id: object_id,
+                    blk_idx: block_index,
+                },
+            ]);
         }
 
         match policy {
@@ -595,7 +605,16 @@ impl SstableStore {
         block: Box<Block>,
     ) {
         if let Some(filter) = self.recent_filter.as_ref() {
-            filter.extend([(object_id, usize::MAX), (object_id, block_index as usize)]);
+            filter.extend([
+                SstableBlock {
+                    sst_obj_id: object_id,
+                    blk_idx: usize::MAX,
+                },
+                SstableBlock {
+                    sst_obj_id: object_id,
+                    blk_idx: block_index as usize,
+                },
+            ]);
         }
         self.block_cache
             .insert(object_id, block_index, block, CachePriority::High);
@@ -635,9 +654,7 @@ impl SstableStore {
         ))
     }
 
-    pub fn data_recent_filter(
-        &self,
-    ) -> Option<&Arc<RecentFilter<(HummockSstableObjectId, usize)>>> {
+    pub fn data_recent_filter(&self) -> Option<&Arc<RecentFilter<SstableBlock>>> {
         self.recent_filter.as_ref()
     }
 
@@ -829,7 +846,10 @@ impl SstableWriter for BatchUploadWriter {
 
             // Only update recent filter with sst obj id is okay here, for l0 is only filter by sst obj id with recent filter.
             if let Some(filter) = self.sstable_store.recent_filter.as_ref() {
-                filter.insert((self.object_id, usize::MAX));
+                filter.insert(SstableBlock {
+                    sst_obj_id: self.object_id,
+                    blk_idx: usize::MAX,
+                });
             }
 
             // Add block cache.

@@ -431,10 +431,12 @@ impl CacheRefillTask {
             .config
             .data_refill_levels
             .contains(&delta.insert_sst_level)
-            || !delta
-                .delete_sst_object_ids
-                .iter()
-                .any(|&id| filter.contains(&(id, usize::MAX)))
+            || !delta.delete_sst_object_ids.iter().any(|&id| {
+                filter.contains(&SstableBlock {
+                    sst_obj_id: id,
+                    blk_idx: usize::MAX,
+                })
+            })
         {
             GLOBAL_CACHE_REFILL_METRICS.data_refill_filtered_total.inc();
             return;
@@ -465,9 +467,9 @@ impl CacheRefillTask {
                     uidx,
                     blks: blk_start..blk_end,
                 };
-                futures.push(
-                    async move { Self::data_file_cache_refill_unit(context, sst, unit).await },
-                );
+                futures.push(async move {
+                    Self::data_file_cache_refill_unit_l0(context, sst, unit).await
+                });
             }
         }
         join_all(futures).await;
@@ -506,26 +508,23 @@ impl CacheRefillTask {
             let store = &sstable_store;
             let ssts = &ssts;
             async move {
-                // refill if:
-                //
-                // 1. pblk in recent filter
-                // 2. in data memory cache or in data file cache
-                let refill = pblks.into_iter().any(|pblk| {
-                    store
-                        .data_recent_filter()
-                        .unwrap()
-                        .contains(&(pblk.sst_obj_id, pblk.blk_idx))
-                        && (store
-                            .data_cache()
-                            .exists_block(pblk.sst_obj_id, pblk.blk_idx as u64)
-                            || store
-                                .data_file_cache()
-                                .exists(&SstableBlockIndex {
-                                    sst_id: pblk.sst_obj_id,
-                                    block_idx: pblk.blk_idx as u64,
-                                })
-                                .unwrap_or_default())
-                });
+                let total = pblks.len();
+
+                // Only check if there is pblk in recent filter, without checking if pblk is still in mem cache or file cache.
+                let keys = pblks
+                    .into_iter()
+                    .map(|pblk| SstableBlock {
+                        sst_obj_id: pblk.sst_obj_id,
+                        blk_idx: pblk.blk_idx,
+                    })
+                    .collect_vec();
+                let recents = store
+                    .data_recent_filter()
+                    .unwrap()
+                    .contains_vector(keys.iter());
+                let admits = recents.into_iter().filter(|&b| b).count();
+
+                let refill = admits as f64 / total as f64 >= context.config.threshold;
 
                 if refill {
                     GLOBAL_CACHE_REFILL_METRICS
@@ -552,11 +551,13 @@ impl CacheRefillTask {
     ) -> HummockResult<()> {
         let sstable_store = &context.sstable_store;
         let object_id = sst.id;
-        let threshold = context.config.threshold;
 
-        // Avoid newly refilled sst being filtered.
+        // Avoid newly refilled sst being early filtered.
         if let Some(filter) = sstable_store.data_recent_filter() {
-            filter.insert((object_id, usize::MAX));
+            filter.insert(SstableBlock {
+                sst_obj_id: sst.id,
+                blk_idx: usize::MAX,
+            });
         }
 
         let blocks = unit.blks.size().unwrap();
@@ -565,7 +566,99 @@ impl CacheRefillTask {
             .data_refill_ideal_bytes
             .inc_by(blocks as u64);
 
-        let mut tasks = vec![];
+        let mut writers = Vec::with_capacity(blocks);
+        let mut ranges = Vec::with_capacity(blocks);
+
+        let (range_first, _) = sst.calculate_block_info(unit.blks.start);
+        let (range_last, _) = sst.calculate_block_info(unit.blks.end - 1);
+        let range = range_first.start..range_last.end;
+
+        for blk in unit.blks {
+            let (range, _uncompressed_capacity) = sst.calculate_block_info(blk);
+            let key = SstableBlockIndex {
+                sst_id: object_id,
+                block_idx: blk as u64,
+            };
+            // see `CachedBlock::serialized_len()`
+            let writer = sstable_store
+                .data_file_cache()
+                .writer(key, key.serialized_len() + 1 + 8 + range.size().unwrap());
+            writers.push(writer);
+            ranges.push(range);
+        }
+
+        GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
+
+        let permit = context.concurrency.acquire().await.unwrap();
+
+        GLOBAL_CACHE_REFILL_METRICS.data_refill_started_total.inc();
+
+        let timer = GLOBAL_CACHE_REFILL_METRICS
+            .data_refill_success_duration
+            .start_timer();
+
+        let data = sstable_store
+            .store()
+            .read(&sstable_store.get_sst_data_path(object_id), range.clone())
+            .await?;
+        let mut futures = vec![];
+        for (mut writer, r) in writers.into_iter().zip_eq_fast(ranges) {
+            let offset = r.start - range.start;
+            let len = r.end - r.start;
+            let bytes = data.slice(offset..offset + len);
+
+            let future = async move {
+                let value = CachedBlock::Fetched {
+                    bytes,
+                    uncompressed_capacity: writer.weight() - writer.key().serialized_len(),
+                };
+
+                // TODO(MrCroxx): compress if raw is not compressed?
+                // skip compression for it may already be compressed.
+                writer.set_compression(FileCacheCompression::None);
+                let res = writer.finish(value).await.map_err(HummockError::file_cache);
+                if matches!(res, Ok(true)) {
+                    GLOBAL_CACHE_REFILL_METRICS
+                        .data_refill_success_bytes
+                        .inc_by(len as u64);
+                }
+                res
+            };
+            futures.push(future);
+        }
+        try_join_all(futures)
+            .await
+            .map_err(HummockError::file_cache)?;
+
+        drop(permit);
+        drop(timer);
+
+        Ok(())
+    }
+
+    async fn data_file_cache_refill_unit_l0(
+        context: &CacheRefillContext,
+        sst: &Sstable,
+        unit: SstableUnit,
+    ) -> HummockResult<()> {
+        let sstable_store = &context.sstable_store;
+        let object_id = sst.id;
+        let threshold = context.config.threshold;
+
+        // Avoid newly refilled sst being filtered.
+        if let Some(filter) = sstable_store.data_recent_filter() {
+            filter.insert(SstableBlock {
+                sst_obj_id: sst.id,
+                blk_idx: usize::MAX,
+            });
+        }
+
+        let blocks = unit.blks.size().unwrap();
+
+        GLOBAL_CACHE_REFILL_METRICS
+            .data_refill_ideal_bytes
+            .inc_by(blocks as u64);
+
         let mut writers = Vec::with_capacity(blocks);
         let mut ranges = Vec::with_capacity(blocks);
         let mut admits = 0;
@@ -593,69 +686,70 @@ impl CacheRefillTask {
             ranges.push(range);
         }
 
-        if admits as f64 / writers.len() as f64 >= threshold {
-            let task = async move {
-                GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
-
-                let permit = context.concurrency.acquire().await.unwrap();
-
-                GLOBAL_CACHE_REFILL_METRICS.data_refill_started_total.inc();
-
-                let timer = GLOBAL_CACHE_REFILL_METRICS
-                    .data_refill_success_duration
-                    .start_timer();
-
-                let data = sstable_store
-                    .store()
-                    .read(&sstable_store.get_sst_data_path(object_id), range.clone())
-                    .await?;
-                let mut futures = vec![];
-                for (mut writer, r) in writers.into_iter().zip_eq_fast(ranges) {
-                    let offset = r.start - range.start;
-                    let len = r.end - r.start;
-                    let bytes = data.slice(offset..offset + len);
-
-                    let future = async move {
-                        let value = CachedBlock::Fetched {
-                            bytes,
-                            uncompressed_capacity: writer.weight() - writer.key().serialized_len(),
-                        };
-                        writer.force();
-                        // TODO(MrCroxx): compress if raw is not compressed?
-                        // skip compression for it may already be compressed.
-                        writer.set_compression(FileCacheCompression::None);
-                        let res = writer.finish(value).await.map_err(HummockError::file_cache);
-                        if matches!(res, Ok(true)) {
-                            GLOBAL_CACHE_REFILL_METRICS
-                                .data_refill_success_bytes
-                                .inc_by(len as u64);
-                        }
-                        res
-                    };
-                    futures.push(future);
-                }
-                try_join_all(futures)
-                    .await
-                    .map_err(HummockError::file_cache)?;
-
-                drop(permit);
-                drop(timer);
-
-                Ok::<_, HummockError>(())
-            };
-            tasks.push(task);
+        if (admits as f64 / writers.len() as f64) < threshold {
+            return Ok(());
         }
 
-        try_join_all(tasks).await?;
+        GLOBAL_CACHE_REFILL_METRICS.data_refill_attempts_total.inc();
+
+        let permit = context.concurrency.acquire().await.unwrap();
+
+        GLOBAL_CACHE_REFILL_METRICS.data_refill_started_total.inc();
+
+        let timer = GLOBAL_CACHE_REFILL_METRICS
+            .data_refill_success_duration
+            .start_timer();
+
+        let data = sstable_store
+            .store()
+            .read(&sstable_store.get_sst_data_path(object_id), range.clone())
+            .await?;
+        let mut futures = vec![];
+        for (mut writer, r) in writers.into_iter().zip_eq_fast(ranges) {
+            let offset = r.start - range.start;
+            let len = r.end - r.start;
+            let bytes = data.slice(offset..offset + len);
+
+            let future = async move {
+                let value = CachedBlock::Fetched {
+                    bytes,
+                    uncompressed_capacity: writer.weight() - writer.key().serialized_len(),
+                };
+                writer.force();
+                // TODO(MrCroxx): compress if raw is not compressed?
+                // skip compression for it may already be compressed.
+                writer.set_compression(FileCacheCompression::None);
+                let res = writer.finish(value).await.map_err(HummockError::file_cache);
+                if matches!(res, Ok(true)) {
+                    GLOBAL_CACHE_REFILL_METRICS
+                        .data_refill_success_bytes
+                        .inc_by(len as u64);
+                }
+                res
+            };
+            futures.push(future);
+        }
+        try_join_all(futures)
+            .await
+            .map_err(HummockError::file_cache)?;
+
+        drop(permit);
+        drop(timer);
 
         Ok(())
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SstableBlock {
     pub sst_obj_id: HummockSstableObjectId,
     pub blk_idx: usize,
+}
+
+impl AsRef<Self> for SstableBlock {
+    fn as_ref(&self) -> &Self {
+        self
+    }
 }
 
 #[derive(Debug)]

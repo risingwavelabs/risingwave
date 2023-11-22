@@ -60,26 +60,14 @@ where
     }
 
     pub fn insert(&self, key: K) {
-        if let Some(mut inner) = self.inner.try_write() {
-            if inner.last_refresh.elapsed() > self.refresh_interval {
-                inner.layers.pop_front();
-                inner.layers.push_back(RwLock::new(BTreeSet::new()));
-                inner.last_refresh = Instant::now();
-            }
-        }
+        self.may_refresh();
 
         let inner = self.inner.read();
         inner.layers.back().unwrap().write().insert(key);
     }
 
     pub fn extend(&self, keys: impl IntoIterator<Item = K>) {
-        if let Some(mut inner) = self.inner.try_write() {
-            if inner.last_refresh.elapsed() > self.refresh_interval {
-                inner.layers.pop_front();
-                inner.layers.push_back(RwLock::new(BTreeSet::new()));
-                inner.last_refresh = Instant::now();
-            }
-        }
+        self.may_refresh();
 
         let inner = self.inner.read();
         let mut guard = inner.layers.back().unwrap().write();
@@ -92,6 +80,46 @@ where
         let inner = self.inner.read();
         for layer in inner.layers.iter().rev() {
             if layer.read().contains(key) {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn contains_vector(
+        &self,
+        keys: impl ExactSizeIterator<Item = impl AsRef<K>> + Clone,
+    ) -> Vec<bool> {
+        let mut res = Vec::with_capacity(keys.len());
+        res.resize(keys.len(), false);
+        let mut remains = keys.len();
+        let inner = self.inner.read();
+        for layer in inner.layers.iter().rev() {
+            if remains == 0 {
+                break;
+            }
+            let iter = keys.clone();
+            let layer = layer.read();
+            for (index, key) in iter.enumerate() {
+                if res[index] {
+                    continue;
+                }
+                if layer.contains(key.as_ref()) {
+                    res[index] = true;
+                    remains -= 1;
+                }
+            }
+        }
+
+        res
+    }
+
+    fn may_refresh(&self) -> bool {
+        if let Some(mut inner) = self.inner.try_write() {
+            if inner.last_refresh.elapsed() > self.refresh_interval {
+                inner.layers.pop_front();
+                inner.layers.push_back(RwLock::new(BTreeSet::new()));
+                inner.last_refresh = Instant::now();
                 return true;
             }
         }
