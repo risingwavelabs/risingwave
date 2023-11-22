@@ -581,6 +581,10 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         mut sender: ChanSenderImpl,
         state_tx: Option<&mut StateReporter>,
     ) {
+        self.context
+            .batch_metrics()
+            .as_ref()
+            .inspect(|m| m.batch_manager_metrics().task_num.inc());
         let mut data_chunk_stream = root.execute();
         let mut state;
         let mut error = None;
@@ -681,6 +685,11 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 e
             );
         }
+
+        self.context
+            .batch_metrics()
+            .as_ref()
+            .inspect(|m| m.batch_manager_metrics().task_num.dec());
     }
 
     pub fn abort(&self, err_msg: String) {

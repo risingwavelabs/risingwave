@@ -13,7 +13,7 @@ clap = { version = "4", features = ["derive"] }
 console = "0.15"
 dialoguer = "0.11"
 enum-iterator = "1"
-fs-err = "2.10.0"
+fs-err = "2.11.0"
 itertools = "0.12"
 
 [lints]

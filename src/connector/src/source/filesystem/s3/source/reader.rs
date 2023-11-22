@@ -31,8 +31,8 @@ use tokio::io::BufReader;
 use tokio_util::io;
 use tokio_util::io::ReaderStream;
 
-use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::{default_conn_config, s3_client};
+use crate::common::AwsAuthProps;
 use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::base::{SplitMetaData, SplitReader};
 use crate::source::filesystem::file_common::FsSplit;

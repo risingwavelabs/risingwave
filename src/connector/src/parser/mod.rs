@@ -43,7 +43,7 @@ use self::simd_json_parser::DebeziumJsonAccessBuilder;
 use self::unified::{AccessImpl, AccessResult};
 use self::upsert_parser::UpsertParser;
 use self::util::get_kafka_topic;
-use crate::aws_auth::AwsAuthProps;
+use crate::common::AwsAuthProps;
 use crate::parser::maxwell::MaxwellParser;
 use crate::schema::schema_registry::SchemaRegistryAuth;
 use crate::source::{
@@ -916,9 +916,12 @@ impl SpecificParserConfig {
                     config.topic = get_kafka_topic(props)?.clone();
                     config.client_config = SchemaRegistryAuth::from(props);
                 } else {
-                    config.aws_auth_props = Some(AwsAuthProps::from_pairs(
-                        props.iter().map(|(k, v)| (k.as_str(), v.as_str())),
-                    ));
+                    config.aws_auth_props = Some(
+                        serde_json::from_value::<AwsAuthProps>(
+                            serde_json::to_value(props).unwrap(),
+                        )
+                        .map_err(|e| anyhow::anyhow!(e))?,
+                    );
                 }
                 EncodingProperties::Avro(config)
             }
@@ -945,9 +948,12 @@ impl SpecificParserConfig {
                     config.topic = get_kafka_topic(props)?.clone();
                     config.client_config = SchemaRegistryAuth::from(props);
                 } else {
-                    config.aws_auth_props = Some(AwsAuthProps::from_pairs(
-                        props.iter().map(|(k, v)| (k.as_str(), v.as_str())),
-                    ));
+                    config.aws_auth_props = Some(
+                        serde_json::from_value::<AwsAuthProps>(
+                            serde_json::to_value(props).unwrap(),
+                        )
+                        .map_err(|e| anyhow::anyhow!(e))?,
+                    );
                 }
                 EncodingProperties::Protobuf(config)
             }
