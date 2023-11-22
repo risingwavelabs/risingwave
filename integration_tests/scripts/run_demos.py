@@ -221,6 +221,7 @@ def run_cassandra_and_scylladb_sink_demo():
                 # (1 rows)
                 query_output_file.seek(0)
                 lines = query_output_file.readlines()
+                query_output_file.close()
                 assert len(lines) >= 6
                 assert lines[1].decode('utf-8').strip().lower() == 'count'
                 rows = int(lines[3].decode('utf-8').strip())
