@@ -146,9 +146,9 @@ pub async fn run_slt_task(
     glob: &str,
     opts: &KillOpts,
     // Probability of background_ddl being set to true per ddl record.
-    background_ddl_weight: f64,
+    background_ddl_rate: f64,
 ) {
-    tracing::info!("background_ddl_weight: {}", background_ddl_weight);
+    tracing::info!("background_ddl_rate: {}", background_ddl_rate);
     let seed = std::env::var("MADSIM_TEST_SEED")
         .unwrap_or("0".to_string())
         .parse::<u64>()
@@ -206,8 +206,8 @@ pub async fn run_slt_task(
             };
             tracing::debug!(?cmd, "Running");
 
-            if matches!(cmd, SqlCmd::SetBackgroundDdl { .. }) && background_ddl_weight > 0.0 {
-                panic!("We cannot run background_ddl statement with background_ddl_weight > 0.0, since it could be reset");
+            if matches!(cmd, SqlCmd::SetBackgroundDdl { .. }) && background_ddl_rate > 0.0 {
+                panic!("We cannot run background_ddl statement with background_ddl_rate > 0.0, since it could be reset");
             }
 
             // Our background ddl strategy is as follows:
@@ -220,7 +220,7 @@ pub async fn run_slt_task(
                 ..
             } = &record
                 && matches!(cmd, SqlCmd::CreateMaterializedView { .. })
-                && rng.gen_bool(background_ddl_weight) {
+                && rng.gen_bool(background_ddl_rate) {
                 let enable_background_ddl = Record::Statement {
                     loc: loc.clone(),
                     conditions: conditions.clone(),

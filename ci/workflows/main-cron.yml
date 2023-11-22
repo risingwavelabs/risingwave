@@ -293,7 +293,7 @@ steps:
     retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
-    command: "TEST_NUM=12 KILL_RATE=1.0 timeout 95m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=12 KILL_RATE=1.0 BACKGROUND_DDL_RATE=0.5 timeout 55m ci/scripts/deterministic-recovery-test.sh"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/skip-ci") && build.env("CI_STEPS") == null
       || build.pull_request.labels includes "ci/run-recovery-test-deterministic-simulation"
@@ -305,7 +305,7 @@ steps:
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 100
+    timeout_in_minutes: 60
     retry: *auto-retry
 
   - label: "misc check"
