@@ -1137,7 +1137,7 @@ fn parse_dollar_quoted_string() {
 
     let stmt = parse_sql_statements(sql).unwrap();
 
-    let projection = match stmt.get(0).unwrap() {
+    let projection = match stmt.first().unwrap() {
         Statement::Query(query) => match &query.body {
             SetExpr::Select(select) => &select.projection,
             _ => unreachable!(),

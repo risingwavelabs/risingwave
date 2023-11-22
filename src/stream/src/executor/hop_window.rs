@@ -214,7 +214,7 @@ impl HopWindowExecutor {
                 Message::Watermark(w) => {
                     if w.col_idx == time_col_idx {
                         if let (Some(out_start_idx), Some(start_expr)) =
-                            (out_window_start_col_idx, self.window_start_exprs.get(0))
+                            (out_window_start_col_idx, self.window_start_exprs.first())
                         {
                             let w = w
                                 .clone()
@@ -225,7 +225,7 @@ impl HopWindowExecutor {
                             }
                         }
                         if let (Some(out_end_idx), Some(end_expr)) =
-                            (out_window_end_col_idx, self.window_end_exprs.get(0))
+                            (out_window_end_col_idx, self.window_end_exprs.first())
                         {
                             let w = w.transform_with_expr(end_expr, out_end_idx).await;
                             if let Some(w) = w {
