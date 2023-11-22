@@ -1047,7 +1047,7 @@ pub fn hash_datum(datum: impl ToDatumRef, state: &mut impl std::hash::Hasher) {
 impl ScalarRefImpl<'_> {
     /// Encode the scalar to postgresql binary format.
     /// The encoder implements encoding using <https://docs.rs/postgres-types/0.2.3/postgres_types/trait.ToSql.html>
-    pub fn binary_format(&self, data_type: &DataType) -> RwResult<Bytes> {
+    pub fn binary_format(&self, data_type: &DataType) -> to_binary::Result<Bytes> {
         self.to_binary_with_type(data_type).transpose().unwrap()
     }
 
