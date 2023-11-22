@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The entry point to combine all integration tests into a single binary.
-//!
-//! See [this post](https://matklad.github.io/2021/02/27/delete-cargo-integration-tests.html)
-//! for the rationale behind this approach.
+use risingwave_pb::meta::PbThrottleTarget;
 
-#![feature(stmt_expr_attributes)]
-#![feature(lazy_cell)]
-#![feature(extract_if)]
+use crate::common::CtlContext;
+use crate::ThrottleCommandArgs;
 
-mod backfill_tests;
-mod batch;
-mod recovery;
-mod scale;
-mod sink;
-mod storage;
-mod throttle;
+pub async fn apply_throttle(
+    context: &CtlContext,
+    kind: PbThrottleTarget,
+    params: ThrottleCommandArgs,
+) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    meta_client
+        .apply_throttle(kind, params.id, params.rate)
+        .await?;
+    Ok(())
+}
