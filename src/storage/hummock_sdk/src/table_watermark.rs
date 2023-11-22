@@ -26,7 +26,20 @@ use risingwave_pb::hummock::vnodes::{AllVnodes, VnodeRange};
 use risingwave_pb::hummock::{vnodes, PbTableWatermarks, PbVnodeWatermark, PbVnodes};
 use tracing::warn;
 
+use crate::key::{vnode_range, TableKeyRange};
 use crate::HummockEpoch;
+
+pub struct ReadTableWatermark {
+    pub direction: WatermarkDirection,
+    pub vnode_watermarks: Vec<(VirtualNode, Bytes)>,
+}
+
+impl ReadTableWatermark {
+    pub fn merge_other(&mut self, other: ReadTableWatermark) {
+        assert_eq!(self.direction, other.direction);
+        self.vnode_watermarks.extend(other.vnode_watermarks);
+    }
+}
 
 #[derive(Clone)]
 pub struct TableWatermarksIndex {
@@ -57,6 +70,29 @@ impl TableWatermarksIndex {
 
     pub fn latest_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
         self.table_watermark(vnode, HummockEpoch::MAX)
+    }
+
+    pub fn range_watermarks(
+        &self,
+        epoch: HummockEpoch,
+        table_key_range: &TableKeyRange,
+    ) -> Option<ReadTableWatermark> {
+        let mut ret = Vec::new();
+        let (left, right) = vnode_range(table_key_range);
+        for i in left..right {
+            let vnode = VirtualNode::from_index(i);
+            if let Some(watermark) = self.table_watermark(vnode, epoch) {
+                ret.push((vnode, watermark))
+            }
+        }
+        if ret.is_empty() {
+            None
+        } else {
+            Some(ReadTableWatermark {
+                direction: self.direction(),
+                vnode_watermarks: ret,
+            })
+        }
     }
 
     pub fn filter_regress_watermarks(

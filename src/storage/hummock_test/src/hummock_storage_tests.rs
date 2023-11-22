@@ -1334,7 +1334,7 @@ async fn test_hummock_version_reader() {
 
             {
                 let read_snapshot = {
-                    let (imms, ssts) = read_filter_for_batch(
+                    let (imms, ssts, watermark) = read_filter_for_batch(
                         epoch1,
                         TEST_TABLE_ID,
                         &(Unbounded, Unbounded),
@@ -1346,7 +1346,7 @@ async fn test_hummock_version_reader() {
                     )
                     .unwrap();
 
-                    (imms, ssts, test_env.storage.get_pinned_version())
+                    (imms, ssts, test_env.storage.get_pinned_version(), watermark)
                 };
 
                 let iter = hummock_version_reader
@@ -1370,7 +1370,7 @@ async fn test_hummock_version_reader() {
 
             {
                 let read_snapshot = {
-                    let (imms, ssts) = read_filter_for_batch(
+                    let (imms, ssts, watermark) = read_filter_for_batch(
                         epoch2,
                         TEST_TABLE_ID,
                         &(Unbounded, Unbounded),
@@ -1382,7 +1382,7 @@ async fn test_hummock_version_reader() {
                     )
                     .unwrap();
 
-                    (imms, ssts, test_env.storage.get_pinned_version())
+                    (imms, ssts, test_env.storage.get_pinned_version(), watermark)
                 };
 
                 assert_eq!(
@@ -1411,7 +1411,7 @@ async fn test_hummock_version_reader() {
 
             {
                 let read_snapshot = {
-                    let (imms, ssts) = read_filter_for_batch(
+                    let (imms, ssts, watermark) = read_filter_for_batch(
                         epoch2,
                         TEST_TABLE_ID,
                         &(Unbounded, Unbounded),
@@ -1423,7 +1423,7 @@ async fn test_hummock_version_reader() {
                     )
                     .unwrap();
 
-                    (imms, ssts, test_env.storage.get_pinned_version())
+                    (imms, ssts, test_env.storage.get_pinned_version(), watermark)
                 };
 
                 let iter = hummock_version_reader
@@ -1448,7 +1448,7 @@ async fn test_hummock_version_reader() {
 
             {
                 let read_snapshot = {
-                    let (imms, ssts) = read_filter_for_batch(
+                    let (imms, ssts, watermark) = read_filter_for_batch(
                         epoch3,
                         TEST_TABLE_ID,
                         &(Unbounded, Unbounded),
@@ -1460,7 +1460,7 @@ async fn test_hummock_version_reader() {
                     )
                     .unwrap();
 
-                    (imms, ssts, test_env.storage.get_pinned_version())
+                    (imms, ssts, test_env.storage.get_pinned_version(), watermark)
                 };
 
                 let iter = hummock_version_reader
@@ -1490,7 +1490,7 @@ async fn test_hummock_version_reader() {
 
                 {
                     let read_snapshot = {
-                        let (imms, ssts) = read_filter_for_batch(
+                        let (imms, ssts, watermark) = read_filter_for_batch(
                             epoch2,
                             TEST_TABLE_ID,
                             &(Unbounded, Unbounded),
@@ -1502,7 +1502,7 @@ async fn test_hummock_version_reader() {
                         )
                         .unwrap();
 
-                        (imms, ssts, test_env.storage.get_pinned_version())
+                        (imms, ssts, test_env.storage.get_pinned_version(), watermark)
                     };
 
                     let iter = hummock_version_reader
@@ -1526,7 +1526,7 @@ async fn test_hummock_version_reader() {
 
                 {
                     let read_snapshot = {
-                        let (imms, ssts) = read_filter_for_batch(
+                        let (imms, ssts, watermark) = read_filter_for_batch(
                             epoch3,
                             TEST_TABLE_ID,
                             &(Unbounded, Unbounded),
@@ -1538,7 +1538,7 @@ async fn test_hummock_version_reader() {
                         )
                         .unwrap();
 
-                        (imms, ssts, test_env.storage.get_pinned_version())
+                        (imms, ssts, test_env.storage.get_pinned_version(), watermark)
                     };
 
                     let iter = hummock_version_reader

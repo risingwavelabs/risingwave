@@ -81,21 +81,25 @@ impl HummockJavaBindingIterator {
         let mut streams = Vec::with_capacity(read_plan.vnode_ids.len());
         let key_range = read_plan.key_range.unwrap();
         let pin_version = PinnedVersion::new(read_plan.version.unwrap(), unbounded_channel().0);
+        let table_id = read_plan.table_id.into();
 
         for vnode in read_plan.vnode_ids {
+            let vnode = VirtualNode::from_index(vnode as usize);
+            let key_range = table_key_range_from_prost(vnode, key_range.clone());
+            let watermark = pin_version
+                .table_watermark_index()
+                .get(&table_id)
+                .and_then(|index| index.range_watermarks(read_plan.epoch, &key_range));
             let stream = reader
                 .iter(
-                    table_key_range_from_prost(
-                        VirtualNode::from_index(vnode as usize),
-                        key_range.clone(),
-                    ),
+                    key_range,
                     read_plan.epoch,
                     ReadOptions {
-                        table_id: read_plan.table_id.into(),
+                        table_id,
                         cache_policy: CachePolicy::NotFill,
                         ..Default::default()
                     },
-                    (vec![], vec![], pin_version.clone()),
+                    (vec![], vec![], pin_version.clone(), watermark),
                 )
                 .await?;
             streams.push(stream);

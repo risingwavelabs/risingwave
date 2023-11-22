@@ -26,6 +26,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
+use risingwave_hummock_sdk::table_watermark::ReadTableWatermark;
 use risingwave_hummock_sdk::HummockReadEpoch;
 #[cfg(any(test, feature = "test"))]
 use risingwave_pb::hummock::HummockVersion;
@@ -108,6 +109,13 @@ pub struct HummockStorage {
 
     write_limiter: WriteLimiterRef,
 }
+
+pub type ReadVersionTuple = (
+    Vec<ImmutableMemtable>,
+    Vec<SstableInfo>,
+    CommittedVersion,
+    Option<ReadTableWatermark>,
+);
 
 impl HummockStorage {
     /// Creates a [`HummockStorage`].
@@ -234,7 +242,8 @@ impl HummockStorage {
         let key_range = (Bound::Included(key.clone()), Bound::Included(key.clone()));
 
         let read_version_tuple = if read_options.read_version_from_backup {
-            self.build_read_version_tuple_from_backup(epoch).await?
+            self.build_read_version_tuple_from_backup(epoch, read_options.table_id, &key_range)
+                .await?
         } else {
             self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?
         };
@@ -251,7 +260,8 @@ impl HummockStorage {
         read_options: ReadOptions,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
         let read_version_tuple = if read_options.read_version_from_backup {
-            self.build_read_version_tuple_from_backup(epoch).await?
+            self.build_read_version_tuple_from_backup(epoch, read_options.table_id, &key_range)
+                .await?
         } else {
             self.build_read_version_tuple(epoch, read_options.table_id, &key_range)?
         };
@@ -264,11 +274,17 @@ impl HummockStorage {
     async fn build_read_version_tuple_from_backup(
         &self,
         epoch: u64,
-    ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
+        table_id: TableId,
+        key_range: &TableKeyRange,
+    ) -> StorageResult<ReadVersionTuple> {
         match self.backup_reader.try_get_hummock_version(epoch).await {
             Ok(Some(backup_version)) => {
                 validate_safe_epoch(backup_version.safe_epoch(), epoch)?;
-                Ok((Vec::default(), Vec::default(), backup_version))
+                let watermark = backup_version
+                    .table_watermark_index()
+                    .get(&table_id)
+                    .and_then(|index| index.range_watermarks(epoch, key_range));
+                Ok((Vec::default(), Vec::default(), backup_version, watermark))
             }
             Ok(None) => Err(HummockError::read_backup_error(format!(
                 "backup include epoch {} not found",
@@ -284,41 +300,61 @@ impl HummockStorage {
         epoch: u64,
         table_id: TableId,
         key_range: &TableKeyRange,
-    ) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
+    ) -> StorageResult<ReadVersionTuple> {
         let pinned_version = self.pinned_version.load();
         validate_safe_epoch(pinned_version.safe_epoch(), epoch)?;
 
         // check epoch if lower mce
-        let read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion) =
-            if epoch <= pinned_version.max_committed_epoch() {
-                // read committed_version directly without build snapshot
-                (Vec::default(), Vec::default(), (**pinned_version).clone())
-            } else {
-                let read_version_vec = {
-                    let read_guard = self.read_version_mapping.read();
-                    read_guard
-                        .get(&table_id)
-                        .map(|v| {
-                            v.values()
-                                .filter(|v| !v.read_arc().is_replicated())
-                                .cloned()
-                                .collect_vec()
-                        })
-                        .unwrap_or_default()
-                };
-
-                // When the system has just started and no state has been created, the memory state
-                // may be empty
-                if read_version_vec.is_empty() {
-                    (Vec::default(), Vec::default(), (**pinned_version).clone())
-                } else {
-                    let (imm_vec, sst_vec) =
-                        read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?;
-                    let committed_version = (**pinned_version).clone();
-
-                    (imm_vec, sst_vec, committed_version)
-                }
+        let read_version_tuple: (
+            Vec<ImmutableMemtable>,
+            Vec<SstableInfo>,
+            CommittedVersion,
+            Option<ReadTableWatermark>,
+        ) = if epoch <= pinned_version.max_committed_epoch() {
+            // read committed_version directly without build snapshot
+            (
+                Vec::default(),
+                Vec::default(),
+                (**pinned_version).clone(),
+                pinned_version
+                    .table_watermark_index()
+                    .get(&table_id)
+                    .and_then(|index| index.range_watermarks(epoch, key_range)),
+            )
+        } else {
+            let read_version_vec = {
+                let read_guard = self.read_version_mapping.read();
+                read_guard
+                    .get(&table_id)
+                    .map(|v| {
+                        v.values()
+                            .filter(|v| !v.read_arc().is_replicated())
+                            .cloned()
+                            .collect_vec()
+                    })
+                    .unwrap_or_default()
             };
+
+            // When the system has just started and no state has been created, the memory state
+            // may be empty
+            if read_version_vec.is_empty() {
+                (
+                    Vec::default(),
+                    Vec::default(),
+                    (**pinned_version).clone(),
+                    pinned_version
+                        .table_watermark_index()
+                        .get(&table_id)
+                        .and_then(|index| index.range_watermarks(epoch, key_range)),
+                )
+            } else {
+                let (imm_vec, sst_vec, watermarks) =
+                    read_filter_for_batch(epoch, table_id, key_range, read_version_vec)?;
+                let committed_version = (**pinned_version).clone();
+
+                (imm_vec, sst_vec, committed_version, watermarks)
+            }
+        };
 
         Ok(read_version_tuple)
     }

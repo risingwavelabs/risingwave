@@ -107,7 +107,7 @@ impl PinnedVersion {
         self.compaction_group_index.clone()
     }
 
-    pub(crate) fn table_watermark_index(&self) -> &Arc<HashMap<TableId, TableWatermarksIndex>> {
+    pub fn table_watermark_index(&self) -> &Arc<HashMap<TableId, TableWatermarksIndex>> {
         &self.table_watermark_index
     }
 

@@ -28,7 +28,7 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::table_watermark::{
-    TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
+    ReadTableWatermark, TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
 };
 use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::{HummockVersionDelta, LevelType, SstableInfo};
@@ -50,8 +50,8 @@ use crate::hummock::utils::{
 };
 use crate::hummock::{
     get_from_batch, get_from_sstable_info, hit_sstable_bloom_filter, HummockStorageIterator,
-    HummockStorageIteratorInner, LocalHummockStorageIterator, Sstable, SstableDeleteRangeIterator,
-    SstableIterator,
+    HummockStorageIteratorInner, LocalHummockStorageIterator, ReadVersionTuple, Sstable,
+    SstableDeleteRangeIterator, SstableIterator,
 };
 use crate::mem_table::{ImmId, ImmutableMemtable, MemTableHummockIterator};
 use crate::monitor::{
@@ -450,6 +450,11 @@ impl HummockReadVersion {
         self.staging.imm.clear();
         self.staging.merged_imm.clear();
         self.staging.sst.clear();
+        self.table_watermarks = self
+            .committed
+            .table_watermark_index()
+            .get(&self.table_id)
+            .cloned()
     }
 
     pub fn add_merged_imm(&mut self, merged_imm: ImmutableMemtable) {
@@ -491,9 +496,14 @@ pub fn read_filter_for_batch(
     table_id: TableId,
     key_range: &TableKeyRange,
     read_version_vec: Vec<Arc<RwLock<HummockReadVersion>>>,
-) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>)> {
+) -> StorageResult<(
+    Vec<ImmutableMemtable>,
+    Vec<SstableInfo>,
+    Option<ReadTableWatermark>,
+)> {
     let mut staging_vec = Vec::with_capacity(read_version_vec.len());
     let mut max_mce = 0;
+    let mut table_watermark: Option<ReadTableWatermark> = None;
     for read_version in &read_version_vec {
         let read_version_guard = read_version.read();
 
@@ -513,6 +523,22 @@ pub fn read_filter_for_batch(
             max_mce,
             read_version_guard.committed().max_committed_epoch(),
         );
+
+        let read_watermark = read_version_guard
+            .table_watermarks
+            .as_ref()
+            .and_then(|watermarks| watermarks.range_watermarks(epoch, key_range));
+
+        if let Some(read_watermark) = read_watermark {
+            match &mut table_watermark {
+                Some(prev_watermark) => {
+                    prev_watermark.merge_other(read_watermark);
+                }
+                None => {
+                    table_watermark = Some(read_watermark);
+                }
+            }
+        }
     }
 
     let mut imm_vec = Vec::default();
@@ -536,7 +562,11 @@ pub fn read_filter_for_batch(
         }));
     }
 
-    Ok((imm_vec, sst_vec))
+    if let Some(read_watermarks) = &mut table_watermark {
+        read_watermarks.vnode_watermarks.sort();
+    }
+
+    Ok((imm_vec, sst_vec, table_watermark))
 }
 
 pub fn read_filter_for_local(
@@ -544,7 +574,7 @@ pub fn read_filter_for_local(
     table_id: TableId,
     table_key_range: &TableKeyRange,
     read_version: Arc<RwLock<HummockReadVersion>>,
-) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
+) -> StorageResult<ReadVersionTuple> {
     let read_version_guard = read_version.read();
     let (imm_iter, sst_iter) =
         read_version_guard
@@ -555,6 +585,10 @@ pub fn read_filter_for_local(
         imm_iter.cloned().collect_vec(),
         sst_iter.cloned().collect_vec(),
         read_version_guard.committed().clone(),
+        read_version_guard
+            .table_watermarks
+            .as_ref()
+            .and_then(|watermark| watermark.range_watermarks(epoch, table_key_range)),
     ))
 }
 
@@ -595,9 +629,34 @@ impl HummockVersionReader {
         table_key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
-        read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
+        read_version_tuple: (
+            Vec<ImmutableMemtable>,
+            Vec<SstableInfo>,
+            CommittedVersion,
+            Option<ReadTableWatermark>,
+        ),
     ) -> StorageResult<Option<Bytes>> {
-        let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
+        let (imms, uncommitted_ssts, committed_version, watermark) = read_version_tuple;
+        let key_vnode = table_key.vnode_part();
+        if let Some(read_watermark) = watermark {
+            for (vnode, watermark) in read_watermark.vnode_watermarks {
+                if vnode == key_vnode {
+                    let inner_key = table_key.key_part();
+                    match read_watermark.direction {
+                        WatermarkDirection::Ascending => {
+                            if inner_key < watermark {
+                                return Ok(None);
+                            }
+                        }
+                        WatermarkDirection::Descending => {
+                            if inner_key > watermark {
+                                return Ok(None);
+                            }
+                        }
+                    }
+                }
+            }
+        }
         let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
         let mut stats_guard =
             GetLocalMetricsGuard::new(self.state_store_metrics.clone(), read_options.table_id);
@@ -738,7 +797,12 @@ impl HummockVersionReader {
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-        read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
+        read_version_tuple: (
+            Vec<ImmutableMemtable>,
+            Vec<SstableInfo>,
+            CommittedVersion,
+            Option<ReadTableWatermark>,
+        ),
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIterator>> {
         self.iter_inner(
             table_key_range,
@@ -755,7 +819,12 @@ impl HummockVersionReader {
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-        read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
+        read_version_tuple: (
+            Vec<ImmutableMemtable>,
+            Vec<SstableInfo>,
+            CommittedVersion,
+            Option<ReadTableWatermark>,
+        ),
         memtable_iter: MemTableHummockIterator<'a>,
     ) -> StorageResult<StreamTypeOfIter<LocalHummockStorageIterator<'_>>> {
         self.iter_inner(
@@ -773,12 +842,17 @@ impl HummockVersionReader {
         table_key_range: TableKeyRange,
         epoch: u64,
         read_options: ReadOptions,
-        read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
+        read_version_tuple: (
+            Vec<ImmutableMemtable>,
+            Vec<SstableInfo>,
+            CommittedVersion,
+            Option<ReadTableWatermark>,
+        ),
         mem_table: Option<MemTableHummockIterator<'b>>,
     ) -> StorageResult<StreamTypeOfIter<HummockStorageIteratorInner<'b>>> {
         let table_id_string = read_options.table_id.to_string();
         let table_id_label = table_id_string.as_str();
-        let (imms, uncommitted_ssts, committed) = read_version_tuple;
+        let (imms, uncommitted_ssts, committed, watermark) = read_version_tuple;
 
         let mut local_stats = StoreLocalStatistic::default();
         let mut staging_iters = Vec::with_capacity(imms.len() + uncommitted_ssts.len());
@@ -1036,10 +1110,15 @@ impl HummockVersionReader {
         &self,
         table_key_range: TableKeyRange,
         read_options: ReadOptions,
-        read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
+        read_version_tuple: (
+            Vec<ImmutableMemtable>,
+            Vec<SstableInfo>,
+            CommittedVersion,
+            Option<ReadTableWatermark>,
+        ),
     ) -> StorageResult<bool> {
         let table_id = read_options.table_id;
-        let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
+        let (imms, uncommitted_ssts, committed_version, _) = read_version_tuple;
         let mut stats_guard =
             MayExistLocalMetricsGuard::new(self.state_store_metrics.clone(), table_id);
 

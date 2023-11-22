@@ -46,6 +46,20 @@ pub type FullKeyRange = (
     Bound<FullKey<KeyPayloadType>>,
 );
 
+// returning left inclusive and right exclusive
+pub fn vnode_range(range: &TableKeyRange) -> (usize, usize) {
+    let (left, right) = range;
+    let left = match left {
+        Included(key) | Excluded(key) => key.vnode_part().to_index(),
+        Unbounded => 0,
+    };
+    let right = match right {
+        Included(key) | Excluded(key) => key.vnode_part().to_index() + 1,
+        Unbounded => VirtualNode::COUNT,
+    };
+    (left, right)
+}
+
 /// Converts user key to full key by appending `epoch` to the user key.
 pub fn key_with_epoch(mut user_key: Vec<u8>, epoch: HummockEpoch) -> Vec<u8> {
     let res = epoch.to_be();
