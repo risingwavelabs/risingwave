@@ -27,7 +27,6 @@ use futures::future::Either;
 use futures::stream::StreamExt;
 use itertools::Itertools;
 use openssl::ssl::{SslAcceptor, SslContext, SslContextRef, SslMethod};
-use risingwave_common::error::RwError;
 use risingwave_common::types::DataType;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_sqlparser::ast::Statement;
@@ -648,11 +647,12 @@ where
                 if id == 0 {
                     Ok(None)
                 } else {
-                    Ok(Some(DataType::from_oid(id)?))
+                    DataType::from_oid(id)
+                        .map(Some)
+                        .map_err(|e| PsqlError::ParseError(e.into()))
                 }
             })
-            .try_collect()
-            .map_err(|err: RwError| PsqlError::ParseError(err.into()))?;
+            .try_collect()?;
 
         let prepare_statement = session
             .parse(stmt, param_types)
