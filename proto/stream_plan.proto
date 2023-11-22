@@ -82,6 +82,14 @@ message PauseMutation {}
 
 message ResumeMutation {}
 
+message ThrottleMutation {
+  message RateLimit {
+    optional uint32 rate_limit = 1;
+  }
+
+  map<uint32, RateLimit> actor_throttle = 1;
+}
+
 message Barrier {
   enum BarrierKind {
     BARRIER_KIND_UNSPECIFIED = 0;
@@ -109,6 +117,8 @@ message Barrier {
     PauseMutation pause = 7;
     // Resume the dataflow of the whole streaming graph, only used for scaling.
     ResumeMutation resume = 8;
+    // Throttle specific source exec or chain exec.
+    ThrottleMutation throttle = 10;
   }
   // Used for tracing.
   map<string, string> tracing_context = 2;
@@ -280,6 +290,9 @@ enum AggNodeVersion {
 
   // https://github.com/risingwavelabs/risingwave/issues/12140#issuecomment-1776289808
   AGG_NODE_VERSION_ISSUE_12140 = 1;
+
+  // https://github.com/risingwavelabs/risingwave/issues/13465#issuecomment-1821016508
+  AGG_NODE_VERSION_ISSUE_13465 = 2;
 
   // Used for test only.
   AGG_NODE_VERSION_MAX = 2147483647;

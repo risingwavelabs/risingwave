@@ -23,6 +23,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, ParallelUnitMapping};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
 use risingwave_connector::source::SplitImpl;
+use risingwave_meta_model_v2::SourceId;
 use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
@@ -788,6 +789,103 @@ impl FragmentManager {
         }
 
         actor_maps
+    }
+
+    // edit the `rate_limit` of the `Source` node in given `source_id`'s fragments
+    // return the actor_ids to be applied
+    pub async fn update_source_rate_limit_by_source_id(
+        &self,
+        source_id: SourceId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        let map = &mut self.core.write().await.table_fragments;
+        let mut table_id_to_apply = HashSet::new();
+        for (table_id, table_fragments) in map.iter() {
+            for fragment in table_fragments.fragments.values() {
+                if (fragment.get_fragment_type_mask() & FragmentTypeFlag::Source as u32) != 0 {
+                    table_id_to_apply.insert(*table_id);
+                }
+            }
+        }
+        if table_id_to_apply.is_empty() {
+            return Err(MetaError::from(anyhow!(
+                "source_id {:?} not found in all fragments",
+                source_id
+            )));
+        }
+
+        let mut table_fragments = BTreeMapTransaction::new(map);
+        let mut to_apply_fragment = HashMap::new();
+        for table_id in table_id_to_apply {
+            let mut table_fragment = table_fragments.get_mut(table_id).unwrap();
+            for fragment in table_fragment.fragments.values_mut() {
+                let mut actor_to_apply = Vec::new();
+                for actor in &mut fragment.actors {
+                    if let Some(node) = actor.nodes.as_mut() {
+                        visit_stream_node(node, |node_body| {
+                            if let NodeBody::Source(ref mut node) = node_body {
+                                if let Some(ref mut node_inner) = node.source_inner && node_inner.source_id == source_id as u32 {
+                                    node_inner.rate_limit = rate_limit;
+                                    actor_to_apply.push(actor.actor_id);
+                                }
+                            }
+                        })
+                    };
+                }
+                to_apply_fragment.insert(fragment.fragment_id, actor_to_apply);
+            }
+        }
+
+        commit_meta!(self, table_fragments)?;
+        tracing::info!(
+            "update source actor rate limit to: {:?}, actors {:?}",
+            rate_limit,
+            to_apply_fragment
+        );
+
+        Ok(to_apply_fragment)
+    }
+
+    // edit the `rate_limit` of the `Chain` node in given `table_id`'s fragments
+    // return the actor_ids to be applied
+    pub async fn update_mv_rate_limit_by_table_id(
+        &self,
+        table_id: TableId,
+        rate_limit: Option<u32>,
+    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+        let map = &mut self.core.write().await.table_fragments;
+
+        let mut table_fragments = BTreeMapTransaction::new(map);
+        let mut fragment = table_fragments
+            .get_mut(table_id)
+            .ok_or_else(|| MetaError::fragment_not_found(table_id))?;
+        let mut fragment_to_apply = HashMap::new();
+
+        for fragment in fragment.fragments.values_mut() {
+            if (fragment.get_fragment_type_mask() & FragmentTypeFlag::StreamScan as u32) != 0 {
+                let mut actor_to_apply = Vec::new();
+                for actor in &mut fragment.actors {
+                    if let Some(node) = actor.nodes.as_mut() {
+                        visit_stream_node(node, |node_body| {
+                            if let NodeBody::StreamScan(ref mut node) = node_body {
+                                node.rate_limit = rate_limit;
+                                actor_to_apply.push(actor.actor_id);
+                            }
+                        })
+                    };
+                }
+                fragment_to_apply.insert(fragment.fragment_id, actor_to_apply);
+            }
+        }
+
+        commit_meta!(self, table_fragments)?;
+        tracing::info!(
+            "update mv actor rate limit to: {:?}, actors {:?}",
+            rate_limit,
+            fragment_to_apply
+        );
+
+        Ok(fragment_to_apply)
     }
 
     pub async fn update_actor_splits_by_split_assignment(

@@ -20,12 +20,12 @@ use risingwave_common::array::DataChunk;
 use tokio::sync::mpsc;
 
 use crate::error::BatchError::{Internal, SenderError};
-use crate::error::{BatchError, BatchSharedResult, Result as BatchResult};
+use crate::error::{BatchError, Result as BatchResult, SharedResult};
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 #[derive(Clone)]
 pub struct FifoSender {
-    sender: mpsc::Sender<BatchSharedResult<Option<DataChunkInChannel>>>,
+    sender: mpsc::Sender<SharedResult<Option<DataChunkInChannel>>>,
 }
 
 impl Debug for FifoSender {
@@ -35,7 +35,7 @@ impl Debug for FifoSender {
 }
 
 pub struct FifoReceiver {
-    receiver: mpsc::Receiver<BatchSharedResult<Option<DataChunkInChannel>>>,
+    receiver: mpsc::Receiver<SharedResult<Option<DataChunkInChannel>>>,
 }
 
 impl ChanSender for FifoSender {
@@ -54,7 +54,7 @@ impl ChanSender for FifoSender {
 }
 
 impl ChanReceiver for FifoReceiver {
-    async fn recv(&mut self) -> BatchSharedResult<Option<DataChunkInChannel>> {
+    async fn recv(&mut self) -> SharedResult<Option<DataChunkInChannel>> {
         match self.receiver.recv().await {
             Some(data_chunk) => data_chunk,
             // Early close should be treated as error.

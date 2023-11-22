@@ -11,45 +11,17 @@ SELECT make_timestamptz(-1973, 07, 15, 08, 15, 55.33);
 ----
 -1973-07-15 08:15:55.330+00:00
 
-statement error
+query error Invalid parameter sec: invalid sec
 SELECT make_timestamptz(1973, 07, 15, 08, 15, -55.33);
-----
-db error: ERROR: QueryError
 
-Caused by these errors (recent errors listed first):
-  1: Expr error
-  2: Invalid parameter sec: invalid sec
-
-
-statement error
+query error Invalid parameter hour, min, sec: invalid time
 SELECT make_timestamptz(1973, 07, 15, 08, -15, 55.33);
-----
-db error: ERROR: QueryError
 
-Caused by these errors (recent errors listed first):
-  1: Expr error
-  2: Invalid parameter hour, min, sec: invalid time
-
-
-statement error
+query error Invalid parameter year, month, day: invalid date
 SELECT make_timestamptz(1973, -07, 15, 08, 15, 55.33);
-----
-db error: ERROR: QueryError
 
-Caused by these errors (recent errors listed first):
-  1: Expr error
-  2: Invalid parameter year, month, day: invalid date
-
-
-statement error
+query error Invalid parameter year, month, day: invalid date
 SELECT make_timestamptz(1973, 06, 31, 08, 15, 55.33);
-----
-db error: ERROR: QueryError
-
-Caused by these errors (recent errors listed first):
-  1: Expr error
-  2: Invalid parameter year, month, day: invalid date
-
 
 statement ok
 set TimeZone to 'America/New_York';
@@ -59,15 +31,8 @@ SELECT make_timestamptz(1973, 07, 15, 08, 15, 55.33);
 ----
 1973-07-15 08:15:55.330-04:00
 
-statement error
+query error Invalid parameter time_zone: 'Nehwon/Lankhmar' is not a valid timezone
 SELECT make_timestamptz(1910, 12, 24, 0, 0, 0, 'Nehwon/Lankhmar');
-----
-db error: ERROR: QueryError
-
-Caused by these errors (recent errors listed first):
-  1: Expr error
-  2: Invalid parameter time_zone: 'Nehwon/Lankhmar' is not a valid timezone
-
 
 query TT
 WITH tzs (tz) AS (VALUES ('Europe/Prague'), ('Europe/Paris'), ('America/New_York'), ('EST'), ('EST5EDT'), ('PST8PDT')) SELECT make_timestamptz(2010, 2, 27, 3, 45, 00, tz), tz FROM tzs;

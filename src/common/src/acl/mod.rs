@@ -69,6 +69,7 @@ impl From<PbAction> for AclMode {
             PbAction::Create => AclMode::Create,
             PbAction::Connect => AclMode::Connect,
             PbAction::Usage => AclMode::Usage,
+            PbAction::Execute => AclMode::Execute,
         }
     }
 }
@@ -83,6 +84,7 @@ impl From<AclMode> for PbAction {
             AclMode::Create => PbAction::Create,
             AclMode::Connect => PbAction::Connect,
             AclMode::Usage => PbAction::Usage,
+            AclMode::Execute => PbAction::Execute,
             _ => unreachable!(),
         }
     }

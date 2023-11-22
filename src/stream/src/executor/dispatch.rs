@@ -1283,7 +1283,7 @@ mod tests {
             if guard.is_empty() {
                 assert!(output_cols[output_idx].iter().all(|x| { x.is_empty() }));
             } else {
-                let message = guard.get(0).unwrap();
+                let message = guard.first().unwrap();
                 let real_chunk = match message {
                     Message::Chunk(chunk) => chunk,
                     _ => panic!(),

@@ -521,7 +521,7 @@ async fn test_graph_builder() -> MetaResult<()> {
         );
         let mut node = actor.get_nodes().unwrap();
         while !node.get_input().is_empty() {
-            node = node.get_input().get(0).unwrap();
+            node = node.get_input().first().unwrap();
         }
         match node.get_node_body().unwrap() {
             NodeBody::Merge(merge_node) => {
