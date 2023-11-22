@@ -73,6 +73,26 @@ pub fn decode(data: &str, format: &str) -> Result<Box<[u8]>> {
     }
 }
 
+#[function("convert_from(bytea, varchar) -> varchar")]
+pub fn convert_from(data: &[u8], src_encoding: &str, writer: &mut impl Write) -> Result<()> {
+    match src_encoding.to_uppercase().as_str() {
+        "UTF8" | "UTF-8" => {
+            let text = String::from_utf8(data.to_vec()).map_err(|e| {
+                ExprError::InvalidParam {
+                    name: "data",
+                    reason: e.to_string().into(),
+                }
+            })?;
+            writer.write_str(&text).unwrap();
+            Ok(())
+        }
+        _ => Err(ExprError::InvalidParam {
+            name: "src_encoding",
+            reason: format!("unrecognized encoding: \"{}\"", src_encoding).into(),
+        }),
+    }
+}
+
 // According to https://www.postgresql.org/docs/current/functions-binarystring.html#ENCODE-FORMAT-BASE64
 // We need to split newlines when the output length is greater than or equal to 76
 fn encode_bytes_base64(data: &[u8], writer: &mut impl Write) -> Result<()> {
