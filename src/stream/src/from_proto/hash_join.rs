@@ -20,7 +20,7 @@ use risingwave_common::types::DataType;
 use risingwave_expr::expr::{
     build_func_non_strict, build_non_strict_from_prost, InputRefExpression, NonStrictExpression,
 };
-pub use risingwave_pb::expr::expr_node::Type as ExprType;
+
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::HashJoinNode;
 
