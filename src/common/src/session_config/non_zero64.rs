@@ -15,6 +15,8 @@
 use std::num::NonZeroU64;
 use std::str::FromStr;
 
+/// When set this config as `0`, the value is `None`, otherwise the value is
+/// `Some(val)`
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 pub struct ConfigNonZeroU64(pub Option<NonZeroU64>);
 
@@ -40,6 +42,7 @@ impl std::fmt::Display for ConfigNonZeroU64 {
         }
     }
 }
+
 impl ConfigNonZeroU64 {
     pub fn map<U, F>(self, f: F) -> Option<U>
     where

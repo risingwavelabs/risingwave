@@ -17,7 +17,7 @@ use pgwire::pg_protocol::ParameterStatus;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::session_config::{ConfigReporter, GUC_LIST_SEP};
+use risingwave_common::session_config::{ConfigReporter, SESSION_CONFIG_LIST_SEP};
 use risingwave_common::system_param::is_mutable;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
@@ -30,7 +30,10 @@ fn set_var_to_guc_str(value: &SetVariableValue) -> String {
     match value {
         SetVariableValue::Literal(Value::DoubleQuotedString(s))
         | SetVariableValue::Literal(Value::SingleQuotedString(s)) => s.clone(),
-        SetVariableValue::List(list) => list.iter().map(set_var_to_guc_str).join(GUC_LIST_SEP),
+        SetVariableValue::List(list) => list
+            .iter()
+            .map(set_var_to_guc_str)
+            .join(SESSION_CONFIG_LIST_SEP),
         _ => value.to_string(),
     }
 }

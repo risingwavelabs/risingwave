@@ -14,7 +14,7 @@
 
 use std::str::FromStr;
 
-use super::GUC_LIST_SEP;
+use super::SESSION_CONFIG_LIST_SEP;
 use crate::catalog::{DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME};
 use crate::error::RwError;
 
@@ -52,7 +52,7 @@ impl SearchPath {
 impl Default for SearchPath {
     fn default() -> Self {
         [USER_NAME_WILD_CARD, DEFAULT_SCHEMA_NAME]
-            .join(GUC_LIST_SEP)
+            .join(SESSION_CONFIG_LIST_SEP)
             .parse()
             .unwrap()
     }
@@ -62,7 +62,7 @@ impl FromStr for SearchPath {
     type Err = RwError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let paths = s.split(GUC_LIST_SEP).map(|path| path.trim());
+        let paths = s.split(SESSION_CONFIG_LIST_SEP).map(|path| path.trim());
         let mut real_path = vec![];
         for p in paths {
             let p = p.trim();
@@ -70,7 +70,7 @@ impl FromStr for SearchPath {
                 real_path.push(p.to_string());
             }
         }
-        let string = real_path.join(GUC_LIST_SEP);
+        let string = real_path.join(SESSION_CONFIG_LIST_SEP);
 
         let mut path = real_path.clone();
         let rw_catalog = RW_CATALOG_SCHEMA_NAME.to_string();

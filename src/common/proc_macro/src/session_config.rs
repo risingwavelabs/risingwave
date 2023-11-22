@@ -19,14 +19,14 @@ use quote::{format_ident, quote, quote_spanned};
 use syn::DeriveInput;
 
 #[derive(FromAttributes)]
-pub struct GucOpts {
+pub struct Parameter {
     pub rename: Option<syn::LitStr>,
     pub default: syn::Expr,
     pub flags: Option<syn::LitStr>,
     pub check_hook: Option<syn::Expr>,
 }
 
-pub(crate) fn derive_guc(input: DeriveInput) -> TokenStream {
+pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
     let syn::Data::Struct(syn::DataStruct { fields, .. }) = input.data else {
         abort!(input, "Only struct is supported");
     };
@@ -58,8 +58,8 @@ pub(crate) fn derive_guc(input: DeriveInput) -> TokenStream {
         let description: TokenStream = format!("r#\"{}\"#", doc_list.join(" ")).parse().unwrap();
 
         let attr =
-            GucOpts::from_attributes(&field.attrs).expect_or_abort("Failed to parse attribute");
-        let GucOpts {
+            Parameter::from_attributes(&field.attrs).expect_or_abort("Failed to parse attribute");
+        let Parameter {
             rename,
             default,
             flags,
@@ -88,6 +88,13 @@ pub(crate) fn derive_guc(input: DeriveInput) -> TokenStream {
         let set_func_name = format_ident!("set_{}_str", field_ident);
         let set_t_func_name = format_ident!("set_{}", field_ident);
         let set_t_inner_func_name = format_ident!("set_{}_inner", field_ident);
+        let set_t_func_doc: TokenStream =
+            format!("r#\"Set parameter {} by a typed value.\"#", entry_name)
+                .parse()
+                .unwrap();
+        let set_func_doc: TokenStream = format!("r#\"Set parameter {} by a string.\"#", entry_name)
+            .parse()
+            .unwrap();
 
         let gen_set_func_name = if flags.contains(&"SETTER") {
             set_t_inner_func_name.clone()
@@ -119,6 +126,7 @@ pub(crate) fn derive_guc(input: DeriveInput) -> TokenStream {
         };
 
         struct_impl_set.push(quote! {
+            #[doc = #set_func_doc]
             pub fn #set_func_name(
                 &mut self,
                 val: &str,
@@ -135,6 +143,7 @@ pub(crate) fn derive_guc(input: DeriveInput) -> TokenStream {
                 Ok(())
             }
 
+            #[doc = #set_t_func_doc]
             pub fn #gen_set_func_name(
                 &mut self,
                 val: #ty,
@@ -161,11 +170,22 @@ pub(crate) fn derive_guc(input: DeriveInput) -> TokenStream {
 
         let get_func_name = format_ident!("{}_str", field_ident);
         let get_t_func_name = format_ident!("{}", field_ident);
+        let get_func_doc: TokenStream =
+            format!("r#\"Get a value string of parameter {} \"#", entry_name)
+                .parse()
+                .unwrap();
+        let get_t_func_doc: TokenStream =
+            format!("r#\"Get a typed value of parameter {} \"#", entry_name)
+                .parse()
+                .unwrap();
+
         struct_impl_get.push(quote! {
+            #[doc = #get_func_doc]
             pub fn #get_func_name(&self) -> String {
                 self.#get_t_func_name().to_string()
             }
 
+            #[doc = #get_t_func_doc]
             pub fn #get_t_func_name(&self) -> #ty {
                 self.#field_ident.clone()
             }
@@ -215,6 +235,7 @@ pub(crate) fn derive_guc(input: DeriveInput) -> TokenStream {
 
             #(#struct_impl_reset)*
 
+            /// Set a parameter given it's name and value string.
             pub fn set(&mut self, key_name: &str, value: String, reporter: &mut impl ConfigReporter) -> RwResult<()> {
                 match key_name.to_ascii_uppercase().as_ref() {
                     #(#set_match_branches)*
@@ -222,6 +243,7 @@ pub(crate) fn derive_guc(input: DeriveInput) -> TokenStream {
                 }
             }
 
+            /// Get a parameter by it's name.
             pub fn get(&self, key_name: &str) -> RwResult<String> {
                 match key_name.to_ascii_uppercase().as_ref() {
                     #(#get_match_branches)*
@@ -229,6 +251,7 @@ pub(crate) fn derive_guc(input: DeriveInput) -> TokenStream {
                 }
             }
 
+            /// Show all parameters.
             pub fn show_all(&self) -> Vec<VariableInfo> {
                 vec![
                     #(#show_all_list)*
