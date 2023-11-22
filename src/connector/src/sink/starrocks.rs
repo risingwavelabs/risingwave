@@ -535,7 +535,7 @@ impl StarrocksSchemaClient {
             })
             .await
             .map_err(|err| SinkError::DorisStarrocksConnect(err.into()))?
-            .get(0)
+            .first()
             .ok_or_else(|| {
                 SinkError::Starrocks(format!(
                     "Can't find schema with table {:?} and database {:?}",
