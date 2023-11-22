@@ -512,6 +512,16 @@ message StreamScanNode {
 
   // Snapshot read every N barriers
   uint32 snapshot_read_barrier_interval = 9 [deprecated = true];
+
+  // Version for backwards compatibility.
+  StreamScanNodeVersion version = 10;
+}
+
+enum StreamScanNodeVersion {
+  STREAM_SCAN_NODE_VERSION_UNSPECIFIED = 0;
+
+  // Support vnode_level state.
+  STREAM_SCAN_NODE_VERSION_BACKFILL_VNODE_LEVEL_STATE = 1;
 }
 
 message StreamCdcScanNode {

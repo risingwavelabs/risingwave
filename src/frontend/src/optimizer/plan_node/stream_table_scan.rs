@@ -301,6 +301,7 @@ impl StreamTableScan {
             table_desc: Some(self.core.table_desc.to_protobuf()),
             state_table: Some(catalog),
             rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
+            version: StreamScanNodeVersion::BackfillVnodeLevelState as _,
             ..Default::default()
         });
 
