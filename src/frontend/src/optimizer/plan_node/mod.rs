@@ -425,6 +425,7 @@ impl PlanRef {
                             .conjunctions
                             .extract_if(|e| {
                                 // If predicates contain now, impure or correlated input ref, don't push through share operator.
+                                // The predicate with now() function is regarded as a temporal filter predicate, which will be transformed to a temporal filter operator and can not do the OR operation with other predicates.
                                 let mut finder = ExprCorrelatedIdFinder::default();
                                 finder.visit_expr(e);
                                 e.count_nows() == 0
