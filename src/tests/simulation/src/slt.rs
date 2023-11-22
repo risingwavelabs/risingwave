@@ -300,6 +300,9 @@ pub async fn run_slt_task(
             for i in 0usize.. {
                 tracing::debug!(iteration = i, "retry count");
                 let delay = Duration::from_secs(1 << i);
+                if i > 0 {
+                    tokio::time::sleep(delay).await;
+                }
                 match tester
                     .run_async(record.clone())
                     .timed(|_res, elapsed| {
@@ -429,7 +432,6 @@ pub async fn run_slt_task(
                         }
                     }
                 }
-                tokio::time::sleep(delay).await;
             }
             if let SqlCmd::SetBackgroundDdl { enable } = cmd {
                 background_ddl_enabled = enable;
