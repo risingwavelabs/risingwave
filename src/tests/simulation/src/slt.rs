@@ -16,6 +16,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::{bail, Result};
 use itertools::Itertools;
 use rand::{thread_rng, Rng, SeedableRng};
 use rand_chacha::ChaChaRng;
@@ -78,10 +79,11 @@ fn extract_sql_command(sql: &str) -> SqlCmd {
     let first_token = tokens.next().unwrap_or("");
 
     match first_token {
-        // Note(kwannoel):
-        // It's entirely possible for a malformed command to be parsed as a `create table as`
+        // NOTE(kwannoel):
+        // It's entirely possible for a malformed command to be parsed as `SqlCmd::Create`.
         // BUT an error should be expected for such a test.
-        // So it should still succeed.
+        // So we don't need to handle this case.
+        // Eventually if there are too many edge cases, we can opt to use our parser.
         "create" => {
             let result: Option<SqlCmd> = try {
                 match tokens.next()? {
@@ -139,6 +141,32 @@ const KILL_IGNORE_FILES: &[&str] = &[
     "transaction/read_only.slt",
     "transaction/tolerance.slt",
 ];
+
+/// Wait for background mv to finish creating
+async fn wait_background_mv_finished(mview_name: &str) -> Result<()> {
+    let Ok(rw) = RisingWave::connect("frontend".into(), "dev".into()).await else {
+        bail!("failed to connect to frontend for {mview_name}");
+    };
+    let client = rw.pg_client();
+    if client.simple_query("WAIT;").await.is_err() {
+        bail!("failed to wait for background mv to finish creating for {mview_name}");
+    }
+
+    let Ok(result) = client
+        .query(
+            "select count(*) from pg_matviews where matviewname=$1;",
+            &[&mview_name],
+        )
+        .await
+    else {
+        bail!("failed to query pg_matviews for {mview_name}");
+    };
+
+    match result[0].try_get::<_, i64>(0) {
+        Ok(1) => Ok(()),
+        r => bail!("expected 1 row in pg_matviews, got {r:#?} instead for {mview_name}"),
+    }
+}
 
 /// Run the sqllogictest files in `glob`.
 pub async fn run_slt_task(
@@ -317,43 +345,26 @@ pub async fn run_slt_task(
                             && matches!(record, Record::Statement { expected_error: None, .. } | Record::Query { expected_error: None, ..})
                         {
                             tracing::debug!(iteration=i, "Retry for background ddl");
-                            // wait for background ddl to finish and succeed.
-                            let Ok(rw) =
-                                RisingWave::connect("frontend".into(), "dev".into()).await
-                            else {
-                                tracing::debug!(iteration=i, name, "failed to run test: background_mv not created, retry after {delay:?}");
-                                if i >= max_retry {
-                                    panic!("failed to run test after retry {i} times, while waiting for background ddl");
-                                }
-                                continue;
-                            };
-                            let client = rw.pg_client();
-                            if client.simple_query("WAIT;").await.is_ok()
-                                && let Ok(result) = client
-                                    .query(
-                                        "select count(*) from pg_matviews where matviewname=$1;",
-                                        &[&name],
-                                    )
-                                    .await
-                                && let Ok(1) = result[0].try_get::<_, i64>(0)
-                            {
-                                if let Some(record) = reset_background_ddl_record {
-                                    tracing::debug!("Record with background_ddl {:?} finished", record);
-                                    if tester.run_async(record).await.is_ok() {
-                                        // Try to reset, but if the cluster killed again before reset,
-                                        // it is fine, we can leave it to the next mview to reset it.
-                                        background_ddl_enabled = false;
+                            match wait_background_mv_finished(name).await {
+                                Ok(_) => {
+                                    if let Some(record) = reset_background_ddl_record {
+                                        tracing::debug!("Record with background_ddl {:?} finished", record);
+                                        if tester.run_async(record).await.is_ok() {
+                                            // Try to reset, but if the cluster killed again before reset,
+                                            // it is fine, we can leave it to the next mview to reset it.
+                                            background_ddl_enabled = false;
+                                        }
                                     }
+                                    break;
                                 }
-                                tracing::debug!("Record with background_ddl {:?} finished", record);
-                                break;
+                                Err(err) => {
+                                    tracing::error!(iteration=i, ?err, "failed to wait for background mv to finish creating");
+                                    if i >= max_retry {
+                                        panic!("failed to run test after retry {i} times, while waiting for background ddl");
+                                    }
+                                    continue;
+                                }
                             }
-                            // If fail, recreate mv again.
-                            tracing::debug!(iteration=i, name, "failed to run test: background_mv not created, retry after {delay:?}");
-                            if i >= max_retry {
-                                panic!("failed to run test after retry {i} times, while waiting for background ddl");
-                            }
-                            continue;
                         }
                         break;
                     }
@@ -390,40 +401,33 @@ pub async fn run_slt_task(
                                     && background_ddl_enabled =>
                             {
                                 tracing::debug!(iteration = i, name, "Retry for background ddl");
-                                // wait for background ddl to finish and succeed.
-                                let Ok(rw) =
-                                    RisingWave::connect("frontend".into(), "dev".into()).await
-                                else {
-                                    tracing::debug!(iteration=i, name, "failed to run test: background_mv not created, retry after {delay:?}");
-                                    if i >= max_retry {
-                                        panic!("failed to run test after retry {i} times, while waiting for background ddl");
-                                    }
-                                    continue;
-                                };
-                                let client = rw.pg_client();
-                                if client.simple_query("WAIT;").await.is_ok()
-                                    && let Ok(result) = client
-                                    .query(
-                                        "select count(*) from pg_matviews where matviewname=$1;",
-                                        &[&name],
-                                    )
-                                    .await
-                                    && let Ok(1) = result[0].try_get::<_, i64>(0)
-                                    {
+                                match wait_background_mv_finished(name).await {
+                                    Ok(_) => {
                                         if let Some(record) = reset_background_ddl_record {
-                                            tester.run_async(record).await.unwrap();
-                                            background_ddl_enabled = false;
+                                            tracing::debug!(
+                                                "Record with background_ddl {:?} finished",
+                                                record
+                                            );
+                                            if tester.run_async(record).await.is_ok() {
+                                                // Try to reset, but if the cluster killed again before reset,
+                                                // it is fine, we can leave it to the next mview to reset it.
+                                                background_ddl_enabled = false;
+                                            }
                                         }
-                                        tracing::debug!("Record with background_ddl {:?} finished", record);
                                         break;
                                     }
-
-                                // If fail, recreate mv again.
-                                tracing::info!(iteration=i, name, "failed to run test: background_mv not created, retry after {delay:?}");
-                                if i >= max_retry {
-                                    panic!("failed to run test after retry {i} times, while waiting for background ddl");
+                                    Err(err) => {
+                                        tracing::error!(
+                                            iteration = i,
+                                            ?err,
+                                            "failed to wait for background mv to finish creating"
+                                        );
+                                        if i >= max_retry {
+                                            panic!("failed to run test after retry {i} times, while waiting for background ddl");
+                                        }
+                                        continue;
+                                    }
                                 }
-                                continue;
                             }
                             _ => tracing::error!(
                                 iteration = i,
@@ -552,6 +556,13 @@ mod tests {
             expect![[r#"
                 SetBackgroundDdl {
                     enable: true,
+                }"#]],
+        );
+        check(
+            extract_sql_command("CREATE MATERIALIZED VIEW if not exists m_1 as select 1;"),
+            expect![[r#"
+                CreateMaterializedView {
+                    name: "m_1",
                 }"#]],
         )
     }
