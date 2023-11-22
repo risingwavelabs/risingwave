@@ -77,11 +77,9 @@ pub fn decode(data: &str, format: &str) -> Result<Box<[u8]>> {
 pub fn convert_from(data: &[u8], src_encoding: &str, writer: &mut impl Write) -> Result<()> {
     match src_encoding.to_uppercase().as_str() {
         "UTF8" | "UTF-8" => {
-            let text = String::from_utf8(data.to_vec()).map_err(|e| {
-                ExprError::InvalidParam {
-                    name: "data",
-                    reason: e.to_string().into(),
-                }
+            let text = String::from_utf8(data.to_vec()).map_err(|e| ExprError::InvalidParam {
+                name: "data",
+                reason: e.to_string().into(),
             })?;
             writer.write_str(&text).unwrap();
             Ok(())
