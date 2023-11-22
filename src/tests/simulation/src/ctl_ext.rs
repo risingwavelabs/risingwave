@@ -431,18 +431,19 @@ impl Cluster {
     pub async fn throttle_mv(&mut self, table_id: TableId, rate_limit: Option<u32>) -> Result<()> {
         self.ctl
             .spawn(async move {
-                let opts =
-                    risingwave_ctl::CliOpts::parse_from(if let Some(rate_limit) = rate_limit {
-                        [
-                            "ctl",
-                            "throttle",
-                            "mv",
-                            &table_id.table_id.to_string(),
-                            &rate_limit.to_string(),
-                        ]
-                    } else {
-                        ["ctl", "throttle", "mv", &table_id.table_id.to_string()]
-                    });
+                let command: Vec<&str> = if let Some(rate_limit) = rate_limit {
+                    [
+                        "ctl",
+                        "throttle",
+                        "mv",
+                        &table_id.table_id.to_string(),
+                        &rate_limit.to_string(),
+                    ]
+                    .to_vec()
+                } else {
+                    ["ctl", "throttle", "mv", &table_id.table_id.to_string()].to_vec()
+                };
+                let opts = risingwave_ctl::CliOpts::parse_from(command);
                 risingwave_ctl::start(opts).await
             })
             .await??;
