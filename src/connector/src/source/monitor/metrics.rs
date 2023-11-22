@@ -33,7 +33,7 @@ pub static GLOBAL_ENUMERATOR_METRICS: LazyLock<EnumeratorMetrics> =
 impl EnumeratorMetrics {
     fn new(registry: &Registry) -> Self {
         let high_watermark = register_int_gauge_vec_with_registry!(
-            "high_watermark",
+            "source_kafka_high_watermark",
             "High watermark for a exec per partition",
             &["source_id", "partition"],
             registry,
@@ -73,21 +73,21 @@ pub static GLOBAL_SOURCE_METRICS: LazyLock<SourceMetrics> =
 impl SourceMetrics {
     fn new(registry: &Registry) -> Self {
         let partition_input_count = register_int_counter_vec_with_registry!(
-            "partition_input_count",
+            "source_partition_input_count",
             "Total number of rows that have been input from specific partition",
             &["actor_id", "source_id", "partition"],
             registry
         )
         .unwrap();
         let partition_input_bytes = register_int_counter_vec_with_registry!(
-            "partition_input_bytes",
+            "source_partition_input_bytes",
             "Total bytes that have been input from specific partition",
             &["actor_id", "source_id", "partition"],
             registry
         )
         .unwrap();
         let latest_message_id = register_int_gauge_vec_with_registry!(
-            "latest_message_id",
+            "source_latest_message_id",
             "Latest message id for a exec per partition",
             &["source_id", "actor_id", "partition"],
             registry,
@@ -95,7 +95,7 @@ impl SourceMetrics {
         .unwrap();
 
         let connector_source_rows_received = register_int_counter_vec_with_registry!(
-            "connector_source_rows_received",
+            "source_rows_received",
             "Number of rows received by source",
             &["source_type", "source_id"],
             registry

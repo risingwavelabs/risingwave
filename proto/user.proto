@@ -44,6 +44,7 @@ message GrantPrivilege {
     CREATE = 5;
     CONNECT = 6;
     USAGE = 7;
+    EXECUTE = 8;
   }
 
   message ActionWithGrantOption {
