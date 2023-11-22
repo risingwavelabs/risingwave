@@ -20,6 +20,7 @@ use super::utils::impl_distill_by_unit;
 use super::{
     ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     generic, ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
@@ -76,6 +77,8 @@ impl ColPrunable for LogicalExcept {
 }
 
 impl ExprRewritable for LogicalExcept {}
+
+impl ExprVisitable for LogicalExcept {}
 
 impl PredicatePushdown for LogicalExcept {
     fn predicate_pushdown(

@@ -24,6 +24,7 @@ use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, StreamNode};
 use crate::catalog::source_catalog::SourceCatalog;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -94,3 +95,5 @@ impl StreamNode for StreamSource {
 }
 
 impl ExprRewritable for StreamSource {}
+
+impl ExprVisitable for StreamSource {}
