@@ -570,16 +570,11 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
     let field_descs = if let AstDataType::Struct(defs) = &column_def.data_type {
         defs.iter()
             .map(|f| {
-                Ok(ColumnDesc {
-                    data_type: bind_data_type(&f.data_type)?,
-                    // Literals don't have `column_id`.
-                    column_id: ColumnId::new(0),
-                    name: f.name.real_value(),
-                    field_descs: vec![],
-                    type_name: "".to_string(),
-                    generated_or_default_column: None,
-                    description: None,
-                })
+                Ok(ColumnDesc::named(
+                    f.name.real_value(),
+                    ColumnId::new(0), // Literals don't have `column_id`.
+                    bind_data_type(&f.data_type)?,
+                ))
             })
             .collect::<Result<Vec<_>>>()?
     } else {
