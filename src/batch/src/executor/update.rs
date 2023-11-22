@@ -18,7 +18,6 @@ use risingwave_common::array::{
     Array, ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk,
 };
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -27,6 +26,7 @@ use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_source::dml_manager::DmlManagerRef;
 
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -105,7 +105,7 @@ impl Executor for UpdateExecutor {
 }
 
 impl UpdateExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(mut self: Box<Self>) {
         let table_dml_handle = self
             .dml_manager
