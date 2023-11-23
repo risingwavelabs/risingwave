@@ -13,15 +13,14 @@
 // limitations under the License.
 
 use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 
-use super::MemoryControlRef;
-use crate::memory_management::{build_memory_control_policy, MemoryControlStats};
+use super::policy::JemallocAndJvmMemoryControl;
 
 /// Compute node uses [`GlobalMemoryManager`] to limit the memory usage.
 pub struct GlobalMemoryManager {
@@ -31,7 +30,7 @@ pub struct GlobalMemoryManager {
     metrics: Arc<StreamingMetrics>,
 
     /// The memory control policy for computing tasks.
-    memory_control_policy: MemoryControlRef,
+    memory_control_policy: Mutex<JemallocAndJvmMemoryControl>,
 }
 
 pub type GlobalMemoryManagerRef = Arc<GlobalMemoryManager>;
@@ -42,7 +41,8 @@ impl GlobalMemoryManager {
     const MIN_TICK_INTERVAL_MS: u32 = 10;
 
     pub fn new(metrics: Arc<StreamingMetrics>, total_memory_bytes: usize) -> Arc<Self> {
-        let memory_control_policy = build_memory_control_policy(total_memory_bytes);
+        let memory_control_policy =
+            Mutex::new(JemallocAndJvmMemoryControl::new(total_memory_bytes));
         tracing::info!("memory control policy: {:?}", &memory_control_policy);
 
         Arc::new(Self {
@@ -71,16 +71,6 @@ impl GlobalMemoryManager {
         // Keep same interval with the barrier interval
         let mut tick_interval = tokio::time::interval(Duration::from_millis(interval_ms as u64));
 
-        let mut memory_control_stats = MemoryControlStats {
-            jemalloc_allocated_bytes: 0,
-            jemalloc_active_bytes: 0,
-            jvm_allocated_bytes: 0,
-            jvm_active_bytes: 0,
-            lru_watermark_step: 0,
-            lru_watermark_time_ms: Epoch::physical_now(),
-            lru_physical_now_ms: Epoch::physical_now(),
-        };
-
         loop {
             // Wait for a while to check if need eviction.
             tokio::select! {
@@ -95,34 +85,33 @@ impl GlobalMemoryManager {
                 }
 
                 _ = tick_interval.tick() => {
-                    memory_control_stats = self.memory_control_policy.apply(
+                    self.memory_control_policy.lock().unwrap().tick(
                         interval_ms,
-                        memory_control_stats,
                         self.watermark_epoch.clone(),
                     );
 
-                    self.metrics
-                        .lru_current_watermark_time_ms
-                        .set(memory_control_stats.lru_watermark_time_ms as i64);
-                    self.metrics
-                        .lru_physical_now_ms
-                        .set(memory_control_stats.lru_physical_now_ms as i64);
-                    self.metrics
-                        .lru_watermark_step
-                        .set(memory_control_stats.lru_watermark_step as i64);
+                    // self.metrics
+                    //     .lru_current_watermark_time_ms
+                    //     .set(memory_control_stats.lru_watermark_time_ms as i64);
+                    // self.metrics
+                    //     .lru_physical_now_ms
+                    //     .set(memory_control_stats.lru_physical_now_ms as i64);
+                    // self.metrics
+                    //     .lru_watermark_step
+                    //     .set(memory_control_stats.lru_watermark_step as i64);
                     self.metrics.lru_runtime_loop_count.inc();
-                    self.metrics
-                        .jemalloc_allocated_bytes
-                        .set(memory_control_stats.jemalloc_allocated_bytes as i64);
-                    self.metrics
-                        .jemalloc_active_bytes
-                        .set(memory_control_stats.jemalloc_active_bytes as i64);
-                    self.metrics
-                        .jvm_allocated_bytes
-                        .set(memory_control_stats.jvm_allocated_bytes as i64);
-                    self.metrics
-                        .jvm_active_bytes
-                        .set(memory_control_stats.jvm_active_bytes as i64);
+                    // self.metrics
+                    //     .jemalloc_allocated_bytes
+                    //     .set(memory_control_stats.jemalloc_allocated_bytes as i64);
+                    // self.metrics
+                    //     .jemalloc_active_bytes
+                    //     .set(memory_control_stats.jemalloc_active_bytes as i64);
+                    // self.metrics
+                    //     .jvm_allocated_bytes
+                    //     .set(memory_control_stats.jvm_allocated_bytes as i64);
+                    // self.metrics
+                    //     .jvm_active_bytes
+                    //     .set(memory_control_stats.jvm_active_bytes as i64);
                 }
             }
         }
