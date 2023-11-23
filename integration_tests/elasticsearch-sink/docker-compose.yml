@@ -2,7 +2,6 @@
 version: "3"
 services:
   elasticsearch7:
-    container_name: elasticsearch7
     image: docker.elastic.co/elasticsearch/elasticsearch:7.11.0
     environment:
       - xpack.security.enabled=true
@@ -11,7 +10,6 @@ services:
     ports:
       - 9200:9200
   elasticsearch8:
-    container_name: elasticsearch8
     image: docker.elastic.co/elasticsearch/elasticsearch:8.10.0
     environment:
       - xpack.security.enabled=true
