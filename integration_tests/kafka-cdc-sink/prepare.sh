@@ -14,6 +14,8 @@ docker compose exec message_queue \
 
 # setup flink
 docker compose run flink-sql-client \
+    /opt/flink/bin/sql-client.sh -f /tmp/flink.sql
+docker compose run flink-sql-client \
     /opt/flink/bin/sql-client.sh -f /tmp/compatibility-flink.sql
 
 # setup connect
