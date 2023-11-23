@@ -125,10 +125,6 @@ services:
 
   connect:
     image: debezium/connect:2.4.0.Final
-    build:
-      context: debezium-jdbc
-      args:
-        DEBEZIUM_VERSION: 2.4.0.Final
     ports:
      - 8083:8083
      - 5005:5005
