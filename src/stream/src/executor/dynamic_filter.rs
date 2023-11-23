@@ -392,7 +392,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                                 self.left_table.iter_with_vnode(
                                     vnode,
                                     &range,
-                                    PrefetchOptions::prefetch_for_large_range_scan(),
+                                    PrefetchOptions::prefetch_for_small_range_scan(),
                                 )
                             }),
                         )
