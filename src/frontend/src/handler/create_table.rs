@@ -138,7 +138,7 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
             ColumnOption::GeneratedColumns(_) => {}
             ColumnOption::DefaultColumns(_) => {}
             ColumnOption::Unique { is_primary: true } => {}
-            _ => bail_not_implemented!(issue = None, "column constraints \"{}\"", option_def),
+            _ => bail_not_implemented!("column constraints \"{}\"", option_def),
         }
     }
     Ok(())
