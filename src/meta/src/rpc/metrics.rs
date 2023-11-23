@@ -526,7 +526,7 @@ impl MetaMetrics {
             &[
                 "materialized_view_id",
                 "table_id",
-                "actor_id",
+                "fragment_id",
                 "table_name",
                 "table_type",
                 "compaction_group_id"
@@ -823,33 +823,32 @@ pub fn start_fragment_info_monitor(
                                     .set(1);
                             }
                         }
+                    }
+                    // Report a dummy gauge metrics with (materialized_view_id, table id, fragment_id, compaction_group_id,  table
+                    // name) as its label
 
-                        // Report a dummy gauge metrics with (table id, actor id, table
-                        // name) as its label
+                    for table_id in &fragment.state_table_ids {
+                        let table_id_str = table_id.to_string();
+                        let (table_name, table_type) = table_name_and_type_mapping
+                            .get(table_id)
+                            .cloned()
+                            .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
+                        let compaction_group_id = table_compaction_group_id_mapping
+                            .get(table_id)
+                            .map(|cg_id| cg_id.to_string())
+                            .unwrap_or_else(|| "unknown".to_string());
 
-                        for table_id in &fragment.state_table_ids {
-                            let table_id_str = table_id.to_string();
-                            let (table_name, table_type) = table_name_and_type_mapping
-                                .get(table_id)
-                                .cloned()
-                                .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
-                            let compaction_group_id = table_compaction_group_id_mapping
-                                .get(table_id)
-                                .map(|cg_id| cg_id.to_string())
-                                .unwrap_or_else(|| "unknown".to_string());
-
-                            meta_metrics
-                                .table_info
-                                .with_label_values(&[
-                                    &mv_id_str,
-                                    &table_id_str,
-                                    &actor_id_str,
-                                    &table_name,
-                                    &table_type,
-                                    &compaction_group_id,
-                                ])
-                                .set(1);
-                        }
+                        meta_metrics
+                            .table_info
+                            .with_label_values(&[
+                                &mv_id_str,
+                                &table_id_str,
+                                &fragment_id_str,
+                                &table_name,
+                                &table_type,
+                                &compaction_group_id,
+                            ])
+                            .set(1);
                     }
                 }
             }

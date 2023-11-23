@@ -24,7 +24,7 @@ use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::GenericPlanNode;
 use crate::catalog::{ColumnId, IndexCatalog};
-use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Cardinality, FunctionalDependencySet, Order};
 use crate::utils::{ColIndexMappingRewriteExt, Condition};
@@ -57,6 +57,10 @@ pub struct Scan {
 impl Scan {
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.predicate = self.predicate.clone().rewrite_expr(r);
+    }
+
+    pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.predicate.visit_expr(v);
     }
 
     /// The mapped distribution key of the scan operator.
