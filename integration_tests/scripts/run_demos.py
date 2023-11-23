@@ -240,7 +240,9 @@ def run_elasticsearch_sink_demo():
     print("Running demo: {}".format(demo))
 
     subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=demo_dir, check=True)
-    sleep(120)
+    subprocess.run(["docker", "compose", "logs", "elasticsearch7"], cwd=demo_dir, check=True)
+    subprocess.run(["docker", "compose", "logs", "elasticsearch8"], cwd=demo_dir, check=True)
+    sleep(180)
 
     subprocess.run(["docker", "compose", "logs", "elasticsearch7"], cwd=demo_dir, check=True)
     subprocess.run(["docker", "compose", "logs", "elasticsearch8"], cwd=demo_dir, check=True)
