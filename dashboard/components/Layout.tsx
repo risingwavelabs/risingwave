@@ -58,8 +58,8 @@ function NavButton({
   return (
     <Link href={href}>
       <Button
-        colorScheme={match ? "teal" : "gray"}
-        color={match ? "teal.600" : "gray.500"}
+        colorScheme={match ? "blue" : "gray"}
+        color={match ? "blue.600" : "gray.500"}
         variant={match ? "outline" : "ghost"}
         width="full"
         justifyContent="flex-start"
@@ -77,7 +77,7 @@ function NavButton({
 
 function NavTitle({ children }: { children: React.ReactNode }) {
   return (
-    <Text mt={3} textColor="teal.500" fontWeight="semibold" lineHeight="6">
+    <Text mt={3} textColor="blue.500" fontWeight="semibold" lineHeight="6">
       {children}
     </Text>
   )

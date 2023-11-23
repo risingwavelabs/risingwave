@@ -20,7 +20,6 @@ use futures_async_stream::{for_await, try_stream};
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, DataChunkTestExt};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::field_generator::{FieldGeneratorImpl, VarcharProperty};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, ToOwnedDatum};
@@ -29,6 +28,7 @@ use risingwave_expr::expr::BoxedExpression;
 use risingwave_pb::batch_plan::PbExchangeSource;
 
 use super::{BoxedExecutorBuilder, ExecutorBuilder};
+use crate::error::{BatchError, Result};
 use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, CreateSource, Executor, LookupExecutorBuilder,
@@ -157,7 +157,7 @@ impl Executor for MockExecutor {
 }
 
 impl MockExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         for data_chunk in self.chunks {
             yield data_chunk;
@@ -366,7 +366,7 @@ impl Executor for BlockExecutor {
 }
 
 impl BlockExecutor {
-    #[try_stream(ok = DataChunk, error = RwError)]
+    #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self) {
         // infinite loop to block
         #[allow(clippy::empty_loop)]
@@ -403,7 +403,7 @@ impl Executor for BusyLoopExecutor {
 }
 
 impl BusyLoopExecutor {
-    #[try_stream(ok = DataChunk, error = RwError)]
+    #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self) {
         // infinite loop to generate data
         loop {

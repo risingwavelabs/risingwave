@@ -115,6 +115,7 @@ steps:
           - "clickhouse-sink"
           - "cockroach-sink"
           - "kafka-cdc-sink"
+          - "cassandra-and-scylladb-sink"
         format:
           - "json"
           - "protobuf"
@@ -157,5 +158,9 @@ steps:
           skip: true
         - with:
             testcase: "kafka-cdc-sink"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "cassandra-and-scylladb-sink"
             format: "protobuf"
           skip: true
