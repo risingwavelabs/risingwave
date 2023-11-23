@@ -212,7 +212,7 @@ impl Binder {
             next_values_id: 0,
             next_share_id: 0,
             session_config: session.shared_config(),
-            search_path: session.config().get_search_path(),
+            search_path: session.config().search_path(),
             bind_for,
             shared_views: HashMap::new(),
             included_relations: HashSet::new(),
