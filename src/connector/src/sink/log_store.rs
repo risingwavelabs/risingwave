@@ -24,8 +24,6 @@ use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
-use tokio::sync::watch;
-use tracing::error;
 
 use crate::sink::SinkMetrics;
 
@@ -323,27 +321,6 @@ where
             inner: self,
             metrics,
         }
-    }
-}
-
-pub struct PausableLogWriter<W> {
-    inner: W,
-    is_paused: watch::Sender<bool>,
-}
-
-impl<W> PausableLogWriter<W> {
-    pub fn pause(&mut self) {
-        let _ = self
-            .is_paused
-            .send(true)
-            .inspect_err(|_| error!("unable to set pause"));
-    }
-
-    pub fn resume(&mut self) {
-        let _ = self
-            .is_paused
-            .send(false)
-            .inspect_err(|_| error!("unable to set resume"));
     }
 }
 
