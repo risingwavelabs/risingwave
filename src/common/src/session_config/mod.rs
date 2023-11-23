@@ -348,7 +348,8 @@ type StreamingRateLimit = ConfigU64<STREAMING_RATE_LIMIT, 0>;
 type CdcBackfill = ConfigBool<CDC_BACKFILL, false>;
 type BackgroundDdl = ConfigBool<BACKGROUND_DDL, false>;
 type ServerEncoding = ConfigString<SERVER_ENCODING>;
-type StreamingEnableArrangementBackfill = ConfigBool<STREAMING_ENABLE_ARRANGEMENT_BACKFILL, false>;
+/// FIXME: disable this config by default.
+type StreamingEnableArrangementBackfill = ConfigBool<STREAMING_ENABLE_ARRANGEMENT_BACKFILL, true>;
 
 /// Report status or notice to caller.
 pub trait ConfigReporter {
