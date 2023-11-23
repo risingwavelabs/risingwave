@@ -21,7 +21,7 @@ use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::monitor::connection::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::tracing::TracingContext;
-use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
+use risingwave_pb::batch_plan::{CapturedContext, PlanFragment, TaskId, TaskOutputId};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::compute::config_service_client::ConfigServiceClient;
 use risingwave_pb::compute::{ShowConfigRequest, ShowConfigResponse};
@@ -158,6 +158,7 @@ impl ComputeClient {
         task_id: TaskId,
         plan: PlanFragment,
         epoch: BatchQueryEpoch,
+        captured_context: CapturedContext,
     ) -> Result<Streaming<TaskInfoResponse>> {
         Ok(self
             .task_client
@@ -167,6 +168,7 @@ impl ComputeClient {
                 plan: Some(plan),
                 epoch: Some(epoch),
                 tracing_context: TracingContext::from_current_span().to_protobuf(),
+                captured_context: Some(captured_context),
             })
             .await?
             .into_inner())

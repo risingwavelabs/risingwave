@@ -23,7 +23,7 @@ use risingwave_common::config::BatchConfig;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tracing::TracingContext;
-use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
+use risingwave_pb::batch_plan::{CapturedContext, PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
@@ -102,6 +102,7 @@ impl BatchManager {
         context: ComputeNodeContext,
         state_reporter: StateReporter,
         tracing_context: TracingContext,
+        captured_context: CapturedContext,
     ) -> Result<()> {
         trace!("Received task id: {:?}, plan: {:?}", tid, plan);
         let task = BatchTaskExecution::new(tid, plan, context, epoch, self.runtime())?;
@@ -128,7 +129,7 @@ impl BatchManager {
                 task_id,
             );
         };
-        task.async_execute(Some(state_reporter), tracing_context)
+        task.async_execute(Some(state_reporter), tracing_context, captured_context)
             .await
             .inspect_err(|_| {
                 self.cancel_task(&task_id.to_prost());
@@ -151,6 +152,7 @@ impl BatchManager {
             ComputeNodeContext::for_test(),
             StateReporter::new_with_test(),
             TracingContext::none(),
+            CapturedContext::default(),
         )
         .await
     }

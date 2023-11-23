@@ -36,10 +36,12 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::select_all;
 use risingwave_connector::source::SplitMetaData;
+use risingwave_expr::captured_context_scope;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
-    DistributedLookupJoinNode, ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment,
-    PlanNode as PlanNodePb, PlanNode, TaskId as TaskIdPb, TaskOutputId,
+    CapturedContext, DistributedLookupJoinNode, ExchangeNode, ExchangeSource,
+    MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodePb, PlanNode, TaskId as TaskIdPb,
+    TaskOutputId,
 };
 use risingwave_pb::common::{BatchQueryEpoch, HostAddress, WorkerNode};
 use risingwave_pb::task_service::{CancelTaskRequest, TaskInfoResponse};
@@ -332,7 +334,11 @@ impl StageRunner {
 
     /// Schedule all tasks to CN and wait process all status messages from RPC. Note that when all
     /// task is created, it should tell `QueryRunner` to schedule next.
-    async fn schedule_tasks(&mut self, mut shutdown_rx: ShutdownToken) -> SchedulerResult<()> {
+    async fn schedule_tasks(
+        &mut self,
+        mut shutdown_rx: ShutdownToken,
+        captured_context: CapturedContext,
+    ) -> SchedulerResult<()> {
         let mut futures = vec![];
 
         if let Some(table_scan_info) = self.stage.table_scan_info.as_ref()
@@ -361,7 +367,7 @@ impl StageRunner {
                 let vnode_ranges = vnode_bitmaps[&parallel_unit_id].clone();
                 let plan_fragment =
                     self.create_plan_fragment(i as u32, Some(PartitionInfo::Table(vnode_ranges)));
-                futures.push(self.schedule_task(task_id, plan_fragment, Some(worker)));
+                futures.push(self.schedule_task(task_id, plan_fragment, Some(worker), captured_context.clone()));
             }
         } else if let Some(source_info) = self.stage.source_info.as_ref() {
             for (id, split) in source_info.split_info().unwrap().iter().enumerate() {
@@ -374,7 +380,7 @@ impl StageRunner {
                     .create_plan_fragment(id as u32, Some(PartitionInfo::Source(split.clone())));
                 let worker =
                     self.choose_worker(&plan_fragment, id as u32, self.stage.dml_table_id)?;
-                futures.push(self.schedule_task(task_id, plan_fragment, worker));
+                futures.push(self.schedule_task(task_id, plan_fragment, worker,  captured_context.clone()));
             }
         } else {
             for id in 0..self.stage.parallelism.unwrap() {
@@ -385,7 +391,7 @@ impl StageRunner {
                 };
                 let plan_fragment = self.create_plan_fragment(id, None);
                 let worker = self.choose_worker(&plan_fragment, id, self.stage.dml_table_id)?;
-                futures.push(self.schedule_task(task_id, plan_fragment, worker));
+                futures.push(self.schedule_task(task_id, plan_fragment, worker,  captured_context.clone()));
             }
         }
 
@@ -548,6 +554,7 @@ impl StageRunner {
     async fn schedule_tasks_for_root(
         &mut self,
         mut shutdown_rx: ShutdownToken,
+        captured_context: CapturedContext,
     ) -> SchedulerResult<()> {
         let root_stage_id = self.stage.id;
         // Currently, the dml or table scan should never be root fragment, so the partition is None.
@@ -574,32 +581,35 @@ impl StageRunner {
         );
 
         let shutdown_rx0 = shutdown_rx.clone();
-        let executor = executor.build().await?;
-        let chunk_stream = executor.execute();
-        let cancelled = pin!(shutdown_rx.cancelled());
-        #[for_await]
-        for chunk in chunk_stream.take_until(cancelled) {
-            if let Err(ref e) = chunk {
-                if shutdown_rx0.is_cancelled() {
-                    break;
-                }
-                let err_str = e.to_string();
 
-                // This is possible if The Query Runner drop early before schedule the root
-                // executor. Detail described in https://github.com/risingwavelabs/risingwave/issues/6883#issuecomment-1348102037.
-                // The error format is just channel closed so no care.
-                if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
-                    warn!("Root executor has been dropped before receive any events so the send is failed");
-                }
-                // Different from below, return this function and report error.
-                return Err(TaskExecutionError(err_str));
-            } else {
-                // Same for below.
-                if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
-                    warn!("Root executor has been dropped before receive any events so the send is failed");
+        captured_context_scope!(captured_context, async {
+            let executor = executor.build().await?;
+            let chunk_stream = executor.execute();
+            let cancelled = pin!(shutdown_rx.cancelled());
+            #[for_await]
+            for chunk in chunk_stream.take_until(cancelled) {
+                if let Err(ref e) = chunk {
+                    if shutdown_rx0.is_cancelled() {
+                        break;
+                    }
+                    let err_str = e.to_string();
+                    // This is possible if The Query Runner drop early before schedule the root
+                    // executor. Detail described in https://github.com/risingwavelabs/risingwave/issues/6883#issuecomment-1348102037.
+                    // The error format is just channel closed so no care.
+                    if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
+                        warn!("Root executor has been dropped before receive any events so the send is failed");
+                    }
+                    // Different from below, return this function and report error.
+                    return Err(TaskExecutionError(err_str));
+                } else {
+                    // Same for below.
+                    if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
+                        warn!("Root executor has been dropped before receive any events so the send is failed");
+                    }
                 }
             }
-        }
+            Ok(())
+        }).await?;
 
         // Terminated by other tasks execution error, so no need to return error here.
         match shutdown_rx0.message() {
@@ -622,11 +632,16 @@ impl StageRunner {
     }
 
     async fn schedule_tasks_for_all(&mut self, shutdown_rx: ShutdownToken) -> SchedulerResult<()> {
+        let captured_context = CapturedContext {
+            // TODO(kexiang): We go through the plan to make sure only the neccessay context is captured.
+            time_zone: Some(self.ctx.session().config().timezone().to_owned()),
+        };
         // If root, we execute it locally.
         if !self.is_root_stage() {
-            self.schedule_tasks(shutdown_rx).await?;
+            self.schedule_tasks(shutdown_rx, captured_context).await?;
         } else {
-            self.schedule_tasks_for_root(shutdown_rx).await?;
+            self.schedule_tasks_for_root(shutdown_rx, captured_context)
+                .await?;
         }
         Ok(())
     }
@@ -824,6 +839,7 @@ impl StageRunner {
         task_id: TaskIdPb,
         plan_fragment: PlanFragment,
         worker: Option<WorkerNode>,
+        captured_context: CapturedContext,
     ) -> SchedulerResult<Fuse<Streaming<TaskInfoResponse>>> {
         let mut worker = worker.unwrap_or(self.worker_node_manager.next_random_worker()?);
         let worker_node_addr = worker.host.take().unwrap();
@@ -835,8 +851,9 @@ impl StageRunner {
             .map_err(|e| anyhow!(e))?;
 
         let t_id = task_id.task_id;
-        let stream_status = compute_client
-            .create_task(task_id, plan_fragment, self.epoch.clone())
+
+        let stream_status: Fuse<Streaming<TaskInfoResponse>> = compute_client
+            .create_task(task_id, plan_fragment, self.epoch.clone(), captured_context)
             .await
             .inspect_err(|_| self.mask_failed_serving_worker(&worker))
             .map_err(|e| anyhow!(e))?

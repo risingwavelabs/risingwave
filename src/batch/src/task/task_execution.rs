@@ -27,7 +27,8 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::util::panic::FutureCatchUnwindExt;
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_common::util::tracing::TracingContext;
-use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
+use risingwave_expr::captured_context_scope;
+use risingwave_pb::batch_plan::{CapturedContext, PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
@@ -425,6 +426,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         self: Arc<Self>,
         state_tx: Option<StateReporter>,
         tracing_context: TracingContext,
+        captured_context: CapturedContext,
     ) -> Result<()> {
         let mut state_tx = state_tx;
         trace!(
@@ -433,14 +435,17 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             serde_json::to_string_pretty(self.plan.get_root()?).unwrap()
         );
 
-        let exec = ExecutorBuilder::new(
-            self.plan.root.as_ref().unwrap(),
-            &self.task_id,
-            self.context.clone(),
-            self.epoch.clone(),
-            self.shutdown_rx.clone(),
+        let exec = captured_context_scope!(
+            captured_context.clone(),
+            ExecutorBuilder::new(
+                self.plan.root.as_ref().unwrap(),
+                &self.task_id,
+                self.context.clone(),
+                self.epoch.clone(),
+                self.shutdown_rx.clone(),
+            )
+            .build()
         )
-        .build()
         .await?;
 
         let sender = self.sender.clone();
@@ -472,9 +477,11 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                t_1.run(exec, sender, state_tx.as_mut())
-                    .instrument(span)
-                    .await;
+                captured_context_scope!(
+                    captured_context,
+                    t_1.run(exec, sender, state_tx.as_mut()).instrument(span)
+                )
+                .await;
             };
 
             if let Some(batch_metrics) = batch_metrics {

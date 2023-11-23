@@ -63,6 +63,7 @@ impl TaskService for BatchServiceImpl {
             plan,
             epoch,
             tracing_context,
+            captured_context,
         } = request.into_inner();
 
         let (state_tx, state_rx) = tokio::sync::mpsc::channel(TASK_STATUS_BUFFER_SIZE);
@@ -79,6 +80,7 @@ impl TaskService for BatchServiceImpl {
                 ),
                 state_reporter,
                 TracingContext::from_protobuf(&tracing_context),
+                captured_context.expect("no captured context found"),
             )
             .await;
         match res {
@@ -119,12 +121,14 @@ impl TaskService for BatchServiceImpl {
             plan,
             epoch,
             tracing_context,
+            captured_context,
         } = req.into_inner();
 
         let task_id = task_id.expect("no task id found");
         let plan = plan.expect("no plan found").clone();
         let epoch = epoch.expect("no epoch found");
         let tracing_context = TracingContext::from_protobuf(&tracing_context);
+        let captured_context = captured_context.expect("no captured context found");
 
         let context = ComputeNodeContext::new_for_local(self.env.clone());
         trace!(
@@ -135,7 +139,11 @@ impl TaskService for BatchServiceImpl {
         let task = BatchTaskExecution::new(&task_id, plan, context, epoch, self.mgr.runtime())?;
         let task = Arc::new(task);
         let (tx, rx) = tokio::sync::mpsc::channel(LOCAL_EXECUTE_BUFFER_SIZE);
-        if let Err(e) = task.clone().async_execute(None, tracing_context).await {
+        if let Err(e) = task
+            .clone()
+            .async_execute(None, tracing_context, captured_context)
+            .await
+        {
             error!(
                 "failed to build executors and trigger execution of Task {:?}: {}",
                 task_id, e

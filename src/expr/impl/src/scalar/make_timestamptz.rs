@@ -13,19 +13,11 @@
 // limitations under the License.
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-use risingwave_common::types::{FloatExt, Timestamptz, F64};
+use risingwave_common::types::{FloatExt, Timestamp, Timestamptz, F64};
+use risingwave_expr::captured_context::TIME_ZONE;
 use risingwave_expr::{capture_context, function, ExprError, Result};
 
-use super::context::TIME_ZONE;
-
-/// Just a wrapper to reuse the `map_err` logic.
-#[inline(always)]
-pub fn time_zone_err(inner_err: String) -> ExprError {
-    ExprError::InvalidParam {
-        name: "time_zone",
-        reason: inner_err.into(),
-    }
-}
+use crate::scalar::timestamptz::timestamp_at_time_zone;
 
 // year int, month int, day int, hour int, min int, sec double precision
 #[function("make_timestamptz(int4, int4, int4, int4, int4, float8) -> timestamptz")]
@@ -64,7 +56,6 @@ fn make_timestamptz_impl(
     min: i32,
     sec: F64,
 ) -> Result<Timestamptz> {
-    let time_zone = Timestamptz::lookup_time_zone(time_zone).map_err(time_zone_err)?;
     if !sec.is_finite() || sec.0.is_sign_negative() {
         return Err(ExprError::InvalidParam {
             name: "sec",
@@ -86,16 +77,6 @@ fn make_timestamptz_impl(
                 reason: "invalid time".into(),
             })?,
     );
-    let date_time = naive_date_time
-        .and_local_timezone(time_zone)
-        .latest()
-        .ok_or_else(|| ExprError::InvalidParam {
-            name: "time_zone",
-            reason: format!(
-                "fail to interpret local timestamp \"{:?}\" in time zone \"{}\"",
-                naive_date_time, time_zone
-            )
-            .into(),
-        })?;
-    Ok(Timestamptz::from(date_time))
+
+    timestamp_at_time_zone(Timestamp(naive_date_time), time_zone)
 }
