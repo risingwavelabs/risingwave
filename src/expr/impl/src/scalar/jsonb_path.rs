@@ -75,7 +75,7 @@ fn jsonb_path_match2(target: JsonbRef<'_>, path: &JsonPath) -> Result<Option<boo
         .query::<ValueRef<'_>>(target.into())
         .map_err(eval_error)?;
 
-    if matched.len() != 1 {
+    if matched.len() != 1 || !matched[0].as_ref().is_boolean() && !matched[0].as_ref().is_null() {
         return Err(ExprError::InvalidParam {
             name: "jsonb_path_match",
             reason: "single boolean result is expected".into(),
@@ -97,7 +97,7 @@ fn jsonb_path_match3(
         .query_with_vars::<ValueRef<'_>>(target.into(), vars.into())
         .map_err(eval_error)?;
 
-    if matched.len() != 1 {
+    if matched.len() != 1 || !matched[0].as_ref().is_boolean() && !matched[0].as_ref().is_null() {
         return Err(ExprError::InvalidParam {
             name: "jsonb_path_match",
             reason: "single boolean result is expected".into(),
@@ -257,7 +257,7 @@ fn jsonb_path_query_array4(
 )]
 fn jsonb_path_query_first2(target: JsonbRef<'_>, path: &JsonPath) -> Result<Option<JsonbVal>> {
     let matched = path
-        .query::<ValueRef<'_>>(target.into())
+        .query_first::<ValueRef<'_>>(target.into())
         .map_err(eval_error)?;
     Ok(matched
         .into_iter()
@@ -275,7 +275,7 @@ fn jsonb_path_query_first3(
     path: &JsonPath,
 ) -> Result<Option<JsonbVal>> {
     let matched = path
-        .query_with_vars::<ValueRef<'_>>(target.into(), vars.into())
+        .query_first_with_vars::<ValueRef<'_>>(target.into(), vars.into())
         .map_err(eval_error)?;
     Ok(matched
         .into_iter()

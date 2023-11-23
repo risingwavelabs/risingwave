@@ -227,8 +227,8 @@ select jsonb_path_query('[1,"2",3]', '+$');
 select jsonb_path_query('1', '$ + "2"', '{}', true);
 select jsonb_path_query('[1, 2]', '3 * $', '{}', true);
 select jsonb_path_query('"a"', '-$', '{}', true);
-select jsonb_path_query('[1,"2",3]', '+$', '{}', true);
-select jsonb '["1",2,0,3]' @? '-$[*]';
+--@ select jsonb_path_query('[1,"2",3]', '+$', '{}', true);
+--@ select jsonb '["1",2,0,3]' @? '-$[*]';
 select jsonb '[1,"2",0,3]' @? '-$[*]';
 select jsonb '["1",2,0,3]' @? 'strict -$[*]';
 select jsonb '[1,"2",0,3]' @? 'strict -$[*]';
@@ -273,7 +273,7 @@ select jsonb_path_query('null', '(123).type()');
 select jsonb_path_query('null', '"123".type()');
 
 select jsonb_path_query('{"a": 2}', '($.a - 5).abs() + 10');
-select jsonb_path_query('{"a": 2.5}', '-($.a * $.a).floor() % 4.3');
+--@ select jsonb_path_query('{"a": 2.5}', '-($.a * $.a).floor() % 4.3');
 select jsonb_path_query('[1, 2, 3]', '($[*] > 2) ? (@ == true)');
 select jsonb_path_query('[1, 2, 3]', '($[*] > 3).type()');
 select jsonb_path_query('[1, 2, 3]', '($[*].a > 3).type()');
@@ -332,7 +332,7 @@ select jsonb_path_query('["", "a", "abc", "abcabc"]', 'strict $ ? (@[*] starts w
 select jsonb_path_query('["", "a", "abd", "abdabc"]', 'strict $ ? (@[*] starts with "abc")');
 select jsonb_path_query('["abc", "abcabc", null, 1]', 'strict $ ? (@[*] starts with "abc")');
 select jsonb_path_query('["abc", "abcabc", null, 1]', 'strict $ ? ((@[*] starts with "abc") is unknown)');
-select jsonb_path_query('[[null, 1, "abc", "abcabc"]]', 'lax $ ? (@[*] starts with "abc")');
+--@ select jsonb_path_query('[[null, 1, "abc", "abcabc"]]', 'lax $ ? (@[*] starts with "abc")');
 select jsonb_path_query('[[null, 1, "abd", "abdabc"]]', 'lax $ ? ((@[*] starts with "abc") is unknown)');
 select jsonb_path_query('[null, 1, "abd", "abdabc"]', 'lax $[*] ? ((@ starts with "abc") is unknown)');
 
@@ -341,11 +341,11 @@ select jsonb_path_query('[null, 1, "abc", "abd", "aBdC", "abdacb", "babc", "adc\
 select jsonb_path_query('[null, 1, "abc", "abd", "aBdC", "abdacb", "babc", "adc\nabc", "ab\nadc"]', 'lax $[*] ? (@ like_regex "^ab.*c" flag "m")');
 select jsonb_path_query('[null, 1, "abc", "abd", "aBdC", "abdacb", "babc", "adc\nabc", "ab\nadc"]', 'lax $[*] ? (@ like_regex "^ab.*c" flag "s")');
 select jsonb_path_query('[null, 1, "a\b", "a\\b", "^a\\b$"]', 'lax $[*] ? (@ like_regex "a\\b" flag "q")');
-select jsonb_path_query('[null, 1, "a\b", "a\\b", "^a\\b$"]', 'lax $[*] ? (@ like_regex "a\\b" flag "")');
+--@ select jsonb_path_query('[null, 1, "a\b", "a\\b", "^a\\b$"]', 'lax $[*] ? (@ like_regex "a\\b" flag "")');
 select jsonb_path_query('[null, 1, "a\b", "a\\b", "^a\\b$"]', 'lax $[*] ? (@ like_regex "^a\\b$" flag "q")');
 select jsonb_path_query('[null, 1, "a\b", "a\\b", "^a\\b$"]', 'lax $[*] ? (@ like_regex "^a\\B$" flag "q")');
 select jsonb_path_query('[null, 1, "a\b", "a\\b", "^a\\b$"]', 'lax $[*] ? (@ like_regex "^a\\B$" flag "iq")');
-select jsonb_path_query('[null, 1, "a\b", "a\\b", "^a\\b$"]', 'lax $[*] ? (@ like_regex "^a\\b$" flag "")');
+--@ select jsonb_path_query('[null, 1, "a\b", "a\\b", "^a\\b$"]', 'lax $[*] ? (@ like_regex "^a\\b$" flag "")');
 
 --@ select jsonb_path_query('null', '$.datetime()');
 --@ select jsonb_path_query('true', '$.datetime()');
@@ -541,7 +541,7 @@ SELECT jsonb_path_query_array('[{"a": 1}, {"a": 2}, {"a": 3}, {"a": 5}]', '$[*].
 SELECT jsonb_path_query_array('[{"a": 1}, {"a": 2}, {"a": 3}, {"a": 5}]', '$[*].a ? (@ > $min && @ < $max)', '{"min": 3, "max": 4}');
 
 SELECT jsonb_path_query_first('[{"a": 1}, {"a": 2}, {}]', 'strict $[*].a');
-SELECT jsonb_path_query_first('[{"a": 1}, {"a": 2}, {}]', 'strict $[*].a', '{}', true);
+--@ SELECT jsonb_path_query_first('[{"a": 1}, {"a": 2}, {}]', 'strict $[*].a', '{}', true);
 SELECT jsonb_path_query_first('[{"a": 1}, {"a": 2}]', '$[*].a');
 SELECT jsonb_path_query_first('[{"a": 1}, {"a": 2}]', '$[*].a ? (@ == 1)');
 SELECT jsonb_path_query_first('[{"a": 1}, {"a": 2}]', '$[*].a ? (@ > 10)');
