@@ -9740,7 +9740,7 @@ dependencies = [
 [[package]]
 name = "sql-json-path"
 version = "0.1.0"
-source = "git+https://github.com/risingwavelabs/sql-json-path.git?rev=1ddfb18#1ddfb18b7384c758161013d868e5a842d5832539"
+source = "git+https://github.com/risingwavelabs/sql-json-path.git?rev=95a06aa#95a06aa6e19df7c39687a259b3e21fb2b2cd2c8c"
 dependencies = [
  "jsonbb",
  "nom",
