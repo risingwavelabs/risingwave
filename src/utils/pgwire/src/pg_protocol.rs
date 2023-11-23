@@ -405,7 +405,7 @@ where
         let application_name = msg.config.get("application_name");
         if let Some(application_name) = application_name {
             session
-                .set_config("application_name", vec![application_name.clone()])
+                .set_config("application_name", application_name.clone())
                 .map_err(PsqlError::StartupError)?;
         }
 

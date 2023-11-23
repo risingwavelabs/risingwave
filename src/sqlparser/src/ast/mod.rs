@@ -1232,7 +1232,7 @@ pub enum Statement {
     SetVariable {
         local: bool,
         variable: Ident,
-        value: Vec<SetVariableValue>,
+        value: SetVariableValue,
     },
     /// `SHOW <variable>`
     ///
@@ -1691,7 +1691,6 @@ impl fmt::Display for Statement {
                     f,
                     "{name} = {value}",
                     name = variable,
-                    value = display_comma_separated(value)
                 )
             }
             Statement::ShowVariable { variable } => {
@@ -2655,6 +2654,7 @@ impl fmt::Display for CreateFunctionUsing {
 pub enum SetVariableValue {
     Ident(Ident),
     Literal(Value),
+    List(Vec<SetVariableValue>),
     Default,
 }
 
@@ -2664,6 +2664,11 @@ impl fmt::Display for SetVariableValue {
         match self {
             Ident(ident) => write!(f, "{}", ident),
             Literal(literal) => write!(f, "{}", literal),
+            List(list) => write!(
+                f,
+                "{}",
+                list.iter().map(|value| value.to_string()).join(", ")
+            ),
             Default => write!(f, "DEFAULT"),
         }
     }
