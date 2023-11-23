@@ -82,14 +82,13 @@ where
             .op
             .lister_with("/")
             .delimiter("")
-            .metakey(Metakey::ContentLength | Metakey::ContentType)
+            .metakey(Metakey::ContentLength | Metakey::LastModified)
             .await?;
         let stream = stream::unfold(object_lister, |mut object_lister| async move {
             match object_lister.next().await {
                 Some(Ok(object)) => {
                     // todo: manual filtering prefix
                     let name = object.path().to_string();
-
                     let om = object.metadata();
 
                     let t = match om.last_modified() {
@@ -109,11 +108,11 @@ where
                     Some((Ok(metadata), object_lister))
                 }
                 Some(Err(err)) => {
-                    tracing::error!("list fail");
+                    tracing::error!("list object fail, err {}", err);
                     Some((Err(err.into()), object_lister))
                 }
                 None => {
-                    tracing::info!("list to the end");
+                    tracing::info!("list object completed.");
                     None
                 }
             }

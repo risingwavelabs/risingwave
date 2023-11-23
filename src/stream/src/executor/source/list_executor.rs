@@ -34,6 +34,8 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::executor::*;
 
+const CHUNK_SIZE: usize = 1024;
+
 #[allow(dead_code)]
 pub struct FsListExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -103,7 +105,7 @@ impl<S: StateStore> FsListExecutor<S> {
             .get_opendal_source_list()
             .map_err(StreamExecutorError::connector_error)?;
         let chunked_stream = stream
-            .chunks(1024) // Group FsPageItems into chunks of size 1024
+            .chunks(CHUNK_SIZE) // Group FsPageItems into chunks of size 1024
             .map(|chunk| {
                 let rows = chunk
                     .into_iter()

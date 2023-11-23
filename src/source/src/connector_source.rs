@@ -97,26 +97,12 @@ impl ConnectorSource {
             ConnectorProperties::Gcs(prop) => {
                 let lister: OpendalEnumerator<GcsProperties> =
                     OpendalEnumerator::new_gcs_source(*prop)?;
-                Ok(build_opendal_fs_list_stream(
-                    FsListCtrlContext {
-                        interval: Duration::from_secs(60),
-                        last_tick: None,
-                        filter_ctx: FsFilterCtrlCtx,
-                    },
-                    lister,
-                ))
+                Ok(build_opendal_fs_list_stream(lister))
             }
             ConnectorProperties::OpenDalS3(prop) => {
                 let lister: OpendalEnumerator<OpendalS3Properties> =
                     OpendalEnumerator::new_s3_source(prop.s3_properties)?;
-                Ok(build_opendal_fs_list_stream(
-                    FsListCtrlContext {
-                        interval: Duration::from_secs(60),
-                        last_tick: None,
-                        filter_ctx: FsFilterCtrlCtx,
-                    },
-                    lister,
-                ))
+                Ok(build_opendal_fs_list_stream(lister))
             }
             other => Err(internal_error(format!("Unsupported source: {:?}", other))),
         }
@@ -195,20 +181,7 @@ impl ConnectorSource {
 }
 
 #[try_stream(boxed, ok = FsPageItem, error = RwError)]
-async fn build_opendal_fs_list_stream<C: OpenDalProperties>(
-    _ctrl_ctx: FsListCtrlContext,
-    lister: OpendalEnumerator<C>,
-) {
-    // let mut interval = time::interval(ctrl_ctx.interval);
-    // interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-    // let prefix = match lister.get_prefix().as_ref() {
-    //     Some(prefix) => prefix,
-    //     None => {
-    //         let empty_prefix = "".to_string();
-    //         &empty_prefix
-    //     }
-    // };
+async fn build_opendal_fs_list_stream<C: OpenDalProperties>(lister: OpendalEnumerator<C>) {
     let prefix = lister
         .get_prefix()
         .as_ref()

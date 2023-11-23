@@ -26,9 +26,9 @@ impl<C: OpenDalProperties> OpendalEnumerator<C>
 where
     C: Send + Clone + PartialEq + 'static + Sync,
 {
-    /// create opendal gcs engine.
+    /// create opendal gcs source.
     pub fn new_gcs_source(gcs_properties: GcsProperties) -> anyhow::Result<Self> {
-        // Create gcs backend builder.
+        // Create gcs builder.
         let mut builder = Gcs::default();
 
         builder.bucket(&gcs_properties.bucket_name);
