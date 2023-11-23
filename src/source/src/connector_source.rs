@@ -105,7 +105,7 @@ impl ConnectorSource {
                     },
                     lister,
                 ))
-            }     
+            }
             ConnectorProperties::OpenDalS3(prop) => {
                 let lister: OpendalEnumerator<OpendalS3Properties> =
                     OpendalEnumerator::new_s3_source(prop.s3_properties)?;

@@ -34,8 +34,8 @@ where
         builder.bucket(&gcs_properties.bucket_name);
 
         // if credential env is set, use it. Otherwise, ADC will be used.
-        let cred = std::env::var("GOOGLE_APPLICATION_CREDENTIALS");
-        if let Ok(cred) = cred {
+        let cred = gcs_properties.credential;
+        if let Some(cred) = cred {
             builder.credential(&cred);
         }
         let op: Operator = Operator::new(builder)?
