@@ -19,7 +19,7 @@ use quote::{format_ident, quote, quote_spanned};
 use syn::DeriveInput;
 
 #[derive(FromAttributes)]
-pub struct Parameter {
+struct Parameter {
     pub rename: Option<syn::LitStr>,
     pub default: syn::Expr,
     pub flags: Option<syn::LitStr>,
@@ -67,13 +67,13 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
         } = attr;
 
         let entry_name = if let Some(rename) = rename {
-            if !(rename.value().is_ascii() && rename.value().to_ascii_uppercase() == rename.value())
+            if !(rename.value().is_ascii() && rename.value().to_ascii_lowercase() == rename.value())
             {
-                abort!(rename, "Expect `rename` to be an ascii upper case string");
+                abort!(rename, "Expect `rename` to be an ascii lower case string");
             }
             quote! {#rename}
         } else {
-            let ident = format_ident!("{}", field_ident.to_string().to_uppercase());
+            let ident = format_ident!("{}", field_ident.to_string().to_lowercase());
             quote! {stringify!(#ident)}
         };
 
@@ -237,7 +237,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
 
             /// Set a parameter given it's name and value string.
             pub fn set(&mut self, key_name: &str, value: String, reporter: &mut impl ConfigReporter) -> RwResult<()> {
-                match key_name.to_ascii_uppercase().as_ref() {
+                match key_name.to_ascii_lowercase().as_ref() {
                     #(#set_match_branches)*
                     _ => Err(ErrorCode::UnrecognizedConfigurationParameter(key_name.to_string()).into()),
                 }
@@ -245,7 +245,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
 
             /// Get a parameter by it's name.
             pub fn get(&self, key_name: &str) -> RwResult<String> {
-                match key_name.to_ascii_uppercase().as_ref() {
+                match key_name.to_ascii_lowercase().as_ref() {
                     #(#get_match_branches)*
                     _ => Err(ErrorCode::UnrecognizedConfigurationParameter(key_name.to_string()).into()),
                 }

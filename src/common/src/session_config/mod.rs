@@ -40,7 +40,7 @@ pub struct ConfigMap {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
     /// be able to see the write.
-    #[parameter(default = false, rename = "RW_IMPLICIT_FLUSH")]
+    #[parameter(default = false, rename = "rw_implicit_flush")]
     implicit_flush: bool,
 
     /// If `CREATE_COMPACTION_GROUP_FOR_MV` is on, dedicated compaction groups will be created in
@@ -66,16 +66,16 @@ pub struct ConfigMap {
 
     /// It is typically set by an application upon connection to the server.
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-DATESTYLE>
-    #[parameter(default = "", rename = "DATESTYLE")]
+    #[parameter(default = "", rename = "datestyle")]
     date_style: String,
 
     /// Force the use of lookup join instead of hash join when possible for local batch execution.
-    #[parameter(default = true, rename = "RW_BATCH_ENABLE_LOOKUP_JOIN")]
+    #[parameter(default = true, rename = "rw_batch_enable_lookup_join")]
     batch_enable_lookup_join: bool,
 
     /// Enable usage of sortAgg instead of hash agg when order property is satisfied in batch
     /// execution
-    #[parameter(default = true, rename = "RW_BATCH_ENABLE_SORT_AGG")]
+    #[parameter(default = true, rename = "rw_batch_enable_sort_agg")]
     batch_enable_sort_agg: bool,
 
     /// The max gap allowed to transform small range scan scan into multi point lookup.
@@ -111,11 +111,11 @@ pub struct ConfigMap {
     streaming_parallelism: ConfigNonZeroU64,
 
     /// Enable delta join for streaming queries. Defaults to false.
-    #[parameter(default = false, rename = "RW_STREAMING_ENABLE_DELTA_JOIN")]
+    #[parameter(default = false, rename = "rw_streaming_enable_delta_join")]
     streaming_enable_delta_join: bool,
 
     /// Enable bushy join for streaming queries. Defaults to true.
-    #[parameter(default = true, rename = "RW_STREAMING_ENABLE_BUSHY_JOIN")]
+    #[parameter(default = true, rename = "rw_streaming_enable_bushy_join")]
     streaming_enable_bushy_join: bool,
 
     /// Enable arrangement backfill for streaming queries. Defaults to false.
@@ -123,32 +123,32 @@ pub struct ConfigMap {
     streaming_enable_arrangement_backfill: bool,
 
     /// Enable join ordering for streaming and batch queries. Defaults to true.
-    #[parameter(default = true, rename = "RW_ENABLE_JOIN_ORDERING")]
+    #[parameter(default = true, rename = "rw_enable_join_ordering")]
     enable_join_ordering: bool,
 
     /// Enable two phase agg optimization. Defaults to true.
     /// Setting this to true will always set `FORCE_TWO_PHASE_AGG` to false.
-    #[parameter(default = true, flags = "SETTER", rename = "RW_ENABLE_TWO_PHASE_AGG")]
+    #[parameter(default = true, flags = "SETTER", rename = "rw_enable_two_phase_agg")]
     enable_two_phase_agg: bool,
 
     /// Force two phase agg optimization whenever there's a choice between
     /// optimizations. Defaults to false.
     /// Setting this to true will always set `ENABLE_TWO_PHASE_AGG` to false.
-    #[parameter(default = false, flags = "SETTER", rename = "RW_FORCE_TWO_PHASE_AGG")]
+    #[parameter(default = false, flags = "SETTER", rename = "rw_force_two_phase_agg")]
     force_two_phase_agg: bool,
 
     /// Enable sharing of common sub-plans.
     /// This means that DAG structured query plans can be constructed,
-    #[parameter(default = true, rename = "RW_ENABLE_SHARE_PLAN")]
+    #[parameter(default = true, rename = "rw_enable_share_plan")]
     /// rather than only tree structured query plans.
     enable_share_plan: bool,
 
     /// Enable split distinct agg
-    #[parameter(default = false, rename = "RW_FORCE_SPLIT_DISTINCT_AGG")]
+    #[parameter(default = false, rename = "rw_force_split_distinct_agg")]
     force_split_distinct_agg: bool,
 
     /// See <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-INTERVALSTYLE>
-    #[parameter(default = "", rename = "INTERVALSTYLE")]
+    #[parameter(default = "", rename = "intervalstyle")]
     interval_style: String,
 
     /// If `BATCH_PARALLELISM` is non-zero, batch queries will use this parallelism.
@@ -211,7 +211,7 @@ pub struct ConfigMap {
 
     /// Cache policy for partition cache in streaming over window.
     /// Can be "full", "recent", "recent_first_n" or "recent_last_n".
-    #[parameter(default = OverWindowCachePolicy::default(), rename = "RW_STREAMING_OVER_WINDOW_CACHE_POLICY")]
+    #[parameter(default = OverWindowCachePolicy::default(), rename = "rw_streaming_over_window_cache_policy")]
     streaming_over_window_cache_policy: OverWindowCachePolicy,
 
     /// Run DDL statements in background
