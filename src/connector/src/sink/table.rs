@@ -21,6 +21,11 @@ use crate::sink::{
 
 pub const TABLE_SINK: &str = "table";
 
+/// A table sink outputs stream into another RisingWave's table.
+///
+/// Different from a materialized view, table sinks do not enforce strong consistency between upstream and downstream in principle. As a result, the `create sink` statement returns immediately, which is similar to any other `create sink`. It also allows users to execute DMLs on these target tables.
+///
+/// See also [RFC: Create Sink into Table](https://github.com/risingwavelabs/rfcs/pull/52).
 #[derive(Debug)]
 pub struct TableSink;
 

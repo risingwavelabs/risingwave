@@ -23,7 +23,9 @@ use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_cont};
+use risingwave_common::util::stream_graph_visitor::{
+    visit_stream_node, visit_stream_node, visit_stream_node_cont,
+};
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
@@ -760,22 +762,15 @@ impl DdlController {
             if let Some(node) = &mut actor.nodes {
                 let fields = node.fields.clone();
 
-                visit_stream_node_cont(node, |node| {
-                    if let Some(NodeBody::Union(_)) = &mut node.node_body {
-                        for input in &mut node.input {
-                            if let Some(NodeBody::Merge(merge_node)) = &mut input.node_body && merge_node.upstream_actor_id.is_empty() {
-                                *merge_node = MergeNode {
-                                    upstream_actor_id: sink_actor_ids.clone(),
-                                    upstream_fragment_id,
-                                    upstream_dispatcher_type: DispatcherType::Hash as _,
-                                    fields: fields.clone(),
-                                };
-
-                                return false;
-                            }
-                        }
+                visit_stream_node(node, |node| {
+                    if let NodeBody::Merge(merge_node) = node && merge_node.upstream_actor_id.is_empty() {
+                        *merge_node = MergeNode {
+                            upstream_actor_id: sink_actor_ids.clone(),
+                            upstream_fragment_id,
+                            upstream_dispatcher_type: DispatcherType::Hash as _,
+                            fields: fields.clone(),
+                        };
                     }
-                    true
                 });
             }
         }
