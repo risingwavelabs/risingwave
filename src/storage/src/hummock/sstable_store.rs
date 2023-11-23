@@ -310,6 +310,10 @@ impl SstableStore {
         )))
     }
 
+    pub fn support_prefetch(&self) -> bool {
+        self.large_query_memory_usage > 0
+    }
+
     pub async fn get_with_prefetch(
         &self,
         sst: &Sstable,

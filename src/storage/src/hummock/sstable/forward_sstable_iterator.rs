@@ -190,26 +190,27 @@ impl SstableIterator {
             }
         }
         if !hit_cache {
-            let block = if idx + 1 < self.preload_end_block_idx {
-                self.sstable_store
-                    .get_with_prefetch(
-                        self.sst.value(),
-                        idx,
-                        self.preload_end_block_idx - idx,
-                        self.options.cache_policy,
-                        &mut self.stats,
-                    )
-                    .await?
-            } else {
-                self.sstable_store
-                    .get(
-                        self.sst.value(),
-                        idx,
-                        self.options.cache_policy,
-                        &mut self.stats,
-                    )
-                    .await?
-            };
+            let block =
+                if idx + 1 < self.preload_end_block_idx && self.sstable_store.support_prefetch() {
+                    self.sstable_store
+                        .get_with_prefetch(
+                            self.sst.value(),
+                            idx,
+                            self.preload_end_block_idx - idx,
+                            self.options.cache_policy,
+                            &mut self.stats,
+                        )
+                        .await?
+                } else {
+                    self.sstable_store
+                        .get(
+                            self.sst.value(),
+                            idx,
+                            self.options.cache_policy,
+                            &mut self.stats,
+                        )
+                        .await?
+                };
             self.block_iter = Some(BlockIterator::new(block));
         };
         let block_iter = self.block_iter.as_mut().unwrap();
