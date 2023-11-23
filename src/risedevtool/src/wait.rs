@@ -48,7 +48,13 @@ pub fn wait(
 
         if let Some(ref timeout) = timeout {
             if std::time::Instant::now() - start_time >= *timeout {
-                return Err(anyhow!("failed to connect, last error: {:?}", last_error));
+                let context = "timeout when trying to connect";
+
+                return Err(if let Some(last_error) = last_error {
+                    last_error.context(context)
+                } else {
+                    anyhow!(context)
+                });
             }
         }
 
@@ -56,11 +62,17 @@ pub fn wait(
             let mut buf = String::new();
             fs_err::File::open(p)?.read_to_string(&mut buf)?;
 
-            return Err(anyhow!(
+            let context = format!(
                 "{} exited while waiting for connection: {}",
                 style(id).red().bold(),
-                buf,
-            ));
+                buf.trim(),
+            );
+
+            return Err(if let Some(last_error) = last_error {
+                last_error.context(context)
+            } else {
+                anyhow!(context)
+            });
         }
 
         sleep(Duration::from_millis(30));

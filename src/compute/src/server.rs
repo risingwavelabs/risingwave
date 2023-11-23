@@ -148,15 +148,6 @@ pub async fn compute_node_serve(
         reserved_memory_bytes,
     );
 
-    // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
-    // `total_compute_memory_bytes` for memory control. This is just a workaround for some
-    // memory control issues and should be modified as soon as we figure out a better solution.
-    //
-    // Related issues:
-    // - https://github.com/risingwavelabs/risingwave/issues/8696
-    // - https://github.com/risingwavelabs/risingwave/issues/8822
-    let total_memory_bytes = compute_memory_bytes + storage_memory_bytes;
-
     let storage_opts = Arc::new(StorageOpts::from((
         &config,
         &system_params,
@@ -173,7 +164,7 @@ pub async fn compute_node_serve(
     let streaming_metrics = Arc::new(global_streaming_metrics(config.server.metrics_level));
     let batch_task_metrics = Arc::new(GLOBAL_BATCH_TASK_METRICS.clone());
     let batch_executor_metrics = Arc::new(GLOBAL_BATCH_EXECUTOR_METRICS.clone());
-    let batch_manager_metrics = GLOBAL_BATCH_MANAGER_METRICS.clone();
+    let batch_manager_metrics = Arc::new(GLOBAL_BATCH_MANAGER_METRICS.clone());
     let exchange_srv_metrics = Arc::new(GLOBAL_EXCHANGE_SERVICE_METRICS.clone());
 
     // Initialize state store.
@@ -285,7 +276,18 @@ pub async fn compute_node_serve(
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
 
-    let memory_mgr = GlobalMemoryManager::new(streaming_metrics.clone(), total_memory_bytes);
+    // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
+    // `total_compute_memory_bytes` for memory control. This is just a workaround for some
+    // memory control issues and should be modified as soon as we figure out a better solution.
+    //
+    // Related issues:
+    // - https://github.com/risingwavelabs/risingwave/issues/8696
+    // - https://github.com/risingwavelabs/risingwave/issues/8822
+    let memory_mgr = GlobalMemoryManager::new(
+        streaming_metrics.clone(),
+        compute_memory_bytes + storage_memory_bytes,
+    );
+
     // Run a background memory manager
     tokio::spawn(memory_mgr.clone().run(
         batch_mgr_clone,
@@ -294,7 +296,10 @@ pub async fn compute_node_serve(
         system_params_manager.watch_params(),
     ));
 
-    let heap_profiler = HeapProfiler::new(total_memory_bytes, config.server.heap_profiling.clone());
+    let heap_profiler = HeapProfiler::new(
+        opts.total_memory_bytes,
+        config.server.heap_profiling.clone(),
+    );
     // Run a background heap profiler
     heap_profiler.start();
 

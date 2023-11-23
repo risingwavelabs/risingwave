@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
     GlobalReplay, LocalReplay, LocalReplayRead, ReplayItem, ReplayRead, ReplayStateStore,
     ReplayWrite, Result, TraceError, TracedBytes, TracedInitOptions, TracedNewLocalOptions,
-    TracedReadOptions, TracedSubResp,
+    TracedReadOptions, TracedSealCurrentEpochOptions, TracedSubResp,
 };
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_pb::common::WorkerNode;
@@ -207,8 +207,11 @@ impl LocalReplay for LocalReplayImpl {
             .map_err(|_| TraceError::Other("init failed"))
     }
 
-    fn seal_current_epoch(&mut self, next_epoch: u64) {
-        self.0.seal_current_epoch(next_epoch);
+    fn seal_current_epoch(&mut self, next_epoch: u64, opts: TracedSealCurrentEpochOptions) {
+        self.0.seal_current_epoch(
+            next_epoch,
+            opts.try_into().expect("should not fail to convert"),
+        );
     }
 
     fn epoch(&self) -> u64 {

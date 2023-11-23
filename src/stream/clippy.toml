@@ -17,7 +17,6 @@ disallowed-types = [
     { path = "risingwave_common::error::Result", reason = "Please use per-crate error type instead." },
     { path = "risingwave_common::error::ToRwResult", reason = "Please use per-crate error type instead." },
     { path = "risingwave_common::error::ToErrorStr", reason = "Please use per-crate error type instead." },
-
 ]
 
 doc-valid-idents = [

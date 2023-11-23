@@ -26,7 +26,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::Deserialize;
 use serde_json::Value;
 use serde_with::serde_as;
 use url::Url;
@@ -36,8 +36,8 @@ use yup_oauth2::ServiceAccountKey;
 use super::encoder::{JsonEncoder, RowEncoder, TimestampHandlingMode};
 use super::writer::LogSinkerOf;
 use super::{SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT};
-use crate::aws_auth::AwsAuthProps;
 use crate::aws_utils::load_file_descriptor_from_s3;
+use crate::common::AwsAuthProps;
 use crate::sink::writer::SinkWriterExt;
 use crate::sink::{
     DummySinkCommitCoordinator, Result, Sink, SinkParam, SinkWriter, SinkWriterParam,
@@ -46,7 +46,7 @@ use crate::sink::{
 pub const BIGQUERY_SINK: &str = "bigquery";
 const BIGQUERY_INSERT_MAX_NUMS: usize = 1024;
 
-#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct BigQueryCommon {
     #[serde(rename = "bigquery.local.path")]
     pub local_path: Option<String>,
@@ -59,8 +59,7 @@ pub struct BigQueryCommon {
     #[serde(rename = "bigquery.table")]
     pub table: String,
     #[serde(flatten)]
-    /// required keys refer to [`crate::aws_utils::AWS_DEFAULT_CONFIG`]
-    pub s3_credentials: HashMap<String, String>,
+    pub aws_auth_props: AwsAuthProps,
 }
 
 impl BigQueryCommon {
@@ -73,16 +72,9 @@ impl BigQueryCommon {
         } else if let Some(s3_path) = &self.s3_path {
             let url =
                 Url::parse(s3_path).map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
-            let auth_json = load_file_descriptor_from_s3(
-                &url,
-                &AwsAuthProps::from_pairs(
-                    self.s3_credentials
-                        .iter()
-                        .map(|(k, v)| (k.as_str(), v.as_str())),
-                ),
-            )
-            .await
-            .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
+            let auth_json = load_file_descriptor_from_s3(&url, &self.aws_auth_props)
+                .await
+                .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?;
             serde_json::from_slice::<ServiceAccountKey>(&auth_json)
                 .map_err(|err| SinkError::BigQuery(anyhow::anyhow!(err)))?
         } else {

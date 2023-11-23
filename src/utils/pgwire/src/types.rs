@@ -102,7 +102,7 @@ impl<'a, 'b> FormatIterator<'a, 'b> {
             ));
         }
 
-        let default_format = provided_formats.get(0).copied().unwrap_or(Format::Text);
+        let default_format = provided_formats.first().copied().unwrap_or(Format::Text);
 
         Ok(Self {
             _formats: provided_formats,

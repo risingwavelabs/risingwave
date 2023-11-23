@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
-use risingwave_sqlparser::ast::{DropFunctionDesc, ReferentialAction};
+use risingwave_sqlparser::ast::{FunctionDesc, ReferentialAction};
 
 use super::*;
 use crate::catalog::root_catalog::SchemaPath;
@@ -23,7 +23,7 @@ use crate::{bind_data_type, Binder};
 pub async fn handle_drop_function(
     handler_args: HandlerArgs,
     if_exists: bool,
-    mut func_desc: Vec<DropFunctionDesc>,
+    mut func_desc: Vec<FunctionDesc>,
     _option: Option<ReferentialAction>,
 ) -> Result<RwPgResponse> {
     if func_desc.len() != 1 {

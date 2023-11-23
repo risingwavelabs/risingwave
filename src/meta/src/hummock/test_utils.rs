@@ -32,7 +32,7 @@ use risingwave_pb::meta::add_worker_node_request::Property;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 #[cfg(test)]
 use crate::hummock::compaction::selector::default_compaction_selector;
-use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
+use crate::hummock::{CommitEpochInfo, CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::{
     ClusterManager, ClusterManagerRef, FragmentManager, MetaSrvEnv, META_NODE_ID,
 };
@@ -70,7 +70,7 @@ pub async fn add_test_tables(
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
         .await
         .unwrap();
     // Simulate a compaction and increase version by 1.
@@ -146,7 +146,7 @@ pub async fn add_test_tables(
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
         .await
         .unwrap();
     vec![test_tables, test_tables_2, test_tables_3]
@@ -346,6 +346,7 @@ pub async fn setup_compute_env_with_metric(
                 is_serving: true,
                 is_unschedulable: false,
             },
+            Default::default(),
         )
         .await
         .unwrap();
@@ -382,7 +383,7 @@ pub async fn commit_from_meta_node(
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), META_NODE_ID))
         .collect();
     hummock_manager_ref
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
         .await
 }
 
@@ -399,7 +400,7 @@ pub async fn add_ssts(
         .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
-        .commit_epoch(epoch, ssts, sst_to_worker)
+        .commit_epoch(epoch, CommitEpochInfo::for_test(ssts, sst_to_worker))
         .await
         .unwrap();
     test_tables
