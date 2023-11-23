@@ -46,7 +46,7 @@ clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "6
     "time",
 ] }
 csv = "1.3"
-deltalake = { version = "0.16.5", features = ["s3"] }
+deltalake = { workspace = true }
 duration-str = "0.7.0"
 easy-ext = "1"
 enum-as-inner = "0.6"

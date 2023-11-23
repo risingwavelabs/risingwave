@@ -17,15 +17,16 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
+use deltalake::kernel::{Action, Add, DataType as DeltaLakeDataType, PrimitiveType, StructType};
 use deltalake::operations::transaction::commit;
-use deltalake::protocol::{Action, Add, DeltaOperation, SaveMode};
+use deltalake::protocol::{DeltaOperation, SaveMode};
 use deltalake::table::builder::s3_storage_options::{
     AWS_ACCESS_KEY_ID, AWS_ALLOW_HTTP, AWS_ENDPOINT_URL, AWS_REGION, AWS_S3_ALLOW_UNSAFE_RENAME,
     AWS_SECRET_ACCESS_KEY,
 };
 use deltalake::writer::{DeltaWriter, RecordBatchWriter};
-use deltalake::{DeltaTable, Schema as DeltaSchema, SchemaDataType};
-use risingwave_common::array::{to_record_batch_with_schema_arrow46, StreamChunk};
+use deltalake::DeltaTable;
+use risingwave_common::array::{to_record_batch_with_schema, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::anyhow_error;
@@ -136,53 +137,61 @@ impl DeltaLakeSink {
     }
 }
 
-fn check_field_type(rw_data_type: &DataType, dl_data_type: &SchemaDataType) -> Result<bool> {
-    let mut result = false;
-    match rw_data_type {
+fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -> Result<bool> {
+    let result = match rw_data_type {
         DataType::Boolean => {
-            if let SchemaDataType::primitive(s) = dl_data_type {
-                result = s.eq("boolean");
-            }
+            matches!(
+                dl_data_type,
+                DeltaLakeDataType::Primitive(PrimitiveType::Boolean)
+            )
         }
         DataType::Int16 => {
-            if let SchemaDataType::primitive(s) = dl_data_type {
-                result = s.eq("short");
-            }
+            matches!(
+                dl_data_type,
+                DeltaLakeDataType::Primitive(PrimitiveType::Short)
+            )
         }
         DataType::Int32 => {
-            if let SchemaDataType::primitive(s) = dl_data_type {
-                result = s.eq("integer");
-            }
+            matches!(
+                dl_data_type,
+                DeltaLakeDataType::Primitive(PrimitiveType::Integer)
+            )
         }
         DataType::Int64 => {
-            if let SchemaDataType::primitive(s) = dl_data_type {
-                result = s.eq("long");
-            }
+            matches!(
+                dl_data_type,
+                DeltaLakeDataType::Primitive(PrimitiveType::Long)
+            )
         }
         DataType::Float32 => {
-            if let SchemaDataType::primitive(s) = dl_data_type {
-                result = s.eq("float");
-            }
+            matches!(
+                dl_data_type,
+                DeltaLakeDataType::Primitive(PrimitiveType::Float)
+            )
         }
         DataType::Float64 => {
-            if let SchemaDataType::primitive(s) = dl_data_type {
-                result = s.eq("double");
-            }
+            matches!(
+                dl_data_type,
+                DeltaLakeDataType::Primitive(PrimitiveType::Double)
+            )
         }
         DataType::Decimal => {
-            if let SchemaDataType::primitive(s) = dl_data_type {
-                result = s.contains("decimal");
-            }
+            matches!(
+                dl_data_type,
+                DeltaLakeDataType::Primitive(PrimitiveType::Decimal(_, _))
+            )
         }
         DataType::Date => {
-            if let SchemaDataType::primitive(s) = dl_data_type {
-                result = s.eq("date");
-            }
+            matches!(
+                dl_data_type,
+                DeltaLakeDataType::Primitive(PrimitiveType::Date)
+            )
         }
         DataType::Varchar => {
-            if let SchemaDataType::primitive(s) = dl_data_type {
-                result = s.eq("string");
-            }
+            matches!(
+                dl_data_type,
+                DeltaLakeDataType::Primitive(PrimitiveType::String)
+            )
         }
         DataType::Time => {
             return Err(SinkError::DeltaLake(
@@ -190,9 +199,10 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &SchemaDataType) -> R
             ))
         }
         DataType::Timestamp => {
-            if let SchemaDataType::primitive(s) = dl_data_type {
-                result = s.eq("timestamp");
-            }
+            matches!(
+                dl_data_type,
+                DeltaLakeDataType::Primitive(PrimitiveType::Timestamp)
+            )
         }
         DataType::Timestamptz => {
             return Err(SinkError::DeltaLake(
@@ -205,23 +215,26 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &SchemaDataType) -> R
             ))
         }
         DataType::Struct(rw_s) => {
-            if let SchemaDataType::r#struct(dl_s) = dl_data_type {
+            if let DeltaLakeDataType::Struct(dl_s) = dl_data_type {
+                let mut result = true;
                 for ((rw_n, rw_t), dl_f) in rw_s
                     .names()
                     .zip_eq_fast(rw_s.types())
-                    .zip_eq_fast(dl_s.get_fields())
+                    .zip_eq_fast(dl_s.fields())
                 {
-                    result = check_field_type(rw_t, dl_f.get_type())?;
-                    if !(result && rw_n.eq(dl_f.get_name())) {
-                        return Ok(result);
-                    }
+                    result =
+                        check_field_type(rw_t, dl_f.data_type())? && result && rw_n.eq(dl_f.name());
                 }
-                result = true;
+                result
+            } else {
+                false
             }
         }
         DataType::List(rw_l) => {
-            if let SchemaDataType::array(dl_l) = dl_data_type {
-                result = check_field_type(rw_l, dl_l.get_element_type())?;
+            if let DeltaLakeDataType::Array(dl_l) = dl_data_type {
+                check_field_type(rw_l, dl_l.element_type())?
+            } else {
+                false
             }
         }
         DataType::Bytea => {
@@ -282,11 +295,11 @@ impl Sink for DeltaLakeSink {
 
     async fn validate(&self) -> Result<()> {
         let table = self.config.common.create_deltalake_client().await?;
-        let deltalake_fields: HashMap<String, &SchemaDataType> = table
+        let deltalake_fields: HashMap<&String, &DeltaLakeDataType> = table
             .get_schema()?
-            .get_fields()
+            .fields()
             .iter()
-            .map(|f| (f.get_name().to_string(), f.get_type()))
+            .map(|f| (f.name(), f.data_type()))
             .collect();
         if deltalake_fields.len() != self.param.schema().fields().len() {
             return Err(SinkError::DeltaLake(format!(
@@ -302,7 +315,7 @@ impl Sink for DeltaLakeSink {
                     field.name
                 )));
             }
-            let deltalake_field_type: &&SchemaDataType = deltalake_fields
+            let deltalake_field_type: &&DeltaLakeDataType = deltalake_fields
                 .get(&field.name)
                 .ok_or_else(|| SinkError::DeltaLake("cannot find field type".to_string()))?;
             if !check_field_type(&field.data_type, deltalake_field_type)? {
@@ -365,19 +378,19 @@ impl DeltaLakeSinkWriter {
     }
 
     async fn write(&mut self, chunk: StreamChunk) -> Result<()> {
-        let a = to_record_batch_with_schema_arrow46(self.dl_schema.clone(), &chunk)
+        let a = to_record_batch_with_schema(self.dl_schema.clone(), &chunk)
             .map_err(|err| SinkError::DeltaLake(format!("convert record batch error: {}", err)))?;
         self.writer.write(a).await?;
         Ok(())
     }
 }
 
-fn covert_schema(schema: &DeltaSchema) -> Result<deltalake::arrow::datatypes::Schema> {
+fn covert_schema(schema: &StructType) -> Result<deltalake::arrow::datatypes::Schema> {
     let mut builder = deltalake::arrow::datatypes::SchemaBuilder::new();
-    for field in schema.get_fields() {
+    for field in schema.fields() {
         let dl_field = deltalake::arrow::datatypes::Field::new(
-            field.get_name(),
-            deltalake::arrow::datatypes::DataType::try_from(field.get_type())
+            field.name(),
+            deltalake::arrow::datatypes::DataType::try_from(field.data_type())
                 .map_err(|err| SinkError::DeltaLake(format!("convert schema error: {}", err)))?,
             field.is_nullable(),
         );
@@ -445,7 +458,7 @@ impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
         let write_adds: Vec<Action> = deltalake_write_result
             .into_iter()
             .flat_map(|v| v.adds.into_iter())
-            .map(Action::add)
+            .map(Action::Add)
             .collect();
 
         if write_adds.is_empty() {
@@ -463,7 +476,7 @@ impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
             predicate: None,
         };
         let version = commit(
-            self.table.object_store().as_ref(),
+            self.table.log_store().as_ref(),
             &write_adds,
             operation,
             &self.table.state,

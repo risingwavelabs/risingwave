@@ -115,15 +115,16 @@ prost = { version = "0.12" }
 icelake = { git = "https://github.com/icelake-io/icelake", rev = "5cdcdffd24f4624a0a43f92c5f368988169a799b", features = [
   "prometheus",
 ] }
-arrow-array = "49"
-arrow-arith = "49"
-arrow-cast = "49"
-arrow-schema = "49"
-arrow-buffer = "49"
-arrow-flight = "49"
-arrow-select = "49"
-arrow-ord = "49"
-arrow-row = "49"
+arrow-array = "48.0.1"
+arrow-arith = "48.0.1"
+arrow-cast = "48.0.1"
+arrow-schema = "48.0.1"
+arrow-buffer = "48.0.1"
+arrow-flight = "48.0.1"
+arrow-select = "48.0.1"
+arrow-ord = "48.0.1"
+arrow-row = "48.0.1"
+deltalake = { git = "https://github.com/delta-io/delta-rs", rev = "72505449e9538371fe5fda35d545dbd662facd07", features = ["s3"] }
 thiserror-ext = "0.0.7"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
