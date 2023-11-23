@@ -43,7 +43,7 @@ pub async fn list_kv(
                 epoch,
                 ReadOptions {
                     table_id: TableId { table_id },
-                    prefetch_options: PrefetchOptions::new_for_large_range_scan(),
+                    prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
                     cache_policy: CachePolicy::NotFill,
                     ..Default::default()
                 },

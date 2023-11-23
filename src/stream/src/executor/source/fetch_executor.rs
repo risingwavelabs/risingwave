@@ -98,7 +98,7 @@ impl<S: StateStore> FsFetchExecutor<S> {
                     vnode,
                     &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
                     // TODO: This usage is similar with `backfill`. Maybe we only need to fetch a large data rather than establish a connection for a whole object.
-                    PrefetchOptions::new_for_large_range_scan(),
+                    PrefetchOptions::prefetch_for_large_range_scan(),
                 )
                 .await?;
             pin_mut!(table_iter);

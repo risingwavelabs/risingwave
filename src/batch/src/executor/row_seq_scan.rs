@@ -443,7 +443,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     },
                 ),
                 ordered,
-                PrefetchOptions::new_for_large_range_scan(),
+                PrefetchOptions::prefetch_for_large_range_scan(),
             )
             .await?;
 

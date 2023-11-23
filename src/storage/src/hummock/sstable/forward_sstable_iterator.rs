@@ -126,8 +126,9 @@ impl SstableIterator {
         }
         // Maybe the previous preload stream breaks on some cached block, so here we can try to preload some data again
         if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx
+            && self.options.prefetch_for_large_query
             && let Ok(preload_stream) = self.sstable_store
-                .preload_blocks(self.sst.value(), idx, self.preload_end_block_idx)
+                .get_stream(self.sst.value(), idx, self.preload_end_block_idx)
                 .await
         {
             self.preload_stream = preload_stream;
@@ -174,7 +175,7 @@ impl SstableIterator {
                     tracing::warn!("recreate stream because the connection to remote storage has closed, reason: {:?}", e);
                     match self
                         .sstable_store
-                        .preload_blocks(self.sst.value(), idx, self.preload_end_block_idx)
+                        .get_stream(self.sst.value(), idx, self.preload_end_block_idx)
                         .await
                     {
                         Ok(stream) => {
@@ -189,15 +190,26 @@ impl SstableIterator {
             }
         }
         if !hit_cache {
-            let block = self
-                .sstable_store
-                .get(
-                    self.sst.value(),
-                    idx,
-                    self.options.cache_policy,
-                    &mut self.stats,
-                )
-                .await?;
+            let block = if idx + 1 < self.preload_end_block_idx {
+                self.sstable_store
+                    .get_with_prefetch(
+                        self.sst.value(),
+                        idx,
+                        self.preload_end_block_idx - idx,
+                        self.options.cache_policy,
+                        &mut self.stats,
+                    )
+                    .await?
+            } else {
+                self.sstable_store
+                    .get(
+                        self.sst.value(),
+                        idx,
+                        self.options.cache_policy,
+                        &mut self.stats,
+                    )
+                    .await?
+            };
             self.block_iter = Some(BlockIterator::new(block));
         };
         let block_iter = self.block_iter.as_mut().unwrap();
@@ -459,6 +471,7 @@ mod tests {
                 cache_policy: CachePolicy::Fill(CachePriority::High),
                 must_iterated_end_user_key: Some(Bound::Included(uk)),
                 max_preload_retry_times: 0,
+                prefetch_for_large_query: true,
             }),
         );
         let mut cnt = 0;

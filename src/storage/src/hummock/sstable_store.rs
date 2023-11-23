@@ -267,7 +267,7 @@ impl SstableStore {
             .map_err(HummockError::object_io_error)
     }
 
-    pub async fn preload_blocks(
+    pub async fn get_stream(
         &self,
         sst: &Sstable,
         start_index: usize,
@@ -308,6 +308,70 @@ impl SstableStore {
             block_metas,
             self.pending_streaming_loading.clone(),
         )))
+    }
+
+    pub async fn get_with_prefetch(
+        &self,
+        sst: &Sstable,
+        block_index: usize,
+        max_prefetch_block_count: usize,
+        policy: CachePolicy,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<BlockHolder> {
+        const MAX_PREFETCH_BLOCK: usize = 10;
+        let object_id = sst.id;
+        if let Some(block) = self.block_cache.get(object_id, block_index as u64) {
+            return Ok(block);
+        }
+        let max_prefetch_block_count = std::cmp::min(max_prefetch_block_count, MAX_PREFETCH_BLOCK);
+        let mut end_index = std::cmp::min(
+            block_index + max_prefetch_block_count,
+            sst.meta.block_metas.len(),
+        );
+        let start_offset = sst.meta.block_metas[block_index].offset as usize;
+        let mut end_offset = start_offset;
+        for idx in block_index..end_index {
+            if self.block_cache.exists_block(object_id, idx as u64) {
+                end_index = idx;
+                break;
+            }
+            end_offset += sst.meta.block_metas[idx].len as usize;
+        }
+        if end_index == block_index {
+            let resp = self
+                .get_block_response(sst, block_index, policy, stats)
+                .await?;
+            return resp.wait().await;
+        }
+        let data_path = self.get_sst_data_path(object_id);
+        let buf = self
+            .store
+            .read(&data_path, start_offset..end_offset)
+            .await?;
+        let mut offset = 0;
+        let mut first_holder = None;
+        for idx in block_index..end_index {
+            let end = offset + sst.meta.block_metas[idx].len as usize;
+            if end > buf.len() {
+                return Err(ObjectError::internal("read unexpected EOF").into());
+            }
+            // copy again to avoid holding a large data in memory.
+            let block = Block::decode(
+                Bytes::copy_from_slice(&buf[offset..end]),
+                sst.meta.block_metas[idx].uncompressed_size as usize,
+            )?;
+            let holder = self.block_cache.insert(
+                object_id,
+                (block_index + idx) as u64,
+                Box::new(block),
+                CachePriority::Low,
+            );
+            if block_index == idx {
+                first_holder = Some(holder);
+            }
+            offset = end;
+        }
+        return Ok(first_holder.unwrap());
     }
 
     pub async fn get_block_response(

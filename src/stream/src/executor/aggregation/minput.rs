@@ -178,7 +178,8 @@ impl MaterializedInputState {
                     group_key.map(GroupKey::table_pk),
                     sub_range,
                     PrefetchOptions {
-                        preload: cache_filler.capacity().is_none(),
+                        prefetch: cache_filler.capacity().is_none(),
+                        for_large_query: false,
                     },
                 )
                 .await?;
