@@ -24,7 +24,6 @@ import io.delta.standalone.Operation;
 import io.delta.standalone.OptimisticTransaction;
 import io.delta.standalone.actions.AddFile;
 import io.delta.standalone.exceptions.DeltaConcurrentModificationException;
-import io.delta.standalone.types.TimestampType;
 import java.io.IOException;
 import java.sql.Timestamp;
 import java.util.*;
@@ -83,13 +82,7 @@ public class DeltaLakeSink extends SinkWriterBase {
                     GenericRecord record = new GenericData.Record(this.sinkSchema);
                     for (int i = 0; i < this.sinkSchema.getFields().size(); i++) {
                         Object values;
-                        if (DeltaLakeSinkUtil.convertType(
-                                        this.getTableSchema()
-                                                .getColumnDescs()
-                                                .get(i)
-                                                .getDataType()
-                                                .getTypeName())
-                                .equals(new TimestampType())) {
+                        if (row.get(i) instanceof Timestamp) {
                             values = ((Timestamp) row.get(i)).getTime();
                         } else {
                             values = row.get(i);
