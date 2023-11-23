@@ -242,6 +242,8 @@ def run_elasticsearch_sink_demo():
     subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=demo_dir, check=True)
     sleep(120)
 
+    subprocess.run(["docker", "compose", "logs", "elasticsearch8"], cwd=demo_dir, check=True)
+
     sql_files = ['create_source.sql', 'create_mv.sql', 'create_sink.sql']
     for fname in sql_files:
         sql_file = os.path.join(demo_dir,  fname)
