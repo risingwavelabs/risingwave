@@ -12,9 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod backfill;
-mod background_ddl;
-mod event_log;
-mod nexmark_recovery;
-mod pause_on_bootstrap;
-mod scale_in_when_recovery;
+use std::ops::Deref;
+
+use super::*;
+use crate::expr::ExprVisitor;
+
+/// Vistis expressions in a `PlanRef`.
+/// To visit recursively, call `visit_exprs_recursive` on [`VisitExprsRecursive`].
+pub trait ExprVisitable {
+    fn visit_exprs(&self, _v: &mut dyn ExprVisitor) {}
+}
+
+impl ExprVisitable for PlanRef {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.deref().visit_exprs(v);
+    }
+}

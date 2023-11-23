@@ -3340,9 +3340,9 @@ dependencies = [
 
 [[package]]
 name = "fs-err"
-version = "2.10.0"
+version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb5fd9bcbe8b1087cbd395b51498c01bc997cef73e778a80b77a811af5e2d29f"
+checksum = "88a41f105fe1d5b6b34b2055e3dc59bb79b46b48b2040b9e6c7b4b5de097aa41"
 dependencies = [
  "autocfg",
 ]
@@ -8112,6 +8112,7 @@ dependencies = [
  "serde_json",
  "sync-point",
  "thiserror",
+ "thiserror-ext",
  "tokio-retry",
  "tokio-stream",
  "tower",
@@ -8165,6 +8166,8 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "sea-orm",
+ "serde",
+ "serde_json",
  "tracing",
  "workspace-hack",
 ]
@@ -8346,6 +8349,7 @@ dependencies = [
  "cfg-or-panic",
  "clap",
  "console",
+ "fail",
  "futures",
  "glob",
  "itertools 0.12.0",
@@ -8564,6 +8568,7 @@ dependencies = [
  "either",
  "enum-as-inner",
  "expect-test",
+ "fail",
  "futures",
  "futures-async-stream",
  "governor",

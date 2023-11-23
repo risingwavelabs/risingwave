@@ -25,6 +25,7 @@ use super::{
     ToBatch, ToStream,
 };
 use crate::expr::{ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -274,6 +275,8 @@ impl ColPrunable for LogicalHopWindow {
 }
 
 impl ExprRewritable for LogicalHopWindow {}
+
+impl ExprVisitable for LogicalHopWindow {}
 
 impl PredicatePushdown for LogicalHopWindow {
     /// Keep predicate on time window parameters (`window_start`, `window_end`),

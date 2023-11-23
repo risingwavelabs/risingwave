@@ -30,6 +30,7 @@ use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
+use risingwave_pb::meta::EventLog;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
@@ -99,6 +100,7 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_hummock_meta_configs(&self) -> Result<HashMap<String, String>>;
 
+    async fn list_event_log(&self) -> Result<Vec<EventLog>>;
     async fn list_compact_task_assignment(&self) -> Result<Vec<CompactTaskAssignment>>;
     async fn list_all_nodes(&self) -> Result<Vec<WorkerNode>>;
 }
@@ -244,6 +246,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_hummock_meta_configs(&self) -> Result<HashMap<String, String>> {
         self.0.list_hummock_meta_config().await
+    }
+
+    async fn list_event_log(&self) -> Result<Vec<EventLog>> {
+        self.0.list_event_log().await
     }
 
     async fn list_compact_task_assignment(&self) -> Result<Vec<CompactTaskAssignment>> {

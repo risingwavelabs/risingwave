@@ -27,7 +27,8 @@ use super::batch::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
 use crate::catalog::ColumnId;
-use crate::expr::ExprRewriter;
+use crate::expr::{ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 
@@ -253,5 +254,11 @@ impl ExprRewritable for BatchSeqScan {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core, self.scan_ranges.clone()).into()
+    }
+}
+
+impl ExprVisitable for BatchSeqScan {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }
