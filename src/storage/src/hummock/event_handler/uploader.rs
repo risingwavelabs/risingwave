@@ -190,6 +190,8 @@ impl UploadingTask {
             .add(task_size as u64);
         if task_info.task_size > Self::LOG_THRESHOLD_FOR_UPLOAD_TASK_SIZE {
             info!("start upload task: {:?}", task_info);
+        } else {
+            debug!("start upload task: {:?}", task_info);
         }
         let join_handle = (context.spawn_upload_task)(payload.clone(), task_info.clone());
         Self {
@@ -208,6 +210,8 @@ impl UploadingTask {
                 .inspect(|_| {
                     if self.task_info.task_size > Self::LOG_THRESHOLD_FOR_UPLOAD_TASK_SIZE {
                         info!("upload task finish {:?}", self.task_info)
+                    } else {
+                        debug!("upload task finish {:?}", self.task_info)
                     }
                 })
                 .map(|ssts| {
