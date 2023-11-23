@@ -355,6 +355,7 @@ impl CatalogController {
         _table_fragments: &PbTableFragments,
         _internal_tables: Vec<PbTable>,
     ) -> MetaResult<()> {
+        // note: If we use PbTableFragments here, we need to determine whether decompression is needed through the ‘graph_render_type’.
         todo!()
     }
 

@@ -19,6 +19,7 @@ use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node;
+use risingwave_common::util::table_fragments_util::downgrade_table_fragments;
 use risingwave_meta_model_v2::actor::ActorStatus;
 use risingwave_meta_model_v2::prelude::{Actor, ActorDispatcher, Fragment, StreamingJob};
 use risingwave_meta_model_v2::{
@@ -46,7 +47,6 @@ use sea_orm::{
 use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::utils::{get_actor_dispatchers, get_parallel_unit_mapping};
 use crate::manager::ActorInfos;
-use crate::model::downgrade_table_fragments;
 use crate::stream::SplitAssignment;
 use crate::MetaResult;
 
@@ -74,7 +74,13 @@ impl CatalogController {
     #[allow(clippy::type_complexity)]
     pub fn extract_fragment_and_actors_from_table_fragments(
         table_fragments: PbTableFragments,
-    ) -> MetaResult<Vec<(fragment::Model, Vec<actor::Model>)>> {
+    ) -> MetaResult<
+        Vec<(
+            fragment::Model,
+            Vec<actor::Model>,
+            HashMap<ActorId, Vec<actor_dispatcher::Model>>,
+        )>,
+    > {
         let mut table_fragments = table_fragments;
 
         if table_fragments.graph_render_type == GraphRenderType::RenderTemplate as i32 {

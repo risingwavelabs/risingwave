@@ -57,10 +57,12 @@ pub(super) mod handlers {
     use axum::Json;
     use itertools::Itertools;
     use risingwave_common::bail;
+    use risingwave_common::util::table_fragments_util::downgrade_table_fragments;
     use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{Sink, Source, Table, View};
     use risingwave_pb::common::{WorkerNode, WorkerType};
+    use risingwave_pb::meta::table_fragments::GraphRenderType;
     use risingwave_pb::meta::{ActorLocation, PbTableFragments};
     use risingwave_pb::monitor_service::{
         HeapProfilingResponse, ListHeapProfilingResponse, StackTraceResponse,
@@ -193,13 +195,22 @@ pub(super) mod handlers {
     ) -> Result<Json<Vec<PbTableFragments>>> {
         use crate::model::MetadataModel;
 
-        let table_fragments = TableFragments::list(&srv.meta_store)
+        let mut all_table_fragments = TableFragments::list(&srv.meta_store)
             .await
             .map_err(err)?
             .into_iter()
             .map(|x| x.to_protobuf())
             .collect_vec();
-        Ok(Json(table_fragments))
+
+        for table_fragments in &mut all_table_fragments {
+            if table_fragments.get_graph_render_type().unwrap_or_default()
+                == GraphRenderType::RenderTemplate
+            {
+                downgrade_table_fragments(table_fragments);
+            }
+        }
+
+        Ok(Json(all_table_fragments))
     }
 
     async fn dump_await_tree_inner(
