@@ -16,11 +16,9 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_batch::task::BatchManager;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::executor::monitor::StreamingMetrics;
-use risingwave_stream::task::LocalStreamManager;
 
 use super::MemoryControlRef;
 use crate::memory_management::{build_memory_control_policy, MemoryControlStats};
@@ -31,6 +29,7 @@ pub struct GlobalMemoryManager {
     watermark_epoch: Arc<AtomicU64>,
 
     metrics: Arc<StreamingMetrics>,
+
     /// The memory control policy for computing tasks.
     memory_control_policy: MemoryControlRef,
 }
@@ -57,12 +56,8 @@ impl GlobalMemoryManager {
         self.watermark_epoch.clone()
     }
 
-    /// Memory manager will get memory usage statistics from batch and streaming and perform memory
-    /// control accordingly.
     pub async fn run(
         self: Arc<Self>,
-        batch_manager: Arc<BatchManager>,
-        stream_manager: Arc<LocalStreamManager>,
         initial_interval_ms: u32,
         mut system_params_change_rx: tokio::sync::watch::Receiver<SystemParamsReaderRef>,
     ) {
@@ -103,8 +98,6 @@ impl GlobalMemoryManager {
                     memory_control_stats = self.memory_control_policy.apply(
                         interval_ms,
                         memory_control_stats,
-                        batch_manager.clone(),
-                        stream_manager.clone(),
                         self.watermark_epoch.clone(),
                     );
 

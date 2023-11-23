@@ -15,10 +15,8 @@
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
-use risingwave_batch::task::BatchManager;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_jni_core::jvm_runtime::load_jvm_memory_stats;
-use risingwave_stream::task::LocalStreamManager;
 use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 
 use super::{MemoryControl, MemoryControlStats};
@@ -97,8 +95,6 @@ impl MemoryControl for JemallocAndJvmMemoryControl {
         &self,
         interval_ms: u32,
         prev_memory_stats: MemoryControlStats,
-        _batch_manager: Arc<BatchManager>,
-        _stream_manager: Arc<LocalStreamManager>,
         watermark_epoch: Arc<AtomicU64>,
     ) -> MemoryControlStats {
         let (jemalloc_allocated_bytes, jemalloc_active_bytes) = self.advance_jemalloc_epoch(

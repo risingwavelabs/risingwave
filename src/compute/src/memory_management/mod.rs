@@ -21,10 +21,8 @@ pub mod policy;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
-use risingwave_batch::task::BatchManager;
 use risingwave_common::config::{StorageConfig, StorageMemoryConfig};
 use risingwave_common::util::pretty_bytes::convert;
-use risingwave_stream::task::LocalStreamManager;
 
 /// The minimal memory requirement of computing tasks in megabytes.
 pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
@@ -65,8 +63,6 @@ pub trait MemoryControl: Send + Sync + std::fmt::Debug {
         &self,
         interval_ms: u32,
         prev_memory_stats: MemoryControlStats,
-        batch_manager: Arc<BatchManager>,
-        stream_manager: Arc<LocalStreamManager>,
         watermark_epoch: Arc<AtomicU64>,
     ) -> MemoryControlStats;
 }
@@ -87,8 +83,6 @@ impl MemoryControl for DummyPolicy {
         &self,
         _interval_ms: u32,
         _prev_memory_stats: MemoryControlStats,
-        _batch_manager: Arc<BatchManager>,
-        _stream_manager: Arc<LocalStreamManager>,
         _watermark_epoch: Arc<AtomicU64>,
     ) -> MemoryControlStats {
         MemoryControlStats::default()

@@ -272,10 +272,6 @@ pub async fn compute_node_serve(
         await_tree_config.clone(),
     ));
 
-    // Spawn LRU Manager that have access to collect memory from batch mgr and stream mgr.
-    let batch_mgr_clone = batch_mgr.clone();
-    let stream_mgr_clone = stream_mgr.clone();
-
     // NOTE: Due to some limits, we use `compute_memory_bytes + storage_memory_bytes` as
     // `total_compute_memory_bytes` for memory control. This is just a workaround for some
     // memory control issues and should be modified as soon as we figure out a better solution.
@@ -290,8 +286,6 @@ pub async fn compute_node_serve(
 
     // Run a background memory manager
     tokio::spawn(memory_mgr.clone().run(
-        batch_mgr_clone,
-        stream_mgr_clone,
         system_params.barrier_interval_ms(),
         system_params_manager.watch_params(),
     ));
