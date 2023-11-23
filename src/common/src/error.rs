@@ -23,6 +23,7 @@ use memcomparable::Error as MemComparableError;
 use risingwave_error::tonic::{ToTonicStatus, TonicStatusWrapper};
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
+use thiserror_ext::Macro;
 use tokio::task::JoinError;
 
 use crate::array::ArrayError;
@@ -36,7 +37,7 @@ pub type BoxedError = Box<dyn Error>;
 
 pub use anyhow::anyhow as anyhow_error;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct TrackingIssue(Option<u32>);
 
 impl TrackingIssue {
@@ -70,59 +71,13 @@ impl Display for TrackingIssue {
     }
 }
 
-#[derive(Error, Debug)]
-#[error("Feature is not yet implemented: {feature}. {tracking_issue}")]
+#[derive(Error, Debug, Macro)]
+#[error("Feature is not yet implemented: {feature}. {issue}")]
+#[thiserror_ext(macro(path = "crate::error"))]
 pub struct NotImplemented {
+    #[message]
     pub feature: String,
-    pub tracking_issue: TrackingIssue,
-}
-
-impl<S> From<S> for NotImplemented
-where
-    S: Into<String>,
-{
-    fn from(feature: S) -> Self {
-        Self::new(feature)
-    }
-}
-
-impl NotImplemented {
-    pub fn new(feature: impl Into<String>) -> Self {
-        Self::with_tracking_issue(feature, TrackingIssue::none())
-    }
-
-    pub fn with_tracking_issue(
-        feature: impl Into<String>,
-        tracking_issue: impl Into<TrackingIssue>,
-    ) -> Self {
-        Self {
-            feature: feature.into(),
-            tracking_issue: tracking_issue.into(),
-        }
-    }
-}
-
-#[macro_export]
-macro_rules! not_implemented {
-    (issue = $issue:expr, $($arg:tt)*) => {
-        $crate::error::NotImplemented::with_tracking_issue(
-            ::std::format!($($arg)*),
-            $issue,
-        )
-    };
-    ($($arg:tt)*) => {
-        not_implemented!(issue = None, $($arg)*)
-    };
-}
-
-#[macro_export(local_inner_macros)]
-macro_rules! bail_not_implemented {
-    (issue = $issue:expr, $($arg:tt)*) => {
-        return Err(not_implemented!(issue = $issue, $($arg)*).into())
-    };
-    ($($arg:tt)*) => {
-        bail_not_implemented!(issue = None, $($arg)*)
-    };
+    pub issue: TrackingIssue,
 }
 
 #[derive(Error, Debug)]
@@ -672,7 +627,7 @@ mod tests {
         check_grpc_error(ErrorCode::TaskNotFound, Code::Internal);
         check_grpc_error(ErrorCode::InternalError(String::new()), Code::Internal);
         check_grpc_error(
-            ErrorCode::NotImplemented(NotImplemented::new("test")),
+            ErrorCode::NotImplemented(not_implemented!("test")),
             Code::Internal,
         );
     }
