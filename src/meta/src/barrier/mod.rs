@@ -20,6 +20,7 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::Duration;
 
+use either::Either;
 use fail::fail_point;
 use futures::future::join_all;
 use itertools::Itertools;
@@ -864,10 +865,7 @@ impl GlobalBarrierManager {
         let inject_results = join_all(inject_futures).await;
         let mut errors = inject_results
             .into_iter()
-            .filter_map(|r| match r {
-                Ok(_) => None,
-                Err(e) => Some(e),
-            })
+            .filter_map(Result::err)
             .peekable();
         if errors.peek().is_some() {
             return Err(merge_compute_node_rpc_error(
@@ -922,16 +920,17 @@ impl GlobalBarrierManager {
 
         // join_all rather than try_join_all, in order to gather errors from all compute nodes.
         let collect_result = join_all(collect_futures).await;
-        let result = if collect_result.iter().all(|r| r.is_ok()) {
-            Ok(collect_result.into_iter().map(|r| r.unwrap()).collect_vec())
-        } else {
-            let errors = collect_result.into_iter().filter_map(|r| match r {
-                Ok(_) => None,
-                Err(e) => Some(e),
+        let (successes, failures): (Vec<_>, Vec<_>) =
+            collect_result.into_iter().partition_map(|r| match r {
+                Ok(v) => Either::Left(v),
+                Err(v) => Either::Right(v),
             });
+        let result = if failures.is_empty() {
+            Ok(successes)
+        } else {
             Err(merge_compute_node_rpc_error(
                 "collect barrier failure",
-                errors,
+                failures,
             ))
         };
         let _ = barrier_complete_tx
@@ -1233,9 +1232,14 @@ fn merge_compute_node_rpc_error(
     errors: impl IntoIterator<Item = (WorkerId, RpcError)>,
 ) -> MetaError {
     use std::fmt::Write;
-    let concat: String = errors.into_iter().fold(String::new(), |mut s, (w, e)| {
-        write!(&mut s, " worker {}, {};", w, e).unwrap();
-        s
-    });
-    anyhow::anyhow!(format!("{}:{}", message, concat)).into()
+
+    use thiserror_ext::AsReport;
+
+    let concat: String = errors
+        .into_iter()
+        .fold(format!("{message}:"), |mut s, (w, e)| {
+            write!(&mut s, " worker node {}, {};", w, e.as_report()).unwrap();
+            s
+        });
+    anyhow::anyhow!(concat).into()
 }

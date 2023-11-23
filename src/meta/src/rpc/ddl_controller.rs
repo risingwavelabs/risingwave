@@ -769,9 +769,11 @@ impl DdlController {
         &self,
         stream_job: &StreamingJob,
         internal_tables: Vec<Table>,
-        error: Option<&impl ToString>,
+        error: Option<&impl thiserror_ext::AsReport>,
     ) -> MetaResult<()> {
-        let error = error.map(ToString::to_string).unwrap_or_default();
+        let error = error
+            .map(thiserror_ext::AsReport::to_report_string)
+            .unwrap_or_default();
         let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
             id: stream_job.id(),
             name: stream_job.name(),
