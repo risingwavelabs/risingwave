@@ -115,13 +115,12 @@ FROM base AS risingwave
 
 LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
 
-RUN apt-get -y install gdb \
-  && rm -rf /var/lib/{apt,dpkg,cache,log}/
+# Clean up apt related stuff
+RUN rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 
 COPY --from=rust-builder /risingwave/bin/risingwave /risingwave/bin/risingwave
-COPY --from=rust-builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwave.dwp
 COPY --from=java-builder /risingwave/bin/connector-node /risingwave/bin/connector-node
 COPY --from=dashboard-builder /risingwave/dashboard/out /risingwave/ui
 COPY --from=rust-builder /risingwave/bin/jeprof /usr/local/bin/jeprof
@@ -136,3 +135,20 @@ ENV IN_CONTAINER=1
 
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
 CMD [ "playground" ]
+
+FROM rust-base AS risingwave-debug
+
+# Install debug tools and clean up apt related stuff
+RUN apt-get -y install gdb lldb \
+  && rm -rf /var/lib/{apt,dpkg,cache,log}/
+
+# https://github.com/llvm/llvm-project/issues/55575#issuecomment-1247426995
+RUN ln -s /usr/lib/llvm-14/lib/python3.10/dist-packages/lldb/* /usr/lib/python3/dist-packages/lldb/
+
+# Copy the binary and debug symbols
+RUN mkdir -p /risingwave/bin
+COPY --from=rust-builder /risingwave/bin/risingwave /risingwave/bin/risingwave
+COPY --from=rust-builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwave.dwp
+
+ENTRYPOINT [ "/usr/bin/bash" ]
+CMD []
