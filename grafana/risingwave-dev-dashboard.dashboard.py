@@ -801,7 +801,7 @@ def section_streaming(outer_panels):
                     [
                         panels.target(
                             f"sum(rate({metric('stream_mview_input_row_count')}[$__rate_interval])) by (actor_id, table_id) * on(actor_id, table_id) group_left(table_name) {metric('table_info')}",
-                            "mview {{table_id}} {{table_name}} - actor {{actor_id}}",
+                            "mview {{table_id}} {{table_name}} - fragment {{fragment_id}}",
                         ),
                     ],
                 ),

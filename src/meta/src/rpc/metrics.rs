@@ -526,7 +526,7 @@ impl MetaMetrics {
             &[
                 "materialized_view_id",
                 "table_id",
-                "actor_id",
+                "fragment_id",
                 "table_name",
                 "table_type",
                 "compaction_group_id"
@@ -843,7 +843,7 @@ pub fn start_fragment_info_monitor(
                                 .with_label_values(&[
                                     &mv_id_str,
                                     &table_id_str,
-                                    &actor_id_str,
+                                    &fragment_id_str,
                                     &table_name,
                                     &table_type,
                                     &compaction_group_id,
