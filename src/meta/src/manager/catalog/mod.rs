@@ -37,7 +37,7 @@ use risingwave_pb::catalog::{
     Comment, Connection, CreateType, Database, Function, Index, PbStreamJobStatus, Schema, Sink,
     Source, StreamJobStatus, Table, View,
 };
-use risingwave_pb::ddl_service::alter_owner_request;
+use risingwave_pb::ddl_service::{alter_owner_request, alter_set_schema_request};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -583,7 +583,12 @@ impl CatalogManager {
         let user_core = &mut core.user;
         database_core.ensure_database_id(function.database_id)?;
         database_core.ensure_schema_id(function.schema_id)?;
-        database_core.check_function_duplicated(function)?;
+        database_core.check_function_duplicated(&(
+            function.database_id,
+            function.schema_id,
+            function.name.clone(),
+            function.arg_types.clone(),
+        ))?;
 
         #[cfg(not(test))]
         user_core.ensure_user_id(function.owner)?;
@@ -1277,7 +1282,9 @@ impl CatalogManager {
                     }
 
                     // cdc source streaming job
-                    if let Some(info) = source.info && info.cdc_source_job {
+                    if let Some(info) = source.info
+                        && info.cdc_source_job
+                    {
                         all_cdc_source_ids.insert(source.id);
                         let source_table_fragments = fragment_manager
                             .select_table_fragments_by_table_id(&source.id.into())
@@ -1970,6 +1977,239 @@ impl CatalogManager {
 
         let version = self.notify_frontend(Operation::Update, notify_info).await;
 
+        Ok(version)
+    }
+
+    pub async fn alter_set_schema(
+        &self,
+        fragment_manager: FragmentManagerRef,
+        object: alter_set_schema_request::Object,
+        new_schema_id: SchemaId,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+
+        database_core.ensure_schema_id(new_schema_id)?;
+        let database_id = database_core
+            .schemas
+            .get(&new_schema_id)
+            .unwrap()
+            .get_database_id();
+
+        let mut relation_infos = Vec::new();
+        match object {
+            alter_set_schema_request::Object::TableId(table_id) => {
+                database_core.ensure_table_id(table_id)?;
+                let Table {
+                    name,
+                    optional_associated_source_id,
+                    schema_id,
+                    ..
+                } = database_core.tables.get(&table_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                database_core.check_relation_name_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                ))?;
+
+                // associated source id.
+                let to_update_source_id = if let Some(
+                    OptionalAssociatedSourceId::AssociatedSourceId(associated_source_id),
+                ) = optional_associated_source_id
+                {
+                    Some(*associated_source_id)
+                } else {
+                    None
+                };
+
+                let mut to_update_table_ids = vec![table_id];
+                let mut to_update_internal_table_ids = vec![];
+
+                // indexes and index tables.
+                let (to_update_index_ids, index_table_ids): (Vec<_>, Vec<_>) = database_core
+                    .indexes
+                    .iter()
+                    .filter(|(_, index)| index.primary_table_id == table_id)
+                    .map(|(index_id, index)| (*index_id, index.index_table_id))
+                    .unzip();
+                to_update_table_ids.extend(index_table_ids);
+
+                // internal tables.
+                for table_id in &to_update_table_ids {
+                    let table_fragment = fragment_manager
+                        .select_table_fragments_by_table_id(&(table_id.into()))
+                        .await?;
+                    to_update_internal_table_ids.extend(table_fragment.internal_table_ids());
+                }
+
+                let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+                for table_id in to_update_table_ids
+                    .into_iter()
+                    .chain(to_update_internal_table_ids)
+                {
+                    let mut table = tables.get_mut(table_id).unwrap();
+                    table.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Table(table.clone())));
+                }
+
+                let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+                if let Some(source_id) = to_update_source_id {
+                    let mut source = sources.get_mut(source_id).unwrap();
+                    source.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Source(source.clone())));
+                }
+
+                let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+                for index_id in to_update_index_ids {
+                    let mut index = indexes.get_mut(index_id).unwrap();
+                    index.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Index(index.clone())));
+                }
+
+                commit_meta!(self, tables, sources, indexes)?;
+            }
+            alter_set_schema_request::Object::ViewId(view_id) => {
+                database_core.ensure_view_id(view_id)?;
+                let View {
+                    name, schema_id, ..
+                } = database_core.views.get(&view_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                database_core.check_relation_name_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                ))?;
+                let mut views = BTreeMapTransaction::new(&mut database_core.views);
+                let mut view = views.get_mut(view_id).unwrap();
+                view.schema_id = new_schema_id;
+                relation_infos.push(Some(RelationInfo::View(view.clone())));
+                commit_meta!(self, views)?;
+            }
+            alter_set_schema_request::Object::SourceId(source_id) => {
+                database_core.ensure_source_id(source_id)?;
+                let Source {
+                    name, schema_id, ..
+                } = database_core.sources.get(&source_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                database_core.check_relation_name_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                ))?;
+                let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
+                let mut source = sources.get_mut(source_id).unwrap();
+                source.schema_id = new_schema_id;
+                relation_infos.push(Some(RelationInfo::Source(source.clone())));
+                commit_meta!(self, sources)?;
+            }
+            alter_set_schema_request::Object::SinkId(sink_id) => {
+                database_core.ensure_sink_id(sink_id)?;
+                let Sink {
+                    name, schema_id, ..
+                } = database_core.sinks.get(&sink_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                // internal tables.
+                let to_update_internal_table_ids = Vec::from_iter(
+                    fragment_manager
+                        .select_table_fragments_by_table_id(&(sink_id.into()))
+                        .await?
+                        .internal_table_ids(),
+                );
+
+                database_core.check_relation_name_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                ))?;
+                let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+                let mut sink = sinks.get_mut(sink_id).unwrap();
+                sink.schema_id = new_schema_id;
+                relation_infos.push(Some(RelationInfo::Sink(sink.clone())));
+
+                let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+                for table_id in to_update_internal_table_ids {
+                    let mut table = tables.get_mut(table_id).unwrap();
+                    table.schema_id = new_schema_id;
+                    relation_infos.push(Some(RelationInfo::Table(table.clone())));
+                }
+
+                commit_meta!(self, sinks, tables)?;
+            }
+            alter_set_schema_request::Object::ConnectionId(connection_id) => {
+                database_core.ensure_connection_id(connection_id)?;
+                let Connection {
+                    name, schema_id, ..
+                } = database_core.connections.get(&connection_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                database_core.check_connection_name_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                ))?;
+
+                let mut connections = BTreeMapTransaction::new(&mut database_core.connections);
+                let mut connection = connections.get_mut(connection_id).unwrap();
+                connection.schema_id = new_schema_id;
+                let notify_info = Info::Connection(connection.clone());
+                commit_meta!(self, connections)?;
+                let version = self.notify_frontend(Operation::Update, notify_info).await;
+                return Ok(version);
+            }
+            alter_set_schema_request::Object::FunctionId(function_id) => {
+                database_core.ensure_function_id(function_id)?;
+                let Function {
+                    name,
+                    arg_types,
+                    schema_id,
+                    ..
+                } = database_core.functions.get(&function_id).unwrap();
+                if *schema_id == new_schema_id {
+                    return Ok(IGNORED_NOTIFICATION_VERSION);
+                }
+
+                database_core.check_function_duplicated(&(
+                    database_id,
+                    new_schema_id,
+                    name.to_owned(),
+                    arg_types.to_owned(),
+                ))?;
+                let mut functions = BTreeMapTransaction::new(&mut database_core.functions);
+                let mut function = functions.get_mut(function_id).unwrap();
+                function.schema_id = new_schema_id;
+                let notify_info = Info::Function(function.clone());
+                commit_meta!(self, functions)?;
+                let version = self.notify_frontend(Operation::Update, notify_info).await;
+                return Ok(version);
+            }
+        }
+
+        let version = self
+            .notify_frontend(
+                Operation::Update,
+                Info::RelationGroup(RelationGroup {
+                    relations: relation_infos
+                        .into_iter()
+                        .map(|relation_info| Relation { relation_info })
+                        .collect_vec(),
+                }),
+            )
+            .await;
         Ok(version)
     }
 

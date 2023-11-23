@@ -170,6 +170,7 @@ pub type BatchMetricsWithTaskLabels = Arc<BatchMetricsWithTaskLabelsInner>;
 /// a `TaskId` so that we don't have to pass `task_id` around and repeatedly generate the same
 /// labels.
 pub struct BatchMetricsWithTaskLabelsInner {
+    batch_manager_metrics: Arc<BatchManagerMetrics>,
     task_metrics: Arc<BatchTaskMetrics>,
     executor_metrics: Arc<BatchExecutorMetrics>,
     task_id: TaskId,
@@ -178,11 +179,13 @@ pub struct BatchMetricsWithTaskLabelsInner {
 
 impl BatchMetricsWithTaskLabelsInner {
     pub fn new(
+        batch_manager_metrics: Arc<BatchManagerMetrics>,
         task_metrics: Arc<BatchTaskMetrics>,
         executor_metrics: Arc<BatchExecutorMetrics>,
         id: TaskId,
     ) -> Self {
         Self {
+            batch_manager_metrics,
             task_metrics,
             executor_metrics,
             task_id: id.clone(),
@@ -216,6 +219,10 @@ impl BatchMetricsWithTaskLabelsInner {
             self.task_labels[2].as_str(),
             executor_id.as_ref(),
         ]
+    }
+
+    pub fn batch_manager_metrics(&self) -> &BatchManagerMetrics {
+        &self.batch_manager_metrics
     }
 }
 
@@ -258,7 +265,7 @@ impl BatchManagerMetrics {
     }
 
     #[cfg(test)]
-    pub fn for_test() -> Self {
-        GLOBAL_BATCH_MANAGER_METRICS.clone()
+    pub fn for_test() -> Arc<Self> {
+        Arc::new(GLOBAL_BATCH_MANAGER_METRICS.clone())
     }
 }

@@ -20,7 +20,7 @@ use redis::aio::Connection;
 use redis::{Client as RedisClient, Pipeline};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use serde_derive::{Deserialize, Serialize};
+use serde_derive::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
 
@@ -40,7 +40,7 @@ pub const REDIS_SINK: &str = "redis";
 pub const KEY_FORMAT: &str = "key_format";
 pub const VALUE_FORMAT: &str = "value_format";
 
-#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct RedisCommon {
     #[serde(rename = "redis.url")]
     pub url: String,

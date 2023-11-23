@@ -192,7 +192,7 @@ impl SchemaCatalog {
                     .unwrap();
                 entry.get_mut().remove(pos);
             }
-            Vacant(_entry) => unreachable!(),
+            Vacant(_entry) => (),
         };
     }
 
@@ -356,6 +356,32 @@ impl SchemaCatalog {
             .expect("function not found by argument types");
     }
 
+    pub fn update_function(&mut self, prost: &PbFunction) {
+        let name = prost.name.clone();
+        let id = prost.id.into();
+        let function = FunctionCatalog::from(prost);
+        let function_ref = Arc::new(function);
+
+        let old_function_by_id = self.function_by_id.get(&id).unwrap();
+        let old_function_by_name = self
+            .function_by_name
+            .get_mut(&old_function_by_id.name)
+            .unwrap();
+        // check if function name get updated.
+        if old_function_by_id.name != name {
+            old_function_by_name.remove(&old_function_by_id.arg_types);
+            if old_function_by_name.is_empty() {
+                self.function_by_name.remove(&old_function_by_id.name);
+            }
+        }
+
+        self.function_by_name
+            .entry(name)
+            .or_default()
+            .insert(old_function_by_id.arg_types.clone(), function_ref.clone());
+        self.function_by_id.insert(id, function_ref);
+    }
+
     pub fn create_connection(&mut self, prost: &PbConnection) {
         let name = prost.name.clone();
         let id = prost.id;
@@ -367,6 +393,22 @@ impl SchemaCatalog {
         self.connection_by_id
             .try_insert(id, connection_ref)
             .unwrap();
+    }
+
+    pub fn update_connection(&mut self, prost: &PbConnection) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let connection = ConnectionCatalog::from(prost);
+        let connection_ref = Arc::new(connection);
+
+        let old_connection = self.connection_by_id.get(&id).unwrap();
+        // check if connection name get updated.
+        if old_connection.name != name {
+            self.connection_by_name.remove(&old_connection.name);
+        }
+
+        self.connection_by_name.insert(name, connection_ref.clone());
+        self.connection_by_id.insert(id, connection_ref);
     }
 
     pub fn drop_connection(&mut self, connection_id: ConnectionId) {
@@ -498,6 +540,10 @@ impl SchemaCatalog {
             .map(|table| table.name.clone())
     }
 
+    pub fn get_function_by_id(&self, function_id: FunctionId) -> Option<&Arc<FunctionCatalog>> {
+        self.function_by_id.get(&function_id)
+    }
+
     pub fn get_function_by_name_args(
         &self,
         name: &str,
@@ -512,6 +558,13 @@ impl SchemaCatalog {
             return None;
         }
         Some(functions.values().collect())
+    }
+
+    pub fn get_connection_by_id(
+        &self,
+        connection_id: &ConnectionId,
+    ) -> Option<&Arc<ConnectionCatalog>> {
+        self.connection_by_id.get(connection_id)
     }
 
     pub fn get_connection_by_name(&self, connection_name: &str) -> Option<&Arc<ConnectionCatalog>> {

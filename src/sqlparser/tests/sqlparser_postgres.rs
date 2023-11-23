@@ -853,7 +853,7 @@ fn parse_drop_function() {
         verified_stmt(sql),
         Statement::DropFunction {
             if_exists: true,
-            func_desc: vec![DropFunctionDesc {
+            func_desc: vec![FunctionDesc {
                 name: ObjectName(vec![Ident::new_unchecked("test_func")]),
                 args: None
             }],
@@ -866,7 +866,7 @@ fn parse_drop_function() {
         verified_stmt(sql),
         Statement::DropFunction {
             if_exists: true,
-            func_desc: vec![DropFunctionDesc {
+            func_desc: vec![FunctionDesc {
                 name: ObjectName(vec![Ident::new_unchecked("test_func")]),
                 args: Some(vec![
                     OperateFunctionArg::with_name("a", DataType::Int),
@@ -888,7 +888,7 @@ fn parse_drop_function() {
         Statement::DropFunction {
             if_exists: true,
             func_desc: vec![
-                DropFunctionDesc {
+                FunctionDesc {
                     name: ObjectName(vec![Ident::new_unchecked("test_func1")]),
                     args: Some(vec![
                         OperateFunctionArg::with_name("a", DataType::Int),
@@ -900,7 +900,7 @@ fn parse_drop_function() {
                         }
                     ]),
                 },
-                DropFunctionDesc {
+                FunctionDesc {
                     name: ObjectName(vec![Ident::new_unchecked("test_func2")]),
                     args: Some(vec![
                         OperateFunctionArg::with_name("a", DataType::Varchar),
@@ -1137,7 +1137,7 @@ fn parse_dollar_quoted_string() {
 
     let stmt = parse_sql_statements(sql).unwrap();
 
-    let projection = match stmt.get(0).unwrap() {
+    let projection = match stmt.first().unwrap() {
         Statement::Query(query) => match &query.body {
             SetExpr::Select(select) => &select.projection,
             _ => unreachable!(),
