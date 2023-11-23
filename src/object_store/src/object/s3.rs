@@ -41,7 +41,7 @@ use either::Either;
 use fail::fail_point;
 use futures::future::{try_join_all, BoxFuture, FutureExt};
 use futures::{stream, Stream, StreamExt, TryStreamExt};
-use hyper::{Body, Response};
+use hyper::Body;
 use itertools::Itertools;
 use risingwave_common::config::default::s3_objstore_config;
 use risingwave_common::monitor::connection::monitor_connector;
@@ -420,7 +420,7 @@ impl ObjectStore for S3ObjectStore {
                 .last_modified()
                 .expect("last_modified required")
                 .as_secs_f64(),
-            total_size: resp.content_length as usize,
+            total_size: resp.content_length.unwrap_or_default() as usize,
         })
     }
 
@@ -804,7 +804,10 @@ impl S3ObjectStore {
 
     #[inline(always)]
     fn should_retry(
-        err: &Either<SdkError<GetObjectError, Response<SdkBody>>, ByteStreamError>,
+        err: &Either<
+            SdkError<GetObjectError, aws_smithy_runtime_api::http::Response<SdkBody>>,
+            ByteStreamError,
+        >,
     ) -> bool {
         match err {
             Either::Left(err) => {
@@ -876,14 +879,14 @@ struct S3ObjectIter {
     bucket: String,
     prefix: String,
     next_continuation_token: Option<String>,
-    is_truncated: bool,
+    is_truncated: Option<bool>,
     #[allow(clippy::type_complexity)]
     send_future: Option<
         BoxFuture<
             'static,
             Result<
-                (Vec<ObjectMetadata>, Option<String>, bool),
-                SdkError<ListObjectsV2Error, Response<SdkBody>>,
+                (Vec<ObjectMetadata>, Option<String>, Option<bool>),
+                SdkError<ListObjectsV2Error, aws_smithy_runtime_api::http::Response<SdkBody>>,
             >,
         >,
     >,
@@ -897,7 +900,7 @@ impl S3ObjectIter {
             bucket,
             prefix,
             next_continuation_token: None,
-            is_truncated: true,
+            is_truncated: Some(true),
             send_future: None,
         }
     }
@@ -925,7 +928,7 @@ impl Stream for S3ObjectIter {
                 }
             };
         }
-        if !self.is_truncated {
+        if !self.is_truncated.unwrap_or_default() {
             return Poll::Ready(None);
         }
         let mut request = self
@@ -948,7 +951,7 @@ impl Stream for S3ObjectIter {
                                 .last_modified()
                                 .map(|l| l.as_secs_f64())
                                 .unwrap_or(0f64),
-                            total_size: obj.size() as usize,
+                            total_size: obj.size().unwrap_or_default() as usize,
                         })
                         .collect_vec();
                     let is_truncated = r.is_truncated;
@@ -963,8 +966,20 @@ impl Stream for S3ObjectIter {
     }
 }
 
-impl From<Either<SdkError<GetObjectError, Response<SdkBody>>, ByteStreamError>> for ObjectError {
-    fn from(e: Either<SdkError<GetObjectError, Response<SdkBody>>, ByteStreamError>) -> Self {
+impl
+    From<
+        Either<
+            SdkError<GetObjectError, aws_smithy_runtime_api::http::Response<SdkBody>>,
+            ByteStreamError,
+        >,
+    > for ObjectError
+{
+    fn from(
+        e: Either<
+            SdkError<GetObjectError, aws_smithy_runtime_api::http::Response<SdkBody>>,
+            ByteStreamError,
+        >,
+    ) -> Self {
         match e {
             Either::Left(e) => e.into(),
             Either::Right(e) => e.into(),
