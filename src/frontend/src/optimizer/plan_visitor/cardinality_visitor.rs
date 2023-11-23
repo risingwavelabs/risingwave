@@ -56,8 +56,8 @@ impl CardinalityVisitor {
                     return None;
                 }
                 let scan = proj.input();
-                let scan = scan.as_logical_scan()?;
-                if scan.is_sys_table() && scan.table_name() == "rw_schemas" {
+                let scan = scan.as_logical_sys_scan()?;
+                if scan.table_name() == "rw_schemas" {
                     if let Some(name) = scan
                         .output_col_idx()
                         .iter()

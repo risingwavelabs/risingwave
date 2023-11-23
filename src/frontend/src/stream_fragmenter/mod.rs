@@ -136,6 +136,7 @@ fn is_stateful_executor(stream_node: &StreamNode) -> bool {
             | NodeBody::HashJoin(_)
             | NodeBody::DeltaIndexJoin(_)
             | NodeBody::StreamScan(_)
+            | NodeBody::StreamCdcScan(_)
             | NodeBody::DynamicFilter(_)
     )
 }
@@ -260,8 +261,10 @@ fn build_fragment(
         NodeBody::Source(node) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32;
 
-            if let Some(source) = node.source_inner.as_ref() &&
-                let Some(source_info) = source.info.as_ref() && source_info.cdc_source_job {
+            if let Some(source) = node.source_inner.as_ref()
+                && let Some(source_info) = source.info.as_ref()
+                && source_info.cdc_source_job
+            {
                 tracing::debug!("mark cdc source job as singleton");
                 current_fragment.requires_singleton = true;
             }
@@ -280,6 +283,16 @@ fn build_fragment(
         NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
         NodeBody::StreamScan(node) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
+            // memorize table id for later use
+            // The table id could be a upstream CDC source
+            state
+                .dependent_table_ids
+                .insert(TableId::new(node.table_id));
+            current_fragment.upstream_table_ids.push(node.table_id);
+        }
+
+        NodeBody::StreamCdcScan(node) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::StreamScan as u32;
             // memorize table id for later use
             // The table id could be a upstream CDC source

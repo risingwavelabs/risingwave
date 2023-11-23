@@ -31,6 +31,7 @@ use risingwave_storage::StateStore;
 use super::agg_state::{AggState, AggStateStorage};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
+use crate::executor::PkIndices;
 
 pub trait Strategy {
     /// Infer the change type of the aggregation result. Don't need to take the ownership of
@@ -198,6 +199,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         agg_funcs: &[BoxedAggregateFunction],
         storages: &[AggStateStorage<S>],
         intermediate_state_table: &StateTable<S>,
+        pk_indices: &PkIndices,
         row_count_index: usize,
         extreme_cache_size: usize,
         input_schema: &Schema,
@@ -217,6 +219,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                 agg_func,
                 &storages[idx],
                 encoded_states.as_ref().map(|outputs| &outputs[idx]),
+                pk_indices,
                 extreme_cache_size,
                 input_schema,
             )?;
@@ -248,6 +251,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         agg_funcs: &[BoxedAggregateFunction],
         storages: &[AggStateStorage<S>],
         encoded_states: &OwnedRow,
+        pk_indices: &PkIndices,
         row_count_index: usize,
         extreme_cache_size: usize,
         input_schema: &Schema,
@@ -260,6 +264,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                 agg_func,
                 &storages[idx],
                 Some(&encoded_states[idx]),
+                pk_indices,
                 extreme_cache_size,
                 input_schema,
             )?;

@@ -103,11 +103,10 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             sink_from_name,
         };
 
-        let identity = format!("SinkExecutor {:X?}", params.executor_id);
         let sink_id_str = format!("{}", sink_id.sink_id);
 
         let sink_metrics = stream.streaming_metrics.new_sink_metrics(
-            identity.as_str(),
+            &params.info.identity,
             sink_id_str.as_str(),
             connector,
         );
@@ -127,13 +126,13 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 let factory = BoundedInMemLogStoreFactory::new(1);
                 Ok(Box::new(
                     SinkExecutor::new(
+                        params.actor_context,
+                        params.info,
                         input_executor,
                         sink_write_param,
                         sink_param,
                         columns,
-                        params.actor_context,
                         factory,
-                        params.pk_indices,
                     )
                     .await?,
                 ))
@@ -157,13 +156,13 @@ impl ExecutorBuilder for SinkExecutorBuilder {
 
                     Ok(Box::new(
                         SinkExecutor::new(
+                            params.actor_context,
+                            params.info,
                             input_executor,
                             sink_write_param,
                             sink_param,
                             columns,
-                            params.actor_context,
                             factory,
-                            params.pk_indices,
                         )
                         .await?,
                     ))

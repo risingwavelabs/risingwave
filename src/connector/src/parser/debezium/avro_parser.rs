@@ -204,6 +204,7 @@ mod tests {
         let inner_shema_str = r#"{
     "type": "record",
     "name": "Value",
+    "namespace": "dbserver1.inventory.customers",
     "fields": [
         {
             "name": "id",

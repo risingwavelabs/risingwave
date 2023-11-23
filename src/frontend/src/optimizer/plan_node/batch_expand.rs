@@ -21,6 +21,7 @@ use risingwave_pb::batch_plan::ExpandNode;
 use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{generic, ExprRewritable};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     PlanBase, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
@@ -99,3 +100,5 @@ impl ToLocalBatch for BatchExpand {
 }
 
 impl ExprRewritable for BatchExpand {}
+
+impl ExprVisitable for BatchExpand {}

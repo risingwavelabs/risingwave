@@ -99,6 +99,7 @@ use crate::user::UserId;
 use crate::utils::infer_stmt_row_desc::{infer_show_object, infer_show_variable};
 use crate::{FrontendOpts, PgResponseStream};
 
+pub(crate) mod current;
 pub(crate) mod transaction;
 
 /// The global environment for the frontend server.
@@ -439,6 +440,32 @@ impl FrontendEnv {
                 .build()
                 .unwrap(),
         ))
+    }
+
+    /// Cancel queries (i.e. batch queries) in session.
+    /// If the session exists return true, otherwise, return false.
+    pub fn cancel_queries_in_session(&self, session_id: SessionId) -> bool {
+        let guard = self.sessions_map.read();
+        if let Some(session) = guard.get(&session_id) {
+            session.cancel_current_query();
+            true
+        } else {
+            info!("Current session finished, ignoring cancel query request");
+            false
+        }
+    }
+
+    /// Cancel creating jobs (i.e. streaming queries) in session.
+    /// If the session exists return true, otherwise, return false.
+    pub fn cancel_creating_jobs_in_session(&self, session_id: SessionId) -> bool {
+        let guard = self.sessions_map.read();
+        if let Some(session) = guard.get(&session_id) {
+            session.cancel_current_creating_job();
+            true
+        } else {
+            info!("Current session finished, ignoring cancel creating request");
+            false
+        }
     }
 }
 
@@ -920,21 +947,11 @@ impl SessionManager for SessionManagerImpl {
 
     /// Used when cancel request happened.
     fn cancel_queries_in_session(&self, session_id: SessionId) {
-        let guard = self.env.sessions_map.read();
-        if let Some(session) = guard.get(&session_id) {
-            session.cancel_current_query()
-        } else {
-            info!("Current session finished, ignoring cancel query request")
-        }
+        self.env.cancel_queries_in_session(session_id);
     }
 
     fn cancel_creating_jobs_in_session(&self, session_id: SessionId) {
-        let guard = self.env.sessions_map.read();
-        if let Some(session) = guard.get(&session_id) {
-            session.cancel_current_creating_job()
-        } else {
-            info!("Current session finished, ignoring cancel creating request")
-        }
+        self.env.cancel_creating_jobs_in_session(session_id);
     }
 
     fn end_session(&self, session: &Self::Session) {

@@ -117,11 +117,11 @@ impl ColumnDesc {
         }
     }
 
-    pub fn named(name: String, column_id: ColumnId, data_type: DataType) -> ColumnDesc {
+    pub fn named(name: impl Into<String>, column_id: ColumnId, data_type: DataType) -> ColumnDesc {
         ColumnDesc {
             data_type,
             column_id,
-            name,
+            name: name.into(),
             field_descs: vec![],
             type_name: String::new(),
             generated_or_default_column: None,
