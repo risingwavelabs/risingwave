@@ -5,7 +5,7 @@ dependencies = ["clean-all"]
 [tasks.start-cluster]
 script = """
 docker compose up -d;
-sleep 20
+sleep 10
 """
 dependencies = ["build-image"]
 
@@ -75,3 +75,13 @@ dependencies = [
     "check-mysql",
     "check-flink-pg"
 ]
+
+[tasks.check-com-pg]
+script = '''
+docker exec postgres bash -c 'psql -U $POSTGRES_USER $POSTGRES_DB -c "select * from types"'
+'''
+
+[tasks.check-flink-com-pg]
+script = '''
+docker exec postgres bash -c 'psql -U $POSTGRES_USER $POSTGRES_DB -c "select * from flink_types"'
+'''
