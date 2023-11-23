@@ -1073,8 +1073,10 @@ pub async fn generate_stream_graph_for_table(
     let graph = StreamFragmentGraph {
         parallelism: session
             .config()
-            .get_streaming_parallelism()
-            .map(|parallelism| Parallelism { parallelism }),
+            .streaming_parallelism()
+            .map(|parallelism| Parallelism {
+                parallelism: parallelism.get(),
+            }),
         ..build_graph(plan)
     };
 

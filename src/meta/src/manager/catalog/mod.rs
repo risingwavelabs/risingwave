@@ -1099,16 +1099,6 @@ impl CatalogManager {
                 .collect()
         };
 
-        let check_sink_into_table_in_dependency = |relation_id: RelationId| -> Vec<Sink> {
-            let mut table_sinks = vec![];
-            for relation_info in relations_depend_on(relation_id) {
-                if let RelationInfo::Sink(s) = relation_info && s.target_table.is_some() {
-                    table_sinks.push(s);
-                }
-            }
-            table_sinks
-        };
-
         // Initial push into deque.
         match relation {
             RelationIdEnum::Table(table_id) => {
@@ -1167,14 +1157,6 @@ impl CatalogManager {
                     let table_id: TableId = table.id;
                     if !all_table_ids.insert(table_id) {
                         continue;
-                    }
-
-                    let associated_sink_into_tables = check_sink_into_table_in_dependency(table_id);
-                    if !associated_sink_into_tables.is_empty() {
-                        bail!(
-                            "Found {} sink(s) into table in dependency, please drop them manually",
-                            associated_sink_into_tables.len()
-                        );
                     }
 
                     let table_fragments = fragment_manager
@@ -1333,15 +1315,6 @@ impl CatalogManager {
                         continue;
                     }
 
-                    let associated_sink_into_tables =
-                        check_sink_into_table_in_dependency(source.id as RelationId);
-                    if !associated_sink_into_tables.is_empty() {
-                        bail!(
-                            "Found {} sink(s) into table in dependency, please drop them manually",
-                            associated_sink_into_tables.len()
-                        );
-                    }
-
                     // cdc source streaming job
                     if let Some(info) = source.info
                         && info.cdc_source_job
@@ -1379,14 +1352,6 @@ impl CatalogManager {
                 RelationInfo::View(view) => {
                     if !all_view_ids.insert(view.id) {
                         continue;
-                    }
-
-                    let associated_sink_into_tables = check_sink_into_table_in_dependency(view.id);
-                    if !associated_sink_into_tables.is_empty() {
-                        bail!(
-                            "Found {} sink(s) into table in dependency, please drop them manually",
-                            associated_sink_into_tables.len()
-                        );
                     }
 
                     if let Some(ref_count) = database_core.relation_ref_count.get(&view.id).cloned()
@@ -1468,6 +1433,19 @@ impl CatalogManager {
             .iter()
             .map(|sink_id| sinks.remove(*sink_id).unwrap())
             .collect_vec();
+
+        if !matches!(relation, RelationIdEnum::Sink(_)) {
+            let table_sink = sinks_removed
+                .iter()
+                .filter(|sink| sink.target_table.is_some())
+                .collect_vec();
+            if !table_sink.is_empty() {
+                bail!(
+                    "Found {} sink(s) into table in dependency, please drop them manually",
+                    table_sink.len()
+                );
+            }
+        }
 
         let internal_tables = all_internal_table_ids
             .iter()

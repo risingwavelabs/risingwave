@@ -751,7 +751,6 @@ impl DdlController {
                     hash_mapping: Some(actor_mapping.to_protobuf()),
                     dispatcher_id: union_fragment.fragment_id as _,
                     downstream_actor_id: downstream_actor_ids.clone(),
-                    downstream_table_name: None,
                 }],
             );
         }
