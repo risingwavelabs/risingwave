@@ -573,19 +573,19 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::object_store_read_timeout_ms")]
     pub object_store_read_timeout_ms: u64,
 
-    #[serde(default = "default::s3_objstore_config::object_store_keepalive_ms")]
+    #[serde(default = "default::obj_store_config::object_store_keepalive_ms")]
     pub object_store_keepalive_ms: Option<u64>,
-    #[serde(default = "default::s3_objstore_config::object_store_recv_buffer_size")]
+    #[serde(default = "default::obj_store_config::object_store_recv_buffer_size")]
     pub object_store_recv_buffer_size: Option<usize>,
-    #[serde(default = "default::s3_objstore_config::object_store_send_buffer_size")]
+    #[serde(default = "default::obj_store_config::object_store_send_buffer_size")]
     pub object_store_send_buffer_size: Option<usize>,
-    #[serde(default = "default::s3_objstore_config::object_store_nodelay")]
+    #[serde(default = "default::obj_store_config::object_store_nodelay")]
     pub object_store_nodelay: Option<bool>,
-    #[serde(default = "default::s3_objstore_config::object_store_req_retry_interval_ms")]
+    #[serde(default = "default::obj_store_config::object_store_req_retry_interval_ms")]
     pub object_store_req_retry_interval_ms: u64,
-    #[serde(default = "default::s3_objstore_config::object_store_req_retry_max_delay_ms")]
+    #[serde(default = "default::obj_store_config::object_store_req_retry_max_delay_ms")]
     pub object_store_req_retry_max_delay_ms: u64,
-    #[serde(default = "default::s3_objstore_config::object_store_req_retry_max_attempts")]
+    #[serde(default = "default::obj_store_config::object_store_req_retry_max_attempts")]
     pub object_store_req_retry_max_attempts: usize,
 
     #[serde(default = "default::storage::compactor_max_sst_key_count")]
@@ -1383,7 +1383,7 @@ pub mod default {
         }
     }
 
-    pub mod s3_objstore_config {
+    pub mod obj_store_config {
         /// Retry config for compute node http timeout error.
         const DEFAULT_RETRY_INTERVAL_MS: u64 = 20;
         const DEFAULT_RETRY_MAX_DELAY_MS: u64 = 10 * 1000;

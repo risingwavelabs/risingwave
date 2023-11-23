@@ -33,7 +33,7 @@ use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
-use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
@@ -114,12 +114,21 @@ pub async fn prepare_start_parameters(
         assert!(compactor_memory_limit_bytes > min_compactor_memory_limit_bytes * 2);
     }
 
-    let mut object_store = parse_remote_object_store(
+    let mut object_store = build_remote_object_store(
         state_store_url
             .strip_prefix("hummock+")
             .expect("object store must be hummock for compactor server"),
         object_metrics,
         "Hummock",
+        ObjectStoreConfig {
+            keepalive_ms: storage_opts.object_store_keepalive_ms,
+            recv_buffer_size: storage_opts.object_store_recv_buffer_size,
+            send_buffer_size: storage_opts.object_store_send_buffer_size,
+            nodelay: storage_opts.object_store_nodelay,
+            req_retry_interval_ms: Some(storage_opts.object_store_req_retry_interval_ms),
+            req_retry_max_delay_ms: Some(storage_opts.object_store_req_retry_max_delay_ms),
+            req_retry_max_attempts: Some(storage_opts.object_store_req_retry_max_attempts),
+        },
     )
     .await;
     object_store.set_opts(
@@ -128,6 +137,7 @@ pub async fn prepare_start_parameters(
         storage_opts.object_store_read_timeout_ms,
         storage_opts.object_store_upload_timeout_ms,
     );
+
     let object_store = Arc::new(object_store);
     let sstable_store = Arc::new(SstableStore::for_compactor(
         object_store,

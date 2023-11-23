@@ -36,7 +36,7 @@ use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBui
 use risingwave_meta::hummock::test_utils::setup_compute_env_with_config;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus, PbTable};
 use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
 use risingwave_pb::meta::SystemParams;
@@ -200,10 +200,11 @@ async fn compaction_test(
     let state_store_metrics = Arc::new(HummockStateStoreMetrics::unused());
     let compactor_metrics = Arc::new(CompactorMetrics::unused());
     let object_store_metrics = Arc::new(ObjectStoreMetrics::unused());
-    let remote_object_store = parse_remote_object_store(
+    let remote_object_store = build_remote_object_store(
         state_store_type.strip_prefix("hummock+").unwrap(),
         object_store_metrics.clone(),
         "Hummock",
+        ObjectStoreConfig::default(),
     )
     .await;
     let sstable_store = Arc::new(SstableStore::new(

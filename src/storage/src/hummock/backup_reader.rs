@@ -27,7 +27,7 @@ use risingwave_backup::storage::{MetaSnapshotStorage, ObjectStoreMetaSnapshotSto
 use risingwave_backup::{meta_snapshot_v1, MetaSnapshotId};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::local_version::pinned_version::{PinVersionAction, PinnedVersion};
@@ -44,10 +44,11 @@ async fn create_snapshot_store(
     config: &StoreConfig,
 ) -> StorageResult<ObjectStoreMetaSnapshotStorage> {
     let backup_object_store = Arc::new(
-        parse_remote_object_store(
+        build_remote_object_store(
             &config.0,
             Arc::new(ObjectStoreMetrics::unused()),
             "Meta Backup",
+            ObjectStoreConfig::default(),
         )
         .await,
     );

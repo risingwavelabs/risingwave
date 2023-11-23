@@ -122,7 +122,14 @@ pub struct StorageOpts {
     /// object store read timeout.
     pub object_store_read_timeout_ms: u64,
 
+    pub object_store_keepalive_ms: Option<u64>,
+    pub object_store_send_buffer_size: Option<usize>,
+    pub object_store_nodelay: Option<bool>,
+    pub object_store_req_retry_interval_ms: u64,
+    pub object_store_req_retry_max_delay_ms: u64,
+    pub object_store_req_retry_max_attempts: usize,
     pub object_store_recv_buffer_size: Option<usize>,
+
     pub compactor_max_sst_key_count: u64,
     pub compactor_max_task_multiplier: f32,
     pub compactor_max_sst_size: u64,
@@ -247,6 +254,12 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             compactor_max_sst_size: c.storage.compactor_max_sst_size,
             enable_fast_compaction: c.storage.enable_fast_compaction,
             mem_table_spill_threshold: c.storage.mem_table_spill_threshold,
+            object_store_keepalive_ms: c.storage.object_store_keepalive_ms,
+            object_store_send_buffer_size: c.storage.object_store_send_buffer_size,
+            object_store_nodelay: c.storage.object_store_nodelay,
+            object_store_req_retry_interval_ms: c.storage.object_store_req_retry_interval_ms,
+            object_store_req_retry_max_delay_ms: c.storage.object_store_req_retry_max_delay_ms,
+            object_store_req_retry_max_attempts: c.storage.object_store_req_retry_max_attempts,
         }
     }
 }

@@ -20,7 +20,7 @@ use risingwave_backup::error::BackupResult;
 use risingwave_backup::storage::{MetaSnapshotStorageRef, ObjectStoreMetaSnapshotStorage};
 use risingwave_common::config::MetaBackend;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
 
 use crate::backup_restore::RestoreOpts;
 use crate::controller::SqlMetaStore;
@@ -82,10 +82,11 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<MetaStoreBackendI
 }
 
 pub async fn get_backup_store(opts: RestoreOpts) -> BackupResult<MetaSnapshotStorageRef> {
-    let object_store = parse_remote_object_store(
+    let object_store = build_remote_object_store(
         &opts.backup_storage_url,
         Arc::new(ObjectStoreMetrics::unused()),
         "Meta Backup",
+        ObjectStoreConfig::default(),
     )
     .await;
     let backup_store =

@@ -36,7 +36,7 @@ use risingwave_hummock_trace::{
 };
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
 use risingwave_storage::filter_key_extractor::{
     FakeRemoteTableAccessor, RpcFilterKeyExtractorManager,
 };
@@ -99,8 +99,13 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
 
     let compactor_metrics = Arc::new(CompactorMetrics::unused());
 
-    let object_store =
-        parse_remote_object_store(&args.object_storage, object_store_stats, "Hummock").await;
+    let object_store = build_remote_object_store(
+        &args.object_storage,
+        object_store_stats,
+        "Hummock",
+        ObjectStoreConfig::default(),
+    )
+    .await;
 
     let sstable_store = {
         Arc::new(SstableStore::new(

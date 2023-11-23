@@ -43,16 +43,14 @@ use futures::future::{try_join_all, BoxFuture, FutureExt};
 use futures::{stream, Stream, StreamExt, TryStreamExt};
 use hyper::{Body, Response};
 use itertools::Itertools;
-use risingwave_common::config::default::s3_objstore_config;
 use risingwave_common::monitor::connection::monitor_connector;
 use risingwave_common::range::RangeBoundsExt;
 use tokio::task::JoinHandle;
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use super::object_metrics::ObjectStoreMetrics;
 use super::{
     BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectRangeBounds, ObjectResult,
-    ObjectStore, StreamingUploader,
+    ObjectStore, ObjectStoreConfig, StreamingUploader,
 };
 use crate::object::{try_update_failure_metric, ObjectDataStream, ObjectMetadataIter};
 
@@ -309,7 +307,7 @@ pub struct S3ObjectStore {
     /// For S3 specific metrics.
     metrics: Arc<ObjectStoreMetrics>,
 
-    config: S3ObjectStoreConfig,
+    config: ObjectStoreConfig,
 }
 
 #[async_trait::async_trait]
@@ -541,10 +539,10 @@ impl S3ObjectStore {
     ///
     /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
     pub async fn new(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
-        Self::new_with_config(bucket, metrics, S3ObjectStoreConfig::default()).await
+        Self::new_with_config(bucket, metrics, ObjectStoreConfig::default()).await
     }
 
-    pub fn new_http_client(config: &S3ObjectStoreConfig) -> impl HttpClient {
+    pub fn new_http_client(config: &ObjectStoreConfig) -> impl HttpClient {
         let mut http = hyper::client::HttpConnector::new();
 
         // connection config
@@ -580,7 +578,7 @@ impl S3ObjectStore {
     pub async fn new_with_config(
         bucket: String,
         metrics: Arc<ObjectStoreMetrics>,
-        config: S3ObjectStoreConfig,
+        config: ObjectStoreConfig,
     ) -> Self {
         let sdk_config_loader = aws_config::from_env()
             .retry_config(RetryConfig::standard().with_max_attempts(4))
@@ -595,7 +593,7 @@ impl S3ObjectStore {
                     Err(_) => false,
                 };
 
-                let sdk_config: aws_config::SdkConfig = sdk_config_loader.load().await;
+                let sdk_config = sdk_config_loader.load().await;
                 #[cfg(madsim)]
                 let client = Client::new(&sdk_config);
                 #[cfg(not(madsim))]
@@ -646,7 +644,7 @@ impl S3ObjectStore {
         let builder =
             aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await)
                 .force_path_style(true)
-                .http_client(Self::new_http_client(&S3ObjectStoreConfig::default()));
+                .http_client(Self::new_http_client(&ObjectStoreConfig::default()));
         let config = builder
             .region(Region::new("custom"))
             .endpoint_url(format!("{}{}", endpoint_prefix, address))
@@ -663,7 +661,7 @@ impl S3ObjectStore {
             bucket: bucket.to_string(),
             part_size: MINIO_PART_SIZE,
             metrics,
-            config: S3ObjectStoreConfig::default(),
+            config: ObjectStoreConfig::default(),
         }
     }
 
@@ -825,51 +823,6 @@ impl S3ObjectStore {
         false
     }
 }
-
-pub struct S3ObjectStoreConfig {
-    pub keepalive_ms: Option<u64>,
-    pub recv_buffer_size: Option<usize>,
-    pub send_buffer_size: Option<usize>,
-    pub nodelay: Option<bool>,
-
-    pub req_retry_interval_ms: Option<u64>,
-    pub req_retry_max_delay_ms: Option<u64>,
-    pub req_retry_max_attempts: Option<usize>,
-}
-
-impl Default for S3ObjectStoreConfig {
-    fn default() -> Self {
-        Self {
-            keepalive_ms: s3_objstore_config::object_store_keepalive_ms(),
-            recv_buffer_size: s3_objstore_config::object_store_recv_buffer_size(),
-            send_buffer_size: s3_objstore_config::object_store_send_buffer_size(),
-            nodelay: s3_objstore_config::object_store_nodelay(),
-            req_retry_interval_ms: Some(s3_objstore_config::object_store_req_retry_interval_ms()),
-            req_retry_max_delay_ms: Some(s3_objstore_config::object_store_req_retry_max_delay_ms()),
-            req_retry_max_attempts: Some(s3_objstore_config::object_store_req_retry_max_attempts()),
-        }
-    }
-}
-
-impl S3ObjectStoreConfig {
-    #[inline(always)]
-    fn get_retry_strategy(&self) -> impl Iterator<Item = Duration> {
-        ExponentialBackoff::from_millis(
-            self.req_retry_interval_ms
-                .unwrap_or(s3_objstore_config::object_store_req_retry_interval_ms()),
-        )
-        .max_delay(Duration::from_millis(
-            self.req_retry_max_delay_ms
-                .unwrap_or(s3_objstore_config::object_store_req_retry_max_delay_ms()),
-        ))
-        .take(
-            self.req_retry_max_attempts
-                .unwrap_or(s3_objstore_config::object_store_req_retry_max_attempts()),
-        )
-        .map(jitter)
-    }
-}
-
 struct S3ObjectIter {
     buffer: VecDeque<ObjectMetadata>,
     client: Client,

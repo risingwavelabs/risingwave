@@ -20,7 +20,7 @@ use std::time::Duration;
 use enum_as_inner::EnumAsInner;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
-use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
 
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{RemoteTableAccessor, RpcFilterKeyExtractorManager};
@@ -609,10 +609,19 @@ impl StateStoreImpl {
 
         let store = match s {
             hummock if hummock.starts_with("hummock+") => {
-                let mut object_store = parse_remote_object_store(
+                let mut object_store = build_remote_object_store(
                     hummock.strip_prefix("hummock+").unwrap(),
                     object_store_metrics.clone(),
                     "Hummock",
+                    ObjectStoreConfig {
+                        keepalive_ms: opts.object_store_keepalive_ms,
+                        recv_buffer_size: opts.object_store_recv_buffer_size,
+                        send_buffer_size: opts.object_store_send_buffer_size,
+                        nodelay: opts.object_store_nodelay,
+                        req_retry_interval_ms: Some(opts.object_store_req_retry_interval_ms),
+                        req_retry_max_delay_ms: Some(opts.object_store_req_retry_max_delay_ms),
+                        req_retry_max_attempts: Some(opts.object_store_req_retry_max_attempts),
+                    },
                 )
                 .await;
                 object_store.set_opts(

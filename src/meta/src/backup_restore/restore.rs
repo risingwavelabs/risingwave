@@ -21,7 +21,7 @@ use risingwave_backup::MetaSnapshotId;
 use risingwave_common::config::MetaBackend;
 use risingwave_hummock_sdk::version_checkpoint_path;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionCheckpoint};
 
 use crate::backup_restore::restore_impl::v1::{LoaderV1, WriterModelV1ToMetaStoreV1};
@@ -74,10 +74,11 @@ async fn restore_hummock_version(
     hummock_version: &HummockVersion,
 ) -> BackupResult<()> {
     let object_store = Arc::new(
-        parse_remote_object_store(
+        build_remote_object_store(
             hummock_storage_url,
             Arc::new(ObjectStoreMetrics::unused()),
             "Version Checkpoint",
+            ObjectStoreConfig::default(),
         )
         .await,
     );

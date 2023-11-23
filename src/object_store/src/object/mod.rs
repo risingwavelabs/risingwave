@@ -29,6 +29,7 @@ pub mod s3;
 use await_tree::InstrumentAwait;
 use futures::stream::BoxStream;
 use futures::StreamExt;
+use risingwave_common::config::default::obj_store_config;
 pub use s3::*;
 
 pub mod error;
@@ -36,6 +37,7 @@ pub mod object_metrics;
 
 pub use error::*;
 use object_metrics::ObjectStoreMetrics;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
 pub type ObjectStreamingUploader = MonitoredStreamingUploader;
@@ -549,6 +551,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         &self.inner
     }
 
+    pub fn mut_inner(&mut self) -> &mut OS {
+        &mut self.inner
+    }
+
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         let operation_type = "upload";
         self.object_store_metrics
@@ -798,16 +804,18 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     }
 }
 
-pub async fn parse_remote_object_store(
+pub async fn build_remote_object_store(
     url: &str,
     metrics: Arc<ObjectStoreMetrics>,
     ident: &str,
+    config: ObjectStoreConfig,
 ) -> ObjectStoreImpl {
     match url {
         s3 if s3.starts_with("s3://") => ObjectStoreImpl::S3(
-            S3ObjectStore::new(
+            S3ObjectStore::new_with_config(
                 s3.strip_prefix("s3://").unwrap().to_string(),
                 metrics.clone(),
+                config,
             )
             .await
             .monitored(metrics),
@@ -904,3 +912,47 @@ pub async fn parse_remote_object_store(
 
 pub type ObjectMetadataIter = BoxStream<'static, ObjectResult<ObjectMetadata>>;
 pub type ObjectDataStream = BoxStream<'static, ObjectResult<Bytes>>;
+
+pub struct ObjectStoreConfig {
+    pub keepalive_ms: Option<u64>,
+    pub recv_buffer_size: Option<usize>,
+    pub send_buffer_size: Option<usize>,
+    pub nodelay: Option<bool>,
+
+    pub req_retry_interval_ms: Option<u64>,
+    pub req_retry_max_delay_ms: Option<u64>,
+    pub req_retry_max_attempts: Option<usize>,
+}
+
+impl Default for ObjectStoreConfig {
+    fn default() -> Self {
+        Self {
+            keepalive_ms: obj_store_config::object_store_keepalive_ms(),
+            recv_buffer_size: obj_store_config::object_store_recv_buffer_size(),
+            send_buffer_size: obj_store_config::object_store_send_buffer_size(),
+            nodelay: obj_store_config::object_store_nodelay(),
+            req_retry_interval_ms: Some(obj_store_config::object_store_req_retry_interval_ms()),
+            req_retry_max_delay_ms: Some(obj_store_config::object_store_req_retry_max_delay_ms()),
+            req_retry_max_attempts: Some(obj_store_config::object_store_req_retry_max_attempts()),
+        }
+    }
+}
+
+impl ObjectStoreConfig {
+    #[inline(always)]
+    fn get_retry_strategy(&self) -> impl Iterator<Item = Duration> {
+        ExponentialBackoff::from_millis(
+            self.req_retry_interval_ms
+                .unwrap_or(obj_store_config::object_store_req_retry_interval_ms()),
+        )
+        .max_delay(Duration::from_millis(
+            self.req_retry_max_delay_ms
+                .unwrap_or(obj_store_config::object_store_req_retry_max_delay_ms()),
+        ))
+        .take(
+            self.req_retry_max_attempts
+                .unwrap_or(obj_store_config::object_store_req_retry_max_attempts()),
+        )
+        .map(jitter)
+    }
+}
