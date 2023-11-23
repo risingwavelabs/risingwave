@@ -360,12 +360,9 @@ impl SstableStore {
                 Bytes::copy_from_slice(&buf[offset..end]),
                 sst.meta.block_metas[idx].uncompressed_size as usize,
             )?;
-            let holder = self.block_cache.insert(
-                object_id,
-                (block_index + idx) as u64,
-                Box::new(block),
-                CachePriority::Low,
-            );
+            let holder =
+                self.block_cache
+                    .insert(object_id, idx as u64, Box::new(block), CachePriority::Low);
             if block_index == idx {
                 first_holder = Some(holder);
             }
