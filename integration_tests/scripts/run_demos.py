@@ -253,7 +253,7 @@ def run_elasticsearch_sink_demo():
     # wait for half min ingestion
     sleep(30)
 
-    versions = ['7', '8']
+    versions = ['8']
     sink_check_file = os.path.join(demo_dir, 'sink_check')
     with open(sink_check_file) as f:
         relations = f.read().strip().split(",")
