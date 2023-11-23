@@ -190,6 +190,12 @@ impl RedisSinkPayloadWriter {
     }
 
     pub async fn commit(&mut self) -> Result<()> {
+        #[cfg(test)]
+        {
+            if self.conn.is_none() {
+                return Ok(());
+            }
+        }
         self.pipe.query_async(self.conn.as_mut().unwrap()).await?;
         self.pipe.clear();
         Ok(())
