@@ -29,15 +29,15 @@ use crate::catalog::CatalogError;
 use crate::handler::util::col_descs_to_rows;
 use crate::handler::HandlerArgs;
 
-pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Result<RwPgResponse> {
+pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let mut binder = Binder::new_for_system(&session);
     let not_found_err =
-        CatalogError::NotFound("table, source, sink or view", table_name.to_string());
+        CatalogError::NotFound("table, source, sink or view", object_name.to_string());
 
     // Vec<ColumnCatalog>, Vec<ColumnDesc>, Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>, String, Option<String>
     let (columns, pk_columns, dist_columns, indices, relname, description) =
-        if let Ok(relation) = binder.bind_relation_by_name(table_name.clone(), None, false) {
+        if let Ok(relation) = binder.bind_relation_by_name(object_name.clone(), None, false) {
             match relation {
                 Relation::Source(s) => {
                     let pk_column_catalogs = s
@@ -102,7 +102,7 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                     )
                 }
                 Relation::Share(_) => {
-                    if let Ok(view) = binder.bind_view_by_name(table_name.clone()) {
+                    if let Ok(view) = binder.bind_view_by_name(object_name.clone()) {
                         let columns = view
                             .view_catalog
                             .columns
@@ -130,7 +130,7 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                 }
             }
         } else {
-            if let Ok(sink) = binder.bind_sink_by_name(table_name.clone()) {
+            if let Ok(sink) = binder.bind_sink_by_name(object_name.clone()) {
                 let columns = sink.sink_catalog.full_columns().to_vec();
                 let pk_columns = sink
                     .sink_catalog
