@@ -13,5 +13,5 @@
 // limitations under the License.
 
 pub mod config;
+pub mod controller;
 pub mod manager;
-pub mod policy;

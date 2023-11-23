@@ -19,14 +19,15 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_jni_core::jvm_runtime::load_jvm_memory_stats;
 use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 
-struct MemoryControlStats {
+/// Internal state of [`MemoryController`] that saves the state in previous tick.
+struct State {
     pub used_memory_bytes: usize,
     pub lru_watermark_step: u64,
     pub lru_watermark_time_ms: u64,
     pub lru_physical_now_ms: u64,
 }
 
-impl Default for MemoryControlStats {
+impl Default for State {
     fn default() -> Self {
         let physical_now = Epoch::physical_now();
         Self {
@@ -38,20 +39,20 @@ impl Default for MemoryControlStats {
     }
 }
 
-/// `JemallocAndJvmMemoryControl` is a memory control policy that uses jemalloc statistics and
+/// `MemoryController` is a memory control policy that uses jemalloc statistics and
 /// jvm memory statistics and to control. It assumes that most memory is used by streaming engine
 /// and does memory control over LRU watermark based on jemalloc statistics and jvm memory statistics.
-pub struct JemallocAndJvmMemoryControl {
+pub struct MemoryController {
     /// TODO(eric): make them configurable
     threshold_stable: usize,
     threshold_graceful: usize,
     threshold_aggressive: usize,
 
-    /// Stats from previous step
-    stats: MemoryControlStats,
+    /// The state from previous tick
+    state: State,
 }
 
-impl JemallocAndJvmMemoryControl {
+impl MemoryController {
     const THRESHOLD_AGGRESSIVE: f64 = 0.9;
     const THRESHOLD_GRACEFUL: f64 = 0.8;
     const THRESHOLD_STABLE: f64 = 0.7;
@@ -61,20 +62,16 @@ impl JemallocAndJvmMemoryControl {
         let threshold_graceful = (total_memory as f64 * Self::THRESHOLD_GRACEFUL) as usize;
         let threshold_aggressive = (total_memory as f64 * Self::THRESHOLD_AGGRESSIVE) as usize;
 
-        // let jemalloc_epoch_mib = jemalloc_epoch::mib().unwrap();
-        // let jemalloc_allocated_mib = jemalloc_stats::allocated::mib().unwrap();
-        // let jemalloc_active_mib = jemalloc_stats::active::mib().unwrap();
-
         Self {
             threshold_stable,
             threshold_graceful,
             threshold_aggressive,
-            stats: MemoryControlStats::default(),
+            state: State::default(),
         }
     }
 }
 
-impl std::fmt::Debug for JemallocAndJvmMemoryControl {
+impl std::fmt::Debug for MemoryController {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JemallocMemoryControl")
             .field("threshold_stable", &self.threshold_stable)
@@ -91,14 +88,14 @@ fn jemalloc_active_memory() -> usize {
     tikv_jemalloc_ctl::stats::active::read().unwrap()
 }
 
-impl JemallocAndJvmMemoryControl {
-    pub fn tick(&mut self, interval_ms: u32, watermark_epoch: Arc<AtomicU64>) {
+impl MemoryController {
+    pub fn tick(&mut self, interval_ms: u32) -> u64 {
         let jemalloc_active_bytes = jemalloc_active_memory();
         let (jvm_allocated_bytes, _) = load_jvm_memory_stats();
         let cur_used_memory_bytes = jemalloc_active_bytes + jvm_allocated_bytes;
 
-        let last_step = self.stats.lru_watermark_step;
-        let last_used_memory_bytes = self.stats.used_memory_bytes;
+        let last_step = self.state.lru_watermark_step;
+        let last_used_memory_bytes = self.state.used_memory_bytes;
 
         // The watermark calculation works in the following way:
         //
@@ -141,30 +138,23 @@ impl JemallocAndJvmMemoryControl {
 
         let physical_now = Epoch::physical_now();
         let watermark_time_ms =
-            if (physical_now - self.stats.lru_watermark_time_ms) / (interval_ms as u64) < step {
+            if (physical_now - self.state.lru_watermark_time_ms) / (interval_ms as u64) < step {
                 // We do not increase the step and watermark here to prevent a too-advanced watermark. The
                 // original condition is `prev_watermark_time_ms + interval_ms * step > now`.
                 step = last_step;
                 physical_now
             } else {
                 // Increase by (steps * interval)
-                self.stats.lru_watermark_time_ms + (interval_ms as u64 * step)
+                self.state.lru_watermark_time_ms + (interval_ms as u64 * step)
             };
 
-        set_lru_watermark_time_ms(watermark_epoch, watermark_time_ms);
-
-        self.stats = MemoryControlStats {
+        self.state = State {
             used_memory_bytes: cur_used_memory_bytes,
             lru_watermark_step: step,
             lru_watermark_time_ms: watermark_time_ms,
             lru_physical_now_ms: physical_now,
-        }
+        };
+
+        return Epoch::from_physical_time(watermark_time_ms).0;
     }
-}
-
-fn set_lru_watermark_time_ms(watermark_epoch: Arc<AtomicU64>, time_ms: u64) {
-    use std::sync::atomic::Ordering;
-
-    let epoch = Epoch::from_physical_time(time_ms).0;
-    watermark_epoch.as_ref().store(epoch, Ordering::Relaxed);
 }

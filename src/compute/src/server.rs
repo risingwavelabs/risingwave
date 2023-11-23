@@ -67,7 +67,7 @@ use tokio::task::JoinHandle;
 use tower::Layer;
 
 use crate::memory::config::{reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB};
-use crate::memory::manager::GlobalMemoryManager;
+use crate::memory::manager::MemoryManager;
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::GLOBAL_EXCHANGE_SERVICE_METRICS;
@@ -277,7 +277,7 @@ pub async fn compute_node_serve(
     // Related issues:
     // - https://github.com/risingwavelabs/risingwave/issues/8696
     // - https://github.com/risingwavelabs/risingwave/issues/8822
-    let memory_mgr = GlobalMemoryManager::new(
+    let memory_mgr = MemoryManager::new(
         streaming_metrics.clone(),
         compute_memory_bytes + storage_memory_bytes,
     );

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -20,27 +20,26 @@ use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 
-use super::policy::JemallocAndJvmMemoryControl;
+use super::controller::MemoryController;
 
-/// Compute node uses [`GlobalMemoryManager`] to limit the memory usage.
-pub struct GlobalMemoryManager {
+/// Compute node uses [`MemoryManager`] to limit the memory usage.
+pub struct MemoryManager {
     /// All cached data before the watermark should be evicted.
     watermark_epoch: Arc<AtomicU64>,
 
     metrics: Arc<StreamingMetrics>,
 
     /// The memory control policy for computing tasks.
-    memory_control_policy: Mutex<JemallocAndJvmMemoryControl>,
+    memory_control_policy: Mutex<MemoryController>,
 }
 
-impl GlobalMemoryManager {
+impl MemoryManager {
     // Arbitrarily set a minimal barrier interval in case it is too small,
     // especially when it's 0.
     const MIN_TICK_INTERVAL_MS: u32 = 10;
 
     pub fn new(metrics: Arc<StreamingMetrics>, total_memory_bytes: usize) -> Arc<Self> {
-        let memory_control_policy =
-            Mutex::new(JemallocAndJvmMemoryControl::new(total_memory_bytes));
+        let memory_control_policy = Mutex::new(MemoryController::new(total_memory_bytes));
         tracing::info!("memory control policy: {:?}", &memory_control_policy);
 
         Arc::new(Self {
@@ -62,7 +61,7 @@ impl GlobalMemoryManager {
         // Loop interval of running control policy
         let mut interval_ms = std::cmp::max(initial_interval_ms, Self::MIN_TICK_INTERVAL_MS);
         tracing::info!(
-            "start running GlobalMemoryManager with interval {}ms",
+            "start running MemoryManager with interval {}ms",
             interval_ms
         );
 
@@ -78,15 +77,13 @@ impl GlobalMemoryManager {
                     if new_interval_ms != interval_ms {
                         interval_ms = new_interval_ms;
                         tick_interval = tokio::time::interval(Duration::from_millis(interval_ms as u64));
-                        tracing::info!("updated GlobalMemoryManager interval to {}ms", interval_ms);
+                        tracing::info!("updated MemoryManager interval to {}ms", interval_ms);
                     }
                 }
 
                 _ = tick_interval.tick() => {
-                    self.memory_control_policy.lock().unwrap().tick(
-                        interval_ms,
-                        self.watermark_epoch.clone(),
-                    );
+                    let new_watermark = self.memory_control_policy.lock().unwrap().tick(interval_ms);
+                    self.watermark_epoch.store(new_watermark, Ordering::Relaxed);
 
                     // self.metrics
                     //     .lru_current_watermark_time_ms
