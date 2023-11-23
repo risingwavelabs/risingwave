@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use pgwire::pg_response::StatementType;
 use risingwave_common::acl::AclMode;
 use risingwave_common::error::ErrorCode::PermissionDenied;
@@ -23,7 +25,29 @@ use risingwave_sqlparser::ast::{Ident, ObjectName};
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::{CatalogError, OwnedByUserCatalog};
+use crate::session::SessionImpl;
+use crate::user::user_catalog::UserCatalog;
 use crate::Binder;
+
+pub fn check_schema_create_privilege(
+    session: &Arc<SessionImpl>,
+    new_owner: &UserCatalog,
+    schema_id: u32,
+) -> Result<()> {
+    if !session.is_super_user()
+        || (!new_owner.is_super
+            && !new_owner.check_privilege(
+                &grant_privilege::Object::SchemaId(schema_id),
+                AclMode::Create,
+            ))
+    {
+        return Err(PermissionDenied(
+            "Require new owner to have create privilege on the object.".to_string(),
+        )
+        .into());
+    }
+    Ok(())
+}
 
 pub async fn handle_alter_owner(
     handler_args: HandlerArgs,
@@ -56,18 +80,7 @@ pub async fn handle_alter_owner(
                     let schema_id = catalog_reader
                         .get_schema_by_name(db_name, schema_name)?
                         .id();
-                    if !session.is_super_user()
-                        && !new_owner.is_super
-                        && !new_owner.check_privilege(
-                            &grant_privilege::Object::SchemaId(schema_id),
-                            AclMode::Create,
-                        )
-                    {
-                        return Err(PermissionDenied(
-                            "Require new owner to have create privilege on the object".to_string(),
-                        )
-                        .into());
-                    }
+                    check_schema_create_privilege(&session, new_owner, schema_id)?;
                     if table.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
@@ -80,18 +93,7 @@ pub async fn handle_alter_owner(
                     let schema_id = catalog_reader
                         .get_schema_by_name(db_name, schema_name)?
                         .id();
-                    if !session.is_super_user()
-                        && !new_owner.is_super
-                        && !new_owner.check_privilege(
-                            &grant_privilege::Object::SchemaId(schema_id),
-                            AclMode::Create,
-                        )
-                    {
-                        return Err(PermissionDenied(
-                            "Require new owner to have create privilege on the object".to_string(),
-                        )
-                        .into());
-                    }
+                    check_schema_create_privilege(&session, new_owner, schema_id)?;
                     if view.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
@@ -104,18 +106,7 @@ pub async fn handle_alter_owner(
                     let schema_id = catalog_reader
                         .get_schema_by_name(db_name, schema_name)?
                         .id();
-                    if !session.is_super_user()
-                        && !new_owner.is_super
-                        && !new_owner.check_privilege(
-                            &grant_privilege::Object::SchemaId(schema_id),
-                            AclMode::Create,
-                        )
-                    {
-                        return Err(PermissionDenied(
-                            "Require new owner to have create privilege on the object".to_string(),
-                        )
-                        .into());
-                    }
+                    check_schema_create_privilege(&session, new_owner, schema_id)?;
                     if source.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
@@ -128,18 +119,7 @@ pub async fn handle_alter_owner(
                     let schema_id = catalog_reader
                         .get_schema_by_name(db_name, schema_name)?
                         .id();
-                    if !session.is_super_user()
-                        && !new_owner.is_super
-                        && !new_owner.check_privilege(
-                            &grant_privilege::Object::SchemaId(schema_id),
-                            AclMode::Create,
-                        )
-                    {
-                        return Err(PermissionDenied(
-                            "Require new owner to have create privilege on the object".to_string(),
-                        )
-                        .into());
-                    }
+                    check_schema_create_privilege(&session, new_owner, schema_id)?;
                     if sink.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
