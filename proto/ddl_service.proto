@@ -77,10 +77,10 @@ message AlterSourceResponse {
   uint64 version = 2;
 }
 
-
 message CreateSinkRequest {
   catalog.Sink sink = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
+  // It is used to provide a replace plan for the downstream table in `create sink into table` requests.
   optional ReplaceTablePlan affected_table_change = 3;
 }
 
