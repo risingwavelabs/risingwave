@@ -18,7 +18,9 @@ use risingwave_common::error::{ErrorCode, Result};
 use super::plan_node::RewriteExprsRecursive;
 use crate::expr::InlineNowProcTime;
 use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
-use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext};
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, VisitExprsRecursive,
+};
 use crate::optimizer::plan_rewriter::ShareSourceRewriter;
 #[cfg(debug_assertions)]
 use crate::optimizer::plan_visitor::InputRefValidator;
@@ -101,6 +103,8 @@ impl OptimizationStage {
 }
 
 use std::sync::LazyLock;
+
+use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 
 pub struct LogicalOptimizer {}
 
@@ -487,10 +491,16 @@ impl LogicalOptimizer {
     }
 
     pub fn inline_now_proc_time(plan: PlanRef, ctx: &OptimizerContextRef) -> PlanRef {
-        // TODO: if there's no `NOW()` or `PROCTIME()`, we don't need to acquire snapshot.
-        let epoch = ctx.session_ctx().pinned_snapshot().epoch();
+        let mut v = InlineNowProcTime::new(Epoch(INVALID_EPOCH));
+        plan.visit_exprs_recursive(&mut v);
+        if !v.has() {
+            return plan;
+        }
 
-        let plan = plan.rewrite_exprs_recursive(&mut InlineNowProcTime::new(epoch));
+        let epoch = ctx.session_ctx().pinned_snapshot().epoch();
+        v.set_epoch(epoch);
+
+        let plan = plan.rewrite_exprs_recursive(&mut v);
 
         if ctx.is_explain_trace() {
             ctx.trace("Inline Now and ProcTime:");

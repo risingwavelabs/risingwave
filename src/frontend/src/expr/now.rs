@@ -18,6 +18,7 @@ use risingwave_pb::expr::expr_node::{self, NowRexNode};
 use risingwave_pb::expr::ExprNode;
 
 use super::{Expr, ExprImpl, ExprRewriter, FunctionCall, Literal};
+use crate::expr::ExprVisitor;
 
 /// The `NOW()` function.
 /// - in streaming queries, it represents a retractable monotonic timestamp stream,
@@ -49,15 +50,24 @@ impl Expr for Now {
 pub struct InlineNowProcTime {
     /// The current epoch value.
     epoch: Epoch,
+    has: bool,
 }
 
 impl InlineNowProcTime {
     pub fn new(epoch: Epoch) -> Self {
-        Self { epoch }
+        Self { epoch, has: false }
     }
 
     fn literal(&self) -> ExprImpl {
         Literal::new(Some(self.epoch.as_scalar()), Now.return_type()).into()
+    }
+
+    pub fn has(&self) -> bool {
+        self.has
+    }
+
+    pub fn set_epoch(&mut self, epoch: Epoch) {
+        self.epoch = epoch;
     }
 }
 
@@ -79,5 +89,23 @@ impl ExprRewriter for InlineNowProcTime {
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         FunctionCall::new_unchecked(func_type, inputs, ret).into()
+    }
+}
+
+impl ExprVisitor for InlineNowProcTime {
+    fn visit_now(&mut self, _: &Now) {
+        self.has = true;
+    }
+
+    fn visit_function_call(&mut self, func_call: &FunctionCall) {
+        if let expr_node::Type::Proctime = func_call.func_type {
+            self.has = true;
+            return;
+        }
+
+        func_call
+            .inputs()
+            .iter()
+            .for_each(|expr| self.visit_expr(expr));
     }
 }
