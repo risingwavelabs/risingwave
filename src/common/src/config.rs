@@ -287,6 +287,12 @@ pub struct MetaConfig {
 
     #[serde(default)]
     pub compaction_config: CompactionConfig,
+
+    #[serde(default = "default::meta::event_log_enabled")]
+    pub event_log_enabled: bool,
+    /// Keeps the latest N events per channel.
+    #[serde(default = "default::meta::event_log_channel_max_size")]
+    pub event_log_channel_max_size: u32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -524,8 +530,7 @@ pub struct StorageConfig {
     pub compactor_max_task_multiplier: f32,
 
     /// The percentage of memory available when compactor is deployed separately.
-    /// total_memory_available_bytes = system_memory_available_bytes *
-    /// compactor_memory_available_proportion
+    /// non_reserved_memory_bytes = system_memory_available_bytes * compactor_memory_available_proportion
     #[serde(default = "default::storage::compactor_memory_available_proportion")]
     pub compactor_memory_available_proportion: f64,
 
@@ -975,6 +980,14 @@ pub mod default {
 
         pub fn compaction_task_max_heartbeat_interval_secs() -> u64 {
             60 // 1min
+        }
+
+        pub fn event_log_enabled() -> bool {
+            true
+        }
+
+        pub fn event_log_channel_max_size() -> u32 {
+            10
         }
     }
 

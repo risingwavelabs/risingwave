@@ -596,7 +596,7 @@
 
     Fragment 4
     StreamProject { exprs: [t4.a, t4.b, t4.c, 3:Int32] }
-    └── StreamTableScan { table: t4, columns: [t4.a, t4.b, t4.c], pk: [t4.b, t4.a], dist: UpstreamHashShard(t4.a, t4.b) }
+    └── StreamTableScan { table: t4, columns: [t4.a, t4.b, t4.c], pk: [t4.b, t4.a], dist: UpstreamHashShard(t4.b, t4.a) }
         ├── state table: 3
         ├── Upstream
         └── BatchPlanNode

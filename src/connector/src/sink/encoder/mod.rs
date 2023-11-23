@@ -82,6 +82,14 @@ impl<T> SerTo<T> for T {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+pub enum DateHandlingMode {
+    #[default]
+    FromCe,
+    FromEpoch,
+    String,
+}
+
 /// Useful for both json and protobuf
 #[derive(Clone, Copy)]
 pub enum TimestampHandlingMode {

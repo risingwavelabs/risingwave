@@ -16,7 +16,8 @@ use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::catalog::{CreateType, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
@@ -165,6 +166,13 @@ pub async fn handle_create_mv(
 
     let (mut table, graph) = {
         let context = OptimizerContext::from_handler_args(handler_args);
+        if !context.with_options().is_empty() {
+            // get other useful fields by `remove`, the logic here is to reject unknown options.
+            return Err(RwError::from(ProtocolError(format!(
+                "unexpected options in WITH clause: {:?}",
+                context.with_options().keys()
+            ))));
+        }
 
         let has_order_by = !query.order_by.is_empty();
         if has_order_by {
@@ -238,9 +246,7 @@ pub mod tests {
     use std::collections::HashMap;
 
     use pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW;
-    use risingwave_common::catalog::{
-        row_id_column_name, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
-    };
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX};
     use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
@@ -287,9 +293,8 @@ pub mod tests {
             vec![DataType::Varchar, DataType::Varchar],
             vec!["address".to_string(), "zipcode".to_string()],
         );
-        let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
-            row_id_col_name.as_str() => DataType::Serial,
+            ROWID_PREFIX => DataType::Serial,
             "country" => DataType::new_struct(
                  vec![DataType::Varchar,city_type,DataType::Varchar],
                  vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],

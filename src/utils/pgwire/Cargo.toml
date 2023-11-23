@@ -20,7 +20,7 @@ auto_enums = { version = "0.8", features = ["tokio1"] }
 byteorder = "1.5"
 bytes = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-itertools = "0.11"
+itertools = "0.12"
 openssl = "0.10.57"
 panic-message = "0.3"
 risingwave_common = { workspace = true }

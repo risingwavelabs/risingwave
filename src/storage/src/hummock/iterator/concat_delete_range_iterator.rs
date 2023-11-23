@@ -189,7 +189,8 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::test_utils::{test_user_key, CompactionDeleteRangesBuilder};
+    use crate::hummock::test_utils::delete_range::CompactionDeleteRangesBuilder;
+    use crate::hummock::test_utils::test_user_key;
     use crate::hummock::{SstableBuilder, SstableBuilderOptions, SstableWriterOptions};
 
     #[tokio::test]

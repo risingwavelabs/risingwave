@@ -42,6 +42,7 @@ mod sink;
 mod sort;
 mod source;
 mod stateless_simple_agg;
+mod stream_cdc_scan;
 mod stream_scan;
 mod temporal_join;
 mod top_n;
@@ -82,6 +83,7 @@ use self::sink::*;
 use self::sort::*;
 use self::source::*;
 use self::stateless_simple_agg::*;
+use self::stream_cdc_scan::*;
 use self::stream_scan::*;
 use self::temporal_join::*;
 use self::top_n::*;
@@ -140,6 +142,7 @@ pub async fn create_executor(
         NodeBody::HashJoin => HashJoinExecutorBuilder,
         NodeBody::HopWindow => HopWindowExecutorBuilder,
         NodeBody::StreamScan => StreamScanExecutorBuilder,
+        NodeBody::StreamCdcScan => StreamCdcScanExecutorBuilder,
         NodeBody::BatchPlan => BatchQueryExecutorBuilder,
         NodeBody::Merge => MergeExecutorBuilder,
         NodeBody::Materialize => MaterializeExecutorBuilder,

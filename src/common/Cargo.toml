@@ -49,7 +49,7 @@ http = "0.2"
 humantime = "2.1"
 hyper = "0.14"
 hytra = { workspace = true }
-itertools = "0.11"
+itertools = "0.12"
 itoa = "1.0"
 jsonbb = "0.1.2"
 lru = { git = "https://github.com/risingwavelabs/lru-rs.git", rev = "cb2d7c7" }

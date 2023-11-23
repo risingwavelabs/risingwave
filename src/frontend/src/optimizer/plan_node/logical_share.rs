@@ -23,6 +23,7 @@ use super::{
     generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PlanTreeNodeUnary,
     PredicatePushdown, ToBatch, ToStream,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamShare,
@@ -113,6 +114,8 @@ impl ColPrunable for LogicalShare {
 }
 
 impl ExprRewritable for LogicalShare {}
+
+impl ExprVisitable for LogicalShare {}
 
 impl PredicatePushdown for LogicalShare {
     fn predicate_pushdown(

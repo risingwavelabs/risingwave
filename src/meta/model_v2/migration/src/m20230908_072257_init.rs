@@ -466,6 +466,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Table::Name).string().not_null())
                     .col(ColumnDef::new(Table::OptionalAssociatedSourceId).integer())
                     .col(ColumnDef::new(Table::TableType).string().not_null())
+                    .col(ColumnDef::new(Table::BelongsToJobId).integer())
                     .col(ColumnDef::new(Table::Columns).json().not_null())
                     .col(ColumnDef::new(Table::Pk).json().not_null())
                     .col(ColumnDef::new(Table::DistributionKey).json().not_null())
@@ -504,6 +505,14 @@ impl MigrationTrait for Migration {
                         &mut ForeignKey::create()
                             .name("FK_table_object_id")
                             .from(Table::Table, Table::TableId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_table_belongs_to_job_id")
+                            .from(Table::Table, Table::BelongsToJobId)
                             .to(Object::Table, Object::Oid)
                             .on_delete(ForeignKeyAction::Cascade)
                             .to_owned(),
@@ -914,6 +923,7 @@ enum Table {
     Name,
     OptionalAssociatedSourceId,
     TableType,
+    BelongsToJobId,
     Columns,
     Pk,
     DistributionKey,
