@@ -50,24 +50,15 @@ impl Expr for Now {
 pub struct InlineNowProcTime {
     /// The current epoch value.
     epoch: Epoch,
-    has: bool,
 }
 
 impl InlineNowProcTime {
     pub fn new(epoch: Epoch) -> Self {
-        Self { epoch, has: false }
+        Self { epoch }
     }
 
     fn literal(&self) -> ExprImpl {
         Literal::new(Some(self.epoch.as_scalar()), Now.return_type()).into()
-    }
-
-    pub fn has(&self) -> bool {
-        self.has
-    }
-
-    pub fn set_epoch(&mut self, epoch: Epoch) {
-        self.epoch = epoch;
     }
 }
 
@@ -92,7 +83,18 @@ impl ExprRewriter for InlineNowProcTime {
     }
 }
 
-impl ExprVisitor for InlineNowProcTime {
+#[derive(Default)]
+pub struct NowProcTimeFinder {
+    has: bool,
+}
+
+impl NowProcTimeFinder {
+    pub fn has(&self) -> bool {
+        self.has
+    }
+}
+
+impl ExprVisitor for NowProcTimeFinder {
     fn visit_now(&mut self, _: &Now) {
         self.has = true;
     }

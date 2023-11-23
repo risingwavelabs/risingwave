@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 
 use super::plan_node::RewriteExprsRecursive;
-use crate::expr::InlineNowProcTime;
+use crate::expr::{InlineNowProcTime, NowProcTimeFinder};
 use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, VisitExprsRecursive,
@@ -103,8 +103,6 @@ impl OptimizationStage {
 }
 
 use std::sync::LazyLock;
-
-use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 
 pub struct LogicalOptimizer {}
 
@@ -491,14 +489,15 @@ impl LogicalOptimizer {
     }
 
     pub fn inline_now_proc_time(plan: PlanRef, ctx: &OptimizerContextRef) -> PlanRef {
-        let mut v = InlineNowProcTime::new(Epoch(INVALID_EPOCH));
+        // If now() and proctime() are no found, bail out.
+        let mut v = NowProcTimeFinder::default();
         plan.visit_exprs_recursive(&mut v);
         if !v.has() {
             return plan;
         }
 
         let epoch = ctx.session_ctx().pinned_snapshot().epoch();
-        v.set_epoch(epoch);
+        let mut v = InlineNowProcTime::new(epoch);
 
         let plan = plan.rewrite_exprs_recursive(&mut v);
 
