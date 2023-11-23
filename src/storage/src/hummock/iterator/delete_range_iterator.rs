@@ -271,14 +271,8 @@ impl ForwardMergeRangeIterator {
         target_user_key: UserKey<&[u8]>,
     ) -> HummockResult<()> {
         let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
-        const MAX_NEXT_COUNT: usize = 8;
-        let mut next_count = 0;
         while self.is_valid() && self.next_extended_user_key().le(&target_extended_user_key) {
             self.next().await?;
-            next_count += 1;
-            if next_count >= MAX_NEXT_COUNT {
-                return self.seek(target_user_key).await;
-            }
         }
         Ok(())
     }
