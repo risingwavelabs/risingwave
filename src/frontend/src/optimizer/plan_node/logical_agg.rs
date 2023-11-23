@@ -27,9 +27,10 @@ use super::{
     StreamStatelessSimpleAgg, ToBatch, ToStream,
 };
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, OrderBy,
-    WindowFunction,
+    AggCall, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
+    OrderBy, WindowFunction,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalDedup, LogicalProject,
@@ -957,6 +958,12 @@ impl ExprRewritable for LogicalAgg {
             core,
         }
         .into()
+    }
+}
+
+impl ExprVisitable for LogicalAgg {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }
 

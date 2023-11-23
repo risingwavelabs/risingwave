@@ -30,6 +30,7 @@ use super::{
 use crate::expr::{
     Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, WindowFunction,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, Literal, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -688,6 +689,8 @@ impl ColPrunable for LogicalOverWindow {
 }
 
 impl ExprRewritable for LogicalOverWindow {}
+
+impl ExprVisitable for LogicalOverWindow {}
 
 impl PredicatePushdown for LogicalOverWindow {
     fn predicate_pushdown(

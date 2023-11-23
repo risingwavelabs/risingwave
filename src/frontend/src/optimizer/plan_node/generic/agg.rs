@@ -30,7 +30,7 @@ use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb}
 
 use super::super::utils::TableCatalogBuilder;
 use super::{impl_distill_unit_from_fields, stream, GenericPlanNode, GenericPlanRef};
-use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay, Literal};
+use crate::expr::{Expr, ExprRewriter, ExprVisitor, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, RequiredDist};
@@ -60,6 +60,12 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.agg_calls.iter_mut().for_each(|call| {
             call.filter = call.filter.clone().rewrite_expr(r);
+        });
+    }
+
+    pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.agg_calls.iter().for_each(|call| {
+            call.filter.visit_expr(v);
         });
     }
 

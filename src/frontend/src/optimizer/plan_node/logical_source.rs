@@ -37,8 +37,9 @@ use super::{
     StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::stream_fs_fetch::StreamFsFetch;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::plan_node::{
@@ -344,6 +345,15 @@ impl ExprRewritable for LogicalSource {
             ..self.clone()
         }
         .into()
+    }
+}
+
+impl ExprVisitable for LogicalSource {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.output_exprs
+            .iter()
+            .flatten()
+            .for_each(|e| v.visit_expr(e));
     }
 }
 
