@@ -565,3 +565,42 @@ message GetServingVnodeMappingsResponse {
 service ServingService {
   rpc GetServingVnodeMappings(GetServingVnodeMappingsRequest) returns (GetServingVnodeMappingsResponse);
 }
+
+message EventLog {
+  message EventMetaNodeStart {
+    string advertise_addr = 1;
+    string listen_addr = 2;
+    string opts = 3;
+  }
+  message EventCreateStreamJobFail {
+    uint32 id = 1;
+    string name = 2;
+    string definition = 3;
+    string error = 4;
+  }
+  message EventDirtyStreamJobClear {
+    uint32 id = 1;
+    string name = 2;
+    string definition = 3;
+    string error = 4;
+  }
+  // Event logs identifier, which should be populated by event log service.
+  optional string unique_id = 1;
+  // Processing time, which should be populated by event log service.
+  optional uint64 timestamp = 2;
+  oneof event {
+    EventCreateStreamJobFail create_stream_job_fail = 3;
+    EventDirtyStreamJobClear dirty_stream_job_clear = 4;
+    EventMetaNodeStart meta_node_start = 5;
+  }
+}
+
+message ListEventLogRequest {}
+
+message ListEventLogResponse {
+  repeated EventLog event_logs = 1;
+}
+
+service EventLogService {
+  rpc ListEventLog(ListEventLogRequest) returns (ListEventLogResponse);
+}

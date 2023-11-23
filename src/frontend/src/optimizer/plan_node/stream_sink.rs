@@ -41,6 +41,7 @@ use super::generic::GenericPlanRef;
 use super::stream::prelude::*;
 use super::utils::{childless_record, Distill, IndicesDisplay, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::PlanTreeNodeUnary;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -444,3 +445,5 @@ impl StreamNode for StreamSink {
 }
 
 impl ExprRewritable for StreamSink {}
+
+impl ExprVisitable for StreamSink {}
