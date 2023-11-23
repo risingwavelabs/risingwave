@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::vec;
+use std::default::Default;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -181,6 +182,7 @@ impl TableCatalogBuilder {
             // It should be ignored for internal tables.
             create_type: CreateType::Foreground,
             description: None,
+            output_indices: vec![],
         }
     }
 
