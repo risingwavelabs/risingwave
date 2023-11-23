@@ -34,12 +34,14 @@ pub fn check_schema_create_privilege(
     new_owner: &UserCatalog,
     schema_id: u32,
 ) -> Result<()> {
-    if !session.is_super_user()
-        || (!new_owner.is_super
-            && !new_owner.check_privilege(
-                &grant_privilege::Object::SchemaId(schema_id),
-                AclMode::Create,
-            ))
+    if session.is_super_user() {
+        return Ok(());
+    }
+    if !new_owner.is_super
+        && !new_owner.check_privilege(
+            &grant_privilege::Object::SchemaId(schema_id),
+            AclMode::Create,
+        )
     {
         return Err(PermissionDenied(
             "Require new owner to have create privilege on the object.".to_string(),
