@@ -318,7 +318,7 @@ impl SstableStore {
         policy: CachePolicy,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
-        const MAX_PREFETCH_BLOCK: usize = 10;
+        const MAX_PREFETCH_BLOCK: usize = 16;
         let object_id = sst.id;
         if let Some(block) = self.block_cache.get(object_id, block_index as u64) {
             return Ok(block);
