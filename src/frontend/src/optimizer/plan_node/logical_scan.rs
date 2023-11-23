@@ -31,6 +31,7 @@ use super::{
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -376,6 +377,12 @@ impl ExprRewritable for LogicalScan {
             core,
         }
         .into()
+    }
+}
+
+impl ExprVisitable for LogicalScan {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }
 

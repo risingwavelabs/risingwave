@@ -1684,38 +1684,6 @@ def section_batch(outer_panels):
                         ),
                     ],
                 ),
-                panels.timeseries_bytes(
-                    "Mem Table Size",
-                    "This metric shows the memory usage of mem_table.",
-                    [
-                        panels.target(
-                            f"sum({metric('state_store_mem_table_memory_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "mem_table size total - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"{metric('state_store_mem_table_memory_size')}",
-                            "mem_table size - table id {{table_id}} instance id {{instance_id}} {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Mem Table Count",
-                    "This metric shows the item counts in mem_table.",
-                    [
-                        panels.target(
-                            f"sum({metric('state_store_mem_table_item_count')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "mem_table counts total - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"{metric('state_store_mem_table_item_count')}",
-                            "mem_table count - table id {{table_id}} instance id {{instance_id}} {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                    ],
-                ),
                 panels.timeseries_latency(
                     "Row SeqScan Next Duration",
                     "",
