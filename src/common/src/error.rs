@@ -71,6 +71,61 @@ impl Display for TrackingIssue {
 }
 
 #[derive(Error, Debug)]
+#[error("Feature is not yet implemented: {feature}. {tracking_issue}")]
+pub struct NotImplemented {
+    pub feature: String,
+    pub tracking_issue: TrackingIssue,
+}
+
+impl<S> From<S> for NotImplemented
+where
+    S: Into<String>,
+{
+    fn from(feature: S) -> Self {
+        Self::new(feature)
+    }
+}
+
+impl NotImplemented {
+    pub fn new(feature: impl Into<String>) -> Self {
+        Self::with_tracking_issue(feature, TrackingIssue::none())
+    }
+
+    pub fn with_tracking_issue(
+        feature: impl Into<String>,
+        tracking_issue: impl Into<TrackingIssue>,
+    ) -> Self {
+        Self {
+            feature: feature.into(),
+            tracking_issue: tracking_issue.into(),
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! not_implemented {
+    (issue = $issue:expr, $($arg:tt)*) => {
+        $crate::error::NotImplemented::with_tracking_issue(
+            ::std::format!($($arg)*),
+            $issue,
+        )
+    };
+    ($($arg:tt)*) => {
+        not_implemented!(issue = None, $($arg)*)
+    };
+}
+
+#[macro_export(local_inner_macros)]
+macro_rules! bail_not_implemented {
+    (issue = $issue:expr, $($arg:tt)*) => {
+        return Err(not_implemented!(issue = $issue, $($arg)*).into())
+    };
+    ($($arg:tt)*) => {
+        bail_not_implemented!(issue = None, $($arg)*)
+    };
+}
+
+#[derive(Error, Debug)]
 pub enum ErrorCode {
     #[error("internal error: {0}")]
     InternalError(String),
@@ -87,8 +142,8 @@ pub enum ErrorCode {
         #[backtrace]
         BoxedError,
     ),
-    #[error("Feature is not yet implemented: {0}\n{1}")]
-    NotImplemented(String, TrackingIssue),
+    #[error(transparent)]
+    NotImplemented(#[from] NotImplemented),
     // Tips: Use this only if it's intended to reject the query
     #[error("Not supported: {0}\nHINT: {1}")]
     NotSupported(String, String),
@@ -198,6 +253,13 @@ pub enum ErrorCode {
         #[backtrace]
         SessionConfigError,
     ),
+}
+
+// TODO(error-handling): automatically generate this impl.
+impl From<NotImplemented> for RwError {
+    fn from(value: NotImplemented) -> Self {
+        ErrorCode::from(value).into()
+    }
 }
 
 pub fn internal_error(msg: impl Into<String>) -> RwError {
@@ -479,14 +541,8 @@ macro_rules! ensure_eq {
 
 #[macro_export]
 macro_rules! bail {
-    ($msg:literal $(,)?) => {
-        return Err($crate::error::anyhow_error!($msg).into())
-    };
-    ($err:expr $(,)?) => {
-        return Err($crate::error::anyhow_error!($err).into())
-    };
-    ($fmt:expr, $($arg:tt)*) => {
-        return Err($crate::error::anyhow_error!($fmt, $($arg)*).into())
+    ($($arg:tt)*) => {
+        return Err($crate::error::anyhow_error!($($arg)*).into())
     };
 }
 
@@ -616,7 +672,7 @@ mod tests {
         check_grpc_error(ErrorCode::TaskNotFound, Code::Internal);
         check_grpc_error(ErrorCode::InternalError(String::new()), Code::Internal);
         check_grpc_error(
-            ErrorCode::NotImplemented(String::new(), None.into()),
+            ErrorCode::NotImplemented(NotImplemented::new("test")),
             Code::Internal,
         );
     }

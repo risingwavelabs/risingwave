@@ -20,6 +20,7 @@ use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     CdcTableDesc, ColumnCatalog, ColumnDesc, TableId, TableVersionId, DEFAULT_SCHEMA_NAME,
     INITIAL_SOURCE_VERSION_ID, INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
@@ -137,13 +138,7 @@ fn ensure_column_options_supported(c: &ColumnDef) -> Result<()> {
             ColumnOption::GeneratedColumns(_) => {}
             ColumnOption::DefaultColumns(_) => {}
             ColumnOption::Unique { is_primary: true } => {}
-            _ => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("column constraints \"{}\"", option_def),
-                    None.into(),
-                )
-                .into())
-            }
+            _ => bail_not_implemented!(issue = None, "column constraints \"{}\"", option_def),
         }
     }
     Ok(())
@@ -177,11 +172,9 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
             //
             // But we don't support real collation, we simply ignore it here.
             if !["C", "POSIX"].contains(&collation.real_value().as_str()) {
-                return Err(ErrorCode::NotImplemented(
-                    "Collate collation other than `C` or `POSIX` is not implemented".into(),
-                    None.into(),
-                )
-                .into());
+                bail_not_implemented!(
+                    "Collate collation other than `C` or `POSIX` is not implemented"
+                );
             }
 
             match data_type {
@@ -359,13 +352,7 @@ pub fn ensure_table_constraints_supported(table_constraints: &[TableConstraint])
                 columns: _,
                 is_primary: true,
             } => {}
-            _ => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("table constraint \"{}\"", constraint),
-                    None.into(),
-                )
-                .into())
-            }
+            _ => bail_not_implemented!("table constraint \"{}\"", constraint),
         }
     }
     Ok(())
