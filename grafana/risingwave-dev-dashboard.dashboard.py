@@ -800,8 +800,8 @@ def section_streaming(outer_panels):
                     "The figure shows the number of rows written into each materialized view per second.",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_mview_input_row_count')}[$__rate_interval])) by (actor_id, table_id) * on(actor_id, table_id) group_left(table_name) {metric('table_info')}",
-                            "mview {{table_id}} {{table_name}} - actor {{actor_id}}",
+                            f"sum(rate({metric('stream_mview_input_row_count')}[$__rate_interval])) by (fragment_id, table_id) * on(fragment_id, table_id) group_left(table_name) {metric('table_info')}",
+                            "mview {{table_id}} {{table_name}} - fragment_id {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -1019,7 +1019,7 @@ def section_streaming_actors(outer_panels):
                     "Memory usage aggregated by materialized views",
                     [
                         panels.target(
-                            f"sum({metric('stream_memory_usage')} * on(table_id, actor_id) group_left(materialized_view_id) {metric('table_info')}) by (materialized_view_id)",
+                            f"sum({metric('stream_memory_usage')} * on(table_id) group_left(materialized_view_id) {metric('table_info')}) by (materialized_view_id)",
                             "materialized view {{materialized_view_id}}",
                         ),
                     ],
