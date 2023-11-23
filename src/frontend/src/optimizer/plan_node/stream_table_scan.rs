@@ -249,18 +249,7 @@ impl StreamTableScan {
         // The required columns from the table (both scan and upstream).
         let upstream_column_ids = match self.stream_scan_type {
             // For backfill, we additionally need the primary key columns.
-            StreamScanType::Backfill => self.core.output_and_pk_column_ids(),
-            // For arrangement backfill, we need all columns.
-            // This is for replication.
-            // Only inside the arrangement backfill executor we will
-            // filter out the columns that are not in the output.
-            StreamScanType::ArrangementBackfill => self
-                .core
-                .table_desc
-                .columns
-                .iter()
-                .map(|c| c.column_id)
-                .collect_vec(),
+            StreamScanType::Backfill | StreamScanType::ArrangementBackfill => self.core.output_and_pk_column_ids(),
             StreamScanType::Chain | StreamScanType::Rearrange | StreamScanType::UpstreamOnly => {
                 self.core.output_column_ids()
             }
@@ -296,41 +285,22 @@ impl StreamTableScan {
             .build_backfill_state_catalog(state)
             .to_internal_table_prost();
 
-        // For arrangement backfill we need to maintain 2 sets of output_indices.
-        // 1. output_indices for the updates.
-        // 2. output_indices for the records from the arrangement table.
-        // FIXME(kwannoel): Actually we should just project in arrangement backfill.
-        // Especially since the output indices can be the same.
+        let output_indices = self
+            .core
+            .output_column_ids()
+            .iter()
+            .map(|i| {
+                upstream_column_ids
+                    .iter()
+                    .position(|&x| x == i.get_id())
+                    .unwrap() as u32
+            })
+            .collect_vec();
+
         let upstream_table_catalog = self
             .get_upstream_state_table()
-            .clone();
-        let output_indices = match self.stream_scan_type {
-            StreamScanType::ArrangementBackfill => self
-                .core
-                .output_column_ids()
-                .iter()
-                .map(|i| {
-                    self.core
-                        .table_desc
-                        .columns
-                        .iter()
-                        .map(|c| c.column_id)
-                        .position(|c| &c == i)
-                        .unwrap() as u32
-                })
-                .collect_vec(),
-            _ => self
-                .core
-                .output_column_ids()
-                .iter()
-                .map(|i| {
-                    upstream_column_ids
-                        .iter()
-                        .position(|&x| x == i.get_id())
-                        .unwrap() as u32
-                })
-                .collect_vec(),
-        };
+            .clone()
+            .to_replicated(output_indices.iter().map(|x| *x as usize).collect_vec());
 
         let arrangement_table = if self.stream_scan_type == StreamScanType::ArrangementBackfill {
             Some(upstream_table_catalog.to_internal_table_prost())

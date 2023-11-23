@@ -119,8 +119,7 @@ pub struct TableCatalog {
     /// `None`.
     pub row_id_index: Option<usize>,
 
-    /// The column indices which are stored in the state store's value with row-encoding. Currently
-    /// is not supported yet and expected to be `[0..columns.len()]`.
+    /// The column indices which are stored in the state store's value with row-encoding.
     pub value_indices: Vec<usize>,
 
     /// The full `CREATE TABLE` or `CREATE MATERIALIZED VIEW` definition of the table.
@@ -486,6 +485,20 @@ impl TableCatalog {
 
     pub fn has_generated_column(&self) -> bool {
         self.columns.iter().any(|c| c.is_generated())
+    }
+
+    /// Creates a new `TableCatalog`.
+    /// It should not clone OR mutate the original table catalog.
+    /// Instead it should move it, so the old definition will not be reused,
+    /// leading to inconsistencies.
+    pub fn to_replicated(self, output_indices: Vec<usize>) -> Self {
+        let mut output_value_indices = vec![];
+        for output_idx in output_indices {
+            if self.value_indices.contains(&output_idx) {
+                output_value_indices.push(output_idx);
+            }
+        }
+        Self { value_indices: output_value_indices, ..self }
     }
 }
 
