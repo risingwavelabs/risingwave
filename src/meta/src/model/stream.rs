@@ -23,6 +23,7 @@ use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::PbTableFragments;
+use risingwave_pb::plan_common::PbExprContext;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     FragmentTypeFlag, PbStreamEnvironment, StreamActor, StreamNode, StreamSource,
@@ -71,6 +72,13 @@ impl StreamEnvironment {
     pub fn to_protobuf(&self) -> PbStreamEnvironment {
         PbStreamEnvironment {
             timezone: self.timezone.clone().unwrap_or("".into()),
+        }
+    }
+
+    pub fn to_expr_context(&self) -> PbExprContext {
+        PbExprContext {
+            // `self.timezone` must always be set; an invalid value is used here for debugging if it's not.
+            time_zone: self.timezone.clone().unwrap_or("Empty Time Zone".into()),
         }
     }
 

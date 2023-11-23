@@ -810,6 +810,8 @@ message StreamActor {
   common.Buffer vnode_bitmap = 8;
   // The SQL definition of this materialized view. Used for debugging only.
   string mview_definition = 9;
+  // Provide the necessary context, e.g. session info like time zone, for the actor.
+  plan_common.ExprContext expr_context = 10;
 }
 
 enum FragmentTypeFlag {
