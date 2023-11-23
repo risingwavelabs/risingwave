@@ -862,6 +862,29 @@ impl CatalogManager {
         }
         commit_meta!(self, tables)?;
 
+        // Note that `tables_to_clean` doesn't include sink/index/table_with_source creation,
+        // because their states are not persisted in the first place, see `start_create_stream_job_procedure`.
+        let event_logs = tables_to_clean
+            .iter()
+            .filter_map(|t| {
+                if t.table_type == TableType::Internal as i32 {
+                    return None;
+                }
+                let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
+                    id: t.id,
+                    name: t.name.to_owned(),
+                    definition: t.definition.to_owned(),
+                    error: "clear during recovery".to_string(),
+                };
+                Some(risingwave_pb::meta::event_log::Event::DirtyStreamJobClear(
+                    event,
+                ))
+            })
+            .collect_vec();
+        if !event_logs.is_empty() {
+            self.env.event_log_manager_ref().add_event_logs(event_logs);
+        }
+
         database_core.clear_creating_stream_jobs();
         let user_core = &mut core.user;
         for table in &tables_to_clean {
@@ -926,11 +949,13 @@ impl CatalogManager {
     /// It is required because failure may not necessarily happen in barrier,
     /// e.g. when cordon nodes.
     /// and we still need some way to cleanup the state.
+    ///
+    /// Returns false if `table_id` is not found.
     pub async fn cancel_create_table_procedure(
         &self,
         table_id: TableId,
         internal_table_ids: Vec<TableId>,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<bool> {
         let table = {
             let core = &mut self.core.lock().await;
             let database_core = &mut core.database;
@@ -940,7 +965,7 @@ impl CatalogManager {
                     "table_id {} missing when attempting to cancel job, could be cleaned on recovery",
                     table_id
                 );
-                return Ok(());
+                return Ok(false);
             };
             // `Unspecified` maps to Created state, due to backwards compatibility.
             // `Created` states should not be cancelled.
@@ -984,7 +1009,7 @@ impl CatalogManager {
             }
         }
 
-        Ok(())
+        Ok(true)
     }
 
     /// return id of streaming jobs in the database which need to be dropped by stream manager.

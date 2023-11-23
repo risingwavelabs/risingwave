@@ -161,6 +161,11 @@ where
     }
 
     async fn run_consumer(self) -> StreamResult<()> {
+        fail::fail_point!("start_actors_err", |_| Err(anyhow::anyhow!(
+            "intentional start_actors_err"
+        )
+        .into()));
+
         let id = self.actor_context.id;
 
         let span_name = format!("Actor {id}");
