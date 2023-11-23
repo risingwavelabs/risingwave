@@ -73,10 +73,26 @@ pub fn decode(data: &str, format: &str) -> Result<Box<[u8]>> {
     }
 }
 
+enum CharacterSet {
+    UTF8,
+}
+
+impl CharacterSet {
+    fn conversion(encoding: &str) -> Result<Self> {
+        match encoding.to_uppercase().as_str() {
+            "UTF8" | "UTF-8" => Ok(Self::UTF8),
+            _ => Err(ExprError::InvalidParam {
+                name: "encoding",
+                reason: format!("unrecognized encoding: \"{}\"", encoding).into(),
+            }),
+        }
+    }
+}
+
 #[function("convert_from(bytea, varchar) -> varchar")]
 pub fn convert_from(data: &[u8], src_encoding: &str, writer: &mut impl Write) -> Result<()> {
-    match src_encoding.to_uppercase().as_str() {
-        "UTF8" | "UTF-8" => {
+    match CharacterSet::conversion(src_encoding)? {
+        CharacterSet::UTF8 => {
             let text = String::from_utf8(data.to_vec()).map_err(|e| ExprError::InvalidParam {
                 name: "data",
                 reason: e.to_string().into(),
@@ -84,10 +100,13 @@ pub fn convert_from(data: &[u8], src_encoding: &str, writer: &mut impl Write) ->
             writer.write_str(&text).unwrap();
             Ok(())
         }
-        _ => Err(ExprError::InvalidParam {
-            name: "src_encoding",
-            reason: format!("unrecognized encoding: \"{}\"", src_encoding).into(),
-        }),
+    }
+}
+
+#[function("convert_to(varchar, varchar) -> bytea")]
+pub fn convert_to(string: &str, dest_encoding: &str) -> Result<Box<[u8]>> {
+    match CharacterSet::conversion(dest_encoding)? {
+        CharacterSet::UTF8 => Ok(string.as_bytes().into()),
     }
 }
 

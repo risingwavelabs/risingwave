@@ -222,7 +222,8 @@ impl ExprVisitor for ImpureAnalyzer {
             | expr_node::Type::ArrayTransform
             | expr_node::Type::Greatest
             | expr_node::Type::Least
-            | expr_node::Type::ConvertFrom =>
+            | expr_node::Type::ConvertFrom
+            | expr_node::Type::ConvertTo =>
             // expression output is deterministic(same result for the same input)
             {
                 let x = func_call

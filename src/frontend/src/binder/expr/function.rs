@@ -804,6 +804,7 @@ impl Binder {
                 ("encode", raw_call(ExprType::Encode)),
                 ("decode", raw_call(ExprType::Decode)),
                 ("convert_from", raw_call(ExprType::ConvertFrom)),
+                ("convert_to", raw_call(ExprType::ConvertTo)),
                 ("sha1", raw_call(ExprType::Sha1)),
                 ("sha224", raw_call(ExprType::Sha224)),
                 ("sha256", raw_call(ExprType::Sha256)),
