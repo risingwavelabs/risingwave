@@ -66,10 +66,8 @@ use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 use tower::Layer;
 
-use crate::memory_management::memory_manager::GlobalMemoryManager;
-use crate::memory_management::{
-    reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB,
-};
+use crate::memory::config::{reserve_memory_bytes, storage_memory_config, MIN_COMPUTE_MEMORY_MB};
+use crate::memory::manager::GlobalMemoryManager;
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::GLOBAL_EXCHANGE_SERVICE_METRICS;

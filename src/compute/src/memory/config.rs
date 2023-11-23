@@ -1,23 +1,3 @@
-// Copyright 2023 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-pub mod memory_manager;
-
-// Only enable the non-trivial policies on Linux as it relies on statistics from `jemalloc-ctl`
-// which might be inaccurate on other platforms.
-pub mod policy;
-
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
@@ -29,20 +9,22 @@ pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 /// The memory reserved for system usage (stack and code segment of processes, allocation
 /// overhead, network buffer, etc.) in megabytes.
 pub const MIN_SYSTEM_RESERVED_MEMORY_MB: usize = 512;
-pub const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.2;
 
-pub const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
+const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.2;
 
-pub const COMPACTOR_MEMORY_PROPORTION: f64 = 0.1;
+const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
 
-pub const STORAGE_BLOCK_CACHE_MEMORY_PROPORTION: f64 = 0.3;
+const COMPACTOR_MEMORY_PROPORTION: f64 = 0.1;
 
-pub const STORAGE_META_CACHE_MAX_MEMORY_MB: usize = 4096;
-pub const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
-pub const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
-pub const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 50;
-// Since the new feature prefetch does not cost much memory, we set a large value by default for performance. If we meet OOM during long time batch query, we shall reduce this configuration.
-pub const STORAGE_DEFAULT_LARGE_QUERY_MEMORY_USAGE_MB: usize = 32 * 1024;
+const STORAGE_BLOCK_CACHE_MEMORY_PROPORTION: f64 = 0.3;
+
+const STORAGE_META_CACHE_MAX_MEMORY_MB: usize = 4096;
+const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
+const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
+const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 50;
+
+/// Since the new feature prefetch does not cost much memory, we set a large value by default for performance. If we meet OOM during long time batch query, we shall reduce this configuration.
+const STORAGE_DEFAULT_LARGE_QUERY_MEMORY_USAGE_MB: usize = 32 * 1024;
 
 /// Each compute node reserves some memory for stack and code segment of processes, allocation
 /// overhead, network buffer, etc. based on `SYSTEM_RESERVED_MEMORY_PROPORTION`. The reserve memory

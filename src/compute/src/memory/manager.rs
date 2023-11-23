@@ -33,8 +33,6 @@ pub struct GlobalMemoryManager {
     memory_control_policy: Mutex<JemallocAndJvmMemoryControl>,
 }
 
-pub type GlobalMemoryManagerRef = Arc<GlobalMemoryManager>;
-
 impl GlobalMemoryManager {
     // Arbitrarily set a minimal barrier interval in case it is too small,
     // especially when it's 0.
