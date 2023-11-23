@@ -129,32 +129,30 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
                     return Err(not_found_err.into());
                 }
             }
+        } else if let Ok(sink) = binder.bind_sink_by_name(object_name.clone()) {
+            let columns = sink.sink_catalog.full_columns().to_vec();
+            let pk_columns = sink
+                .sink_catalog
+                .downstream_pk_indices()
+                .into_iter()
+                .map(|idx| columns[idx].column_desc.clone())
+                .collect_vec();
+            let dist_columns = sink
+                .sink_catalog
+                .distribution_key
+                .iter()
+                .map(|idx| columns[*idx].column_desc.clone())
+                .collect_vec();
+            (
+                columns,
+                pk_columns,
+                dist_columns,
+                vec![],
+                sink.sink_catalog.name.clone(),
+                None,
+            )
         } else {
-            if let Ok(sink) = binder.bind_sink_by_name(object_name.clone()) {
-                let columns = sink.sink_catalog.full_columns().to_vec();
-                let pk_columns = sink
-                    .sink_catalog
-                    .downstream_pk_indices()
-                    .into_iter()
-                    .map(|idx| columns[idx].column_desc.clone())
-                    .collect_vec();
-                let dist_columns = sink
-                    .sink_catalog
-                    .distribution_key
-                    .iter()
-                    .map(|idx| columns[*idx].column_desc.clone())
-                    .collect_vec();
-                (
-                    columns,
-                    pk_columns,
-                    dist_columns,
-                    vec![],
-                    sink.sink_catalog.name.clone(),
-                    None,
-                )
-            } else {
-                return Err(not_found_err.into());
-            }
+            return Err(not_found_err.into());
         };
 
     // Convert all column descs to rows
