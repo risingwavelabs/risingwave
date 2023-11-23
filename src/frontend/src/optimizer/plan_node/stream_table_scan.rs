@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{Field, TableDesc};
+use risingwave_common::catalog::Field;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
@@ -97,14 +97,14 @@ impl StreamTableScan {
     pub fn to_index_scan(
         &self,
         index_name: &str,
-        index_table_desc: Rc<TableDesc>,
+        index_table_catalog: Arc<TableCatalog>,
         primary_to_secondary_mapping: &BTreeMap<usize, usize>,
         function_mapping: &HashMap<FunctionCall, usize>,
         stream_scan_type: StreamScanType,
     ) -> StreamTableScan {
         let logical_index_scan = self.core.to_index_scan(
             index_name,
-            index_table_desc,
+            index_table_catalog,
             primary_to_secondary_mapping,
             function_mapping,
         );
@@ -116,6 +116,11 @@ impl StreamTableScan {
 
     pub fn stream_scan_type(&self) -> StreamScanType {
         self.stream_scan_type
+    }
+
+    // TODO: Add note to reviewer about safety, because of `generic::Scan` limitation.
+    fn get_upstream_state_table(&self) -> &TableCatalog {
+        self.core.table_catalog.as_ref()
     }
 
     /// Build catalog for backfill state
@@ -245,6 +250,17 @@ impl StreamTableScan {
         let upstream_column_ids = match self.stream_scan_type {
             // For backfill, we additionally need the primary key columns.
             StreamScanType::Backfill => self.core.output_and_pk_column_ids(),
+            // For arrangement backfill, we need all columns.
+            // This is for replication.
+            // Only inside the arrangement backfill executor we will
+            // filter out the columns that are not in the output.
+            StreamScanType::ArrangementBackfill => self
+                .core
+                .table_desc
+                .columns
+                .iter()
+                .map(|c| c.column_id)
+                .collect_vec(),
             StreamScanType::Chain | StreamScanType::Rearrange | StreamScanType::UpstreamOnly => {
                 self.core.output_column_ids()
             }
@@ -270,18 +286,6 @@ impl StreamTableScan {
 
         let upstream_schema = snapshot_schema.clone();
 
-        let output_indices = self
-            .core
-            .output_column_ids()
-            .iter()
-            .map(|i| {
-                upstream_column_ids
-                    .iter()
-                    .position(|&x| x == i.get_id())
-                    .unwrap() as u32
-            })
-            .collect_vec();
-
         // TODO: snapshot read of upstream mview
         let batch_plan_node = BatchPlanNode {
             table_desc: Some(self.core.table_desc.to_protobuf()),
@@ -292,6 +296,48 @@ impl StreamTableScan {
             .build_backfill_state_catalog(state)
             .to_internal_table_prost();
 
+        // For arrangement backfill we need to maintain 2 sets of output_indices.
+        // 1. output_indices for the updates.
+        // 2. output_indices for the records from the arrangement table.
+        // FIXME(kwannoel): Actually we should just project in arrangement backfill.
+        // Especially since the output indices can be the same.
+        let upstream_table_catalog = self
+            .get_upstream_state_table()
+            .clone();
+        let output_indices = match self.stream_scan_type {
+            StreamScanType::ArrangementBackfill => self
+                .core
+                .output_column_ids()
+                .iter()
+                .map(|i| {
+                    self.core
+                        .table_desc
+                        .columns
+                        .iter()
+                        .map(|c| c.column_id)
+                        .position(|c| &c == i)
+                        .unwrap() as u32
+                })
+                .collect_vec(),
+            _ => self
+                .core
+                .output_column_ids()
+                .iter()
+                .map(|i| {
+                    upstream_column_ids
+                        .iter()
+                        .position(|&x| x == i.get_id())
+                        .unwrap() as u32
+                })
+                .collect_vec(),
+        };
+
+        let arrangement_table = if self.stream_scan_type == StreamScanType::ArrangementBackfill {
+            Some(upstream_table_catalog.to_internal_table_prost())
+        } else {
+            None
+        };
+
         let node_body = PbNodeBody::StreamScan(StreamScanNode {
             table_id: self.core.table_desc.table_id.table_id,
             stream_scan_type: self.stream_scan_type as i32,
@@ -301,6 +347,7 @@ impl StreamTableScan {
             // The table desc used by backfill executor
             table_desc: Some(self.core.table_desc.to_protobuf()),
             state_table: Some(catalog),
+            arrangement_table,
             rate_limit: self.base.ctx().overwrite_options().streaming_rate_limit,
             ..Default::default()
         });
@@ -308,6 +355,7 @@ impl StreamTableScan {
         PbStreamNode {
             fields: self.schema().to_prost(),
             input: vec![
+                // Upstream updates
                 // The merge node body will be filled by the `ActorBuilder` on the meta service.
                 PbStreamNode {
                     node_body: Some(PbNodeBody::Merge(Default::default())),
@@ -316,6 +364,7 @@ impl StreamTableScan {
                     stream_key: vec![], // not used
                     ..Default::default()
                 },
+                // Snapshot read
                 PbStreamNode {
                     node_body: Some(PbNodeBody::BatchPlan(batch_plan_node)),
                     operator_id: self.batch_plan_id.0 as u64,
@@ -326,7 +375,6 @@ impl StreamTableScan {
                     append_only: true,
                 },
             ],
-
             node_body: Some(node_body),
             stream_key,
             operator_id: self.base.id().0 as u64,

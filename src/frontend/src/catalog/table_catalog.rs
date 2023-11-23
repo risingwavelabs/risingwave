@@ -705,7 +705,7 @@ mod tests {
                 initialized_at_epoch: None,
                 cleaned_by_watermark: false,
                 create_type: CreateType::Foreground,
-                description: Some("description".to_string())
+                description: Some("description".to_string()),
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

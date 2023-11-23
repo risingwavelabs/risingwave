@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::default::Default;
 use std::ops::Bound;
 use std::ops::Bound::*;
 use std::sync::Arc;
@@ -28,7 +29,7 @@ use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, once, CompactedRow, Once, OwnedRow, Row, RowExt};
-use risingwave_common::types::{Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::row_serde::OrderedRowSerde;
@@ -138,13 +139,17 @@ pub struct StateTableInner<
 
     /// Watermark cache
     watermark_cache: StateTableWatermarkCache,
+
+    /// Data Types
+    /// We will need to use to build data chunks from state table rows.
+    data_types: Vec<DataType>,
 }
 
 /// `StateTable` will use `BasicSerde` as default
 pub type StateTable<S> = StateTableInner<S, BasicSerde>;
 /// `ReplicatedStateTable` is meant to replicate upstream shared buffer.
 /// Used for `ArrangementBackfill` executor.
-pub type ReplicatedStateTable<S> = StateTableInner<S, BasicSerde, true>;
+pub type ReplicatedStateTable<S, SD> = StateTableInner<S, SD, true>;
 /// `WatermarkCacheStateTable` caches the watermark column.
 /// It will reduce state cleaning overhead.
 pub type WatermarkCacheStateTable<S> =
@@ -227,6 +232,17 @@ where
             .iter()
             .map(|col| col.column_desc.as_ref().unwrap().into())
             .collect();
+        let data_types: Vec<DataType> = table_catalog
+            .columns
+            .iter()
+            .map(|col| {
+                col.get_column_desc()
+                    .unwrap()
+                    .get_column_type()
+                    .unwrap()
+                    .into()
+            })
+            .collect();
         let order_types: Vec<OrderType> = table_catalog
             .pk
             .iter()
@@ -299,9 +315,15 @@ where
             Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
             Arc::from(table_columns.into_boxed_slice()),
         );
+
+        // If state table has versioning, that means it supports
+        // Schema change. In that case, the row encoding should be column aware as well.
+        // Otherwise both will be false.
+        // NOTE(kwannoel): Replicated table will follow upstream table's versioning. I'm not sure
+        // If ALTER TABLE will propagate to this replicated table as well. Ideally it won't
         assert_eq!(
-            row_serde.kind().is_column_aware(),
-            table_catalog.version.is_some()
+            table_catalog.version.is_some(),
+            row_serde.kind().is_column_aware()
         );
 
         let watermark_cache = if USE_WATERMARK_CACHE {
@@ -326,6 +348,7 @@ where
             state_clean_watermark: None,
             prev_cleaned_watermark: None,
             watermark_cache,
+            data_types,
         }
     }
 
@@ -458,7 +481,10 @@ where
                 TableOption::default(),
             ))
             .await;
-
+        let data_types: Vec<DataType> = table_columns
+            .iter()
+            .map(|col| col.data_type.clone())
+            .collect();
         let pk_data_types = pk_indices
             .iter()
             .map(|i| table_columns[*i].data_type.clone())
@@ -470,7 +496,6 @@ where
         } else {
             StateTableWatermarkCache::new(0)
         };
-
         Self {
             table_id,
             local_store: local_state_store,
@@ -495,7 +520,12 @@ where
             state_clean_watermark: None,
             prev_cleaned_watermark: None,
             watermark_cache,
+            data_types,
         }
+    }
+
+    pub fn get_data_types(&self) -> &[DataType] {
+        &self.data_types
     }
 
     pub fn table_id(&self) -> u32 {
@@ -541,7 +571,8 @@ where
         compute_vnode(pk, &self.dist_key_in_pk_indices, &self.vnodes)
     }
 
-    // TODO: remove, should not be exposed to user
+    /// NOTE(kwannoel): This is used by backfill.
+    /// We want to check pk indices of upstream table.
     pub fn pk_indices(&self) -> &[usize] {
         &self.pk_indices
     }
@@ -1139,12 +1170,11 @@ where
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
         let read_options = ReadOptions {
             prefix_hint,
-            ignore_range_tombstone: false,
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
-            read_version_from_backup: false,
             prefetch_options,
             cache_policy: CachePolicy::Fill(CachePriority::High),
+            ..Default::default()
         };
         let table_key_range = map_table_key_range(key_range);
 
@@ -1225,7 +1255,6 @@ where
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
-
         let memcomparable_range_with_vnode =
             prefixed_range(memcomparable_range, &vnode.to_be_bytes());
 
@@ -1271,12 +1300,9 @@ where
 
         let read_options = ReadOptions {
             prefix_hint,
-            ignore_range_tombstone: false,
-            retention_seconds: None,
             table_id: self.table_id,
-            read_version_from_backup: false,
-            prefetch_options: Default::default(),
             cache_policy: CachePolicy::Fill(CachePriority::High),
+            ..Default::default()
         };
 
         self.local_store

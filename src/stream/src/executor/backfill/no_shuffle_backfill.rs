@@ -36,7 +36,7 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
     compute_bounds, construct_initial_finished_state, get_new_pos, iter_chunks, mapping_chunk,
-    mapping_message, mark_chunk, owned_row_iter,
+    mapping_message, mark_chunk, owned_row_iter, METADATA_STATE_LEN,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -44,9 +44,6 @@ use crate::executor::{
     Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::{ActorId, CreateMviewProgress};
-
-/// vnode, `is_finished`, `row_count`, all occupy 1 column each.
-const METADATA_STATE_LEN: usize = 3;
 
 /// Schema: | vnode | pk ... | `backfill_finished` | `row_count` |
 /// We can decode that into `BackfillState` on recovery.
@@ -612,14 +609,14 @@ where
                 PrefetchOptions::new_for_large_range_scan(),
             )
             .await?;
-
         let row_iter = owned_row_iter(iter);
         pin_mut!(row_iter);
 
         #[for_await]
         for chunk in iter_chunks(row_iter, builder) {
-            yield chunk?;
+            yield Some(chunk?);
         }
+        yield None;
     }
 
     async fn persist_state(

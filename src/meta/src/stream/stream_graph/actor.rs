@@ -173,6 +173,7 @@ impl ActorBuilder {
                     downstream_fragment_id: self.fragment_id,
                 }];
 
+                // FIXME: This may not hold for Arrangement Backfill.
                 // As we always use the `NoShuffle` exchange for MV on MV, there should be only one
                 // upstream.
                 let upstream_actor_id = upstreams.actors.as_global_ids();
