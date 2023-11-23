@@ -182,7 +182,7 @@ impl TableCatalogBuilder {
             // It should be ignored for internal tables.
             create_type: CreateType::Foreground,
             description: None,
-            output_indices: vec![],
+            output_column_ids: vec![],
         }
     }
 

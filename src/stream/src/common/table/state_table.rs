@@ -26,7 +26,7 @@ use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
-use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption};
+use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption, ColumnId};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, once, CompactedRow, Once, OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
@@ -55,6 +55,7 @@ use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution, KeyedRow};
 use risingwave_storage::StateStore;
 use tracing::{trace, Instrument};
+use risingwave_storage::row_serde::find_columns_by_ids;
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
@@ -274,6 +275,14 @@ where
                 .collect()
         };
 
+        let column_ids: Vec<ColumnId> = table_catalog
+            .get_output_column_ids()
+            .iter()
+            .map(ColumnId::from)
+            .collect();
+
+        let (_output_columns, output_indices) = find_columns_by_ids(&table_columns, &column_ids);
+
         let table_option = TableOption::build_table_option(table_catalog.get_properties());
         let new_local_options = if IS_REPLICATED {
             NewLocalOptions::new_replicated(table_id, is_consistent_op, table_option)
@@ -334,12 +343,6 @@ where
         } else {
             StateTableWatermarkCache::new(0)
         };
-
-        let output_indices = table_catalog
-            .output_indices
-            .iter()
-            .map(|i| *i as usize)
-            .collect_vec();
 
         Self {
             table_id,
@@ -878,6 +881,12 @@ where
     // allow(izip, which use zip instead of zip_eq)
     #[allow(clippy::disallowed_methods)]
     pub fn write_chunk(&mut self, chunk: StreamChunk) {
+        // let chunk = if IS_REPLICATED {
+        //     // Need to fill non-output-indices with NULL.
+        //     // Otherwise it is inconsistent with the schema.
+        // } else {
+        //     chunk
+        // };
         let (chunk, op) = chunk.into_parts();
 
         let vnodes = compute_chunk_vnode(

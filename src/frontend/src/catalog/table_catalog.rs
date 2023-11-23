@@ -157,7 +157,7 @@ pub struct TableCatalog {
     pub description: Option<String>,
 
     /// Output indices for replicated state table.
-    pub output_indices: Vec<usize>,
+    pub output_column_ids: Vec<ColumnId>,
 }
 
 // How the stream job was created will determine
@@ -277,17 +277,8 @@ impl TableCatalog {
         self
     }
 
-    pub fn with_output_column_ids(mut self, output_column_ids: &[ColumnId]) -> Self {
-        let output_indices = output_column_ids
-            .iter()
-            .map(|&x| {
-                self.columns()
-                    .iter()
-                    .position(|i| i.column_desc.column_id == x)
-                    .unwrap()
-            })
-            .collect_vec();
-        self.output_indices = output_indices;
+    pub fn with_output_column_ids(mut self, output_column_ids: Vec<ColumnId>) -> Self {
+        self.output_column_ids = output_column_ids;
         self
     }
 
@@ -459,7 +450,7 @@ impl TableCatalog {
             stream_job_status: PbStreamJobStatus::Creating.into(),
             create_type: self.create_type.to_prost().into(),
             description: self.description.clone(),
-            output_indices: self.output_indices.iter().map(|x| *x as _).collect(),
+            output_column_ids: self.output_column_ids.iter().map(|id| { id.get_id() }).collect(),
         }
     }
 
@@ -574,7 +565,7 @@ impl From<PbTable> for TableCatalog {
             cleaned_by_watermark: matches!(tb.cleaned_by_watermark, true),
             create_type: CreateType::from_prost(create_type),
             description: tb.description,
-            output_indices: tb.output_indices.iter().map(|x| *x as _).collect(),
+            output_column_ids: tb.output_column_ids.iter().map(ColumnId::from).collect(),
         }
     }
 }
@@ -668,7 +659,7 @@ mod tests {
             stream_job_status: PbStreamJobStatus::Creating.into(),
             create_type: PbCreateType::Foreground.into(),
             description: Some("description".to_string()),
-            output_indices: vec![],
+            ..Default::default()
         }
         .into();
 
@@ -726,7 +717,7 @@ mod tests {
                 cleaned_by_watermark: false,
                 create_type: CreateType::Foreground,
                 description: Some("description".to_string()),
-                output_indices: vec![],
+                output_column_ids: vec![],
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

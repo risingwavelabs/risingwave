@@ -252,7 +252,7 @@ impl StreamMaterialize {
             cleaned_by_watermark: false,
             create_type: CreateType::Foreground, // Will be updated in the handler itself.
             description: None,
-            output_indices: vec![],
+            output_column_ids: vec![],
         })
     }
 

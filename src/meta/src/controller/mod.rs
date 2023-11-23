@@ -135,7 +135,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
                 .optional_associated_source_id
                 .map(|id| PbOptionalAssociatedSourceId::AssociatedSourceId(id as _)),
             description: None,
-            output_indices: vec![],
+            output_column_ids: vec![],
         }
     }
 }
