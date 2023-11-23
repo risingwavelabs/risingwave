@@ -371,7 +371,7 @@ impl SstableStore {
             }
             offset = end;
         }
-        return Ok(first_holder.unwrap());
+        Ok(first_holder.unwrap())
     }
 
     pub async fn get_block_response(
