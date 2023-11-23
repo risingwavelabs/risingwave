@@ -5740,7 +5740,6 @@ dependencies = [
  "ordered-float 4.1.1",
  "percent-encoding",
  "rand",
- "serde_json",
  "thiserror",
 ]
 
@@ -11571,8 +11570,6 @@ dependencies = [
  "num-integer",
  "num-iter",
  "num-traits",
- "opentelemetry_api",
- "opentelemetry_sdk 0.21.1",
  "ordered-float 3.9.1",
  "parking_lot 0.12.1",
  "parking_lot_core 0.9.8",
