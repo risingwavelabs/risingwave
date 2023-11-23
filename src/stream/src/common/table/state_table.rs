@@ -23,7 +23,7 @@ use futures::{pin_mut, FutureExt, Stream, StreamExt};
 use futures_async_stream::for_await;
 use itertools::{izip, Itertools};
 use risingwave_common::array::stream_record::Record;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption, ColumnId};
@@ -39,7 +39,7 @@ use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, map_table_key_range, next_key, prefixed_range, range_of_prefix,
     start_bound_of_excluded_prefix, TableKey,
 };
-use risingwave_pb::catalog::Table;
+use risingwave_pb::catalog::{Table};
 use risingwave_storage::error::{StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
@@ -55,7 +55,8 @@ use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution, KeyedRow};
 use risingwave_storage::StateStore;
 use tracing::{trace, Instrument};
-use risingwave_storage::row_serde::find_columns_by_ids;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_storage::row_serde::{get_output_column_indices};
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
 use crate::cache::cache_may_stale;
@@ -146,7 +147,15 @@ pub struct StateTableInner<
     data_types: Vec<DataType>,
 
     /// Output indices, only applicable for replicated state tables.
+    /// They MUST include pk indices as a subset.
     output_indices: Vec<usize>,
+
+    /// "i" here refers to the base state_table's actual schema.
+    /// "o" here refers to the replicated state table's output schema.
+    /// This mapping is used to reconstruct a row being written from replicated state table.
+    /// Such that the schema of this row will match the full schema of the base state table.
+    /// It is only applicable for replication.
+    i2o_mapping: ColIndexMapping,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -281,7 +290,10 @@ where
             .map(ColumnId::from)
             .collect();
 
-        let (_output_columns, output_indices) = find_columns_by_ids(&table_columns, &column_ids);
+        let (i2o_mapping, output_indices) = get_output_column_indices(
+            &table_columns,
+            &column_ids,
+        );
 
         let table_option = TableOption::build_table_option(table_catalog.get_properties());
         let new_local_options = if IS_REPLICATED {
@@ -362,6 +374,7 @@ where
             watermark_cache,
             data_types,
             output_indices,
+            i2o_mapping,
         }
     }
 
@@ -509,7 +522,6 @@ where
         } else {
             StateTableWatermarkCache::new(0)
         };
-        let output_indices = vec![];
 
         Self {
             table_id,
@@ -536,7 +548,8 @@ where
             prev_cleaned_watermark: None,
             watermark_cache,
             data_types,
-            output_indices,
+            output_indices: vec![],
+            i2o_mapping: ColIndexMapping::new(vec![], 0),
         }
     }
 
@@ -877,16 +890,33 @@ where
         }
     }
 
+    fn fill_non_output_indices(&self, chunk: StreamChunk) -> StreamChunk {
+        let cardinality = chunk.cardinality();
+        let (ops, columns, vis) = chunk.into_inner();
+        let mut full_columns = Vec::with_capacity(self.data_types.len());
+        for (i, data_type) in self.data_types.iter().enumerate() {
+            if let Some(j) = self.i2o_mapping.try_map(i) {
+                full_columns.push(columns[j].clone());
+            } else {
+                let mut column_builder = ArrayImplBuilder::with_type(cardinality, data_type.clone());
+                column_builder.append_n_null(cardinality);
+                let column: ArrayRef = column_builder.finish().into();
+                full_columns.push(column)
+            }
+        }
+        let data_chunk = DataChunk::new(columns, vis);
+        StreamChunk::from_parts(ops, data_chunk)
+    }
+
     /// Write batch with a `StreamChunk` which should have the same schema with the table.
     // allow(izip, which use zip instead of zip_eq)
     #[allow(clippy::disallowed_methods)]
     pub fn write_chunk(&mut self, chunk: StreamChunk) {
-        // let chunk = if IS_REPLICATED {
-        //     // Need to fill non-output-indices with NULL.
-        //     // Otherwise it is inconsistent with the schema.
-        // } else {
-        //     chunk
-        // };
+        let chunk = if IS_REPLICATED {
+            self.fill_non_output_indices(chunk)
+        } else {
+            chunk
+        };
         let (chunk, op) = chunk.into_parts();
 
         let vnodes = compute_chunk_vnode(

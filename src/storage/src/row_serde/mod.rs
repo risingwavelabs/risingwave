@@ -12,36 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-use either::Either;
-use itertools::Itertools;
+use std::collections::HashMap;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::row::{OwnedRow, Project, RowExt};
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 pub mod row_serde_util;
 
 pub mod value_serde;
 
-/// Partition non-output columns and output columns.
-///
-/// # Returns
-/// A pair of non-output column_indices and output column_indices
-pub fn partition_output_column_indices(
+/// Gets pair of i2o column mapping and output column_indices
+pub fn get_output_column_indices(
     table_columns: &[ColumnDesc],
     output_column_ids: &[ColumnId],
-) -> (Vec<usize>, Vec<usize>) {
-    let output_column_ids = output_column_ids.iter().collect::<HashSet<_>>();
-    let (pruned_indices, output_indices) = table_columns
+) -> (ColIndexMapping, Vec<usize>) {
+    let output_column_ids_to_input_idx = output_column_ids
         .iter()
         .enumerate()
-        .partition_map(|(index, c)| {
-            if output_column_ids.contains(&c.column_id) {
-                Either::Right(index)
-            } else {
-                Either::Left(index)
-            }
-        });
-    (pruned_indices, output_indices)
+        .map(|(pos, id) | (*id, pos))
+        .collect::<HashMap<_, _>>();
+    let mut i2o_mapping = vec![None; table_columns.len()];
+    let mut output_column_indices = vec![];
+    for (i, table_column) in table_columns.iter().enumerate() {
+        if let Some(pos) = output_column_ids_to_input_idx.get(&table_column.column_id) {
+            i2o_mapping[i] = Some(*pos);
+            output_column_indices.push(i);
+        }
+    }
+    let i2o_mapping = ColIndexMapping::new(i2o_mapping, output_column_indices.len());
+    (i2o_mapping, output_column_indices)
 }
 
 /// Find out the [`ColumnDesc`] by a list of [`ColumnId`].
@@ -53,7 +52,6 @@ pub fn find_columns_by_ids(
     table_columns: &[ColumnDesc],
     column_ids: &[ColumnId],
 ) -> (Vec<ColumnDesc>, Vec<usize>) {
-    use std::collections::HashMap;
     let mut table_columns = table_columns
         .iter()
         .enumerate()
@@ -85,11 +83,18 @@ impl ColumnMapping {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Debug;
     use risingwave_common::types::DataType;
+    use expect_test::{expect, Expect};
     use super::*;
 
+    fn check(actual: impl Debug, expect: Expect) {
+        let actual = format!("{:#?}", actual);
+        expect.assert_eq(&actual);
+    }
+
     #[test]
-    fn test_partition_output_column_indices(
+    fn test_get_output_column_indices(
     ) {
         let output_column_ids = vec![ColumnId::new(1), ColumnId::new(2)];
         let table_columns = vec![
@@ -97,11 +102,13 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(2), DataType::Int32),
             ColumnDesc::unnamed(ColumnId::new(3), DataType::Varchar),
         ];
-        let (non_output_indices, output_indices) =
-            partition_output_column_indices(&table_columns, &output_column_ids);
-        let expected_non_output_indices = vec![2];
-        let expected_output_indices = vec![0, 1];
-        assert_eq!(non_output_indices, expected_non_output_indices);
-        assert_eq!(output_indices, expected_output_indices);
+        let (i2o_mapping, output_indices) =
+            get_output_column_indices(&table_columns, &output_column_ids);
+        check(i2o_mapping, expect!["ColIndexMapping(source_size:3, target_size:2, mapping:0->0,1->1)"]);
+        check(output_indices, expect![[r#"
+            [
+                0,
+                1,
+            ]"#]]);
     }
 }
