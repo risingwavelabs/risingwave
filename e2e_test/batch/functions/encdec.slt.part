@@ -45,6 +45,7 @@ SELECT decode('6a6f616e6e61', 'hex');
 \x6a6f616e6e61
 
 # convert
+# convert_from
 query T
 SELECT convert_from('\xc3b1', 'UTF8');
 ----
@@ -85,3 +86,29 @@ query T
 SELECT convert_from('\x6a6f616e6e61', 'uTF-8');
 ----
 joanna
+
+# convert_to
+query T
+SELECT convert_to('some_text', 'UTF8');
+----
+\x736f6d655f74657874
+
+query T
+SELECT convert_to('柠檬', 'UTF8');
+----
+\xe69fa0e6aaac
+
+query T
+SELECT convert_to('🍋', 'UTF8');
+----
+\xf09f8d8b
+
+query T
+SELECT convert_from(convert_to('good', 'UTF8'), 'UTF8');
+----
+good
+
+query T
+SELECT convert_from(convert_to('wow🐮', 'UTF8'), 'UTF8');
+----
+wow🐮
