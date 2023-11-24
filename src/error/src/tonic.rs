@@ -144,7 +144,13 @@ impl std::fmt::Display for TonicStatusWrapper {
         {
             write!(f, " to {} service", service_name)?;
         }
-        write!(f, " failed: {}: {}", self.0.code(), self.0.message())
+        write!(f, " failed: {}: ", self.0.code())?;
+        if let Some(source) = self.source() {
+            // Prefer the source chain from the `details` field.
+            write!(f, "{}", source)
+        } else {
+            write!(f, "{}", self.0.message())
+        }
     }
 }
 

@@ -18,12 +18,13 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use futures::stream::BoxStream;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
 use rand::seq::SliceRandom;
-use risingwave_batch::executor::{BoxedDataChunkStream, ExecutorBuilder};
+use risingwave_batch::executor::ExecutorBuilder;
 use risingwave_batch::task::{ShutdownToken, TaskId};
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
@@ -129,7 +130,7 @@ impl LocalQueryExecution {
         }
     }
 
-    fn run(self) -> BoxedDataChunkStream {
+    fn run(self) -> BoxStream<'static, Result<DataChunk, RwError>> {
         let span = tracing::info_span!(
             "local_execute",
             query_id = self.query.query_id.id,
@@ -146,8 +147,8 @@ impl LocalQueryExecution {
         let catalog_reader = self.front_env.catalog_reader().clone();
         let auth_context = self.session.auth_context().clone();
         let db_name = self.session.database().to_string();
-        let search_path = self.session.config().get_search_path().clone();
-        let time_zone = self.session.config().get_timezone().to_owned();
+        let search_path = self.session.config().search_path();
+        let time_zone = self.session.config().timezone();
 
         let exec = async move {
             let mut data_stream = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));

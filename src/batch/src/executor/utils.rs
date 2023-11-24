@@ -17,14 +17,14 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
 
+use crate::error::{BatchError, Result};
 use crate::executor::{BoxedDataChunkStream, Executor};
 
 pub type BoxedDataChunkListStream = BoxStream<'static, Result<Vec<DataChunk>>>;
 
 /// Read at least `rows` rows.
-#[try_stream(boxed, ok = Vec<DataChunk>, error = RwError)]
+#[try_stream(boxed, ok = Vec<DataChunk>, error = BatchError)]
 pub async fn batch_read(mut stream: BoxedDataChunkStream, rows: usize) {
     let mut cnt = 0;
     let mut chunk_list = vec![];
@@ -69,7 +69,7 @@ impl BufferChunkExecutor {
         Self { schema, chunk_list }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self) {
         for chunk in self.chunk_list {
             yield chunk
@@ -96,6 +96,6 @@ impl Executor for DummyExecutor {
 }
 
 impl DummyExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_nothing() {}
 }

@@ -153,6 +153,11 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
             }
             StreamScanType::Unspecified => unreachable!(),
         };
-        Ok(FlowControlExecutor::new(executor, node.rate_limit.map(|x| x as _)).boxed())
+        Ok(FlowControlExecutor::new(
+            executor,
+            params.actor_context,
+            node.rate_limit.map(|x| x as _),
+        )
+        .boxed())
     }
 }

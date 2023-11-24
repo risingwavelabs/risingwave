@@ -61,7 +61,6 @@ pub use project::*;
 pub use project_set::*;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PlanNode;
 use risingwave_pb::common::BatchQueryEpoch;
@@ -77,6 +76,7 @@ pub use utils::*;
 pub use values::*;
 
 use self::test_utils::{BlockExecutorBuidler, BusyLoopExecutorBuidler};
+use crate::error::Result;
 use crate::executor::sys_row_seq_scan::SysRowSeqScanExecutorBuilder;
 use crate::task::{BatchTaskContext, ShutdownToken, TaskId};
 

@@ -30,7 +30,7 @@ use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb}
 
 use super::super::utils::TableCatalogBuilder;
 use super::{impl_distill_unit_from_fields, stream, GenericPlanNode, GenericPlanRef};
-use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay, Literal};
+use crate::expr::{Expr, ExprRewriter, ExprVisitor, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::batch::BatchPlanRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, RequiredDist};
@@ -63,6 +63,12 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
         });
     }
 
+    pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.agg_calls.iter().for_each(|call| {
+            call.filter.visit_expr(v);
+        });
+    }
+
     pub(crate) fn output_len(&self) -> usize {
         self.group_key.len() + self.agg_calls.len()
     }
@@ -87,7 +93,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     }
 
     fn two_phase_agg_forced(&self) -> bool {
-        self.ctx().session_ctx().config().get_force_two_phase_agg()
+        self.ctx().session_ctx().config().force_two_phase_agg()
     }
 
     pub fn two_phase_agg_enabled(&self) -> bool {
@@ -138,11 +144,7 @@ impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     }
 
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: IndexSet, input: PlanRef) -> Self {
-        let enable_two_phase = input
-            .ctx()
-            .session_ctx()
-            .config()
-            .get_enable_two_phase_agg();
+        let enable_two_phase = input.ctx().session_ctx().config().enable_two_phase_agg();
         Self {
             agg_calls,
             group_key,

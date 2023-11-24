@@ -200,7 +200,9 @@ pub(crate) async fn start_pinned_version_worker(
     loop {
         min_execute_interval_tick.tick().await;
         // 0. Expire versions.
-        while version_ids_in_use.len() > 1 && let Some(e) = version_ids_in_use.first_entry() {
+        while version_ids_in_use.len() > 1
+            && let Some(e) = version_ids_in_use.first_entry()
+        {
             if e.get().1.elapsed() < max_version_pinning_duration_sec {
                 break;
             }

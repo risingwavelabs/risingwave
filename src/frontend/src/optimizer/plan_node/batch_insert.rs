@@ -23,6 +23,7 @@ use super::generic::GenericPlanRef;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::expr::Expr;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
@@ -113,3 +114,5 @@ impl ToLocalBatch for BatchInsert {
 }
 
 impl ExprRewritable for BatchInsert {}
+
+impl ExprVisitable for BatchInsert {}

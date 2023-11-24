@@ -75,7 +75,7 @@ impl crate::types::to_binary::ToBinary for Serial {
     fn to_binary_with_type(
         &self,
         _ty: &crate::types::DataType,
-    ) -> crate::error::Result<Option<bytes::Bytes>> {
+    ) -> super::to_binary::Result<Option<bytes::Bytes>> {
         let mut output = bytes::BytesMut::new();
         self.0.to_sql(&Type::ANY, &mut output).unwrap();
         Ok(Some(output.freeze()))

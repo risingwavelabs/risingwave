@@ -17,7 +17,6 @@ use std::sync::Arc;
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::estimate_size::collections::MemMonitoredHeap;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
@@ -26,6 +25,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, HeapElem};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::PbExchangeSource;
 
+use crate::error::{BatchError, Result};
 use crate::exchange_source::ExchangeSourceImpl;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, CreateSource, DefaultCreateSource,
@@ -154,7 +154,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> Executor
 /// `self.chunk_size`. It is possible that the chunk's size is smaller than the
 /// `self.chunk_size` as the executor runs out of input from `sources`.
 impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeExecutorImpl<CS, C> {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(mut self: Box<Self>) {
         for source_idx in 0..self.proto_sources.len() {
             let new_source = self.source_creators[source_idx]

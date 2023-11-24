@@ -27,11 +27,11 @@ mod concat_inner;
 pub use backward_concat::*;
 pub use concat_inner::ConcatIteratorInner;
 mod backward_merge;
-pub use backward_merge::*;
+
 mod backward_user;
 pub use backward_user::*;
 mod forward_merge;
-pub use forward_merge::*;
+
 pub mod forward_user;
 mod merge_inner;
 pub use forward_user::*;

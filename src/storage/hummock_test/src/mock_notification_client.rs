@@ -15,9 +15,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common_service::observer_manager::{Channel, NotificationClient};
+use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverError};
 use risingwave_meta::hummock::{HummockManager, HummockManagerRef};
 use risingwave_meta::manager::{MessageStatus, MetaSrvEnv, NotificationManagerRef, WorkerKey};
 use risingwave_pb::backup_service::MetaBackupManifestId;
@@ -50,7 +49,10 @@ impl MockNotificationClient {
 impl NotificationClient for MockNotificationClient {
     type Channel = TestChannel<SubscribeResponse>;
 
-    async fn subscribe(&self, subscribe_type: SubscribeType) -> Result<Self::Channel> {
+    async fn subscribe(
+        &self,
+        subscribe_type: SubscribeType,
+    ) -> Result<Self::Channel, ObserverError> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
         let worker_key = WorkerKey(self.addr.to_protobuf());
@@ -88,13 +90,13 @@ pub fn get_notification_client_for_test(
     )
 }
 
-pub struct TestChannel<T>(UnboundedReceiver<std::result::Result<T, MessageStatus>>);
+pub struct TestChannel<T>(UnboundedReceiver<Result<T, MessageStatus>>);
 
 #[async_trait::async_trait]
 impl<T: Send + 'static> Channel for TestChannel<T> {
     type Item = T;
 
-    async fn message(&mut self) -> std::result::Result<Option<T>, MessageStatus> {
+    async fn message(&mut self) -> Result<Option<T>, MessageStatus> {
         match self.0.recv().await {
             None => Ok(None),
             Some(result) => result.map(|r| Some(r)),
