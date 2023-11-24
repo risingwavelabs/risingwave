@@ -35,7 +35,7 @@ RUN rustup self update \
   && rustup show \
   && rustup component add rustfmt
 
-
+RUN cargo install flamegraph
 # TODO: cargo-chef doesn't work well now, because we update Cargo.lock very often.
 # We may consider sccache instead.
 
@@ -115,6 +115,9 @@ FROM base AS risingwave
 
 LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
 
+RUN apt-get update && apt-get -y install linux-tools-generic \
+    && ln -s "$(find /usr/lib/linux-tools/*/perf | head -1)" /usr/local/bin/perf
+
 RUN apt-get -y install gdb \
   && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
@@ -125,6 +128,7 @@ COPY --from=rust-builder /risingwave/bin/risingwave.dwp /risingwave/bin/risingwa
 COPY --from=java-builder /risingwave/bin/connector-node /risingwave/bin/connector-node
 COPY --from=dashboard-builder /risingwave/dashboard/out /risingwave/ui
 COPY --from=rust-builder /risingwave/bin/jeprof /usr/local/bin/jeprof
+COPY --from=rust-base /root/.cargo/bin/flamegraph /usr/local/bin/flamegraph
 
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground
