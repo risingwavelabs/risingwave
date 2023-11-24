@@ -12,37 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
 
 use futures::future::{join_all, try_join_all, BoxFuture};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_pb::catalog::{CreateType, Table};
-use risingwave_pb::meta::get_reschedule_plan_request::{PbWorkerChanges, StableResizePolicy};
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::Dispatcher;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, DropActorsRequest, UpdateActorsRequest,
 };
 use tokio::sync::mpsc::Sender;
-use tokio::sync::oneshot::Receiver;
 use tokio::sync::{oneshot, Mutex, RwLock};
-use tokio::task::JoinHandle;
-use tokio::time::MissedTickBehavior;
 use tracing::Instrument;
 use uuid::Uuid;
 
-use super::{
-    Locations, ParallelUnitReschedule, RescheduleOptions, ScaleController, ScaleControllerRef,
-};
+use super::{Locations, ScaleController, ScaleControllerRef};
 use crate::barrier::{BarrierScheduler, Command};
 use crate::hummock::HummockManagerRef;
-use crate::manager::{
-    ClusterManagerRef, FragmentManagerRef, LocalNotification, MetaSrvEnv, WorkerId,
-};
-use crate::model::{ActorId, FragmentId, TableFragments};
+use crate::manager::{ClusterManagerRef, FragmentManagerRef, MetaSrvEnv};
+use crate::model::{ActorId, TableFragments};
 use crate::stream::SourceManagerRef;
 use crate::{MetaError, MetaResult};
 
@@ -656,209 +647,6 @@ impl GlobalStreamManager {
 
         cancelled_ids.extend(cancelled_recovered_ids);
         cancelled_ids
-    }
-}
-
-impl GlobalStreamManager {
-    pub async fn reschedule_actors(
-        &self,
-        reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
-        options: RescheduleOptions,
-    ) -> MetaResult<()> {
-        let mut revert_funcs = vec![];
-        if let Err(e) = self
-            .reschedule_actors_impl(&mut revert_funcs, reschedules, options)
-            .await
-        {
-            for revert_func in revert_funcs.into_iter().rev() {
-                revert_func.await;
-            }
-            return Err(e);
-        }
-
-        Ok(())
-    }
-
-    async fn reschedule_actors_impl(
-        &self,
-        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
-        reschedules: HashMap<FragmentId, ParallelUnitReschedule>,
-        options: RescheduleOptions,
-    ) -> MetaResult<()> {
-        let (reschedule_fragment, applied_reschedules) = self
-            .scale_controller
-            .prepare_reschedule_command(reschedules, options)
-            .await?;
-
-        tracing::debug!("reschedule plan: {:#?}", reschedule_fragment);
-
-        let command = Command::RescheduleFragment {
-            reschedules: reschedule_fragment,
-        };
-
-        let fragment_manager_ref = self.fragment_manager.clone();
-
-        revert_funcs.push(Box::pin(async move {
-            fragment_manager_ref
-                .cancel_apply_reschedules(applied_reschedules)
-                .await;
-        }));
-
-        let _source_pause_guard = self.source_manager.paused.lock().await;
-
-        self.barrier_scheduler
-            .run_config_change_command_with_pause(command)
-            .await?;
-
-        Ok(())
-    }
-
-    async fn trigger_scale_out(&self, workers: Vec<WorkerId>) -> MetaResult<()> {
-        let _reschedule_job_lock = self.reschedule_lock.write().await;
-
-        let fragment_worker_changes = {
-            let guard = self.fragment_manager.get_fragment_read_guard().await;
-            let mut fragment_worker_changes = HashMap::new();
-            for table_fragments in guard.table_fragments().values() {
-                for fragment_id in table_fragments.fragment_ids() {
-                    fragment_worker_changes.insert(
-                        fragment_id,
-                        PbWorkerChanges {
-                            include_worker_ids: workers.clone(),
-                            ..Default::default()
-                        },
-                    );
-                }
-            }
-            fragment_worker_changes
-        };
-
-        let reschedules = self
-            .scale_controller
-            .generate_stable_resize_plan(
-                StableResizePolicy {
-                    fragment_worker_changes,
-                },
-                None,
-            )
-            .await?;
-
-        if reschedules.is_empty() {
-            return Ok(());
-        }
-
-        self.reschedule_actors(
-            reschedules,
-            RescheduleOptions {
-                resolve_no_shuffle_upstream: true,
-            },
-        )
-        .await?;
-
-        Ok(())
-    }
-
-    async fn run(&self, mut shutdown_rx: Receiver<()>) {
-        let (local_notification_tx, mut local_notification_rx) =
-            tokio::sync::mpsc::unbounded_channel();
-
-        self.env
-            .notification_manager()
-            .insert_local_sender(local_notification_tx)
-            .await;
-
-        let check_period = Duration::from_secs(10);
-        let mut ticker = tokio::time::interval(check_period);
-        ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
-        ticker.reset();
-
-        let worker_nodes = self
-            .cluster_manager
-            .list_active_streaming_compute_nodes()
-            .await;
-
-        let mut worker_cache: BTreeMap<_, _> = worker_nodes
-            .into_iter()
-            .map(|worker| (worker.id, worker))
-            .collect();
-
-        let mut changed = true;
-
-        loop {
-            tokio::select! {
-                biased;
-
-                _ = &mut shutdown_rx => {
-                    tracing::info!("Stream manager is stopped");
-                    break;
-                }
-
-                _ = ticker.tick(), if changed => {
-                    let include_workers = worker_cache.keys().copied().collect_vec();
-
-                    if include_workers.is_empty() {
-                        tracing::debug!("no available worker nodes");
-                        changed = false;
-                        continue;
-                    }
-
-                    match self.trigger_scale_out(include_workers).await {
-                        Ok(_) => {
-                            worker_cache.clear();
-                            changed = false;
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = e.to_string(), "Failed to trigger scale out, waiting for next tick to retry after {}s", ticker.period().as_secs());
-                            ticker.reset();
-                        }
-                    }
-                }
-
-                notification = local_notification_rx.recv() => {
-                    let notification = notification.expect("local notification channel closed in loop of stream manager");
-
-                    match notification {
-                        LocalNotification::WorkerNodeActivated(worker) => {
-                            let prev_worker = worker_cache.insert(worker.id, worker.clone());
-
-                            if let Some(prev_worker) = prev_worker && prev_worker.parallel_units != worker.parallel_units {
-                                tracing::info!(worker = worker.id, "worker parallelism changed");
-                            }
-
-                            changed = true;
-                        }
-
-                        // Since our logic for handling passive scale-in is within the barrier manager,
-                        // there’s not much we can do here. All we can do is proactively remove the entries from our cache.
-                        LocalNotification::WorkerNodeDeleted(worker) => {
-                            match worker_cache.remove(&worker.id) {
-                                Some(prev_worker) => {
-                                    tracing::info!(worker = prev_worker.id, "worker removed from stream manager cache");
-                                }
-
-                                None => {
-                                    tracing::warn!(worker = worker.id, "worker not found in stream manager cache, but it was removed");
-                                }
-                            }
-                        }
-
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn start_auto_parallelism_monitor(
-        stream_manager: GlobalStreamManagerRef,
-    ) -> (JoinHandle<()>, oneshot::Sender<()>) {
-        tracing::info!("Automatic parallelism scale-out is enabled for streaming jobs");
-        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
-        let join_handle = tokio::spawn(async move {
-            stream_manager.run(shutdown_rx).await;
-        });
-
-        (join_handle, shutdown_tx)
     }
 }
 
