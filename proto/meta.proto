@@ -584,12 +584,12 @@ message EventLog {
     string definition = 3;
     string error = 4;
   }
-  message InjectBarrierFail {
+  message EventInjectBarrierFail {
     uint64 prev_epoch = 1;
     uint64 cur_epoch = 2;
     string error = 3;
   }
-  message CollectBarrierFail {
+  message EventCollectBarrierFail {
     uint64 prev_epoch = 1;
     uint64 cur_epoch = 2;
     string error = 3;
@@ -602,8 +602,8 @@ message EventLog {
     EventCreateStreamJobFail create_stream_job_fail = 3;
     EventDirtyStreamJobClear dirty_stream_job_clear = 4;
     EventMetaNodeStart meta_node_start = 5;
-    InjectBarrierFail inject_barrier_fail = 6;
-    CollectBarrierFail collect_barrier_fail = 7;
+    EventInjectBarrierFail inject_barrier_fail = 6;
+    EventCollectBarrierFail collect_barrier_fail = 7;
   }
 }
 

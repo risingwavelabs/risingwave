@@ -856,7 +856,7 @@ impl GlobalBarrierManager {
             // Record failure in event log.
             use risingwave_pb::meta::event_log;
             use thiserror_ext::AsReport;
-            let event = event_log::InjectBarrierFail {
+            let event = event_log::EventInjectBarrierFail {
                 prev_epoch: command_context.prev_epoch.value().0,
                 cur_epoch: command_context.curr_epoch.value().0,
                 error: e.to_report_string(),
@@ -914,7 +914,7 @@ impl GlobalBarrierManager {
                 // Record failure in event log.
                 use risingwave_pb::meta::event_log;
                 use thiserror_ext::AsReport;
-                let event = event_log::CollectBarrierFail {
+                let event = event_log::EventCollectBarrierFail {
                     prev_epoch: command_context.prev_epoch.value().0,
                     cur_epoch: command_context.curr_epoch.value().0,
                     error: e.to_report_string(),
