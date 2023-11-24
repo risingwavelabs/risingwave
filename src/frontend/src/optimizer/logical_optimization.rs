@@ -16,9 +16,11 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 
 use super::plan_node::RewriteExprsRecursive;
-use crate::expr::InlineNowProcTime;
+use crate::expr::{InlineNowProcTime, NowProcTimeFinder};
 use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
-use crate::optimizer::plan_node::{ColumnPruningContext, PredicatePushdownContext};
+use crate::optimizer::plan_node::{
+    ColumnPruningContext, PredicatePushdownContext, VisitExprsRecursive,
+};
 use crate::optimizer::plan_rewriter::ShareSourceRewriter;
 #[cfg(debug_assertions)]
 use crate::optimizer::plan_visitor::InputRefValidator;
@@ -487,10 +489,17 @@ impl LogicalOptimizer {
     }
 
     pub fn inline_now_proc_time(plan: PlanRef, ctx: &OptimizerContextRef) -> PlanRef {
-        // TODO: if there's no `NOW()` or `PROCTIME()`, we don't need to acquire snapshot.
-        let epoch = ctx.session_ctx().pinned_snapshot().epoch();
+        // If now() and proctime() are no found, bail out.
+        let mut v = NowProcTimeFinder::default();
+        plan.visit_exprs_recursive(&mut v);
+        if !v.has() {
+            return plan;
+        }
 
-        let plan = plan.rewrite_exprs_recursive(&mut InlineNowProcTime::new(epoch));
+        let epoch = ctx.session_ctx().pinned_snapshot().epoch();
+        let mut v = InlineNowProcTime::new(epoch);
+
+        let plan = plan.rewrite_exprs_recursive(&mut v);
 
         if ctx.is_explain_trace() {
             ctx.trace("Inline Now and ProcTime:");
