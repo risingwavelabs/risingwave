@@ -849,7 +849,9 @@ impl GlobalStreamManager {
         }
     }
 
-    pub fn start(stream_manager: GlobalStreamManagerRef) -> (JoinHandle<()>, oneshot::Sender<()>) {
+    pub fn start_auto_parallelism_monitor(
+        stream_manager: GlobalStreamManagerRef,
+    ) -> (JoinHandle<()>, oneshot::Sender<()>) {
         tracing::info!("Automatic parallelism scale-out is enabled for streaming jobs");
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
