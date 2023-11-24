@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
-use crate::hummock::{BatchBlockStream, BlockIterator, SstableStoreRef, TableHolder};
+use crate::hummock::{BatchBlockStream, BlockHolder, BlockIterator, SstableStoreRef, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 pub trait SstableIteratorType: HummockIterator + 'static {
@@ -151,7 +151,8 @@ impl SstableIterator {
                     match preload_stream.next_block().await {
                         Ok(Some(block)) => {
                             hit_cache = true;
-                            self.block_iter = Some(BlockIterator::new(block));
+                            self.block_iter =
+                                Some(BlockIterator::new(BlockHolder::from_owned_block(block)));
                             break;
                         }
                         Ok(None) => {

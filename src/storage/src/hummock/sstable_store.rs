@@ -1153,7 +1153,7 @@ pub struct BatchBlockStream {
 
     buff_offset: usize,
 
-    blocks: VecDeque<BlockHolder>,
+    blocks: VecDeque<Box<Block>>,
 
     cache: BlockCache,
 
@@ -1192,7 +1192,7 @@ impl BatchBlockStream {
 
     /// Reads the next block from the stream and returns it. Returns `None` if there are no blocks
     /// left to read.
-    pub async fn next_block(&mut self) -> HummockResult<Option<BlockHolder>> {
+    pub async fn next_block(&mut self) -> HummockResult<Option<Box<Block>>> {
         if self.block_idx >= self.block_metas.len() {
             return Ok(None);
         }
@@ -1215,12 +1215,15 @@ impl BatchBlockStream {
             block,
             self.block_metas[self.block_idx].uncompressed_size as usize,
         )?;
-        let holder = self.cache.insert(
+        self.cache.insert(
             self.object_id,
             (self.start_block_index + self.block_idx) as u64,
-            Box::new(block),
+            // Here we can clone this block just because the data in `Block` is `Bytes`, so we only increase the reference, and would not really cost memory.
+            Box::new(block.clone()),
             CachePriority::Low,
         );
+        let first_block = Box::new(block);
+
         let mut block_idx = self.block_idx + 1;
         let mut buff_offset = self.buff_offset;
         while block_idx < self.block_metas.len() {
@@ -1233,20 +1236,22 @@ impl BatchBlockStream {
                 Bytes::copy_from_slice(&self.buf[buff_offset..end]),
                 self.block_metas[block_idx].uncompressed_size as usize,
             )?;
-            let next_holder = self.cache.insert(
+            self.cache.insert(
                 self.object_id,
                 (self.start_block_index + block_idx) as u64,
-                Box::new(block),
+                Box::new(block.clone()),
                 CachePriority::Low,
             );
-            self.blocks.push_back(next_holder);
+            self.blocks.push_back(Box::new(block.clone()));
             buff_offset = end;
             block_idx += 1;
         }
 
-        self.buff_offset = buff_offset;
+        // copy rest of this buffer to avoid holding large memory.
+        self.buf = Bytes::copy_from_slice(&self.buf[buff_offset..]);
+        self.buff_offset = 0;
         self.block_idx += 1;
-        Ok(Some(holder))
+        Ok(Some(first_block))
     }
 
     pub fn next_block_index(&self) -> usize {
