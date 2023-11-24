@@ -170,7 +170,19 @@ impl StreamSink {
                     }
                     _ => {
                         assert_matches!(user_distributed_by, RequiredDist::Any);
-                        RequiredDist::shard_by_key(input.schema().len(), input.expect_stream_key())
+                        if downstream_pk.is_empty() {
+                            RequiredDist::shard_by_key(
+                                input.schema().len(),
+                                input.expect_stream_key(),
+                            )
+                        } else {
+                            // force the same primary key be written into the same sink shard to make sure the sink pk mismatch compaction effective
+                            // https://github.com/risingwavelabs/risingwave/blob/6d88344c286f250ea8a7e7ef6b9d74dea838269e/src/stream/src/executor/sink.rs#L169-L198
+                            RequiredDist::shard_by_key(
+                                input.schema().len(),
+                                downstream_pk.as_slice(),
+                            )
+                        }
                     }
                 }
             }
@@ -418,7 +430,7 @@ impl StreamNode for StreamSink {
         PbNodeBody::Sink(SinkNode {
             sink_desc: Some(self.sink_desc.to_proto()),
             table: Some(table.to_internal_table_prost()),
-            log_store_type: match self.base.ctx().session_ctx().config().get_sink_decouple() {
+            log_store_type: match self.base.ctx().session_ctx().config().sink_decouple() {
                 SinkDecouple::Default => {
                     let enable_sink_decouple =
                         match_sink_name_str!(
