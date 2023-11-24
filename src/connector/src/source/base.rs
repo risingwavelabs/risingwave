@@ -45,7 +45,6 @@ pub(crate) use crate::source::common::CommonSplitReader;
 use crate::source::filesystem::opendal_source::OpendalS3Properties;
 use crate::source::filesystem::{FsPageItem, GcsProperties, S3Properties};
 use crate::source::monitor::EnumeratorMetrics;
-use crate::source::S3_CONNECTOR;
 use crate::{
     dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
     impl_split, match_source_name_str,
@@ -384,34 +383,6 @@ impl ConnectorProperties {
                 .get(UPSTREAM_SOURCE_KEY)
                 .map(|s| s.eq_ignore_ascii_case(GCS_CONNECTOR))
                 .unwrap_or(false)
-    }
-
-    pub fn rewrite_upstream_source_key_hash_map(props: &mut HashMap<String, String>) {
-        let connector = props.remove(UPSTREAM_SOURCE_KEY).unwrap();
-        match connector.as_str() {
-            OPENDAL_S3_CONNECTOR => {
-                tracing::info!(
-                    "using new fs source, rewrite connector from '{}' to '{}'",
-                    OPENDAL_S3_CONNECTOR,
-                    S3_CONNECTOR
-                );
-                props.insert(
-                    UPSTREAM_SOURCE_KEY.to_string(),
-                    OPENDAL_S3_CONNECTOR.to_string(),
-                );
-            }
-            GCS_CONNECTOR => {
-                tracing::info!(
-                    "using new fs source, rewrite connector from '{}' to '{}'",
-                    GCS_CONNECTOR,
-                    S3_CONNECTOR
-                );
-                props.insert(UPSTREAM_SOURCE_KEY.to_string(), GCS_CONNECTOR.to_string());
-            }
-            _ => {
-                props.insert(UPSTREAM_SOURCE_KEY.to_string(), connector);
-            }
-        }
     }
 }
 

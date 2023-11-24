@@ -141,7 +141,7 @@ impl ConnectorSource {
         let support_multiple_splits = config.support_multiple_splits();
         dispatch_source_prop!(config, prop, {
             let readers = if support_multiple_splits {
-                tracing::info!(
+                tracing::debug!(
                     "spawning connector split reader for multiple splits {:?}",
                     splits
                 );
@@ -154,7 +154,7 @@ impl ConnectorSource {
                 let to_reader_splits = splits.into_iter().map(|split| vec![split]);
 
                 try_join_all(to_reader_splits.into_iter().map(|splits| {
-                    tracing::info!(?splits, ?prop, "spawning connector split reader");
+                    tracing::debug!(?splits, ?prop, "spawning connector split reader");
                     let props = prop.clone();
                     let data_gen_columns = data_gen_columns.clone();
                     let parser_config = parser_config.clone();
@@ -202,10 +202,14 @@ async fn build_opendal_fs_list_stream<C: OpenDalSourceProperties>(lister: Openda
                 {
                     yield res
                 } else {
+                    // Currrntly due to the lack of prefix list, we just skip the unmatched files.
                     continue;
                 }
             }
-            Err(_) => break,
+            Err(err) => {
+                tracing::error!("list object fail, err {}", err);
+                break;
+            }
         }
     }
 }

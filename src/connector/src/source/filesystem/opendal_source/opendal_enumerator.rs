@@ -62,14 +62,15 @@ where
     C: Send + Clone + Sized + PartialEq + 'static + Sync,
 {
     pub async fn list(&self) -> anyhow::Result<ObjectMetadataIter> {
-        let _prefix = match &self.prefix {
-            Some(prefix) => prefix,
-            None => "",
-        };
-
         // Currently, we need to do full list and then filter the prefix and matcher,
         // After OpenDAL implementing the list prefix, we can use the user-specified prefix.
         // https://github.com/apache/incubator-opendal/issues/3247
+        // todo(wcy-fdu): manual filtering prefix
+
+        // let _prefix = match &self.prefix {
+        //     Some(prefix) => prefix,
+        //     None => "",
+        // };
 
         let object_lister = self
             .op
@@ -80,7 +81,6 @@ where
         let stream = stream::unfold(object_lister, |mut object_lister| async move {
             match object_lister.next().await {
                 Some(Ok(object)) => {
-                    // todo: manual filtering prefix
                     let name = object.path().to_string();
                     let om = object.metadata();
 
@@ -100,10 +100,7 @@ where
                     };
                     Some((Ok(metadata), object_lister))
                 }
-                Some(Err(err)) => {
-                    tracing::error!("list object fail, err {}", err);
-                    Some((Err(err.into()), object_lister))
-                }
+                Some(Err(err)) => Some((Err(err.into()), object_lister)),
                 None => {
                     tracing::info!("list object completed.");
                     None

@@ -27,6 +27,7 @@ use super::{OpendalFsSplit, S3Properties};
 use crate::source::SourceProperties;
 
 pub const GCS_CONNECTOR: &str = "gcs";
+// The new s3_v2 will use opendal.
 pub const OPENDAL_S3_CONNECTOR: &str = "s3_v2";
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -78,37 +79,4 @@ impl OpenDalSourceProperties for OpendalS3Properties {
     fn new_enumerator(properties: Self) -> anyhow::Result<OpendalEnumerator<Self>> {
         OpendalEnumerator::new_s3_source(properties.s3_properties)
     }
-}
-
-/// Get the prefix from a glob
-pub fn get_prefix(glob: &str) -> String {
-    let mut escaped = false;
-    let mut escaped_filter = false;
-    glob.chars()
-        .take_while(|c| match (c, &escaped) {
-            ('*', false) => false,
-            ('[', false) => false,
-            ('{', false) => false,
-            ('\\', false) => {
-                escaped = true;
-                true
-            }
-            (_, false) => true,
-            (_, true) => {
-                escaped = false;
-                true
-            }
-        })
-        .filter(|c| match (c, &escaped_filter) {
-            (_, true) => {
-                escaped_filter = false;
-                true
-            }
-            ('\\', false) => {
-                escaped_filter = true;
-                false
-            }
-            (_, _) => true,
-        })
-        .collect()
 }

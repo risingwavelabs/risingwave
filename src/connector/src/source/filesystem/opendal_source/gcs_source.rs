@@ -20,7 +20,8 @@ use opendal::services::Gcs;
 use opendal::Operator;
 
 use super::opendal_enumerator::OpendalEnumerator;
-use super::{get_prefix, GcsProperties, OpenDalSourceProperties};
+use super::{GcsProperties, OpenDalSourceProperties};
+use crate::source::filesystem::s3::enumerator::get_prefix;
 
 impl<C: OpenDalSourceProperties> OpendalEnumerator<C>
 where

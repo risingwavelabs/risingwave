@@ -98,12 +98,6 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum OpendalEnumeratorType {
-    OpenDalS3,
-    Gcs,
-}
-
 impl<C> SplitMetaData for OpendalFsSplit<C>
 where
     C: Sized + Send + Clone + 'static,

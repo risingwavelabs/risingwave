@@ -104,30 +104,29 @@ impl<S: StateStore> FsListExecutor<S> {
             .source
             .get_source_list()
             .map_err(StreamExecutorError::connector_error)?;
-        let chunked_stream = stream
-            .chunks(CHUNK_SIZE) // Group FsPageItems into chunks of size 1024
-            .map(|chunk| {
-                let rows = chunk
-                    .into_iter()
-                    .map(|item| {
-                        // Implement the conversion of FsPageItem to row here
-                        let page_item = item.unwrap();
-                        (
-                            Op::Insert,
-                            OwnedRow::new(vec![
-                                Some(ScalarImpl::Utf8(page_item.name.into_boxed_str())),
-                                Some(ScalarImpl::Timestamp(page_item.timestamp)),
-                                Some(ScalarImpl::Int64(page_item.size)),
-                            ]),
-                        )
-                    })
-                    .collect::<Vec<_>>();
 
-                Ok(StreamChunk::from_rows(
-                    &rows,
-                    &[DataType::Varchar, DataType::Timestamp, DataType::Int64],
-                ))
-            });
+        // Group FsPageItem stream into chunks of size 1024.
+        let chunked_stream = stream.chunks(CHUNK_SIZE).map(|chunk| {
+            let rows = chunk
+                .into_iter()
+                .map(|item| {
+                    let page_item = item.unwrap();
+                    (
+                        Op::Insert,
+                        OwnedRow::new(vec![
+                            Some(ScalarImpl::Utf8(page_item.name.into_boxed_str())),
+                            Some(ScalarImpl::Timestamp(page_item.timestamp)),
+                            Some(ScalarImpl::Int64(page_item.size)),
+                        ]),
+                    )
+                })
+                .collect::<Vec<_>>();
+
+            Ok(StreamChunk::from_rows(
+                &rows,
+                &[DataType::Varchar, DataType::Timestamp, DataType::Int64],
+            ))
+        });
 
         Ok(chunked_stream.boxed())
     }
