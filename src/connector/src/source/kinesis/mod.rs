@@ -33,7 +33,7 @@ pub struct KinesisProperties {
     pub scan_startup_mode: Option<String>,
 
     #[serde(rename = "scan.startup.timestamp.millis")]
-    pub timestamp_offset: Option<i64>,
+    pub timestamp_offset: Option<String>,
 
     #[serde(flatten)]
     pub common: KinesisCommon,

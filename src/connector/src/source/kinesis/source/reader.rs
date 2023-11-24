@@ -72,7 +72,12 @@ impl SplitReader for KinesisSplitReader {
                     "latest" => KinesisOffset::Latest,
                     "timestamp" => {
                         if let Some(ts) = &properties.timestamp_offset {
-                            KinesisOffset::Timestamp(*ts)
+                            let Ok(ts_i) = ts.parse() else {
+                                return Err(anyhow!(
+                                    format! {"cannot parse timestamp offset {ts} into i64"}
+                                ));
+                            };
+                            KinesisOffset::Timestamp(ts_i)
                         } else {
                             return Err(anyhow!("scan.startup.timestamp.millis is required"));
                         }
