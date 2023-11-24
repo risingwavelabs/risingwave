@@ -117,7 +117,7 @@ impl FunctionAttr {
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
-        } else if self.unimplemented {
+        } else if self.rewritten {
             quote! { |_, _| Err(ExprError::UnsupportedFunction(#name.into())) }
         } else {
             self.generate_build_scalar_function(user_fn, true)?
@@ -551,7 +551,7 @@ impl FunctionAttr {
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.as_fn().name);
             quote! { #name }
-        } else if self.unimplemented {
+        } else if self.rewritten {
             quote! { |_| Err(ExprError::UnsupportedFunction(#name.into())) }
         } else {
             self.generate_agg_build_fn(user_fn)?
@@ -889,7 +889,7 @@ impl FunctionAttr {
         let build_fn = if build_fn {
             let name = format_ident!("{}", user_fn.name);
             quote! { #name }
-        } else if self.unimplemented {
+        } else if self.rewritten {
             quote! { |_, _| Err(ExprError::UnsupportedFunction(#name.into())) }
         } else {
             self.generate_build_table_function(user_fn)?

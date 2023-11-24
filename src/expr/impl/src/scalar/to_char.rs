@@ -119,7 +119,7 @@ fn timestamp_to_char(data: Timestamp, pattern: &ChronoPattern, writer: &mut impl
     write!(writer, "{}", format).unwrap();
 }
 
-#[function("to_char(timestamptz, varchar) -> varchar", unimplemented)]
+#[function("to_char(timestamptz, varchar) -> varchar", rewritten)]
 fn _timestamptz_to_char() {}
 
 #[function(

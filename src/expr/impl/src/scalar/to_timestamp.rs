@@ -93,7 +93,7 @@ pub fn to_timestamp(s: &str, timezone: &str, tmpl: &ChronoPattern) -> Result<Tim
     })
 }
 
-#[function("to_timestamp1(varchar, varchar) -> timestamptz", unimplemented)]
+#[function("to_timestamp1(varchar, varchar) -> timestamptz", rewritten)]
 fn _to_timestamp1() {}
 
 #[function(

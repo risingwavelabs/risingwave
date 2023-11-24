@@ -506,7 +506,7 @@ struct FunctionAttr {
     /// If true, the function is unavailable on the frontend.
     deprecated: bool,
     /// If true, the function is not implemented on the backend, but its signature is defined.
-    unimplemented: bool,
+    rewritten: bool,
 }
 
 /// Attributes from function signature `fn(..)`

@@ -52,7 +52,7 @@ pub fn date_trunc_timestamp(field: &str, ts: Timestamp) -> Result<Timestamp> {
     })
 }
 
-#[function("date_trunc(varchar, timestamptz) -> timestamptz", unimplemented)]
+#[function("date_trunc(varchar, timestamptz) -> timestamptz", rewritten)]
 fn _date_trunc_timestamptz() {}
 
 #[function("date_trunc(varchar, timestamptz, varchar) -> timestamptz")]

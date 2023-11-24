@@ -81,8 +81,8 @@ impl Parse for FunctionAttr {
                 parsed.volatile = true;
             } else if meta.path().is_ident("deprecated") {
                 parsed.deprecated = true;
-            } else if meta.path().is_ident("unimplemented") {
-                parsed.unimplemented = true;
+            } else if meta.path().is_ident("rewritten") {
+                parsed.rewritten = true;
             } else if meta.path().is_ident("append_only") {
                 parsed.append_only = true;
             } else {
