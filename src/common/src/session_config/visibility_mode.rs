@@ -29,7 +29,7 @@ pub enum VisibilityMode {
 }
 
 impl FromStr for VisibilityMode {
-    type Err = ();
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.eq_ignore_ascii_case("all") {
@@ -39,7 +39,7 @@ impl FromStr for VisibilityMode {
         } else if s.eq_ignore_ascii_case("default") {
             Ok(Self::Default)
         } else {
-            Err(())
+            Err("expect one of [all, checkpoint, default]")
         }
     }
 }
