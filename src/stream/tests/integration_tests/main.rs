@@ -23,7 +23,7 @@ mod project_set;
 
 // utils
 mod prelude {
-    pub use expect_test::{expect, expect_file};
+    pub use expect_test::expect;
     pub use risingwave_stream::executor::test_utils::prelude::*;
 
     pub use crate::snapshot::*;

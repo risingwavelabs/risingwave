@@ -27,7 +27,8 @@ use super::batch::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
 use crate::catalog::ColumnId;
-use crate::expr::ExprRewriter;
+use crate::expr::{ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order};
 
@@ -37,10 +38,16 @@ pub struct BatchSeqScan {
     pub base: PlanBase<Batch>,
     core: generic::Scan,
     scan_ranges: Vec<ScanRange>,
+    limit: Option<u64>,
 }
 
 impl BatchSeqScan {
-    fn new_inner(core: generic::Scan, dist: Distribution, scan_ranges: Vec<ScanRange>) -> Self {
+    fn new_inner(
+        core: generic::Scan,
+        dist: Distribution,
+        scan_ranges: Vec<ScanRange>,
+        limit: Option<u64>,
+    ) -> Self {
         let order = if scan_ranges.len() > 1 {
             Order::any()
         } else {
@@ -66,12 +73,22 @@ impl BatchSeqScan {
             base,
             core,
             scan_ranges,
+            limit,
         }
     }
 
-    pub fn new(core: generic::Scan, scan_ranges: Vec<ScanRange>) -> Self {
+    pub fn new(core: generic::Scan, scan_ranges: Vec<ScanRange>, limit: Option<u64>) -> Self {
         // Use `Single` by default, will be updated later with `clone_with_dist`.
-        Self::new_inner(core, Distribution::Single, scan_ranges)
+        Self::new_inner(core, Distribution::Single, scan_ranges, limit)
+    }
+
+    pub fn new_with_dist(
+        core: generic::Scan,
+        dist: Distribution,
+        scan_ranges: Vec<ScanRange>,
+        limit: Option<u64>,
+    ) -> Self {
+        Self::new_inner(core, dist, scan_ranges, limit)
     }
 
     fn clone_with_dist(&self) -> Self {
@@ -100,6 +117,7 @@ impl BatchSeqScan {
                 }
             },
             self.scan_ranges.clone(),
+            self.limit,
         )
     }
 
@@ -142,6 +160,10 @@ impl BatchSeqScan {
             range_strs.push("...".to_string());
         }
         range_strs
+    }
+
+    pub fn limit(&self) -> &Option<u64> {
+        &self.limit
     }
 }
 
@@ -189,6 +211,10 @@ impl Distill for BatchSeqScan {
             ));
         }
 
+        if let Some(limit) = &self.limit {
+            vec.push(("limit", Pretty::display(limit)));
+        }
+
         if verbose {
             let dist = Pretty::display(&DistributionDisplay {
                 distribution: self.distribution(),
@@ -225,6 +251,7 @@ impl ToBatchPb for BatchSeqScan {
                 .core
                 .chunk_size
                 .map(|chunk_size| ChunkSize { chunk_size }),
+            limit: *self.limit(),
         })
     }
 }
@@ -240,7 +267,13 @@ impl ToLocalBatch for BatchSeqScan {
             // scan.
             Distribution::SomeShard
         };
-        Ok(Self::new_inner(self.core.clone(), dist, self.scan_ranges.clone()).into())
+        Ok(Self::new_inner(
+            self.core.clone(),
+            dist,
+            self.scan_ranges.clone(),
+            self.limit,
+        )
+        .into())
     }
 }
 
@@ -252,6 +285,12 @@ impl ExprRewritable for BatchSeqScan {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new(core, self.scan_ranges.clone()).into()
+        Self::new(core, self.scan_ranges.clone(), self.limit).into()
+    }
+}
+
+impl ExprVisitable for BatchSeqScan {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

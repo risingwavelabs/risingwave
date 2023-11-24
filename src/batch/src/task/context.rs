@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
-use risingwave_common::error::Result;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
@@ -26,6 +25,7 @@ use risingwave_source::dml_manager::DmlManagerRef;
 use risingwave_storage::StateStoreImpl;
 
 use super::TaskId;
+use crate::error::Result;
 use crate::monitor::{BatchMetricsWithTaskLabels, BatchMetricsWithTaskLabelsInner};
 use crate::task::{BatchEnvironment, TaskOutput, TaskOutputId};
 
@@ -166,7 +166,9 @@ impl ComputeNodeContext {
 
     pub fn new(env: BatchEnvironment, task_id: TaskId) -> Self {
         let batch_mem_context = env.task_manager().memory_context_ref();
+
         let batch_metrics = Arc::new(BatchMetricsWithTaskLabelsInner::new(
+            env.task_manager().metrics(),
             env.task_metrics(),
             env.executor_metrics(),
             task_id,

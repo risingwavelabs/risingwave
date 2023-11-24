@@ -256,6 +256,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             MetaOpts {
                 enable_recovery: !config.meta.disable_recovery,
                 enable_scale_in_when_recovery: config.meta.enable_scale_in_when_recovery,
+                enable_automatic_parallelism_control: config
+                    .meta
+                    .enable_automatic_parallelism_control,
                 in_flight_barrier_nums,
                 max_idle_ms,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
@@ -307,6 +310,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .meta
                     .compaction_task_max_heartbeat_interval_secs,
                 compaction_config: Some(config.meta.compaction_config),
+                event_log_enabled: config.meta.event_log_enabled,
+                event_log_channel_max_size: config.meta.event_log_channel_max_size,
                 advertise_addr: opts.advertise_addr,
             },
             config.system.into_init_system_params(),

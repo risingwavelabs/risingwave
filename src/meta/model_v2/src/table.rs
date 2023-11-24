@@ -18,7 +18,7 @@ use sea_orm::entity::prelude::*;
 
 use crate::{
     Cardinality, ColumnCatalogArray, ColumnOrderArray, CreateType, FragmentId, I32Array, JobStatus,
-    Property, SourceId, TableId, TableVersion,
+    ObjectId, Property, SourceId, TableId, TableVersion,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum)]
@@ -74,6 +74,7 @@ pub struct Model {
     pub name: String,
     pub optional_associated_source_id: Option<SourceId>,
     pub table_type: TableType,
+    pub belongs_to_job_id: Option<ObjectId>,
     pub columns: ColumnCatalogArray,
     pub pk: ColumnOrderArray,
     pub distribution_key: I32Array,
@@ -118,12 +119,20 @@ pub enum Relation {
     Fragment1,
     #[sea_orm(
         belongs_to = "super::object::Entity",
+        from = "Column::BelongsToJobId",
+        to = "super::object::Column::Oid",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    Object2,
+    #[sea_orm(
+        belongs_to = "super::object::Entity",
         from = "Column::TableId",
         to = "super::object::Column::Oid",
         on_update = "NoAction",
         on_delete = "Cascade"
     )]
-    Object,
+    Object1,
     #[sea_orm(
         belongs_to = "super::source::Entity",
         from = "Column::OptionalAssociatedSourceId",
@@ -136,7 +145,7 @@ pub enum Relation {
 
 impl Related<super::object::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::Object.def()
+        Relation::Object1.def()
     }
 }
 

@@ -14,7 +14,6 @@ datatypes:
     zero: 0
     minimum: -32767
     maximum: 32767
-    rw_type:
   - name: integer
     aliases:
       - int
