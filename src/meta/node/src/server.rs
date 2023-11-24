@@ -674,7 +674,10 @@ pub async fn start_service_as_election_leader(
             Duration::from_secs(1),
         ));
         sub_tasks.push(GlobalBarrierManager::start(barrier_manager));
-        sub_tasks.push(GlobalStreamManager::start(stream_manager));
+
+        if env.opts.enable_automatic_parallelism_control {
+            sub_tasks.push(GlobalStreamManager::start(stream_manager));
+        }
     }
     let (idle_send, idle_recv) = tokio::sync::oneshot::channel();
     sub_tasks.push(IdleManager::start_idle_checker(
