@@ -23,7 +23,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::S3ObjectStoreConfig;
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_object_store::object::{ObjectStore, ObjectStoreImpl, S3ObjectStore};
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
@@ -135,7 +135,7 @@ fn bench_builder(
         S3ObjectStore::new_with_config(
             bucket.to_string(),
             metrics.clone(),
-            S3ObjectStoreConfig::default(),
+            ObjectStoreConfig::default(),
         )
         .await
         .monitored(metrics)
