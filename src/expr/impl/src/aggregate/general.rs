@@ -26,7 +26,7 @@ use risingwave_expr::{aggregate, ExprError, Result};
 #[aggregate("sum(interval) -> interval")]
 #[aggregate("sum(int256) -> int256")]
 #[aggregate("sum(int8) -> int8", internal)] // used internally for 2-phase sum(int2) and sum(int4)
-#[aggregate("sum0(int8) -> int8", init_state = "0i64")] // used internally for 2-phase count
+#[aggregate("sum0(int8) -> int8", internal, init_state = "0i64")] // used internally for 2-phase count
 fn sum<S, T>(state: S, input: T, retract: bool) -> Result<S>
 where
     S: Default + From<T> + CheckedAdd<Output = S> + CheckedSub<Output = S>,
@@ -136,7 +136,7 @@ fn last_value<T>(_: T, input: T) -> T {
     input
 }
 
-#[aggregate("internal_last_seen_value(*) -> auto", state = "ref")]
+#[aggregate("internal_last_seen_value(*) -> auto", state = "ref", internal)]
 fn internal_last_seen_value<T>(state: T, input: T, retract: bool) -> T {
     if retract {
         state

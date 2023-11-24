@@ -40,10 +40,9 @@ use crate::catalog::system_catalog::rw_catalog::{
 };
 use crate::expr::{
     AggCall, CorrelatedId, CorrelatedInputRef, Depth, Expr as _, ExprImpl, ExprType, FunctionCall,
-    InputRef, OrderBy,
+    InputRef,
 };
 use crate::utils::group_by::GroupBy;
-use crate::utils::Condition;
 
 #[derive(Debug, Clone)]
 pub struct BoundSelect {
@@ -635,15 +634,8 @@ impl Binder {
         .into();
 
         // There could be multiple indexes on a table so aggregate the sizes of all indexes
-        let select_items: Vec<ExprImpl> = vec![AggCall::new(
-            AggKind::Sum0,
-            vec![sum],
-            false,
-            OrderBy::any(),
-            Condition::true_cond(),
-            vec![],
-        )?
-        .into()];
+        let select_items: Vec<ExprImpl> =
+            vec![AggCall::new_unchecked(AggKind::Sum0, vec![sum], DataType::Int64)?.into()];
 
         let indrelid_col = PG_INDEX_COLUMNS[1].1;
         let indrelid_ref = self.bind_column(&[indrelid_col.into()])?;

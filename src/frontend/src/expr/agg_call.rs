@@ -72,6 +72,23 @@ impl AggCall {
         })
     }
 
+    /// Constructs an `AggCall` without type inference.
+    pub fn new_unchecked(
+        agg_kind: AggKind,
+        args: Vec<ExprImpl>,
+        return_type: DataType,
+    ) -> Result<Self> {
+        Ok(AggCall {
+            agg_kind,
+            return_type,
+            args,
+            distinct: false,
+            order_by: OrderBy::any(),
+            filter: Condition::true_cond(),
+            direct_args: vec![],
+        })
+    }
+
     pub fn decompose(
         self,
     ) -> (
