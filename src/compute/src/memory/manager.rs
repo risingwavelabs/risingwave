@@ -19,7 +19,7 @@ use std::time::Duration;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 
-use super::controller::MemoryController;
+use super::controller::LruWatermarkController;
 
 /// Compute node uses [`MemoryManager`] to limit the memory usage.
 pub struct MemoryManager {
@@ -28,8 +28,7 @@ pub struct MemoryManager {
 
     metrics: Arc<StreamingMetrics>,
 
-    /// The memory control policy for computing tasks.
-    memory_control_policy: Mutex<MemoryController>,
+    controller: Mutex<LruWatermarkController>,
 }
 
 impl MemoryManager {
@@ -38,14 +37,16 @@ impl MemoryManager {
     const MIN_TICK_INTERVAL_MS: u32 = 10;
 
     pub fn new(metrics: Arc<StreamingMetrics>, total_memory_bytes: usize) -> Arc<Self> {
-        let memory_control_policy =
-            Mutex::new(MemoryController::new(total_memory_bytes, metrics.clone()));
-        tracing::info!("memory control policy: {:?}", &memory_control_policy);
+        let controller = Mutex::new(LruWatermarkController::new(
+            total_memory_bytes,
+            metrics.clone(),
+        ));
+        tracing::info!("LRU watermark controller: {:?}", &controller);
 
         Arc::new(Self {
             watermark_epoch: Arc::new(0.into()),
             metrics,
-            memory_control_policy,
+            controller,
         })
     }
 
@@ -82,7 +83,7 @@ impl MemoryManager {
                 }
 
                 _ = tick_interval.tick() => {
-                    let new_watermark_epoch = self.memory_control_policy.lock().unwrap().tick(interval_ms);
+                    let new_watermark_epoch = self.controller.lock().unwrap().tick(interval_ms);
                     self.watermark_epoch.store(new_watermark_epoch.0, Ordering::Relaxed);
 
                     self.metrics.lru_runtime_loop_count.inc();

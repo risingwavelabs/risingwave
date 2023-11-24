@@ -36,13 +36,26 @@ impl Default for State {
     }
 }
 
-/// `MemoryController` is a memory control policy that uses jemalloc statistics and
-/// jvm memory statistics and to control. It assumes that most memory is used by streaming engine
-/// and does memory control over LRU watermark based on jemalloc statistics and jvm memory statistics.
-pub struct MemoryController {
+/// `LruWatermarkController` controls LRU Watermark (epoch) according to actual memory usage statistics
+/// collected from Jemalloc and JVM.
+///
+/// Basically, it works as a negative feedback loop: collect memory statistics, and then set the LRU watarmarking
+/// according to maintain the memory usage in a proper level.
+///
+/// ```text
+///     ┌───────────────────┐        ┌───────────────────┐
+///     │       INPUT       │        │       OUTPUT      │
+/// ┌───►     (observe)     ├───────►│     (control)     ├───┐
+/// │   │ Memory Statistics │        │ New LRU Watermark │   │
+/// │   └───────────────────┘        └───────────────────┘   │
+/// │                                                        │
+/// └────────────────────────────────────────────────────────┘
+/// ```
+///
+/// Check the function [`Self::tick()`] to see the control policy.
+pub struct LruWatermarkController {
     metrics: Arc<StreamingMetrics>,
 
-    /// TODO(eric): make them configurable
     threshold_stable: usize,
     threshold_graceful: usize,
     threshold_aggressive: usize,
@@ -51,7 +64,8 @@ pub struct MemoryController {
     state: State,
 }
 
-impl MemoryController {
+impl LruWatermarkController {
+    // TODO(eric): make them configurable
     const THRESHOLD_AGGRESSIVE: f64 = 0.9;
     const THRESHOLD_GRACEFUL: f64 = 0.8;
     const THRESHOLD_STABLE: f64 = 0.7;
@@ -71,9 +85,9 @@ impl MemoryController {
     }
 }
 
-impl std::fmt::Debug for MemoryController {
+impl std::fmt::Debug for LruWatermarkController {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("JemallocMemoryControl")
+        f.debug_struct("LruWatermarkController")
             .field("threshold_stable", &self.threshold_stable)
             .field("threshold_graceful", &self.threshold_graceful)
             .field("threshold_aggressive", &self.threshold_aggressive)
@@ -96,7 +110,7 @@ fn jemalloc_memory_stats() -> (usize, usize) {
     (allocated, active)
 }
 
-impl MemoryController {
+impl LruWatermarkController {
     pub fn tick(&mut self, interval_ms: u32) -> Epoch {
         // NOTE: Be careful! The meaning of `allocated` and `active` differ in JeMalloc and JVM
         let (jemalloc_allocated_bytes, jemalloc_active_bytes) = jemalloc_memory_stats();
@@ -121,7 +135,6 @@ impl MemoryController {
         //   - If the memory usage decreases after the last eviction, we set the eviction step to
         //     last_step.
         //   - Otherwise, we set the step to last_step * 2.
-
         let mut step = if cur_used_memory_bytes < self.threshold_stable {
             // Do not evict if the memory usage is lower than `threshold_stable`
             0
