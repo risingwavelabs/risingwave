@@ -17,6 +17,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use anyhow::Context as _;
 use bytes::Bytes;
 use futures::Stream;
 use itertools::Itertools;
@@ -125,7 +126,9 @@ fn pg_value_format(
                 Ok(d.text_format(data_type).into())
             }
         }
-        Format::Binary => d.binary_format(data_type),
+        Format::Binary => Ok(d
+            .binary_format(data_type)
+            .context("failed to format binary value")?),
     }
 }
 

@@ -608,7 +608,10 @@ impl SessionImpl {
     }
 
     pub fn set_config(&self, key: &str, value: String) -> Result<()> {
-        self.config_map.write().set(key, value, &mut ())
+        self.config_map
+            .write()
+            .set(key, value, &mut ())
+            .map_err(Into::into)
     }
 
     pub fn set_config_report(
@@ -617,7 +620,10 @@ impl SessionImpl {
         value: String,
         mut reporter: impl ConfigReporter,
     ) -> Result<()> {
-        self.config_map.write().set(key, value, &mut reporter)
+        self.config_map
+            .write()
+            .set(key, value, &mut reporter)
+            .map_err(Into::into)
     }
 
     pub fn session_id(&self) -> SessionId {

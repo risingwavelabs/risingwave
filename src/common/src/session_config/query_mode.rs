@@ -28,7 +28,7 @@ pub enum QueryMode {
 }
 
 impl FromStr for QueryMode {
-    type Err = ();
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.eq_ignore_ascii_case("local") {
@@ -38,7 +38,7 @@ impl FromStr for QueryMode {
         } else if s.eq_ignore_ascii_case("auto") {
             Ok(Self::Auto)
         } else {
-            Err(())
+            Err("expect one of [local, distributed, auto]")
         }
     }
 }

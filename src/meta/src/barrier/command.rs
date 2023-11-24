@@ -76,7 +76,7 @@ pub struct Reschedule {
 /// [`Command`] is the action of [`crate::barrier::GlobalBarrierManager`]. For different commands,
 /// we'll build different barriers to send, and may do different stuffs after the barrier is
 /// collected.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, strum::Display)]
 pub enum Command {
     /// `Plain` command generates a barrier with the mutation it carries.
     ///

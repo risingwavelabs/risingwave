@@ -113,6 +113,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             ordered: false,
             vnode_bitmap: Some(vnode_bitmap.finish().to_protobuf()),
             chunk_size: None,
+            limit: None,
         });
 
         Ok(row_seq_scan_node)

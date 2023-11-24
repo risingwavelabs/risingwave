@@ -60,10 +60,11 @@ use self::plan_visitor::{has_batch_exchange, CardinalityVisitor};
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
+use crate::expr::TimestamptzExprFinder;
 use crate::optimizer::plan_node::generic::Union;
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive, StreamExchange, StreamUnion,
-    ToStream,
+    ToStream, VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::TemporalJoinValidator;
 use crate::optimizer::property::Distribution;
@@ -259,6 +260,13 @@ impl PlanRoot {
                 BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into();
         }
 
+        // Both two phase limit and topn could generate limit on top of the scan, so we push limit here.
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Push Limit To Scan",
+            vec![BatchPushLimitToScanRule::create()],
+            ApplyOrder::BottomUp,
+        ));
+
         Ok(plan)
     }
 
@@ -291,6 +299,13 @@ impl PlanRoot {
             ctx.trace("To Batch Local Plan:");
             ctx.trace(plan.explain_to_string());
         }
+
+        // Both two phase limit and topn could generate limit on top of the scan, so we push limit here.
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Push Limit To Scan",
+            vec![BatchPushLimitToScanRule::create()],
+            ApplyOrder::BottomUp,
+        ));
 
         Ok(plan)
     }
@@ -725,8 +740,13 @@ fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {
 }
 
 fn inline_session_timezone_in_exprs(ctx: OptimizerContextRef, plan: PlanRef) -> Result<PlanRef> {
-    let plan = plan.rewrite_exprs_recursive(ctx.session_timezone().deref_mut());
-    Ok(plan)
+    let mut v = TimestamptzExprFinder::default();
+    plan.visit_exprs_recursive(&mut v);
+    if v.has() {
+        Ok(plan.rewrite_exprs_recursive(ctx.session_timezone().deref_mut()))
+    } else {
+        Ok(plan)
+    }
 }
 
 fn exist_and_no_exchange_before(plan: &PlanRef, is_candidate: fn(&PlanRef) -> bool) -> bool {

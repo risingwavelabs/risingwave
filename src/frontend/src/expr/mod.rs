@@ -58,11 +58,11 @@ pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use function_call_with_lambda::FunctionCallWithLambda;
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
-pub use now::{InlineNowProcTime, Now};
+pub use now::{InlineNowProcTime, Now, NowProcTimeFinder};
 pub use parameter::Parameter;
 pub use pure::*;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
-pub use session_timezone::SessionTimezone;
+pub use session_timezone::{SessionTimezone, TimestamptzExprFinder};
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};
 pub use type_inference::{

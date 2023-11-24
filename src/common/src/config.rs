@@ -212,6 +212,10 @@ pub struct MetaConfig {
     #[serde(default)]
     pub enable_scale_in_when_recovery: bool,
 
+    /// Whether to enable auto-scaling feature.
+    #[serde(default)]
+    pub enable_automatic_parallelism_control: bool,
+
     #[serde(default = "default::meta::meta_leader_lease_secs")]
     pub meta_leader_lease_secs: u64,
 
