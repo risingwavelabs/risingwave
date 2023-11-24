@@ -200,6 +200,11 @@ where
                 Err(err) => break Err(err),
             };
 
+            fail::fail_point!("collect_actors_err", id == 10, |_| Err(anyhow::anyhow!(
+                "intentional collect_actors_err"
+            )
+            .into()));
+
             // Collect barriers to local barrier manager
             self.context.lock_barrier_manager().collect(id, &barrier);
 

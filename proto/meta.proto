@@ -591,6 +591,16 @@ message EventLog {
     string command = 4;
     string barrier_kind = 5;
   }
+  message EventInjectBarrierFail {
+    uint64 prev_epoch = 1;
+    uint64 cur_epoch = 2;
+    string error = 3;
+  }
+  message EventCollectBarrierFail {
+    uint64 prev_epoch = 1;
+    uint64 cur_epoch = 2;
+    string error = 3;
+  }
   // Event logs identifier, which should be populated by event log service.
   optional string unique_id = 1;
   // Processing time, which should be populated by event log service.
@@ -600,6 +610,8 @@ message EventLog {
     EventDirtyStreamJobClear dirty_stream_job_clear = 4;
     EventMetaNodeStart meta_node_start = 5;
     EventBarrierComplete barrier_complete = 6;
+    EventInjectBarrierFail inject_barrier_fail = 7;
+    EventCollectBarrierFail collect_barrier_fail = 8;
   }
 }
 

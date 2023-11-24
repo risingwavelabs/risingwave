@@ -64,6 +64,8 @@ fn event_type(e: &Event) -> String {
         Event::DirtyStreamJobClear(_) => "DIRTY_STREAM_JOB_CLEAR",
         Event::MetaNodeStart(_) => "META_NODE_START",
         Event::BarrierComplete(_) => "BARRIER_COMPLETE",
+        Event::InjectBarrierFail(_) => "INJECT_BARRIER_FAIL",
+        Event::CollectBarrierFail(_) => "COLLECT_BARRIER_FAIL",
     }
     .into()
 }
