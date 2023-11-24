@@ -202,6 +202,7 @@ public class EsSink extends SinkWriterBase {
                 case DATE:
                 case TIME:
                 case TIMESTAMP:
+                case TIMESTAMPTZ:
                     // es client doesn't natively support java.sql.Timestamp/Time/Date
                     // so we need to convert Date/Time/Timestamp type into a string as suggested in
                     // https://github.com/elastic/elasticsearch/issues/31377#issuecomment-398102292
