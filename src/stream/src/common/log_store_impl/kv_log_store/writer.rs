@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound::{Excluded, Included};
 use std::sync::Arc;
 
-use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
@@ -134,23 +132,15 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                 Ok(())
             })?;
         flush_info.report(&self.metrics);
-        let mut delete_range = Vec::with_capacity(self.serde.vnodes().count_ones());
         let mut watermark = None;
         if let Some(truncation_offset) = self.tx.pop_truncation(epoch) {
-            for vnode in self.serde.vnodes().iter_vnodes() {
-                let range_begin = Bytes::from(vnode.to_be_bytes().to_vec());
-                let range_end = self
-                    .serde
-                    .serialize_truncation_offset_watermark(vnode, truncation_offset);
-                delete_range.push((Included(range_begin), Excluded(range_end)));
-            }
             watermark = Some(VnodeWatermark::new(
                 Vnodes::Bitmap(self.serde.vnodes().clone()),
                 self.serde
-                    .serialize_truncate_offset_watermark_without_vnode(truncation_offset),
+                    .serialize_truncation_offset_watermark(truncation_offset),
             ));
         }
-        self.state_store.flush(delete_range).await?;
+        self.state_store.flush(vec![]).await?;
         let watermark = watermark.into_iter().collect_vec();
         self.state_store.seal_current_epoch(
             next_epoch,

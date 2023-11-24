@@ -271,7 +271,7 @@ impl LogStoreRowSerde {
         )
     }
 
-    pub(crate) fn serialize_truncate_offset_watermark_without_vnode(
+    pub(crate) fn serialize_truncation_offset_watermark(
         &self,
         offset: ReaderTruncationOffsetType,
     ) -> Bytes {
@@ -283,18 +283,6 @@ impl LogStoreRowSerde {
             ],
             &self.pk_serde,
         )))
-    }
-
-    pub(crate) fn serialize_truncation_offset_watermark(
-        &self,
-        vnode: VirtualNode,
-        offset: ReaderTruncationOffsetType,
-    ) -> Bytes {
-        let (epoch, seq_id) = offset;
-        let curr_offset = self.serialize_log_store_pk(vnode, epoch, seq_id);
-        let ret = Bytes::from(next_key(&curr_offset));
-        assert!(!ret.is_empty());
-        ret
     }
 }
 
@@ -796,9 +784,7 @@ mod tests {
         fn remove_vnode_prefix(key: &Bytes) -> Bytes {
             key.slice(VirtualNode::SIZE..)
         }
-        let delete_range_right1 = remove_vnode_prefix(
-            &serde.serialize_truncation_offset_watermark(DEFAULT_VNODE, (epoch, None)),
-        );
+        let delete_range_right1 = serde.serialize_truncation_offset_watermark((epoch, None));
 
         for (op, row) in stream_chunk.rows() {
             let (_, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
@@ -835,9 +821,7 @@ mod tests {
         seq_id = 1;
         epoch += 1;
 
-        let delete_range_right2 = remove_vnode_prefix(
-            &serde.serialize_truncation_offset_watermark(DEFAULT_VNODE, (epoch, None)),
-        );
+        let delete_range_right2 = serde.serialize_truncation_offset_watermark((epoch, None));
 
         for (op, row) in stream_chunk.rows() {
             let (_, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
