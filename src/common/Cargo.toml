@@ -34,7 +34,6 @@ chrono-tz = { version = "0.8", features = ["case-insensitive"] }
 clap = { version = "4", features = ["derive"] }
 comfy-table = "7"
 crc32fast = "1"
-deltalake = { git = "https://github.com/delta-io/delta-rs", rev = "72505449e9538371fe5fda35d545dbd662facd07", features = ["s3"] }
 easy-ext = "1"
 educe = "0.4"
 either = "1"
