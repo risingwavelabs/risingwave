@@ -42,11 +42,12 @@ impl SysCatalogReaderImpl {
             .await?
             .into_iter()
             .sorted_by(|a, b| a.timestamp.cmp(&b.timestamp))
-            .map(|e| {
-                let ts = Timestamptz::from_millis(e.timestamp.unwrap() as i64).unwrap();
+            .map(|mut e| {
+                let id = e.unique_id.take().unwrap().into();
+                let ts = Timestamptz::from_millis(e.timestamp.take().unwrap() as i64).unwrap();
                 let event_type = event_type(e.event.as_ref().unwrap());
                 OwnedRow::new(vec![
-                    Some(ScalarImpl::Utf8(e.unique_id.to_owned().unwrap().into())),
+                    Some(ScalarImpl::Utf8(id)),
                     Some(ScalarImpl::Timestamptz(ts)),
                     Some(ScalarImpl::Utf8(event_type.into())),
                     Some(ScalarImpl::Jsonb(json!(e).into())),
@@ -62,6 +63,7 @@ fn event_type(e: &Event) -> String {
         Event::CreateStreamJobFail(_) => "CREATE_STREAM_JOB_FAIL",
         Event::DirtyStreamJobClear(_) => "DIRTY_STREAM_JOB_CLEAR",
         Event::MetaNodeStart(_) => "META_NODE_START",
+        Event::BarrierComplete(_) => "BARRIER_COMPLETE",
         Event::InjectBarrierFail(_) => "INJECT_BARRIER_FAIL",
         Event::CollectBarrierFail(_) => "COLLECT_BARRIER_FAIL",
     }

@@ -1138,8 +1138,23 @@ impl GlobalBarrierManager {
                     self.scheduled_barriers.force_checkpoint_in_next_barrier();
                 }
 
-                node.timer.take().unwrap().observe_duration();
+                let duration_sec = node.timer.take().unwrap().stop_and_record();
                 node.wait_commit_timer.take().unwrap().observe_duration();
+
+                {
+                    // Record barrier latency in event log.
+                    use risingwave_pb::meta::event_log;
+                    let event = event_log::EventBarrierComplete {
+                        prev_epoch: node.command_ctx.prev_epoch.value().0,
+                        cur_epoch: node.command_ctx.curr_epoch.value().0,
+                        duration_sec,
+                        command: node.command_ctx.command.to_string(),
+                        barrier_kind: node.command_ctx.kind.as_str_name().to_string(),
+                    };
+                    self.env
+                        .event_log_manager_ref()
+                        .add_event_logs(vec![event_log::Event::BarrierComplete(event)]);
+                }
 
                 Ok(())
             }

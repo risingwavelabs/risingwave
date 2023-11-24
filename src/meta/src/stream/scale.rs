@@ -1369,10 +1369,7 @@ impl ScaleController {
 
             match upstream_dispatch_type {
                 DispatcherType::Unspecified => unreachable!(),
-                DispatcherType::Hash
-                | DispatcherType::Broadcast
-                | DispatcherType::Simple
-                | DispatcherType::CdcTablename => {
+                DispatcherType::Hash | DispatcherType::Broadcast | DispatcherType::Simple => {
                     let upstream_fragment = &ctx.fragment_map.get(upstream_fragment_id).unwrap();
                     let mut upstream_actor_ids = upstream_fragment
                         .actors
@@ -1454,10 +1451,7 @@ impl ScaleController {
                 fragment_actors_to_create.get(&downstream_fragment_id);
 
             match dispatcher.r#type() {
-                d @ (DispatcherType::Hash
-                | DispatcherType::Simple
-                | DispatcherType::Broadcast
-                | DispatcherType::CdcTablename) => {
+                d @ (DispatcherType::Hash | DispatcherType::Simple | DispatcherType::Broadcast) => {
                     if let Some(downstream_actors_to_remove) = downstream_fragment_actors_to_remove
                     {
                         dispatcher
