@@ -24,7 +24,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
-use risingwave_expr::sig::FUNCTION_REGISTRY;
+use risingwave_expr::sig::{FuncBuilder, FUNCTION_REGISTRY};
 use risingwave_pb::expr::{PbAggCall, PbConstant};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
 
@@ -531,12 +531,34 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     &agg_call.return_type,
                 )
                 .expect("agg not found");
-            if !in_append_only && sig.is_append_only() {
-                // we use materialized input state for non-retractable aggregate function.
-                // for backward compatibility, the state type is same as the return type.
-                // its values in the intermediate state table are always null.
-            } else if let Some(state_type) = &sig.state_type {
-                field.data_type = state_type.clone();
+            // in_append_only: whether the input is append-only
+            // sig.is_append_only(): whether the agg function has append-only version
+            match (in_append_only, sig.is_append_only()) {
+                (false, true) => {
+                    // we use materialized input state for non-retractable aggregate function.
+                    // for backward compatibility, the state type is same as the return type.
+                    // its values in the intermediate state table are always null.
+                }
+                (true, true) => {
+                    // use append-only version
+                    if let FuncBuilder::Aggregate {
+                        append_only_state_type: Some(state_type),
+                        ..
+                    } = &sig.build
+                    {
+                        field.data_type = state_type.clone();
+                    }
+                }
+                (_, false) => {
+                    // there is only retractable version, use it
+                    if let FuncBuilder::Aggregate {
+                        retractable_state_type: Some(state_type),
+                        ..
+                    } = &sig.build
+                    {
+                        field.data_type = state_type.clone();
+                    }
+                }
             }
         }
         let in_dist_key = self.input.distribution().dist_column_indices().to_vec();

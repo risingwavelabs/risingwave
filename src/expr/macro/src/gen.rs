@@ -139,7 +139,6 @@ impl FunctionAttr {
                     build: FuncBuilder::Scalar(#build_fn),
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
-                    state_type: None,
                 }) };
             }
         })
@@ -564,6 +563,14 @@ impl FunctionAttr {
             false => quote! { None },
             true => quote! { Some(#build_fn) },
         };
+        let retractable_state_type = match append_only {
+            true => quote! { None },
+            false => state_type.clone(),
+        };
+        let append_only_state_type = match append_only {
+            false => quote! { None },
+            true => state_type,
+        };
         let type_infer_fn = self.generate_type_infer_fn()?;
         let deprecated = self.deprecated;
 
@@ -581,9 +588,10 @@ impl FunctionAttr {
                     build: FuncBuilder::Aggregate {
                         retractable: #build_retractable,
                         append_only: #build_append_only,
+                        retractable_state_type: #retractable_state_type,
+                        append_only_state_type: #append_only_state_type,
                     },
                     type_infer: #type_infer_fn,
-                    state_type: #state_type,
                     deprecated: #deprecated,
                 }) };
             }
@@ -911,7 +919,6 @@ impl FunctionAttr {
                     build: FuncBuilder::Table(#build_fn),
                     type_infer: #type_infer_fn,
                     deprecated: #deprecated,
-                    state_type: None,
                 }) };
             }
         })

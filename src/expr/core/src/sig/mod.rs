@@ -60,10 +60,14 @@ impl FunctionRegistry {
                     FuncBuilder::Aggregate {
                         retractable,
                         append_only,
+                        retractable_state_type,
+                        append_only_state_type,
                     },
                     FuncBuilder::Aggregate {
                         retractable: r1,
                         append_only: a1,
+                        retractable_state_type: rs1,
+                        append_only_state_type: as1,
                     },
                 ) = (&mut existing.build, sig.build)
                 else {
@@ -71,9 +75,11 @@ impl FunctionRegistry {
                 };
                 if let Some(f) = r1 {
                     *retractable = Some(f);
+                    *retractable_state_type = rs1;
                 }
                 if let Some(f) = a1 {
                     *append_only = Some(f);
+                    *append_only_state_type = as1;
                 }
                 return;
             }
@@ -163,10 +169,6 @@ pub struct FuncSign {
     /// Whether the function is deprecated and should not be used in the frontend.
     /// For backward compatibility, it is still available in the backend.
     pub deprecated: bool,
-
-    /// The state type of the aggregate function.
-    /// `None` means equal to the return type.
-    pub state_type: Option<DataType>,
 }
 
 impl fmt::Debug for FuncSign {
@@ -292,6 +294,7 @@ impl FuncSign {
             FuncBuilder::Aggregate {
                 retractable,
                 append_only,
+                ..
             } => retractable.or(append_only).unwrap()(agg),
             _ => panic!("Expected an aggregate function"),
         }
@@ -414,7 +417,7 @@ impl SigDataType {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub enum FuncBuilder {
     Scalar(fn(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression>),
     Table(
@@ -424,9 +427,16 @@ pub enum FuncBuilder {
             children: Vec<BoxedExpression>,
         ) -> Result<BoxedTableFunction>,
     ),
+    // An aggregate function may contain both or either one of retractable and append-only versions.
     Aggregate {
         retractable: Option<fn(agg: &AggCall) -> Result<BoxedAggregateFunction>>,
         append_only: Option<fn(agg: &AggCall) -> Result<BoxedAggregateFunction>>,
+        /// The state type of the retractable aggregate function.
+        /// `None` means equal to the return type.
+        retractable_state_type: Option<DataType>,
+        /// The state type of the append-only aggregate function.
+        /// `None` means equal to the return type.
+        append_only_state_type: Option<DataType>,
     },
 }
 
