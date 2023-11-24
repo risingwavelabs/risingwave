@@ -290,10 +290,10 @@ impl PrefetchOptions {
         }
     }
 
-    pub fn new(prefetch: bool) -> Self {
+    pub fn new(prefetch: bool, for_large_query: bool) -> Self {
         Self {
             prefetch,
-            for_large_query: false,
+            for_large_query,
         }
     }
 }
