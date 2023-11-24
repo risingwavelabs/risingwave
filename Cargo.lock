@@ -8110,6 +8110,7 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
+ "strum",
  "sync-point",
  "thiserror",
  "thiserror-ext",
