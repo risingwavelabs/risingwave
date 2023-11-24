@@ -489,7 +489,7 @@ impl LogicalOptimizer {
     }
 
     pub fn inline_now_proc_time(plan: PlanRef, ctx: &OptimizerContextRef) -> PlanRef {
-        // If now() and proctime() are no found, bail out.
+        // If now() and proctime() are not found, bail out.
         let mut v = NowProcTimeFinder::default();
         plan.visit_exprs_recursive(&mut v);
         if !v.has() {
