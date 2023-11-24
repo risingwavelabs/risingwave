@@ -255,7 +255,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         } else {
             source.context.get_config().developer.chunk_size as u32
         };
-        let limit = seq_scan_node.limit.clone().map(|limit| limit.limit);
+        let limit = seq_scan_node.limit;
         let metrics = source.context().batch_metrics();
 
         dispatch_state_store!(source.context().state_store(), state_store, {

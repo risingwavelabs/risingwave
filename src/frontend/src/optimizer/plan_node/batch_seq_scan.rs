@@ -20,7 +20,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::row_seq_scan_node::{ChunkSize, Limit};
+use risingwave_pb::batch_plan::row_seq_scan_node::ChunkSize;
 use risingwave_pb::batch_plan::RowSeqScanNode;
 
 use super::batch::prelude::*;
@@ -251,7 +251,7 @@ impl ToBatchPb for BatchSeqScan {
                 .core
                 .chunk_size
                 .map(|chunk_size| ChunkSize { chunk_size }),
-            limit: self.limit().map(|limit| Limit { limit }),
+            limit: *self.limit(),
         })
     }
 }
