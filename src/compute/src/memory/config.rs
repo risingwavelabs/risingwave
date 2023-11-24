@@ -1,6 +1,3 @@
-use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
-
 use risingwave_common::config::{StorageConfig, StorageMemoryConfig};
 use risingwave_common::util::pretty_bytes::convert;
 

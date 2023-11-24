@@ -12,20 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use risingwave_common::util::epoch::Epoch;
 use risingwave_jni_core::jvm_runtime::load_jvm_memory_stats;
 use risingwave_stream::executor::monitor::StreamingMetrics;
-use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 
 /// Internal state of [`MemoryController`] that saves the state in previous tick.
 struct State {
     pub used_memory_bytes: usize,
     pub lru_watermark_step: u64,
     pub lru_watermark_time_ms: u64,
-    pub lru_physical_now_ms: u64,
 }
 
 impl Default for State {
@@ -35,7 +32,6 @@ impl Default for State {
             used_memory_bytes: 0,
             lru_watermark_step: 0,
             lru_watermark_time_ms: physical_now,
-            lru_physical_now_ms: physical_now,
         }
     }
 }
@@ -87,7 +83,7 @@ impl std::fmt::Debug for MemoryController {
 
 /// Get memory statistics from Jemalloc
 ///
-/// - `stats.allocated`: Total number of bytes allocated by the application.`
+/// - `stats.allocated`: Total number of bytes allocated by the application.
 /// - `stats.active`: Total number of bytes in active pages allocated by the application. This is a multiple of the page size, and greater than or equal to `stats.allocated`. This does not include `stats.arenas.<i>.pdirty`, `stats.arenas.<i>.pmuzzy`, nor pages entirely devoted to allocator metadata.
 ///
 /// Reference: <https://jemalloc.net/jemalloc.3.html>
@@ -166,7 +162,6 @@ impl MemoryController {
             used_memory_bytes: cur_used_memory_bytes,
             lru_watermark_step: step,
             lru_watermark_time_ms: watermark_time_ms,
-            lru_physical_now_ms: physical_now,
         };
 
         self.metrics
@@ -185,6 +180,6 @@ impl MemoryController {
             .set(jvm_allocated_bytes as i64);
         self.metrics.jvm_active_bytes.set(jvm_active_bytes as i64);
 
-        return Epoch::from_physical_time(watermark_time_ms);
+        Epoch::from_physical_time(watermark_time_ms)
     }
 }
