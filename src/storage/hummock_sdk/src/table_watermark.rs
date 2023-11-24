@@ -96,12 +96,9 @@ impl TableWatermarksIndex {
         }
     }
 
-    pub fn filter_regress_watermarks(
-        &self,
-        watermarks: Vec<VnodeWatermark>,
-    ) -> Vec<VnodeWatermark> {
+    pub fn filter_regress_watermarks(&self, watermarks: &mut Vec<VnodeWatermark>) {
         let mut ret = Vec::with_capacity(watermarks.len());
-        for watermark in watermarks {
+        for watermark in watermarks.drain(..) {
             let mut regress_vnodes = HashSet::new();
             for vnode in watermark.vnodes.vnodes() {
                 if let Some(prev_watermark) = self.latest_watermark(vnode) {
@@ -137,7 +134,7 @@ impl TableWatermarksIndex {
                 ));
             }
         }
-        ret
+        *watermarks = ret;
     }
 
     pub fn direction(&self) -> WatermarkDirection {
