@@ -64,6 +64,7 @@ use risingwave_pb::hummock::*;
 use risingwave_pb::meta::add_worker_node_request::Property;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
+use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
 use risingwave_pb::meta::get_reschedule_plan_request::PbPolicy;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
@@ -1189,6 +1190,12 @@ impl MetaClient {
         self.inner.core.read().await.sink_coordinate_client.clone()
     }
 
+    pub async fn list_event_log(&self) -> Result<Vec<EventLog>> {
+        let req = ListEventLogRequest::default();
+        let resp = self.inner.list_event_log(req).await?;
+        Ok(resp.event_logs)
+    }
+
     pub async fn rise_ctl_list_compact_task_assignment(
         &self,
     ) -> Result<Vec<CompactTaskAssignment>> {
@@ -1392,6 +1399,7 @@ struct GrpcMetaClientCore {
     serving_client: ServingServiceClient<Channel>,
     cloud_client: CloudServiceClient<Channel>,
     sink_coordinate_client: SinkCoordinationRpcClient,
+    event_log_client: EventLogServiceClient<Channel>,
 }
 
 impl GrpcMetaClientCore {
@@ -1416,7 +1424,8 @@ impl GrpcMetaClientCore {
         let system_params_client = SystemParamsServiceClient::new(channel.clone());
         let serving_client = ServingServiceClient::new(channel.clone());
         let cloud_client = CloudServiceClient::new(channel.clone());
-        let sink_coordinate_client = SinkCoordinationServiceClient::new(channel);
+        let sink_coordinate_client = SinkCoordinationServiceClient::new(channel.clone());
+        let event_log_client = EventLogServiceClient::new(channel);
 
         GrpcMetaClientCore {
             cluster_client,
@@ -1434,6 +1443,7 @@ impl GrpcMetaClientCore {
             serving_client,
             cloud_client,
             sink_coordinate_client,
+            event_log_client,
         }
     }
 }
@@ -1868,6 +1878,7 @@ macro_rules! for_all_meta_rpc {
             ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
             ,{ serving_client, get_serving_vnode_mappings, GetServingVnodeMappingsRequest, GetServingVnodeMappingsResponse }
             ,{ cloud_client, rw_cloud_validate_source, RwCloudValidateSourceRequest, RwCloudValidateSourceResponse }
+            ,{ event_log_client, list_event_log, ListEventLogRequest, ListEventLogResponse }
         }
     };
 }

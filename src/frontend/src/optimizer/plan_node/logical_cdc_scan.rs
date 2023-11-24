@@ -25,8 +25,9 @@ use super::{
     ToStream,
 };
 use crate::catalog::ColumnId;
-use crate::expr::ExprRewriter;
+use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamCdcTableScan,
     ToStreamContext,
@@ -166,6 +167,12 @@ impl ExprRewritable for LogicalCdcScan {
             core,
         }
         .into()
+    }
+}
+
+impl ExprVisitable for LogicalCdcScan {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }
 

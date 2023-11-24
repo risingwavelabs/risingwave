@@ -486,7 +486,8 @@ impl DdlController {
         let (ctx, table_fragments) = match result {
             Ok(r) => r,
             Err(e) => {
-                self.cancel_stream_job(&stream_job, internal_tables).await?;
+                self.cancel_stream_job(&stream_job, internal_tables, Some(&e))
+                    .await?;
                 return Err(e);
             }
         };
@@ -545,7 +546,8 @@ impl DdlController {
                     tracing::error!(id = stream_job.id(), error = ?e, "finish stream job failed")
                 }
                 _ => {
-                    self.cancel_stream_job(&stream_job, internal_tables).await?;
+                    self.cancel_stream_job(&stream_job, internal_tables, Some(&e))
+                        .await?;
                 }
             }
             return Err(e);
@@ -767,7 +769,19 @@ impl DdlController {
         &self,
         stream_job: &StreamingJob,
         internal_tables: Vec<Table>,
+        error: Option<&impl ToString>,
     ) -> MetaResult<()> {
+        let error = error.map(ToString::to_string).unwrap_or_default();
+        let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
+            id: stream_job.id(),
+            name: stream_job.name(),
+            definition: stream_job.definition(),
+            error,
+        };
+        self.env.event_log_manager_ref().add_event_logs(vec![
+            risingwave_pb::meta::event_log::Event::CreateStreamJobFail(event),
+        ]);
+
         let mut creating_internal_table_ids =
             internal_tables.into_iter().map(|t| t.id).collect_vec();
         // 1. cancel create procedure.

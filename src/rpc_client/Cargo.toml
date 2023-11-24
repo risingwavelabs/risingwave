@@ -43,7 +43,7 @@ tokio-stream = "0.1"
 tonic = { workspace = true }
 tower = "0.4"
 tracing = "0.1"
-url = "2.4.1"
+url = "2.5.0"
 
 [dev-dependencies]
 risingwave_hummock_sdk = { workspace = true, features = ["enable_test_epoch"] }

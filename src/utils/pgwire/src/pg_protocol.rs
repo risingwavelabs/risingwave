@@ -257,7 +257,7 @@ where
                         return None;
                     }
 
-                    PsqlError::QueryError(_) => {
+                    PsqlError::SimpleQueryError(_) => {
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
                             .ok()?;
@@ -276,9 +276,9 @@ where
                         return None;
                     }
 
-                    PsqlError::Internal(_)
-                    | PsqlError::ParseError(_)
-                    | PsqlError::ExecuteError(_) => {
+                    PsqlError::Uncategorized(_)
+                    | PsqlError::ExtendedPrepareError(_)
+                    | PsqlError::ExtendedExecuteError(_) => {
                         self.stream
                             .write_no_flush(&BeMessage::ErrorResponse(Box::new(e)))
                             .ok()?;
@@ -404,7 +404,7 @@ where
         let application_name = msg.config.get("application_name");
         if let Some(application_name) = application_name {
             session
-                .set_config("application_name", vec![application_name.clone()])
+                .set_config("application_name", application_name.clone())
                 .map_err(PsqlError::StartupError)?;
         }
 
@@ -462,7 +462,7 @@ where
 
     async fn process_query_msg(&mut self, query_string: io::Result<&str>) -> PsqlResult<()> {
         let sql: Arc<str> =
-            Arc::from(query_string.map_err(|err| PsqlError::QueryError(Box::new(err)))?);
+            Arc::from(query_string.map_err(|err| PsqlError::SimpleQueryError(Box::new(err)))?);
         let start = Instant::now();
         let session = self.session.clone().unwrap();
         let session_id = session.id().0;
@@ -493,7 +493,7 @@ where
         // Parse sql.
         let stmts = Parser::parse_sql(&sql)
             .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
-            .map_err(|err| PsqlError::QueryError(err.into()))?;
+            .map_err(|err| PsqlError::SimpleQueryError(err.into()))?;
         if stmts.is_empty() {
             self.stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
         }
@@ -534,7 +534,7 @@ where
             self.stream
                 .write_no_flush(&BeMessage::NoticeResponse(&notice))?;
         }
-        let mut res = res.map_err(PsqlError::QueryError)?;
+        let mut res = res.map_err(PsqlError::SimpleQueryError)?;
 
         for notice in res.notices() {
             self.stream
@@ -555,7 +555,7 @@ where
             let mut rows_cnt = 0;
 
             while let Some(row_set) = res.values_stream().next().await {
-                let row_set = row_set.map_err(PsqlError::QueryError)?;
+                let row_set = row_set.map_err(PsqlError::SimpleQueryError)?;
                 for row in row_set {
                     self.stream.write_no_flush(&BeMessage::DataRow(&row))?;
                     rows_cnt += 1;
@@ -622,16 +622,18 @@ where
             // prepare statement.
             self.unnamed_prepare_statement.take();
         } else if self.prepare_statement_store.contains_key(&statement_name) {
-            return Err(PsqlError::ParseError("Duplicated statement name".into()));
+            return Err(PsqlError::ExtendedPrepareError(
+                "Duplicated statement name".into(),
+            ));
         }
 
         let stmt = {
             let stmts = Parser::parse_sql(sql)
                 .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
-                .map_err(|err| PsqlError::ParseError(err.into()))?;
+                .map_err(|err| PsqlError::ExtendedPrepareError(err.into()))?;
 
             if stmts.len() > 1 {
-                return Err(PsqlError::ParseError(
+                return Err(PsqlError::ExtendedPrepareError(
                     "Only one statement is allowed in extended query mode".into(),
                 ));
             }
@@ -649,14 +651,14 @@ where
                 } else {
                     DataType::from_oid(id)
                         .map(Some)
-                        .map_err(|e| PsqlError::ParseError(e.into()))
+                        .map_err(|e| PsqlError::ExtendedPrepareError(e.into()))
                 }
             })
             .try_collect()?;
 
         let prepare_statement = session
             .parse(stmt, param_types)
-            .map_err(PsqlError::ParseError)?;
+            .map_err(PsqlError::ExtendedPrepareError)?;
 
         if statement_name.is_empty() {
             self.unnamed_prepare_statement.replace(prepare_statement);
@@ -680,7 +682,7 @@ where
         let session = self.session.clone().unwrap();
 
         if self.portal_store.contains_key(&portal_name) {
-            return Err(PsqlError::Internal("Duplicated portal name".into()));
+            return Err(PsqlError::Uncategorized("Duplicated portal name".into()));
         }
 
         let prepare_statement = self.get_statement(&statement_name)?;
@@ -698,7 +700,7 @@ where
 
         let portal = session
             .bind(prepare_statement, msg.params, param_formats, result_formats)
-            .map_err(PsqlError::Internal)?;
+            .map_err(PsqlError::Uncategorized)?;
 
         if portal_name.is_empty() {
             self.result_cache.remove(&portal_name);
@@ -753,7 +755,7 @@ where
                 sql = format_args!("{}", truncated_fmt::TruncatedFmt(&sql, *RW_QUERY_LOG_TRUNCATE_LEN)),
             );
 
-            let pg_response = result.map_err(PsqlError::ExecuteError)?;
+            let pg_response = result.map_err(PsqlError::ExtendedExecuteError)?;
             let mut result_cache = ResultCache::new(pg_response);
             let is_consume_completed = result_cache.consume::<S>(row_max, &mut self.stream).await?;
             if !is_consume_completed {
@@ -779,7 +781,7 @@ where
                 .clone()
                 .unwrap()
                 .describe_statement(prepare_statement)
-                .map_err(PsqlError::Internal)?;
+                .map_err(PsqlError::Uncategorized)?;
 
             self.stream
                 .write_no_flush(&BeMessage::ParameterDescription(
@@ -799,7 +801,7 @@ where
 
             let row_descriptions = session
                 .describe_portal(portal)
-                .map_err(PsqlError::Internal)?;
+                .map_err(PsqlError::Uncategorized)?;
 
             if row_descriptions.is_empty() {
                 // According https://www.postgresql.org/docs/current/protocol-flow.html#:~:text=The%20response%20is%20a%20RowDescri[…]0a%20query%20that%20will%20return%20rows%3B,
@@ -850,14 +852,14 @@ where
             Ok(self
                 .unnamed_portal
                 .as_ref()
-                .ok_or_else(|| PsqlError::Internal("unnamed portal not found".into()))?
+                .ok_or_else(|| PsqlError::Uncategorized("unnamed portal not found".into()))?
                 .clone())
         } else {
             Ok(self
                 .portal_store
                 .get(portal_name)
                 .ok_or_else(|| {
-                    PsqlError::Internal(format!("Portal {} not found", portal_name).into())
+                    PsqlError::Uncategorized(format!("Portal {} not found", portal_name).into())
                 })?
                 .clone())
         }
@@ -871,14 +873,16 @@ where
             Ok(self
                 .unnamed_prepare_statement
                 .as_ref()
-                .ok_or_else(|| PsqlError::Internal("unnamed prepare statement not found".into()))?
+                .ok_or_else(|| {
+                    PsqlError::Uncategorized("unnamed prepare statement not found".into())
+                })?
                 .clone())
         } else {
             Ok(self
                 .prepare_statement_store
                 .get(statement_name)
                 .ok_or_else(|| {
-                    PsqlError::Internal(
+                    PsqlError::Uncategorized(
                         format!("Prepare statement {} not found", statement_name).into(),
                     )
                 })?
@@ -1069,13 +1073,13 @@ fn build_ssl_ctx_from_config(tls_config: &TlsConfig) -> PsqlResult<SslContext> {
     // Now we set every verify to true.
     acceptor
         .set_private_key_file(key_path, openssl::ssl::SslFiletype::PEM)
-        .map_err(|e| PsqlError::Internal(e.into()))?;
+        .map_err(|e| PsqlError::Uncategorized(e.into()))?;
     acceptor
         .set_ca_file(cert_path)
-        .map_err(|e| PsqlError::Internal(e.into()))?;
+        .map_err(|e| PsqlError::Uncategorized(e.into()))?;
     acceptor
         .set_certificate_chain_file(cert_path)
-        .map_err(|e| PsqlError::Internal(e.into()))?;
+        .map_err(|e| PsqlError::Uncategorized(e.into()))?;
     let acceptor = acceptor.build();
 
     Ok(acceptor.into_context())

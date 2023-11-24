@@ -17,7 +17,7 @@ use pgwire::pg_protocol::ParameterStatus;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::session_config::ConfigReporter;
+use risingwave_common::session_config::{ConfigReporter, SESSION_CONFIG_LIST_SEP};
 use risingwave_common::system_param::is_mutable;
 use risingwave_common::types::{DataType, ScalarRefImpl};
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
@@ -26,20 +26,25 @@ use super::RwPgResponse;
 use crate::handler::HandlerArgs;
 use crate::utils::infer_stmt_row_desc::infer_show_variable;
 
+fn set_var_to_guc_str(value: &SetVariableValue) -> String {
+    match value {
+        SetVariableValue::Literal(Value::DoubleQuotedString(s))
+        | SetVariableValue::Literal(Value::SingleQuotedString(s)) => s.clone(),
+        SetVariableValue::List(list) => list
+            .iter()
+            .map(set_var_to_guc_str)
+            .join(SESSION_CONFIG_LIST_SEP),
+        _ => value.to_string(),
+    }
+}
+
 pub fn handle_set(
     handler_args: HandlerArgs,
     name: Ident,
-    value: Vec<SetVariableValue>,
+    value: SetVariableValue,
 ) -> Result<RwPgResponse> {
     // Strip double and single quotes
-    let string_vals = value
-        .into_iter()
-        .map(|v| match v {
-            SetVariableValue::Literal(Value::DoubleQuotedString(s))
-            | SetVariableValue::Literal(Value::SingleQuotedString(s)) => s,
-            _ => v.to_string(),
-        })
-        .collect_vec();
+    let string_val = set_var_to_guc_str(&value);
 
     let mut status = ParameterStatus::default();
 
@@ -60,7 +65,7 @@ pub fn handle_set(
     // We remark that the name of session parameter is always case-insensitive.
     handler_args.session.set_config_report(
         &name.real_value().to_lowercase(),
-        string_vals,
+        string_val,
         Reporter {
             status: &mut status,
         },
@@ -85,7 +90,7 @@ pub(super) fn handle_set_time_zone(
         _ => Ok(value.to_string()),
     }?;
 
-    handler_args.session.set_config("timezone", vec![tz_info])?;
+    handler_args.session.set_config("timezone", tz_info)?;
 
     Ok(PgResponse::empty_result(StatementType::SET_VARIABLE))
 }
@@ -114,7 +119,7 @@ pub(super) async fn handle_show(
 fn handle_show_all(handler_args: HandlerArgs) -> Result<Vec<Row>> {
     let config_reader = handler_args.session.config();
 
-    let all_variables = config_reader.get_all();
+    let all_variables = config_reader.show_all();
 
     let rows = all_variables
         .iter()
