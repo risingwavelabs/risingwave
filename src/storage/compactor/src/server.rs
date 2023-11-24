@@ -114,7 +114,7 @@ pub async fn prepare_start_parameters(
         assert!(compactor_memory_limit_bytes > min_compactor_memory_limit_bytes * 2);
     }
 
-    let mut object_store = build_remote_object_store(
+    let object_store = build_remote_object_store(
         state_store_url
             .strip_prefix("hummock+")
             .expect("object store must be hummock for compactor server"),
@@ -123,12 +123,6 @@ pub async fn prepare_start_parameters(
         config.storage.object_store.clone(),
     )
     .await;
-    object_store.set_opts(
-        storage_opts.object_store_streaming_read_timeout_ms,
-        storage_opts.object_store_streaming_upload_timeout_ms,
-        storage_opts.object_store_read_timeout_ms,
-        storage_opts.object_store_upload_timeout_ms,
-    );
 
     let object_store = Arc::new(object_store);
     let sstable_store = Arc::new(SstableStore::for_compactor(
@@ -244,7 +238,6 @@ pub async fn compactor_serve(
         filter_key_extractor_manager.clone(),
     );
     let compactor_context = CompactorContext {
-        storage_config: Arc::new(config.storage),
         storage_opts,
         sstable_store: sstable_store.clone(),
         compactor_metrics,
@@ -374,7 +367,6 @@ pub async fn shared_compactor_serve(
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
     let compactor_context = CompactorContext {
-        storage_config: Arc::new(config.storage),
         storage_opts,
         sstable_store,
         compactor_metrics,

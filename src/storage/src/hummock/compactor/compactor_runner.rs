@@ -407,8 +407,8 @@ pub async fn compact(
         &compact_task,
         (context.storage_opts.block_size_kb as u64) * (1 << 10),
         context
-            .storage_config
-            .object_store
+            .storage_opts
+            .object_store_config
             .s3
             .object_store_recv_buffer_size
             .unwrap_or(6 * 1024 * 1024) as u64,

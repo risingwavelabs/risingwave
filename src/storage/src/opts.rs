@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::config::{extract_storage_memory_config, RwConfig, StorageMemoryConfig};
+use risingwave_common::config::{
+    extract_storage_memory_config, ObjectStoreConfig, RwConfig, StorageMemoryConfig,
+};
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::system_params_for_test;
 
@@ -130,6 +132,8 @@ pub struct StorageOpts {
     pub max_preload_io_retry_times: usize,
 
     pub mem_table_spill_threshold: usize,
+
+    pub object_store_config: ObjectStoreConfig,
 }
 
 impl Default for StorageOpts {
@@ -247,6 +251,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             compactor_max_sst_size: c.storage.compactor_max_sst_size,
             enable_fast_compaction: c.storage.enable_fast_compaction,
             mem_table_spill_threshold: c.storage.mem_table_spill_threshold,
+            object_store_config: c.storage.object_store.clone(),
         }
     }
 }

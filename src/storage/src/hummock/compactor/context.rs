@@ -16,7 +16,6 @@ use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
-use risingwave_common::config::StorageConfig;
 
 use super::task_progress::TaskProgressManagerRef;
 use crate::hummock::compactor::CompactionExecutor;
@@ -49,13 +48,10 @@ pub struct CompactorContext {
     pub await_tree_reg: Option<Arc<RwLock<await_tree::Registry<String>>>>,
 
     pub running_task_count: Arc<AtomicU32>,
-
-    pub storage_config: Arc<StorageConfig>,
 }
 
 impl CompactorContext {
     pub fn new_local_compact_context(
-        storage_config: Arc<StorageConfig>,
         storage_opts: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
         compactor_metrics: Arc<CompactorMetrics>,
@@ -71,7 +67,6 @@ impl CompactorContext {
 
         // not limit memory for local compact
         Self {
-            storage_config,
             storage_opts,
             sstable_store,
             compactor_metrics,

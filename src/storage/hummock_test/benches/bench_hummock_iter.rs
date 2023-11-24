@@ -19,7 +19,6 @@ use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::{pin_mut, TryStreamExt};
 use risingwave_common::cache::CachePriority;
-use risingwave_common::config::StorageConfig;
 use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_test::get_notification_client_for_test;
@@ -68,7 +67,6 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let global_hummock_storage = runtime.block_on(async {
         HummockStorage::for_test(
-            Arc::new(StorageConfig::default()),
             hummock_options,
             sstable_store,
             meta_client.clone(),

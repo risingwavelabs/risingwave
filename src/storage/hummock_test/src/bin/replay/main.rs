@@ -149,7 +149,6 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
     )));
 
     let storage = HummockStorage::new(
-        Arc::new(config.storage),
         storage_opts,
         sstable_store,
         hummock_meta_client.clone(),
