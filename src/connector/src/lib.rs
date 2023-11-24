@@ -40,7 +40,6 @@ use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de;
 
-pub mod aws_auth;
 pub mod aws_utils;
 pub mod error;
 mod macros;
@@ -121,16 +120,17 @@ where
 mod tests {
     use expect_test::expect_file;
 
-    use crate::with_options_test::update_with_options_yaml;
+    use crate::with_options_test::{
+        generate_with_options_yaml_sink, generate_with_options_yaml_source,
+    };
 
     /// This test ensures that `src/connector/with_options.yaml` is up-to-date with the default values specified
     /// in this file. Developer should run `./risedev generate-with-options` to update it if this
     /// test fails.
     #[test]
     fn test_with_options_yaml_up_to_date() {
-        let expected = expect_file!("../with_options.yaml");
-        let actual = update_with_options_yaml();
+        expect_file!("../with_options_source.yaml").assert_eq(&generate_with_options_yaml_source());
 
-        expected.assert_eq(&actual);
+        expect_file!("../with_options_sink.yaml").assert_eq(&generate_with_options_yaml_sink());
     }
 }

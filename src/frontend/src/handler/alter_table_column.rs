@@ -30,6 +30,7 @@ use risingwave_sqlparser::parser::Parser;
 
 use super::create_source::get_json_schema_location;
 use super::create_table::{gen_create_table_plan, ColumnIdGenerator};
+use super::util::SourceSchemaCompatExt;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
@@ -47,7 +48,7 @@ pub async fn handle_alter_table_column(
     let db_name = session.database();
     let (schema_name, real_table_name) =
         Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
-    let search_path = session.config().get_search_path();
+    let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -92,7 +93,7 @@ pub async fn handle_alter_table_column(
     };
     let source_schema = source_schema
         .clone()
-        .map(|source_schema| source_schema.into_source_schema_v2().0);
+        .map(|source_schema| source_schema.into_v2_with_warning());
 
     if let Some(source_schema) = &source_schema {
         if schema_has_schema_registry(source_schema) {
@@ -224,8 +225,10 @@ pub async fn handle_alter_table_column(
         let graph = StreamFragmentGraph {
             parallelism: session
                 .config()
-                .get_streaming_parallelism()
-                .map(|parallelism| Parallelism { parallelism }),
+                .streaming_parallelism()
+                .map(|parallelism| Parallelism {
+                    parallelism: parallelism.get(),
+                }),
             ..build_graph(plan)
         };
 
@@ -279,9 +282,7 @@ fn schema_has_schema_registry(schema: &ConnectorSchema) -> bool {
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::catalog::{
-        row_id_column_name, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
-    };
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX};
     use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
@@ -332,10 +333,7 @@ mod tests {
         // Check the old columns and IDs are not changed.
         assert_eq!(columns["i"], altered_columns["i"]);
         assert_eq!(columns["r"], altered_columns["r"]);
-        assert_eq!(
-            columns[row_id_column_name().as_str()],
-            altered_columns[row_id_column_name().as_str()]
-        );
+        assert_eq!(columns[ROWID_PREFIX], altered_columns[ROWID_PREFIX]);
 
         // Check the version is updated.
         assert_eq!(

@@ -123,8 +123,8 @@ function WorkerNodeMetricsComponent({
               type="linear"
               dataKey="value"
               strokeWidth={1}
-              stroke={theme.colors.teal["500"]}
-              fill={theme.colors.teal["100"]}
+              stroke={theme.colors.blue["500"]}
+              fill={theme.colors.blue["100"]}
             />
           </AreaChart>
         </ResponsiveContainer>

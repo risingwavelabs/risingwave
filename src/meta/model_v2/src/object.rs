@@ -104,6 +104,8 @@ pub enum Relation {
     Source,
     #[sea_orm(has_many = "super::table::Entity")]
     Table,
+    #[sea_orm(has_many = "super::streaming_job::Entity")]
+    StreamingJob,
     #[sea_orm(
         belongs_to = "super::user::Entity",
         from = "Column::OwnerId",
@@ -169,6 +171,12 @@ impl Related<super::source::Entity> for Entity {
 impl Related<super::table::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Table.def()
+    }
+}
+
+impl Related<super::streaming_job::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::StreamingJob.def()
     }
 }
 

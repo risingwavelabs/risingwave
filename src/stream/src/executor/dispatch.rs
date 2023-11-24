@@ -894,7 +894,9 @@ impl Dispatcher for CdcTableNameDispatcher {
         {
             // Build visibility map for every output chunk.
             for vis_map in &mut vis_maps {
-                let should_emit = if let Some(row) = row && let Some(full_table_name) = self.downstream_table_name.as_ref() {
+                let should_emit = if let Some(row) = row
+                    && let Some(full_table_name) = self.downstream_table_name.as_ref()
+                {
                     let table_name_datum = row.datum_at(self.table_name_col_index).unwrap();
                     tracing::trace!(target: "events::stream::dispatch::cdc", "keys: {:?}, table: {}", self.table_name_col_index, full_table_name);
                     // dispatch based on downstream table name
@@ -1431,7 +1433,7 @@ mod tests {
             if guard.is_empty() {
                 assert!(output_cols[output_idx].iter().all(|x| { x.is_empty() }));
             } else {
-                let message = guard.get(0).unwrap();
+                let message = guard.first().unwrap();
                 let real_chunk = match message {
                     Message::Chunk(chunk) => chunk,
                     _ => panic!(),

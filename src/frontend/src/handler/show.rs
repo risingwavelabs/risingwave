@@ -277,7 +277,8 @@ pub async fn handle_show_object(
                     .values()
                     .map(|s| {
                         Row::new(vec![
-                            Some(format!("{}-{}", s.id().0, s.id().1).into()),
+                            // Since process id and the secret id in the session id are the same in RisingWave, just display the process id.
+                            Some(format!("{}", s.id().0).into()),
                             Some(s.user_name().to_owned().into()),
                             Some(format!("{}", s.peer_addr()).into()),
                             Some(s.database().to_owned().into()),

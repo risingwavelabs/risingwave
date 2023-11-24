@@ -24,6 +24,10 @@ updates:
       patterns:
         - "tonic*"
         - "prost*"
+    opentelemetry:
+      patterns:
+        - "opentelemetry*"
+        - "tracing-opentelemetry"
     mysql:
       patterns:
         - "mysql_common"

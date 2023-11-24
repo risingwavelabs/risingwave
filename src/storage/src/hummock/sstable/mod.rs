@@ -17,7 +17,6 @@
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 mod block;
 
-use std::collections::BTreeSet;
 use std::fmt::{Debug, Formatter};
 use std::ops::{BitXor, Bound, Range};
 
@@ -34,7 +33,6 @@ pub mod builder;
 pub use builder::*;
 pub mod writer;
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::epoch::MAX_EPOCH;
 pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
@@ -46,8 +44,6 @@ use risingwave_hummock_sdk::key::{
     FullKey, KeyPayloadType, PointRange, TableKey, UserKey, UserKeyRangeRef,
 };
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
-#[cfg(test)]
-use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 mod delete_range_aggregator;
 mod filter;
@@ -59,16 +55,13 @@ pub use delete_range_aggregator::{
     SstableDeleteRangeIterator,
 };
 pub use filter::FilterBuilder;
-use itertools::Itertools;
 pub use sstable_object_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 use xxhash_rust::{xxh32, xxh64};
 
-use self::delete_range_aggregator::{apply_event, CompactionDeleteRangeEvent};
 use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
-use crate::hummock::sstable::delete_range_aggregator::TombstoneEnterExitEvent;
 use crate::hummock::CachePolicy;
 use crate::store::ReadOptions;
 
@@ -202,77 +195,6 @@ impl MonotonicDeleteEvent {
     }
 }
 
-#[cfg(any(test, feature = "test"))]
-fn create_monotonic_events_from_compaction_delete_events(
-    compaction_delete_range_events: Vec<CompactionDeleteRangeEvent>,
-) -> Vec<MonotonicDeleteEvent> {
-    let mut epochs = BTreeSet::new();
-    let mut monotonic_tombstone_events = Vec::with_capacity(compaction_delete_range_events.len());
-    for event in compaction_delete_range_events {
-        apply_event(&mut epochs, &event);
-        monotonic_tombstone_events.push(MonotonicDeleteEvent {
-            event_key: event.0,
-            new_epoch: epochs.first().map_or(MAX_EPOCH, |epoch| *epoch),
-        });
-    }
-    monotonic_tombstone_events.dedup_by(|a, b| {
-        a.event_key.left_user_key.table_id == b.event_key.left_user_key.table_id
-            && a.new_epoch == b.new_epoch
-    });
-    monotonic_tombstone_events
-}
-
-/// Assume that watermark1 is 5, watermark2 is 7, watermark3 is 11, delete ranges
-/// `{ [0, wmk1) in epoch1, [wmk1, wmk2) in epoch2, [wmk2, wmk3) in epoch3 }`
-/// can be transformed into events below:
-/// `{ <0, +epoch1> <wmk1, -epoch1> <wmk1, +epoch2> <wmk2, -epoch2> <wmk2, +epoch3> <wmk3,
-/// -epoch3> }`
-#[cfg(any(test, feature = "test"))]
-fn build_events(delete_tombstones: &Vec<DeleteRangeTombstone>) -> Vec<CompactionDeleteRangeEvent> {
-    let tombstone_len = delete_tombstones.len();
-    let mut events = Vec::with_capacity(tombstone_len * 2);
-    for DeleteRangeTombstone {
-        start_user_key,
-        end_user_key,
-        sequence,
-    } in delete_tombstones
-    {
-        events.push((start_user_key, 1, *sequence));
-        events.push((end_user_key, 0, *sequence));
-    }
-    events.sort();
-
-    let mut result = Vec::with_capacity(events.len());
-    for (user_key, group) in &events.into_iter().group_by(|(user_key, _, _)| *user_key) {
-        let (mut exit, mut enter) = (vec![], vec![]);
-        for (_, op, sequence) in group {
-            match op {
-                0 => exit.push(TombstoneEnterExitEvent {
-                    tombstone_epoch: sequence,
-                }),
-                1 => {
-                    enter.push(TombstoneEnterExitEvent {
-                        tombstone_epoch: sequence,
-                    });
-                }
-                _ => unreachable!(),
-            }
-        }
-        result.push((user_key.clone(), exit, enter));
-    }
-
-    result
-}
-
-#[cfg(any(test, feature = "test"))]
-pub(crate) fn create_monotonic_events(
-    mut delete_range_tombstones: Vec<DeleteRangeTombstone>,
-) -> Vec<MonotonicDeleteEvent> {
-    delete_range_tombstones.sort();
-    let events = build_events(&delete_range_tombstones);
-    create_monotonic_events_from_compaction_delete_events(events)
-}
-
 /// [`Sstable`] is a handle for accessing SST.
 #[derive(Clone)]
 pub struct Sstable {
@@ -340,24 +262,6 @@ impl Sstable {
     #[inline]
     pub fn estimate_size(&self) -> usize {
         8 /* id */ + self.filter_reader.estimate_size() + self.meta.encoded_size()
-    }
-
-    #[cfg(test)]
-    pub fn get_sstable_info(&self) -> SstableInfo {
-        SstableInfo {
-            object_id: self.id,
-            sst_id: self.id,
-            key_range: Some(KeyRange {
-                left: self.meta.smallest_key.clone(),
-                right: self.meta.largest_key.clone(),
-                right_exclusive: false,
-            }),
-            file_size: self.meta.estimated_size as u64,
-            meta_offset: self.meta.meta_offset,
-            total_key_count: self.meta.key_count as u64,
-            uncompressed_file_size: self.meta.estimated_size as u64,
-            ..Default::default()
-        }
     }
 }
 
@@ -594,6 +498,7 @@ impl SstableMeta {
 pub struct SstableIteratorReadOptions {
     pub cache_policy: CachePolicy,
     pub must_iterated_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
+    pub max_preload_retry_times: usize,
 }
 
 impl SstableIteratorReadOptions {
@@ -601,6 +506,7 @@ impl SstableIteratorReadOptions {
         Self {
             cache_policy: read_options.cache_policy,
             must_iterated_end_user_key: None,
+            max_preload_retry_times: 0,
         }
     }
 }

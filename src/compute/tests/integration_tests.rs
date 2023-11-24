@@ -22,6 +22,7 @@ use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
+use risingwave_batch::error::BatchError;
 use risingwave_batch::executor::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
@@ -91,7 +92,7 @@ impl BatchExecutor for SingleChunkExecutor {
 }
 
 impl SingleChunkExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         yield self.chunk.unwrap()
     }
@@ -152,15 +153,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let column_descs = all_column_ids
         .iter()
         .zip_eq_fast(all_schema.fields.iter().cloned())
-        .map(|(column_id, field)| ColumnDesc {
-            data_type: field.data_type,
-            column_id: *column_id,
-            name: field.name,
-            field_descs: vec![],
-            type_name: "".to_string(),
-            generated_or_default_column: None,
-            description: None,
-        })
+        .map(|(column_id, field)| ColumnDesc::named(field.name, *column_id, field.data_type))
         .collect_vec();
     let (barrier_tx, barrier_rx) = unbounded_channel();
     let vnodes = Bitmap::from_bytes(&[0b11111111]);

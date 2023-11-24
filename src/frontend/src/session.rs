@@ -99,6 +99,7 @@ use crate::user::UserId;
 use crate::utils::infer_stmt_row_desc::{infer_show_object, infer_show_variable};
 use crate::{FrontendOpts, PgResponseStream};
 
+pub(crate) mod current;
 pub(crate) mod transaction;
 
 /// The global environment for the frontend server.
@@ -440,6 +441,32 @@ impl FrontendEnv {
                 .unwrap(),
         ))
     }
+
+    /// Cancel queries (i.e. batch queries) in session.
+    /// If the session exists return true, otherwise, return false.
+    pub fn cancel_queries_in_session(&self, session_id: SessionId) -> bool {
+        let guard = self.sessions_map.read();
+        if let Some(session) = guard.get(&session_id) {
+            session.cancel_current_query();
+            true
+        } else {
+            info!("Current session finished, ignoring cancel query request");
+            false
+        }
+    }
+
+    /// Cancel creating jobs (i.e. streaming queries) in session.
+    /// If the session exists return true, otherwise, return false.
+    pub fn cancel_creating_jobs_in_session(&self, session_id: SessionId) -> bool {
+        let guard = self.sessions_map.read();
+        if let Some(session) = guard.get(&session_id) {
+            session.cancel_current_creating_job();
+            true
+        } else {
+            info!("Current session finished, ignoring cancel creating request");
+            false
+        }
+    }
 }
 
 pub struct AuthContext {
@@ -580,17 +607,17 @@ impl SessionImpl {
         self.config_map.read()
     }
 
-    pub fn set_config(&self, key: &str, value: Vec<String>) -> Result<()> {
-        self.config_map.write().set(key, value, ())
+    pub fn set_config(&self, key: &str, value: String) -> Result<()> {
+        self.config_map.write().set(key, value, &mut ())
     }
 
     pub fn set_config_report(
         &self,
         key: &str,
-        value: Vec<String>,
-        reporter: impl ConfigReporter,
+        value: String,
+        mut reporter: impl ConfigReporter,
     ) -> Result<()> {
-        self.config_map.write().set(key, value, reporter)
+        self.config_map.write().set(key, value, &mut reporter)
     }
 
     pub fn session_id(&self) -> SessionId {
@@ -628,7 +655,7 @@ impl SessionImpl {
         let (schema_name, relation_name) = {
             let (schema_name, relation_name) =
                 Binder::resolve_schema_qualified_name(db_name, name)?;
-            let search_path = self.config().get_search_path();
+            let search_path = self.config().search_path();
             let user_name = &self.auth_context().user_name;
             let schema_name = match schema_name {
                 Some(schema_name) => schema_name,
@@ -655,7 +682,7 @@ impl SessionImpl {
         let (schema_name, connection_name) = {
             let (schema_name, connection_name) =
                 Binder::resolve_schema_qualified_name(db_name, name)?;
-            let search_path = self.config().get_search_path();
+            let search_path = self.config().search_path();
             let user_name = &self.auth_context().user_name;
             let schema_name = match schema_name {
                 Some(schema_name) => schema_name,
@@ -677,7 +704,7 @@ impl SessionImpl {
     ) -> Result<(DatabaseId, SchemaId)> {
         let db_name = self.database();
 
-        let search_path = self.config().get_search_path();
+        let search_path = self.config().search_path();
         let user_name = &self.auth_context().user_name;
 
         let catalog_reader = self.env().catalog_reader().read_guard();
@@ -705,7 +732,7 @@ impl SessionImpl {
         connection_name: &str,
     ) -> Result<Arc<ConnectionCatalog>> {
         let db_name = self.database();
-        let search_path = self.config().get_search_path();
+        let search_path = self.config().search_path();
         let user_name = &self.auth_context().user_name;
 
         let catalog_reader = self.env().catalog_reader().read_guard();
@@ -814,7 +841,7 @@ impl SessionImpl {
     }
 
     pub fn is_barrier_read(&self) -> bool {
-        match self.config().get_visible_mode() {
+        match self.config().visibility_mode() {
             VisibilityMode::Default => self.env.batch_config.enable_barrier_read,
             VisibilityMode::All => true,
             VisibilityMode::Checkpoint => false,
@@ -920,21 +947,11 @@ impl SessionManager for SessionManagerImpl {
 
     /// Used when cancel request happened.
     fn cancel_queries_in_session(&self, session_id: SessionId) {
-        let guard = self.env.sessions_map.read();
-        if let Some(session) = guard.get(&session_id) {
-            session.cancel_current_query()
-        } else {
-            info!("Current session finished, ignoring cancel query request")
-        }
+        self.env.cancel_queries_in_session(session_id);
     }
 
     fn cancel_creating_jobs_in_session(&self, session_id: SessionId) {
-        let guard = self.env.sessions_map.read();
-        if let Some(session) = guard.get(&session_id) {
-            session.cancel_current_creating_job()
-        } else {
-            info!("Current session finished, ignoring cancel creating request")
-        }
+        self.env.cancel_creating_jobs_in_session(session_id);
     }
 
     fn end_session(&self, session: &Self::Session) {
@@ -1112,7 +1129,7 @@ impl Session for SessionImpl {
         }
     }
 
-    fn set_config(&self, key: &str, value: Vec<String>) -> std::result::Result<(), BoxedError> {
+    fn set_config(&self, key: &str, value: String) -> std::result::Result<(), BoxedError> {
         Self::set_config(self, key, value).map_err(Into::into)
     }
 

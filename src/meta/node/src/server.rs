@@ -100,7 +100,9 @@ pub struct MetaStoreSqlBackend {
 }
 
 use risingwave_meta::MetaStoreBackend;
+use risingwave_meta_service::event_log_service::EventLogServiceImpl;
 use risingwave_meta_service::AddressInfo;
+use risingwave_pb::meta::event_log_service_server::EventLogServiceServer;
 
 pub async fn rpc_serve(
     address_info: AddressInfo,
@@ -381,7 +383,6 @@ pub async fn start_service_as_election_leader(
             .expect("Failed to upgrade models in meta store");
     }
 
-    let prometheus_endpoint = opts.prometheus_endpoint.clone();
     let env = MetaSrvEnv::new(
         opts.clone(),
         init_system_params,
@@ -459,11 +460,11 @@ pub async fn start_service_as_election_leader(
     let dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
             dashboard_addr: *dashboard_addr,
-            prometheus_endpoint: prometheus_endpoint.clone(),
-            prometheus_client: prometheus_endpoint.as_ref().map(|x| {
+            prometheus_client: opts.prometheus_endpoint.as_ref().map(|x| {
                 use std::str::FromStr;
                 prometheus_http_query::Client::from_str(x).unwrap()
             }),
+            prometheus_selector: opts.prometheus_selector.unwrap_or_default(),
             cluster_manager: cluster_manager.clone(),
             fragment_manager: fragment_manager.clone(),
             compute_clients: ComputeClientPool::default(),
@@ -620,6 +621,7 @@ pub async fn start_service_as_election_leader(
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), fragment_manager.clone());
     let cloud_srv = CloudServiceImpl::new(catalog_manager.clone(), aws_cli);
+    let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(prometheus_addr.to_string())
@@ -707,6 +709,10 @@ pub async fn start_service_as_election_leader(
         tracing::info!("Telemetry didn't start due to meta backend or config");
     }
 
+    if let Some(pair) = env.event_log_manager_ref().take_join_handle() {
+        sub_tasks.push(pair);
+    }
+
     let shutdown_all = async move {
         let mut handles = Vec::with_capacity(sub_tasks.len());
 
@@ -744,6 +750,15 @@ pub async fn start_service_as_election_leader(
     tracing::info!("Assigned cluster id {:?}", *env.cluster_id());
     tracing::info!("Starting meta services");
 
+    let event = risingwave_pb::meta::event_log::EventMetaNodeStart {
+        advertise_addr: address_info.advertise_addr,
+        listen_addr: address_info.listen_addr.to_string(),
+        opts: serde_json::to_string(&env.opts).unwrap(),
+    };
+    env.event_log_manager_ref().add_event_logs(vec![
+        risingwave_pb::meta::event_log::Event::MetaNodeStart(event),
+    ]);
+
     tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
         .layer(TracingExtractLayer::new())
@@ -765,6 +780,7 @@ pub async fn start_service_as_election_leader(
         .add_service(ServingServiceServer::new(serving_srv))
         .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
+        .add_service(EventLogServiceServer::new(event_log_srv))
         .monitored_serve_with_shutdown(
             address_info.listen_addr,
             "grpc-meta-leader-service",

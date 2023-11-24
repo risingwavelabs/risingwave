@@ -7,16 +7,17 @@ services:
       - 9042:9042
     environment:
       - CASSANDRA_CLUSTER_NAME=cloudinfra
-    profiles:
-      - cassandra
+    volumes:
+      - "./prepare_cassandra_and_scylladb.sql:/prepare_cassandra_and_scylladb.sql"
   scylladb:
     image: scylladb/scylla:5.1
+    # port 9042 is used by cassandra
     ports:
-      - 9042:9042
+      - 9041:9042
     environment:
       - CASSANDRA_CLUSTER_NAME=cloudinfra
-    profiles:
-      - scylladb
+    volumes:
+      - "./prepare_cassandra_and_scylladb.sql:/prepare_cassandra_and_scylladb.sql"
   compactor-0:
     extends:
       file: ../../docker/docker-compose.yml

@@ -26,6 +26,7 @@ use super::stream::StreamPlanRef;
 use super::utils::{childless_record, watermark_pretty, Distill, TableCatalogBuilder};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{ExprDisplay, ExprImpl};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::{TableCatalog, WithOptions};
 
@@ -159,3 +160,5 @@ impl StreamNode for StreamWatermarkFilter {
 
 // TODO(yuhao): may impl a `ExprRewritable` after store `ExplImpl` in catalog.
 impl ExprRewritable for StreamWatermarkFilter {}
+
+impl ExprVisitable for StreamWatermarkFilter {}

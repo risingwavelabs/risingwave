@@ -41,6 +41,8 @@ partition_vnode_count = 64
 table_write_throughput_threshold = 16777216
 min_table_split_write_throughput = 4194304
 compaction_task_max_heartbeat_interval_secs = 60
+event_log_enabled = true
+event_log_channel_max_size = 10
 
 [meta.compaction_config]
 max_bytes_for_level_base = 536870912
@@ -113,6 +115,7 @@ compactor_max_sst_key_count = 2097152
 compact_iter_recreate_timeout_ms = 600000
 compactor_max_sst_size = 536870912
 enable_fast_compaction = true
+max_preload_io_retry_times = 3
 mem_table_spill_threshold = 4194304
 
 [storage.data_file_cache]

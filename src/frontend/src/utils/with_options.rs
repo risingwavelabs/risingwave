@@ -16,7 +16,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::convert::TryFrom;
 use std::num::NonZeroU32;
 
-use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result as RwResult, RwError};
 use risingwave_connector::source::kafka::{
     insert_privatelink_broker_rewrite_map, PRIVATELINK_ENDPOINT_KEY,
@@ -76,7 +75,7 @@ impl WithOptions {
 
     /// Take the value of the inner map.
     pub fn into_inner(self) -> BTreeMap<String, String> {
-        self.inner.into_iter().collect()
+        self.inner
     }
 
     /// Parse the retention seconds from the options.
@@ -172,20 +171,28 @@ impl TryFrom<&[SqlOption]> for WithOptions {
     type Error = RwError;
 
     fn try_from(options: &[SqlOption]) -> Result<Self, Self::Error> {
-        let inner = options
-            .iter()
-            .cloned()
-            .map(|x| match x.value {
-                Value::CstyleEscapedString(s) => Ok((x.name.real_value(), s.value)),
-                Value::SingleQuotedString(s) => Ok((x.name.real_value(), s)),
-                Value::Number(n) => Ok((x.name.real_value(), n)),
-                Value::Boolean(b) => Ok((x.name.real_value(), b.to_string())),
-                _ => Err(ErrorCode::InvalidParameterValue(
-                    "`with options` or `with properties` only support single quoted string value and C style escaped string"
-                        .to_owned(),
-                )),
-            })
-            .try_collect()?;
+        let mut inner: BTreeMap<String, String> = BTreeMap::new();
+        for option in options {
+            let key = option.name.real_value();
+            let value: String = match option.value.clone() {
+                Value::CstyleEscapedString(s) => s.value,
+                Value::SingleQuotedString(s) => s,
+                Value::Number(n) => n,
+                Value::Boolean(b) => b.to_string(),
+                _ => {
+                    return Err(RwError::from(ErrorCode::InvalidParameterValue(
+                        "`with options` or `with properties` only support single quoted string value and C style escaped string"
+                            .to_owned(),
+                    )))
+                }
+            };
+            if inner.insert(key.clone(), value).is_some() {
+                return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                    "Duplicated option: {}",
+                    key
+                ))));
+            }
+        }
 
         Ok(Self { inner })
     }
