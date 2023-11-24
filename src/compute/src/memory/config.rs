@@ -21,7 +21,7 @@ pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 /// overhead, network buffer, etc.) in megabytes.
 pub const MIN_SYSTEM_RESERVED_MEMORY_MB: usize = 512;
 
-const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.2;
+const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.3;
 
 const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
 
@@ -157,14 +157,14 @@ mod tests {
     #[test]
     fn test_reserve_memory_bytes() {
         // at least 512 MB
-        let (reserved, non_reserved) = reserve_memory_bytes(2 << 30);
+        let (reserved, non_reserved) = reserve_memory_bytes(1 << 30);
         assert_eq!(reserved, 512 << 20);
         assert_eq!(non_reserved, 1536 << 20);
 
         // reserve based on proportion
         let (reserved, non_reserved) = reserve_memory_bytes(10 << 30);
-        assert_eq!(reserved, 2 << 30);
-        assert_eq!(non_reserved, 8 << 30);
+        assert_eq!(reserved, 3 << 30);
+        assert_eq!(non_reserved, 7 << 30);
     }
 
     #[test]
