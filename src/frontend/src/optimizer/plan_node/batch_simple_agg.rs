@@ -47,7 +47,7 @@ impl BatchSimpleAgg {
             .ctx()
             .session_ctx()
             .config()
-            .get_enable_two_phase_agg()
+            .enable_two_phase_agg()
     }
 
     pub(crate) fn can_two_phase_agg(&self) -> bool {

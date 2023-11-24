@@ -32,7 +32,7 @@ use risingwave_pb::catalog::HandleConflictBehavior as PbHandleConflictBehavior;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
 
 pub use crate::constants::hummock;
-use crate::error::Result;
+use crate::error::BoxedError;
 use crate::row::OwnedRow;
 use crate::types::DataType;
 
@@ -106,7 +106,9 @@ pub fn row_id_column_desc() -> ColumnDesc {
 
 pub const OFFSET_COLUMN_NAME: &str = "_rw_offset";
 
-pub const CDC_SOURCE_COLUMN_NUM: u32 = 4;
+// The number of columns output by the cdc source job
+// see `debezium_cdc_source_schema()` for details
+pub const CDC_SOURCE_COLUMN_NUM: u32 = 3;
 pub const TABLE_NAME_COLUMN_NAME: &str = "_rw_table_name";
 
 pub fn is_offset_column_name(name: &str) -> bool {
@@ -134,7 +136,7 @@ pub fn cdc_table_name_column_desc() -> ColumnDesc {
 /// The local system catalog reader in the frontend node.
 #[async_trait]
 pub trait SysCatalogReader: Sync + Send + 'static {
-    async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>>;
+    async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>, BoxedError>;
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;
