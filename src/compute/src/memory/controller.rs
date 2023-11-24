@@ -18,7 +18,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_jni_core::jvm_runtime::load_jvm_memory_stats;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 
-/// Internal state of [`MemoryController`] that saves the state in previous tick.
+/// Internal state of [`LruWatermarkController`] that saves the state in previous tick.
 struct State {
     pub used_memory_bytes: usize,
     pub lru_watermark_step: u64,
