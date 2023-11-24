@@ -219,7 +219,7 @@
     GROUP BY Q.category;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [$expr4, (sum(max($expr7))::Decimal / count(max($expr7))::Decimal) as $expr8] }
+    └─BatchProject { exprs: [$expr4, (sum(max($expr7)) / count(max($expr7))::Decimal) as $expr8] }
       └─BatchHashAgg { group_key: [$expr4], aggs: [sum(max($expr7)), count(max($expr7))] }
         └─BatchExchange { order: [], dist: HashShard($expr4) }
           └─BatchHashAgg { group_key: [$expr2, $expr4], aggs: [max($expr7)] }
@@ -236,7 +236,7 @@
                       └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [category, avg], stream_key: [category], pk_columns: [category], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr4, (sum(max($expr6))::Decimal / count(max($expr6))::Decimal) as $expr7] }
+    └─StreamProject { exprs: [$expr4, (sum(max($expr6)) / count(max($expr6))::Decimal) as $expr7] }
       └─StreamHashAgg { group_key: [$expr4], aggs: [sum(max($expr6)), count(max($expr6)), count] }
         └─StreamExchange { dist: HashShard($expr4) }
           └─StreamProject { exprs: [$expr2, $expr4, max($expr6)] }
@@ -266,7 +266,7 @@
     Fragment 0
     StreamMaterialize { columns: [category, avg], stream_key: [category], pk_columns: [category], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── StreamProject { exprs: [$expr4, (sum(max($expr6))::Decimal / count(max($expr6))::Decimal) as $expr7] }
+    └── StreamProject { exprs: [$expr4, (sum(max($expr6)) / count(max($expr6))::Decimal) as $expr7] }
         └── StreamHashAgg { group_key: [$expr4], aggs: [sum(max($expr6)), count(max($expr6)), count] }
             ├── intermediate state table: 0
             ├── state tables: []
@@ -544,7 +544,7 @@
     WHERE Q.rank <= 1;
   stream_plan: |-
     StreamMaterialize { columns: [seller, avg, $expr2(hidden)], stream_key: [$expr2, seller], pk_columns: [$expr2, seller], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr4, (sum::Decimal / count::Decimal) as $expr7, $expr2] }
+    └─StreamProject { exprs: [$expr4, (sum / count::Decimal) as $expr7, $expr2] }
       └─StreamOverWindow { window_functions: [sum($expr6) OVER(PARTITION BY $expr4 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr6) OVER(PARTITION BY $expr4 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
         └─StreamExchange { dist: HashShard($expr4) }
           └─StreamProject { exprs: [$expr4, $expr6, $expr1, $expr2], output_watermarks: [$expr1] }
@@ -574,7 +574,7 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [seller, avg, $expr2(hidden)], stream_key: [$expr2, seller], pk_columns: [$expr2, seller], pk_conflict: NoCheck } { materialized table: 4294967294 }
-    └── StreamProject { exprs: [$expr4, (sum::Decimal / count::Decimal) as $expr7, $expr2] }
+    └── StreamProject { exprs: [$expr4, (sum / count::Decimal) as $expr7, $expr2] }
         └── StreamOverWindow { window_functions: [sum($expr6) OVER(PARTITION BY $expr4 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr6) OVER(PARTITION BY $expr4 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
             ├── state table: 0
             └── StreamExchange Hash([0]) from 1
@@ -631,7 +631,7 @@
 
   eowc_stream_plan: |-
     StreamMaterialize { columns: [seller, avg, $expr2(hidden)], stream_key: [$expr2, seller], pk_columns: [$expr2, seller], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr4, (sum::Decimal / count::Decimal) as $expr7, $expr2] }
+    └─StreamProject { exprs: [$expr4, (sum / count::Decimal) as $expr7, $expr2] }
       └─StreamEowcOverWindow { window_functions: [sum($expr6) OVER(PARTITION BY $expr4 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr6) OVER(PARTITION BY $expr4 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
         └─StreamEowcSort { sort_column: $expr1 }
           └─StreamExchange { dist: HashShard($expr4) }
@@ -1446,8 +1446,8 @@
     GROUP BY auction, to_char(date_time, 'YYYY-MM-DD');
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [$expr2, $expr3, count, count filter(($expr4 < 10000:Int32)), count filter(($expr4 >= 10000:Int32) AND ($expr4 < 1000000:Int32)), count filter(($expr4 >= 1000000:Int32)), min($expr4), max($expr4), (sum($expr4)::Decimal / count($expr4)::Decimal) as $expr5, sum($expr4)] }
-      └─BatchHashAgg { group_key: [$expr2, $expr3], aggs: [count, count filter(($expr4 < 10000:Int32)), count filter(($expr4 >= 10000:Int32) AND ($expr4 < 1000000:Int32)), count filter(($expr4 >= 1000000:Int32)), min($expr4), max($expr4), sum($expr4), count($expr4), sum($expr4)] }
+    └─BatchProject { exprs: [$expr2, $expr3, count, count filter(($expr4 < 10000:Int32)), count filter(($expr4 >= 10000:Int32) AND ($expr4 < 1000000:Int32)), count filter(($expr4 >= 1000000:Int32)), min($expr4), max($expr4), (sum($expr4) / count($expr4)::Decimal) as $expr5, sum($expr4)] }
+      └─BatchHashAgg { group_key: [$expr2, $expr3], aggs: [count, count filter(($expr4 < 10000:Int32)), count filter(($expr4 >= 10000:Int32) AND ($expr4 < 1000000:Int32)), count filter(($expr4 >= 1000000:Int32)), min($expr4), max($expr4), sum($expr4), count($expr4)] }
         └─BatchExchange { order: [], dist: HashShard($expr2, $expr3) }
           └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, ToChar($expr1, 'YYYY-MM-DD':Varchar) as $expr3, Field(bid, 2:Int32) as $expr4] }
             └─BatchFilter { predicate: (event_type = 2:Int32) }
@@ -1455,8 +1455,8 @@
                 └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [auction, day, total_bids, rank1_bids, rank2_bids, rank3_bids, min_price, max_price, avg_price, sum_price], stream_key: [auction, day], pk_columns: [auction, day], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr2, $expr3, count, count filter(($expr4 < 10000:Int32)), count filter(($expr4 >= 10000:Int32) AND ($expr4 < 1000000:Int32)), count filter(($expr4 >= 1000000:Int32)), min($expr4), max($expr4), (sum($expr4)::Decimal / count($expr4)::Decimal) as $expr5, sum($expr4)] }
-      └─StreamHashAgg [append_only] { group_key: [$expr2, $expr3], aggs: [count, count filter(($expr4 < 10000:Int32)), count filter(($expr4 >= 10000:Int32) AND ($expr4 < 1000000:Int32)), count filter(($expr4 >= 1000000:Int32)), min($expr4), max($expr4), sum($expr4), count($expr4), sum($expr4)] }
+    └─StreamProject { exprs: [$expr2, $expr3, count, count filter(($expr4 < 10000:Int32)), count filter(($expr4 >= 10000:Int32) AND ($expr4 < 1000000:Int32)), count filter(($expr4 >= 1000000:Int32)), min($expr4), max($expr4), (sum($expr4) / count($expr4)::Decimal) as $expr5, sum($expr4)] }
+      └─StreamHashAgg [append_only] { group_key: [$expr2, $expr3], aggs: [count, count filter(($expr4 < 10000:Int32)), count filter(($expr4 >= 10000:Int32) AND ($expr4 < 1000000:Int32)), count filter(($expr4 >= 1000000:Int32)), min($expr4), max($expr4), sum($expr4), count($expr4)] }
         └─StreamExchange { dist: HashShard($expr2, $expr3) }
           └─StreamProject { exprs: [Field(bid, 0:Int32) as $expr2, ToChar($expr1, 'YYYY-MM-DD':Varchar) as $expr3, Field(bid, 2:Int32) as $expr4, _row_id] }
             └─StreamFilter { predicate: (event_type = 2:Int32) }
@@ -1467,8 +1467,8 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction, day, total_bids, rank1_bids, rank2_bids, rank3_bids, min_price, max_price, avg_price, sum_price], stream_key: [auction, day], pk_columns: [auction, day], pk_conflict: NoCheck } { materialized table: 4294967294 }
-    └── StreamProject { exprs: [$expr2, $expr3, count, count filter(($expr4 < 10000:Int32)), count filter(($expr4 >= 10000:Int32) AND ($expr4 < 1000000:Int32)), count filter(($expr4 >= 1000000:Int32)), min($expr4), max($expr4), (sum($expr4)::Decimal / count($expr4)::Decimal) as $expr5, sum($expr4)] }
-        └── StreamHashAgg [append_only] { group_key: [$expr2, $expr3], aggs: [count, count filter(($expr4 < 10000:Int32)), count filter(($expr4 >= 10000:Int32) AND ($expr4 < 1000000:Int32)), count filter(($expr4 >= 1000000:Int32)), min($expr4), max($expr4), sum($expr4), count($expr4), sum($expr4)] }
+    └── StreamProject { exprs: [$expr2, $expr3, count, count filter(($expr4 < 10000:Int32)), count filter(($expr4 >= 10000:Int32) AND ($expr4 < 1000000:Int32)), count filter(($expr4 >= 1000000:Int32)), min($expr4), max($expr4), (sum($expr4) / count($expr4)::Decimal) as $expr5, sum($expr4)] }
+        └── StreamHashAgg [append_only] { group_key: [$expr2, $expr3], aggs: [count, count filter(($expr4 < 10000:Int32)), count filter(($expr4 >= 10000:Int32) AND ($expr4 < 1000000:Int32)), count filter(($expr4 >= 1000000:Int32)), min($expr4), max($expr4), sum($expr4), count($expr4)] }
             ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
@@ -1483,9 +1483,9 @@
                     └── StreamSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] } { source state table: 2 }
 
     Table 0
-    ├── columns: [ $expr2, $expr3, count, count filter(($expr4 < 10000:Int32)), count filter(($expr4 >= 10000:Int32) AND ($expr4 < 1000000:Int32)), count filter(($expr4 >= 1000000:Int32)), min($expr4), max($expr4), sum($expr4), count($expr4), sum($expr4)_0 ]
+    ├── columns: [ $expr2, $expr3, count, count filter(($expr4 < 10000:Int32)), count filter(($expr4 >= 10000:Int32) AND ($expr4 < 1000000:Int32)), count filter(($expr4 >= 1000000:Int32)), min($expr4), max($expr4), sum($expr4), count($expr4) ]
     ├── primary key: [ $0 ASC, $1 ASC ]
-    ├── value indices: [ 2, 3, 4, 5, 6, 7, 8, 9, 10 ]
+    ├── value indices: [ 2, 3, 4, 5, 6, 7, 8, 9 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
 

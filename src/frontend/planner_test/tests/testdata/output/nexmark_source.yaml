@@ -236,7 +236,7 @@
     GROUP BY Q.category;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [category, (sum(max(price))::Decimal / count(max(price))::Decimal) as $expr1] }
+    └─BatchProject { exprs: [category, (sum(max(price)) / count(max(price))::Decimal) as $expr1] }
       └─BatchHashAgg { group_key: [category], aggs: [sum(max(price)), count(max(price))] }
         └─BatchExchange { order: [], dist: HashShard(category) }
           └─BatchHashAgg { group_key: [id, category], aggs: [max(price)] }
@@ -247,7 +247,7 @@
                 └─BatchSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [category, avg], stream_key: [category], pk_columns: [category], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [category, (sum(max(price))::Decimal / count(max(price))::Decimal) as $expr1] }
+    └─StreamProject { exprs: [category, (sum(max(price)) / count(max(price))::Decimal) as $expr1] }
       └─StreamHashAgg { group_key: [category], aggs: [sum(max(price)), count(max(price)), count] }
         └─StreamExchange { dist: HashShard(category) }
           └─StreamProject { exprs: [id, category, max(price)] }
@@ -265,7 +265,7 @@
     Fragment 0
     StreamMaterialize { columns: [category, avg], stream_key: [category], pk_columns: [category], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── StreamProject { exprs: [category, (sum(max(price))::Decimal / count(max(price))::Decimal) as $expr1] }
+    └── StreamProject { exprs: [category, (sum(max(price)) / count(max(price))::Decimal) as $expr1] }
         └── StreamHashAgg { group_key: [category], aggs: [sum(max(price)), count(max(price)), count] }
             ├── intermediate state table: 0
             ├── state tables: []
@@ -525,7 +525,7 @@
     WHERE Q.rank <= 1;
   stream_plan: |-
     StreamMaterialize { columns: [seller, avg, id(hidden)], stream_key: [id, seller], pk_columns: [id, seller], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [seller, (sum::Decimal / count::Decimal) as $expr1, id] }
+    └─StreamProject { exprs: [seller, (sum / count::Decimal) as $expr1, id] }
       └─StreamOverWindow { window_functions: [sum(price) OVER(PARTITION BY seller ORDER BY date_time ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count(price) OVER(PARTITION BY seller ORDER BY date_time ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
         └─StreamExchange { dist: HashShard(seller) }
           └─StreamProject { exprs: [seller, price, date_time, id] }
@@ -543,7 +543,7 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [seller, avg, id(hidden)], stream_key: [id, seller], pk_columns: [id, seller], pk_conflict: NoCheck } { materialized table: 4294967294 }
-    └── StreamProject { exprs: [seller, (sum::Decimal / count::Decimal) as $expr1, id] }
+    └── StreamProject { exprs: [seller, (sum / count::Decimal) as $expr1, id] }
         └── StreamOverWindow { window_functions: [sum(price) OVER(PARTITION BY seller ORDER BY date_time ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count(price) OVER(PARTITION BY seller ORDER BY date_time ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
             ├── state table: 0
             └── StreamExchange Hash([0]) from 1
@@ -1403,15 +1403,15 @@
     GROUP BY auction, to_char(date_time, 'YYYY-MM-DD');
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [auction, $expr1, count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), min(price), max(price), (sum(price)::Decimal / count(price)::Decimal) as $expr2, sum(price)] }
-      └─BatchHashAgg { group_key: [auction, $expr1], aggs: [count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), min(price), max(price), sum(price), count(price), sum(price)] }
+    └─BatchProject { exprs: [auction, $expr1, count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), min(price), max(price), (sum(price) / count(price)::Decimal) as $expr2, sum(price)] }
+      └─BatchHashAgg { group_key: [auction, $expr1], aggs: [count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), min(price), max(price), sum(price), count(price)] }
         └─BatchExchange { order: [], dist: HashShard(auction, $expr1) }
           └─BatchProject { exprs: [auction, ToChar(date_time, 'YYYY-MM-DD':Varchar) as $expr1, price] }
             └─BatchSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [auction, day, total_bids, rank1_bids, rank2_bids, rank3_bids, min_price, max_price, avg_price, sum_price], stream_key: [auction, day], pk_columns: [auction, day], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [auction, $expr1, count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), min(price), max(price), (sum(price)::Decimal / count(price)::Decimal) as $expr2, sum(price)] }
-      └─StreamHashAgg [append_only] { group_key: [auction, $expr1], aggs: [count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), min(price), max(price), sum(price), count(price), sum(price)] }
+    └─StreamProject { exprs: [auction, $expr1, count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), min(price), max(price), (sum(price) / count(price)::Decimal) as $expr2, sum(price)] }
+      └─StreamHashAgg [append_only] { group_key: [auction, $expr1], aggs: [count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), min(price), max(price), sum(price), count(price)] }
         └─StreamExchange { dist: HashShard(auction, $expr1) }
           └─StreamProject { exprs: [auction, ToChar(date_time, 'YYYY-MM-DD':Varchar) as $expr1, price, _row_id] }
             └─StreamRowIdGen { row_id_index: 7 }
@@ -1419,8 +1419,8 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [auction, day, total_bids, rank1_bids, rank2_bids, rank3_bids, min_price, max_price, avg_price, sum_price], stream_key: [auction, day], pk_columns: [auction, day], pk_conflict: NoCheck } { materialized table: 4294967294 }
-    └── StreamProject { exprs: [auction, $expr1, count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), min(price), max(price), (sum(price)::Decimal / count(price)::Decimal) as $expr2, sum(price)] }
-        └── StreamHashAgg [append_only] { group_key: [auction, $expr1], aggs: [count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), min(price), max(price), sum(price), count(price), sum(price)] }
+    └── StreamProject { exprs: [auction, $expr1, count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), min(price), max(price), (sum(price) / count(price)::Decimal) as $expr2, sum(price)] }
+        └── StreamHashAgg [append_only] { group_key: [auction, $expr1], aggs: [count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), min(price), max(price), sum(price), count(price)] }
             ├── intermediate state table: 0
             ├── state tables: []
             ├── distinct tables: []
@@ -1432,9 +1432,9 @@
         └── StreamSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] } { source state table: 1 }
 
     Table 0
-    ├── columns: [ auction, $expr1, count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), min(price), max(price), sum(price), count(price), sum(price)_0 ]
+    ├── columns: [ auction, $expr1, count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), min(price), max(price), sum(price), count(price) ]
     ├── primary key: [ $0 ASC, $1 ASC ]
-    ├── value indices: [ 2, 3, 4, 5, 6, 7, 8, 9, 10 ]
+    ├── value indices: [ 2, 3, 4, 5, 6, 7, 8, 9 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
 

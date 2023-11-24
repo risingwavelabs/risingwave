@@ -112,6 +112,7 @@ impl FunctionRegistry {
     }
 
     /// Returns the return type for the given function and arguments.
+    /// Deprecated functions are excluded.
     pub fn get_return_type(
         &self,
         name: impl Into<FuncName>,
@@ -124,7 +125,7 @@ impl FunctionRegistry {
             .ok_or_else(|| ExprError::UnsupportedFunction(name.to_string()))?;
         let sig = v
             .iter()
-            .find(|d| d.match_args(args))
+            .find(|d| d.match_args(args) && !d.deprecated)
             .ok_or_else(|| ExprError::UnsupportedFunction(name.to_string()))?;
         (sig.type_infer)(args)
     }

@@ -164,7 +164,7 @@
     GROUP BY Q.category;
   stream_plan: |-
     StreamMaterialize { columns: [category, avg], stream_key: [category], pk_columns: [category], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr5, (sum(max($expr8))::Decimal / count(max($expr8))::Decimal) as $expr10] }
+    └─StreamProject { exprs: [$expr5, (sum(max($expr8)) / count(max($expr8))::Decimal) as $expr10] }
       └─StreamHashAgg { group_key: [$expr5], aggs: [sum(max($expr8)), count(max($expr8)), count] }
         └─StreamExchange { dist: HashShard($expr5) }
           └─StreamProject { exprs: [$expr2, $expr5, max($expr8)] }
@@ -198,7 +198,7 @@
     Fragment 0
     StreamMaterialize { columns: [category, avg], stream_key: [category], pk_columns: [category], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── StreamProject { exprs: [$expr5, (sum(max($expr8))::Decimal / count(max($expr8))::Decimal) as $expr10] }
+    └── StreamProject { exprs: [$expr5, (sum(max($expr8)) / count(max($expr8))::Decimal) as $expr10] }
         └── StreamHashAgg { group_key: [$expr5], aggs: [sum(max($expr8)), count(max($expr8)), count] }
             ├── intermediate state table: 0
             ├── state tables: []
@@ -464,7 +464,7 @@
     WHERE Q.rank <= 1;
   stream_plan: |-
     StreamMaterialize { columns: [seller, avg, $expr2(hidden)], stream_key: [$expr2, seller], pk_columns: [$expr2, seller], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr5, (sum::Decimal / count::Decimal) as $expr10, $expr2] }
+    └─StreamProject { exprs: [$expr5, (sum / count::Decimal) as $expr10, $expr2] }
       └─StreamOverWindow { window_functions: [sum($expr8) OVER(PARTITION BY $expr5 ORDER BY $expr9 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr8) OVER(PARTITION BY $expr5 ORDER BY $expr9 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
         └─StreamExchange { dist: HashShard($expr5) }
           └─StreamProject { exprs: [$expr5, $expr8, $expr9, $expr2] }
@@ -498,7 +498,7 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [seller, avg, $expr2(hidden)], stream_key: [$expr2, seller], pk_columns: [$expr2, seller], pk_conflict: NoCheck } { materialized table: 4294967294 }
-    └── StreamProject { exprs: [$expr5, (sum::Decimal / count::Decimal) as $expr10, $expr2] }
+    └── StreamProject { exprs: [$expr5, (sum / count::Decimal) as $expr10, $expr2] }
         └── StreamOverWindow { window_functions: [sum($expr8) OVER(PARTITION BY $expr5 ORDER BY $expr9 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr8) OVER(PARTITION BY $expr5 ORDER BY $expr9 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
             ├── state table: 0
             └── StreamExchange Hash([0]) from 1
