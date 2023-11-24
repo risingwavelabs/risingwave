@@ -155,6 +155,7 @@ pub trait PlanNode:
     + Downcast
     + ColPrunable
     + ExprRewritable
+    + ExprVisitable
     + ToBatch
     + ToStream
     + ToDistributedBatch
@@ -298,6 +299,19 @@ impl RewriteExprsRecursive for PlanRef {
             .map(|plan_ref| plan_ref.rewrite_exprs_recursive(r))
             .collect();
         new.clone_with_inputs(&inputs[..])
+    }
+}
+
+pub(crate) trait VisitExprsRecursive {
+    fn visit_exprs_recursive(&self, r: &mut impl ExprVisitor);
+}
+
+impl VisitExprsRecursive for PlanRef {
+    fn visit_exprs_recursive(&self, r: &mut impl ExprVisitor) {
+        self.visit_exprs(r);
+        self.inputs()
+            .iter()
+            .for_each(|plan_ref| plan_ref.visit_exprs_recursive(r));
     }
 }
 
@@ -739,6 +753,8 @@ mod col_pruning;
 pub use col_pruning::*;
 mod expr_rewritable;
 pub use expr_rewritable::*;
+mod expr_visitable;
+pub use expr_rewritable::*;
 mod convert;
 pub use convert::*;
 mod eq_join_predicate;
@@ -933,6 +949,7 @@ pub use stream_watermark_filter::StreamWatermarkFilter;
 
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_rewriter::PlanCloner;
 use crate::optimizer::plan_visitor::ExprCorrelatedIdFinder;
 use crate::stream_fragmenter::BuildFragmentGraphState;

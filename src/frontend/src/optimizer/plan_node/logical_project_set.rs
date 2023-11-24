@@ -24,8 +24,10 @@ use super::{
     ToBatch, ToStream,
 };
 use crate::expr::{
-    collect_input_refs, Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction,
+    collect_input_refs, Expr, ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef,
+    TableFunction,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -306,6 +308,12 @@ impl ExprRewritable for LogicalProjectSet {
             core,
         }
         .into()
+    }
+}
+
+impl ExprVisitable for LogicalProjectSet {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }
 

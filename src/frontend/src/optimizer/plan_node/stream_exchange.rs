@@ -19,6 +19,7 @@ use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode}
 use super::stream::prelude::*;
 use super::utils::{childless_record, plan_node_name, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
@@ -138,3 +139,5 @@ impl StreamNode for StreamExchange {
 }
 
 impl ExprRewritable for StreamExchange {}
+
+impl ExprVisitable for StreamExchange {}

@@ -31,6 +31,7 @@ use super::{
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -379,6 +380,12 @@ impl ExprRewritable for LogicalScan {
     }
 }
 
+impl ExprVisitable for LogicalScan {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
+    }
+}
+
 impl PredicatePushdown for LogicalScan {
     fn predicate_pushdown(
         &self,
@@ -434,11 +441,7 @@ impl LogicalScan {
         } else {
             let (scan_ranges, predicate) = self.predicate().clone().split_to_scan_ranges(
                 self.core.table_desc.clone(),
-                self.base
-                    .ctx()
-                    .session_ctx()
-                    .config()
-                    .get_max_split_range_gap(),
+                self.base.ctx().session_ctx().config().max_split_range_gap() as u64,
             )?;
             let mut scan = self.clone();
             scan.core.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.

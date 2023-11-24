@@ -21,7 +21,8 @@ use super::batch::prelude::*;
 use super::generic::{self, GenericPlanRef};
 use super::utils::{childless_record, Distill};
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb, ToDistributedBatch};
-use crate::expr::{Expr, ExprImpl, ExprRewriter};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -137,5 +138,11 @@ impl ExprRewritable for BatchNestedLoopJoin {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new(core).into()
+    }
+}
+
+impl ExprVisitable for BatchNestedLoopJoin {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }
