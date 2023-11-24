@@ -157,9 +157,9 @@ mod tests {
     #[test]
     fn test_reserve_memory_bytes() {
         // at least 512 MB
-        let (reserved, non_reserved) = reserve_memory_bytes(1 << 30);
+        let (reserved, non_reserved) = reserve_memory_bytes(1536 << 20);
         assert_eq!(reserved, 512 << 20);
-        assert_eq!(non_reserved, 1536 << 20);
+        assert_eq!(non_reserved, 1024 << 20);
 
         // reserve based on proportion
         let (reserved, non_reserved) = reserve_memory_bytes(10 << 30);
