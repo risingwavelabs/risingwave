@@ -21,6 +21,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::types::{DataType, Datum};
 
+use crate::sig::FuncBuilder;
 use crate::{ExprError, Result};
 
 // aggregate definition
@@ -150,8 +151,8 @@ pub fn build(agg: &AggCall, prefer_append_only: bool) -> Result<BoxedAggregateFu
             ))
         })?;
 
-    if let Some(build_append_only) = sig.build_aggregate_append_only && prefer_append_only {
-        return build_append_only(agg);
+    if let FuncBuilder::Aggregate{ append_only: Some(f), .. } = sig.build && prefer_append_only {
+        return f(agg);
     }
     sig.build_aggregate(agg)
 }

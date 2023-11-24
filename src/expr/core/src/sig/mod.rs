@@ -56,11 +56,24 @@ impl FunctionRegistry {
                 .iter_mut()
                 .find(|d| d.inputs_type == sig.inputs_type && d.ret_type == sig.ret_type)
             {
-                if let Some(f) = sig.build_aggregate_retractable {
-                    existing.build_aggregate_retractable = Some(f);
+                let (
+                    FuncBuilder::Aggregate {
+                        retractable,
+                        append_only,
+                    },
+                    FuncBuilder::Aggregate {
+                        retractable: r1,
+                        append_only: a1,
+                    },
+                ) = (&mut existing.build, sig.build)
+                else {
+                    panic!("expected aggregate function")
+                };
+                if let Some(f) = r1 {
+                    *retractable = Some(f);
                 }
-                if let Some(f) = sig.build_aggregate_append_only {
-                    existing.build_aggregate_append_only = Some(f);
+                if let Some(f) = a1 {
+                    *append_only = Some(f);
                 }
                 return;
             }
@@ -141,17 +154,8 @@ pub struct FuncSign {
     /// The return type.
     pub ret_type: SigDataType,
 
-    /// A function to build the scalar function.
-    pub build_scalar: Option<ScalarFunctionBuilder>,
-
-    /// A function to build the table function.
-    pub build_table: Option<TableFunctionBuilder>,
-
-    /// A function to build the aggregate function (retractable version).
-    pub build_aggregate_retractable: Option<AggregateFunctionBuilder>,
-
-    /// A function to build the aggregate function (append-only version).
-    pub build_aggregate_append_only: Option<AggregateFunctionBuilder>,
+    /// A function to build the expression.
+    pub build: FuncBuilder,
 
     /// A function to infer the return type from argument types.
     pub type_infer: fn(args: &[DataType]) -> Result<DataType>,
@@ -164,17 +168,6 @@ pub struct FuncSign {
     /// `None` means equal to the return type.
     pub state_type: Option<DataType>,
 }
-
-type ScalarFunctionBuilder =
-    fn(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression>;
-
-type TableFunctionBuilder = fn(
-    return_type: DataType,
-    chunk_size: usize,
-    children: Vec<BoxedExpression>,
-) -> Result<BoxedTableFunction>;
-
-type AggregateFunctionBuilder = fn(agg: &AggCall) -> Result<BoxedAggregateFunction>;
 
 impl fmt::Debug for FuncSign {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -247,12 +240,24 @@ impl FuncSign {
 
     /// Returns true if the aggregate function is append-only.
     pub const fn is_append_only(&self) -> bool {
-        self.build_aggregate_retractable.is_none()
+        matches!(
+            self.build,
+            FuncBuilder::Aggregate {
+                retractable: None,
+                ..
+            }
+        )
     }
 
     /// Returns true if the aggregate function has a retractable version.
     pub const fn is_retractable(&self) -> bool {
-        self.build_aggregate_retractable.is_some()
+        matches!(
+            self.build,
+            FuncBuilder::Aggregate {
+                retractable: Some(_),
+                ..
+            }
+        )
     }
 
     /// Builds the scalar function.
@@ -261,9 +266,9 @@ impl FuncSign {
         return_type: DataType,
         children: Vec<BoxedExpression>,
     ) -> Result<BoxedExpression> {
-        match self.build_scalar {
-            Some(f) => f(return_type, children),
-            None => panic!("Expected a scalar function"),
+        match self.build {
+            FuncBuilder::Scalar(f) => f(return_type, children),
+            _ => panic!("Expected a scalar function"),
         }
     }
 
@@ -274,21 +279,20 @@ impl FuncSign {
         chunk_size: usize,
         children: Vec<BoxedExpression>,
     ) -> Result<BoxedTableFunction> {
-        match self.build_table {
-            Some(f) => f(return_type, chunk_size, children),
-            None => panic!("Expected a table function"),
+        match self.build {
+            FuncBuilder::Table(f) => f(return_type, chunk_size, children),
+            _ => panic!("Expected a table function"),
         }
     }
 
     /// Builds the aggregate function. If both retractable and append-only versions exist, the
     /// retractable version will be built.
     pub fn build_aggregate(&self, agg: &AggCall) -> Result<BoxedAggregateFunction> {
-        match (
-            self.build_aggregate_retractable,
-            self.build_aggregate_append_only,
-        ) {
-            (Some(f), _) => f(agg),
-            (_, Some(f)) => f(agg),
+        match self.build {
+            FuncBuilder::Aggregate {
+                retractable,
+                append_only,
+            } => retractable.or(append_only).unwrap()(agg),
             _ => panic!("Expected an aggregate function"),
         }
     }
@@ -408,6 +412,22 @@ impl SigDataType {
     pub fn is_exact(&self) -> bool {
         matches!(self, Self::Exact(_))
     }
+}
+
+#[derive(Clone, Copy)]
+pub enum FuncBuilder {
+    Scalar(fn(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression>),
+    Table(
+        fn(
+            return_type: DataType,
+            chunk_size: usize,
+            children: Vec<BoxedExpression>,
+        ) -> Result<BoxedTableFunction>,
+    ),
+    Aggregate {
+        retractable: Option<fn(agg: &AggCall) -> Result<BoxedAggregateFunction>>,
+        append_only: Option<fn(agg: &AggCall) -> Result<BoxedAggregateFunction>>,
+    },
 }
 
 /// Register a function into global registry.

@@ -1172,10 +1172,7 @@ mod tests {
                     variadic: false,
                     // ret_type does not affect the overload resolution logic
                     ret_type: T::Int32.into(),
-                    build_scalar: None,
-                    build_table: None,
-                    build_aggregate_retractable: None,
-                    build_aggregate_append_only: None,
+                    build: FuncBuilder::Scalar(|_, _| unreachable!()),
                     type_infer: |_| unreachable!(),
                     deprecated: false,
                     state_type: None,
