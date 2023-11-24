@@ -64,17 +64,17 @@ impl SourceProperties for OpendalS3Properties {
     fn init_from_pb_source(&mut self, _source: &risingwave_pb::catalog::PbSource) {}
 }
 
-pub trait OpenDalProperties: Sized + Send + Clone + PartialEq + 'static + Sync {
+pub trait OpenDalSourceProperties: Sized + Send + Clone + PartialEq + 'static + Sync {
     fn new_enumerator(properties: Self) -> anyhow::Result<OpendalEnumerator<Self>>;
 }
 
-impl OpenDalProperties for GcsProperties {
+impl OpenDalSourceProperties for GcsProperties {
     fn new_enumerator(properties: Self) -> anyhow::Result<OpendalEnumerator<Self>> {
         OpendalEnumerator::new_gcs_source(properties)
     }
 }
 
-impl OpenDalProperties for OpendalS3Properties {
+impl OpenDalSourceProperties for OpendalS3Properties {
     fn new_enumerator(properties: Self) -> anyhow::Result<OpendalEnumerator<Self>> {
         OpendalEnumerator::new_s3_source(properties.s3_properties)
     }

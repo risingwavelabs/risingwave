@@ -12,20 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::pin::pin;
-
 use anyhow::{Ok, Result};
 use async_trait::async_trait;
-use aws_smithy_http::byte_stream::ByteStream;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use opendal::Operator;
 use risingwave_common::error::RwError;
-use tokio::io::{AsyncReadExt, BufReader};
+use tokio::io::BufReader;
 use tokio_util::io::{ReaderStream, StreamReader};
 
 use super::opendal_enumerator::OpendalEnumerator;
-use super::OpenDalProperties;
+use super::OpenDalSourceProperties;
 use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
 use crate::source::{
@@ -36,15 +33,14 @@ use crate::source::{
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const STREAM_READER_CAPACITY: usize = 4096;
 #[derive(Debug, Clone)]
-pub struct OpendalReader<C: OpenDalProperties> {
+pub struct OpendalReader<C: OpenDalSourceProperties> {
     connector: OpendalEnumerator<C>,
     splits: Vec<OpendalFsSplit<C>>,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
-    // marker: PhantomData<C>,
 }
 #[async_trait]
-impl<C: OpenDalProperties> SplitReader for OpendalReader<C>
+impl<C: OpenDalSourceProperties> SplitReader for OpendalReader<C>
 where
     C: Send + Clone + PartialEq + 'static + Sync,
 {
@@ -73,7 +69,7 @@ where
     }
 }
 
-impl<C: OpenDalProperties> OpendalReader<C>
+impl<C: OpenDalSourceProperties> OpendalReader<C>
 where
     C: Send + Clone + Sized + PartialEq + 'static,
 {
@@ -125,15 +121,16 @@ where
 
         let object_name = split.name.clone();
 
-        let byte_stream = Self::get_object(op, &object_name, split.offset).await?;
+        let reader = op
+            .reader_with(&object_name)
+            .range(split.offset as u64..)
+            .await?;
 
         let stream_reader = StreamReader::new(
-            byte_stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
+            reader.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
         );
-
-        let reader = pin!(BufReader::new(stream_reader));
-
-        let stream = ReaderStream::with_capacity(reader, STREAM_READER_CAPACITY);
+        let buf_reader = BufReader::new(stream_reader);
+        let stream = ReaderStream::with_capacity(buf_reader, STREAM_READER_CAPACITY);
 
         let mut offset: usize = split.offset;
         let mut batch_size: usize = 0;
@@ -171,13 +168,5 @@ where
                 .inc_by(batch_size as u64);
             yield batch;
         }
-    }
-
-    pub async fn get_object(op: Operator, object_name: &str, start: usize) -> Result<ByteStream> {
-        let mut reader = op.reader_with(object_name).range(start as u64..).await?;
-        let mut buffer = Vec::new();
-        reader.read_to_end(&mut buffer).await?;
-        let res = ByteStream::from(buffer);
-        Ok(res)
     }
 }

@@ -19,12 +19,12 @@ use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::S3;
 use opendal::Operator;
 
-use super::opendal_enumerator::{EngineType, OpendalEnumerator};
-use super::OpenDalProperties;
+use super::opendal_enumerator::OpendalEnumerator;
+use super::OpenDalSourceProperties;
 use crate::source::filesystem::opendal_source::get_prefix;
 use crate::source::filesystem::S3Properties;
 
-impl<C: OpenDalProperties> OpendalEnumerator<C>
+impl<C: OpenDalSourceProperties> OpendalEnumerator<C>
 where
     C: Sized + Send + Clone + PartialEq + 'static + Sync,
 {
@@ -64,7 +64,6 @@ where
 
         Ok(Self {
             op,
-            engine_type: EngineType::S3,
             prefix,
             matcher,
             marker: PhantomData,

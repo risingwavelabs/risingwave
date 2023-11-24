@@ -102,7 +102,7 @@ impl<S: StateStore> FsListExecutor<S> {
             Box<dyn Stream<Item = Result<FsPageItem, risingwave_common::error::RwError>> + Send>,
         > = source_desc
             .source
-            .get_opendal_source_list()
+            .get_source_list()
             .map_err(StreamExecutorError::connector_error)?;
         let chunked_stream = stream
             .chunks(CHUNK_SIZE) // Group FsPageItems into chunks of size 1024

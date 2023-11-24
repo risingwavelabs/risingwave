@@ -21,31 +21,24 @@ use futures::StreamExt;
 use opendal::{Metakey, Operator};
 use risingwave_common::types::Timestamp;
 
-use super::OpenDalProperties;
+use super::OpenDalSourceProperties;
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator};
 
 #[derive(Debug, Clone)]
-pub struct OpendalEnumerator<C: OpenDalProperties>
+pub struct OpendalEnumerator<C: OpenDalSourceProperties>
 where
     C: Send + Clone + Sized + PartialEq + 'static + Sync,
 {
     pub(crate) op: Operator,
-    pub(crate) engine_type: EngineType,
     // prefix is used to reduce the number of objects to be listed
     pub(crate) prefix: Option<String>,
     pub(crate) matcher: Option<glob::Pattern>,
     pub(crate) marker: PhantomData<C>,
 }
 
-#[derive(Debug, Clone)]
-pub enum EngineType {
-    Gcs,
-    S3,
-}
-
 #[async_trait]
-impl<C: OpenDalProperties> SplitEnumerator for OpendalEnumerator<C>
+impl<C: OpenDalSourceProperties> SplitEnumerator for OpendalEnumerator<C>
 where
     C: Sized + Send + Clone + PartialEq + 'static + Sync,
 {
@@ -64,7 +57,7 @@ where
     }
 }
 
-impl<C: OpenDalProperties> OpendalEnumerator<C>
+impl<C: OpenDalSourceProperties> OpendalEnumerator<C>
 where
     C: Send + Clone + Sized + PartialEq + 'static + Sync,
 {

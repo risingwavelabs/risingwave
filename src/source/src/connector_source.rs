@@ -28,7 +28,7 @@ use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use risingwave_connector::source::filesystem::opendal_source::{
-    OpenDalProperties, OpendalS3Properties,
+    OpenDalSourceProperties, OpendalS3Properties,
 };
 use risingwave_connector::source::filesystem::{FsPageItem, GcsProperties};
 use risingwave_connector::source::{
@@ -91,7 +91,7 @@ impl ConnectorSource {
             .collect::<Result<Vec<SourceColumnDesc>>>()
     }
 
-    pub fn get_opendal_source_list(&self) -> Result<BoxTryStream<FsPageItem>> {
+    pub fn get_source_list(&self) -> Result<BoxTryStream<FsPageItem>> {
         let config = self.config.clone();
         match config {
             ConnectorProperties::Gcs(prop) => {
@@ -181,7 +181,7 @@ impl ConnectorSource {
 }
 
 #[try_stream(boxed, ok = FsPageItem, error = RwError)]
-async fn build_opendal_fs_list_stream<C: OpenDalProperties>(lister: OpendalEnumerator<C>) {
+async fn build_opendal_fs_list_stream<C: OpenDalSourceProperties>(lister: OpendalEnumerator<C>) {
     let prefix = lister
         .get_prefix()
         .as_ref()

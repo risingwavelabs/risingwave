@@ -19,10 +19,10 @@ use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::Gcs;
 use opendal::Operator;
 
-use super::opendal_enumerator::{EngineType, OpendalEnumerator};
-use super::{get_prefix, GcsProperties, OpenDalProperties};
+use super::opendal_enumerator::OpendalEnumerator;
+use super::{get_prefix, GcsProperties, OpenDalSourceProperties};
 
-impl<C: OpenDalProperties> OpendalEnumerator<C>
+impl<C: OpenDalSourceProperties> OpendalEnumerator<C>
 where
     C: Send + Clone + PartialEq + 'static + Sync,
 {
@@ -53,7 +53,6 @@ where
         };
         Ok(Self {
             op,
-            engine_type: EngineType::Gcs,
             prefix,
             matcher,
             marker: PhantomData,
