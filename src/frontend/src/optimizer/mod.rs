@@ -546,10 +546,7 @@ impl PlanRoot {
                         .enforce_if_not_satisfies(external_source_node, &Order::any())?
                 }
 
-                PrimaryKeyKind::RowIdAsPrimaryKey => {
-                    StreamExchange::new_no_shuffle(external_source_node).into()
-                }
-                PrimaryKeyKind::AppendOnly => {
+                PrimaryKeyKind::RowIdAsPrimaryKey | PrimaryKeyKind::AppendOnly => {
                     StreamExchange::new_no_shuffle(external_source_node).into()
                 }
             };
@@ -583,6 +580,7 @@ impl PlanRoot {
                 kind,
                 column_descs,
             )?;
+
             vec![dml_node]
         };
 
