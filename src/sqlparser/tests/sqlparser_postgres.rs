@@ -392,7 +392,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: SetVariableValue::Ident("b".into()),
+            value: SetVariableValueSingle::Ident("b".into()).into(),
         }
     );
 
@@ -402,7 +402,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: SetVariableValue::Literal(Value::SingleQuotedString("b".into())),
+            value: SetVariableValueSingle::Literal(Value::SingleQuotedString("b".into())).into(),
         }
     );
 
@@ -412,7 +412,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: SetVariableValue::Literal(number("0")),
+            value: SetVariableValueSingle::Literal(number("0")).into(),
         }
     );
 
@@ -432,7 +432,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: true,
             variable: "a".into(),
-            value: SetVariableValue::Ident("b".into()),
+            value: SetVariableValueSingle::Ident("b".into()).into(),
         }
     );
 

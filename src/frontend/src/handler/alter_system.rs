@@ -14,8 +14,9 @@
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::error::Result;
-use risingwave_sqlparser::ast::{Ident, SetVariableValue, Value};
+use risingwave_sqlparser::ast::{Ident, SetVariableValue};
 
+use super::variable::set_var_to_param_str;
 use super::{HandlerArgs, RwPgResponse};
 
 // Warn user if barrier_interval_ms is set above 5mins.
@@ -28,12 +29,7 @@ pub async fn handle_alter_system(
     param: Ident,
     value: SetVariableValue,
 ) -> Result<RwPgResponse> {
-    let value = match value {
-        SetVariableValue::Literal(Value::DoubleQuotedString(s))
-        | SetVariableValue::Literal(Value::SingleQuotedString(s)) => Some(s),
-        SetVariableValue::Default => None,
-        _ => Some(value.to_string()),
-    };
+    let value = set_var_to_param_str(&value);
     let params = handler_args
         .session
         .env()

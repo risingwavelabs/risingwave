@@ -3228,12 +3228,12 @@ impl Parser {
         loop {
             let token = self.peek_token();
             let value = match (self.parse_value(), token.token) {
-                (Ok(value), _) => SetVariableValue::Literal(value),
+                (Ok(value), _) => SetVariableValueSingle::Literal(value),
                 (Err(_), Token::Word(w)) => {
                     if w.keyword == Keyword::DEFAULT {
-                        SetVariableValue::Default
+                        return Ok(SetVariableValue::Default);
                     } else {
-                        SetVariableValue::Ident(w.to_ident()?)
+                        SetVariableValueSingle::Ident(w.to_ident()?)
                     }
                 }
                 (Err(_), unexpected) => {
@@ -3246,7 +3246,7 @@ impl Parser {
             }
         }
         if values.len() == 1 {
-            Ok(values[0].clone())
+            Ok(SetVariableValue::Single(values[0].clone()))
         } else {
             Ok(SetVariableValue::List(values))
         }

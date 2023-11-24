@@ -2652,24 +2652,50 @@ impl fmt::Display for CreateFunctionUsing {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SetVariableValue {
-    Ident(Ident),
-    Literal(Value),
-    List(Vec<SetVariableValue>),
+    Single(SetVariableValueSingle),
+    List(Vec<SetVariableValueSingle>),
     Default,
+}
+
+impl From<SetVariableValueSingle> for SetVariableValue {
+    fn from(value: SetVariableValueSingle) -> Self {
+        SetVariableValue::Single(value)
+    }
 }
 
 impl fmt::Display for SetVariableValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use SetVariableValue::*;
         match self {
+            Single(val) => write!(f, "{}", val),
+            List(list) => write!(f, "{}", display_comma_separated(list),),
+            Default => write!(f, "DEFAULT"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SetVariableValueSingle {
+    Ident(Ident),
+    Literal(Value),
+}
+
+impl SetVariableValueSingle {
+    pub fn to_string_unquoted(&self) -> String {
+        match self {
+            Self::Literal(Value::SingleQuotedString(s))
+            | Self::Literal(Value::DoubleQuotedString(s)) => s.clone(),
+            _ => self.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for SetVariableValueSingle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use SetVariableValueSingle::*;
+        match self {
             Ident(ident) => write!(f, "{}", ident),
             Literal(literal) => write!(f, "{}", literal),
-            List(list) => write!(
-                f,
-                "{}",
-                list.iter().map(|value| value.to_string()).join(", ")
-            ),
-            Default => write!(f, "DEFAULT"),
         }
     }
 }
