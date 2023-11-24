@@ -27,8 +27,8 @@ use risingwave_pb::stream_plan::barrier::{BarrierKind, Mutation};
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
-    AddMutation, Dispatcher, Dispatchers, PauseMutation, ResumeMutation, SourceChangeSplitMutation,
-    StopMutation, ThrottleMutation, UpdateMutation,
+    AddMutation, Dispatcher, Dispatchers, FragmentTypeFlag, PauseMutation, ResumeMutation,
+    SourceChangeSplitMutation, StopMutation, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::{DropActorsRequest, WaitEpochCommitRequest};
 use risingwave_rpc_client::StreamClientPoolRef;
@@ -586,12 +586,21 @@ impl CommandContext {
                 dispatchers,
                 table_fragments,
                 ..
-            } => dispatchers
-                .values()
-                .flatten()
-                .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
-                .chain(table_fragments.values_actor_ids())
-                .collect(),
+            } => {
+                // cdc backfill table job doesn't need to be tracked
+                if table_fragments.fragments().iter().any(|fragment| {
+                    fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32 != 0
+                }) {
+                    Default::default()
+                } else {
+                    dispatchers
+                        .values()
+                        .flatten()
+                        .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter().copied())
+                        .chain(table_fragments.values_actor_ids())
+                        .collect()
+                }
+            }
             _ => Default::default(),
         }
     }

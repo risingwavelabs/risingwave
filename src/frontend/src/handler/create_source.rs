@@ -1250,12 +1250,13 @@ pub mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{
-        DEFAULT_DATABASE_NAME, DEFAULT_KEY_COLUMN_NAME, DEFAULT_SCHEMA_NAME, OFFSET_COLUMN_NAME,
-        ROWID_PREFIX, TABLE_NAME_COLUMN_NAME,
+        CDC_SOURCE_COLUMN_NUM, DEFAULT_DATABASE_NAME, DEFAULT_KEY_COLUMN_NAME, DEFAULT_SCHEMA_NAME,
+        OFFSET_COLUMN_NAME, ROWID_PREFIX, TABLE_NAME_COLUMN_NAME,
     };
     use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
+    use crate::handler::create_source::debezium_cdc_source_schema;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[tokio::test]
@@ -1340,5 +1341,12 @@ pub mod tests {
             TABLE_NAME_COLUMN_NAME => DataType::Varchar,
         };
         assert_eq!(columns, expected_columns);
+    }
+
+    #[tokio::test]
+    async fn test_cdc_source_job_schema() {
+        let columns = debezium_cdc_source_schema();
+        // make sure it doesn't broken by future PRs
+        assert_eq!(CDC_SOURCE_COLUMN_NUM, columns.len() as u32);
     }
 }

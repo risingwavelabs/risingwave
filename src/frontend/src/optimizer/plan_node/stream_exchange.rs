@@ -116,7 +116,6 @@ impl StreamNode for StreamExchange {
                     r#type: DispatcherType::NoShuffle as i32,
                     dist_key_indices: vec![],
                     output_indices: (0..self.schema().len() as u32).collect(),
-                    downstream_table_name: None,
                 })
             } else {
                 Some(DispatchStrategy {
@@ -133,7 +132,6 @@ impl StreamNode for StreamExchange {
                         _ => vec![],
                     },
                     output_indices: (0..self.schema().len() as u32).collect(),
-                    downstream_table_name: None,
                 })
             },
         })
