@@ -646,9 +646,9 @@ impl S3ObjectStore {
         let builder =
             aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await)
                 .force_path_style(true)
-                .http_client(Self::new_http_client(&S3ObjectStoreConfig::default()));
+                .http_client(Self::new_http_client(&S3ObjectStoreConfig::default()))
+                .behavior_version_latest();
         let config = builder
-            .behavior_version_latest()
             .region(Region::new("custom"))
             .endpoint_url(format!("{}{}", endpoint_prefix, address))
             .credentials_provider(Credentials::from_keys(
