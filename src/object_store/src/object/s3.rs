@@ -20,7 +20,6 @@ use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
-use aws_config::BehaviorVersion;
 use aws_sdk_s3::config::{Credentials, Region};
 use aws_sdk_s3::operation::get_object::builders::GetObjectFluentBuilder;
 use aws_sdk_s3::operation::get_object::GetObjectError;
@@ -649,7 +648,7 @@ impl S3ObjectStore {
                 .force_path_style(true)
                 .http_client(Self::new_http_client(&S3ObjectStoreConfig::default()));
         let config = builder
-            .behavior_version(BehaviorVersion::v2023_11_09())
+            .behavior_version_latest()
             .region(Region::new("custom"))
             .endpoint_url(format!("{}{}", endpoint_prefix, address))
             .credentials_provider(Credentials::from_keys(
