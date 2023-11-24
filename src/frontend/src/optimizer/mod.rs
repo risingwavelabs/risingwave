@@ -259,6 +259,7 @@ impl PlanRoot {
                 BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into();
         }
 
+        // Both two phase limit and topn could generate limit on top of the scan, so we push limit here.
         let plan = plan.optimize_by_rules(&OptimizationStage::new(
             "Push Limit To Scan",
             vec![BatchPushLimitToScanRule::create()],
@@ -298,6 +299,7 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string());
         }
 
+        // Both two phase limit and topn could generate limit on top of the scan, so we push limit here.
         let plan = plan.optimize_by_rules(&OptimizationStage::new(
             "Push Limit To Scan",
             vec![BatchPushLimitToScanRule::create()],
