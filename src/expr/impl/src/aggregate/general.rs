@@ -25,7 +25,7 @@ use risingwave_expr::{aggregate, ExprError, Result};
 #[aggregate("sum(decimal) -> decimal")]
 #[aggregate("sum(interval) -> interval")]
 #[aggregate("sum(int256) -> int256")]
-#[aggregate("sum(int8) -> int8", deprecated)] // used internally for 2-phase sum(int2) and sum(int4)
+#[aggregate("sum(int8) -> int8", internal)] // used internally for 2-phase sum(int2) and sum(int4)
 #[aggregate("sum0(int8) -> int8", init_state = "0i64")] // used internally for 2-phase count
 fn sum<S, T>(state: S, input: T, retract: bool) -> Result<S>
 where

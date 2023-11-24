@@ -79,7 +79,7 @@ impl Parse for FunctionAttr {
                 parsed.generic = Some(get_value()?);
             } else if meta.path().is_ident("volatile") {
                 parsed.volatile = true;
-            } else if meta.path().is_ident("deprecated") {
+            } else if meta.path().is_ident("deprecated") || meta.path().is_ident("internal") {
                 parsed.deprecated = true;
             } else if meta.path().is_ident("rewritten") {
                 parsed.rewritten = true;
