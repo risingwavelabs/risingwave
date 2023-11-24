@@ -28,7 +28,7 @@ use std::sync::Arc;
 use clap::Parser;
 use replay_impl::{get_replay_notification_client, GlobalReplayImpl};
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, NoOverride, StorageConfig,
+    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig, StorageConfig,
 };
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_trace::{
@@ -36,7 +36,7 @@ use risingwave_hummock_trace::{
 };
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_storage::filter_key_extractor::{
     FakeRemoteTableAccessor, RpcFilterKeyExtractorManager,
 };
@@ -149,6 +149,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
     )));
 
     let storage = HummockStorage::new(
+        Arc::new(config.storage),
         storage_opts,
         sstable_store,
         hummock_meta_client.clone(),

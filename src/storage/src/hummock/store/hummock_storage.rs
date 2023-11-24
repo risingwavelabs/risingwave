@@ -23,6 +23,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use more_asserts::assert_gt;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::StorageConfig;
 use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_common_service::observer_manager::{NotificationClient, ObserverManager};
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
@@ -113,6 +114,7 @@ impl HummockStorage {
     /// Creates a [`HummockStorage`].
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
+        storage_config: Arc<StorageConfig>,
         options: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -162,6 +164,7 @@ impl HummockStorage {
             filter_key_extractor_manager.clone(),
         );
         let compactor_context = CompactorContext::new_local_compact_context(
+            storage_config,
             options.clone(),
             sstable_store.clone(),
             compactor_metrics.clone(),
@@ -543,12 +546,14 @@ impl HummockStorage {
 
     /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.
     pub async fn for_test(
+        storage_config: Arc<StorageConfig>,
         options: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
     ) -> HummockResult<Self> {
         Self::new(
+            storage_config,
             options,
             sstable_store,
             hummock_meta_client,

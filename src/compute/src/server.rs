@@ -100,8 +100,7 @@ pub async fn compute_node_serve(
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
     // Initialize all the configs
-    let stream_config: Arc<risingwave_common::config::StreamingConfig> =
-        Arc::new(config.streaming.clone());
+    let stream_config = Arc::new(config.streaming.clone());
     let batch_config = Arc::new(config.batch.clone());
 
     // Register to the cluster. We're not ready to serve until activate is called.
@@ -183,6 +182,7 @@ pub async fn compute_node_serve(
 
     let state_store = StateStoreImpl::new(
         state_store_url,
+        config.storage.clone(),
         storage_opts.clone(),
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
@@ -209,6 +209,7 @@ pub async fn compute_node_serve(
                 storage_opts.compactor_memory_limit_mb as u64 * 1024 * 1024 / 2,
             ));
             let compactor_context = CompactorContext {
+                storage_config: Arc::new(config.storage),
                 storage_opts,
                 sstable_store: storage.sstable_store(),
                 compactor_metrics: compactor_metrics.clone(),

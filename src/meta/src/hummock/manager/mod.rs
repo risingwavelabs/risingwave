@@ -29,6 +29,7 @@ use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::config::default::compaction_config;
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_common::util::{pending_on_none, select_all};
@@ -193,9 +194,7 @@ use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGro
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
-use risingwave_object_store::object::{
-    build_remote_object_store, ObjectError, ObjectStoreConfig, ObjectStoreRef,
-};
+use risingwave_object_store::object::{build_remote_object_store, ObjectError, ObjectStoreRef};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
 use risingwave_pb::hummock::version_update_payload::Payload;

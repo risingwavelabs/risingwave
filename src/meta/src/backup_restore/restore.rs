@@ -18,10 +18,10 @@ use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::Metadata;
 use risingwave_backup::storage::{MetaSnapshotStorage, MetaSnapshotStorageRef};
 use risingwave_backup::MetaSnapshotId;
-use risingwave_common::config::MetaBackend;
+use risingwave_common::config::{MetaBackend, ObjectStoreConfig};
 use risingwave_hummock_sdk::version_checkpoint_path;
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionCheckpoint};
 
 use crate::backup_restore::restore_impl::v1::{LoaderV1, WriterModelV1ToMetaStoreV1};

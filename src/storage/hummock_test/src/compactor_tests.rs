@@ -25,6 +25,7 @@ pub(crate) mod tests {
     use rand::{Rng, RngCore, SeedableRng};
     use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::config::StorageConfig;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_common::util::epoch::Epoch;
     use risingwave_common_service::observer_manager::NotificationClient;
@@ -93,6 +94,7 @@ pub(crate) mod tests {
         let sstable_store = mock_sstable_store();
 
         let hummock = GlobalHummockStorage::for_test(
+            Arc::new(StorageConfig::default()),
             options,
             sstable_store,
             hummock_meta_client.clone(),
@@ -127,6 +129,7 @@ pub(crate) mod tests {
         let sstable_store = mock_sstable_store();
 
         GlobalHummockStorage::for_test(
+            Arc::new(StorageConfig::default()),
             options,
             sstable_store,
             hummock_meta_client.clone(),
@@ -188,6 +191,7 @@ pub(crate) mod tests {
         sstable_store: SstableStoreRef,
     ) -> CompactorContext {
         CompactorContext {
+            storage_config: Arc::new(StorageConfig::default()),
             storage_opts: options,
             sstable_store,
             compactor_metrics: Arc::new(CompactorMetrics::unused()),

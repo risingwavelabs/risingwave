@@ -18,9 +18,9 @@ use std::time::Duration;
 use etcd_client::ConnectOptions;
 use risingwave_backup::error::BackupResult;
 use risingwave_backup::storage::{MetaSnapshotStorageRef, ObjectStoreMetaSnapshotStorage};
-use risingwave_common::config::MetaBackend;
+use risingwave_common::config::{MetaBackend, ObjectStoreConfig};
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
 
 use crate::backup_restore::RestoreOpts;
 use crate::controller::SqlMetaStore;

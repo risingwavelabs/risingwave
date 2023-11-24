@@ -43,14 +43,16 @@ use futures::future::{try_join_all, BoxFuture, FutureExt};
 use futures::{stream, Stream, StreamExt, TryStreamExt};
 use hyper::{Body, Response};
 use itertools::Itertools;
+use risingwave_common::config::S3ObjectStoreConfig;
 use risingwave_common::monitor::connection::monitor_connector;
 use risingwave_common::range::RangeBoundsExt;
 use tokio::task::JoinHandle;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use super::object_metrics::ObjectStoreMetrics;
 use super::{
     BoxedStreamingUploader, Bytes, ObjectError, ObjectMetadata, ObjectRangeBounds, ObjectResult,
-    ObjectStore, ObjectStoreConfig, StreamingUploader,
+    ObjectStore, StreamingUploader,
 };
 use crate::object::{try_update_failure_metric, ObjectDataStream, ObjectMetadataIter};
 
@@ -307,7 +309,7 @@ pub struct S3ObjectStore {
     /// For S3 specific metrics.
     metrics: Arc<ObjectStoreMetrics>,
 
-    config: ObjectStoreConfig,
+    config: S3ObjectStoreConfig,
 }
 
 #[async_trait::async_trait]
@@ -356,7 +358,7 @@ impl ObjectStore for S3ObjectStore {
 
         // retry if occurs AWS EC2 HTTP timeout error.
         let val = tokio_retry::RetryIf::spawn(
-            self.config.get_retry_strategy(),
+            self.get_retry_strategy(),
             || async {
                 match self.obj_store_request(path, range.clone()).send().await {
                     Ok(resp) => {
@@ -436,7 +438,7 @@ impl ObjectStore for S3ObjectStore {
 
         // retry if occurs AWS EC2 HTTP timeout error.
         let resp = tokio_retry::RetryIf::spawn(
-            self.config.get_retry_strategy(),
+            self.get_retry_strategy(),
             || async {
                 match self.obj_store_request(path, range.clone()).send().await {
                     Ok(resp) => Ok(resp),
@@ -530,35 +532,28 @@ impl ObjectStore for S3ObjectStore {
     }
 
     fn recv_buffer_size(&self) -> usize {
-        self.config.recv_buffer_size.unwrap_or(1 << 21)
+        self.config.object_store_recv_buffer_size.unwrap_or(1 << 21)
     }
 }
 
 impl S3ObjectStore {
-    /// Creates an S3 object store from environment variable.
-    ///
-    /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
-    pub async fn new(bucket: String, metrics: Arc<ObjectStoreMetrics>) -> Self {
-        Self::new_with_config(bucket, metrics, ObjectStoreConfig::default()).await
-    }
-
-    pub fn new_http_client(config: &ObjectStoreConfig) -> impl HttpClient {
+    pub fn new_http_client(config: &S3ObjectStoreConfig) -> impl HttpClient {
         let mut http = hyper::client::HttpConnector::new();
 
         // connection config
-        if let Some(keepalive_ms) = config.keepalive_ms.as_ref() {
+        if let Some(keepalive_ms) = config.object_store_keepalive_ms.as_ref() {
             http.set_keepalive(Some(Duration::from_millis(*keepalive_ms)));
         }
 
-        if let Some(nodelay) = config.nodelay.as_ref() {
+        if let Some(nodelay) = config.object_store_nodelay.as_ref() {
             http.set_nodelay(*nodelay);
         }
 
-        if let Some(recv_buffer_size) = config.recv_buffer_size.as_ref() {
+        if let Some(recv_buffer_size) = config.object_store_recv_buffer_size.as_ref() {
             http.set_recv_buffer_size(Some(*recv_buffer_size));
         }
 
-        if let Some(send_buffer_size) = config.send_buffer_size.as_ref() {
+        if let Some(send_buffer_size) = config.object_store_send_buffer_size.as_ref() {
             http.set_send_buffer_size(Some(*send_buffer_size));
         }
 
@@ -575,10 +570,13 @@ impl S3ObjectStore {
         HyperClientBuilder::new().build(conn)
     }
 
+    /// Creates an S3 object store from environment variable.
+    ///
+    /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
     pub async fn new_with_config(
         bucket: String,
         metrics: Arc<ObjectStoreMetrics>,
-        config: ObjectStoreConfig,
+        config: S3ObjectStoreConfig,
     ) -> Self {
         let sdk_config_loader = aws_config::from_env()
             .retry_config(RetryConfig::standard().with_max_attempts(4))
@@ -641,10 +639,11 @@ impl S3ObjectStore {
         #[cfg(madsim)]
         let builder = aws_sdk_s3::config::Builder::new();
         #[cfg(not(madsim))]
-        let builder =
+        let s3_object_store_config = S3ObjectStoreConfig::default();
+        let builder: aws_sdk_s3::config::Builder =
             aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await)
                 .force_path_style(true)
-                .http_client(Self::new_http_client(&ObjectStoreConfig::default()));
+                .http_client(Self::new_http_client(&s3_object_store_config));
         let config = builder
             .region(Region::new("custom"))
             .endpoint_url(format!("{}{}", endpoint_prefix, address))
@@ -661,7 +660,7 @@ impl S3ObjectStore {
             bucket: bucket.to_string(),
             part_size: MINIO_PART_SIZE,
             metrics,
-            config: ObjectStoreConfig::default(),
+            config: s3_object_store_config,
         }
     }
 
@@ -821,6 +820,16 @@ impl S3ObjectStore {
         }
 
         false
+    }
+
+    #[inline(always)]
+    fn get_retry_strategy(&self) -> impl Iterator<Item = Duration> {
+        ExponentialBackoff::from_millis(self.config.object_store_req_retry_interval_ms)
+            .max_delay(Duration::from_millis(
+                self.config.object_store_req_retry_max_delay_ms,
+            ))
+            .take(self.config.object_store_req_retry_max_attempts)
+            .map(jitter)
     }
 }
 struct S3ObjectIter {

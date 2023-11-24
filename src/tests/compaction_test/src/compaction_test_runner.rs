@@ -27,7 +27,7 @@ use futures::TryStreamExt;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, MetaConfig, NoOverride,
+    extract_storage_memory_config, load_config, MetaConfig, NoOverride, StorageConfig,
 };
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -365,7 +365,13 @@ async fn start_replay(
         &system_params,
         &storage_memory_config,
     )));
-    let hummock = create_hummock_store_with_metrics(&meta_client, storage_opts, &opts).await?;
+    let hummock = create_hummock_store_with_metrics(
+        &meta_client,
+        config.storage.clone(),
+        storage_opts,
+        &opts,
+    )
+    .await?;
 
     // Replay version deltas from FIRST_VERSION_ID to the version before reset
     let mut modified_compaction_groups = HashSet::<CompactionGroupId>::new();
@@ -693,6 +699,7 @@ struct StorageMetrics {
 
 pub async fn create_hummock_store_with_metrics(
     meta_client: &MetaClient,
+    storage_config: StorageConfig,
     storage_opts: Arc<StorageOpts>,
     opts: &CompactionTestOpts,
 ) -> anyhow::Result<MonitoredStateStore<HummockStorage>> {
@@ -706,6 +713,7 @@ pub async fn create_hummock_store_with_metrics(
 
     let state_store_impl = StateStoreImpl::new(
         &opts.state_store,
+        storage_config,
         storage_opts,
         Arc::new(MonitoredHummockMetaClient::new(
             meta_client.clone(),

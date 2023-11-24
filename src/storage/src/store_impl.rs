@@ -18,9 +18,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
+use risingwave_common::config::StorageConfig;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
-use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
+use risingwave_object_store::object::build_remote_object_store;
 
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{RemoteTableAccessor, RpcFilterKeyExtractorManager};
@@ -525,6 +526,7 @@ impl StateStoreImpl {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
         s: &str,
+        storage_config: StorageConfig,
         opts: Arc<StorageOpts>,
         hummock_meta_client: Arc<MonitoredHummockMetaClient>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
@@ -613,15 +615,7 @@ impl StateStoreImpl {
                     hummock.strip_prefix("hummock+").unwrap(),
                     object_store_metrics.clone(),
                     "Hummock",
-                    ObjectStoreConfig {
-                        keepalive_ms: opts.object_store_keepalive_ms,
-                        recv_buffer_size: opts.object_store_recv_buffer_size,
-                        send_buffer_size: opts.object_store_send_buffer_size,
-                        nodelay: opts.object_store_nodelay,
-                        req_retry_interval_ms: Some(opts.object_store_req_retry_interval_ms),
-                        req_retry_max_delay_ms: Some(opts.object_store_req_retry_max_delay_ms),
-                        req_retry_max_attempts: Some(opts.object_store_req_retry_max_attempts),
-                    },
+                    storage_config.object_store.clone(),
                 )
                 .await;
                 object_store.set_opts(
@@ -648,6 +642,7 @@ impl StateStoreImpl {
                     RemoteTableAccessor::new(hummock_meta_client.get_inner().clone()),
                 )));
                 let inner = HummockStorage::new(
+                    Arc::new(storage_config),
                     opts.clone(),
                     sstable_store,
                     hummock_meta_client.clone(),

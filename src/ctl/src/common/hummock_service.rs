@@ -17,7 +17,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
-use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
+use risingwave_common::config::{ObjectStoreConfig, StorageConfig};
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{FileCache, HummockStorage, SstableStore};
@@ -126,6 +127,7 @@ impl HummockServiceOpts {
 
         let state_store_impl = StateStoreImpl::new(
             &self.hummock_url,
+            StorageConfig::default(),
             Arc::new(opts),
             Arc::new(MonitoredHummockMetaClient::new(
                 meta_client.clone(),

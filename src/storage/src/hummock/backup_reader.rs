@@ -25,9 +25,10 @@ use risingwave_backup::error::BackupError;
 use risingwave_backup::meta_snapshot::{MetaSnapshot, Metadata};
 use risingwave_backup::storage::{MetaSnapshotStorage, ObjectStoreMetaSnapshotStorage};
 use risingwave_backup::{meta_snapshot_v1, MetaSnapshotId};
+use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
+use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::{build_remote_object_store, ObjectStoreConfig};
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::local_version::pinned_version::{PinVersionAction, PinnedVersion};

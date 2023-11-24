@@ -18,6 +18,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::StorageConfig;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -156,6 +157,7 @@ pub async fn with_hummock_storage_v2(
     ));
 
     let hummock_storage = HummockStorage::for_test(
+        Arc::new(StorageConfig::default()),
         hummock_options,
         sstable_store,
         meta_client.clone(),
@@ -290,6 +292,7 @@ pub async fn prepare_hummock_test_env() -> HummockTestEnv {
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone());
 
     let storage = HummockStorage::for_test(
+        Arc::new(StorageConfig::default()),
         hummock_options,
         sstable_store,
         hummock_meta_client.clone(),

@@ -22,6 +22,7 @@ use futures::{pin_mut, TryStreamExt};
 use futures_async_stream::for_await;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::config::StorageConfig;
 use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::{
@@ -579,6 +580,7 @@ async fn test_reload_storage() {
     // Mock something happened to storage internal, and storage is reloaded.
     drop(hummock_storage);
     let hummock_storage = HummockStorage::for_test(
+        Arc::new(StorageConfig::default()),
         hummock_options,
         sstable_store.clone(),
         meta_client.clone(),
