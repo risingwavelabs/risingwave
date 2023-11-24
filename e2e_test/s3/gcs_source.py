@@ -118,7 +118,6 @@ if __name__ == "__main__":
             os.fsync(f.fileno())
         file_bytes = file_str.encode('utf-8')
         op.write(_gcs(idx), file_bytes)
-        
 
     # do test
     do_test(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id, fmt)
