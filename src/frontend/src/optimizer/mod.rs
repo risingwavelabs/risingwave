@@ -259,6 +259,13 @@ impl PlanRoot {
                 BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into();
         }
 
+        // Both two phase limit and topn could generate limit on top of the scan, so we push limit here.
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Push Limit To Scan",
+            vec![BatchPushLimitToScanRule::create()],
+            ApplyOrder::BottomUp,
+        ));
+
         Ok(plan)
     }
 
@@ -292,6 +299,13 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string());
         }
 
+        // Both two phase limit and topn could generate limit on top of the scan, so we push limit here.
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Push Limit To Scan",
+            vec![BatchPushLimitToScanRule::create()],
+            ApplyOrder::BottomUp,
+        ));
+
         Ok(plan)
     }
 
@@ -308,7 +322,7 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ));
 
-        if ctx.session_ctx().config().get_streaming_enable_delta_join() {
+        if ctx.session_ctx().config().streaming_enable_delta_join() {
             // TODO: make it a logical optimization.
             // Rewrite joins with index to delta join
             plan = plan.optimize_by_rules(&OptimizationStage::new(
