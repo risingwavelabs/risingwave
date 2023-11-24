@@ -25,14 +25,29 @@ pub use over_window::OverWindowCachePolicy;
 pub use query_mode::QueryMode;
 use risingwave_common_proc_macro::SessionConfig;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
+use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
-use crate::error::{ErrorCode, Result as RwResult};
 use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 pub use crate::session_config::visibility_mode::VisibilityMode;
 
 pub const SESSION_CONFIG_LIST_SEP: &str = ", ";
+
+#[derive(Error, Debug)]
+pub enum SessionConfigError {
+    #[error("Invalid value `{value}` for `{entry}`")]
+    InvalidValue {
+        entry: &'static str,
+        value: String,
+        source: anyhow::Error,
+    },
+
+    #[error("Unrecognized config entry `{0}`")]
+    UnrecognizedEntry(String),
+}
+
+type SessionConfigResult<T> = std::result::Result<T, SessionConfigError>;
 
 /// This is the Session Config of RisingWave.
 #[derive(SessionConfig)]
@@ -255,7 +270,7 @@ impl ConfigMap {
         &mut self,
         val: bool,
         reporter: &mut impl ConfigReporter,
-    ) -> RwResult<()> {
+    ) -> SessionConfigResult<()> {
         self.set_force_two_phase_agg_inner(val, reporter)?;
         if self.force_two_phase_agg {
             self.set_enable_two_phase_agg(true, reporter)
@@ -268,7 +283,7 @@ impl ConfigMap {
         &mut self,
         val: bool,
         reporter: &mut impl ConfigReporter,
-    ) -> RwResult<()> {
+    ) -> SessionConfigResult<()> {
         self.set_enable_two_phase_agg_inner(val, reporter)?;
         if !self.force_two_phase_agg {
             self.set_force_two_phase_agg(false, reporter)

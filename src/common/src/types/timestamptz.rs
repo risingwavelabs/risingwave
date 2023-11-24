@@ -25,7 +25,6 @@ use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::DataType;
 use crate::array::ArrayResult;
-use crate::error::Result;
 use crate::estimate_size::ZeroHeapSize;
 
 /// Timestamp with timezone.
@@ -38,7 +37,7 @@ pub struct Timestamptz(i64);
 impl ZeroHeapSize for Timestamptz {}
 
 impl ToBinary for Timestamptz {
-    fn to_binary_with_type(&self, _ty: &DataType) -> Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, _ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         let instant = self.to_datetime_utc();
         let mut out = BytesMut::new();
         // postgres_types::Type::ANY is only used as a placeholder.

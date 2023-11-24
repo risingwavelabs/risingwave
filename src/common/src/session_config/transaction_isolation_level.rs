@@ -27,10 +27,10 @@ pub enum IsolationLevel {
 }
 
 impl FromStr for IsolationLevel {
-    type Err = ();
+    type Err = &'static str;
 
     fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        Err(())
+        Err("isolation level is not yet supported")
     }
 }
 

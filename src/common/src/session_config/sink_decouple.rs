@@ -26,14 +26,14 @@ pub enum SinkDecouple {
 }
 
 impl FromStr for SinkDecouple {
-    type Err = ();
+    type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_ascii_lowercase().as_str() {
             "true" | "enable" => Ok(Self::Enable),
             "false" | "disable" => Ok(Self::Disable),
             "default" => Ok(Self::Default),
-            _ => Err(()),
+            _ => Err("expect one of [true, enable, false, disable, default]"),
         }
     }
 }

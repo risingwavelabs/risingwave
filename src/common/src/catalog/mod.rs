@@ -32,7 +32,7 @@ use risingwave_pb::catalog::HandleConflictBehavior as PbHandleConflictBehavior;
 pub use schema::{test_utils as schema_test_utils, Field, FieldDisplay, Schema};
 
 pub use crate::constants::hummock;
-use crate::error::Result;
+use crate::error::BoxedError;
 use crate::row::OwnedRow;
 use crate::types::DataType;
 
@@ -136,7 +136,7 @@ pub fn cdc_table_name_column_desc() -> ColumnDesc {
 /// The local system catalog reader in the frontend node.
 #[async_trait]
 pub trait SysCatalogReader: Sync + Send + 'static {
-    async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>>;
+    async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>, BoxedError>;
 }
 
 pub type SysCatalogReaderRef = Arc<dyn SysCatalogReader>;

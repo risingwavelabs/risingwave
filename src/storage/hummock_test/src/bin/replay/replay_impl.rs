@@ -17,9 +17,8 @@ use std::ops::Bound;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use futures_async_stream::{for_await, try_stream};
-use risingwave_common::error::Result as RwResult;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common_service::observer_manager::{Channel, NotificationClient};
+use risingwave_common_service::observer_manager::{Channel, NotificationClient, ObserverError};
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_trace::{
@@ -320,7 +319,10 @@ impl ReplayNotificationClient {
 impl NotificationClient for ReplayNotificationClient {
     type Channel = ReplayChannel<SubscribeResponse>;
 
-    async fn subscribe(&self, subscribe_type: SubscribeType) -> RwResult<Self::Channel> {
+    async fn subscribe(
+        &self,
+        subscribe_type: SubscribeType,
+    ) -> std::result::Result<Self::Channel, ObserverError> {
         let (tx, rx) = unbounded_channel();
 
         self.notification_manager

@@ -104,10 +104,11 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
 
         let check_hook = if let Some(check_hook_name) = check_hook_name {
             quote! {
-                #check_hook_name(&val).map_err(|_e| {
-                    ErrorCode::InvalidConfigValue {
-                        config_entry: #entry_name.to_string(),
-                        config_value: val.to_string(),
+                #check_hook_name(&val).map_err(|e| {
+                    SessionConfigError::InvalidValue {
+                        entry: #entry_name,
+                        value: val.to_string(),
+                        source: anyhow::anyhow!(e),
                     }
                 })?;
             }
@@ -131,11 +132,12 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 &mut self,
                 val: &str,
                 reporter: &mut impl ConfigReporter
-            ) -> RwResult<()> {
-                let val_t: #ty = val.parse().map_err(|_e| {
-                    ErrorCode::InvalidConfigValue {
-                        config_entry: #entry_name.to_string(),
-                        config_value: val.to_string(),
+            ) -> SessionConfigResult<()> {
+                let val_t = <#ty as ::std::str::FromStr>::from_str(val).map_err(|e| {
+                    SessionConfigError::InvalidValue {
+                        entry: #entry_name,
+                        value: val.to_string(),
+                        source: anyhow::anyhow!(e),
                     }
                 })?;
 
@@ -148,7 +150,7 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
                 &mut self,
                 val: #ty,
                 reporter: &mut impl ConfigReporter
-            ) -> RwResult<()> {
+            ) -> SessionConfigResult<()> {
                 #check_hook
                 #report_hook
 
@@ -236,18 +238,18 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
             #(#struct_impl_reset)*
 
             /// Set a parameter given it's name and value string.
-            pub fn set(&mut self, key_name: &str, value: String, reporter: &mut impl ConfigReporter) -> RwResult<()> {
+            pub fn set(&mut self, key_name: &str, value: String, reporter: &mut impl ConfigReporter) -> SessionConfigResult<()> {
                 match key_name.to_ascii_lowercase().as_ref() {
                     #(#set_match_branches)*
-                    _ => Err(ErrorCode::UnrecognizedConfigurationParameter(key_name.to_string()).into()),
+                    _ => Err(SessionConfigError::UnrecognizedEntry(key_name.to_string())),
                 }
             }
 
             /// Get a parameter by it's name.
-            pub fn get(&self, key_name: &str) -> RwResult<String> {
+            pub fn get(&self, key_name: &str) -> SessionConfigResult<String> {
                 match key_name.to_ascii_lowercase().as_ref() {
                     #(#get_match_branches)*
-                    _ => Err(ErrorCode::UnrecognizedConfigurationParameter(key_name.to_string()).into()),
+                    _ => Err(SessionConfigError::UnrecognizedEntry(key_name.to_string())),
                 }
             }
 
