@@ -503,7 +503,7 @@ dependencies = [
  "base64 0.21.4",
  "bytes",
  "futures",
- "http",
+ "http 0.2.9",
  "memchr",
  "nkeys",
  "nuid",
@@ -701,7 +701,7 @@ dependencies = [
  "aws-types",
  "bytes",
  "fastrand 2.0.0",
- "http",
+ "http 0.2.9",
  "hyper",
  "time",
  "tokio",
@@ -730,7 +730,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-types",
  "bytes",
- "http",
+ "http 0.2.9",
  "http-body",
  "pin-project-lite",
  "tracing",
@@ -752,7 +752,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-types",
  "fastrand 2.0.0",
- "http",
+ "http 0.2.9",
  "percent-encoding",
  "tracing",
  "uuid",
@@ -777,7 +777,7 @@ dependencies = [
  "aws-smithy-xml",
  "aws-types",
  "fastrand 2.0.0",
- "http",
+ "http 0.2.9",
  "regex",
  "tracing",
 ]
@@ -799,7 +799,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-types",
  "bytes",
- "http",
+ "http 0.2.9",
  "regex",
  "tracing",
 ]
@@ -825,7 +825,7 @@ dependencies = [
  "aws-smithy-xml",
  "aws-types",
  "bytes",
- "http",
+ "http 0.2.9",
  "http-body",
  "once_cell",
  "percent-encoding",
@@ -852,7 +852,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-smithy-xml",
  "aws-types",
- "http",
+ "http 0.2.9",
  "regex",
  "tracing",
 ]
@@ -873,7 +873,7 @@ dependencies = [
  "form_urlencoded",
  "hex",
  "hmac",
- "http",
+ "http 0.2.9",
  "once_cell",
  "p256 0.11.1",
  "percent-encoding",
@@ -909,7 +909,7 @@ dependencies = [
  "crc32c",
  "crc32fast",
  "hex",
- "http",
+ "http 0.2.9",
  "http-body",
  "md-5",
  "pin-project-lite",
@@ -941,7 +941,7 @@ dependencies = [
  "bytes",
  "bytes-utils",
  "futures-core",
- "http",
+ "http 0.2.9",
  "http-body",
  "once_cell",
  "percent-encoding",
@@ -981,7 +981,7 @@ dependencies = [
  "aws-smithy-types",
  "bytes",
  "fastrand 2.0.0",
- "http",
+ "http 0.2.9",
  "http-body",
  "hyper",
  "hyper-rustls",
@@ -1002,7 +1002,7 @@ dependencies = [
  "aws-smithy-async",
  "aws-smithy-types",
  "bytes",
- "http",
+ "http 0.2.9",
  "pin-project-lite",
  "tokio",
  "tracing",
@@ -1018,7 +1018,7 @@ dependencies = [
  "bytes",
  "bytes-utils",
  "futures-core",
- "http",
+ "http 0.2.9",
  "http-body",
  "hyper",
  "itoa",
@@ -1051,7 +1051,7 @@ dependencies = [
  "aws-smithy-async",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
- "http",
+ "http 0.2.9",
  "rustc_version",
  "tracing",
 ]
@@ -1067,7 +1067,7 @@ dependencies = [
  "bitflags 1.3.2",
  "bytes",
  "futures-util",
- "http",
+ "http 0.2.9",
  "http-body",
  "hyper",
  "itoa",
@@ -1097,7 +1097,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures-util",
- "http",
+ "http 0.2.9",
  "http-body",
  "mime",
  "rustversion",
@@ -2936,7 +2936,7 @@ name = "etcd-client"
 version = "0.12.1"
 source = "git+https://github.com/risingwavelabs/etcd-client.git?rev=4e84d40#4e84d40a84b35718d814cc2afccc9274c9d78e1e"
 dependencies = [
- "http",
+ "http 0.2.9",
  "prost 0.12.1",
  "tokio",
  "tokio-stream",
@@ -3645,7 +3645,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8bdaaa4bc036e8318274d1b25f0f2265b3e95418b765fd1ea1c7ef938fd69bd"
 dependencies = [
  "google-cloud-token",
- "http",
+ "http 0.2.9",
  "thiserror",
  "tokio",
  "tokio-retry",
@@ -3754,7 +3754,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "futures-util",
- "http",
+ "http 0.2.9",
  "indexmap 1.9.3",
  "slab",
  "tokio",
@@ -3920,13 +3920,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "http"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b32afd38673a8016f7c9ae69e5af41a58f81b1d31689040f2f1959594ce194ea"
+dependencies = [
+ "bytes",
+ "fnv",
+ "itoa",
+]
+
+[[package]]
 name = "http-body"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5f38f16d184e36f2408a55281cd658ecbd3ca05cce6d6510a176eca393e26d1"
 dependencies = [
  "bytes",
- "http",
+ "http 0.2.9",
  "pin-project-lite",
 ]
 
@@ -3965,7 +3976,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http",
+ "http 0.2.9",
  "http-body",
  "httparse",
  "httpdate",
@@ -3985,7 +3996,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec3efd23720e2049821a693cbc7e65ea87c72f1c58ff2f9522ff332b1491e590"
 dependencies = [
  "futures-util",
- "http",
+ "http 0.2.9",
  "hyper",
  "log",
  "rustls",
@@ -4762,8 +4773,9 @@ dependencies = [
 
 [[package]]
 name = "madsim-aws-sdk-s3"
-version = "0.3.0+0.35"
-source = "git+https://github.com/mrcroxx/madsim?rev=367b7cd#367b7cd72aeed6a17bb8d448919d48531310b37d"
+version = "0.4.0+0.39"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69506b80c4e2285edd997235a244ec76674b8f40ec0317cfb93c50332c54ed30"
 dependencies = [
  "aws-sdk-s3",
  "aws-smithy-http",
@@ -4771,7 +4783,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-types",
  "bytes",
- "http",
+ "http 1.0.0",
  "madsim",
  "spin 0.9.8",
  "tracing",
@@ -4785,7 +4797,7 @@ checksum = "02b4b5de48bb7f3f7eae0bca62b3ed0b7d714b1b273d7347329b92c3a2eef113"
 dependencies = [
  "etcd-client",
  "futures-util",
- "http",
+ "http 0.2.9",
  "madsim",
  "serde",
  "serde_with",
@@ -5468,7 +5480,7 @@ dependencies = [
  "base64 0.13.1",
  "chrono",
  "getrandom",
- "http",
+ "http 0.2.9",
  "rand",
  "reqwest",
  "serde",
@@ -5515,7 +5527,7 @@ dependencies = [
  "chrono",
  "flagset",
  "futures",
- "http",
+ "http 0.2.9",
  "hyper",
  "log",
  "md-5",
@@ -5545,7 +5557,7 @@ dependencies = [
  "dyn-clone",
  "ed25519-dalek",
  "hmac",
- "http",
+ "http 0.2.9",
  "itertools 0.10.5",
  "log",
  "oauth2",
@@ -5638,7 +5650,7 @@ checksum = "7e5e5a5c4135864099f3faafbe939eb4d7f9b80ebf68a8448da961b32a7c1275"
 dependencies = [
  "async-trait",
  "futures-core",
- "http",
+ "http 0.2.9",
  "opentelemetry-proto",
  "opentelemetry-semantic-conventions",
  "opentelemetry_api",
@@ -7083,7 +7095,7 @@ dependencies = [
  "hex",
  "hmac",
  "home",
- "http",
+ "http 0.2.9",
  "jsonwebtoken",
  "log",
  "once_cell",
@@ -7112,7 +7124,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http",
+ "http 0.2.9",
  "http-body",
  "hyper",
  "hyper-rustls",
@@ -7434,7 +7446,7 @@ dependencies = [
  "fs-err",
  "futures",
  "hex",
- "http",
+ "http 0.2.9",
  "http-body",
  "humantime",
  "hyper",
@@ -7668,7 +7680,7 @@ dependencies = [
  "gcp-bigquery-client",
  "glob",
  "google-cloud-pubsub",
- "http",
+ "http 0.2.9",
  "hyper",
  "hyper-tls",
  "icelake",
@@ -10584,7 +10596,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http",
+ "http 0.2.9",
  "http-body",
  "hyper",
  "hyper-timeout",
@@ -10614,7 +10626,7 @@ dependencies = [
  "base64 0.21.4",
  "bytes",
  "h2",
- "http",
+ "http 0.2.9",
  "http-body",
  "hyper",
  "hyper-timeout",
@@ -10672,7 +10684,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
- "http",
+ "http 0.2.9",
  "http-body",
  "http-range-header",
  "httpdate",
@@ -11637,7 +11649,7 @@ dependencies = [
  "async-trait",
  "base64 0.13.1",
  "futures",
- "http",
+ "http 0.2.9",
  "hyper",
  "hyper-rustls",
  "itertools 0.10.5",
