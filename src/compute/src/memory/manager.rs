@@ -39,7 +39,8 @@ impl MemoryManager {
     const MIN_TICK_INTERVAL_MS: u32 = 10;
 
     pub fn new(metrics: Arc<StreamingMetrics>, total_memory_bytes: usize) -> Arc<Self> {
-        let memory_control_policy = Mutex::new(MemoryController::new(total_memory_bytes));
+        let memory_control_policy =
+            Mutex::new(MemoryController::new(total_memory_bytes, metrics.clone()));
         tracing::info!("memory control policy: {:?}", &memory_control_policy);
 
         Arc::new(Self {
@@ -82,31 +83,10 @@ impl MemoryManager {
                 }
 
                 _ = tick_interval.tick() => {
-                    let new_watermark = self.memory_control_policy.lock().unwrap().tick(interval_ms);
-                    self.watermark_epoch.store(new_watermark, Ordering::Relaxed);
+                    let new_watermark_epoch = self.memory_control_policy.lock().unwrap().tick(interval_ms);
+                    self.watermark_epoch.store(new_watermark_epoch.0, Ordering::Relaxed);
 
-                    // self.metrics
-                    //     .lru_current_watermark_time_ms
-                    //     .set(memory_control_stats.lru_watermark_time_ms as i64);
-                    // self.metrics
-                    //     .lru_physical_now_ms
-                    //     .set(memory_control_stats.lru_physical_now_ms as i64);
-                    // self.metrics
-                    //     .lru_watermark_step
-                    //     .set(memory_control_stats.lru_watermark_step as i64);
                     self.metrics.lru_runtime_loop_count.inc();
-                    // self.metrics
-                    //     .jemalloc_allocated_bytes
-                    //     .set(memory_control_stats.jemalloc_allocated_bytes as i64);
-                    // self.metrics
-                    //     .jemalloc_active_bytes
-                    //     .set(memory_control_stats.jemalloc_active_bytes as i64);
-                    // self.metrics
-                    //     .jvm_allocated_bytes
-                    //     .set(memory_control_stats.jvm_allocated_bytes as i64);
-                    // self.metrics
-                    //     .jvm_active_bytes
-                    //     .set(memory_control_stats.jvm_active_bytes as i64);
                 }
             }
         }

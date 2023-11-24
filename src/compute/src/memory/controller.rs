@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use risingwave_common::util::epoch::Epoch;
 use risingwave_jni_core::jvm_runtime::load_jvm_memory_stats;
+use risingwave_stream::executor::monitor::StreamingMetrics;
 use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 
 /// Internal state of [`MemoryController`] that saves the state in previous tick.
@@ -43,6 +44,8 @@ impl Default for State {
 /// jvm memory statistics and to control. It assumes that most memory is used by streaming engine
 /// and does memory control over LRU watermark based on jemalloc statistics and jvm memory statistics.
 pub struct MemoryController {
+    metrics: Arc<StreamingMetrics>,
+
     /// TODO(eric): make them configurable
     threshold_stable: usize,
     threshold_graceful: usize,
@@ -57,12 +60,13 @@ impl MemoryController {
     const THRESHOLD_GRACEFUL: f64 = 0.8;
     const THRESHOLD_STABLE: f64 = 0.7;
 
-    pub fn new(total_memory: usize) -> Self {
+    pub fn new(total_memory: usize, metrics: Arc<StreamingMetrics>) -> Self {
         let threshold_stable = (total_memory as f64 * Self::THRESHOLD_STABLE) as usize;
         let threshold_graceful = (total_memory as f64 * Self::THRESHOLD_GRACEFUL) as usize;
         let threshold_aggressive = (total_memory as f64 * Self::THRESHOLD_AGGRESSIVE) as usize;
 
         Self {
+            metrics,
             threshold_stable,
             threshold_graceful,
             threshold_aggressive,
@@ -81,17 +85,27 @@ impl std::fmt::Debug for MemoryController {
     }
 }
 
-fn jemalloc_active_memory() -> usize {
+/// Get memory statistics from Jemalloc
+///
+/// - `stats.allocated`: Total number of bytes allocated by the application.`
+/// - `stats.active`: Total number of bytes in active pages allocated by the application. This is a multiple of the page size, and greater than or equal to `stats.allocated`. This does not include `stats.arenas.<i>.pdirty`, `stats.arenas.<i>.pmuzzy`, nor pages entirely devoted to allocator metadata.
+///
+/// Reference: <https://jemalloc.net/jemalloc.3.html>
+fn jemalloc_memory_stats() -> (usize, usize) {
     if let Err(e) = tikv_jemalloc_ctl::epoch::advance() {
         tracing::warn!("Jemalloc epoch advance failed! {:?}", e);
     }
-    tikv_jemalloc_ctl::stats::active::read().unwrap()
+    let allocated = tikv_jemalloc_ctl::stats::allocated::read().unwrap();
+    let active = tikv_jemalloc_ctl::stats::active::read().unwrap();
+    (allocated, active)
 }
 
 impl MemoryController {
-    pub fn tick(&mut self, interval_ms: u32) -> u64 {
-        let jemalloc_active_bytes = jemalloc_active_memory();
-        let (jvm_allocated_bytes, _) = load_jvm_memory_stats();
+    pub fn tick(&mut self, interval_ms: u32) -> Epoch {
+        // NOTE: Be careful! The meaning of `allocated` and `active` differ in JeMalloc and JVM
+        let (jemalloc_allocated_bytes, jemalloc_active_bytes) = jemalloc_memory_stats();
+        let (jvm_allocated_bytes, jvm_active_bytes) = load_jvm_memory_stats();
+
         let cur_used_memory_bytes = jemalloc_active_bytes + jvm_allocated_bytes;
 
         let last_step = self.state.lru_watermark_step;
@@ -155,6 +169,22 @@ impl MemoryController {
             lru_physical_now_ms: physical_now,
         };
 
-        return Epoch::from_physical_time(watermark_time_ms).0;
+        self.metrics
+            .lru_current_watermark_time_ms
+            .set(watermark_time_ms as i64);
+        self.metrics.lru_physical_now_ms.set(physical_now as i64);
+        self.metrics.lru_watermark_step.set(step as i64);
+        self.metrics
+            .jemalloc_allocated_bytes
+            .set(jemalloc_allocated_bytes as i64);
+        self.metrics
+            .jemalloc_active_bytes
+            .set(jemalloc_active_bytes as i64);
+        self.metrics
+            .jvm_allocated_bytes
+            .set(jvm_allocated_bytes as i64);
+        self.metrics.jvm_active_bytes.set(jvm_active_bytes as i64);
+
+        return Epoch::from_physical_time(watermark_time_ms);
     }
 }
