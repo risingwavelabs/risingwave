@@ -58,3 +58,25 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: Expr error
   2: Division by zero
+
+
+statement error
+set rw_implicit_flush to maybe;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to get/set session config
+  2: Invalid value `maybe` for `rw_implicit_flush`
+  3: provided string was not `true` or `false`
+
+
+statement error
+set transaction_isolation_level to read_committed;
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: Failed to get/set session config
+  2: Invalid value `read_committed` for `transaction_isolation_level`
+  3: Feature is not yet implemented: isolation level. Tracking issue: https://github.com/risingwavelabs/risingwave/issues/10736
