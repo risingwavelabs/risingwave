@@ -30,6 +30,11 @@ message RowSeqScanNode {
   }
   // If along with `batch_limit`, `chunk_size` will be set.
   ChunkSize chunk_size = 6;
+  message Limit {
+    uint64 limit = 1;
+  }
+  // The pushed down `batch_limit`. Max rows needed to return.
+  Limit limit = 7;
 }
 
 message SysRowSeqScanNode {

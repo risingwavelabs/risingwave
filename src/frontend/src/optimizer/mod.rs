@@ -259,6 +259,12 @@ impl PlanRoot {
                 BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into();
         }
 
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Push Limit To Scan",
+            vec![BatchPushLimitToScanRule::create()],
+            ApplyOrder::BottomUp,
+        ));
+
         Ok(plan)
     }
 
@@ -291,6 +297,12 @@ impl PlanRoot {
             ctx.trace("To Batch Local Plan:");
             ctx.trace(plan.explain_to_string());
         }
+
+        let plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Push Limit To Scan",
+            vec![BatchPushLimitToScanRule::create()],
+            ApplyOrder::BottomUp,
+        ));
 
         Ok(plan)
     }
