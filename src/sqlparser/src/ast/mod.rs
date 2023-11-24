@@ -2675,6 +2675,7 @@ impl fmt::Display for SetVariableValue {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SetVariableValueSingle {
     Ident(Ident),
     Literal(Value),
