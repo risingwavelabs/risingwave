@@ -139,8 +139,8 @@ pub struct SstableStore {
     meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
 
     recent_filter: Option<Arc<RecentFilter<HummockSstableObjectId>>>,
-    pending_streaming_loading: Arc<AtomicUsize>,
-    large_query_memory_usage: usize,
+    prefetch_buffer_usage: Arc<AtomicUsize>,
+    prefetch_buffer_capacity: usize,
 }
 
 impl SstableStore {
@@ -150,7 +150,7 @@ impl SstableStore {
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
         high_priority_ratio: usize,
-        large_query_memory_usage: usize,
+        prefetch_buffer_capacity: usize,
         data_file_cache: FileCache<SstableBlockIndex, CachedBlock>,
         meta_file_cache: FileCache<HummockSstableObjectId, Box<Sstable>>,
         recent_filter: Option<Arc<RecentFilter<HummockSstableObjectId>>>,
@@ -185,8 +185,8 @@ impl SstableStore {
             meta_file_cache,
 
             recent_filter,
-            pending_streaming_loading: Arc::new(AtomicUsize::new(0)),
-            large_query_memory_usage,
+            prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
+            prefetch_buffer_capacity,
         }
     }
 
@@ -206,8 +206,8 @@ impl SstableStore {
             meta_cache,
             data_file_cache: FileCache::none(),
             meta_file_cache: FileCache::none(),
-            pending_streaming_loading: Arc::new(AtomicUsize::new(0)),
-            large_query_memory_usage: block_cache_capacity,
+            prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
+            prefetch_buffer_capacity: block_cache_capacity,
             recent_filter: None,
         }
     }
@@ -286,13 +286,13 @@ impl SstableStore {
             }
             end_offset += sst.meta.block_metas[idx].len as usize;
         }
-        let pending_data = self.pending_streaming_loading.load(Ordering::SeqCst);
-        if end_offset == start_offset || pending_data > self.large_query_memory_usage {
+        let pending_data = self.prefetch_buffer_usage.load(Ordering::SeqCst);
+        if end_offset == start_offset || pending_data > self.prefetch_buffer_capacity {
             return Ok(None);
         }
         let data_path = self.get_sst_data_path(object_id);
         let memory_usage = std::cmp::min(end_offset - start_offset, self.store.recv_buffer_size());
-        self.pending_streaming_loading
+        self.prefetch_buffer_usage
             .fetch_add(memory_usage, Ordering::SeqCst);
         let reader = self
             .store
@@ -306,12 +306,12 @@ impl SstableStore {
             start_index,
             memory_usage,
             block_metas,
-            self.pending_streaming_loading.clone(),
+            self.prefetch_buffer_usage.clone(),
         )))
     }
 
     pub fn support_prefetch(&self) -> bool {
-        self.large_query_memory_usage > 0
+        self.prefetch_buffer_capacity > 0
     }
 
     pub async fn get_with_prefetch(
@@ -319,7 +319,6 @@ impl SstableStore {
         sst: &Sstable,
         block_index: usize,
         max_prefetch_block_count: usize,
-        policy: CachePolicy,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
         const MAX_PREFETCH_BLOCK: usize = 16;
@@ -343,7 +342,12 @@ impl SstableStore {
         }
         if end_index == block_index {
             let resp = self
-                .get_block_response(sst, block_index, policy, stats)
+                .get_block_response(
+                    sst,
+                    block_index,
+                    CachePolicy::Fill(CachePriority::Low),
+                    stats,
+                )
                 .await?;
             return resp.wait().await;
         }
@@ -1158,7 +1162,7 @@ pub struct BatchBlockStream {
     start_block_index: usize,
     memory_usage: usize,
     /// To avoid high frequently query cost too much memory.
-    pending_streaming_loading: Arc<AtomicUsize>,
+    prefetch_buffer_usage: Arc<AtomicUsize>,
 }
 
 impl BatchBlockStream {
@@ -1169,7 +1173,7 @@ impl BatchBlockStream {
         start_block_index: usize,
         memory_usage: usize,
         block_metas: Vec<BlockMeta>,
-        pending_streaming_loading: Arc<AtomicUsize>,
+        prefetch_buffer_usage: Arc<AtomicUsize>,
     ) -> Self {
         Self {
             reader: BlockStreamReader::new(byte_stream),
@@ -1182,7 +1186,7 @@ impl BatchBlockStream {
             cache,
             blocks: VecDeque::default(),
             start_block_index,
-            pending_streaming_loading,
+            prefetch_buffer_usage,
         }
     }
 
@@ -1252,7 +1256,7 @@ impl BatchBlockStream {
 
 impl Drop for BatchBlockStream {
     fn drop(&mut self) {
-        self.pending_streaming_loading
+        self.prefetch_buffer_usage
             .fetch_sub(self.memory_usage, Ordering::SeqCst);
     }
 }

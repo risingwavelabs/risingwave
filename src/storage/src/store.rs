@@ -267,12 +267,10 @@ pub trait LocalStateStore: StaticSendSync {
     ) -> impl Future<Output = StorageResult<bool>> + Send + '_;
 }
 
-/// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory
+/// If `prefetch` is true, prefetch will be enabled. Prefetching may increase the memory
 /// footprint of the CN process because the prefetched blocks cannot be evicted.
 #[derive(Default, Clone, Copy)]
 pub struct PrefetchOptions {
-    /// `exhaust_iter` is set `true` only if the return value of `iter()` will definitely be
-    /// exhausted, i.e., will iterate until end.
     pub prefetch: bool,
     pub for_large_query: bool,
 }
@@ -292,9 +290,9 @@ impl PrefetchOptions {
         }
     }
 
-    pub fn new_with_exhaust_iter(exhaust_iter: bool) -> Self {
+    pub fn new(prefetch: bool) -> Self {
         Self {
-            prefetch: exhaust_iter,
+            prefetch,
             for_large_query: false,
         }
     }
@@ -303,7 +301,7 @@ impl PrefetchOptions {
 impl From<TracedPrefetchOptions> for PrefetchOptions {
     fn from(value: TracedPrefetchOptions) -> Self {
         Self {
-            prefetch: value.exhaust_iter,
+            prefetch: value.prefetch,
             for_large_query: value.for_large_query,
         }
     }
@@ -312,7 +310,7 @@ impl From<TracedPrefetchOptions> for PrefetchOptions {
 impl From<PrefetchOptions> for TracedPrefetchOptions {
     fn from(value: PrefetchOptions) -> Self {
         Self {
-            exhaust_iter: value.prefetch,
+            prefetch: value.prefetch,
             for_large_query: value.for_large_query,
         }
     }

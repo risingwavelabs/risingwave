@@ -197,7 +197,6 @@ impl SstableIterator {
                             self.sst.value(),
                             idx,
                             self.preload_end_block_idx - idx,
-                            self.options.cache_policy,
                             &mut self.stats,
                         )
                         .await?

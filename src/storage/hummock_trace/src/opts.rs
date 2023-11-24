@@ -22,7 +22,7 @@ use crate::TracedBytes;
 
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub struct TracedPrefetchOptions {
-    pub exhaust_iter: bool,
+    pub prefetch: bool,
     pub for_large_query: bool,
 }
 
@@ -97,7 +97,7 @@ impl TracedReadOptions {
             prefix_hint: Some(TracedBytes::from(vec![0])),
             ignore_range_tombstone: true,
             prefetch_options: TracedPrefetchOptions {
-                exhaust_iter: true,
+                prefetch: true,
                 for_large_query: true,
             },
             cache_policy: TracedCachePolicy::Disable,

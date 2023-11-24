@@ -144,8 +144,8 @@ pub fn storage_memory_config(
             default_meta_cache_capacity >> 20,
             STORAGE_META_CACHE_MAX_MEMORY_MB,
         ));
-    let large_query_memory_usage_mb = storage_config
-        .large_query_memory_usage_mb
+    let prefetch_buffer_capacity_mb = storage_config
+        .prefetch_buffer_capacity_mb
         .unwrap_or(meta_cache_capacity_mb + block_cache_capacity_mb);
     if meta_cache_capacity_mb == STORAGE_META_CACHE_MAX_MEMORY_MB {
         block_cache_capacity_mb += (default_meta_cache_capacity >> 20) - meta_cache_capacity_mb;
@@ -199,7 +199,7 @@ pub fn storage_memory_config(
         data_file_cache_ring_buffer_capacity_mb,
         meta_file_cache_ring_buffer_capacity_mb,
         compactor_memory_limit_mb,
-        large_query_memory_usage_mb,
+        prefetch_buffer_capacity_mb,
         high_priority_ratio_in_percent,
     }
 }
