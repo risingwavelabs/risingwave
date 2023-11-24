@@ -1101,11 +1101,7 @@ impl ToBatch for LogicalAgg {
         };
         let agg_plan = if self.group_key().is_empty() {
             BatchSimpleAgg::new(new_logical).into()
-        } else if self
-            .ctx()
-            .session_ctx()
-            .config()
-            .get_batch_enable_sort_agg()
+        } else if self.ctx().session_ctx().config().batch_enable_sort_agg()
             && new_logical.input_provides_order_on_group_keys()
         {
             BatchSortAgg::new(new_logical).into()

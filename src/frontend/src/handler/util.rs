@@ -17,6 +17,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
+use anyhow::Context as _;
 use bytes::Bytes;
 use futures::Stream;
 use itertools::Itertools;
@@ -73,7 +74,7 @@ where
         session: Arc<SessionImpl>,
     ) -> Self {
         let session_data = StaticSessionData {
-            timezone: session.config().get_timezone().into(),
+            timezone: session.config().timezone(),
         };
         Self {
             chunk_stream,
@@ -125,7 +126,9 @@ fn pg_value_format(
                 Ok(d.text_format(data_type).into())
             }
         }
-        Format::Binary => d.binary_format(data_type),
+        Format::Binary => Ok(d
+            .binary_format(data_type)
+            .context("failed to format binary value")?),
     }
 }
 

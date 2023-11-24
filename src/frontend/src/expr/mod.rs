@@ -312,7 +312,7 @@ impl ExprImpl {
     ///
     /// TODO: This is a naive implementation. We should avoid proto ser/de.
     /// Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/3479>
-    async fn eval_row(&self, input: &OwnedRow) -> RwResult<Datum> {
+    pub async fn eval_row(&self, input: &OwnedRow) -> RwResult<Datum> {
         let backend_expr = build_from_prost(&self.to_expr_proto())?;
         Ok(backend_expr.eval_row(input).await?)
     }

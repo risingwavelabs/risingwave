@@ -14,8 +14,9 @@
 
 use bytes::Bytes;
 use pgwire::types::{Format, FormatIterator};
-use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::{Datum, ScalarImpl};
+use risingwave_common::bail;
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::{Datum, FromSqlError, ScalarImpl};
 
 use super::statement::RewriteExprsRecursive;
 use super::BoundStatement;
@@ -26,7 +27,7 @@ pub(crate) struct ParamRewriter {
     pub(crate) params: Vec<Option<Bytes>>,
     pub(crate) parsed_params: Vec<Datum>,
     pub(crate) param_formats: Vec<Format>,
-    pub(crate) error: Option<RwError>,
+    pub(crate) error: Option<FromSqlError>,
 }
 
 impl ParamRewriter {
@@ -107,7 +108,7 @@ impl BoundStatement {
         self.rewrite_exprs_recursive(&mut rewriter);
 
         if let Some(err) = rewriter.error {
-            return Err(err);
+            bail!(err);
         }
 
         Ok((self, rewriter.parsed_params))

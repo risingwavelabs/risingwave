@@ -309,7 +309,7 @@ impl PlanRoot {
             ApplyOrder::BottomUp,
         ));
 
-        if ctx.session_ctx().config().get_streaming_enable_delta_join() {
+        if ctx.session_ctx().config().streaming_enable_delta_join() {
             // TODO: make it a logical optimization.
             // Rewrite joins with index to delta join
             plan = plan.optimize_by_rules(&OptimizationStage::new(
