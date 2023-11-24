@@ -628,7 +628,7 @@ impl HummockEventHandler {
                 )) {
                     Ok(_) => {}
                     Err(_) => {
-                        panic!(
+                        error!(
                             "RegisterReadVersion send fail table_id {:?} instance_is {:?}",
                             table_id, instance_id
                         )
