@@ -4,10 +4,10 @@ import csv
 import json
 import random
 import psycopg2
+import opendal
 
 from time import sleep
 from io import StringIO
-from minio import Minio
 from functools import partial
 
 def gen_data(file_num, item_num_per_file):
@@ -105,32 +105,24 @@ if __name__ == "__main__":
     formatted_files = FORMATTER[fmt](data)
 
     config = json.loads(os.environ["GCS_SOURCE_TEST_CONF"])
-    client = Minio(
-        config["GCS_ENDPOINT"],
-        access_key=config["GCS_ACCESS_KEY"],
-        secret_key=config["GCS_SECRET_KEY"],
-        secure=True,
-    )
     run_id = str(random.randint(1000, 9999))
     _local = lambda idx: f'data_{idx}.{fmt}'
     _gcs = lambda idx: f"{run_id}_data_{idx}.{fmt}"
 
-    # todo(wcy-fdu): write into gcs
     # put gcs files
+    op = opendal.Operator("gcs", root="/ci/temp/", bucket=config["GCS_BUCKET"], credential=config["GOOGLE_APPLICATION_CREDENTIALS"])
+
     for idx, file_str in enumerate(formatted_files):
         with open(_local(idx), "w") as f:
             f.write(file_str)
             os.fsync(f.fileno())
-
-        client.fput_object(
-            config["GCS_BUCKET"],
-            _gcs(idx),
-            _local(idx)
-        )
+        file_bytes = file_str.encode('utf-8')
+        op.write(_gcs(idx), file_bytes)
+        
 
     # do test
     do_test(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id, fmt)
 
     # clean up gcs files
     for idx, _ in enumerate(formatted_files):
-        client.remove_object(config["gcs_BUCKET"], _gcs(idx))
+        op.delete(_gcs(idx))
