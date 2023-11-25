@@ -154,6 +154,7 @@ impl Binder {
         obj: Expr,
         start: Option<Box<Expr>>,
         end: Option<Box<Expr>>,
+        step: Option<Box<Expr>>,
     ) -> Result<ExprImpl> {
         let obj = self.bind_expr_inner(obj)?;
         let start = match start {
@@ -170,10 +171,16 @@ impl Binder {
                 .bind_expr_inner(*expr)?
                 .cast_implicit(DataType::Int32)?,
         };
+        let step = match step {
+            None => ExprImpl::literal_int(1),
+            Some(expr) => self
+                .bind_expr_inner(*expr)?
+                .cast_implicit(DataType::Int32)?,
+        };
         match obj.return_type() {
             DataType::List(return_type) => Ok(FunctionCall::new_unchecked(
                 ExprType::ArrayRangeAccess,
-                vec![obj, start, end],
+                vec![obj, start, end, step],
                 DataType::List(return_type),
             )
             .into()),

@@ -18,18 +18,38 @@ use risingwave_expr::function;
 
 /// If the case is `array[1,2,3][:2]`, then start will be 0 set by the frontend
 /// If the case is `array[1,2,3][1:]`, then end will be `i32::MAX` set by the frontend
-#[function("array_range_access(anyarray, int4, int4) -> anyarray")]
-pub fn array_range_access(list: ListRef<'_>, start: i32, end: i32) -> Option<ListValue> {
+#[function("array_range_access(anyarray, int4, int4, int4) -> anyarray")]
+pub fn array_range_access(list: ListRef<'_>, start: i32, end: i32, step: i32) -> Option<ListValue> {
     let mut data = vec![];
     let list_all_values = list.iter();
-    let start = std::cmp::max(start, 1) as usize;
-    let end = std::cmp::min(std::cmp::max(0, end), list_all_values.len() as i32) as usize;
-    if start > end {
+
+    let mut new_start = std::cmp::max(start, 1) as usize;
+    let mut new_end = std::cmp::min(std::cmp::max(0, end), list_all_values.len() as i32) as usize;
+
+    let (step, need_rev) = if step < 0 {
+        if start != 0 && end != i32::MAX {
+            (new_start, new_end) = (new_end, new_start);
+        }
+        (-step, true)
+    } else {
+        (step, false)
+    };
+
+    if new_start > new_end {
         return Some(ListValue::new(data));
     }
 
-    for datumref in list_all_values.take(end).skip(start - 1) {
+    for datumref in list_all_values
+        .take(new_end)
+        .skip(new_start - 1)
+        .step_by(step as _)
+    {
         data.push(datumref.to_owned_datum());
     }
-    Some(ListValue::new(data))
+
+    Some(ListValue::new(if need_rev {
+        data.into_iter().rev().collect()
+    } else {
+        data
+    }))
 }
