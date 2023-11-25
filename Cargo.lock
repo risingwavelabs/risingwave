@@ -7222,6 +7222,7 @@ dependencies = [
  "redis",
  "regex",
  "reqwest",
+ "risingwave_common",
  "serde",
  "serde_json",
  "serde_with",
