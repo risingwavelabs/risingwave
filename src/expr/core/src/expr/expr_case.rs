@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk};
@@ -105,6 +106,10 @@ impl Expression for CaseExpression {
         } else {
             Ok(None)
         }
+    }
+
+    fn name(&self) -> Cow<'static, str> {
+        "case".into()
     }
 }
 

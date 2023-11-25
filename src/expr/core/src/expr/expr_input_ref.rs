@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::ops::Index;
 
 use risingwave_common::array::{ArrayRef, DataChunk};
@@ -43,6 +44,10 @@ impl Expression for InputRefExpression {
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let cell = input.index(self.idx).as_ref().cloned();
         Ok(cell)
+    }
+
+    fn name(&self) -> Cow<'static, str> {
+        "input_ref".into()
     }
 }
 

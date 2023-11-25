@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -199,6 +200,15 @@ impl Expression for SomeAllExpression {
         } else {
             Ok(None)
         }
+    }
+
+    fn name(&self) -> Cow<'static, str> {
+        match self.expr_type {
+            Type::Some => "some",
+            Type::All => "all",
+            _ => unreachable!(),
+        }
+        .into()
     }
 }
 

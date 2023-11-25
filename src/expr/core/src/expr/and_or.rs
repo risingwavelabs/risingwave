@@ -14,6 +14,7 @@
 
 //! For expression that only accept two nullable arguments as input.
 
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use risingwave_common::array::*;
@@ -93,6 +94,15 @@ impl Expression for BinaryShortCircuitExpression {
             Type::And => Ok(and(ret_ia1, ret_ia2).map(|x| x.to_scalar_value())),
             _ => unimplemented!(),
         }
+    }
+
+    fn name(&self) -> Cow<'static, str> {
+        match self.expr_type {
+            Type::Or => "or",
+            Type::And => "and",
+            _ => unimplemented!(),
+        }
+        .into()
     }
 }
 

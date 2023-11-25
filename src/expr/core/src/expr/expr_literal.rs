@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+
 use risingwave_common::array::DataChunk;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{literal_type_match, DataType, Datum};
@@ -48,6 +50,10 @@ impl Expression for LiteralExpression {
 
     fn eval_const(&self) -> Result<Datum> {
         Ok(self.literal.clone())
+    }
+
+    fn name(&self) -> Cow<'static, str> {
+        "literal".into()
     }
 }
 

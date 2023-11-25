@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+
 use anyhow::anyhow;
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
@@ -56,6 +58,10 @@ impl Expression for FieldExpression {
             })
             .transpose()
             .map(|x| x.flatten())
+    }
+
+    fn name(&self) -> Cow<'static, str> {
+        "field".into()
     }
 }
 
