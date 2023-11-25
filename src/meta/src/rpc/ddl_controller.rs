@@ -18,6 +18,7 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VirtualNode;
@@ -494,12 +495,19 @@ impl DdlController {
 
         match create_type {
             CreateType::Foreground | CreateType::Unspecified => {
-                self.create_streaming_job_inner(stream_job, table_fragments, ctx, internal_tables)
-                    .await
+                self.create_streaming_job_inner(
+                    stream_job,
+                    table_fragments,
+                    ctx,
+                    internal_tables,
+                    None,
+                )
+                .await
             }
             CreateType::Background => {
                 let ctrl = self.clone();
                 let stream_job_id = stream_job.id();
+                let (sender, receiver) = tokio::sync::oneshot::channel();
                 let fut = async move {
                     let result = ctrl
                         .create_streaming_job_inner(
@@ -507,6 +515,7 @@ impl DdlController {
                             table_fragments,
                             ctx,
                             internal_tables,
+                            Some(sender),
                         )
                         .await;
                     match result {
@@ -519,6 +528,9 @@ impl DdlController {
                     }
                 };
                 tokio::spawn(fut);
+                receiver
+                    .await
+                    .map_err(|e| anyhow!("failed to receive {:?}", e))??;
                 Ok(IGNORED_NOTIFICATION_VERSION)
             }
         }
@@ -531,12 +543,13 @@ impl DdlController {
         table_fragments: TableFragments,
         ctx: CreateStreamingJobContext,
         internal_tables: Vec<Table>,
+        sender: Option<tokio::sync::oneshot::Sender<MetaResult<()>>>,
     ) -> MetaResult<NotificationVersion> {
         let job_id = stream_job.id();
         tracing::debug!(id = job_id, "creating stream job");
         let result = self
             .stream_manager
-            .create_streaming_job(table_fragments, ctx)
+            .create_streaming_job(table_fragments, ctx, sender)
             .await;
         if let Err(e) = result {
             match stream_job.create_type() {

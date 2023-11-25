@@ -239,6 +239,7 @@ impl GlobalStreamManager {
         self: &Arc<Self>,
         table_fragments: TableFragments,
         ctx: CreateStreamingJobContext,
+        collect_barrier_sender: Option<tokio::sync::oneshot::Sender<MetaResult<()>>>,
     ) -> MetaResult<()> {
         let table_id = table_fragments.table_id();
         let (sender, mut receiver) = tokio::sync::mpsc::channel(10);
@@ -249,7 +250,12 @@ impl GlobalStreamManager {
         let fut = async move {
             let mut revert_funcs = vec![];
             let res = stream_manager
-                .create_streaming_job_impl(&mut revert_funcs, table_fragments, ctx)
+                .create_streaming_job_impl(
+                    &mut revert_funcs,
+                    table_fragments,
+                    collect_barrier_sender,
+                    ctx,
+                )
                 .await;
             match res {
                 Ok(_) => {
@@ -430,6 +436,7 @@ impl GlobalStreamManager {
         &self,
         revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
         table_fragments: TableFragments,
+        sender: Option<tokio::sync::oneshot::Sender<MetaResult<()>>>,
         CreateStreamingJobContext {
             dispatchers,
             upstream_mview_actors,
@@ -477,13 +484,16 @@ impl GlobalStreamManager {
 
         if let Err(err) = self
             .barrier_scheduler
-            .run_command(Command::CreateStreamingJob {
-                table_fragments,
-                upstream_mview_actors,
-                dispatchers,
-                init_split_assignment,
-                definition: definition.to_string(),
-            })
+            .run_command_with_notify_on_collect(
+                Command::CreateStreamingJob {
+                    table_fragments,
+                    upstream_mview_actors,
+                    dispatchers,
+                    init_split_assignment,
+                    definition: definition.to_string(),
+                },
+                sender,
+            )
             .await
         {
             if create_type == CreateType::Foreground {
@@ -976,7 +986,7 @@ mod tests {
                 .start_create_table_procedure(&table, vec![])
                 .await?;
             self.global_stream_manager
-                .create_streaming_job(table_fragments, ctx)
+                .create_streaming_job(table_fragments, ctx, None)
                 .await?;
             self.catalog_manager
                 .finish_create_table_procedure(vec![], table)
