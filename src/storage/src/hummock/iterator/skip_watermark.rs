@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
+use bytes::Bytes;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
 
@@ -26,94 +28,127 @@ use crate::monitor::StoreLocalStatistic;
 
 pub struct SkipWatermarkIterator<I> {
     inner: I,
-    watermarks: Vec<(TableId, ReadTableWatermark)>,
-    remain_watermarks: VecDeque<(TableId, ReadTableWatermark)>,
+    watermarks: BTreeMap<TableId, ReadTableWatermark>,
+    remain_watermarks: VecDeque<(TableId, VirtualNode, WatermarkDirection, Bytes)>,
 }
 
 impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
-    pub fn new(inner: I, watermarks: Vec<(TableId, ReadTableWatermark)>) -> Self {
-        assert!(watermarks.is_sorted_by_key(|(table_id, _)| table_id));
+    pub fn new(inner: I, watermarks: BTreeMap<TableId, ReadTableWatermark>) -> Self {
         Self {
             inner,
-            remain_watermarks: VecDeque::with_capacity(watermarks.len()),
+            remain_watermarks: VecDeque::new(),
             watermarks,
         }
     }
 
-    async fn advance_key_and_watermark(&mut self) -> HummockResult<()> {
-        loop {
-            if !self.inner.is_valid() {
-                return Ok(());
-            }
-            while let Some((watermark_table_id, table_read_watermarks)) =
-                self.remain_watermarks.front_mut()
+    fn reset_watermark(&mut self) {
+        self.remain_watermarks = self
+            .watermarks
+            .iter()
+            .flat_map(|(table_id, read_watermarks)| {
+                read_watermarks
+                    .vnode_watermarks
+                    .iter()
+                    .map(|(vnode, watermarks)| {
+                        (
+                            *table_id,
+                            *vnode,
+                            read_watermarks.direction,
+                            watermarks.clone(),
+                        )
+                    })
+            })
+            .collect();
+    }
+
+    /// Advance watermark until no watermark remains or the first watermark can possibly
+    /// filter out the current or future key.
+    fn advance_watermark(&mut self) -> bool {
+        let mut changed = false;
+        if self.inner.is_valid() {
+            let key = self.inner.key();
+            let key_table_id = key.user_key.table_id;
+            let key_vnode = key.user_key.table_key.vnode_part();
+            let inner_key = key.user_key.table_key.key_part();
+            while let Some((table_id, vnode, direction, watermark)) = self.remain_watermarks.front()
             {
-                match (*watermark_table_id).cmp(&self.inner.key().user_key.table_id) {
+                match (table_id, vnode).cmp(&(&key_table_id, &key_vnode)) {
                     Ordering::Less => {
-                        // Current key has advanced the least watermark. See the next watermark
                         self.remain_watermarks.pop_front();
+                        changed = true;
                         continue;
                     }
                     Ordering::Equal => {
-                        while let Some((vnode, watermark)) =
-                            table_read_watermarks.vnode_watermarks.front_mut()
+                        // when watermark is ascending and the inner key has passed the watermark,
+                        // the watermark is not likely to take effect to current or future key,
+                        // and we can skip the watermark.
+                        if *direction == WatermarkDirection::Ascending
+                            && inner_key >= watermark.as_ref()
                         {
-                            let key_vnode = self.inner.key().user_key.table_key.vnode_part();
-                            match (*vnode).cmp(&key_vnode) {
-                                Ordering::Less => {
-                                    // Current key has advanced the least watermark. See the next watermark
-                                    let _ = table_read_watermarks.vnode_watermarks.pop_front();
-                                }
-                                Ordering::Equal => {
-                                    loop {
-                                        if !self.inner.is_valid() {
-                                            return Ok(());
-                                        }
-                                        let skip_key = {
-                                            let key = self.inner.key();
-                                            let key_vnode = key.user_key.table_key.vnode_part();
-                                            if key_vnode > *vnode {
-                                                // key has advanced to a new vnode
-                                                let _ = table_read_watermarks
-                                                    .vnode_watermarks
-                                                    .pop_front();
-                                                break;
-                                            }
-                                            let inner_table_key = key.user_key.table_key.key_part();
-                                            match table_read_watermarks.direction {
-                                                WatermarkDirection::Ascending => {
-                                                    inner_table_key < watermark.as_ref()
-                                                }
-                                                WatermarkDirection::Descending => {
-                                                    inner_table_key > watermark.as_ref()
-                                                }
-                                            }
-                                        };
-                                        if skip_key {
-                                            self.inner.next().await?;
-                                            continue;
-                                        } else {
-                                            return Ok(());
-                                        }
-                                    }
-                                }
-                                Ordering::Greater => {
-                                    // Current key has not reached the least watermark yet. No need to advance any more.
-                                    return Ok(());
-                                }
-                            }
-                        }
-                        if table_read_watermarks.vnode_watermarks.is_empty() {
                             self.remain_watermarks.pop_front();
+                            changed = true;
+                            continue;
+                        } else {
+                            break;
                         }
                     }
                     Ordering::Greater => {
-                        // Current key has not reached the latest watermark yet. No need to advance any more.
-                        return Ok(());
+                        break;
                     }
                 }
             }
         }
+        changed
+    }
+
+    /// Advance the key until iterator invalid or the current key will not be filtered by the latest watermark.
+    /// Calling this method should ensure that the first remaining watermark has been advanced to the current key
+    async fn advance_key(&mut self) -> HummockResult<bool> {
+        let mut changed = false;
+        if let Some((table_id, vnode, direction, watermark)) = self.remain_watermarks.front() {
+            while self.inner.is_valid() {
+                let skip = {
+                    let key = self.inner.key();
+                    let key_table_id = key.user_key.table_id;
+                    let key_vnode = key.user_key.table_key.vnode_part();
+                    let inner_key = key.user_key.table_key.key_part();
+                    match (&key_table_id, &key_vnode).cmp(&(table_id, vnode)) {
+                        Ordering::Less => false,
+                        Ordering::Equal => match direction {
+                            WatermarkDirection::Ascending => inner_key < watermark.as_ref(),
+                            WatermarkDirection::Descending => inner_key > watermark.as_ref(),
+                        },
+                        Ordering::Greater => {
+                            unreachable!("watermark should be advanced to current key")
+                        }
+                    }
+                };
+                if skip {
+                    self.inner.next().await?;
+                    changed = true;
+                } else {
+                    break;
+                }
+            }
+        }
+        Ok(changed)
+    }
+
+    async fn advance_key_and_watermark(&mut self) -> HummockResult<()> {
+        // here we assume that before calling this method, it was an operation on key,
+        // so we call advance_watermark anyway at first.
+        self.advance_watermark();
+        loop {
+            // advance key and watermark in an interleave manner until nothing
+            // changed after the method is called.
+            if !self.advance_key().await? {
+                break;
+            }
+            if !self.advance_watermark() {
+                break;
+            }
+        }
+        Ok(())
     }
 }
 
@@ -139,15 +174,15 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for SkipWatermarkI
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {
+        self.reset_watermark();
         self.inner.rewind().await?;
-        self.remain_watermarks = self.watermarks.iter().cloned().collect();
         self.advance_key_and_watermark().await?;
         Ok(())
     }
 
     async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+        self.reset_watermark();
         self.inner.seek(key).await?;
-        self.remain_watermarks = self.watermarks.iter().cloned().collect();
         self.advance_key_and_watermark().await?;
         Ok(())
     }
@@ -155,4 +190,10 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for SkipWatermarkI
     fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
         self.inner.collect_local_statistic(stats)
     }
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn test_basic() {}
 }

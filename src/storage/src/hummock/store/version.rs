@@ -557,14 +557,6 @@ pub fn read_filter_for_batch(
         }));
     }
 
-    if let Some(read_watermarks) = &mut table_watermark {
-        read_watermarks.vnode_watermarks = read_watermarks
-            .vnode_watermarks
-            .drain(..)
-            .sorted_by_key(|(vnode, _)| *vnode)
-            .collect();
-    }
-
     Ok((imm_vec, sst_vec, table_watermark))
 }
 

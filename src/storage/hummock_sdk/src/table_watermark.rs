@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{btree_map, BTreeMap, HashMap, HashSet};
 use std::iter::once;
 use std::ops::Bound::Included;
 use std::sync::Arc;
@@ -32,13 +32,29 @@ use crate::HummockEpoch;
 #[derive(Clone)]
 pub struct ReadTableWatermark {
     pub direction: WatermarkDirection,
-    pub vnode_watermarks: VecDeque<(VirtualNode, Bytes)>,
+    pub vnode_watermarks: BTreeMap<VirtualNode, Bytes>,
 }
 
 impl ReadTableWatermark {
     pub fn merge_other(&mut self, other: ReadTableWatermark) {
         assert_eq!(self.direction, other.direction);
-        self.vnode_watermarks.extend(other.vnode_watermarks);
+        for (vnode, watermark) in other.vnode_watermarks {
+            match self.vnode_watermarks.entry(vnode) {
+                btree_map::Entry::Vacant(entry) => {
+                    entry.insert(watermark);
+                }
+                btree_map::Entry::Occupied(mut entry) => {
+                    let prev_watermark = entry.get();
+                    let overwrite = match self.direction {
+                        WatermarkDirection::Ascending => watermark > prev_watermark,
+                        WatermarkDirection::Descending => watermark < prev_watermark,
+                    };
+                    if overwrite {
+                        entry.insert(watermark);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -78,12 +94,12 @@ impl TableWatermarksIndex {
         epoch: HummockEpoch,
         table_key_range: &TableKeyRange,
     ) -> Option<ReadTableWatermark> {
-        let mut ret = VecDeque::new();
+        let mut ret = BTreeMap::new();
         let (left, right) = vnode_range(table_key_range);
         for i in left..right {
             let vnode = VirtualNode::from_index(i);
             if let Some(watermark) = self.table_watermark(vnode, epoch) {
-                ret.push_back((vnode, watermark))
+                assert!(ret.insert(vnode, watermark).is_none());
             }
         }
         if ret.is_empty() {
