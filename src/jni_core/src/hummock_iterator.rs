@@ -31,7 +31,9 @@ use risingwave_storage::error::{StorageError, StorageResult};
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::store::HummockStorageIterator;
-use risingwave_storage::hummock::{CachePolicy, FileCache, SstableStore};
+use risingwave_storage::hummock::{
+    get_committed_read_version_tuple, CachePolicy, FileCache, SstableStore,
+};
 use risingwave_storage::monitor::HummockStateStoreMetrics;
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use risingwave_storage::store::{ReadOptions, StateStoreReadIterStream, StreamTypeOfIter};
@@ -86,10 +88,12 @@ impl HummockJavaBindingIterator {
         for vnode in read_plan.vnode_ids {
             let vnode = VirtualNode::from_index(vnode as usize);
             let key_range = table_key_range_from_prost(vnode, key_range.clone());
-            let watermark = pin_version
-                .table_watermark_index()
-                .get(&table_id)
-                .and_then(|index| index.range_watermarks(read_plan.epoch, &key_range));
+            let read_version_tuple = get_committed_read_version_tuple(
+                pin_version.clone(),
+                table_id,
+                &key_range,
+                read_plan.epoch,
+            );
             let stream = reader
                 .iter(
                     key_range,
@@ -99,7 +103,7 @@ impl HummockJavaBindingIterator {
                         cache_policy: CachePolicy::NotFill,
                         ..Default::default()
                     },
-                    (vec![], vec![], pin_version.clone(), watermark),
+                    read_version_tuple,
                 )
                 .await?;
             streams.push(stream);

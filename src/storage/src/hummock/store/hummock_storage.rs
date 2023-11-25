@@ -117,6 +117,19 @@ pub type ReadVersionTuple = (
     Option<ReadTableWatermark>,
 );
 
+pub fn get_committed_read_version_tuple(
+    version: PinnedVersion,
+    table_id: TableId,
+    key_range: &TableKeyRange,
+    epoch: HummockEpoch,
+) -> ReadVersionTuple {
+    let watermark = version
+        .table_watermark_index()
+        .get(&table_id)
+        .and_then(|index| index.range_watermarks(epoch, key_range));
+    (vec![], vec![], version, watermark)
+}
+
 impl HummockStorage {
     /// Creates a [`HummockStorage`].
     #[allow(clippy::too_many_arguments)]
@@ -280,11 +293,12 @@ impl HummockStorage {
         match self.backup_reader.try_get_hummock_version(epoch).await {
             Ok(Some(backup_version)) => {
                 validate_safe_epoch(backup_version.safe_epoch(), epoch)?;
-                let watermark = backup_version
-                    .table_watermark_index()
-                    .get(&table_id)
-                    .and_then(|index| index.range_watermarks(epoch, key_range));
-                Ok((Vec::default(), Vec::default(), backup_version, watermark))
+                Ok(get_committed_read_version_tuple(
+                    backup_version,
+                    table_id,
+                    key_range,
+                    epoch,
+                ))
             }
             Ok(None) => Err(HummockError::read_backup_error(format!(
                 "backup include epoch {} not found",
@@ -312,15 +326,7 @@ impl HummockStorage {
             Option<ReadTableWatermark>,
         ) = if epoch <= pinned_version.max_committed_epoch() {
             // read committed_version directly without build snapshot
-            (
-                Vec::default(),
-                Vec::default(),
-                (**pinned_version).clone(),
-                pinned_version
-                    .table_watermark_index()
-                    .get(&table_id)
-                    .and_then(|index| index.range_watermarks(epoch, key_range)),
-            )
+            get_committed_read_version_tuple((**pinned_version).clone(), table_id, key_range, epoch)
         } else {
             let read_version_vec = {
                 let read_guard = self.read_version_mapping.read();
@@ -338,14 +344,11 @@ impl HummockStorage {
             // When the system has just started and no state has been created, the memory state
             // may be empty
             if read_version_vec.is_empty() {
-                (
-                    Vec::default(),
-                    Vec::default(),
+                get_committed_read_version_tuple(
                     (**pinned_version).clone(),
-                    pinned_version
-                        .table_watermark_index()
-                        .get(&table_id)
-                        .and_then(|index| index.range_watermarks(epoch, key_range)),
+                    table_id,
+                    key_range,
+                    epoch,
                 )
             } else {
                 let (imm_vec, sst_vec, watermarks) =
