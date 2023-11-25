@@ -1242,7 +1242,7 @@ impl BatchBlockStream {
                 Box::new(block.clone()),
                 CachePriority::Low,
             );
-            self.blocks.push_back(Box::new(block.clone()));
+            self.blocks.push_back(Box::new(block));
             buff_offset = end;
             block_idx += 1;
         }

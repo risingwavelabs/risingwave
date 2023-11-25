@@ -71,6 +71,7 @@ impl SstableIterator {
     }
 
     fn init_block_prefetch_range(&mut self, start_idx: usize) {
+        self.preload_end_block_idx = 0;
         if let Some(bound) = self.options.must_iterated_end_user_key.as_ref() {
             let block_metas = &self.sst.value().meta.block_metas;
             let next_to_start_idx = start_idx + 1;
