@@ -269,11 +269,35 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             // otherwise the upstream changelog may be blocked by the snapshot read stream
             let _ = Pin::new(&mut upstream).peek().await;
 
-            tracing::info!(
-                upstream_table_id,
-                initial_binlog_offset = ?last_binlog_offset,
-                "start the bacfill loop");
+            // wait for the next barrier to make sure the snapshot read starts after upstream source
+            #[for_await]
+            for msg in upstream.by_ref() {
+                match msg? {
+                    Message::Barrier(barrier) => {
+                        // commit state just to bump the epoch of state table
+                        state_impl.commit_state(barrier.epoch).await?;
+                        yield Message::Barrier(barrier);
+                        break;
+                    }
+                    Message::Chunk(ref chunk) => {
+                        last_binlog_offset = get_cdc_chunk_last_offset(
+                            upstream_table_reader.inner().table_reader(),
+                            chunk,
+                        )?;
 
+                        tracing::info!(
+                            upstream_table_id,
+                            ?last_binlog_offset,
+                            "got upstream changelog chunk"
+                        );
+                    }
+                    Message::Watermark(_) => {
+                        // Ignore watermark
+                    }
+                }
+            }
+
+            tracing::info!(upstream_table_id, initial_binlog_offset = ?last_binlog_offset, "start cdc backfill loop");
             'backfill_loop: loop {
                 let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
 
@@ -492,6 +516,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         drop(upstream_table_reader);
 
         tracing::info!(
+            upstream_table_id,
             "CdcBackfill has already finished and forward messages directly to the downstream"
         );
 
