@@ -628,17 +628,11 @@ impl HummockVersionReader {
             for (vnode, watermark) in read_watermark.vnode_watermarks {
                 if vnode == key_vnode {
                     let inner_key = table_key.key_part();
-                    match read_watermark.direction {
-                        WatermarkDirection::Ascending => {
-                            if inner_key < watermark {
-                                return Ok(None);
-                            }
-                        }
-                        WatermarkDirection::Descending => {
-                            if inner_key > watermark {
-                                return Ok(None);
-                            }
-                        }
+                    if read_watermark
+                        .direction
+                        .filter_by_watermark(inner_key, watermark)
+                    {
+                        return Ok(None);
                     }
                 }
             }

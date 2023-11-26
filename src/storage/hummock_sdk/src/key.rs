@@ -444,6 +444,16 @@ pub fn map_table_key_range(range: (Bound<KeyPayloadType>, Bound<KeyPayloadType>)
     (range.0.map(TableKey), range.1.map(TableKey))
 }
 
+pub fn gen_key_from_bytes(vnode: VirtualNode, payload: &[u8]) -> TableKey<Bytes> {
+    TableKey(Bytes::from(
+        [vnode.to_be_bytes().as_slice(), payload].concat(),
+    ))
+}
+
+pub fn gen_key_from_str(vnode: VirtualNode, payload: &str) -> TableKey<Bytes> {
+    gen_key_from_bytes(vnode, payload.as_bytes())
+}
+
 /// [`UserKey`] is is an internal concept in storage. In the storage interface, user specifies
 /// `table_key` and `table_id` (in `ReadOptions` or `WriteOptions`) as the input. The storage
 /// will group these two values into one struct for convenient filtering.

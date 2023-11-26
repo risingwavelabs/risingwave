@@ -63,8 +63,9 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
 
     /// Advance watermark until no watermark remains or the first watermark can possibly
     /// filter out the current or future key.
+    ///
+    /// Return a flag indicating whether the current key will be filtered by the current watermark.
     fn advance_watermark(&mut self) -> bool {
-        let mut changed = false;
         if self.inner.is_valid() {
             let key = self.inner.key();
             let key_table_id = key.user_key.table_id;
@@ -75,10 +76,12 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
                 match (table_id, vnode).cmp(&(&key_table_id, &key_vnode)) {
                     Ordering::Less => {
                         self.remain_watermarks.pop_front();
-                        changed = true;
                         continue;
                     }
                     Ordering::Equal => {
+                        if direction.filter_by_watermark(inner_key, watermark) {
+                            return true;
+                        }
                         // when watermark is ascending and the inner key has passed the watermark,
                         // the watermark is not likely to take effect to current or future key,
                         // and we can skip the watermark.
@@ -86,66 +89,68 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
                             && inner_key >= watermark.as_ref()
                         {
                             self.remain_watermarks.pop_front();
-                            changed = true;
                             continue;
                         } else {
-                            break;
+                            return false;
                         }
                     }
                     Ordering::Greater => {
-                        break;
+                        return false;
                     }
                 }
             }
         }
-        changed
+        false
     }
 
     /// Advance the key until iterator invalid or the current key will not be filtered by the latest watermark.
-    /// Calling this method should ensure that the first remaining watermark has been advanced to the current key
+    /// Calling this method should ensure that the first remaining watermark has been advanced to the current key.
+    ///
+    /// Return a flag indicating whether should later advance the watermark.
     async fn advance_key(&mut self) -> HummockResult<bool> {
-        let mut changed = false;
         if let Some((table_id, vnode, direction, watermark)) = self.remain_watermarks.front() {
             while self.inner.is_valid() {
-                let skip = {
+                {
                     let key = self.inner.key();
                     let key_table_id = key.user_key.table_id;
                     let key_vnode = key.user_key.table_key.vnode_part();
                     let inner_key = key.user_key.table_key.key_part();
                     match (&key_table_id, &key_vnode).cmp(&(table_id, vnode)) {
-                        Ordering::Less => false,
-                        Ordering::Equal => match direction {
-                            WatermarkDirection::Ascending => inner_key < watermark.as_ref(),
-                            WatermarkDirection::Descending => inner_key > watermark.as_ref(),
-                        },
+                        Ordering::Less => {
+                            return Ok(false);
+                        }
+                        Ordering::Equal => {
+                            if direction.filter_by_watermark(inner_key, watermark) {
+                                self.inner.next().await?;
+                            } else {
+                                return Ok(false);
+                            }
+                        }
                         Ordering::Greater => {
-                            unreachable!("watermark should be advanced to current key")
+                            // The current key has advanced over the watermark.
+                            // We may return to advance the watermark before advancing the key.
+                            return Ok(true);
                         }
                     }
                 };
-                if skip {
-                    self.inner.next().await?;
-                    changed = true;
-                } else {
-                    break;
-                }
             }
         }
-        Ok(changed)
+        Ok(false)
     }
 
     async fn advance_key_and_watermark(&mut self) -> HummockResult<()> {
         // here we assume that before calling this method, it was an operation on key,
         // so we call advance_watermark anyway at first.
-        self.advance_watermark();
-        loop {
-            // advance key and watermark in an interleave manner until nothing
-            // changed after the method is called.
-            if !self.advance_key().await? {
-                break;
-            }
-            if !self.advance_watermark() {
-                break;
+        if self.advance_watermark() {
+            loop {
+                // advance key and watermark in an interleave manner until nothing
+                // changed after the method is called.
+                if !self.advance_key().await? {
+                    break;
+                }
+                if !self.advance_watermark() {
+                    break;
+                }
             }
         }
         Ok(())
@@ -194,6 +199,175 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for SkipWatermarkI
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+    use std::iter::{empty, once};
+
+    use bytes::Bytes;
+    use itertools::Itertools;
+    use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_hummock_sdk::key::{gen_key_from_str, FullKey, TableKey, UserKey};
+    use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
+    use risingwave_hummock_sdk::EpochWithGap;
+
+    use crate::hummock::iterator::{HummockIterator, SkipWatermarkIterator};
+    use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
+    use crate::hummock::value::HummockValue;
+
+    const EPOCH: u64 = 1;
+    const TABLE_ID: TableId = TableId::new(233);
+
+    async fn assert_iter_eq(
+        mut first: impl HummockIterator,
+        mut second: impl HummockIterator,
+        seek_key: Option<(usize, usize)>,
+    ) {
+        if let Some((vnode, key_index)) = seek_key {
+            let (seek_key, _) = gen_key_value(vnode, key_index);
+            let full_key = FullKey {
+                user_key: UserKey {
+                    table_id: TABLE_ID,
+                    table_key: seek_key,
+                },
+                epoch_with_gap: EpochWithGap::new_from_epoch(EPOCH),
+            };
+            first.seek(full_key.to_ref()).await.unwrap();
+            second.seek(full_key.to_ref()).await.unwrap()
+        } else {
+            first.rewind().await.unwrap();
+            second.rewind().await.unwrap();
+        }
+
+        while first.is_valid() {
+            assert!(second.is_valid());
+            let first_key = first.key();
+            let second_key = second.key();
+            assert_eq!(first_key, second_key);
+            assert_eq!(first.value(), second.value());
+            first.next().await.unwrap();
+            second.next().await.unwrap();
+        }
+        assert!(!second.is_valid());
+    }
+
+    fn build_batch(
+        pairs: impl Iterator<Item = (TableKey<Bytes>, HummockValue<Bytes>)>,
+    ) -> SharedBufferBatch {
+        SharedBufferBatch::for_test(pairs.collect(), EPOCH, TABLE_ID)
+    }
+
+    fn filter_with_watermarks(
+        iter: impl Iterator<Item = (TableKey<Bytes>, HummockValue<Bytes>)>,
+        table_watermarks: ReadTableWatermark,
+    ) -> impl Iterator<Item = (TableKey<Bytes>, HummockValue<Bytes>)> {
+        iter.filter(move |(key, _)| {
+            if let Some(watermark) = table_watermarks.vnode_watermarks.get(&key.vnode_part()) {
+                !table_watermarks
+                    .direction
+                    .filter_by_watermark(key.key_part(), watermark)
+            } else {
+                true
+            }
+        })
+    }
+
+    fn gen_inner_key(index: usize) -> String {
+        format!("key{:5}", index)
+    }
+
+    async fn test_watermark(
+        watermarks: impl IntoIterator<Item = (usize, usize)>,
+        direction: WatermarkDirection,
+    ) {
+        let test_index = [(0, 2), (0, 3), (0, 4), (1, 1), (1, 3), (4, 2), (8, 1)];
+        let items = test_index
+            .iter()
+            .map(|(vnode, key_index)| gen_key_value(*vnode, *key_index))
+            .collect_vec();
+
+        let read_watermark = ReadTableWatermark {
+            direction,
+            vnode_watermarks: BTreeMap::from_iter(watermarks.into_iter().map(
+                |(vnode, key_index)| {
+                    (
+                        VirtualNode::from_index(vnode),
+                        Bytes::from(gen_inner_key(key_index)),
+                    )
+                },
+            )),
+        };
+
+        let gen_iters = || {
+            let batch = build_batch(filter_with_watermarks(
+                items.clone().into_iter(),
+                read_watermark.clone(),
+            ));
+            let iter = SkipWatermarkIterator::new(
+                build_batch(items.clone().into_iter()).into_forward_iter(),
+                BTreeMap::from_iter(once((TABLE_ID, read_watermark.clone()))),
+            );
+            (batch.into_forward_iter(), iter)
+        };
+        let (first, second) = gen_iters();
+        assert_iter_eq(first, second, None).await;
+        for (vnode, key_index) in &test_index {
+            let (first, second) = gen_iters();
+            assert_iter_eq(first, second, Some((*vnode, *key_index))).await;
+        }
+        let (last_vnode, last_key_index) = test_index.last().unwrap();
+        let (first, second) = gen_iters();
+        assert_iter_eq(first, second, Some((*last_vnode, last_key_index + 1))).await;
+    }
+
+    fn gen_key_value(vnode: usize, index: usize) -> (TableKey<Bytes>, HummockValue<Bytes>) {
+        (
+            gen_key_from_str(VirtualNode::from_index(vnode), &gen_inner_key(index)),
+            HummockValue::Put(Bytes::copy_from_slice(
+                format!("{}-value-{}", vnode, index).as_bytes(),
+            )),
+        )
+    }
+
     #[tokio::test]
-    async fn test_basic() {}
+    async fn test_no_watermark() {
+        test_watermark(empty(), WatermarkDirection::Ascending).await;
+        test_watermark(empty(), WatermarkDirection::Descending).await;
+    }
+
+    #[tokio::test]
+    async fn test_too_low_watermark() {
+        test_watermark(vec![(0, 0)], WatermarkDirection::Ascending).await;
+        test_watermark(vec![(0, 10)], WatermarkDirection::Descending).await;
+    }
+
+    #[tokio::test]
+    async fn test_single_watermark() {
+        test_watermark(vec![(0, 3)], WatermarkDirection::Ascending).await;
+        test_watermark(vec![(0, 3)], WatermarkDirection::Descending).await;
+    }
+
+    #[tokio::test]
+    async fn test_watermark_vnode_no_data() {
+        test_watermark(vec![(3, 3)], WatermarkDirection::Ascending).await;
+        test_watermark(vec![(3, 3)], WatermarkDirection::Descending).await;
+    }
+
+    #[tokio::test]
+    async fn test_filter_all() {
+        test_watermark(
+            vec![(0, 5), (1, 4), (2, 0), (4, 3), (8, 2)],
+            WatermarkDirection::Ascending,
+        )
+        .await;
+        test_watermark(
+            vec![(0, 0), (1, 0), (2, 0), (4, 0), (8, 0)],
+            WatermarkDirection::Descending,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_advance_multi_vnode() {
+        test_watermark(vec![(1, 2), (8, 0)], WatermarkDirection::Ascending).await;
+    }
 }

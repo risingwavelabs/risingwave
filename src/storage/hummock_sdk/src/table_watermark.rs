@@ -209,6 +209,17 @@ pub enum WatermarkDirection {
     Descending,
 }
 
+impl WatermarkDirection {
+    pub fn filter_by_watermark(&self, key: impl AsRef<[u8]>, watermark: impl AsRef<[u8]>) -> bool {
+        let key = key.as_ref();
+        let watermark = watermark.as_ref();
+        match self {
+            WatermarkDirection::Ascending => key < watermark,
+            WatermarkDirection::Descending => key > watermark,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Vnodes {
     Bitmap(Arc<Bitmap>),

@@ -117,7 +117,7 @@ impl SstableIterator {
         // When all data are in block cache, it is highly possible that this iterator will stay on a
         // worker thread for a full time. Therefore, we use tokio's unstable API consume_budget to
         // do cooperative scheduling.
-        tokio::task::consume_budget().await;
+        // tokio::task::consume_budget().await;
 
         let mut hit_cache = false;
         if idx >= self.sst.value().block_count() {
