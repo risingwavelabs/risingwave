@@ -12,88 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod memory_manager;
-
-// Only enable the non-trivial policies on Linux as it relies on statistics from `jemalloc-ctl`
-// which might be inaccurate on other platforms.
-pub mod policy;
-
-use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
-
-use risingwave_batch::task::BatchManager;
 use risingwave_common::config::{StorageConfig, StorageMemoryConfig};
 use risingwave_common::util::pretty_bytes::convert;
-use risingwave_stream::task::LocalStreamManager;
 
 /// The minimal memory requirement of computing tasks in megabytes.
 pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
 /// The memory reserved for system usage (stack and code segment of processes, allocation
 /// overhead, network buffer, etc.) in megabytes.
 pub const MIN_SYSTEM_RESERVED_MEMORY_MB: usize = 512;
-pub const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.2;
 
-pub const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
+const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.2;
 
-pub const COMPACTOR_MEMORY_PROPORTION: f64 = 0.1;
+const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
 
-pub const STORAGE_BLOCK_CACHE_MEMORY_PROPORTION: f64 = 0.3;
+const COMPACTOR_MEMORY_PROPORTION: f64 = 0.1;
 
-pub const STORAGE_META_CACHE_MAX_MEMORY_MB: usize = 4096;
-pub const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
-pub const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
-pub const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 50;
-// Since the new feature prefetch does not cost much memory, we set a large value by default for performance. If we meet OOM during long time batch query, we shall reduce this configuration.
-pub const STORAGE_DEFAULT_LARGE_QUERY_MEMORY_USAGE_MB: usize = 32 * 1024;
+const STORAGE_BLOCK_CACHE_MEMORY_PROPORTION: f64 = 0.3;
 
-/// `MemoryControlStats` contains the state from previous control loop
-#[derive(Default)]
-pub struct MemoryControlStats {
-    pub jemalloc_allocated_bytes: usize,
-    pub jemalloc_active_bytes: usize,
-    pub jvm_allocated_bytes: usize,
-    pub jvm_active_bytes: usize,
-    pub lru_watermark_step: u64,
-    pub lru_watermark_time_ms: u64,
-    pub lru_physical_now_ms: u64,
-}
+const STORAGE_META_CACHE_MAX_MEMORY_MB: usize = 4096;
+const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
+const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
+const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 50;
 
-pub type MemoryControlRef = Box<dyn MemoryControl>;
-
-pub trait MemoryControl: Send + Sync + std::fmt::Debug {
-    fn apply(
-        &self,
-        interval_ms: u32,
-        prev_memory_stats: MemoryControlStats,
-        batch_manager: Arc<BatchManager>,
-        stream_manager: Arc<LocalStreamManager>,
-        watermark_epoch: Arc<AtomicU64>,
-    ) -> MemoryControlStats;
-}
-
-pub fn build_memory_control_policy(total_memory_bytes: usize) -> MemoryControlRef {
-    use self::policy::JemallocAndJvmMemoryControl;
-
-    Box::new(JemallocAndJvmMemoryControl::new(total_memory_bytes))
-}
-
-/// `DummyPolicy` is used for operarting systems other than Linux. It does nothing as memory control
-/// is disabled on non-Linux OS.
-#[derive(Debug)]
-pub struct DummyPolicy;
-
-impl MemoryControl for DummyPolicy {
-    fn apply(
-        &self,
-        _interval_ms: u32,
-        _prev_memory_stats: MemoryControlStats,
-        _batch_manager: Arc<BatchManager>,
-        _stream_manager: Arc<LocalStreamManager>,
-        _watermark_epoch: Arc<AtomicU64>,
-    ) -> MemoryControlStats {
-        MemoryControlStats::default()
-    }
-}
+/// Since the new feature prefetch does not cost much memory, we set a large value by default for performance. If we meet OOM during long time batch query, we shall reduce this configuration.
+const STORAGE_DEFAULT_LARGE_QUERY_MEMORY_USAGE_MB: usize = 32 * 1024;
 
 /// Each compute node reserves some memory for stack and code segment of processes, allocation
 /// overhead, network buffer, etc. based on `SYSTEM_RESERVED_MEMORY_PROPORTION`. The reserve memory
