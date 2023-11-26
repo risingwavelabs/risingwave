@@ -17,7 +17,9 @@ package com.risingwave.connector.source.core;
 import com.risingwave.connector.api.source.*;
 import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
+import io.debezium.engine.DebeziumEngine;
 import io.grpc.stub.StreamObserver;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -31,6 +33,15 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
     private final ExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final CdcEngine engine;
+
+    private static final CountDownLatch startSignal = new CountDownLatch(1);
+    private static final DebeziumEngine.ConnectorCallback connectorCallback =
+            new DebeziumEngine.ConnectorCallback() {
+                @Override
+                public void taskStarted() {
+                    startSignal.countDown();
+                }
+            };
 
     private DbzCdcEngineRunner(CdcEngine engine) {
         this.executor =
@@ -48,6 +59,7 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
                     new DbzCdcEngine(
                             config.getSourceId(),
                             config.getResolvedDebeziumProps(),
+                            connectorCallback,
                             (success, message, error) -> {
                                 if (!success) {
                                     responseObserver.onError(error);
@@ -69,7 +81,7 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
         return runner;
     }
 
-    public static CdcEngineRunner newCdcEngineRunner(DbzConnectorConfig config) {
+    public static CdcEngineRunner create(DbzConnectorConfig config) {
         DbzCdcEngineRunner runner = null;
         try {
             var sourceId = config.getSourceId();
@@ -77,6 +89,7 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
                     new DbzCdcEngine(
                             config.getSourceId(),
                             config.getResolvedDebeziumProps(),
+                            connectorCallback,
                             (success, message, error) -> {
                                 if (!success) {
                                     LOG.error(
@@ -103,6 +116,9 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
             return;
         }
 
+        executor.execute(engine);
+        // wait for start of the connector task
+        startSignal.await();
         // put a handshake message to notify the Source executor
         var controlInfo =
                 GetEventStreamResponse.ControlInfo.newBuilder().setHandshakeOk(true).build();
@@ -112,7 +128,6 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
                                 .setSourceId(engine.getId())
                                 .setControl(controlInfo)
                                 .build());
-        executor.execute(engine);
         running.set(true);
         LOG.info("engine#{} started", engine.getId());
     }
