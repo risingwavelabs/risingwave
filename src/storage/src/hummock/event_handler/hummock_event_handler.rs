@@ -585,13 +585,9 @@ impl HummockEventHandler {
                 table_id,
                 ..
             } => {
-                if !opts.watermark.is_empty() {
-                    self.uploader.add_watermark(
-                        epoch,
-                        table_id,
-                        opts.watermark,
-                        opts.watermark_direction,
-                    )
+                if let Some((direction, watermarks)) = opts.table_watermarks {
+                    self.uploader
+                        .add_watermark(epoch, table_id, watermarks, direction)
                 }
             }
 

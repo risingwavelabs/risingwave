@@ -1232,7 +1232,7 @@ fn collect_commit_epoch_info(resps: &mut [BarrierCompleteResponse]) -> CommitEpo
     }
     CommitEpochInfo::new(
         synced_ssts,
-        merge_multiple_new_table_watermarks(resps.iter().map(|resp| resp.watermarks.clone())),
+        merge_multiple_new_table_watermarks(resps.iter().map(|resp| resp.table_watermarks.clone())),
         sst_to_worker,
     )
 }

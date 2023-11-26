@@ -408,14 +408,14 @@ impl LocalStateStore for LocalHummockStorage {
             next_epoch,
             prev_epoch
         );
-        if !opts.watermark.is_empty() {
+        if let Some((direction, watermarks)) = &mut opts.table_watermarks {
             let mut read_version = self.read_version.write();
-            read_version.filter_regress_watermarks(&mut opts.watermark);
-            if !opts.watermark.is_empty() {
+            read_version.filter_regress_watermarks(watermarks);
+            if !watermarks.is_empty() {
                 read_version.update(VersionUpdate::NewTableWatermark {
-                    direction: opts.watermark_direction,
+                    direction: *direction,
                     epoch: prev_epoch,
-                    vnode_watermarks: opts.watermark.clone(),
+                    vnode_watermarks: watermarks.clone(),
                 });
             }
         }

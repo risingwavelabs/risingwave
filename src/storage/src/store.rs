@@ -18,11 +18,9 @@ use std::future::Future;
 use std::ops::Bound;
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use prost::Message;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
@@ -494,65 +492,63 @@ impl From<TracedInitOptions> for InitOptions {
 
 #[derive(Clone, Debug)]
 pub struct SealCurrentEpochOptions {
-    pub watermark: Vec<VnodeWatermark>,
-    pub watermark_direction: WatermarkDirection,
+    pub table_watermarks: Option<(WatermarkDirection, Vec<VnodeWatermark>)>,
 }
 
 impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
     fn from(value: SealCurrentEpochOptions) -> Self {
         TracedSealCurrentEpochOptions {
-            watermark: value
-                .watermark
-                .iter()
-                .map(|watermark| Message::encode_to_vec(&watermark.to_protobuf()))
-                .collect(),
-            is_watermark_ascending: value.watermark_direction == WatermarkDirection::Ascending,
+            table_watermarks: value.table_watermarks.map(|(direction, watermarks)| {
+                (
+                    direction == WatermarkDirection::Ascending,
+                    watermarks
+                        .iter()
+                        .map(|watermark| Message::encode_to_vec(&watermark.to_protobuf()))
+                        .collect(),
+                )
+            }),
         }
     }
 }
 
-impl TryInto<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
-    type Error = anyhow::Error;
-
-    fn try_into(self) -> Result<SealCurrentEpochOptions, Self::Error> {
-        Ok(SealCurrentEpochOptions {
-            watermark: self
-                .watermark
-                .iter()
-                .map(|serialized_watermark| {
-                    Message::decode(serialized_watermark.as_slice())
-                        .map(|pb| VnodeWatermark::from_protobuf(&pb))
-                        .map_err(|e| anyhow!("failed to decode: {:?}", e))
-                })
-                .try_collect()?,
-            watermark_direction: if self.is_watermark_ascending {
-                WatermarkDirection::Ascending
-            } else {
-                WatermarkDirection::Descending
-            },
-        })
+impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
+    fn from(value: TracedSealCurrentEpochOptions) -> SealCurrentEpochOptions {
+        SealCurrentEpochOptions {
+            table_watermarks: value.table_watermarks.map(|(is_ascending, watermarks)| {
+                (
+                    if is_ascending {
+                        WatermarkDirection::Ascending
+                    } else {
+                        WatermarkDirection::Descending
+                    },
+                    watermarks
+                        .iter()
+                        .map(|serialized_watermark| {
+                            Message::decode(serialized_watermark.as_slice())
+                                .map(|pb| VnodeWatermark::from_protobuf(&pb))
+                                .expect("should not failed")
+                        })
+                        .collect(),
+                )
+            }),
+        }
     }
 }
 
 impl SealCurrentEpochOptions {
-    pub fn new(watermark: Vec<VnodeWatermark>, watermark_direction: WatermarkDirection) -> Self {
+    pub fn new(watermarks: Vec<VnodeWatermark>, direction: WatermarkDirection) -> Self {
         Self {
-            watermark,
-            watermark_direction,
+            table_watermarks: Some((direction, watermarks)),
         }
     }
 
     pub fn no_watermark() -> Self {
         Self {
-            watermark: vec![],
-            watermark_direction: WatermarkDirection::Ascending,
+            table_watermarks: None,
         }
     }
 
     pub fn for_test() -> Self {
-        Self {
-            watermark: vec![],
-            watermark_direction: WatermarkDirection::Ascending,
-        }
+        Self::no_watermark()
     }
 }

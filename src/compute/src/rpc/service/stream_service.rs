@@ -190,7 +190,7 @@ impl StreamService for StreamServiceImpl {
             .await
             .inspect_err(|err| tracing::error!("failed to collect barrier: {}", err))?;
 
-        let (synced_sstables, watermarks) = match kind {
+        let (synced_sstables, table_watermarks) = match kind {
             BarrierKind::Unspecified => unreachable!(),
             BarrierKind::Initial => {
                 if let Some(hummock) = self.env.state_store().as_hummock() {
@@ -243,7 +243,7 @@ impl StreamService for StreamServiceImpl {
                 )
                 .collect_vec(),
             worker_id: self.env.worker_id(),
-            watermarks: watermarks
+            table_watermarks: table_watermarks
                 .into_iter()
                 .map(|(key, value)| (key.table_id as u64, value.to_protobuf()))
                 .collect(),

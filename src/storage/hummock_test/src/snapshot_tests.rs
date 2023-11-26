@@ -18,7 +18,7 @@ use bytes::Bytes;
 use futures::TryStreamExt;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::hash::VirtualNode;
-use risingwave_hummock_sdk::key::{map_table_key_range, TableKey};
+use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
