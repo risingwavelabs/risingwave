@@ -698,9 +698,21 @@ impl PredicatePushdown for LogicalOverWindow {
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        let mut window_col = FixedBitSet::with_capacity(self.schema().len());
-        window_col.insert_range(self.core.input.schema().len()..self.schema().len());
-        let (window_pred, other_pred) = predicate.split_disjoint(&window_col);
+        let in_schema_len = self.core.input.schema().len();
+        let out_schema_len = self.schema().len();
+
+        let window_func_input_refs = self.window_functions().iter().flat_map(|func| {
+            func.args
+                .iter()
+                .map(|arg| arg.index)
+                .chain(func.order_by.iter().map(|o| o.column_index))
+        });
+        let mut over_window_related_cols: FixedBitSet = window_func_input_refs
+            .chain(in_schema_len..out_schema_len)
+            .collect();
+        over_window_related_cols.grow(out_schema_len);
+
+        let (window_pred, other_pred) = predicate.split_disjoint(&over_window_related_cols);
         gen_filter_and_pushdown(self, window_pred, other_pred, ctx)
     }
 }
