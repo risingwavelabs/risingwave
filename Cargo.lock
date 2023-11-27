@@ -3171,9 +3171,9 @@ checksum = "00b0228411908ca8685dba7fc2cdd70ec9990a6e753e89b6ac91a84c40fbaf4b"
 
 [[package]]
 name = "form_urlencoded"
-version = "1.2.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a62bc1cf6f830c2ec14a513a9fb124d0a213a629668a4186f329db21fe045652"
+checksum = "e13624c2627564efccf4934284bdd98cbaa14e79b0b5a141218e507b3a823456"
 dependencies = [
  "percent-encoding",
 ]
@@ -3340,9 +3340,9 @@ dependencies = [
 
 [[package]]
 name = "fs-err"
-version = "2.10.0"
+version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb5fd9bcbe8b1087cbd395b51498c01bc997cef73e778a80b77a811af5e2d29f"
+checksum = "88a41f105fe1d5b6b34b2055e3dc59bb79b46b48b2040b9e6c7b4b5de097aa41"
 dependencies = [
  "autocfg",
 ]
@@ -4109,9 +4109,9 @@ checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
 name = "idna"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d20d6b07bfbc108882d88ed8e37d39636dcc260e15e30c45e6ba089610b917c"
+checksum = "634d9b1461af396cad843f47fdba5597a4f9e6ddd4bfb6ff5d85028c25cb12f6"
 dependencies = [
  "unicode-bidi",
  "unicode-normalization",
@@ -6037,9 +6037,9 @@ dependencies = [
 
 [[package]]
 name = "percent-encoding"
-version = "2.3.0"
+version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b2a4787296e9989611394c33f193f676704af1686e70b8f8033ab5ba9a35a94"
+checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
 
 [[package]]
 name = "petgraph"
@@ -7286,6 +7286,7 @@ dependencies = [
  "itertools 0.12.0",
  "madsim-tokio",
  "madsim-tonic",
+ "memcomparable",
  "parking_lot 0.12.1",
  "paste",
  "prometheus",
@@ -7304,6 +7305,7 @@ dependencies = [
  "task_stats_alloc",
  "tempfile",
  "thiserror",
+ "thiserror-ext",
  "tikv-jemallocator",
  "tokio-metrics",
  "tokio-stream",
@@ -7483,6 +7485,7 @@ dependencies = [
  "sysinfo",
  "tempfile",
  "thiserror",
+ "thiserror-ext",
  "tinyvec",
  "toml 0.8.2",
  "tower-layer",
@@ -7505,6 +7508,8 @@ dependencies = [
  "madsim-tokio",
  "parking_lot 0.12.1",
  "risingwave_common",
+ "thiserror",
+ "thiserror-ext",
  "tikv-jemalloc-ctl",
  "tracing",
 ]
@@ -7533,6 +7538,8 @@ dependencies = [
  "risingwave_common",
  "risingwave_pb",
  "risingwave_rpc_client",
+ "thiserror",
+ "thiserror-ext",
  "tower",
  "tower-http",
  "tracing",
@@ -8108,8 +8115,10 @@ dependencies = [
  "sea-orm",
  "serde",
  "serde_json",
+ "strum",
  "sync-point",
  "thiserror",
+ "thiserror-ext",
  "tokio-retry",
  "tokio-stream",
  "tower",
@@ -8164,6 +8173,8 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "sea-orm",
+ "serde",
+ "serde_json",
  "tracing",
  "workspace-hack",
 ]
@@ -8345,6 +8356,7 @@ dependencies = [
  "cfg-or-panic",
  "clap",
  "console",
+ "fail",
  "futures",
  "glob",
  "itertools 0.12.0",
@@ -8563,6 +8575,7 @@ dependencies = [
  "either",
  "enum-as-inner",
  "expect-test",
+ "fail",
  "futures",
  "futures-async-stream",
  "governor",
@@ -10196,9 +10209,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext"
-version = "0.0.6"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b253f2e76cc35b73c1e1b9fd4e28d920f47e27b33b8b3e455bacc62cc0e40bf5"
+checksum = "01e0feae8c8aff1b65f0bca5b24fe2b6e2331e03cd7c6daa681e43a8055f92f6"
 dependencies = [
  "thiserror",
  "thiserror-ext-derive",
@@ -10206,9 +10219,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-ext-derive"
-version = "0.0.6"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11737e1864ac6e6ec08409cdaba243912693de6b5c7fac56a6aeabb0d73a4ad3"
+checksum = "e32482e53bca3d022bdee662ea7d568835e0eb8a86ab410946104657e9e1b5b5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10965,9 +10978,9 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "url"
-version = "2.4.1"
+version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "143b538f18257fac9cad154828a57c6bf5157e1aa604d4816b5995bf6de87ae5"
+checksum = "31e6302e3bb753d46e83516cae55ae196fc0c309407cf11ab35cc51a4c2a4633"
 dependencies = [
  "form_urlencoded",
  "idna",

@@ -21,6 +21,7 @@ use super::stream::prelude::*;
 use super::stream::StreamPlanRef;
 use super::utils::{plan_node_name, watermark_pretty, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::property::Order;
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -161,3 +162,5 @@ impl PlanTreeNodeUnary for StreamGroupTopN {
 }
 
 impl ExprRewritable for StreamGroupTopN {}
+
+impl ExprVisitable for StreamGroupTopN {}

@@ -122,8 +122,11 @@ impl Rule for IndexDeltaJoinRule {
 
                 if stream_scan_type != table_scan.stream_scan_type() {
                     Some(
-                        StreamTableScan::new_with_stream_scan_type(table_scan.core().clone(), stream_scan_type)
-                            .into(),
+                        StreamTableScan::new_with_stream_scan_type(
+                            table_scan.core().clone(),
+                            stream_scan_type,
+                        )
+                        .into(),
                     )
                 } else {
                     Some(table_scan.clone().into())

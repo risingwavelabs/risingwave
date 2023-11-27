@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub use super::actor::Entity as Actor;
+pub use super::actor_dispatcher::Entity as ActorDispatcher;
 pub use super::cluster::Entity as Cluster;
 pub use super::compaction_config::Entity as CompactionConfig;
 pub use super::compaction_status::Entity as CompactionStatus;

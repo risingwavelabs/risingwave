@@ -7,6 +7,7 @@
 max_heartbeat_interval_secs = 15
 meta_leader_lease_secs = 10
 enable_scale_in_when_recovery = true
+enable_automatic_parallelism_control = true
 
 [system]
 barrier_interval_ms = 250

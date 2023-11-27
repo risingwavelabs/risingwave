@@ -27,8 +27,9 @@ use risingwave_pb::monitor_service::{
     ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
     StackTraceRequest, StackTraceResponse,
 };
+use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_stream::task::LocalStreamManager;
-use tonic::{Request, Response, Status};
+use tonic::{Code, Request, Response, Status};
 
 #[derive(Clone)]
 pub struct MonitorServiceImpl {
@@ -221,7 +222,8 @@ impl MonitorService for MonitorServiceImpl {
                 dumped_path_str,
                 collapsed_path_str.clone(),
             )
-            .await?;
+            .await
+            .map_err(|e| e.to_status(Code::Internal, "monitor"))?;
         }
 
         let file = fs::read(Path::new(&collapsed_path_str))?;

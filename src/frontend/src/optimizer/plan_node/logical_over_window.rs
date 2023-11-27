@@ -30,6 +30,7 @@ use super::{
 use crate::expr::{
     Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, WindowFunction,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, Literal, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -325,10 +326,6 @@ impl<'a> OverWindowProjectBuilder<'a> {
 }
 
 impl<'a> ExprVisitor for OverWindowProjectBuilder<'a> {
-    type Result = ();
-
-    fn merge(_a: (), _b: ()) {}
-
     fn visit_window_function(&mut self, window_function: &WindowFunction) {
         if let Err(e) = self.try_visit_window_function(window_function) {
             self.error = Some(e);
@@ -692,6 +689,8 @@ impl ColPrunable for LogicalOverWindow {
 }
 
 impl ExprRewritable for LogicalOverWindow {}
+
+impl ExprVisitable for LogicalOverWindow {}
 
 impl PredicatePushdown for LogicalOverWindow {
     fn predicate_pushdown(

@@ -22,6 +22,8 @@ chrono = { version = "0.4", default-features = false, features = [
 ] }
 parking_lot = "0.12"
 risingwave_common = { workspace = true }
+thiserror = "1"
+thiserror-ext = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
 tracing = "0.1"

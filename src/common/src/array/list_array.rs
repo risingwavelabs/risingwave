@@ -791,7 +791,9 @@ impl ListValue {
             ///       Because we can't decide whether it is a null value or a string starts with "null".
             ///       Consider this case: `{null value}` => `["null value"]`
             fn try_parse_null(&mut self) -> bool {
-                if let Some(s) = self.input.get(..4) && s.eq_ignore_ascii_case("null") {
+                if let Some(s) = self.input.get(..4)
+                    && s.eq_ignore_ascii_case("null")
+                {
                     let next_char = self.input[4..].chars().next();
                     match next_char {
                         None | Some(',' | '}') => {}
