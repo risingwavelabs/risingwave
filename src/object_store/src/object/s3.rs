@@ -641,21 +641,27 @@ impl S3ObjectStore {
         let (address, bucket) = rest.split_once('/').unwrap();
 
         #[cfg(madsim)]
-        let builder = aws_sdk_s3::config::Builder::new();
+        let builder = aws_sdk_s3::config::Builder::new().credentials_provider(
+            Credentials::from_keys(access_key_id, secret_access_key, None),
+        );
         #[cfg(not(madsim))]
-        let builder =
-            aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await)
-                .force_path_style(true)
-                .http_client(Self::new_http_client(&S3ObjectStoreConfig::default()))
-                .behavior_version_latest();
+        let builder = aws_sdk_s3::config::Builder::from(
+            &aws_config::ConfigLoader::default()
+                // FIXME: https://github.com/awslabs/aws-sdk-rust/issues/973
+                .credentials_provider(Credentials::from_keys(
+                    access_key_id,
+                    secret_access_key,
+                    None,
+                ))
+                .load()
+                .await,
+        )
+        .force_path_style(true)
+        .http_client(Self::new_http_client(&S3ObjectStoreConfig::default()))
+        .behavior_version_latest();
         let config = builder
             .region(Region::new("custom"))
             .endpoint_url(format!("{}{}", endpoint_prefix, address))
-            .credentials_provider(Credentials::from_keys(
-                access_key_id,
-                secret_access_key,
-                None,
-            ))
             .build();
         let client = Client::from_conf(config);
 
