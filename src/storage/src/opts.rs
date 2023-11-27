@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::config::{extract_storage_memory_config, RwConfig, StorageMemoryConfig};
+use risingwave_common::config::{
+    extract_storage_memory_config, ObjectStoreConfig, RwConfig, StorageMemoryConfig,
+};
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::system_params_for_test;
 
@@ -122,7 +124,6 @@ pub struct StorageOpts {
     /// object store read timeout.
     pub object_store_read_timeout_ms: u64,
 
-    pub object_store_recv_buffer_size: Option<usize>,
     pub compactor_max_sst_key_count: u64,
     pub compactor_max_task_multiplier: f32,
     pub compactor_max_sst_size: u64,
@@ -131,6 +132,8 @@ pub struct StorageOpts {
     pub max_preload_io_retry_times: usize,
 
     pub mem_table_spill_threshold: usize,
+
+    pub object_store_config: ObjectStoreConfig,
 }
 
 impl Default for StorageOpts {
@@ -231,22 +234,24 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
             object_store_streaming_read_timeout_ms: c
                 .storage
+                .object_store
                 .object_store_streaming_read_timeout_ms,
             compact_iter_recreate_timeout_ms: c.storage.compact_iter_recreate_timeout_ms,
             object_store_streaming_upload_timeout_ms: c
                 .storage
+                .object_store
                 .object_store_streaming_upload_timeout_ms,
-            object_store_read_timeout_ms: c.storage.object_store_read_timeout_ms,
-            object_store_upload_timeout_ms: c.storage.object_store_upload_timeout_ms,
+            object_store_read_timeout_ms: c.storage.object_store.object_store_read_timeout_ms,
+            object_store_upload_timeout_ms: c.storage.object_store.object_store_upload_timeout_ms,
             max_preload_io_retry_times: c.storage.max_preload_io_retry_times,
             backup_storage_url: p.backup_storage_url().to_string(),
             backup_storage_directory: p.backup_storage_directory().to_string(),
-            object_store_recv_buffer_size: c.storage.object_store_recv_buffer_size,
             compactor_max_sst_key_count: c.storage.compactor_max_sst_key_count,
             compactor_max_task_multiplier: c.storage.compactor_max_task_multiplier,
             compactor_max_sst_size: c.storage.compactor_max_sst_size,
             enable_fast_compaction: c.storage.enable_fast_compaction,
             mem_table_spill_threshold: c.storage.mem_table_spill_threshold,
+            object_store_config: c.storage.object_store.clone(),
         }
     }
 }
