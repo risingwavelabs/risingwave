@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use risingwave_common::catalog::TableVersionId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
+use risingwave_pb::catalog::{CreateType, DdlType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
 
 use crate::model::FragmentId;
@@ -30,6 +30,18 @@ pub enum StreamingJob {
     Table(Option<PbSource>, Table, TableJobType),
     Index(Index, Table),
     Source(PbSource),
+}
+
+impl From<&StreamingJob> for DdlType {
+    fn from(job: &StreamingJob) -> Self {
+        match job {
+            StreamingJob::MaterializedView(_) => DdlType::MaterializedView,
+            StreamingJob::Sink(_) => DdlType::Sink,
+            StreamingJob::Table(_, _, _) => DdlType::Table,
+            StreamingJob::Index(_, _) => DdlType::Index,
+            StreamingJob::Source(_) => DdlType::Source,
+        }
+    }
 }
 
 impl StreamingJob {
