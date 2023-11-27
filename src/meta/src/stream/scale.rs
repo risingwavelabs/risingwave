@@ -2248,98 +2248,80 @@ impl GlobalStreamManager {
     }
 }
 
-pub(crate) fn rebalance_worker_pu<T>(
-    fragment_worker_parallel_unit_map: HashMap<WorkerId, BTreeSet<ParallelUnitId>>,
-    workers_to_remove: &BTreeSet<WorkerId>,
-    workers_to_create: &BTreeSet<WorkerId>,
-    total: usize,
-) -> HashMap<WorkerId, BTreeSet<ParallelUnitId>>
+pub(crate) fn rebalance_units<T, U>(
+    slots: HashMap<T, BTreeSet<U>>,
+    slots_to_remove: BTreeSet<T>,
+    slots_to_add: BTreeSet<T>,
+    target_unit_size: usize,
+) -> HashMap<T, BTreeSet<U>>
 where
-    T: Sized + Copy + Clone + Ord + PartialOrd,
+    T: Clone + Ord + PartialOrd + std::fmt::Debug + std::hash::Hash,
+    U: Ord + PartialOrd,
 {
-    assert!(fragment_worker_parallel_unit_map.len() >= workers_to_remove.len());
+    assert!(slots.len() >= slots_to_remove.len());
 
-    let target_actor_count =
-        fragment_worker_parallel_unit_map.len() - workers_to_remove.len() + workers_to_create.len();
-    assert!(target_actor_count > 0);
+    let target_slot_size = slots.len() - slots_to_remove.len() + slots_to_add.len();
 
-    // represents the balance of each actor, used to sort later
-    #[derive(Debug)]
-    struct Balance {
-        actor_id: WorkerId,
+    assert!(target_slot_size > 0);
+
+    struct Balance<T, U> {
+        key: T,
+        units: BTreeSet<U>,
         balance: i32,
-        parallel_unit_ids: BTreeSet<ParallelUnitId>,
     }
-    let (expected, mut remain) = total.div_rem(&target_actor_count);
+
+    let (expected, mut remain) = target_unit_size.div_rem(&target_slot_size);
 
     tracing::debug!(
-        "expected {}, remain {}, prev actors {}, target actors {}",
+        "expected {}, remain {}, prev {}, target {}",
         expected,
         remain,
-        fragment_worker_parallel_unit_map.len(),
-        target_actor_count,
+        slots.len(),
+        target_slot_size,
     );
 
-    let (prev_expected, _) = total.div_rem(&fragment_worker_parallel_unit_map.len());
+    let (prev_expected, _) = target_unit_size.div_rem(&slots.len());
 
-    let (mut removed, mut rest): (Vec<_>, Vec<_>) = fragment_worker_parallel_unit_map
+    let (mut removed, mut rest): (Vec<_>, Vec<_>) = slots
         .into_iter()
-        //.partition(|(&(a, b), _)| workers_to_remove.contains(b));
-        .partition(|&(a, _)| workers_to_remove.contains(&a));
-
-    // let order_by_parallel_unit_desc
-    //     |(_, bitmap_a): &(ActorId, Bitmap), (_, bitmap_b): &(ActorId, Bitmap)| -> Ordering {
-    //         bitmap_a.count_ones().cmp(&bitmap_b.count_ones()).reverse()
-    //     };
-    //
-    // let builder_from_bitmap = |bitmap: &Bitmap| -> BitmapBuilder {
-    //     let mut builder = BitmapBuilder::default();
-    //     builder.append_bitmap(bitmap);
-    //     builder
-    // };
+        .partition(|(key, _)| slots_to_remove.contains(key));
 
     let prev_remain = removed
         .iter()
-        .map(|(_, parallel_unit_ids)| {
-            assert!(parallel_unit_ids.len() >= prev_expected);
-            parallel_unit_ids.len() - prev_expected
+        .map(|(_, units)| {
+            assert!(units.len() >= prev_expected);
+            units.len() - prev_expected
         })
         .sum::<usize>();
 
-    removed.sort_by(|(_, parallel_unit_ids_a), (_, parallel_unit_ids_b)| {
-        parallel_unit_ids_a
-            .len()
-            .cmp(&parallel_unit_ids_b.len())
-            .reverse()
-    });
-    rest.sort_by(|(_, parallel_unit_ids_a), (_, parallel_unit_ids_b)| {
-        parallel_unit_ids_a
-            .len()
-            .cmp(&parallel_unit_ids_b.len())
-            .reverse()
-    });
+    let order_by_units_desc = |(_, units_a): &(T, BTreeSet<U>),
+                               (_, units_b): &(T, BTreeSet<U>)|
+     -> Ordering { units_a.len().cmp(&units_b.len()).reverse() };
+
+    removed.sort_by(order_by_units_desc);
+    rest.sort_by(order_by_units_desc);
 
     let removed_balances = removed.into_iter().map(|(actor_id, bitmap)| Balance {
-        actor_id,
+        key: actor_id,
         balance: bitmap.len() as i32,
-        parallel_unit_ids: bitmap,
+        units: bitmap,
     });
 
     let mut rest_balances = rest
         .into_iter()
-        .map(|(actor_id, bitmap)| Balance {
-            actor_id,
-            balance: bitmap.len() as i32 - expected as i32,
-            parallel_unit_ids: bitmap,
+        .map(|(key, units)| Balance {
+            key,
+            balance: units.len() as i32 - expected as i32,
+            units,
         })
         .collect_vec();
 
-    let mut created_balances = workers_to_create
+    let mut created_balances = slots_to_add
         .iter()
-        .map(|actor_id| Balance {
-            actor_id: *actor_id,
+        .map(|key| Balance {
+            key: key.clone(),
             balance: -(expected as i32),
-            parallel_unit_ids: BTreeSet::new(),
+            units: BTreeSet::new(),
         })
         .collect_vec();
 
@@ -2372,15 +2354,15 @@ where
 
     // We will return the full bitmap here after rebalancing,
     // if we want to return only the changed actors, filter balance = 0 here
-    let mut result = HashMap::with_capacity(target_actor_count);
+    let mut result = HashMap::with_capacity(target_slot_size);
 
     for balance in &v {
         tracing::debug!(
-            "actor {:5}\tbalance {:5}\tR[{:5}]\tC[{:5}]",
-            balance.actor_id,
+            "key {:5?}\tbalance {:5}\tR[{:5}]\tC[{:5}]",
+            balance.key,
             balance.balance,
-            workers_to_remove.contains(&balance.actor_id),
-            workers_to_create.contains(&balance.actor_id)
+            slots_to_remove.contains(&balance.key),
+            slots_to_add.contains(&balance.key)
         );
     }
 
@@ -2388,8 +2370,8 @@ where
         if v.len() == 1 {
             let single = v.pop_front().unwrap();
             assert_eq!(single.balance, 0);
-            if !workers_to_remove.contains(&single.actor_id) {
-                result.insert(single.actor_id, single.parallel_unit_ids);
+            if !slots_to_remove.contains(&single.key) {
+                result.insert(single.key, single.units);
             }
 
             continue;
@@ -2400,27 +2382,25 @@ where
 
         let n = min(abs(src.balance), abs(dst.balance));
 
-        let moving_parallel_units = src.parallel_unit_ids.iter().take(n as usize);
-        dst.parallel_unit_ids.extend(moving_parallel_units);
+        let moving_units = (0..n).flat_map(|_| src.units.pop_first());
 
-        // for parallel_unit_id in moving_parallel_units {
-        //     src.parallel_unit_ids.remove(parallel_unit_id);
-        //     dst.parallel_unit_ids.insert(*parallel_unit_id);
-        // }
+        dst.units.extend(moving_units);
+
+        assert_eq!(dst.units.len() as i32, dst.balance + n);
 
         src.balance -= n;
         dst.balance += n;
 
         if src.balance != 0 {
             v.push_front(src);
-        } else if !workers_to_remove.contains(&src.actor_id) {
-            result.insert(src.actor_id, src.parallel_unit_ids);
+        } else if !slots_to_remove.contains(&src.key) {
+            result.insert(src.key, src.units);
         }
 
         if dst.balance != 0 {
             v.push_back(dst);
         } else {
-            result.insert(dst.actor_id, dst.parallel_unit_ids);
+            result.insert(dst.key, dst.units);
         }
     }
 
