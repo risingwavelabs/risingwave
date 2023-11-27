@@ -344,14 +344,13 @@ impl LocalStateStore for LocalHummockStorage {
 
     async fn try_flush(&mut self) -> StorageResult<()> {
         if self.mem_table.kv_size.size() > self.mem_table_spill_threshold {
-            tracing::info!(
-                "The size of mem table is {} Mb and it exceeds {} Mb and spill occurs. table_id {}",
-                self.mem_table.kv_size.size() >> 20,
-                self.mem_table_spill_threshold >> 20,
-                self.table_id.table_id()
-            );
-
             if self.spill_offset < MAX_SPILL_TIMES {
+                tracing::info!(
+                    "The size of mem table is {} Mb and it exceeds {} Mb and spill occurs. table_id {}",
+                    self.mem_table.kv_size.size() >> 20,
+                    self.mem_table_spill_threshold >> 20,
+                    self.table_id.table_id()
+                );
                 self.flush(vec![]).await?;
             } else {
                 tracing::warn!("No mem table spill occurs, the gap epoch exceeds available range.");

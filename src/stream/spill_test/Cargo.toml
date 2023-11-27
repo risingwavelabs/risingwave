@@ -1,5 +1,5 @@
 [package]
-name = "risingwave_mem_table_test"
+name = "risingwave_mem_table_spill_test"
 version = { workspace = true }
 edition = { workspace = true }
 homepage = { workspace = true }
@@ -20,7 +20,7 @@ risingwave_hummock_test = { workspace = true, features = ["test"] }
 tokio = { version = "0.2", package = "madsim-tokio" }
 
 [dev-dependencies]
-risingwave_hummock_sdk = { workspace = true, features = [] }
+risingwave_hummock_sdk = { workspace = true }
 
 [lints]
 workspace = true

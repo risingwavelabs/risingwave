@@ -38,7 +38,7 @@ members = [
   "src/storage/hummock_sdk",
   "src/storage/hummock_test",
   "src/stream",
-  "src/stream/mem_table_test",
+  "src/stream/spill_test",
   "src/test_runner",
   "src/tests/compaction_test",
   "src/tests/e2e_extended_mode",
@@ -145,7 +145,7 @@ risingwave_frontend = { path = "./src/frontend" }
 risingwave_hummock_sdk = { path = "./src/storage/hummock_sdk" }
 risingwave_hummock_test = { path = "./src/storage/hummock_test" }
 risingwave_hummock_trace = { path = "./src/storage/hummock_trace" }
-risingwave_mem_table_test = { path = "./src/stream/mem_table_test" }
+risingwave_mem_table_spill_test = { path = "./src/stream/spill_test" }
 risingwave_meta = { path = "./src/meta" }
 risingwave_meta_service = { path = "./src/meta/service" }
 risingwave_meta_model_migration = { path = "src/meta/model_v2/migration" }
