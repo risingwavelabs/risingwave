@@ -241,7 +241,11 @@ enum HummockCommands {
     ResumeVersionCheckpoint,
     /// Replay version from the checkpoint one to the latest one.
     ReplayVersion,
-
+    /// List compaction status
+    ListCompactionStatus {
+        #[clap(short, long = "verbose", default_value_t = false)]
+        verbose: bool,
+    },
     GetCompactionScore {
         #[clap(long)]
         compaction_group_id: u64,
@@ -605,6 +609,9 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Hummock(HummockCommands::ReplayVersion) => {
             cmd_impl::hummock::replay_version(context).await?;
+        }
+        Commands::Hummock(HummockCommands::ListCompactionStatus { verbose }) => {
+            cmd_impl::hummock::list_compaction_status(context, verbose).await?;
         }
         Commands::Hummock(HummockCommands::GetCompactionScore {
             compaction_group_id,
