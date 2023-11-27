@@ -21,8 +21,8 @@ use serde_json::json;
 
 use crate::catalog::system_catalog::{BuiltinTable, SysCatalogReaderImpl};
 
-pub const RW_HUMMOCK_COMPACTION_STATUS: BuiltinTable = BuiltinTable {
-    name: "RW_HUMMOCK_COMPACTION_STATUS",
+pub const RW_HUMMOCK_COMPAC_TASK_ASSIGNMENT: BuiltinTable = BuiltinTable {
+    name: "RW_HUMMOCK_COMPAC_TASK_ASSIGNMENT",
     schema: RW_CATALOG_SCHEMA_NAME,
     columns: &[
         (DataType::Int64, "compaction_group_id"),
@@ -44,16 +44,19 @@ pub const RW_HUMMOCK_COMPACTION_STATUS: BuiltinTable = BuiltinTable {
 };
 
 impl SysCatalogReaderImpl {
-    pub async fn read_hummock_compaction_status(&self) -> Result<Vec<OwnedRow>> {
-        let compaction_status = self.meta_client.list_compaction_status().await?;
-        Ok(compaction_status_to_rows(compaction_status))
+    pub async fn read_hummock_compact_task_assignments(&self) -> Result<Vec<OwnedRow>> {
+        // The naming of compact_task_assignment is due to versioning; now compact_task_assignment only records the state of the compact task
+        let compact_task_assignments = self.meta_client.list_compact_task_assignment().await?;
+        Ok(compact_task_assignments_to_rows(compact_task_assignments))
     }
 }
 
-fn compaction_status_to_rows(compaction_status_vec: Vec<CompactTaskAssignment>) -> Vec<OwnedRow> {
+fn compact_task_assignments_to_rows(
+    compact_task_assignments: Vec<CompactTaskAssignment>,
+) -> Vec<OwnedRow> {
     let mut rows = vec![];
-    for compaction_status in compaction_status_vec {
-        let compact_task = compaction_status.compact_task.unwrap();
+    for compact_task_assignment in compact_task_assignments {
+        let compact_task = compact_task_assignment.compact_task.unwrap();
 
         let select_level = compact_task.input_ssts[0].level_idx;
 

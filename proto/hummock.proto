@@ -701,15 +701,15 @@ message GetCompactionScoreResponse {
   repeated PickerInfo scores = 2;
 }
 
-message RiseCtlListCompactTaskAssignmentRequest {}
+message ListCompactTaskAssignmentRequest {}
 
-message RiseCtlListCompactTaskAssignmentResponse {
+message ListCompactTaskAssignmentResponse {
   repeated CompactTaskAssignment task_assignment = 1;
 }
 
-message RiseCtlListCompactTaskProgressRequest {}
+message ListCompactTaskProgressRequest {}
 
-message RiseCtlListCompactTaskProgressResponse {
+message ListCompactTaskProgressResponse {
   repeated CompactTaskProgress task_progress = 1;
 }
 
@@ -749,8 +749,8 @@ service HummockManagerService {
   rpc ListActiveWriteLimit(ListActiveWriteLimitRequest) returns (ListActiveWriteLimitResponse);
   rpc ListHummockMetaConfig(ListHummockMetaConfigRequest) returns (ListHummockMetaConfigResponse);
   rpc GetCompactionScore(GetCompactionScoreRequest) returns (GetCompactionScoreResponse);
-  rpc RiseCtlListCompactTaskAssignment(RiseCtlListCompactTaskAssignmentRequest) returns (RiseCtlListCompactTaskAssignmentResponse);
-  rpc RiseCtlListCompactTaskProgress(RiseCtlListCompactTaskProgressRequest) returns (RiseCtlListCompactTaskProgressResponse);
+  rpc ListCompactTaskAssignment(ListCompactTaskAssignmentRequest) returns (ListCompactTaskAssignmentResponse);
+  rpc ListCompactTaskProgress(ListCompactTaskProgressRequest) returns (ListCompactTaskProgressResponse);
 }
 
 message CompactionConfig {

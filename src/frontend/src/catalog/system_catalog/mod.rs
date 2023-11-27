@@ -405,7 +405,7 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_HUMMOCK_BRANCHED_OBJECTS), read_hummock_branched_objects await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACTION_GROUP_CONFIGS), read_hummock_compaction_group_configs await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_META_CONFIGS), read_hummock_meta_configs await},
-    { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACTION_STATUS), read_hummock_compaction_status await },
+    { BuiltinCatalog::Table(&RW_HUMMOCK_COMPAC_TASK_ASSIGNMENT), read_hummock_compact_task_assignments await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACT_TASK_PROGRESS), read_hummock_compact_task_progress await },
     { BuiltinCatalog::Table(&RW_DESCRIPTION), read_rw_description },
 }
