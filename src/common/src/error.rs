@@ -26,6 +26,7 @@ use thiserror::Error;
 use tokio::task::JoinError;
 
 use crate::array::ArrayError;
+use crate::session_config::SessionConfigError;
 use crate::util::value_encoding::error::ValueEncodingError;
 
 const ERROR_SUPPRESSOR_RESET_DURATION: Duration = Duration::from_millis(60 * 60 * 1000); // 1h
@@ -191,8 +192,12 @@ pub enum ErrorCode {
     ),
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
-    #[error("unrecognized configuration parameter \"{0}\"")]
-    UnrecognizedConfigurationParameter(String),
+    #[error("Failed to get/set session config: {0}")]
+    SessionConfig(
+        #[from]
+        #[backtrace]
+        SessionConfigError,
+    ),
 }
 
 pub fn internal_error(msg: impl Into<String>) -> RwError {
@@ -332,6 +337,12 @@ impl From<PbFieldNotFound> for RwError {
             err.0
         ))
         .into()
+    }
+}
+
+impl From<SessionConfigError> for RwError {
+    fn from(value: SessionConfigError) -> Self {
+        ErrorCode::SessionConfig(value).into()
     }
 }
 

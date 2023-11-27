@@ -803,6 +803,8 @@ impl Binder {
                 ("string_to_array", raw_call(ExprType::StringToArray)),
                 ("encode", raw_call(ExprType::Encode)),
                 ("decode", raw_call(ExprType::Decode)),
+                ("convert_from", raw_call(ExprType::ConvertFrom)),
+                ("convert_to", raw_call(ExprType::ConvertTo)),
                 ("sha1", raw_call(ExprType::Sha1)),
                 ("sha224", raw_call(ExprType::Sha224)),
                 ("sha256", raw_call(ExprType::Sha256)),
@@ -1181,7 +1183,7 @@ impl Binder {
                     let mut session_config = binder.session_config.write();
 
                     // TODO: report session config changes if necessary.
-                    session_config.set(setting_name, vec![new_value.to_string()], ())?;
+                    session_config.set(setting_name, new_value.to_string(), &mut())?;
 
                     Ok(ExprImpl::literal_varchar(new_value.to_string()))
                 }))),

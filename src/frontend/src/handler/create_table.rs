@@ -540,7 +540,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     }
 
     let cdc_table_type = CdcTableType::from_properties(&properties);
-    if cdc_table_type.can_backfill() && context.session_ctx().config().get_cdc_backfill() {
+    if cdc_table_type.can_backfill() && context.session_ctx().config().cdc_backfill() {
         // debezium connector will only consume changelogs from latest offset on this mode
         properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
 
@@ -708,7 +708,9 @@ fn gen_table_plan_inner(
         row_id_index: row_id_index.map(|i| i as _),
         columns: {
             let mut source_columns = columns.clone();
-            if let Some(t) = cdc_table_type && t.can_backfill() {
+            if let Some(t) = cdc_table_type
+                && t.can_backfill()
+            {
                 // Append the offset column to be used in the cdc backfill
                 let offset_column = ColumnCatalog::offset_column();
                 source_columns.push(offset_column);
@@ -1048,10 +1050,13 @@ pub async fn handle_create_table(
         .await?;
 
         let mut graph = build_graph(plan);
-        graph.parallelism = session
-            .config()
-            .get_streaming_parallelism()
-            .map(|parallelism| Parallelism { parallelism });
+        graph.parallelism =
+            session
+                .config()
+                .streaming_parallelism()
+                .map(|parallelism| Parallelism {
+                    parallelism: parallelism.get(),
+                });
         (graph, source, table, job_type)
     };
 

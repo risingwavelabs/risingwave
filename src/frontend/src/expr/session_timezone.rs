@@ -17,7 +17,7 @@ pub use risingwave_pb::expr::expr_node::Type as ExprType;
 
 pub use crate::expr::expr_rewriter::ExprRewriter;
 pub use crate::expr::function_call::FunctionCall;
-use crate::expr::{Expr, ExprImpl};
+use crate::expr::{Expr, ExprImpl, ExprVisitor};
 use crate::session::current;
 
 /// `SessionTimezone` will be used to resolve session
@@ -262,5 +262,37 @@ impl SessionTimezone {
             return_type,
         )
         .into()
+    }
+}
+
+#[derive(Default)]
+pub struct TimestamptzExprFinder {
+    has: bool,
+}
+
+impl TimestamptzExprFinder {
+    pub fn has(&self) -> bool {
+        self.has
+    }
+}
+
+impl ExprVisitor for TimestamptzExprFinder {
+    fn visit_function_call(&mut self, func_call: &FunctionCall) {
+        if func_call.return_type() == DataType::Timestamptz {
+            self.has = true;
+            return;
+        }
+
+        for input in &func_call.inputs {
+            if input.return_type() == DataType::Timestamptz {
+                self.has = true;
+                return;
+            }
+        }
+
+        func_call
+            .inputs()
+            .iter()
+            .for_each(|expr| self.visit_expr(expr));
     }
 }

@@ -1111,7 +1111,7 @@ pub async fn handle_create_source(
 
     // gated the feature with a session variable
     let create_cdc_source_job =
-        is_cdc_connector(&with_properties) && session.config().get_cdc_backfill();
+        is_cdc_connector(&with_properties) && session.config().cdc_backfill();
 
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
         &session,
@@ -1225,10 +1225,13 @@ pub async fn handle_create_source(
             // generate stream graph for cdc source job
             let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
             let mut graph = build_graph(stream_plan);
-            graph.parallelism = session
-                .config()
-                .get_streaming_parallelism()
-                .map(|parallelism| Parallelism { parallelism });
+            graph.parallelism =
+                session
+                    .config()
+                    .streaming_parallelism()
+                    .map(|parallelism| Parallelism {
+                        parallelism: parallelism.get(),
+                    });
             graph
         };
         catalog_writer
@@ -1247,12 +1250,13 @@ pub mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{
-        DEFAULT_DATABASE_NAME, DEFAULT_KEY_COLUMN_NAME, DEFAULT_SCHEMA_NAME, OFFSET_COLUMN_NAME,
-        ROWID_PREFIX, TABLE_NAME_COLUMN_NAME,
+        CDC_SOURCE_COLUMN_NUM, DEFAULT_DATABASE_NAME, DEFAULT_KEY_COLUMN_NAME, DEFAULT_SCHEMA_NAME,
+        OFFSET_COLUMN_NAME, ROWID_PREFIX, TABLE_NAME_COLUMN_NAME,
     };
     use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
+    use crate::handler::create_source::debezium_cdc_source_schema;
     use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[tokio::test]
@@ -1308,7 +1312,7 @@ pub mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
         let session = frontend.session_ref();
         session
-            .set_config("cdc_backfill", vec!["true".to_string()])
+            .set_config("cdc_backfill", "true".to_string())
             .unwrap();
 
         frontend
@@ -1337,5 +1341,12 @@ pub mod tests {
             TABLE_NAME_COLUMN_NAME => DataType::Varchar,
         };
         assert_eq!(columns, expected_columns);
+    }
+
+    #[tokio::test]
+    async fn test_cdc_source_job_schema() {
+        let columns = debezium_cdc_source_schema();
+        // make sure it doesn't broken by future PRs
+        assert_eq!(CDC_SOURCE_COLUMN_NUM, columns.len() as u32);
     }
 }

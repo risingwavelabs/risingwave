@@ -392,7 +392,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: vec![SetVariableValue::Ident("b".into())],
+            value: SetVariableValue::Ident("b".into()),
         }
     );
 
@@ -402,9 +402,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: vec![SetVariableValue::Literal(Value::SingleQuotedString(
-                "b".into()
-            ))],
+            value: SetVariableValue::Literal(Value::SingleQuotedString("b".into())),
         }
     );
 
@@ -414,7 +412,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: vec![SetVariableValue::Literal(number("0"))],
+            value: SetVariableValue::Literal(number("0")),
         }
     );
 
@@ -424,7 +422,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: false,
             variable: "a".into(),
-            value: vec![SetVariableValue::Default],
+            value: SetVariableValue::Default,
         }
     );
 
@@ -434,7 +432,7 @@ fn parse_set() {
         Statement::SetVariable {
             local: true,
             variable: "a".into(),
-            value: vec![SetVariableValue::Ident("b".into())],
+            value: SetVariableValue::Ident("b".into()),
         }
     );
 
@@ -1137,7 +1135,7 @@ fn parse_dollar_quoted_string() {
 
     let stmt = parse_sql_statements(sql).unwrap();
 
-    let projection = match stmt.get(0).unwrap() {
+    let projection = match stmt.first().unwrap() {
         Statement::Query(query) => match &query.body {
             SetExpr::Select(select) => &select.projection,
             _ => unreachable!(),

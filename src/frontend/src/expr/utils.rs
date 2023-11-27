@@ -354,10 +354,6 @@ pub struct CollectInputRef {
 }
 
 impl ExprVisitor for CollectInputRef {
-    type Result = ();
-
-    fn merge(_: (), _: ()) {}
-
     fn visit_input_ref(&mut self, expr: &InputRef) {
         self.input_bits.insert(expr.index());
     }
@@ -408,17 +404,19 @@ pub fn collect_input_refs<'a>(
 
 /// Count `Now`s in the expression.
 #[derive(Clone, Default)]
-pub struct CountNow {}
+pub struct CountNow {
+    count: usize,
+}
+
+impl CountNow {
+    pub fn count(&self) -> usize {
+        self.count
+    }
+}
 
 impl ExprVisitor for CountNow {
-    type Result = usize;
-
-    fn merge(a: usize, b: usize) -> usize {
-        a + b
-    }
-
-    fn visit_now(&mut self, _: &super::Now) -> usize {
-        1
+    fn visit_now(&mut self, _: &super::Now) {
+        self.count += 1;
     }
 }
 

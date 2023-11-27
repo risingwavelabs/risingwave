@@ -49,7 +49,9 @@ fn compact_task_progress_to_rows(
     for compact_task_progress in compact_task_progress_vec {
         rows.push(OwnedRow::new(vec![
             Some(ScalarImpl::Int64(
-                compact_task_progress.compaction_group_id as _,
+                compact_task_progress
+                    .compaction_group_id
+                    .unwrap_or_default() as _,
             )),
             Some(ScalarImpl::Int64(compact_task_progress.task_id as _)),
             Some(ScalarImpl::Int32(
