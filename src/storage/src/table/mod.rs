@@ -232,6 +232,10 @@ impl<T: AsRef<[u8]>> KeyedRow<T> {
     pub fn key(&self) -> &[u8] {
         self.vnode_prefixed_key.key_part()
     }
+
+    pub fn into_parts(self) -> (TableKey<T>, OwnedRow) {
+        (self.vnode_prefixed_key, self.row)
+    }
 }
 
 impl<T: AsRef<[u8]>> Deref for KeyedRow<T> {

@@ -1204,6 +1204,25 @@ where
         ))
     }
 
+    pub async fn iter_with_vnode_and_output_indices(
+        &self,
+        vnode: VirtualNode,
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + '_> {
+        assert!(IS_REPLICATED);
+        let stream = self
+            .iter_with_vnode(vnode, pk_range, prefetch_options)
+            .await?;
+        Ok(stream.map(|row| {
+            row.map(|keyed_row| {
+                let (vnode_prefixed_key, row) = keyed_row.into_parts();
+                let row = row.project(&self.output_indices).into_owned_row();
+                KeyedRow::new(vnode_prefixed_key, row)
+            })
+        }))
+    }
+
     async fn iter_kv(
         &self,
         key_range: (Bound<Bytes>, Bound<Bytes>),

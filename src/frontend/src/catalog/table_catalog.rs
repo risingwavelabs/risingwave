@@ -500,15 +500,15 @@ impl TableCatalog {
     /// Instead it should move it, so the old definition will not be reused,
     /// leading to inconsistencies.
     pub fn into_replicated(self, output_indices: Vec<usize>) -> Self {
-        let mut output_value_indices = vec![];
-        for output_idx in &output_indices {
-            if self.value_indices.contains(output_idx) {
-                output_value_indices.push(*output_idx);
-            }
-        }
-        println!("output_value_indices: {:?}", output_value_indices);
+        // FIXME: Support value indices for ColumnAwareSerde.
+        // let mut output_value_indices = vec![];
+        // for output_idx in &output_indices {
+        //     if self.value_indices.contains(output_idx) {
+        //         output_value_indices.push(*output_idx);
+        //     }
+        // }
         Self {
-            value_indices: output_value_indices,
+            // value_indices: output_value_indices,
             output_indices,
             ..self
         }

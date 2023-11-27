@@ -591,7 +591,7 @@ where
             let range_bounds = range_bounds.unwrap();
 
             let vnode_row_iter = upstream_table
-                .iter_with_vnode(vnode, &range_bounds, Default::default())
+                .iter_with_vnode_and_output_indices(vnode, &range_bounds, Default::default())
                 .await?;
 
             // TODO: Is there some way to avoid double-pin here?
