@@ -13,26 +13,27 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::{ParallelUnitMapping, VirtualNode};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_common::util::stream_graph_visitor::{
-    visit_stream_node, visit_stream_node, visit_stream_node_cont,
-};
+use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_cont};
 use risingwave_connector::dispatch_source_prop;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SourceProperties, SplitEnumerator,
 };
+use risingwave_pb::catalog;
 use risingwave_pb::catalog::connection::private_link_service::PbPrivateLinkProvider;
 use risingwave_pb::catalog::{
-    connection, Comment, Connection, CreateType, Database, Function, Schema, Source, Table, View,
+    connection, Comment, Connection, CreateType, Database, Function, Schema, Sink, Source, Table,
+    View,
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
@@ -624,12 +625,62 @@ impl DdlController {
         Ok(())
     }
 
+    async fn check_cycle_for_sink(
+        &self,
+        sink: &catalog::Sink,
+        table_id: TableId,
+    ) -> MetaResult<bool> {
+        let reader = self.catalog_manager.get_catalog_core_guard().await;
+
+        let mut q: VecDeque<RelationIdEnum> = VecDeque::new();
+
+        let mut visited_tables = HashSet::new();
+
+        visited_tables.insert(table_id);
+
+        for table_id in &sink.dependent_relations {
+            q.push_front(RelationIdEnum::Table(*table_id));
+        }
+
+        while !q.is_empty() {
+            match q.pop_front() {
+                Some(RelationIdEnum::Table(table_id)) => {
+                    if visited_tables.contains(&table_id) {
+                        return Ok(true);
+                    }
+                    let _ = visited_tables.insert(table_id);
+
+                    if let Some(table) = reader.database.get_table(table_id) {
+                        for sink_id in &table.incoming_sinks {
+                            q.push_front(RelationIdEnum::Sink(*sink_id));
+                        }
+                    } else {
+                        bail!("table {} not found when checking cycle in create sink into table procedure", table_id);
+                    }
+                }
+                Some(RelationIdEnum::Sink(sink_id)) => {
+                    if let Some(sink) = reader.database.get_sink(sink_id) {
+                        for table_id in &sink.dependent_relations {
+                            q.push_front(RelationIdEnum::Table(*table_id));
+                        }
+                    } else {
+                        bail!("table {} not found when checking cycle in create sink into table procedure", table_id);
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        Ok(false)
+    }
+
     // Here we modify the union node of the downstream table by the TableFragments of the to-be-created sink upstream.
     // The merge in the union has already been set up in the frontend and will be filled with specific upstream actors in this function.
     // Meanwhile, the Dispatcher corresponding to the upstream of the merge will also be added to the replace table context here.
     async fn inject_replace_table_job(
         &self,
         env: StreamEnvironment,
+        sink: &Sink,
         sink_table_fragments: &TableFragments,
         ReplaceTableInfo {
             mut streaming_job,
@@ -637,6 +688,14 @@ impl DdlController {
             col_index_mapping,
         }: ReplaceTableInfo,
     ) -> MetaResult<ReplaceTableJob> {
+        let table_id = streaming_job.table().unwrap().id;
+
+        if self.check_cycle_for_sink(sink, table_id).await? {
+            return Err(MetaError::invalid_parameter(
+                "Creating such a sink will result in circular dependency.",
+            ));
+        }
+
         let fragment_graph = self
             .prepare_replace_table(&mut streaming_job, fragment_graph)
             .await?;
@@ -1080,8 +1139,12 @@ impl DdlController {
         // 5. If we have other tables that will be affected (for example, Sink into table),
         // we need to modify them to generate a replace table plan to change their operational status.
         let replace_table_job = if let Some(replace_table_info) = affected_table_replace_info {
+            let StreamingJob::Sink(sink) = stream_job else {
+                bail!("Only sink into table can have affected tables")
+            };
+
             Some(
-                self.inject_replace_table_job(env, &table_fragments, replace_table_info)
+                self.inject_replace_table_job(env, sink, &table_fragments, replace_table_info)
                     .await?,
             )
         } else {
