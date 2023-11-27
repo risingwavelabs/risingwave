@@ -15,8 +15,8 @@
 package com.risingwave.connector;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
@@ -169,13 +169,20 @@ public class EsSink extends SinkWriterBase {
         /** This method is called after bulk execution. */
         @Override
         public void afterBulk(long executionId, BulkRequest request, BulkResponse response) {
-            LOG.info("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
+            if (response.hasFailures()) {
+                LOG.error(
+                        "Bulk of {} actions failed. Failure: {:?}",
+                        request.numberOfActions(),
+                        response.buildFailureMessage());
+            } else {
+                LOG.info("Sent bulk of {} actions to Elasticsearch.", request.numberOfActions());
+            }
         }
 
         /** This method is called when the bulk failed and raised a Throwable */
         @Override
         public void afterBulk(long executionId, BulkRequest request, Throwable failure) {
-            LOG.info(
+            LOG.error(
                     "Bulk of {} actions failed. Failure: {}",
                     request.numberOfActions(),
                     failure.getMessage());
@@ -207,9 +214,8 @@ public class EsSink extends SinkWriterBase {
                     break;
                 case JSONB:
                     ObjectMapper mapper = new ObjectMapper();
-                    col =
-                            mapper.readValue(
-                                    (String) col, new TypeReference<Map<String, Object>>() {});
+                    JsonNode jsonNode = mapper.readTree((String) col);
+                    col = convertJsonNode(jsonNode);
                     break;
                 default:
                     break;
@@ -219,6 +225,36 @@ public class EsSink extends SinkWriterBase {
             doc.put(getTableSchema().getColumnDesc(i).getName(), col);
         }
         return doc;
+    }
+
+    private static Object convertJsonNode(JsonNode jsonNode) {
+        if (jsonNode.isObject()) {
+            Map<String, Object> resultMap = new HashMap<>();
+            jsonNode.fields()
+                    .forEachRemaining(
+                            entry -> {
+                                resultMap.put(entry.getKey(), convertJsonNode(entry.getValue()));
+                            });
+            return resultMap;
+        } else if (jsonNode.isArray()) {
+            List<Object> resultList = new ArrayList<>();
+            jsonNode.elements()
+                    .forEachRemaining(
+                            element -> {
+                                resultList.add(convertJsonNode(element));
+                            });
+            return resultList;
+        } else if (jsonNode.isNumber()) {
+            return jsonNode.numberValue();
+        } else if (jsonNode.isTextual()) {
+            return jsonNode.textValue();
+        } else if (jsonNode.isBoolean()) {
+            return jsonNode.booleanValue();
+        } else if (jsonNode.isNull()) {
+            return null;
+        } else {
+            throw new IllegalArgumentException("Unsupported JSON type");
+        }
     }
 
     /**
