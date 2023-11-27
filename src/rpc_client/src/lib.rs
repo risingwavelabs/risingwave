@@ -116,7 +116,7 @@ where
             .try_get_with(
                 addr.clone(),
                 S::new_clients(addr.clone(), self.connection_pool_size as usize)
-                    .map_ok(|v| Arc::new(v)),
+                    .map_ok(Arc::new),
             )
             .await
             .map_err(|e| -> RpcError {
