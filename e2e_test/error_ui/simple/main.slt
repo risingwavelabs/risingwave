@@ -79,4 +79,5 @@ db error: ERROR: Failed to run the query
 Caused by these errors (recent errors listed first):
   1: Failed to get/set session config
   2: Invalid value `read_committed` for `transaction_isolation_level`
-  3: Feature is not yet implemented: isolation level. Tracking issue: https://github.com/risingwavelabs/risingwave/issues/10736
+  3: Feature is not yet implemented: isolation level
+Tracking issue: https://github.com/risingwavelabs/risingwave/issues/10736
