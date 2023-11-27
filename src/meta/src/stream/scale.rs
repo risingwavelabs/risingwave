@@ -2252,23 +2252,28 @@ pub(crate) fn rebalance_units<T, U>(
     slots: HashMap<T, BTreeSet<U>>,
     slots_to_remove: BTreeSet<T>,
     slots_to_add: BTreeSet<T>,
-    target_unit_size: usize,
-) -> HashMap<T, BTreeSet<U>>
+) -> MetaResult<HashMap<T, BTreeSet<U>>>
 where
     T: Clone + Ord + PartialOrd + std::fmt::Debug + std::hash::Hash,
-    U: Ord + PartialOrd,
+    U: Ord + PartialOrd + std::fmt::Debug,
 {
-    assert!(slots.len() >= slots_to_remove.len());
+    if slots.len() < slots_to_remove.len() {
+        bail!(
+            "slots len {} < slots to remove len {}",
+            slots.len(),
+            slots_to_remove.len()
+        );
+    }
 
     let target_slot_size = slots.len() - slots_to_remove.len() + slots_to_add.len();
-
-    assert!(target_slot_size > 0);
 
     struct Balance<T, U> {
         key: T,
         units: BTreeSet<U>,
         balance: i32,
     }
+
+    let target_unit_size = slots.values().map(|units| units.len()).sum::<usize>();
 
     let (expected, mut remain) = target_unit_size.div_rem(&target_slot_size);
 
@@ -2294,9 +2299,9 @@ where
         })
         .sum::<usize>();
 
-    let order_by_units_desc = |(_, units_a): &(T, BTreeSet<U>),
-                               (_, units_b): &(T, BTreeSet<U>)|
-     -> Ordering { units_a.len().cmp(&units_b.len()).reverse() };
+    let order_by_units_desc = |(_, a): &(T, BTreeSet<U>), (_, b): &(T, BTreeSet<U>)| -> Ordering {
+        a.len().cmp(&b.len()).reverse()
+    };
 
     removed.sort_by(order_by_units_desc);
     rest.sort_by(order_by_units_desc);
@@ -2345,7 +2350,9 @@ where
         }
     }
 
-    assert_eq!(remain, 0);
+    if remain != 0 {
+        bail!("remain {} != 0", remain);
+    }
 
     let mut v: VecDeque<_> = removed_balances
         .chain(rest_balances)
@@ -2386,8 +2393,6 @@ where
 
         dst.units.extend(moving_units);
 
-        assert_eq!(dst.units.len() as i32, dst.balance + n);
-
         src.balance -= n;
         dst.balance += n;
 
@@ -2404,5 +2409,24 @@ where
         }
     }
 
-    result
+    Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+
+    use maplit::{btreeset, hashmap};
+
+    use crate::stream::rebalance_units;
+
+    #[test]
+    fn test_rebalance_units() {
+        let slots = hashmap! {
+            1 => btreeset![1, 2, 3],
+            2 => btreeset![4, 5, 6],
+        };
+
+        let result = rebalance_units(slots, btreeset! {}, btreeset! {3}).unwrap();
+        println!("{:?}", result);
+    }
 }
