@@ -22,8 +22,11 @@ use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_c
 use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
+/// Please ensure that this value is the same as the one in the `risingwave-auto-scale.toml` file.
+const MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE: u64 = 15;
+
 #[tokio::test]
-async fn test_scale_in_when_recovery() -> Result<()> {
+async fn test_passive_online_and_offline() -> Result<()> {
     let config = Configuration::for_auto_scale();
     let mut cluster = Cluster::start(config.clone()).await?;
     let mut session = cluster.start_session();
@@ -91,12 +94,13 @@ async fn test_scale_in_when_recovery() -> Result<()> {
         config.compute_nodes * config.compute_node_cores
     );
 
-    // ensure the restart delay is longer than config in `risingwave-auto-scale.toml`
-    let restart_delay = 30;
+    cluster.simple_kill_nodes(vec![host_name.clone()]).await;
 
-    cluster
-        .kill_nodes_and_restart(vec![host_name], restart_delay)
-        .await;
+    // wait for a while
+    sleep(Duration::from_secs(
+        MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
+    ))
+    .await;
 
     let table_mat_fragment = cluster
         .locate_one_fragment(vec![
@@ -161,6 +165,114 @@ async fn test_scale_in_when_recovery() -> Result<()> {
         .run("select * from m")
         .await?
         .assert_result_eq("150");
+
+    cluster.simple_restart_nodes(vec![host_name]).await;
+
+    // wait for a while
+    sleep(Duration::from_secs(
+        MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
+    ))
+    .await;
+
+    let table_mat_fragment = cluster
+        .locate_one_fragment(vec![
+            identity_contains("materialize"),
+            no_identity_contains("simpleAgg"),
+        ])
+        .await?;
+
+    let (_, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
+
+    assert_eq!(initialized_parallelism, used_parallel_units.len());
+
+    let stream_scan_fragment = cluster
+        .locate_one_fragment(vec![identity_contains("streamTableScan")])
+        .await?;
+
+    let (_, used_parallel_units) = stream_scan_fragment.parallel_unit_usage();
+
+    assert_eq!(initialized_parallelism, used_parallel_units.len());
+    session
+        .run("select count(*) from t")
+        .await?
+        .assert_result_eq("150");
+
+    session
+        .run("select * from m")
+        .await?
+        .assert_result_eq("150");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_active_online() -> Result<()> {
+    let config = Configuration::for_auto_scale();
+    let mut cluster = Cluster::start(config.clone()).await?;
+    let mut session = cluster.start_session();
+
+    // Keep one worker reserved for adding later.
+    cluster
+        .simple_kill_nodes(vec!["compute-2".to_string()])
+        .await;
+
+    sleep(Duration::from_secs(
+        MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
+    ))
+    .await;
+
+    session.run("create table t (v1 int);").await?;
+    session
+        .run("create materialized view m as select count(*) from t;")
+        .await?;
+
+    session
+        .run("insert into t select * from generate_series(1, 100)")
+        .await?;
+    session.run("flush").await?;
+
+    sleep(Duration::from_secs(5)).await;
+
+    let table_mat_fragment = cluster
+        .locate_one_fragment(vec![
+            identity_contains("materialize"),
+            no_identity_contains("simpleAgg"),
+        ])
+        .await?;
+
+    let (all_parallel_units, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
+
+    assert_eq!(all_parallel_units.len(), used_parallel_units.len());
+
+    assert_eq!(
+        all_parallel_units.len(),
+        (config.compute_nodes - 1) * config.compute_node_cores
+    );
+
+    cluster
+        .simple_restart_nodes(vec!["compute-2".to_string()])
+        .await;
+
+    sleep(Duration::from_secs(
+        MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 2,
+    ))
+    .await;
+
+    let table_mat_fragment = cluster
+        .locate_one_fragment(vec![
+            identity_contains("materialize"),
+            no_identity_contains("simpleAgg"),
+        ])
+        .await?;
+
+    let (all_parallel_units, used_parallel_units) = table_mat_fragment.parallel_unit_usage();
+
+    assert_eq!(all_parallel_units.len(), used_parallel_units.len());
+
+    assert_eq!(
+        all_parallel_units.len(),
+        config.compute_nodes * config.compute_node_cores
+    );
 
     Ok(())
 }

@@ -22,14 +22,15 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    BranchedObject, CompactTaskAssignment, CompactionGroupInfo, HummockSnapshot, HummockVersion,
-    HummockVersionDelta,
+    BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
+    HummockSnapshot, HummockVersion, HummockVersionDelta,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
+use risingwave_pb::meta::EventLog;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
@@ -99,8 +100,12 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_hummock_meta_configs(&self) -> Result<HashMap<String, String>>;
 
+    async fn list_event_log(&self) -> Result<Vec<EventLog>>;
     async fn list_compact_task_assignment(&self) -> Result<Vec<CompactTaskAssignment>>;
+
     async fn list_all_nodes(&self) -> Result<Vec<WorkerNode>>;
+
+    async fn list_compact_task_progress(&self) -> Result<Vec<CompactTaskProgress>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -246,11 +251,19 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_hummock_meta_config().await
     }
 
+    async fn list_event_log(&self) -> Result<Vec<EventLog>> {
+        self.0.list_event_log().await
+    }
+
     async fn list_compact_task_assignment(&self) -> Result<Vec<CompactTaskAssignment>> {
-        self.0.rise_ctl_list_compact_task_assignment().await
+        self.0.list_compact_task_assignment().await
     }
 
     async fn list_all_nodes(&self) -> Result<Vec<WorkerNode>> {
         self.0.list_worker_nodes(None).await
+    }
+
+    async fn list_compact_task_progress(&self) -> Result<Vec<CompactTaskProgress>> {
+        self.0.list_compact_task_progress().await
     }
 }

@@ -623,6 +623,26 @@ impl Cluster {
         .await;
     }
 
+    #[cfg_or_panic(madsim)]
+    pub async fn simple_kill_nodes(&self, nodes: impl IntoIterator<Item = impl AsRef<str>>) {
+        join_all(nodes.into_iter().map(|name| async move {
+            let name = name.as_ref();
+            tracing::info!("kill {name}");
+            Handle::current().kill(name);
+        }))
+        .await;
+    }
+
+    #[cfg_or_panic(madsim)]
+    pub async fn simple_restart_nodes(&self, nodes: impl IntoIterator<Item = impl AsRef<str>>) {
+        join_all(nodes.into_iter().map(|name| async move {
+            let name = name.as_ref();
+            tracing::info!("restart {name}");
+            Handle::current().restart(name);
+        }))
+        .await;
+    }
+
     /// Create a node for kafka producer and prepare data.
     #[cfg_or_panic(madsim)]
     pub async fn create_kafka_producer(&self, datadir: &str) {

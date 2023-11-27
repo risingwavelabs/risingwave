@@ -12,17 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
-use crate::error::BatchError;
+use crate::error::{BatchError, Result};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -50,7 +48,7 @@ impl Executor for FilterExecutor {
 }
 
 impl FilterExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let mut data_chunk_builder =
             DataChunkBuilder::new(self.child.schema().data_types(), self.chunk_size);
@@ -68,9 +66,7 @@ impl FilterExecutor {
                     yield data_chunk;
                 }
             } else {
-                return Err(
-                    BatchError::Internal(anyhow!("Filter can only receive bool array")).into(),
-                );
+                bail!("Filter can only receive bool array");
             }
         }
 

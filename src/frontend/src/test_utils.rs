@@ -43,15 +43,15 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    BranchedObject, CompactTaskAssignment, CompactionGroupInfo, HummockSnapshot, HummockVersion,
-    HummockVersionDelta,
+    BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
+    HummockSnapshot, HummockVersion, HummockVersionDelta,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::SystemParams;
+use risingwave_pb::meta::{EventLog, SystemParams};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -924,11 +924,19 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
+    async fn list_event_log(&self) -> RpcResult<Vec<EventLog>> {
+        unimplemented!()
+    }
+
     async fn list_compact_task_assignment(&self) -> RpcResult<Vec<CompactTaskAssignment>> {
         unimplemented!()
     }
 
     async fn list_all_nodes(&self) -> RpcResult<Vec<WorkerNode>> {
+        unimplemented!()
+    }
+
+    async fn list_compact_task_progress(&self) -> RpcResult<Vec<CompactTaskProgress>> {
         unimplemented!()
     }
 }

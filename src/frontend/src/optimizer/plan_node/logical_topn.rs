@@ -25,6 +25,7 @@ use super::{
     ToBatch, ToStream,
 };
 use crate::expr::{ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     BatchTopN, ColumnPruningContext, LogicalProject, PredicatePushdownContext,
     RewriteStreamContext, StreamTopN, ToStreamContext,
@@ -297,6 +298,8 @@ impl ColPrunable for LogicalTopN {
 }
 
 impl ExprRewritable for LogicalTopN {}
+
+impl ExprVisitable for LogicalTopN {}
 
 impl PredicatePushdown for LogicalTopN {
     fn predicate_pushdown(

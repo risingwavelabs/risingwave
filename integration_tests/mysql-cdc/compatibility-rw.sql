@@ -15,6 +15,7 @@ c_binary_255 bytea,
 c_varbinary_10000 bytea,
 c_date date,
 c_time time,
+c_datetime timestamp,
 c_timestamp timestamptz,
 PRIMARY KEY (c_boolean,c_bigint,c_date)
 ) WITH (

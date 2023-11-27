@@ -130,7 +130,6 @@ pub fn try_get_exact_serialize_datum_size(arr: &ArrayImpl) -> Option<usize> {
         ArrayImpl::Float32(_) => Some(4),
         ArrayImpl::Float64(_) => Some(8),
         ArrayImpl::Bool(_) => Some(1),
-        ArrayImpl::Jsonb(_) => Some(8),
         ArrayImpl::Decimal(_) => Some(estimate_serialize_decimal_size()),
         ArrayImpl::Interval(_) => Some(estimate_serialize_interval_size()),
         ArrayImpl::Date(_) => Some(estimate_serialize_date_size()),
@@ -246,7 +245,8 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Timestamp(_) => estimate_serialize_timestamp_size(),
         ScalarRefImpl::Timestamptz(_) => 8,
         ScalarRefImpl::Time(_) => estimate_serialize_time_size(),
-        ScalarRefImpl::Jsonb(_) => 8,
+        // not exact as we use internal encoding size to estimate the json string size
+        ScalarRefImpl::Jsonb(v) => v.capacity(),
         ScalarRefImpl::Struct(s) => estimate_serialize_struct_size(s),
         ScalarRefImpl::List(v) => estimate_serialize_list_size(v),
     }

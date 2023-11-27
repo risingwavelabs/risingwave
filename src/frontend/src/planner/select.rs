@@ -182,7 +182,7 @@ impl Planner {
 
         if let BoundDistinct::Distinct = distinct {
             let fields = root.schema().fields();
-            let group_key = if let Some(field) = fields.get(0)
+            let group_key = if let Some(field) = fields.first()
                 && field.name == "projected_row_id"
             {
                 // Do not group by projected_row_id hidden column.

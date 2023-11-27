@@ -26,7 +26,7 @@ use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, SysCatalogReader, TableDesc, TableId, DEFAULT_SUPER_USER_ID,
     NON_RESERVED_SYS_CATALOG_ID,
 };
-use risingwave_common::error::Result;
+use risingwave_common::error::BoxedError;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 use risingwave_pb::user::grant_privilege::Object;
@@ -314,14 +314,14 @@ macro_rules! prepare_sys_catalog {
 
         #[async_trait]
         impl SysCatalogReader for SysCatalogReaderImpl {
-            async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>> {
+            async fn read_table(&self, table_id: &TableId) -> Result<Vec<OwnedRow>, BoxedError> {
                 let table_name = SYS_CATALOGS.table_name_by_id.get(table_id).unwrap();
                 $(
                     if $builtin_catalog.name() == *table_name {
                         $(
                             let rows = self.$func();
                             $(let rows = rows.$await;)?
-                            return rows;
+                            return Ok(rows?);
                         )?
                     }
                 )*
@@ -405,7 +405,9 @@ prepare_sys_catalog! {
     { BuiltinCatalog::Table(&RW_HUMMOCK_BRANCHED_OBJECTS), read_hummock_branched_objects await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACTION_GROUP_CONFIGS), read_hummock_compaction_group_configs await },
     { BuiltinCatalog::Table(&RW_HUMMOCK_META_CONFIGS), read_hummock_meta_configs await},
-    { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACT_TASK_ASSIGNMEN), read_hummock_compaction_status await },
+    { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACT_TASK_ASSIGNMENT), read_hummock_compact_task_assignments await },
+    { BuiltinCatalog::Table(&RW_HUMMOCK_COMPACT_TASK_PROGRESS), read_hummock_compact_task_progress await },
+    { BuiltinCatalog::Table(&RW_EVENT_LOGS), read_event_logs await},
     { BuiltinCatalog::Table(&RW_DESCRIPTION), read_rw_description },
 }
 
