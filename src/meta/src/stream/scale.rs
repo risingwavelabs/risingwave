@@ -2426,7 +2426,23 @@ mod tests {
             2 => btreeset![4, 5, 6],
         };
 
-        let result = rebalance_units(slots, btreeset! {}, btreeset! {3}).unwrap();
-        println!("{:?}", result);
+        let result = rebalance_units(slots, btreeset![], btreeset![3]).unwrap();
+
+        for (_, vs) in result {
+            assert_eq!(vs.len(), 2);
+        }
+    }
+
+    #[test]
+    fn test_rebalance_units_single() {
+        let slots = hashmap! {
+            1 => btreeset![1],
+            2 => btreeset![],
+            3 => btreeset![],
+        };
+
+        let result = rebalance_units(slots, btreeset![2], btreeset![4]).unwrap();
+
+        assert_eq!(result[&1], btreeset![1])
     }
 }
