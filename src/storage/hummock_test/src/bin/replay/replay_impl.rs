@@ -56,7 +56,7 @@ where
     pub(crate) fn into_stream(self) -> impl Stream<Item = Result<ReplayItem>> {
         self.inner.map(|item_res| {
             item_res
-                .map(|(key, value)| (key.user_key.table_key.0.into(), value.into()))
+                .map(|(key, value)| (key.user_key.table_key.into_inner().into(), value.into()))
                 .map_err(|_| TraceError::IterFailed("iter failed to retrieve item".to_string()))
         })
     }
@@ -72,7 +72,10 @@ impl LocalReplayIter {
         #[for_await]
         for value in stream {
             let value = value.unwrap();
-            inner.push((value.0.user_key.table_key.0.into(), value.1.into()));
+            inner.push((
+                value.0.user_key.table_key.into_inner().into(),
+                value.1.into(),
+            ));
         }
         Self { inner }
     }
@@ -107,8 +110,8 @@ impl ReplayRead for GlobalReplayImpl {
         read_options: TracedReadOptions,
     ) -> Result<BoxStream<'static, Result<ReplayItem>>> {
         let key_range = (
-            key_range.0.map(TracedBytes::into).map(TableKey),
-            key_range.1.map(TracedBytes::into).map(TableKey),
+            key_range.0.map(TracedBytes::into).map(TableKey::new),
+            key_range.1.map(TracedBytes::into).map(TableKey::new),
         );
 
         let iter = self
@@ -129,7 +132,7 @@ impl ReplayRead for GlobalReplayImpl {
     ) -> Result<Option<TracedBytes>> {
         Ok(self
             .store
-            .get(TableKey(key.into()), epoch, read_options.into())
+            .get(TableKey::new(key.into()), epoch, read_options.into())
             .await
             .unwrap()
             .map(TracedBytes::from))
@@ -244,8 +247,8 @@ impl LocalReplayRead for LocalReplayImpl {
         read_options: TracedReadOptions,
     ) -> Result<BoxStream<'static, Result<ReplayItem>>> {
         let key_range = (
-            key_range.0.map(|b| TableKey(b.into())),
-            key_range.1.map(|b| TableKey(b.into())),
+            key_range.0.map(|b| TableKey::new(b.into())),
+            key_range.1.map(|b| TableKey::new(b.into())),
         );
 
         let iter = LocalStateStore::iter(&self.0, key_range, read_options.into())
@@ -263,7 +266,7 @@ impl LocalReplayRead for LocalReplayImpl {
         read_options: TracedReadOptions,
     ) -> Result<Option<TracedBytes>> {
         Ok(
-            LocalStateStore::get(&self.0, TableKey(key.into()), read_options.into())
+            LocalStateStore::get(&self.0, TableKey::new(key.into()), read_options.into())
                 .await
                 .unwrap()
                 .map(TracedBytes::from),
@@ -281,7 +284,7 @@ impl ReplayWrite for LocalReplayImpl {
     ) -> Result<()> {
         LocalStateStore::insert(
             &mut self.0,
-            TableKey(key.into()),
+            TableKey::new(key.into()),
             new_val.into(),
             old_val.map(|b| b.into()),
         )
@@ -290,7 +293,7 @@ impl ReplayWrite for LocalReplayImpl {
     }
 
     fn delete(&mut self, key: TracedBytes, old_val: TracedBytes) -> Result<()> {
-        LocalStateStore::delete(&mut self.0, TableKey(key.into()), old_val.into()).unwrap();
+        LocalStateStore::delete(&mut self.0, TableKey::new(key.into()), old_val.into()).unwrap();
         Ok(())
     }
 }

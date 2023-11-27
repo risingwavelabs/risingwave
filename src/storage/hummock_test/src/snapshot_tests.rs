@@ -112,8 +112,14 @@ async fn test_snapshot_inner(
     local
         .ingest_batch(
             vec![
-                (TableKey(Bytes::from("1")), StorageValue::new_put("test")),
-                (TableKey(Bytes::from("2")), StorageValue::new_put("test")),
+                (
+                    TableKey::new(Bytes::from("1")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    TableKey::new(Bytes::from("2")),
+                    StorageValue::new_put("test"),
+                ),
             ],
             vec![],
             WriteOptions {
@@ -147,9 +153,15 @@ async fn test_snapshot_inner(
     local
         .ingest_batch(
             vec![
-                (TableKey(Bytes::from("1")), StorageValue::new_delete()),
-                (TableKey(Bytes::from("3")), StorageValue::new_put("test")),
-                (TableKey(Bytes::from("4")), StorageValue::new_put("test")),
+                (TableKey::new(Bytes::from("1")), StorageValue::new_delete()),
+                (
+                    TableKey::new(Bytes::from("3")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    TableKey::new(Bytes::from("4")),
+                    StorageValue::new_put("test"),
+                ),
             ],
             vec![],
             WriteOptions {
@@ -184,9 +196,9 @@ async fn test_snapshot_inner(
     local
         .ingest_batch(
             vec![
-                (TableKey(Bytes::from("2")), StorageValue::new_delete()),
-                (TableKey(Bytes::from("3")), StorageValue::new_delete()),
-                (TableKey(Bytes::from("4")), StorageValue::new_delete()),
+                (TableKey::new(Bytes::from("2")), StorageValue::new_delete()),
+                (TableKey::new(Bytes::from("3")), StorageValue::new_delete()),
+                (TableKey::new(Bytes::from("4")), StorageValue::new_delete()),
             ],
             vec![],
             WriteOptions {
@@ -234,10 +246,22 @@ async fn test_snapshot_range_scan_inner(
     local
         .ingest_batch(
             vec![
-                (TableKey(Bytes::from("1")), StorageValue::new_put("test")),
-                (TableKey(Bytes::from("2")), StorageValue::new_put("test")),
-                (TableKey(Bytes::from("3")), StorageValue::new_put("test")),
-                (TableKey(Bytes::from("4")), StorageValue::new_put("test")),
+                (
+                    TableKey::new(Bytes::from("1")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    TableKey::new(Bytes::from("2")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    TableKey::new(Bytes::from("3")),
+                    StorageValue::new_put("test"),
+                ),
+                (
+                    TableKey::new(Bytes::from("4")),
+                    StorageValue::new_put("test"),
+                ),
             ],
             vec![],
             WriteOptions {

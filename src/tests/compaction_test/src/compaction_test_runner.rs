@@ -620,11 +620,11 @@ async fn open_hummock_iters(
     buf.put_u32(table_id);
     let b = buf.freeze();
     let range = (
-        Bound::Included(b.clone()).map(TableKey),
+        Bound::Included(b.clone()).map(TableKey::new),
         Bound::Excluded(Bytes::from(risingwave_hummock_sdk::key::next_key(
             b.as_ref(),
         )))
-        .map(TableKey),
+        .map(TableKey::new),
     );
 
     for &epoch in snapshots {

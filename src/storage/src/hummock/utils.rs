@@ -474,8 +474,11 @@ pub(crate) async fn do_update_sanity_check(
     }
 }
 
-pub fn cmp_delete_range_left_bounds(a: Bound<&Bytes>, b: Bound<&Bytes>) -> Ordering {
-    match (a, b) {
+pub fn cmp_delete_range_left_bounds(
+    a: Bound<&impl AsRef<[u8]>>,
+    b: Bound<&impl AsRef<[u8]>>,
+) -> Ordering {
+    match (a.map(AsRef::as_ref), b.map(AsRef::as_ref)) {
         // only right bound of delete range can be `Unbounded`
         (Unbounded, _) | (_, Unbounded) => unreachable!(),
         (Included(x), Included(y)) | (Excluded(x), Excluded(y)) => x.cmp(y),
@@ -511,7 +514,7 @@ pub(crate) fn filter_with_delete_range<'a>(
     }
     kv_iter.filter(move |(ref key, _)| {
         if let Some(range_bound) = range {
-            if cmp_delete_range_left_bounds(Included(&key.0), range_bound.0.as_ref())
+            if cmp_delete_range_left_bounds(Included(&key.as_ref()), range_bound.0.as_ref())
                 == Ordering::Less
             {
                 true

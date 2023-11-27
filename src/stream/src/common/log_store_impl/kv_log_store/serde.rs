@@ -788,7 +788,7 @@ mod tests {
 
         for (op, row) in stream_chunk.rows() {
             let (_, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
-            let key = remove_vnode_prefix(&key.0);
+            let key = remove_vnode_prefix(&key);
             assert!(key < delete_range_right1);
             serialized_keys.push(key);
             let (decoded_epoch, row_op) = serde.deserialize(value).unwrap();
@@ -807,7 +807,7 @@ mod tests {
         }
 
         let (key, encoded_barrier) = serde.serialize_barrier(epoch, DEFAULT_VNODE, false);
-        let key = remove_vnode_prefix(&key.0);
+        let key = remove_vnode_prefix(&key);
         match serde.deserialize(encoded_barrier).unwrap() {
             (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
                 assert!(!is_checkpoint);
@@ -827,7 +827,7 @@ mod tests {
 
         for (op, row) in stream_chunk.rows() {
             let (_, key, value) = serde.serialize_data_row(epoch, seq_id, op, row);
-            let key = remove_vnode_prefix(&key.0);
+            let key = remove_vnode_prefix(&key);
             assert!(key >= delete_range_right1);
             assert!(key < delete_range_right2);
             serialized_keys.push(key);
@@ -847,7 +847,7 @@ mod tests {
         }
 
         let (key, encoded_checkpoint_barrier) = serde.serialize_barrier(epoch, DEFAULT_VNODE, true);
-        let key = remove_vnode_prefix(&key.0);
+        let key = remove_vnode_prefix(&key);
         match serde.deserialize(encoded_checkpoint_barrier).unwrap() {
             (decoded_epoch, LogStoreRowOp::Barrier { is_checkpoint }) => {
                 assert_eq!(decoded_epoch, epoch);

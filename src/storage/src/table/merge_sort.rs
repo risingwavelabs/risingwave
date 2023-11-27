@@ -91,7 +91,7 @@ mod tests {
         let mut key = VirtualNode::ZERO.to_be_bytes().to_vec();
         key.extend(vec![i]);
         Ok(KeyedRow::new(
-            TableKey(key),
+            TableKey::new(key),
             OwnedRow::new(vec![Some(ScalarImpl::Int64(i as _))]),
         ))
     }

@@ -114,7 +114,11 @@ async fn build_table(
     for i in range {
         let start = (i % 8) as usize;
         let end = start + 8;
-        full_key.user_key.table_key[table_key_len - 8..].copy_from_slice(&i.to_be_bytes());
+        full_key
+            .user_key
+            .table_key
+            .range_mut(table_key_len - 8..)
+            .copy_from_slice(&i.to_be_bytes());
         builder
             .add_for_test(full_key.to_ref(), HummockValue::put(&value[start..end]))
             .await

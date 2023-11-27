@@ -382,7 +382,7 @@ pub async fn merge_imms_in_memory(
         .unwrap_or_default();
     let mut monotonic_tombstone_events = vec![];
     let target_extended_user_key =
-        PointRange::from_user_key(UserKey::new(table_id, TableKey(pivot.as_ref())), false);
+        PointRange::from_user_key(UserKey::new(table_id, TableKey::new(pivot.as_ref())), false);
     while del_iter.is_valid() && del_iter.key().le(&target_extended_user_key) {
         let event_key = del_iter.key().to_vec();
         del_iter.next().await?;
@@ -403,8 +403,10 @@ pub async fn merge_imms_in_memory(
             pivot = key;
             pivot_last_delete_epoch = MAX_EPOCH;
             versions = vec![];
-            let target_extended_user_key =
-                PointRange::from_user_key(UserKey::new(table_id, TableKey(pivot.as_ref())), false);
+            let target_extended_user_key = PointRange::from_user_key(
+                UserKey::new(table_id, TableKey::new(pivot.as_ref())),
+                false,
+            );
             while del_iter.is_valid() && del_iter.key().le(&target_extended_user_key) {
                 let event_key = del_iter.key().to_vec();
                 del_iter.next().await?;

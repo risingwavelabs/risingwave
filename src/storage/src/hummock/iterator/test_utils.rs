@@ -123,7 +123,7 @@ pub fn transform_shared_buffer(
 ) -> Vec<(TableKey<Bytes>, HummockValue<Bytes>)> {
     batches
         .into_iter()
-        .map(|(k, v)| (TableKey(k.into()), v))
+        .map(|(k, v)| (TableKey::new(k.into()), v))
         .collect_vec()
 }
 

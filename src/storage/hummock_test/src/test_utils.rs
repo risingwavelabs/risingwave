@@ -51,7 +51,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use crate::mock_notification_client::get_notification_client_for_test;
 
 pub fn gen_key_from_bytes(vnode: VirtualNode, payload: &[u8]) -> TableKey<Bytes> {
-    TableKey(Bytes::from(
+    TableKey::new(Bytes::from(
         [vnode.to_be_bytes().as_slice(), payload].concat(),
     ))
 }

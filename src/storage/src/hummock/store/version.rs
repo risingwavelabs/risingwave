@@ -153,8 +153,8 @@ impl StagingVersion {
         impl Iterator<Item = &SstableInfo> + 'a,
     ) {
         let (ref left, ref right) = table_key_range;
-        let left = left.as_ref().map(|key| TableKey(key.0.as_ref()));
-        let right = right.as_ref().map(|key| TableKey(key.0.as_ref()));
+        let left = left.as_ref().map(|key| TableKey::new(key.as_ref()));
+        let right = right.as_ref().map(|key| TableKey::new(key.as_ref()));
         let overlapped_imms = self
             .imm
             .iter()
@@ -566,7 +566,7 @@ impl HummockVersionReader {
 
             if let Some((data, data_epoch)) = get_from_batch(
                 imm,
-                TableKey(table_key.as_ref()),
+                TableKey::new(table_key.as_ref()),
                 epoch,
                 &read_options,
                 local_stats,
@@ -584,7 +584,11 @@ impl HummockVersionReader {
             Sstable::hash_for_bloom_filter(dist_key.as_ref(), read_options.table_id.table_id())
         });
 
-        let full_key = FullKey::new(read_options.table_id, TableKey(table_key.clone()), epoch);
+        let full_key = FullKey::new(
+            read_options.table_id,
+            TableKey::new(table_key.clone()),
+            epoch,
+        );
         for local_sst in &uncommitted_ssts {
             local_stats.staging_sst_get_count += 1;
             if let Some((data, data_epoch)) = get_from_sstable_info(

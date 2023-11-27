@@ -452,7 +452,7 @@ mod tests {
         let end_key = test_key_of(TEST_KEYS_COUNT / 2);
         let uk = UserKey::new(
             end_key.user_key.table_id,
-            TableKey(Bytes::from(end_key.user_key.table_key.0)),
+            TableKey::new(Bytes::from(end_key.user_key.table_key.into_inner())),
         );
         let mut sstable_iter = SstableIterator::create(
             table,

@@ -153,7 +153,7 @@ pub(crate) mod tests {
             local
                 .ingest_batch(
                     vec![(
-                        TableKey(key.clone()),
+                        TableKey::new(key.clone()),
                         StorageValue::new_put(Bytes::from(new_val)),
                     )],
                     vec![],
@@ -354,7 +354,7 @@ pub(crate) mod tests {
 
         let get_ret = storage
             .get(
-                TableKey(key.clone()),
+                TableKey::new(key.clone()),
                 read_epoch,
                 ReadOptions {
                     cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -367,7 +367,7 @@ pub(crate) mod tests {
         assert_eq!(get_val, val);
         let ret = storage
             .get(
-                TableKey(key.clone()),
+                TableKey::new(key.clone()),
                 ((TEST_WATERMARK - 1) * 1000) << 16,
                 ReadOptions {
                     prefix_hint: Some(key.clone()),
@@ -491,7 +491,7 @@ pub(crate) mod tests {
         storage.wait_version(version).await;
         let get_val = storage
             .get(
-                TableKey(key.clone()),
+                TableKey::new(key.clone()),
                 SST_COUNT + 1,
                 ReadOptions {
                     cache_policy: CachePolicy::Fill(CachePriority::High),
@@ -545,7 +545,7 @@ pub(crate) mod tests {
                 let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
                 key.extend_from_slice(&ramdom_key);
                 local
-                    .insert(TableKey(Bytes::from(key)), val.clone(), None)
+                    .insert(TableKey::new(Bytes::from(key)), val.clone(), None)
                     .unwrap();
             }
             local.flush(Vec::new()).await.unwrap();
@@ -731,7 +731,7 @@ pub(crate) mod tests {
             prefix.put_slice(random_key.as_slice());
 
             storage
-                .insert(TableKey(prefix.freeze()), val.clone(), None)
+                .insert(TableKey::new(prefix.freeze()), val.clone(), None)
                 .unwrap();
             storage.flush(Vec::new()).await.unwrap();
             storage.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
@@ -922,7 +922,7 @@ pub(crate) mod tests {
             prefix.put_slice(random_key.as_slice());
 
             local
-                .insert(TableKey(prefix.freeze()), val.clone(), None)
+                .insert(TableKey::new(prefix.freeze()), val.clone(), None)
                 .unwrap();
             local.flush(Vec::new()).await.unwrap();
             local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
@@ -1120,7 +1120,7 @@ pub(crate) mod tests {
 
             let ramdom_key = [key_prefix.as_ref(), &rand::thread_rng().gen::<[u8; 32]>()].concat();
             local
-                .insert(TableKey(Bytes::from(ramdom_key)), val.clone(), None)
+                .insert(TableKey::new(Bytes::from(ramdom_key)), val.clone(), None)
                 .unwrap();
             local.flush(Vec::new()).await.unwrap();
             local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
@@ -1223,8 +1223,8 @@ pub(crate) mod tests {
             key_prefix.to_vec(),
         ]
         .concat();
-        let start_bound_key = TableKey(key_prefix);
-        let end_bound_key = TableKey(Bytes::from(next_key(start_bound_key.as_ref())));
+        let start_bound_key = TableKey::new(key_prefix);
+        let end_bound_key = TableKey::new(Bytes::from(next_key(start_bound_key.as_ref())));
         let scan_result = storage
             .scan(
                 (
@@ -1561,7 +1561,7 @@ pub(crate) mod tests {
                 (last_k + 1, 400)
             };
             let key = k.to_be_bytes().to_vec();
-            let key = FullKey::new(TableId::new(1), TableKey(key), epoch);
+            let key = FullKey::new(TableId::new(1), TableKey::new(key), epoch);
             let rand_v = rng.next_u32() % 10;
             let v = if rand_v == 1 {
                 HummockValue::delete()
@@ -1592,7 +1592,7 @@ pub(crate) mod tests {
                 (last_k + 1, max_epoch)
             };
             let key = k.to_be_bytes().to_vec();
-            let key = FullKey::new(TableId::new(1), TableKey(key), epoch);
+            let key = FullKey::new(TableId::new(1), TableKey::new(key), epoch);
             let v = HummockValue::put(format!("sst2-{}", epoch).into_bytes());
             if last_k != k && data3.is_empty() && data.len() >= KEY_COUNT {
                 std::mem::swap(&mut data, &mut data3);

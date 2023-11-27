@@ -429,7 +429,7 @@ impl NormalState {
     async fn get_impl(&self, key: &[u8], ignore_range_tombstone: bool) -> Option<Bytes> {
         self.storage
             .get(
-                TableKey(Bytes::copy_from_slice(key)),
+                TableKey::new(Bytes::copy_from_slice(key)),
                 ReadOptions {
                     prefix_hint: None,
                     ignore_range_tombstone,
@@ -454,8 +454,8 @@ impl NormalState {
             .storage
             .iter(
                 (
-                    Bound::Included(TableKey(Bytes::copy_from_slice(left))),
-                    Bound::Excluded(TableKey(Bytes::copy_from_slice(right))),
+                    Bound::Included(TableKey::new(Bytes::copy_from_slice(left))),
+                    Bound::Excluded(TableKey::new(Bytes::copy_from_slice(right))),
                 ),
                 ReadOptions {
                     prefix_hint: None,
@@ -472,7 +472,7 @@ impl NormalState {
         let mut ret = vec![];
         while let Some(item) = iter.next().await {
             let (full_key, val) = item.unwrap();
-            let tkey = full_key.user_key.table_key.0.clone();
+            let tkey = (*full_key.user_key.table_key).clone();
             ret.push((tkey, val));
         }
         ret
@@ -486,8 +486,8 @@ impl CheckState for NormalState {
             self.storage
                 .iter(
                     (
-                        Bound::Included(Bytes::copy_from_slice(left)).map(TableKey),
-                        Bound::Excluded(Bytes::copy_from_slice(right)).map(TableKey),
+                        Bound::Included(Bytes::copy_from_slice(left)).map(TableKey::new),
+                        Bound::Excluded(Bytes::copy_from_slice(right)).map(TableKey::new),
                     ),
                     ReadOptions {
                         prefix_hint: None,
@@ -516,7 +516,7 @@ impl CheckState for NormalState {
     fn insert(&mut self, key: &[u8], val: &[u8]) {
         self.storage
             .insert(
-                TableKey(Bytes::from(key.to_vec())),
+                TableKey::new(Bytes::from(key.to_vec())),
                 Bytes::copy_from_slice(val),
                 None,
             )

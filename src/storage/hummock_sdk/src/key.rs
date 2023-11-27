@@ -16,8 +16,9 @@ use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::ops::Bound::*;
-use std::ops::{Bound, Deref, DerefMut, RangeBounds};
+use std::ops::{Bound, Deref, RangeBounds};
 use std::ptr;
+use std::slice::SliceIndex;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
@@ -371,7 +372,7 @@ impl CopyFromSlice for Bytes {
 /// Its name come from the assumption that Hummock is always accessed by a table-like structure
 /// identified by a [`TableId`].
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct TableKey<T: AsRef<[u8]>>(pub T);
+pub struct TableKey<T: AsRef<[u8]>>(T);
 
 impl<T: AsRef<[u8]>> Debug for TableKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -387,12 +388,6 @@ impl<T: AsRef<[u8]>> Deref for TableKey<T> {
     }
 }
 
-impl<T: AsRef<[u8]>> DerefMut for TableKey<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
 impl<T: AsRef<[u8]>> AsRef<[u8]> for TableKey<T> {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
@@ -400,6 +395,19 @@ impl<T: AsRef<[u8]>> AsRef<[u8]> for TableKey<T> {
 }
 
 impl<T: AsRef<[u8]>> TableKey<T> {
+    pub fn new(value: T) -> Self {
+        debug_assert!(
+            value.as_ref().len() > VirtualNode::SIZE,
+            "too short table key: {:?}",
+            value.as_ref()
+        );
+        Self(value)
+    }
+
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+
     pub fn vnode_part(&self) -> VirtualNode {
         VirtualNode::from_be_bytes(
             self.0.as_ref()[..VirtualNode::SIZE]
@@ -410,6 +418,12 @@ impl<T: AsRef<[u8]>> TableKey<T> {
 
     pub fn key_part(&self) -> &[u8] {
         &self.0.as_ref()[VirtualNode::SIZE..]
+    }
+}
+
+impl TableKey<Vec<u8>> {
+    pub fn range_mut(&mut self, range: impl SliceIndex<[u8], Output = [u8]>) -> &mut [u8] {
+        &mut self.0[range]
     }
 }
 
@@ -427,7 +441,7 @@ impl EstimateSize for TableKey<Bytes> {
 
 #[inline]
 pub fn map_table_key_range(range: (Bound<KeyPayloadType>, Bound<KeyPayloadType>)) -> TableKeyRange {
-    (range.0.map(TableKey), range.1.map(TableKey))
+    (range.0.map(TableKey::new), range.1.map(TableKey::new))
 }
 
 /// [`UserKey`] is is an internal concept in storage. In the storage interface, user specifies
@@ -465,7 +479,7 @@ impl<T: AsRef<[u8]>> UserKey<T> {
     pub fn for_test(table_id: TableId, table_key: T) -> Self {
         Self {
             table_id,
-            table_key: TableKey(table_key),
+            table_key: TableKey::new(table_key),
         }
     }
 
@@ -514,7 +528,7 @@ impl<'a> UserKey<&'a [u8]> {
 
         Self {
             table_id: TableId::new(table_id),
-            table_key: TableKey(&slice[TABLE_PREFIX_LEN..]),
+            table_key: TableKey::new(&slice[TABLE_PREFIX_LEN..]),
         }
     }
 
@@ -525,7 +539,7 @@ impl<'a> UserKey<&'a [u8]> {
     pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(self) -> UserKey<T> {
         UserKey {
             table_id: self.table_id,
-            table_key: TableKey(T::copy_from_slice(self.table_key.0)),
+            table_key: TableKey::new(T::copy_from_slice(self.table_key.0)),
         }
     }
 }
@@ -534,14 +548,14 @@ impl<'a, T: AsRef<[u8]> + Clone> UserKey<&'a T> {
     pub fn cloned(self) -> UserKey<T> {
         UserKey {
             table_id: self.table_id,
-            table_key: TableKey(self.table_key.0.clone()),
+            table_key: TableKey::new(self.table_key.0.clone()),
         }
     }
 }
 
 impl<T: AsRef<[u8]>> UserKey<T> {
     pub fn as_ref(&self) -> UserKey<&[u8]> {
-        UserKey::new(self.table_id, TableKey(self.table_key.as_ref()))
+        UserKey::new(self.table_id, TableKey::new(self.table_key.as_ref()))
     }
 }
 
@@ -551,7 +565,7 @@ impl UserKey<Vec<u8>> {
         let len = buf.get_u32() as usize;
         let data = buf[..len].to_vec();
         buf.advance(len);
-        UserKey::new(TableId::new(table_id), TableKey(data))
+        UserKey::new(TableId::new(table_id), TableKey::new(data))
     }
 
     pub fn extend_from_other(&mut self, other: &UserKey<&[u8]>) {
@@ -564,14 +578,14 @@ impl UserKey<Vec<u8>> {
     /// table key without reallocating a new `UserKey` object.
     pub fn set(&mut self, other: UserKey<&[u8]>) {
         self.table_id = other.table_id;
-        self.table_key.clear();
-        self.table_key.extend_from_slice(other.table_key.as_ref());
+        self.table_key.0.clear();
+        self.table_key.0.extend_from_slice(other.table_key.as_ref());
     }
 
     pub fn into_bytes(self) -> UserKey<Bytes> {
         UserKey {
             table_id: self.table_id,
-            table_key: TableKey(Bytes::from(self.table_key.0)),
+            table_key: TableKey::new(Bytes::from(self.table_key.0)),
         }
     }
 }
@@ -691,7 +705,10 @@ impl<'a> FullKey<&'a [u8]> {
         let epoch = (&slice_without_table_id[epoch_pos..]).get_u64();
 
         Self {
-            user_key: UserKey::new(table_id, TableKey(&slice_without_table_id[..epoch_pos])),
+            user_key: UserKey::new(
+                table_id,
+                TableKey::new(&slice_without_table_id[..epoch_pos]),
+            ),
             epoch_with_gap: EpochWithGap::from_u64(epoch),
         }
     }
@@ -835,19 +852,19 @@ pub fn bound_table_key_range<T: AsRef<[u8]> + EmptySliceRef>(
     table_key_range: &impl RangeBounds<TableKey<T>>,
 ) -> (Bound<UserKey<&T>>, Bound<UserKey<&T>>) {
     let start = match table_key_range.start_bound() {
-        Included(b) => Included(UserKey::new(table_id, TableKey(&b.0))),
-        Excluded(b) => Excluded(UserKey::new(table_id, TableKey(&b.0))),
-        Unbounded => Included(UserKey::new(table_id, TableKey(T::empty_slice_ref()))),
+        Included(b) => Included(UserKey::new(table_id, TableKey::new(&b.0))),
+        Excluded(b) => Excluded(UserKey::new(table_id, TableKey::new(&b.0))),
+        Unbounded => Included(UserKey::new(table_id, TableKey::new(T::empty_slice_ref()))),
     };
 
     let end = match table_key_range.end_bound() {
-        Included(b) => Included(UserKey::new(table_id, TableKey(&b.0))),
-        Excluded(b) => Excluded(UserKey::new(table_id, TableKey(&b.0))),
+        Included(b) => Included(UserKey::new(table_id, TableKey::new(&b.0))),
+        Excluded(b) => Excluded(UserKey::new(table_id, TableKey::new(&b.0))),
         Unbounded => {
             if let Some(next_table_id) = table_id.table_id().checked_add(1) {
                 Excluded(UserKey::new(
                     next_table_id.into(),
-                    TableKey(T::empty_slice_ref()),
+                    TableKey::new(T::empty_slice_ref()),
                 ))
             } else {
                 Unbounded
@@ -913,8 +930,8 @@ mod tests {
             bound_table_key_range(
                 TableId::default(),
                 &(
-                    Included(TableKey(b"a".to_vec())),
-                    Included(TableKey(b"b".to_vec()))
+                    Included(TableKey::new(b"a".to_vec())),
+                    Included(TableKey::new(b"b".to_vec()))
                 )
             ),
             (
@@ -925,7 +942,7 @@ mod tests {
         assert_eq!(
             bound_table_key_range(
                 TableId::from(1),
-                &(Included(TableKey(b"a".to_vec())), Unbounded)
+                &(Included(TableKey::new(b"a".to_vec())), Unbounded)
             ),
             (
                 Included(UserKey::for_test(TableId::from(1), &b"a".to_vec())),
@@ -935,7 +952,7 @@ mod tests {
         assert_eq!(
             bound_table_key_range(
                 TableId::from(u32::MAX),
-                &(Included(TableKey(b"a".to_vec())), Unbounded)
+                &(Included(TableKey::new(b"a".to_vec())), Unbounded)
             ),
             (
                 Included(UserKey::for_test(TableId::from(u32::MAX), &b"a".to_vec())),
@@ -994,9 +1011,9 @@ mod tests {
 
     #[test]
     fn test_uesr_key_order() {
-        let a = UserKey::new(TableId::new(1), TableKey(b"aaa".to_vec()));
-        let b = UserKey::new(TableId::new(2), TableKey(b"aaa".to_vec()));
-        let c = UserKey::new(TableId::new(2), TableKey(b"bbb".to_vec()));
+        let a = UserKey::new(TableId::new(1), TableKey::new(b"aaa".to_vec()));
+        let b = UserKey::new(TableId::new(2), TableKey::new(b"aaa".to_vec()));
+        let c = UserKey::new(TableId::new(2), TableKey::new(b"bbb".to_vec()));
         assert!(a.lt(&b));
         assert!(b.lt(&c));
         let a = a.encode();

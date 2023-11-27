@@ -132,7 +132,7 @@ impl HummockJavaBindingIterator {
         let item = self.stream.try_next().await?;
         Ok(match item {
             Some((key, value)) => Some((
-                key.user_key.table_key.0,
+                key.user_key.table_key.into_inner(),
                 OwnedRow::new(
                     self.row_serde
                         .deserialize(&value)

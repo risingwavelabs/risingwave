@@ -70,7 +70,7 @@ pub fn default_opts_for_test() -> StorageOpts {
 
 pub fn gen_dummy_batch(n: u64) -> Vec<(TableKey<Bytes>, StorageValue)> {
     vec![(
-        TableKey(Bytes::from(iterator_test_table_key_of(n as usize))),
+        TableKey::new(Bytes::from(iterator_test_table_key_of(n as usize))),
         StorageValue::new_put(b"value1".to_vec()),
     )]
 }
@@ -80,7 +80,7 @@ pub fn gen_dummy_batch_several_keys(n: usize) -> Vec<(TableKey<Bytes>, StorageVa
     let v = Bytes::from(b"value1".to_vec().repeat(100));
     for idx in 0..n {
         kvs.push((
-            TableKey(Bytes::from(iterator_test_table_key_of(idx))),
+            TableKey::new(Bytes::from(iterator_test_table_key_of(idx))),
             StorageValue::new_put(v.clone()),
         ));
     }
@@ -98,11 +98,11 @@ pub fn gen_dummy_sst_info(
         must_match!(batches[0].end_table_key(), Bound::Included(table_key) => table_key.to_vec());
     let mut file_size = 0;
     for batch in batches.iter().skip(1) {
-        if min_table_key.as_slice() > *batch.start_table_key() {
+        if min_table_key.as_slice() > batch.start_table_key().as_ref() {
             min_table_key = batch.start_table_key().to_vec();
         }
         if max_table_key.as_slice()
-            < must_match!(batch.end_table_key(), Bound::Included(table_key) => *table_key)
+            < must_match!(batch.end_table_key(), Bound::Included(table_key) => table_key.into_inner())
         {
             max_table_key = must_match!(batch.end_table_key(), Bound::Included(table_key) => table_key.to_vec());
         }

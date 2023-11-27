@@ -77,7 +77,7 @@ fn map_to_hummock_value<'a>(
     (key, op): (&'a TableKey<Bytes>, &'a KeyOp),
 ) -> (TableKey<&'a [u8]>, HummockValue<&'a [u8]>) {
     (
-        TableKey(key.0.as_ref()),
+        TableKey::new(key.as_ref()),
         match op {
             KeyOp::Insert(value) | KeyOp::Update((_, value)) => HummockValue::Put(value),
             KeyOp::Delete(_) => HummockValue::Delete,
@@ -95,7 +95,7 @@ impl RustIteratorBuilder for MemTableIteratorBuilder {
 
     fn seek<'a>(iterable: &'a Self::Iterable, seek_key: TableKey<&[u8]>) -> Self::SeekIter<'a> {
         iterable
-            .range::<[u8], _>((Included(seek_key.0), Unbounded))
+            .range::<[u8], _>((Included(seek_key.as_ref()), Unbounded))
             .map(map_to_hummock_value)
     }
 
@@ -640,7 +640,7 @@ mod tests {
         assert_eq!(mem_table.kv_size.size(), 0);
 
         mem_table
-            .insert(TableKey("key1".into()), "value1".into())
+            .insert(TableKey::new("key1".into()), "value1".into())
             .unwrap();
         assert_eq!(
             mem_table.kv_size.size(),
@@ -654,7 +654,7 @@ mod tests {
         mem_table.drain();
         assert_eq!(mem_table.kv_size.size(), 0);
         mem_table
-            .delete(TableKey("key2".into()), "value2".into())
+            .delete(TableKey::new("key2".into()), "value2".into())
             .unwrap();
         assert_eq!(
             mem_table.kv_size.size(),
@@ -664,7 +664,7 @@ mod tests {
                 + Bytes::from("value2").len()
         );
         mem_table
-            .insert(TableKey("key2".into()), "value22".into())
+            .insert(TableKey::new("key2".into()), "value22".into())
             .unwrap();
         assert_eq!(
             mem_table.kv_size.size(),
@@ -676,7 +676,7 @@ mod tests {
         );
 
         mem_table
-            .delete(TableKey("key2".into()), "value22".into())
+            .delete(TableKey::new("key2".into()), "value22".into())
             .unwrap();
 
         assert_eq!(
@@ -691,7 +691,7 @@ mod tests {
         mem_table.drain();
         assert_eq!(mem_table.kv_size.size(), 0);
         mem_table
-            .insert(TableKey("key3".into()), "value3".into())
+            .insert(TableKey::new("key3".into()), "value3".into())
             .unwrap();
         assert_eq!(
             mem_table.kv_size.size(),
@@ -703,7 +703,11 @@ mod tests {
 
         // update-> insert
         mem_table
-            .update(TableKey("key3".into()), "value3".into(), "value333".into())
+            .update(
+                TableKey::new("key3".into()),
+                "value3".into(),
+                "value333".into(),
+            )
             .unwrap();
         assert_eq!(
             mem_table.kv_size.size(),
@@ -715,7 +719,11 @@ mod tests {
 
         mem_table.drain();
         mem_table
-            .update(TableKey("key4".into()), "value4".into(), "value44".into())
+            .update(
+                TableKey::new("key4".into()),
+                "value4".into(),
+                "value44".into(),
+            )
             .unwrap();
 
         assert_eq!(
@@ -728,7 +736,7 @@ mod tests {
         );
         mem_table
             .update(
-                TableKey("key4".into()),
+                TableKey::new("key4".into()),
                 "value44".into(),
                 "value4444".into(),
             )
@@ -750,7 +758,7 @@ mod tests {
         assert_eq!(mem_table.kv_size.size(), 0);
 
         mem_table
-            .insert(TableKey("key1".into()), "value1".into())
+            .insert(TableKey::new("key1".into()), "value1".into())
             .unwrap();
 
         assert_eq!(
@@ -762,7 +770,7 @@ mod tests {
         );
 
         mem_table
-            .insert(TableKey("key1".into()), "value111".into())
+            .insert(TableKey::new("key1".into()), "value111".into())
             .unwrap();
         assert_eq!(
             mem_table.kv_size.size(),
@@ -774,7 +782,11 @@ mod tests {
         mem_table.drain();
 
         mem_table
-            .update(TableKey("key4".into()), "value4".into(), "value44".into())
+            .update(
+                TableKey::new("key4".into()),
+                "value4".into(),
+                "value44".into(),
+            )
             .unwrap();
 
         assert_eq!(
@@ -787,7 +799,7 @@ mod tests {
         );
         mem_table
             .update(
-                TableKey("key4".into()),
+                TableKey::new("key4".into()),
                 "value44".into(),
                 "value4444".into(),
             )
@@ -811,7 +823,7 @@ mod tests {
             let mut bytes = BytesMut::new();
             bytes.put(&VirtualNode::ZERO.to_be_bytes()[..]);
             bytes.put(format!("key_{:20}", i).as_bytes());
-            TableKey(bytes.freeze())
+            TableKey::new(bytes.freeze())
         }
 
         let ordered_test_data = (0..10000)
@@ -857,7 +869,7 @@ mod tests {
                 let (expected_key, expected_value) = test_data[idx].clone();
                 assert_eq!(key.epoch_with_gap, EpochWithGap::new_from_epoch(TEST_EPOCH));
                 assert_eq!(key.user_key.table_id, TEST_TABLE_ID);
-                assert_eq!(key.user_key.table_key.0, expected_key.0.as_ref());
+                assert_eq!(key.user_key.table_key.as_ref(), expected_key.as_ref());
                 match expected_value {
                     KeyOp::Insert(expected_value) | KeyOp::Update((_, expected_value)) => {
                         assert_eq!(value, HummockValue::Put(expected_value.as_ref()));
@@ -889,7 +901,7 @@ mod tests {
         iter.seek(FullKey {
             user_key: UserKey {
                 table_id: TEST_TABLE_ID,
-                table_key: TableKey(&get_key(seek_idx)),
+                table_key: TableKey::new(&get_key(seek_idx)),
             },
             epoch_with_gap: later_epoch,
         })
@@ -903,7 +915,7 @@ mod tests {
         iter.seek(FullKey {
             user_key: UserKey {
                 table_id: TEST_TABLE_ID,
-                table_key: TableKey(&get_key(seek_idx)),
+                table_key: TableKey::new(&get_key(seek_idx)),
             },
             epoch_with_gap: early_epoch,
         })
@@ -915,7 +927,7 @@ mod tests {
         iter.seek(FullKey {
             user_key: UserKey {
                 table_id: TEST_TABLE_ID,
-                table_key: TableKey(&get_key(ordered_test_data.len() + 10)),
+                table_key: TableKey::new(&get_key(ordered_test_data.len() + 10)),
             },
             epoch_with_gap: EpochWithGap::new_from_epoch(TEST_EPOCH),
         })
@@ -928,7 +940,7 @@ mod tests {
         iter.seek(FullKey {
             user_key: UserKey {
                 table_id: smaller_table_id,
-                table_key: TableKey(&get_key(ordered_test_data.len() + 10)),
+                table_key: TableKey::new(&get_key(ordered_test_data.len() + 10)),
             },
             epoch_with_gap: EpochWithGap::new_from_epoch(TEST_EPOCH),
         })
@@ -941,7 +953,7 @@ mod tests {
         iter.seek(FullKey {
             user_key: UserKey {
                 table_id: greater_table_id,
-                table_key: TableKey(&get_key(0)),
+                table_key: TableKey::new(&get_key(0)),
             },
             epoch_with_gap: EpochWithGap::new_from_epoch(TEST_EPOCH),
         })

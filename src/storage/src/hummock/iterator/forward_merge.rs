@@ -312,7 +312,7 @@ mod test {
             FullKey {
                 user_key: UserKey {
                     table_id: Default::default(),
-                    table_key: TableKey(&b"test_key"[..]),
+                    table_key: TableKey::new(&b"test_key"[..]),
                 },
                 epoch_with_gap: EpochWithGap::new_from_epoch(0),
             }

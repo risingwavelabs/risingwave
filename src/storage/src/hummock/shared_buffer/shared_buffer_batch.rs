@@ -106,22 +106,22 @@ impl SharedBufferBatchInner {
                 (
                     match left_bound {
                         Bound::Excluded(x) => PointRange::from_user_key(
-                            UserKey::new(table_id, TableKey(x.to_vec())),
+                            UserKey::new(table_id, TableKey::new(x.to_vec())),
                             true,
                         ),
                         Bound::Included(x) => PointRange::from_user_key(
-                            UserKey::new(table_id, TableKey(x.to_vec())),
+                            UserKey::new(table_id, TableKey::new(x.to_vec())),
                             false,
                         ),
                         Bound::Unbounded => unreachable!(),
                     },
                     match right_bound {
                         Bound::Excluded(x) => PointRange::from_user_key(
-                            UserKey::new(table_id, TableKey(x.to_vec())),
+                            UserKey::new(table_id, TableKey::new(x.to_vec())),
                             false,
                         ),
                         Bound::Included(x) => PointRange::from_user_key(
-                            UserKey::new(table_id, TableKey(x.to_vec())),
+                            UserKey::new(table_id, TableKey::new(x.to_vec())),
                             true,
                         ),
                         Bound::Unbounded => PointRange::from_user_key(
@@ -145,7 +145,7 @@ impl SharedBufferBatchInner {
 
         if let Some(item) = payload.last() {
             if whether_update_largest_key(&largest_table_key, &item.0) {
-                largest_table_key = Bound::Included(item.0.clone().0);
+                largest_table_key = Bound::Included(item.0.clone().into_inner());
             }
         }
         if let Some(item) = payload.first() {
@@ -241,24 +241,24 @@ impl SharedBufferBatchInner {
                     largest_table_key = Bound::Unbounded;
                 } else if whether_update_largest_key(
                     &largest_table_key,
-                    &end_point_range.left_user_key.table_key.0,
+                    &end_point_range.left_user_key.table_key.as_ref(),
                 ) {
                     largest_table_key = if end_point_range.is_exclude_left_key {
                         Bound::Included(Bytes::from(
-                            end_point_range.left_user_key.table_key.0.clone(),
+                            end_point_range.left_user_key.table_key.clone().into_inner(),
                         ))
                     } else {
                         Bound::Excluded(Bytes::from(
-                            end_point_range.left_user_key.table_key.0.clone(),
+                            end_point_range.left_user_key.table_key.clone().into_inner(),
                         ))
                     };
                 }
                 if smallest_empty
-                    || smallest_table_key.gt(&start_point_range.left_user_key.table_key.0)
+                    || smallest_table_key.gt(start_point_range.left_user_key.table_key.as_ref())
                 {
                     smallest_table_key.clear();
                     smallest_table_key
-                        .extend_from_slice(&start_point_range.left_user_key.table_key.0);
+                        .extend_from_slice(start_point_range.left_user_key.table_key.as_ref());
                     smallest_empty = false;
                 }
                 if let Some(last) = range_tombstones.last_mut() {
@@ -291,9 +291,12 @@ impl SharedBufferBatchInner {
         read_options: &ReadOptions,
     ) -> Option<(HummockValue<Bytes>, EpochWithGap)> {
         // Perform binary search on table key to find the corresponding entry
-        if let Ok(i) = self.payload.binary_search_by(|m| (m.0[..]).cmp(*table_key)) {
+        if let Ok(i) = self
+            .payload
+            .binary_search_by(|m| (m.0[..]).cmp(table_key.as_ref()))
+        {
             let item = &self.payload[i];
-            assert_eq!(item.0.as_ref(), *table_key);
+            assert_eq!(item.0.as_ref(), table_key.as_ref());
             // Scan to find the first version <= epoch
             for (e, v) in &item.1 {
                 // skip invisible versions
@@ -423,12 +426,10 @@ impl SharedBufferBatch {
     {
         let left = table_key_range
             .start_bound()
-            .as_ref()
-            .map(|key| TableKey(key.0.as_ref()));
+            .map(|key| TableKey::new(key.as_ref()));
         let right = table_key_range
             .end_bound()
-            .as_ref()
-            .map(|key| TableKey(key.0.as_ref()));
+            .map(|key| TableKey::new(key.as_ref()));
         self.table_id == table_id
             && range_overlap(
                 &(left, right),
@@ -525,7 +526,7 @@ impl SharedBufferBatch {
 
     #[inline(always)]
     pub fn start_table_key(&self) -> TableKey<&[u8]> {
-        TableKey(&self.inner.smallest_table_key)
+        TableKey::new(&self.inner.smallest_table_key)
     }
 
     #[inline(always)]
@@ -538,7 +539,7 @@ impl SharedBufferBatch {
         self.inner
             .largest_table_key
             .as_ref()
-            .map(|largest_key| TableKey(largest_key.as_ref()))
+            .map(|largest_key| TableKey::new(largest_key.as_ref()))
     }
 
     #[inline(always)]
@@ -612,7 +613,7 @@ impl SharedBufferBatch {
         let mut vnodes = Vec::with_capacity(VirtualNode::COUNT);
         let mut next_vnode_id = 0;
         while next_vnode_id < VirtualNode::COUNT {
-            let seek_key = TableKey(
+            let seek_key = TableKey::new(
                 VirtualNode::from_index(next_vnode_id)
                     .to_be_bytes()
                     .to_vec(),
@@ -620,7 +621,7 @@ impl SharedBufferBatch {
             let idx = match self
                 .inner
                 .payload
-                .binary_search_by(|m| (m.0[..]).cmp(seek_key.as_slice()))
+                .binary_search_by(|m| (m.0[..]).cmp(seek_key.as_ref()))
             {
                 Ok(idx) => idx,
                 Err(idx) => idx,
@@ -729,7 +730,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
 
     fn key(&self) -> FullKey<&[u8]> {
         let (key, (epoch_with_gap, _)) = self.current_item();
-        FullKey::new_with_gap_epoch(self.table_id, TableKey(key), *epoch_with_gap)
+        FullKey::new_with_gap_epoch(self.table_id, TableKey::new(key), *epoch_with_gap)
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -765,7 +766,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
         // by table key.
         let partition_point = self
             .inner
-            .binary_search_by(|probe| probe.0[..].cmp(*key.user_key.table_key));
+            .binary_search_by(|probe| probe.0.as_ref()[..].cmp(key.user_key.table_key.as_ref()));
         let seek_key_epoch = key.epoch_with_gap;
         match D::direction() {
             DirectionEnum::Forward => match partition_point {
@@ -935,7 +936,7 @@ mod tests {
             shared_buffer_items[0].0
         );
         assert_eq!(
-            must_match!(shared_buffer_batch.end_table_key(), Bound::Included(table_key) => *table_key),
+            must_match!(shared_buffer_batch.end_table_key(), Bound::Included(table_key) => table_key.into_inner()),
             shared_buffer_items[2].0
         );
 
@@ -943,7 +944,7 @@ mod tests {
         for (k, v) in &shared_buffer_items {
             assert_eq!(
                 shared_buffer_batch
-                    .get(TableKey(k.as_slice()), epoch, &ReadOptions::default())
+                    .get(TableKey::new(k.as_slice()), epoch, &ReadOptions::default())
                     .unwrap()
                     .0,
                 v.clone()
@@ -951,7 +952,7 @@ mod tests {
         }
         assert_eq!(
             shared_buffer_batch.get(
-                TableKey(iterator_test_table_key_of(3).as_slice()),
+                TableKey::new(iterator_test_table_key_of(3).as_slice()),
                 epoch,
                 &ReadOptions::default()
             ),
@@ -959,7 +960,7 @@ mod tests {
         );
         assert_eq!(
             shared_buffer_batch.get(
-                TableKey(iterator_test_table_key_of(4).as_slice()),
+                TableKey::new(iterator_test_table_key_of(4).as_slice()),
                 epoch,
                 &ReadOptions::default()
             ),
@@ -1014,7 +1015,7 @@ mod tests {
         );
         assert_eq!(batch.start_table_key().as_ref(), "a".as_bytes());
         assert_eq!(
-            must_match!(batch.end_table_key(), Bound::Excluded(table_key) => *table_key),
+            must_match!(batch.end_table_key(), Bound::Excluded(table_key) => table_key.into_inner()),
             "d".as_bytes()
         );
     }
@@ -1082,7 +1083,7 @@ mod tests {
             .unwrap();
         for item in &shared_buffer_items[1..] {
             assert!(iter.is_valid());
-            assert_eq!(*iter.key().user_key.table_key, item.0.as_slice());
+            assert_eq!(iter.key().user_key.table_key.as_ref(), item.0.as_slice());
             assert_eq!(iter.value(), item.1.as_slice());
             iter.next().await.unwrap();
         }
@@ -1095,7 +1096,7 @@ mod tests {
             .unwrap();
         let item = shared_buffer_items.last().unwrap();
         assert!(iter.is_valid());
-        assert_eq!(*iter.key().user_key.table_key, item.0.as_slice());
+        assert_eq!(iter.key().user_key.table_key.as_ref(), item.0.as_slice());
         assert_eq!(iter.value(), item.1.as_slice());
         iter.next().await.unwrap();
         assert!(!iter.is_valid());
@@ -1114,7 +1115,7 @@ mod tests {
             .unwrap();
         for item in shared_buffer_items.iter().rev() {
             assert!(iter.is_valid());
-            assert_eq!(*iter.key().user_key.table_key, item.0.as_slice());
+            assert_eq!(iter.key().user_key.table_key.as_ref(), item.0.as_slice());
             assert_eq!(iter.value(), item.1.as_slice());
             iter.next().await.unwrap();
         }
@@ -1127,7 +1128,7 @@ mod tests {
             .unwrap();
         for item in shared_buffer_items[0..=1].iter().rev() {
             assert!(iter.is_valid());
-            assert_eq!(*iter.key().user_key.table_key, item.0.as_slice());
+            assert_eq!(iter.key().user_key.table_key.as_ref(), item.0.as_slice());
             assert_eq!(iter.value(), item.1.as_slice());
             iter.next().await.unwrap();
         }
@@ -1140,7 +1141,7 @@ mod tests {
             .unwrap();
         assert!(iter.is_valid());
         let item = shared_buffer_items.first().unwrap();
-        assert_eq!(*iter.key().user_key.table_key, item.0.as_slice());
+        assert_eq!(iter.key().user_key.table_key.as_ref(), item.0.as_slice());
         assert_eq!(iter.value(), item.1.as_slice());
         iter.next().await.unwrap();
         assert!(!iter.is_valid());
@@ -1152,7 +1153,7 @@ mod tests {
             .unwrap();
         for item in shared_buffer_items[0..=1].iter().rev() {
             assert!(iter.is_valid());
-            assert_eq!(*iter.key().user_key.table_key, item.0.as_slice());
+            assert_eq!(iter.key().user_key.table_key.as_ref(), item.0.as_slice());
             assert_eq!(iter.value(), item.1.as_slice());
             iter.next().await.unwrap();
         }
@@ -1188,23 +1189,31 @@ mod tests {
         );
         assert_eq!(
             epoch,
-            shared_buffer_batch
-                .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"aaa"),))
+            shared_buffer_batch.get_min_delete_range_epoch(UserKey::new(
+                Default::default(),
+                TableKey::new(b"aaa"),
+            ))
         );
         assert_eq!(
             MAX_EPOCH,
-            shared_buffer_batch
-                .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"bbb"),))
+            shared_buffer_batch.get_min_delete_range_epoch(UserKey::new(
+                Default::default(),
+                TableKey::new(b"bbb"),
+            ))
         );
         assert_eq!(
             epoch,
-            shared_buffer_batch
-                .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"ddd"),))
+            shared_buffer_batch.get_min_delete_range_epoch(UserKey::new(
+                Default::default(),
+                TableKey::new(b"ddd"),
+            ))
         );
         assert_eq!(
             MAX_EPOCH,
-            shared_buffer_batch
-                .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"eee"),))
+            shared_buffer_batch.get_min_delete_range_epoch(UserKey::new(
+                Default::default(),
+                TableKey::new(b"eee"),
+            ))
         );
     }
 
@@ -1346,7 +1355,7 @@ mod tests {
                 assert_eq!(
                     merged_imm
                         .get(
-                            TableKey(key.as_slice()),
+                            TableKey::new(key.as_slice()),
                             i as u64 + 1,
                             &ReadOptions::default()
                         )
@@ -1361,7 +1370,7 @@ mod tests {
         }
         assert_eq!(
             merged_imm.get(
-                TableKey(iterator_test_table_key_of(4).as_slice()),
+                TableKey::new(iterator_test_table_key_of(4).as_slice()),
                 1,
                 &ReadOptions::default()
             ),
@@ -1369,7 +1378,7 @@ mod tests {
         );
         assert_eq!(
             merged_imm.get(
-                TableKey(iterator_test_table_key_of(5).as_slice()),
+                TableKey::new(iterator_test_table_key_of(5).as_slice()),
                 1,
                 &ReadOptions::default()
             ),
@@ -1531,21 +1540,21 @@ mod tests {
 
         assert_eq!(
             1,
-            merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey(b"111")))
+            merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey::new(b"111")))
         );
         assert_eq!(
             1,
-            merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey(b"555")))
+            merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey::new(b"555")))
         );
         assert_eq!(
             2,
-            merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey(b"888")))
+            merged_imm.get_min_delete_range_epoch(UserKey::new(table_id, TableKey::new(b"888")))
         );
 
         assert_eq!(
             HummockValue::put(Bytes::from("value12")),
             merged_imm
-                .get(TableKey(b"111"), 2, &ReadOptions::default())
+                .get(TableKey::new(b"111"), 2, &ReadOptions::default())
                 .unwrap()
                 .0
         );
@@ -1554,7 +1563,7 @@ mod tests {
         assert_eq!(
             HummockValue::Delete,
             merged_imm
-                .get(TableKey(b"555"), 1, &ReadOptions::default())
+                .get(TableKey::new(b"555"), 1, &ReadOptions::default())
                 .unwrap()
                 .0
         );
@@ -1563,7 +1572,7 @@ mod tests {
         assert_eq!(
             HummockValue::put(Bytes::from("value52")),
             merged_imm
-                .get(TableKey(b"555"), 2, &ReadOptions::default())
+                .get(TableKey::new(b"555"), 2, &ReadOptions::default())
                 .unwrap()
                 .0
         );
@@ -1572,7 +1581,7 @@ mod tests {
         assert_eq!(
             HummockValue::Delete,
             merged_imm
-                .get(TableKey(b"666"), 2, &ReadOptions::default())
+                .get(TableKey::new(b"666"), 2, &ReadOptions::default())
                 .unwrap()
                 .0
         );
@@ -1580,7 +1589,7 @@ mod tests {
         assert_eq!(
             HummockValue::Delete,
             merged_imm
-                .get(TableKey(b"888"), 2, &ReadOptions::default())
+                .get(TableKey::new(b"888"), 2, &ReadOptions::default())
                 .unwrap()
                 .0
         );
@@ -1589,7 +1598,7 @@ mod tests {
         assert_eq!(
             HummockValue::put(Bytes::from("value8")),
             merged_imm
-                .get(TableKey(b"888"), 1, &ReadOptions::default())
+                .get(TableKey::new(b"888"), 1, &ReadOptions::default())
                 .unwrap()
                 .0
         );

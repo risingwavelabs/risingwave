@@ -32,7 +32,7 @@ pub fn serialize_pk_with_vnode(
     let mut buffer = BytesMut::new();
     buffer.put_slice(&vnode.to_be_bytes()[..]);
     pk.memcmp_serialize_into(serializer, &mut buffer);
-    TableKey(buffer.freeze())
+    TableKey::new(buffer.freeze())
 }
 
 pub fn deserialize_pk_with_vnode(

@@ -288,11 +288,11 @@ impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
             let top_key = self.heap.peek().expect("no inner iter").iter.key();
             self.last_table_key.clear();
             self.last_table_key
-                .extend_from_slice(top_key.user_key.table_key.0);
+                .extend_from_slice(top_key.user_key.table_key.as_ref());
             FullKey {
                 user_key: UserKey {
                     table_id: top_key.user_key.table_id,
-                    table_key: TableKey(self.last_table_key.as_slice()),
+                    table_key: TableKey::new(self.last_table_key.as_slice()),
                 },
                 epoch_with_gap: top_key.epoch_with_gap,
             }

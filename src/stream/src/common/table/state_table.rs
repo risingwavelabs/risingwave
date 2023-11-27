@@ -607,7 +607,12 @@ where
             serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
 
         let prefix_hint = if self.prefix_hint_len != 0 && self.prefix_hint_len == pk.len() {
-            Some(serialized_pk.slice(VirtualNode::SIZE..))
+            Some(
+                serialized_pk
+                    .clone()
+                    .into_inner()
+                    .slice(VirtualNode::SIZE..),
+            )
         } else {
             None
         };
@@ -854,13 +859,13 @@ where
                             if USE_WATERMARK_CACHE && let Some(ref pk) = key {
                                 self.watermark_cache.insert(pk);
                             }
-                            self.insert_inner(TableKey(key_bytes), value);
+                            self.insert_inner(TableKey::new(key_bytes), value);
                         }
                         Op::Delete | Op::UpdateDelete => {
                             if USE_WATERMARK_CACHE && let Some(ref pk) = key {
                                 self.watermark_cache.delete(pk);
                             }
-                            self.delete_inner(TableKey(key_bytes), value);
+                            self.delete_inner(TableKey::new(key_bytes), value);
                         }
                     }
                 }
@@ -872,13 +877,13 @@ where
                         if USE_WATERMARK_CACHE && let Some(ref pk) = key {
                             self.watermark_cache.insert(pk);
                         }
-                        self.insert_inner(TableKey(key_bytes), value);
+                        self.insert_inner(TableKey::new(key_bytes), value);
                     }
                     Op::Delete | Op::UpdateDelete => {
                         if USE_WATERMARK_CACHE && let Some(ref pk) = key {
                             self.watermark_cache.delete(pk);
                         }
-                        self.delete_inner(TableKey(key_bytes), value);
+                        self.delete_inner(TableKey::new(key_bytes), value);
                     }
                 }
             }

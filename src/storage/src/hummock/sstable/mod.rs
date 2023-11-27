@@ -104,11 +104,11 @@ impl DeleteRangeTombstone {
     ) -> Self {
         Self {
             start_user_key: PointRange::from_user_key(
-                UserKey::new(table_id, TableKey(start_table_key)),
+                UserKey::new(table_id, TableKey::new(start_table_key)),
                 is_left_open,
             ),
             end_user_key: PointRange::from_user_key(
-                UserKey::new(table_id, TableKey(end_table_key)),
+                UserKey::new(table_id, TableKey::new(end_table_key)),
                 is_right_close,
             ),
             sequence,
@@ -157,7 +157,7 @@ impl MonotonicDeleteEvent {
     pub fn new(table_id: TableId, event_key: Vec<u8>, new_epoch: HummockEpoch) -> Self {
         Self {
             event_key: PointRange::from_user_key(
-                UserKey::new(table_id, TableKey(event_key)),
+                UserKey::new(table_id, TableKey::new(event_key)),
                 false,
             ),
             new_epoch,

@@ -216,7 +216,7 @@ pub mod sled {
             let to_full_key = |table_key: &[u8]| FullKey {
                 user_key: UserKey {
                     table_id,
-                    table_key: TableKey(Bytes::from(table_key.to_vec())),
+                    table_key: TableKey::new(Bytes::from(table_key.to_vec())),
                 },
                 epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
             };
@@ -323,7 +323,7 @@ mod batched_iter {
             if let Some((last_key, _)) = batch.last() {
                 let full_key = FullKey::new_with_gap_epoch(
                     last_key.user_key.table_id,
-                    TableKey(last_key.user_key.table_key.0.clone()),
+                    last_key.user_key.table_key.clone(),
                     last_key.epoch_with_gap,
                 );
                 self.range.0 = Bound::Excluded(full_key);
@@ -371,11 +371,11 @@ mod batched_iter {
             let key_range = 1..=10000;
             let num_to_bytes = |k: i32| Bytes::from(format!("{:06}", k).as_bytes().to_vec());
             let num_to_full_key =
-                |k: i32| FullKey::new(TableId::default(), TableKey(num_to_bytes(k)), 0);
+                |k: i32| FullKey::new(TableId::default(), TableKey::new(num_to_bytes(k)), 0);
             #[allow(clippy::mutable_key_type)]
             map.ingest_batch(key_range.clone().map(|k| {
                 let key = num_to_full_key(k);
-                let b = key.user_key.table_key.0.clone();
+                let b = key.user_key.table_key.clone().into_inner();
 
                 (key, Some(b))
             }))
@@ -449,36 +449,36 @@ where
     let start = match table_key_range.start_bound() {
         Included(k) => Included(FullKey::new(
             table_id,
-            TableKey(Bytes::from(k.as_ref().to_vec())),
+            TableKey::new(Bytes::from(k.as_ref().to_vec())),
             MAX_EPOCH,
         )),
         Excluded(k) => Excluded(FullKey::new(
             table_id,
-            TableKey(Bytes::from(k.as_ref().to_vec())),
+            TableKey::new(Bytes::from(k.as_ref().to_vec())),
             0,
         )),
         Unbounded => Included(FullKey::new(
             table_id,
-            TableKey(Bytes::from(b"".to_vec())),
+            TableKey::new(Bytes::from(b"".to_vec())),
             MAX_EPOCH,
         )),
     };
     let end = match table_key_range.end_bound() {
         Included(k) => Included(FullKey::new(
             table_id,
-            TableKey(Bytes::from(k.as_ref().to_vec())),
+            TableKey::new(Bytes::from(k.as_ref().to_vec())),
             0,
         )),
         Excluded(k) => Excluded(FullKey::new(
             table_id,
-            TableKey(Bytes::from(k.as_ref().to_vec())),
+            TableKey::new(Bytes::from(k.as_ref().to_vec())),
             MAX_EPOCH,
         )),
         Unbounded => {
             if let Some(next_table_id) = table_id.table_id().checked_add(1) {
                 Excluded(FullKey::new(
                     next_table_id.into(),
-                    TableKey(Bytes::from(b"".to_vec())),
+                    TableKey::new(Bytes::from(b"".to_vec())),
                     MAX_EPOCH,
                 ))
             } else {
@@ -590,10 +590,10 @@ impl<R: RangeKv> StateStoreWrite for RangeKvStateStore<R> {
             for (key, _) in self.inner.range(
                 (
                     del_range.0.map(|table_key| {
-                        FullKey::new(write_options.table_id, TableKey(table_key), epoch)
+                        FullKey::new(write_options.table_id, TableKey::new(table_key), epoch)
                     }),
                     del_range.1.map(|table_key| {
-                        FullKey::new(write_options.table_id, TableKey(table_key), epoch)
+                        FullKey::new(write_options.table_id, TableKey::new(table_key), epoch)
                     }),
                 ),
                 None,
@@ -734,11 +734,11 @@ mod tests {
             .ingest_batch(
                 vec![
                     (
-                        TableKey(Bytes::from(b"a".to_vec())),
+                        TableKey::new(Bytes::from(b"a".to_vec())),
                         StorageValue::new_put(b"v1".to_vec()),
                     ),
                     (
-                        TableKey(Bytes::from(b"b".to_vec())),
+                        TableKey::new(Bytes::from(b"b".to_vec())),
                         StorageValue::new_put(b"v1".to_vec()),
                     ),
                 ],
@@ -754,11 +754,11 @@ mod tests {
             .ingest_batch(
                 vec![
                     (
-                        TableKey(Bytes::from(b"a".to_vec())),
+                        TableKey::new(Bytes::from(b"a".to_vec())),
                         StorageValue::new_put(b"v2".to_vec()),
                     ),
                     (
-                        TableKey(Bytes::from(b"b".to_vec())),
+                        TableKey::new(Bytes::from(b"b".to_vec())),
                         StorageValue::new_delete(),
                     ),
                 ],
@@ -774,8 +774,8 @@ mod tests {
             state_store
                 .scan(
                     (
-                        Bound::Included(TableKey(Bytes::from("a"))),
-                        Bound::Included(TableKey(Bytes::from("b"))),
+                        Bound::Included(TableKey::new(Bytes::from("a"))),
+                        Bound::Included(TableKey::new(Bytes::from("b"))),
                     ),
                     0,
                     TableId::default(),
@@ -801,8 +801,8 @@ mod tests {
             state_store
                 .scan(
                     (
-                        Bound::Included(TableKey(Bytes::from("a"))),
-                        Bound::Included(TableKey(Bytes::from("b"))),
+                        Bound::Included(TableKey::new(Bytes::from("a"))),
+                        Bound::Included(TableKey::new(Bytes::from("b"))),
                     ),
                     0,
                     TableId::default(),
@@ -820,8 +820,8 @@ mod tests {
             state_store
                 .scan(
                     (
-                        Bound::Included(TableKey(Bytes::from("a"))),
-                        Bound::Included(TableKey(Bytes::from("b"))),
+                        Bound::Included(TableKey::new(Bytes::from("a"))),
+                        Bound::Included(TableKey::new(Bytes::from("b"))),
                     ),
                     1,
                     TableId::default(),
@@ -837,7 +837,7 @@ mod tests {
         );
         assert_eq!(
             state_store
-                .get(TableKey(Bytes::from("a")), 0, ReadOptions::default(),)
+                .get(TableKey::new(Bytes::from("a")), 0, ReadOptions::default(),)
                 .await
                 .unwrap(),
             Some(Bytes::from("v1"))
@@ -845,7 +845,7 @@ mod tests {
         assert_eq!(
             state_store
                 .get(
-                    TableKey(Bytes::copy_from_slice(b"b")),
+                    TableKey::new(Bytes::copy_from_slice(b"b")),
                     0,
                     ReadOptions::default(),
                 )
@@ -856,7 +856,7 @@ mod tests {
         assert_eq!(
             state_store
                 .get(
-                    TableKey(Bytes::copy_from_slice(b"c")),
+                    TableKey::new(Bytes::copy_from_slice(b"c")),
                     0,
                     ReadOptions::default(),
                 )
@@ -867,7 +867,7 @@ mod tests {
         assert_eq!(
             state_store
                 .get(
-                    TableKey(Bytes::copy_from_slice(b"a")),
+                    TableKey::new(Bytes::copy_from_slice(b"a")),
                     1,
                     ReadOptions::default(),
                 )
@@ -877,14 +877,14 @@ mod tests {
         );
         assert_eq!(
             state_store
-                .get(TableKey(Bytes::from("b")), 1, ReadOptions::default(),)
+                .get(TableKey::new(Bytes::from("b")), 1, ReadOptions::default(),)
                 .await
                 .unwrap(),
             None
         );
         assert_eq!(
             state_store
-                .get(TableKey(Bytes::from("c")), 1, ReadOptions::default())
+                .get(TableKey::new(Bytes::from("c")), 1, ReadOptions::default())
                 .await
                 .unwrap(),
             None
