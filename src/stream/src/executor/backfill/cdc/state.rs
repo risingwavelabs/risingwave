@@ -167,7 +167,6 @@ impl<S: StateStore> MultiBackfillState<S> {
         if let Some(current_pk_pos) = &record.current_pk_pos {
             state[1..=current_pk_pos.len()].clone_from_slice(current_pk_pos.as_inner());
         }
-
         state[state_len - 3] = Some(record.is_finished.into());
         state[state_len - 2] = Some(record.row_count.into());
         state[state_len - 1] = record.last_cdc_offset.clone().map(|cdc_offset| {

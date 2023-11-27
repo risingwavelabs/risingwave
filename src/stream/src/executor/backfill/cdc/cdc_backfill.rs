@@ -251,7 +251,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             // otherwise the upstream changelog may be blocked by the snapshot read stream
             let _ = Pin::new(&mut upstream).peek().await;
 
-            // wait for the next barrier to make sure the snapshot read starts after upstream source
+            // wait for a barrier to make sure the backfill starts after upstream source
             #[for_await]
             for msg in upstream.by_ref() {
                 match msg? {
@@ -266,12 +266,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                             upstream_table_reader.inner().table_reader(),
                             chunk,
                         )?;
-
-                        tracing::info!(
-                            upstream_table_id,
-                            ?last_binlog_offset,
-                            "got upstream changelog chunk"
-                        );
                     }
                     Message::Watermark(_) => {
                         // Ignore watermark
