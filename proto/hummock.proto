@@ -380,7 +380,7 @@ message CompactTaskProgress {
   uint64 num_progress_key = 4;
   uint64 num_pending_read_io = 5;
   uint64 num_pending_write_io = 6;
-  uint64 compaction_group_id = 7;
+  optional uint64 compaction_group_id = 7;
 }
 
 message SubscribeCompactionEventRequest {
