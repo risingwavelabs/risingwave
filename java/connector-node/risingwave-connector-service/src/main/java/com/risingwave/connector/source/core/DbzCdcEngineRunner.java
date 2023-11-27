@@ -22,6 +22,7 @@ import io.grpc.stub.StreamObserver;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -118,18 +119,24 @@ public class DbzCdcEngineRunner implements CdcEngineRunner {
 
         executor.execute(engine);
         // wait for start of the connector task
-        startSignal.await();
+        boolean startOk = startSignal.await(5, TimeUnit.SECONDS);
         // put a handshake message to notify the Source executor
+        // if the handshake is not successful, the split reader will return an error to source
+        // executor
         var controlInfo =
-                GetEventStreamResponse.ControlInfo.newBuilder().setHandshakeOk(true).build();
+                GetEventStreamResponse.ControlInfo.newBuilder().setHandshakeOk(startOk).build();
         engine.getOutputChannel()
                 .put(
                         GetEventStreamResponse.newBuilder()
                                 .setSourceId(engine.getId())
                                 .setControl(controlInfo)
                                 .build());
-        running.set(true);
-        LOG.info("engine#{} started", engine.getId());
+        if (startOk) {
+            running.set(true);
+            LOG.info("engine#{} started", engine.getId());
+        } else {
+            LOG.error("engine#{} failed to start", engine.getId());
+        }
     }
 
     public void stop() throws Exception {
