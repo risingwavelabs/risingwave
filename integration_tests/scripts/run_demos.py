@@ -271,6 +271,41 @@ def run_elasticsearch_sink_demo():
         if len(failed_cases) != 0:
             raise Exception("Data check failed for case {}".format(failed_cases))
 
+def run_redis_demo():
+    demo = "redis-sink"
+    file_dir = dirname(abspath(__file__))
+    project_dir = dirname(file_dir)
+    demo_dir = os.path.join(project_dir, demo)
+    print("Running demo: {}".format(demo))
+
+    subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=demo_dir, check=True)
+    sleep(40)
+
+    sql_files = ['create_source.sql', 'create_mv.sql', 'create_sink.sql']
+    for fname in sql_files:
+        sql_file = os.path.join(demo_dir,  fname)
+        print("executing sql: ", open(sql_file).read())
+        run_sql_file(sql_file, demo_dir)
+
+    sleep(20)
+    sink_check_file = os.path.join(demo_dir, 'sink_check')
+    with open(sink_check_file) as f:
+        relations = f.read().strip().split(",")
+        failed_cases = []
+        for rel in relations:
+            query = "*{}*".format(rel)
+            print("Running query: scan on Redis".format(query))
+            output = subprocess.Popen(["docker", "compose", "exec", "redis", "redis-cli", "--scan", "--pattern", query], cwd=demo_dir, stdout=subprocess.PIPE)
+            rows = subprocess.check_output(["wc", "-l"], cwd=demo_dir, stdin=output.stdout)
+            output.stdout.close()
+            output.wait()
+            rows = int(rows.decode('utf8').strip())
+            print("{} keys in '*{}*'".format(rows, rel))
+            if rows < 1:
+                failed_cases.append(rel)
+        if len(failed_cases) != 0:
+            raise Exception("Data check failed for case {}".format(failed_cases))
+
 arg_parser = argparse.ArgumentParser(description='Run the demo')
 arg_parser.add_argument('--format',
                         metavar='format',
@@ -301,5 +336,7 @@ elif args.case == "cassandra-and-scylladb-sink":
     run_cassandra_and_scylladb_sink_demo()
 elif args.case == "elasticsearch-sink":
     run_elasticsearch_sink_demo()
+elif args.case == "redis-sink":
+    run_redis_demo()
 else:
     run_demo(args.case, args.format)
