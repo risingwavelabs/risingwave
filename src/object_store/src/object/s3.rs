@@ -643,10 +643,10 @@ impl S3ObjectStore {
         };
         let (address, bucket) = rest.split_once('/').unwrap();
 
+        let s3_object_store_config = ObjectStoreConfig::default();
         #[cfg(madsim)]
         let builder = aws_sdk_s3::config::Builder::new();
         #[cfg(not(madsim))]
-        let s3_object_store_config = ObjectStoreConfig::default();
         let builder: aws_sdk_s3::config::Builder =
             aws_sdk_s3::config::Builder::from(&aws_config::ConfigLoader::default().load().await)
                 .force_path_style(true)
