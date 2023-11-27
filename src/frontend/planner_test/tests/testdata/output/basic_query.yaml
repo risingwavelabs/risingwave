@@ -192,7 +192,7 @@
     BatchLimit { limit: 1, offset: 0 }
     └─BatchExchange { order: [], dist: Single }
       └─BatchLimit { limit: 1, offset: 0 }
-        └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+        └─BatchScan { table: t, columns: [t.v1, t.v2], limit: 1, distribution: SomeShard }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v1 limit 1

@@ -810,6 +810,7 @@ fn get_task_progress(
             num_progress_key: progress.num_progress_key.load(Ordering::Relaxed),
             num_pending_read_io: progress.num_pending_read_io.load(Ordering::Relaxed) as u64,
             num_pending_write_io: progress.num_pending_write_io.load(Ordering::Relaxed) as u64,
+            ..Default::default()
         });
     }
     progress_list

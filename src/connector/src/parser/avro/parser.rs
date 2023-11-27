@@ -158,7 +158,7 @@ impl AvroParserConfig {
                     "avro upsert without schema registry is not supported".to_string(),
                 )));
             }
-            let url = url.get(0).unwrap();
+            let url = url.first().unwrap();
             let schema_content = match url.scheme() {
                 "file" => read_schema_from_local(url.path()),
                 "s3" => {
@@ -220,7 +220,7 @@ mod test {
         read_schema_from_http, read_schema_from_local, read_schema_from_s3, AvroAccessBuilder,
         AvroParserConfig,
     };
-    use crate::aws_auth::AwsAuthProps;
+    use crate::common::AwsAuthProps;
     use crate::parser::bytes_parser::BytesAccessBuilder;
     use crate::parser::plain_parser::PlainParser;
     use crate::parser::unified::avro::unix_epoch_days;
@@ -257,14 +257,9 @@ mod test {
     #[ignore]
     async fn test_load_schema_from_s3() {
         let schema_location = "s3://mingchao-schemas/complex-schema.avsc".to_string();
-        let mut s3_config_props = HashMap::new();
-        s3_config_props.insert("region".to_string(), "ap-southeast-1".to_string());
         let url = Url::parse(&schema_location).unwrap();
-        let aws_auth_config = AwsAuthProps::from_pairs(
-            s3_config_props
-                .iter()
-                .map(|(k, v)| (k.as_str(), v.as_str())),
-        );
+        let aws_auth_config: AwsAuthProps =
+            serde_json::from_str(r#"region":"ap-southeast-1"#).unwrap();
         let schema_content = read_schema_from_s3(&url, &aws_auth_config).await;
         assert!(schema_content.is_ok());
         let schema = Schema::parse_str(&schema_content.unwrap());
@@ -584,7 +579,7 @@ mod test {
                 Value::Union(0, Box::new(Value::Null)),
             ),
         ];
-        let null_record_value = reader.get(0).unwrap().as_ref().unwrap();
+        let null_record_value = reader.first().unwrap().as_ref().unwrap();
         match null_record_value {
             Value::Record(values) => {
                 assert_eq!(values, &null_record_expected)

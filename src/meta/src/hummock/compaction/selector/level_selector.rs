@@ -704,7 +704,7 @@ pub mod tests {
         let ctx = dynamic_level_core.calculate_level_base_size(&levels);
         assert_eq!(1, ctx.base_level);
         assert_eq!(1000, levels.l0.as_ref().unwrap().total_file_size); // l0
-        assert_eq!(0, levels.levels.get(0).unwrap().total_file_size); // l1
+        assert_eq!(0, levels.levels.first().unwrap().total_file_size); // l1
         assert_eq!(25000, levels.levels.get(1).unwrap().total_file_size); // l2
         assert_eq!(15000, levels.levels.get(2).unwrap().total_file_size); // l3
         assert_eq!(10000, levels.levels.get(3).unwrap().total_file_size); // l4

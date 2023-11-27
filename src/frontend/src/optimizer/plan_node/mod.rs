@@ -155,6 +155,7 @@ pub trait PlanNode:
     + Downcast
     + ColPrunable
     + ExprRewritable
+    + ExprVisitable
     + ToBatch
     + ToStream
     + ToDistributedBatch
@@ -301,6 +302,19 @@ impl RewriteExprsRecursive for PlanRef {
     }
 }
 
+pub(crate) trait VisitExprsRecursive {
+    fn visit_exprs_recursive(&self, r: &mut impl ExprVisitor);
+}
+
+impl VisitExprsRecursive for PlanRef {
+    fn visit_exprs_recursive(&self, r: &mut impl ExprVisitor) {
+        self.visit_exprs(r);
+        self.inputs()
+            .iter()
+            .for_each(|plan_ref| plan_ref.visit_exprs_recursive(r));
+    }
+}
+
 impl PlanRef {
     pub fn expect_stream_key(&self) -> &[usize] {
         self.stream_key().unwrap_or_else(|| {
@@ -423,7 +437,15 @@ impl PlanRef {
                     .map(|mut c| Condition {
                         conjunctions: c
                             .conjunctions
-                            .extract_if(|e| e.count_nows() == 0 && e.is_pure())
+                            .extract_if(|e| {
+                                // If predicates contain now, impure or correlated input ref, don't push through share operator.
+                                // The predicate with now() function is regarded as a temporal filter predicate, which will be transformed to a temporal filter operator and can not do the OR operation with other predicates.
+                                let mut finder = ExprCorrelatedIdFinder::default();
+                                finder.visit_expr(e);
+                                e.count_nows() == 0
+                                    && e.is_pure()
+                                    && !finder.has_correlated_input_ref()
+                            })
                             .collect(),
                     })
                     .reduce(|a, b| a.or(b))
@@ -731,6 +753,8 @@ mod col_pruning;
 pub use col_pruning::*;
 mod expr_rewritable;
 pub use expr_rewritable::*;
+mod expr_visitable;
+pub use expr_rewritable::*;
 mod convert;
 pub use convert::*;
 mod eq_join_predicate;
@@ -923,9 +947,11 @@ pub use stream_union::StreamUnion;
 pub use stream_values::StreamValues;
 pub use stream_watermark_filter::StreamWatermarkFilter;
 
-use crate::expr::{ExprImpl, ExprRewriter, InputRef, Literal};
+use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_rewriter::PlanCloner;
+use crate::optimizer::plan_visitor::ExprCorrelatedIdFinder;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition, DynEq, DynHash, Endo, Layer, Visit};
 

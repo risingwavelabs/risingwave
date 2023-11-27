@@ -32,7 +32,6 @@ use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::ROWID_PREFIX;
 use risingwave_common::error::RwError;
 
-use crate::aws_utils::{ACCESS_KEY, REGION, SECRET_ACCESS};
 use crate::error::ConnectorError;
 use crate::parser::ParserConfig;
 use crate::source::pulsar::split::PulsarSplit;
@@ -430,19 +429,19 @@ impl PulsarIcebergReader {
             ),
         );
 
-        if let Some(s3_configs) = self.props.common.oauth.as_ref().map(|s| &s.s3_credentials) {
-            if let Some(region) = s3_configs.get(REGION) {
+        if let Some(s3_configs) = self.props.common.oauth.as_ref().map(|s| &s.aws_auth_props) {
+            if let Some(region) = &s3_configs.region {
                 iceberg_configs.insert("iceberg.table.io.region".to_string(), region.to_string());
             }
 
-            if let Some(access_key) = s3_configs.get(ACCESS_KEY) {
+            if let Some(access_key) = &s3_configs.access_key {
                 iceberg_configs.insert(
                     "iceberg.table.io.access_key_id".to_string(),
                     access_key.to_string(),
                 );
             }
 
-            if let Some(secret_key) = s3_configs.get(SECRET_ACCESS) {
+            if let Some(secret_key) = &s3_configs.secret_key {
                 iceberg_configs.insert(
                     "iceberg.table.io.secret_access_key".to_string(),
                     secret_key.to_string(),

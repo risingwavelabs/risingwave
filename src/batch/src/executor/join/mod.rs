@@ -27,13 +27,12 @@ pub use local_lookup_join::*;
 pub use lookup_join_base::*;
 pub use nested_loop_join::*;
 use risingwave_common::array::{DataChunk, RowRef};
-use risingwave_common::error::Result;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType as JoinTypePb;
 
-use crate::error::BatchError;
+use crate::error::Result;
 
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub enum JoinType {
@@ -128,10 +127,7 @@ fn concatenate(left: &DataChunk, right: &DataChunk) -> Result<DataChunk> {
         (true, _) => right.visibility().clone(),
         (_, true) => left.visibility().clone(),
         (false, false) => {
-            return Err(BatchError::UnsupportedFunction(
-                "The concatenate behaviour of two chunk with visibility is undefined".to_string(),
-            )
-            .into())
+            panic!("The concatenate behaviour of two chunk with visibility is undefined")
         }
     };
     let data_chunk = DataChunk::new(concated_columns, vis);

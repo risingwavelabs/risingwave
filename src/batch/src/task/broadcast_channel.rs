@@ -22,14 +22,14 @@ use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;
 
 use crate::error::BatchError::{Internal, SenderError};
-use crate::error::{BatchError, BatchSharedResult, Result as BatchResult};
+use crate::error::{BatchError, Result as BatchResult, SharedResult};
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 
 /// `BroadcastSender` sends the same chunk to a number of `BroadcastReceiver`s.
 #[derive(Clone)]
 pub struct BroadcastSender {
-    senders: Vec<mpsc::Sender<BatchSharedResult<Option<DataChunkInChannel>>>>,
+    senders: Vec<mpsc::Sender<SharedResult<Option<DataChunkInChannel>>>>,
     broadcast_info: BroadcastInfo,
 }
 
@@ -68,11 +68,11 @@ impl ChanSender for BroadcastSender {
 
 /// One or more `BroadcastReceiver`s corresponds to a single `BroadcastReceiver`
 pub struct BroadcastReceiver {
-    receiver: mpsc::Receiver<BatchSharedResult<Option<DataChunkInChannel>>>,
+    receiver: mpsc::Receiver<SharedResult<Option<DataChunkInChannel>>>,
 }
 
 impl ChanReceiver for BroadcastReceiver {
-    async fn recv(&mut self) -> BatchSharedResult<Option<DataChunkInChannel>> {
+    async fn recv(&mut self) -> SharedResult<Option<DataChunkInChannel>> {
         match self.receiver.recv().await {
             Some(data_chunk) => data_chunk,
             // Early close should be treated as an error.

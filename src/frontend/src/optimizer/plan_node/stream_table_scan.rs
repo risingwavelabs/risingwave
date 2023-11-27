@@ -28,7 +28,8 @@ use super::stream::prelude::*;
 use super::utils::{childless_record, Distill};
 use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
-use crate::expr::{ExprRewriter, FunctionCall};
+use crate::expr::{ExprRewriter, ExprVisitor, FunctionCall};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -344,5 +345,11 @@ impl ExprRewritable for StreamTableScan {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
         Self::new_with_stream_scan_type(core, self.stream_scan_type).into()
+    }
+}
+
+impl ExprVisitable for StreamTableScan {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

@@ -285,7 +285,9 @@ impl LogSinker for RemoteLogSinker {
                 log_reader: &mut impl LogReader,
                 metrics: &SinkMetrics,
             ) -> Result<()> {
-                while let Some((sent_offset, _)) = queue.front() && sent_offset < &persisted_offset {
+                while let Some((sent_offset, _)) = queue.front()
+                    && sent_offset < &persisted_offset
+                {
                     queue.pop_front();
                 }
 

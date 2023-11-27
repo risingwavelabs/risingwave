@@ -16,13 +16,13 @@ use std::fmt::{Debug, Formatter};
 
 use futures::StreamExt;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::{self, Plan};
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::{ExecuteRequest, GetDataResponse};
 use risingwave_rpc_client::ComputeClient;
 use tonic::Streaming;
 
+use crate::error::Result;
 use crate::exchange_source::ExchangeSource;
 use crate::task::TaskId;
 
