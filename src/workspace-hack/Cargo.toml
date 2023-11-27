@@ -24,9 +24,9 @@ anyhow = { version = "1", features = ["backtrace"] }
 async-std = { version = "1", features = ["attributes", "tokio1"] }
 aws-credential-types = { version = "1", default-features = false, features = ["hardcoded-credentials"] }
 aws-runtime = { version = "1", default-features = false, features = ["event-stream", "sigv4a"] }
-aws-sdk-s3 = { version = "0.39" }
 aws-sigv4 = { version = "1", features = ["http0-compat", "sign-eventstream", "sigv4a"] }
-aws-smithy-runtime = { version = "1", default-features = false, features = ["client", "rt-tokio", "tls-rustls"] }
+aws-smithy-async = { version = "1", default-features = false, features = ["rt-tokio"] }
+aws-smithy-http = { version = "0.60", default-features = false, features = ["event-stream"] }
 aws-smithy-types = { version = "1", default-features = false, features = ["byte-stream-poll-next", "http-body-0-4-x", "hyper-0-14-x", "rt-tokio"] }
 base64 = { version = "0.21", features = ["alloc"] }
 bit-vec = { version = "0.6" }
