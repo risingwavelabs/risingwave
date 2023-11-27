@@ -11,14 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
-pub mod state_table;
-mod state_table_cache;
-mod watermark;
+#![feature(proc_macro_hygiene, stmt_expr_attributes)]
+#![feature(custom_test_frameworks)]
+#![feature(bound_map)]
+#![feature(type_alias_impl_trait)]
+#![feature(associated_type_bounds)]
 
 #[cfg(test)]
-pub mod test_state_table;
-#[cfg(test)]
-pub mod test_storage_table;
-
-pub mod test_utils;
+mod test_mem_table;
