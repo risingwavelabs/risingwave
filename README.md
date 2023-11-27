@@ -45,7 +45,7 @@
     target="_blank"
   >
     <img alt="Docker" src="https://img.shields.io/docker/v/risingwavelabs/risingwave" />
-  </a>
+  </a> 
   <a
     href="https://buildkite.com/risingwavelabs/main"
     target="_blank"
