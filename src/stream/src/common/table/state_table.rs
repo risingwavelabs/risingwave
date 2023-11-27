@@ -883,14 +883,14 @@ where
                 &self.dist_key_in_pk_indices,
                 &self.pk_in_output_indices().unwrap(),
                 &self.vnodes,
-            );
+            )
         } else {
             compute_chunk_vnode(
                 &chunk,
                 &self.dist_key_in_pk_indices,
                 &self.pk_indices,
                 &self.vnodes,
-            );
+            )
         };
 
         let values = if let Some(ref value_indices) = self.value_indices {

@@ -402,8 +402,8 @@ where
                         ));
                     }
 
-                    // Replicate
-                    upstream_table.write_chunk(chunk);
+                    // FIXME(kwannoel): Replicate
+                    // upstream_table.write_chunk(chunk);
                 }
 
                 if upstream_chunk_buffer_is_empty {
