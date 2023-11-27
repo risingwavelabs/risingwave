@@ -287,7 +287,7 @@ def run_redis_demo():
         print("executing sql: ", open(sql_file).read())
         run_sql_file(sql_file, demo_dir)
 
-    sleep(20)
+    sleep(40)
     sink_check_file = os.path.join(demo_dir, 'sink_check')
     with open(sink_check_file) as f:
         relations = f.read().strip().split(",")
