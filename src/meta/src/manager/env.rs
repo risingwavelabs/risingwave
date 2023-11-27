@@ -386,6 +386,8 @@ impl MetaSrvEnv {
     }
 
     pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {
+        use crate::manager::event_log::EventLogManger;
+
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let meta_store = MemStore::default().into_ref();
         #[cfg(madsim)]
@@ -422,7 +424,7 @@ impl MetaSrvEnv {
             None
         };
 
-        let event_log_manager = Arc::new(crate::manager::event_log::EventLogManger::for_test());
+        let event_log_manager = Arc::new(EventLogManger::for_test());
 
         Self {
             id_gen_manager,
