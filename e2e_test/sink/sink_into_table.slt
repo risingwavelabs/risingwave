@@ -28,6 +28,22 @@ drop table t_simple;
 statement ok
 drop table m_simple;
 
+# drop table with associated sink
+statement ok
+create table t_simple (v1 int, v2 int);
+
+statement ok
+create table m_simple (v1 int primary key, v2 int);
+
+statement ok
+create sink s_simple_1 into m_simple as select v1, v2 from t_simple;
+
+statement ok
+drop table m_simple;
+
+statement ok
+drop table t_simple;
+
 # target table with row_id as primary key
 statement ok
 create table t_s1 (v1 int, v2 int);

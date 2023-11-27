@@ -1435,14 +1435,28 @@ impl CatalogManager {
             .collect_vec();
 
         if !matches!(relation, RelationIdEnum::Sink(_)) {
-            let table_sink = sinks_removed
+            let table_sinks = sinks_removed
                 .iter()
-                .filter(|sink| sink.target_table.is_some())
+                .filter(|sink| {
+                    if let Some(target_table) = sink.target_table {
+                        // Table sink but associated with the table
+                        if matches!(relation, RelationIdEnum::Table(table_id) if table_id == target_table) {
+                            false
+                        } else {
+                            // Table sink
+                            true
+                        }
+                    } else {
+                        // Normal sink
+                        false
+                    }
+                })
                 .collect_vec();
-            if !table_sink.is_empty() {
+
+            if !table_sinks.is_empty() {
                 bail!(
                     "Found {} sink(s) into table in dependency, please drop them manually",
-                    table_sink.len()
+                    table_sinks.len()
                 );
             }
         }
