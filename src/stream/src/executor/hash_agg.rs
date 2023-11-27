@@ -88,7 +88,7 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
 
-    /// Pk indices from input.
+    /// Pk indices from input. Only used by `AggNodeVersion` before `ISSUE_13465`.
     input_pk_indices: Vec<usize>,
 
     /// Schema from input.
@@ -375,7 +375,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .zip_eq_fast(&mut this.storages)
             .zip_eq_fast(call_visibilities.iter())
         {
-            if let AggStateStorage::MaterializedInput { table, mapping } = storage
+            if let AggStateStorage::MaterializedInput { table, mapping, .. } = storage
                 && !call.distinct
             {
                 let chunk = chunk.project_with_vis(mapping.upstream_columns(), visibility.clone());
@@ -406,7 +406,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 .zip_eq_fast(&mut this.storages)
                 .zip_eq_fast(visibilities.iter())
             {
-                if let AggStateStorage::MaterializedInput { table, mapping } = storage
+                if let AggStateStorage::MaterializedInput { table, mapping, .. } = storage
                     && call.distinct
                 {
                     let chunk =

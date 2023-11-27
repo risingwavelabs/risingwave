@@ -5,7 +5,11 @@
     StreamMaterialize { columns: [*VALUES*_0.column_0, *VALUES*_0.column_1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
     └─StreamValues { rows: [[11:Int32, 22:Int32, 0:Int64], [36:Int32, 44:Int32, 1:Int64]] }
 - sql: select * from t
-  binder_error: 'Catalog error: table or source not found: t'
+  binder_error: |
+    Catalog error
+
+    Caused by:
+      table or source not found: t
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t;
@@ -148,8 +152,8 @@
 - sql: |
     create table t1 (x int);
     select * from t1 where EXISTS(select * where t1.x=1);
-  binder_error: |-
-    Bind error: failed to bind expression: EXISTS (SELECT * WHERE t1.x = 1)
+  binder_error: |
+    Failed to bind expression: EXISTS (SELECT * WHERE t1.x = 1)
 
     Caused by:
       Bind error: SELECT * with no tables specified is not valid
@@ -175,8 +179,8 @@
   sql: |
     create table t(v1 int);
     select v1 from t where exists (values(v1));
-  binder_error: |-
-    Bind error: failed to bind expression: EXISTS (VALUES (v1))
+  binder_error: |
+    Failed to bind expression: EXISTS (VALUES (v1))
 
     Caused by:
       Feature is not yet implemented: CorrelatedInputRef in VALUES
@@ -188,7 +192,7 @@
     BatchLimit { limit: 1, offset: 0 }
     └─BatchExchange { order: [], dist: Single }
       └─BatchLimit { limit: 1, offset: 0 }
-        └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
+        └─BatchScan { table: t, columns: [t.v1, t.v2], limit: 1, distribution: SomeShard }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v1 limit 1

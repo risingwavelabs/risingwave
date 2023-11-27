@@ -29,7 +29,7 @@ use risingwave_pb::catalog::{
 };
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
-use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_pb::ddl_service::{alter_set_schema_request, DdlProgress};
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use tokio::sync::Semaphore;
 use tokio::time::sleep;
@@ -104,6 +104,7 @@ pub enum DdlCommand {
     AlterRelationName(Relation, String),
     AlterSourceColumn(Source),
     AlterTableOwner(Object, UserId),
+    AlterSetSchema(alter_set_schema_request::Object, SchemaId),
     CreateConnection(Connection),
     DropConnection(ConnectionId),
     CommentOn(Comment),
@@ -259,6 +260,9 @@ impl DdlController {
                 }
                 DdlCommand::AlterTableOwner(object, owner_id) => {
                     ctrl.alter_owner(object, owner_id).await
+                }
+                DdlCommand::AlterSetSchema(object, new_schema_id) => {
+                    ctrl.alter_set_schema(object, new_schema_id).await
                 }
                 DdlCommand::CreateConnection(connection) => {
                     ctrl.create_connection(connection).await
@@ -482,7 +486,8 @@ impl DdlController {
         let (ctx, table_fragments) = match result {
             Ok(r) => r,
             Err(e) => {
-                self.cancel_stream_job(&stream_job, internal_tables).await?;
+                self.cancel_stream_job(&stream_job, internal_tables, Some(&e))
+                    .await?;
                 return Err(e);
             }
         };
@@ -541,7 +546,8 @@ impl DdlController {
                     tracing::error!(id = stream_job.id(), error = ?e, "finish stream job failed")
                 }
                 _ => {
-                    self.cancel_stream_job(&stream_job, internal_tables).await?;
+                    self.cancel_stream_job(&stream_job, internal_tables, Some(&e))
+                        .await?;
                 }
             }
             return Err(e);
@@ -763,7 +769,19 @@ impl DdlController {
         &self,
         stream_job: &StreamingJob,
         internal_tables: Vec<Table>,
+        error: Option<&impl ToString>,
     ) -> MetaResult<()> {
+        let error = error.map(ToString::to_string).unwrap_or_default();
+        let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
+            id: stream_job.id(),
+            name: stream_job.name(),
+            definition: stream_job.definition(),
+            error,
+        };
+        self.env.event_log_manager_ref().add_event_logs(vec![
+            risingwave_pb::meta::event_log::Event::CreateStreamJobFail(event),
+        ]);
+
         let mut creating_internal_table_ids =
             internal_tables.into_iter().map(|t| t.id).collect_vec();
         // 1. cancel create procedure.
@@ -1009,7 +1027,7 @@ impl DdlController {
         // Map the column indices in the dispatchers with the given mapping.
         let downstream_fragments = self
             .fragment_manager
-            .get_downstream_chain_fragments(id.into())
+            .get_downstream_fragments(id.into())
             .await?
             .into_iter()
             .map(|(d, f)| Some((table_col_index_mapping.rewrite_dispatch_strategy(&d)?, f)))
@@ -1137,7 +1155,19 @@ impl DdlController {
         object: Object,
         owner_id: UserId,
     ) -> MetaResult<NotificationVersion> {
-        self.catalog_manager.alter_owner(object, owner_id).await
+        self.catalog_manager
+            .alter_owner(self.fragment_manager.clone(), object, owner_id)
+            .await
+    }
+
+    async fn alter_set_schema(
+        &self,
+        object: alter_set_schema_request::Object,
+        new_schema_id: SchemaId,
+    ) -> MetaResult<NotificationVersion> {
+        self.catalog_manager
+            .alter_set_schema(self.fragment_manager.clone(), object, new_schema_id)
+            .await
     }
 
     pub async fn wait(&self) -> MetaResult<()> {

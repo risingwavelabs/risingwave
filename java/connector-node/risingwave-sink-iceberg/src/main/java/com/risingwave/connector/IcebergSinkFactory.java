@@ -144,7 +144,7 @@ public class IcebergSinkFactory implements SinkFactory {
         }
 
         switch (sinkType) {
-            case UPSERT:
+            case SINK_TYPE_UPSERT:
                 // For upsert iceberg sink, the user must specify its primary key explicitly.
                 if (tableSchema.getPrimaryKeys().isEmpty()) {
                     throw Status.INVALID_ARGUMENT
@@ -152,8 +152,8 @@ public class IcebergSinkFactory implements SinkFactory {
                             .asRuntimeException();
                 }
                 break;
-            case APPEND_ONLY:
-            case FORCE_APPEND_ONLY:
+            case SINK_TYPE_APPEND_ONLY:
+            case SINK_TYPE_FORCE_APPEND_ONLY:
                 break;
             default:
                 throw Status.INTERNAL.asRuntimeException();

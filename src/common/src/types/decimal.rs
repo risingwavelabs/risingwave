@@ -28,7 +28,6 @@ use super::to_binary::ToBinary;
 use super::to_text::ToText;
 use super::DataType;
 use crate::array::ArrayResult;
-use crate::error::Result as RwResult;
 use crate::estimate_size::EstimateSize;
 use crate::types::ordered_float::OrderedFloat;
 use crate::types::Decimal::Normalized;
@@ -82,7 +81,7 @@ impl Decimal {
 }
 
 impl ToBinary for Decimal {
-    fn to_binary_with_type(&self, ty: &DataType) -> RwResult<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         match ty {
             DataType::Decimal => {
                 let mut output = BytesMut::new();

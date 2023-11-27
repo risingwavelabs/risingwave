@@ -59,7 +59,7 @@
     Fragment 0
     StreamMaterialize { columns: [auction, bidder, price, date_time, bid._row_id(hidden)], stream_key: [bid._row_id], pk_columns: [bid._row_id], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
-    └── Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+    └── StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
         ├── state table: 0
         ├── Upstream
         └── BatchPlanNode
@@ -107,7 +107,7 @@
     StreamMaterialize { columns: [auction, bidder, price, date_time, bid._row_id(hidden)], stream_key: [bid._row_id], pk_columns: [bid._row_id], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [bid.auction, bid.bidder, (0.908:Decimal * bid.price::Decimal) as $expr1, bid.date_time, bid._row_id] }
-        └── Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+        └── StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
             ├── state table: 0
             ├── Upstream
             └── BatchPlanNode
@@ -148,7 +148,7 @@
     Fragment 0
     StreamMaterialize { columns: [auction, price, bid._row_id(hidden)], stream_key: [bid._row_id], pk_columns: [bid._row_id], pk_conflict: NoCheck } { materialized table: 4294967294 }
     └── StreamFilter { predicate: (((((bid.auction = 1007:Int32) OR (bid.auction = 1020:Int32)) OR (bid.auction = 2001:Int32)) OR (bid.auction = 2019:Int32)) OR (bid.auction = 2087:Int32)) }
-        └── Chain { table: bid, columns: [bid.auction, bid.price, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 0 }
+        └── StreamTableScan { table: bid, columns: [bid.auction, bid.price, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 0 }
             ├── Upstream
             └── BatchPlanNode
 
@@ -174,7 +174,7 @@
         A.category = 10 and (P.state = 'or' OR P.state = 'id' OR P.state = 'ca');
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: auction.seller = person.id AND (((person.state = 'or':Varchar) OR (person.state = 'id':Varchar)) OR (person.state = 'ca':Varchar)), output: [person.name, person.city, person.state, auction.id] }
+    └─BatchLookupJoin { type: Inner, predicate: auction.seller = person.id AND (((person.state = 'or':Varchar) OR (person.state = 'id':Varchar)) OR (person.state = 'ca':Varchar)), output: [person.name, person.city, person.state, auction.id], lookup table: person }
       └─BatchExchange { order: [], dist: UpstreamHashShard(auction.seller) }
         └─BatchProject { exprs: [auction.id, auction.seller] }
           └─BatchFilter { predicate: (auction.category = 10:Int32) }
@@ -208,13 +208,13 @@
     Fragment 2
     StreamProject { exprs: [auction.id, auction.seller] }
     └── StreamFilter { predicate: (auction.category = 10:Int32) }
-        └── Chain { table: auction, columns: [auction.id, auction.seller, auction.category], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 4 }
+        └── StreamTableScan { table: auction, columns: [auction.id, auction.seller, auction.category], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 4 }
             ├── Upstream
             └── BatchPlanNode
 
     Fragment 3
     StreamFilter { predicate: (((person.state = 'or':Varchar) OR (person.state = 'id':Varchar)) OR (person.state = 'ca':Varchar)) }
-    └── Chain { table: person, columns: [person.id, person.name, person.city, person.state], pk: [person.id], dist: UpstreamHashShard(person.id) } { state table: 5 }
+    └── StreamTableScan { table: person, columns: [person.id, person.name, person.city, person.state], pk: [person.id], dist: UpstreamHashShard(person.id) } { state table: 5 }
         ├── Upstream
         └── BatchPlanNode
 
@@ -316,13 +316,13 @@
                     └── StreamExchange Hash([0]) from 3
 
     Fragment 2
-    Chain { table: auction, columns: [auction.id, auction.date_time, auction.expires, auction.category], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+    StreamTableScan { table: auction, columns: [auction.id, auction.date_time, auction.expires, auction.category], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
     ├── state table: 7
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    Chain { table: bid, columns: [bid.auction, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+    StreamTableScan { table: bid, columns: [bid.auction, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
     ├── state table: 8
     ├── Upstream
     └── BatchPlanNode
@@ -364,12 +364,7 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 6
-    ├── columns: [ bid_auction, bid__row_id, _degree ]
-    ├── primary key: [ $0 ASC, $1 ASC ]
-    ├── value indices: [ 2 ]
-    ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 1
+    Table 6 { columns: [ bid_auction, bid__row_id, _degree ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 7
     ├── columns: [ vnode, id, auction_backfill_finished, auction_row_count ]
@@ -499,7 +494,7 @@
     Fragment 3
     StreamHopWindow { time_col: bid.date_time, slide: 00:00:02, size: 00:00:10, output: [bid.auction, window_start, bid._row_id] }
     └── StreamFilter { predicate: IsNotNull(bid.date_time) }
-        └── Chain { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 5 }
+        └── StreamTableScan { table: bid, columns: [bid.auction, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 5 }
             ├── Upstream
             └── BatchPlanNode
 
@@ -587,12 +582,12 @@
             └── StreamExchange Hash([0]) from 4
 
     Fragment 3
-    Chain { table: auction, columns: [auction.id, auction.date_time, auction.expires, auction.seller], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 6 }
+    StreamTableScan { table: auction, columns: [auction.id, auction.date_time, auction.expires, auction.seller], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 6 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 4
-    Chain { table: bid, columns: [bid.auction, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 7 }
+    StreamTableScan { table: bid, columns: [bid.auction, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 7 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -679,12 +674,12 @@
             └── StreamExchange Hash([0]) from 4
 
     Fragment 3
-    Chain { table: auction, columns: [auction.id, auction.date_time, auction.expires, auction.seller], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 6 }
+    StreamTableScan { table: auction, columns: [auction.id, auction.date_time, auction.expires, auction.seller], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 6 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 4
-    Chain { table: bid, columns: [bid.auction, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 7 }
+    StreamTableScan { table: bid, columns: [bid.auction, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 7 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -764,7 +759,7 @@
                 └── StreamExchange Hash([1]) from 2
 
     Fragment 1
-    Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 4 }
+    StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 4 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -775,7 +770,7 @@
 
     Fragment 3
     StreamProject { exprs: [(TumbleStart(bid.date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr1, bid.price, bid._row_id] }
-    └── Chain { table: bid, columns: [bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 6 }
+    └── StreamTableScan { table: bid, columns: [bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 6 }
         ├── Upstream
         └── BatchPlanNode
 
@@ -887,14 +882,14 @@
     └── StreamHashAgg { group_key: [person.id, $expr1, $expr2], aggs: [internal_last_seen_value(person.name), count] } { intermediate state table: 4, state tables: [], distinct tables: [] }
         └── StreamProject { exprs: [person.id, person.name, $expr1, ($expr1 + '00:00:10':Interval) as $expr2] }
             └── StreamProject { exprs: [person.id, person.name, person.date_time, TumbleStart(person.date_time, '00:00:10':Interval) as $expr1] }
-                └── Chain { table: person, columns: [person.id, person.name, person.date_time], pk: [person.id], dist: UpstreamHashShard(person.id) } { state table: 5 }
+                └── StreamTableScan { table: person, columns: [person.id, person.name, person.date_time], pk: [person.id], dist: UpstreamHashShard(person.id) } { state table: 5 }
                     ├── Upstream
                     └── BatchPlanNode
 
     Fragment 3
     StreamProject { exprs: [auction.seller, $expr3, ($expr3 + '00:00:10':Interval) as $expr4, auction.id] }
     └── StreamProject { exprs: [auction.date_time, auction.seller, TumbleStart(auction.date_time, '00:00:10':Interval) as $expr3, auction.id] }
-        └── Chain { table: auction, columns: [auction.date_time, auction.seller, auction.id], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 7 }
+        └── StreamTableScan { table: auction, columns: [auction.date_time, auction.seller, auction.id], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 7 }
             ├── Upstream
             └── BatchPlanNode
 
@@ -978,13 +973,13 @@
                 └── StreamExchange Hash([0]) from 2
 
     Fragment 1
-    Chain { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+    StreamTableScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
     ├── state table: 5
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 2
-    Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 6 }
+    StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 6 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -1042,7 +1037,7 @@
     StreamMaterialize { columns: [auction, bidder, price, date_time, date, time, bid._row_id(hidden)], stream_key: [bid._row_id], pk_columns: [bid._row_id], pk_conflict: NoCheck }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.date_time, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar) as $expr1, ToChar(bid.date_time, 'HH:MI':Varchar) as $expr2, bid._row_id] }
-        └── Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 0 }
+        └── StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 0 }
             ├── Upstream
             └── BatchPlanNode
 
@@ -1072,8 +1067,8 @@
       SESSION_END(B.date_time, INTERVAL '10' SECOND) as endtime
     FROM bid B
     GROUP BY B.bidder, SESSION(B.date_time, INTERVAL '10' SECOND);
-  binder_error: |-
-    Bind error: failed to bind expression: SESSION_START(B.date_time, INTERVAL '10' SECOND)
+  binder_error: |
+    Failed to bind expression: SESSION_START(B.date_time, INTERVAL '10' SECOND)
 
     Caused by:
       Feature is not yet implemented: unsupported function: "session_start"
@@ -1112,7 +1107,7 @@
     Fragment 1
     StreamProject { exprs: [bid.bidder, $expr1, AddWithTimeZone($expr1, '00:00:10':Interval, 'UTC':Varchar) as $expr2, bid._row_id], output_watermarks: [$expr1, $expr2] }
     └── StreamProject { exprs: [bid.bidder, bid.p_time, TumbleStart(bid.p_time, '00:00:10':Interval) as $expr1, bid._row_id], output_watermarks: [bid.p_time, $expr1] }
-        └── Chain { table: bid, columns: [bid.bidder, bid.p_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 1 }
+        └── StreamTableScan { table: bid, columns: [bid.bidder, bid.p_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 1 }
             ├── Upstream
             └── BatchPlanNode
 
@@ -1132,7 +1127,7 @@
     JOIN side_input FOR SYSTEM_TIME AS OF PROCTIME() S
     ON mod(B.auction, 10000) = S.key
   sink_plan: |-
-    StreamSink { type: append-only, columns: [auction, bidder, price, date_time, value, bid._row_id(hidden), $expr10042(hidden), side_input.key(hidden)] }
+    StreamSink { type: append-only, columns: [auction, bidder, price, date_time, value, bid._row_id(hidden), $expr10018(hidden), side_input.key(hidden)] }
     └─StreamTemporalJoin { type: Inner, predicate: $expr1 = side_input.key, output: [bid.auction, bid.bidder, bid.price, bid.date_time, side_input.value, bid._row_id, $expr1, side_input.key] }
       ├─StreamExchange { dist: HashShard($expr1) }
       │ └─StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.date_time, (bid.auction % 10000:Int32) as $expr1, bid._row_id] }
@@ -1161,12 +1156,12 @@
 
     Fragment 2
     StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.date_time, (bid.auction % 10000:Int32) as $expr1, bid._row_id] }
-    └── Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 0 }
+    └── StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 0 }
         ├── Upstream
         └── BatchPlanNode
 
     Fragment 3
-    Chain { table: side_input, columns: [side_input.key, side_input.value], pk: [side_input.key], dist: UpstreamHashShard(side_input.key) } { state table: 1 }
+    StreamTableScan { table: side_input, columns: [side_input.key, side_input.value], pk: [side_input.key], dist: UpstreamHashShard(side_input.key) } { state table: 1 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -1228,7 +1223,7 @@
     StreamMaterialize { columns: [auction, bidder, price, bidtimetype, date_time, extra, bid._row_id(hidden)], stream_key: [bid._row_id], pk_columns: [bid._row_id], pk_conflict: NoCheck } { materialized table: 4294967294 }
     └── StreamProject { exprs: [bid.auction, bid.bidder, (0.908:Decimal * bid.price::Decimal) as $expr1, Case(((Extract('HOUR':Varchar, bid.date_time) >= 8:Decimal) AND (Extract('HOUR':Varchar, bid.date_time) <= 18:Decimal)), 'dayTime':Varchar, ((Extract('HOUR':Varchar, bid.date_time) <= 6:Decimal) OR (Extract('HOUR':Varchar, bid.date_time) >= 20:Decimal)), 'nightTime':Varchar, 'otherTime':Varchar) as $expr2, bid.date_time, bid.extra, bid._row_id] }
         └── StreamFilter { predicate: ((0.908:Decimal * bid.price::Decimal) > 1000000:Decimal) AND ((0.908:Decimal * bid.price::Decimal) < 50000000:Decimal) }
-            └── Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid.extra, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 0 }
+            └── StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid.extra, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 0 }
                 ├── Upstream
                 └── BatchPlanNode
 
@@ -1282,7 +1277,7 @@
 
     Fragment 1
     StreamProject { exprs: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar) as $expr1, bid.price, bid.bidder, bid.auction, bid._row_id] }
-    └── Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 3 }
+    └── StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 3 }
         ├── Upstream
         └── BatchPlanNode
 
@@ -1348,7 +1343,7 @@
     Fragment 2
     StreamExpand { column_subsets: [[$expr1], [$expr1, bid.bidder], [$expr1, bid.auction]] }
     └── StreamProject { exprs: [ToChar(bid.date_time, 'yyyy-MM-dd':Varchar) as $expr1, bid.price, bid.bidder, bid.auction, bid._row_id] }
-        └── Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 2 }
+        └── StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 2 }
             ├── Upstream
             └── BatchPlanNode
 
@@ -1415,7 +1410,7 @@
 
     Fragment 1
     StreamProject { exprs: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar) as $expr1, ToChar(bid.date_time, 'HH:mm':Varchar) as $expr2, bid.price, bid.bidder, bid.auction, bid._row_id] }
-    └── Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 3 }
+    └── StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 3 }
         ├── Upstream
         └── BatchPlanNode
 
@@ -1483,7 +1478,7 @@
     Fragment 2
     StreamExpand { column_subsets: [[bid.channel, $expr1, $expr2], [bid.channel, $expr1, bid.bidder], [bid.channel, $expr1, bid.auction]] }
     └── StreamProject { exprs: [bid.channel, ToChar(bid.date_time, 'yyyy-MM-dd':Varchar) as $expr1, ToChar(bid.date_time, 'HH:mm':Varchar) as $expr2, bid.price, bid.bidder, bid.auction, bid._row_id] }
-        └── Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 3 }
+        └── StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 3 }
             ├── Upstream
             └── BatchPlanNode
 
@@ -1547,7 +1542,7 @@
 
     Fragment 1
     StreamProject { exprs: [bid.auction, ToChar(bid.date_time, 'YYYY-MM-DD':Varchar) as $expr1, bid.price, bid._row_id] }
-    └── Chain { table: bid, columns: [bid.auction, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 1 }
+    └── StreamTableScan { table: bid, columns: [bid.auction, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 1 }
         ├── Upstream
         └── BatchPlanNode
 
@@ -1595,7 +1590,7 @@
         └── StreamExchange Hash([1, 0]) from 1
 
     Fragment 1
-    Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+    StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
     ├── state table: 1
     ├── Upstream
     └── BatchPlanNode
@@ -1655,7 +1650,7 @@
         └── StreamExchange Hash([1, 0]) from 1
 
     Fragment 1
-    Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 1 }
+    StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 1 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -1707,7 +1702,7 @@
         └── StreamExchange Hash([0]) from 1
 
     Fragment 1
-    Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 1 }
+    StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 1 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -1763,7 +1758,8 @@
             └── StreamExchange Hash([0]) from 1
 
     Fragment 1
-    Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 2 }
+    StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+    ├── state table: 2
     ├── Upstream
     └── BatchPlanNode
 
@@ -1802,7 +1798,7 @@
     WHERE A.category = 10;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchLookupJoin { type: Inner, predicate: bid.auction = auction.id AND (auction.category = 10:Int32), output: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category] }
+    └─BatchLookupJoin { type: Inner, predicate: bid.auction = auction.id AND (auction.category = 10:Int32), output: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], lookup table: auction }
       └─BatchExchange { order: [], dist: UpstreamHashShard(bid.auction) }
         └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time], distribution: SomeShard }
   stream_plan: |-
@@ -1830,13 +1826,13 @@
     └── StreamExchange Hash([0]) from 3
 
     Fragment 2
-    Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 4 }
+    StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 4 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
     StreamFilter { predicate: (auction.category = 10:Int32) }
-    └── Chain { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 5 }
+    └── StreamTableScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 5 }
         ├── Upstream
         └── BatchPlanNode
 
@@ -1890,7 +1886,7 @@
     StreamMaterialize { columns: [auction, bidder, price, channel, channel_id, bid._row_id(hidden)], stream_key: [bid._row_id], pk_columns: [bid._row_id], pk_conflict: NoCheck } { materialized table: 4294967294 }
     └── StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, Case((Lower(bid.channel) = 'apple':Varchar), '0':Varchar, (Lower(bid.channel) = 'google':Varchar), '1':Varchar, (Lower(bid.channel) = 'facebook':Varchar), '2':Varchar, (Lower(bid.channel) = 'baidu':Varchar), '3':Varchar, ArrayAccess(RegexpMatch(bid.url, '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) as $expr1, bid._row_id] }
         └── StreamFilter { predicate: (IsNotNull(ArrayAccess(RegexpMatch(bid.url, '(&|^)channel_id=([^&]*)':Varchar), 2:Int32)) OR In(Lower(bid.channel), 'apple':Varchar, 'google':Varchar, 'facebook':Varchar, 'baidu':Varchar)) }
-            └── Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 0 }
+            └── StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 0 }
                 ├── Upstream
                 └── BatchPlanNode
 
@@ -1924,7 +1920,7 @@
     Fragment 0
     StreamMaterialize { columns: [auction, bidder, price, channel, dir1, dir2, dir3, bid._row_id(hidden)], stream_key: [bid._row_id], pk_columns: [bid._row_id], pk_conflict: NoCheck } { materialized table: 4294967294 }
     └── StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, SplitPart(bid.url, '/':Varchar, 4:Int32) as $expr1, SplitPart(bid.url, '/':Varchar, 5:Int32) as $expr2, SplitPart(bid.url, '/':Varchar, 6:Int32) as $expr3, bid._row_id] }
-        └── Chain { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 0 }
+        └── StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 0 }
             ├── Upstream
             └── BatchPlanNode
 
@@ -1988,12 +1984,12 @@
             └── StreamExchange Hash([0]) from 3
 
     Fragment 2
-    Chain { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 4 }
+    StreamTableScan { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 4 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    Chain { table: bid, columns: [bid.auction, bid.price, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 6 }
+    StreamTableScan { table: bid, columns: [bid.auction, bid.price, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 6 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -2104,12 +2100,12 @@
         └── StreamExchange Broadcast from 3
 
     Fragment 1
-    Chain { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 7 }
+    StreamTableScan { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 7 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 2
-    Chain { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 8 }
+    StreamTableScan { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 8 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -2124,7 +2120,7 @@
         └── StreamExchange Hash([0]) from 5
 
     Fragment 5
-    Chain { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 11 }
+    StreamTableScan { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 11 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -2266,13 +2262,14 @@
                 └── StreamExchange Hash([0]) from 3
 
     Fragment 2
-    Chain { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+    StreamTableScan { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
     ├── state table: 4
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    Chain { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 6 }
+    StreamTableScan { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+    ├── state table: 6
     ├── Upstream
     └── BatchPlanNode
 
@@ -2388,13 +2385,14 @@
                 └── StreamExchange Hash([0]) from 3
 
     Fragment 2
-    Chain { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+    StreamTableScan { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
     ├── state table: 4
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    Chain { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 6 }
+    StreamTableScan { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+    ├── state table: 6
     ├── Upstream
     └── BatchPlanNode
 
@@ -2514,12 +2512,12 @@
                 └── StreamExchange Hash([0]) from 3
 
     Fragment 2
-    Chain { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 7 }
+    StreamTableScan { table: auction, columns: [auction.id, auction.item_name], pk: [auction.id], dist: UpstreamHashShard(auction.id) } { state table: 7 }
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    Chain { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 8 }
+    StreamTableScan { table: bid, columns: [bid.auction, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) } { state table: 8 }
     ├── Upstream
     └── BatchPlanNode
 
@@ -2666,13 +2664,13 @@
                         └── StreamExchange Hash([0]) from 3
 
     Fragment 2
-    Chain { table: auction, columns: [auction.id, auction.date_time, auction.expires], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
+    StreamTableScan { table: auction, columns: [auction.id, auction.date_time, auction.expires], pk: [auction.id], dist: UpstreamHashShard(auction.id) }
     ├── state table: 10
     ├── Upstream
     └── BatchPlanNode
 
     Fragment 3
-    Chain { table: bid, columns: [bid.auction, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+    StreamTableScan { table: bid, columns: [bid.auction, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
     ├── state table: 11
     ├── Upstream
     └── BatchPlanNode
@@ -2684,12 +2682,7 @@
     ├── distribution key: []
     └── read pk prefix len hint: 0
 
-    Table 1
-    ├── columns: [ min(min(max(bid_price))), count ]
-    ├── primary key: []
-    ├── value indices: [ 0, 1 ]
-    ├── distribution key: []
-    └── read pk prefix len hint: 0
+    Table 1 { columns: [ min(min(max(bid_price))), count ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 2
     ├── columns: [ $expr1, max(bid_price), auction_id ]
@@ -2728,12 +2721,7 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
-    Table 7
-    ├── columns: [ auction_id, _degree ]
-    ├── primary key: [ $0 ASC ]
-    ├── value indices: [ 1 ]
-    ├── distribution key: [ 0 ]
-    └── read pk prefix len hint: 1
+    Table 7 { columns: [ auction_id, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 8
     ├── columns: [ bid_auction, bid_price, bid_date_time, bid__row_id ]

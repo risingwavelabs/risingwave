@@ -318,7 +318,7 @@ impl ToText for Timestamp {
 }
 
 impl ToBinary for Date {
-    fn to_binary_with_type(&self, ty: &DataType) -> crate::error::Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         match ty {
             super::DataType::Date => {
                 let mut output = BytesMut::new();
@@ -331,7 +331,7 @@ impl ToBinary for Date {
 }
 
 impl ToBinary for Time {
-    fn to_binary_with_type(&self, ty: &DataType) -> crate::error::Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         match ty {
             super::DataType::Time => {
                 let mut output = BytesMut::new();
@@ -344,7 +344,7 @@ impl ToBinary for Time {
 }
 
 impl ToBinary for Timestamp {
-    fn to_binary_with_type(&self, ty: &DataType) -> crate::error::Result<Option<Bytes>> {
+    fn to_binary_with_type(&self, ty: &DataType) -> super::to_binary::Result<Option<Bytes>> {
         match ty {
             super::DataType::Timestamp => {
                 let mut output = BytesMut::new();

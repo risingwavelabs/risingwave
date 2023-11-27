@@ -62,17 +62,20 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
         let state_table =
             StateTable::from_table_catalog(node.get_state_table()?, store, vnodes).await;
         Ok(OverWindowExecutor::new(OverWindowExecutorArgs {
-            input,
             actor_ctx: params.actor_context,
-            pk_indices: params.pk_indices,
-            executor_id: params.executor_id,
+            info: params.info,
+
+            input,
+
             calls,
             partition_key_indices,
             order_key_indices,
             order_key_order_types,
+
             state_table,
             watermark_epoch: stream.get_watermark_epoch(),
             metrics: params.executor_stats,
+
             chunk_size: params.env.config().developer.chunk_size,
             cache_policy: OverWindowCachePolicy::from_protobuf(
                 node.get_cache_policy().unwrap_or_default(),

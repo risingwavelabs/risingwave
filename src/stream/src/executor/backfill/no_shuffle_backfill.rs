@@ -41,7 +41,7 @@ use crate::executor::backfill::utils::{
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
     expect_first_barrier, Barrier, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo,
-    Message, PkIndices, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
+    Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult,
 };
 use crate::task::{ActorId, CreateMviewProgress};
 
@@ -80,6 +80,8 @@ pub struct BackfillState {
 /// in the same worker, so that we can read uncommitted data from the upstream table without
 /// waiting.
 pub struct BackfillExecutor<S: StateStore> {
+    info: ExecutorInfo,
+
     /// Upstream table
     upstream_table: StorageTable<S>,
     /// Upstream with the same schema with the upstream table.
@@ -96,8 +98,6 @@ pub struct BackfillExecutor<S: StateStore> {
 
     actor_id: ActorId,
 
-    info: ExecutorInfo,
-
     metrics: Arc<StreamingMetrics>,
 
     chunk_size: usize,
@@ -109,29 +109,24 @@ where
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        info: ExecutorInfo,
         upstream_table: StorageTable<S>,
         upstream: BoxedExecutor,
         state_table: Option<StateTable<S>>,
         output_indices: Vec<usize>,
         progress: CreateMviewProgress,
-        schema: Schema,
-        pk_indices: PkIndices,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
-        executor_id: u64,
     ) -> Self {
+        let actor_id = progress.actor_id();
         Self {
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity: format!("BackfillExecutor {:X}", executor_id),
-            },
+            info,
             upstream_table,
             upstream,
             state_table,
             output_indices,
-            actor_id: progress.actor_id(),
             progress,
+            actor_id,
             metrics,
             chunk_size,
         }
@@ -614,7 +609,7 @@ where
                 row::empty(),
                 range_bounds,
                 ordered,
-                PrefetchOptions::new_for_exhaust_iter(),
+                PrefetchOptions::new_for_large_range_scan(),
             )
             .await?;
 

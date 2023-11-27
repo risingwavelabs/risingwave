@@ -15,6 +15,7 @@
 import socket
 import struct
 import sys
+import time
 from typing import Iterator, List, Optional, Tuple, Any
 from decimal import Decimal
 
@@ -26,6 +27,12 @@ from risingwave.udf import udf, udtf, UdfServer
 @udf(input_types=[], result_type="INT")
 def int_42() -> int:
     return 42
+
+
+@udf(input_types=["INT"], result_type="INT")
+def sleep(s: int) -> int:
+    time.sleep(s)
+    return 0
 
 
 @udf(input_types=["INT", "INT"], result_type="INT")
@@ -190,8 +197,9 @@ def return_all_arrays(
 
 
 if __name__ == "__main__":
-    server = UdfServer(location="0.0.0.0:8815")
+    server = UdfServer(location="localhost:8815")
     server.add_function(int_42)
+    server.add_function(sleep)
     server.add_function(gcd)
     server.add_function(gcd3)
     server.add_function(series)

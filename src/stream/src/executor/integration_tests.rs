@@ -57,12 +57,12 @@ async fn test_merger_sum_aggr() {
         // for the local aggregator, we need two states: row count and sum
         let aggregator = StatelessSimpleAggExecutor::new(
             actor_ctx.clone(),
-            input.boxed(),
             ExecutorInfo {
                 schema,
                 pk_indices: vec![],
                 identity: format!("StatelessSimpleAggExecutor {:X}", 1),
             },
+            input.boxed(),
             agg_calls,
         )
         .unwrap();
@@ -155,13 +155,18 @@ async fn test_merger_sum_aggr() {
 
     let projection = ProjectExecutor::new(
         actor_ctx.clone(),
+        ExecutorInfo {
+            schema: Schema {
+                fields: vec![Field::unnamed(DataType::Int64)],
+            },
+            pk_indices: vec![],
+            identity: format!("ProjectExecutor {:X}", 3),
+        },
         aggregator,
-        vec![],
         vec![
             // TODO: use the new streaming_if_null expression here, and add `None` tests
             NonStrictExpression::for_test(InputRefExpression::new(DataType::Int64, 1)),
         ],
-        3,
         MultiMap::new(),
         vec![],
         0.0,

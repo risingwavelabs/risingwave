@@ -14,9 +14,9 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2.9"
 risingwave_common = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
-risingwave_stream = { workspace = true }
-risingwave_storage = { workspace = true, features = ["test"] }
 risingwave_hummock_test = { workspace = true, features = ["test"] }
+risingwave_storage = { workspace = true, features = ["test"] }
+risingwave_stream = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio" }
 
 [dev-dependencies]

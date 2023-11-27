@@ -59,7 +59,7 @@ struct ExecutorInner<S: StateStore> {
     actor_ctx: ActorContextRef,
     info: ExecutorInfo,
 
-    /// Pk indices from input.
+    /// Pk indices from input. Only used by `AggNodeVersion` before `ISSUE_13465`.
     input_pk_indices: Vec<usize>,
 
     /// Schema from input.
@@ -188,7 +188,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
         // Materialize input chunk if needed and possible.
         for (storage, visibility) in this.storages.iter_mut().zip_eq_fast(visibilities.iter()) {
-            if let AggStateStorage::MaterializedInput { table, mapping } = storage {
+            if let AggStateStorage::MaterializedInput { table, mapping, .. } = storage {
                 let chunk = chunk.project_with_vis(mapping.upstream_columns(), visibility.clone());
                 table.write_chunk(chunk);
             }

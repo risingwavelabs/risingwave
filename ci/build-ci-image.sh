@@ -9,7 +9,7 @@ cd "$DIR"
 cat ../rust-toolchain
 # shellcheck disable=SC2155
 
-export BUILD_ENV_VERSION=v20231101
+export BUILD_ENV_VERSION=v20231109
 
 export BUILD_TAG="public.ecr.aws/x5u3w5h6/rw-build-env:${BUILD_ENV_VERSION}"
 
