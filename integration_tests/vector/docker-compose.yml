@@ -35,7 +35,7 @@ services:
       service: prometheus-0
 
   vector:
-    image: "j1nser/vector:0.33.1.custom.7e244e087-debian"
+    image: "ghcr.io/risingwavelabs/vector:0.33.1.custom.7e244e087-debian"
     volumes:
       - "./vector.yaml:/etc/vector/vector.yaml:ro"
     depends_on:
