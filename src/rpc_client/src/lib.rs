@@ -37,7 +37,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::future::try_join_all;
 use futures::stream::{BoxStream, Peekable};
-use futures::{Stream, StreamExt};
+use futures::{Stream, StreamExt, TryFutureExt};
 use moka::future::Cache;
 use rand::prelude::SliceRandom;
 use risingwave_common::util::addr::HostAddr;
@@ -78,7 +78,7 @@ pub trait RpcClient: Send + Sync + 'static + Clone {
 pub struct RpcClientPool<S> {
     connection_pool_size: u16,
 
-    clients: Cache<HostAddr, Vec<S>>,
+    clients: Cache<HostAddr, Arc<Vec<S>>>,
 }
 
 impl<S> Default for RpcClientPool<S>
@@ -115,7 +115,8 @@ where
             .clients
             .try_get_with(
                 addr.clone(),
-                S::new_clients(addr.clone(), self.connection_pool_size as usize),
+                S::new_clients(addr.clone(), self.connection_pool_size as usize)
+                    .map_ok(|v| Arc::new(v)),
             )
             .await
             .map_err(|e| -> RpcError {
