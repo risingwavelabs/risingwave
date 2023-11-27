@@ -806,36 +806,6 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-s3"
-version = "0.39.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29223b1074621f1d011bac836d995c002936663052b1e7ad02927551b17d6625"
-dependencies = [
- "aws-credential-types",
- "aws-http",
- "aws-runtime",
- "aws-sigv4",
- "aws-smithy-async",
- "aws-smithy-checksums",
- "aws-smithy-eventstream",
- "aws-smithy-http",
- "aws-smithy-json",
- "aws-smithy-runtime",
- "aws-smithy-runtime-api",
- "aws-smithy-types",
- "aws-smithy-xml",
- "aws-types",
- "bytes",
- "http 0.2.9",
- "http-body",
- "once_cell",
- "percent-encoding",
- "regex",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "aws-sdk-s3"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62d240c8c3e3663cd278e47702bbd2566203362d93b51d95575d7b2e0c265e99"
@@ -4803,11 +4773,11 @@ dependencies = [
 
 [[package]]
 name = "madsim-aws-sdk-s3"
-version = "0.4.0+0.39"
+version = "0.5.0+1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69506b80c4e2285edd997235a244ec76674b8f40ec0317cfb93c50332c54ed30"
+checksum = "0b442215f0047e7e7df7b98991129c43ee5fb186ce899e8f7e27515bc99de508"
 dependencies = [
- "aws-sdk-s3 0.39.1",
+ "aws-sdk-s3",
  "aws-smithy-http",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
@@ -7361,7 +7331,7 @@ version = "1.3.0-alpha"
 dependencies = [
  "async-trait",
  "aws-config",
- "aws-sdk-s3 1.1.0",
+ "aws-sdk-s3",
  "aws-smithy-http",
  "aws-smithy-types",
  "bcc",
@@ -7694,7 +7664,7 @@ dependencies = [
  "aws-config",
  "aws-credential-types",
  "aws-sdk-kinesis",
- "aws-sdk-s3 1.1.0",
+ "aws-sdk-s3",
  "aws-smithy-http",
  "aws-smithy-runtime-api",
  "aws-smithy-types",
@@ -11494,9 +11464,9 @@ dependencies = [
  "auto_enums",
  "aws-credential-types",
  "aws-runtime",
+ "aws-sdk-s3",
  "aws-sigv4",
- "aws-smithy-async",
- "aws-smithy-http",
+ "aws-smithy-runtime",
  "aws-smithy-types",
  "base64 0.21.4",
  "bit-vec",
