@@ -7968,7 +7968,6 @@ dependencies = [
 name = "risingwave_hummock_sdk"
 version = "1.3.0-alpha"
 dependencies = [
- "auto_enums",
  "bytes",
  "easy-ext",
  "hex",

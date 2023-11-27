@@ -109,25 +109,9 @@ message UncommittedEpoch {
   repeated SstableInfo tables = 2;
 }
 
-message Vnodes {
-  message VnodeRange {
-    uint32 vnode_start = 1;
-    uint32 vnode_end = 2;
-  }
-
-  message AllVnodes {}
-
-  oneof vnodes {
-    common.Buffer vnode_bitmap = 1;
-    VnodeRange range = 2;
-    uint32 single = 3;
-    AllVnodes all = 4;
-  }
-}
-
 message VnodeWatermark {
   bytes watermark = 1;
-  Vnodes vnodes = 2;
+  common.Buffer vnode_bitmap = 2;
 }
 
 message TableWatermarks {

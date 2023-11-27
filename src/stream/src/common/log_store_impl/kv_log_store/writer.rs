@@ -22,7 +22,7 @@ use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::sink::log_store::{LogStoreResult, LogWriter};
-use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, Vnodes, WatermarkDirection};
+use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_storage::store::{InitOptions, LocalStateStore, SealCurrentEpochOptions};
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender;
@@ -135,7 +135,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         let mut watermark = None;
         if let Some(truncation_offset) = self.tx.pop_truncation(epoch) {
             watermark = Some(VnodeWatermark::new(
-                Vnodes::Bitmap(self.serde.vnodes().clone()),
+                self.serde.vnodes().clone(),
                 self.serde
                     .serialize_truncation_offset_watermark(truncation_offset),
             ));

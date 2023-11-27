@@ -38,7 +38,7 @@ use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, map_table_key_range, prefixed_range, range_of_prefix,
     start_bound_of_excluded_prefix, TableKey,
 };
-use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, Vnodes, WatermarkDirection};
+use risingwave_hummock_sdk::table_watermark::{VnodeWatermark, WatermarkDirection};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::error::{StorageError, StorageResult};
 use risingwave_storage::hummock::CachePolicy;
@@ -1046,7 +1046,7 @@ where
                 seal_watermark = Some((
                     WatermarkDirection::Ascending,
                     VnodeWatermark::new(
-                        Vnodes::Bitmap(self.vnodes.clone()),
+                        self.vnodes.clone(),
                         Bytes::copy_from_slice(watermark_suffix.as_ref())
                     )
                 ));
@@ -1054,7 +1054,7 @@ where
                 seal_watermark = Some((
                     WatermarkDirection::Descending,
                     VnodeWatermark::new(
-                        Vnodes::Bitmap(self.vnodes.clone()),
+                        self.vnodes.clone(),
                         Bytes::copy_from_slice(watermark_suffix.as_ref())
                     )
                 ));

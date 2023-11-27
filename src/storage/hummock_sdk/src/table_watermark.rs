@@ -14,16 +14,14 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{btree_map, BTreeMap, HashMap, HashSet};
-use std::iter::once;
 use std::ops::Bound::Included;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
-use risingwave_pb::hummock::vnodes::{AllVnodes, VnodeRange};
-use risingwave_pb::hummock::{vnodes, PbTableWatermarks, PbVnodeWatermark, PbVnodes};
+use risingwave_pb::hummock::{PbTableWatermarks, PbVnodeWatermark};
 use tracing::warn;
 
 use crate::key::{vnode_range, TableKeyRange};
@@ -116,7 +114,7 @@ impl TableWatermarksIndex {
         let mut ret = Vec::with_capacity(watermarks.len());
         for watermark in watermarks.drain(..) {
             let mut regress_vnodes = HashSet::new();
-            for vnode in watermark.vnodes.vnodes() {
+            for vnode in watermark.vnode_bitmap.iter_vnodes() {
                 if let Some(prev_watermark) = self.latest_watermark(vnode) {
                     let is_regress = match self.direction() {
                         WatermarkDirection::Ascending => prev_watermark > watermark.watermark,
@@ -139,13 +137,13 @@ impl TableWatermarksIndex {
                 ret.push(watermark);
             } else {
                 let mut bitmap_builder = BitmapBuilder::with_capacity(VirtualNode::COUNT);
-                for vnode in watermark.vnodes.vnodes() {
+                for vnode in watermark.vnode_bitmap.iter_vnodes() {
                     if !regress_vnodes.contains(&vnode) {
                         bitmap_builder.set(vnode.to_index(), true);
                     }
                 }
                 ret.push(VnodeWatermark::new(
-                    Vnodes::Bitmap(Arc::new(bitmap_builder.finish())),
+                    Arc::new(bitmap_builder.finish()),
                     watermark.watermark,
                 ));
             }
@@ -167,7 +165,7 @@ impl TableWatermarksIndex {
         assert_eq!(self.watermark_direction, direction);
         self.latest_epoch = epoch;
         for vnode_watermark in vnode_watermark_list {
-            for vnode in vnode_watermark.vnodes.vnodes() {
+            for vnode in vnode_watermark.vnode_bitmap.iter_vnodes() {
                 let epoch_watermarks = self.index.entry(vnode).or_default();
                 if let Some((prev_epoch, prev_watermark)) = epoch_watermarks.last_key_value() {
                     assert!(*prev_epoch < epoch);
@@ -221,106 +219,29 @@ impl WatermarkDirection {
 }
 
 #[derive(Clone, Debug)]
-pub enum Vnodes {
-    Bitmap(Arc<Bitmap>),
-    Range {
-        start_vnode: VirtualNode,
-        end_vnode: VirtualNode,
-    },
-    Single(VirtualNode),
-    All,
-}
-
-impl Vnodes {
-    pub fn to_protobuf(&self) -> PbVnodes {
-        let vnodes = match self {
-            Vnodes::Bitmap(bitmap) => vnodes::PbVnodes::VnodeBitmap(bitmap.to_protobuf()),
-            Vnodes::Range {
-                start_vnode,
-                end_vnode,
-            } => vnodes::PbVnodes::Range(VnodeRange {
-                vnode_start: start_vnode.to_index() as _,
-                vnode_end: end_vnode.to_index() as _,
-            }),
-            Vnodes::Single(vnode) => vnodes::PbVnodes::Single(vnode.to_index() as _),
-            Vnodes::All => vnodes::PbVnodes::All(AllVnodes {}),
-        };
-        PbVnodes {
-            vnodes: Some(vnodes),
-        }
-    }
-
-    pub fn from_protobuf(pb: &PbVnodes) -> Vnodes {
-        match pb.vnodes.as_ref().expect("should not be None") {
-            vnodes::Vnodes::VnodeBitmap(bitmap) => Vnodes::Bitmap(Arc::new(Bitmap::from(bitmap))),
-            vnodes::Vnodes::Range(range) => Vnodes::Range {
-                start_vnode: VirtualNode::from_index(range.vnode_start as _),
-                end_vnode: VirtualNode::from_index(range.vnode_end as _),
-            },
-            vnodes::Vnodes::Single(vnode) => Vnodes::Single(VirtualNode::from_index(*vnode as _)),
-            vnodes::Vnodes::All(_) => Vnodes::All,
-        }
-    }
-
-    #[auto_enums::auto_enum(Iterator)]
-    pub fn vnodes(&self) -> impl Iterator<Item = VirtualNode> + '_ {
-        match self {
-            Vnodes::Bitmap(bitmap) => bitmap.iter_ones().map(VirtualNode::from_index),
-            Vnodes::Range {
-                start_vnode,
-                end_vnode,
-            } => (start_vnode.to_index()..=end_vnode.to_index()).map(VirtualNode::from_index),
-            Vnodes::Single(vnode) => once(*vnode),
-            Vnodes::All => (0..VirtualNode::COUNT).map(VirtualNode::from_index),
-        }
-    }
-
-    pub fn contains(&self, vnode: VirtualNode) -> bool {
-        match self {
-            Vnodes::Bitmap(bitmap) => bitmap.is_set(vnode.to_index()),
-            Vnodes::Range {
-                start_vnode,
-                end_vnode,
-            } => start_vnode <= &vnode && &vnode <= end_vnode,
-            Vnodes::Single(single_vnode) => single_vnode == &vnode,
-            Vnodes::All => true,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
 pub struct VnodeWatermark {
-    vnodes: Vnodes,
+    vnode_bitmap: Arc<Bitmap>,
     watermark: Bytes,
 }
 
 impl VnodeWatermark {
-    pub fn new(vnodes: Vnodes, watermark: Bytes) -> Self {
-        Self { vnodes, watermark }
+    pub fn new(vnode_bitmap: Arc<Bitmap>, watermark: Bytes) -> Self {
+        Self {
+            vnode_bitmap,
+            watermark,
+        }
     }
 
     pub fn to_protobuf(&self) -> PbVnodeWatermark {
         PbVnodeWatermark {
             watermark: self.watermark.to_vec(),
-            vnodes: Some(self.vnodes.to_protobuf()),
+            vnode_bitmap: Some(self.vnode_bitmap.to_protobuf()),
         }
     }
 
     pub fn from_protobuf(pb: &PbVnodeWatermark) -> Self {
         Self {
-            vnodes: match pb.vnodes.as_ref().unwrap().vnodes.as_ref().unwrap() {
-                vnodes::PbVnodes::VnodeBitmap(bitmap) => {
-                    Vnodes::Bitmap(Arc::new(Bitmap::from(bitmap)))
-                }
-                vnodes::PbVnodes::Range(range) => Vnodes::Range {
-                    start_vnode: VirtualNode::from_index(range.vnode_start as _),
-                    end_vnode: VirtualNode::from_index(range.vnode_end as _),
-                },
-                vnodes::PbVnodes::Single(vnode) => {
-                    Vnodes::Single(VirtualNode::from_index(*vnode as _))
-                }
-                vnodes::PbVnodes::All(_) => Vnodes::All,
-            },
+            vnode_bitmap: Arc::new(Bitmap::from(pb.vnode_bitmap.as_ref().unwrap())),
             watermark: Bytes::from(pb.watermark.clone()),
         }
     }
@@ -496,10 +417,9 @@ impl PbTableWatermarks {
             if epoch_watermark.epoch >= safe_epoch {
                 let epoch_watermark = self.epoch_watermarks.pop().expect("have check Some");
                 for watermark in &epoch_watermark.watermarks {
-                    for vnode in Vnodes::from_protobuf(
-                        watermark.vnodes.as_ref().expect("should not be None"),
-                    )
-                    .vnodes()
+                    for vnode in
+                        Bitmap::from(watermark.vnode_bitmap.as_ref().expect("should not be None"))
+                            .iter_vnodes()
                     {
                         unset_vnode.remove(&vnode);
                     }
@@ -513,7 +433,7 @@ impl PbTableWatermarks {
             let mut new_vnode_watermarks = Vec::new();
             for vnode_watermark in &epoch_watermark.watermarks {
                 let mut set_vnode = Vec::new();
-                for vnode in Vnodes::from_protobuf(vnode_watermark.vnodes.as_ref().expect("should not be None")).vnodes() {
+                for vnode in Bitmap::from(vnode_watermark.vnode_bitmap.as_ref().expect("should not be None")).iter_vnodes() {
                     if unset_vnode.remove(&vnode) {
                         set_vnode.push(vnode);
                     }
@@ -525,9 +445,7 @@ impl PbTableWatermarks {
                     }
                     let bitmap = builder.finish();
                     new_vnode_watermarks.push(PbVnodeWatermark {
-                        vnodes: Some(PbVnodes {
-                            vnodes: Some(vnodes::Vnodes::VnodeBitmap(bitmap.to_protobuf()))
-                        }),
+                        vnode_bitmap: Some(bitmap.to_protobuf()),
                         watermark: vnode_watermark.watermark.clone(),
                     })
                 }
