@@ -89,7 +89,7 @@ impl<S> TracedStateStore<S> {
         get_future: impl Future<Output = StorageResult<Option<Bytes>>>,
     ) -> StorageResult<Option<Bytes>> {
         let span = TraceSpan::new_get_span(
-            key.0.clone(),
+            (*key).clone(),
             epoch,
             read_options.clone().into(),
             self.storage_type,
@@ -137,7 +137,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::IterStream<'_>>> + Send + '_ {
         let (l, r) = key_range.clone();
-        let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
+        let bytes_key_range = (l.map(|l| l.into_inner()), r.map(|r| r.into_inner()));
         let span = TraceSpan::new_iter_span(
             bytes_key_range,
             None,
@@ -155,7 +155,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
         old_val: Option<Bytes>,
     ) -> StorageResult<()> {
         let span = TraceSpan::new_insert_span(
-            key.0.clone(),
+            (*key).clone(),
             new_val.clone(),
             old_val.clone(),
             self.storage_type,
@@ -167,7 +167,7 @@ impl<S: LocalStateStore> LocalStateStore for TracedStateStore<S> {
     }
 
     fn delete(&mut self, key: TableKey<Bytes>, old_val: Bytes) -> StorageResult<()> {
-        let span = TraceSpan::new_delete_span(key.0.clone(), old_val.clone(), self.storage_type);
+        let span = TraceSpan::new_delete_span((*key).clone(), old_val.clone(), self.storage_type);
 
         let res = self.inner.delete(key, old_val);
 
@@ -301,7 +301,7 @@ impl<S: StateStoreRead> StateStoreRead for TracedStateStore<S> {
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::IterStream>> + '_ {
         let (l, r) = key_range.clone();
-        let bytes_key_range = (l.map(|l| l.0), r.map(|r| r.0));
+        let bytes_key_range = (l.map(|l| l.into_inner()), r.map(|r| r.into_inner()));
         let span = TraceSpan::new_iter_span(
             bytes_key_range,
             Some(epoch),

@@ -607,12 +607,7 @@ where
             serialize_pk_with_vnode(&pk, &self.pk_serde, self.compute_prefix_vnode(&pk));
 
         let prefix_hint = if self.prefix_hint_len != 0 && self.prefix_hint_len == pk.len() {
-            Some(
-                serialized_pk
-                    .clone()
-                    .into_inner()
-                    .slice(VirtualNode::SIZE..),
-            )
+            Some(serialized_pk.slice(VirtualNode::SIZE..))
         } else {
             None
         };

@@ -315,12 +315,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
 
         let prefix_hint = if self.read_prefix_len_hint != 0 && self.read_prefix_len_hint == pk.len()
         {
-            Some(
-                serialized_pk
-                    .clone()
-                    .into_inner()
-                    .slice(VirtualNode::SIZE..),
-            )
+            Some(serialized_pk.slice(VirtualNode::SIZE..))
         } else {
             None
         };

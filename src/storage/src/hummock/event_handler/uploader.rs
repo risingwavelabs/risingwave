@@ -1052,6 +1052,7 @@ mod tests {
     use futures::FutureExt;
     use prometheus::core::GenericGauge;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
     use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
     use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
@@ -1102,7 +1103,10 @@ mod tests {
     }
 
     fn dummy_table_key() -> Vec<u8> {
-        vec![b't', b'e', b's', b't']
+        let mut ret = Vec::new();
+        ret.extend_from_slice(&VirtualNode::ZERO.to_be_bytes());
+        ret.extend_from_slice("test".as_bytes());
+        ret
     }
 
     async fn gen_imm_with_limiter(

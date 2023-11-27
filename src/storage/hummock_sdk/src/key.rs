@@ -397,7 +397,7 @@ impl<T: AsRef<[u8]>> AsRef<[u8]> for TableKey<T> {
 impl<T: AsRef<[u8]>> TableKey<T> {
     pub fn new(value: T) -> Self {
         debug_assert!(
-            value.as_ref().len() > VirtualNode::SIZE,
+            value.as_ref().len() >= VirtualNode::SIZE,
             "too short table key: {:?}",
             value.as_ref()
         );
