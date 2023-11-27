@@ -69,8 +69,7 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
         if self.inner.is_valid() {
             let key = self.inner.key();
             let key_table_id = key.user_key.table_id;
-            let key_vnode = key.user_key.table_key.vnode_part();
-            let inner_key = key.user_key.table_key.key_part();
+            let (key_vnode, inner_key) = key.user_key.table_key.split_vnode();
             while let Some((table_id, vnode, direction, watermark)) = self.remain_watermarks.front()
             {
                 match (table_id, vnode).cmp(&(&key_table_id, &key_vnode)) {
@@ -79,19 +78,31 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
                         continue;
                     }
                     Ordering::Equal => {
-                        if direction.filter_by_watermark(inner_key, watermark) {
-                            return true;
-                        }
-                        // when watermark is ascending and the inner key has passed the watermark,
-                        // the watermark is not likely to take effect to current or future key,
-                        // and we can skip the watermark.
-                        if *direction == WatermarkDirection::Ascending
-                            && inner_key >= watermark.as_ref()
-                        {
-                            self.remain_watermarks.pop_front();
-                            continue;
-                        } else {
-                            return false;
+                        match direction {
+                            WatermarkDirection::Ascending => {
+                                match inner_key.cmp(watermark.as_ref()) {
+                                    Ordering::Less => {
+                                        // The current key will be filtered by the watermark.
+                                        // Return true to further advance the key.
+                                        return true;
+                                    }
+                                    Ordering::Equal | Ordering::Greater => {
+                                        // The current key has passed the watermark.
+                                        // Advance the next watermark.
+                                        self.remain_watermarks.pop_front();
+                                        continue;
+                                    }
+                                }
+                            }
+                            WatermarkDirection::Descending => {
+                                return match inner_key.cmp(watermark.as_ref()) {
+                                    // Current key as not reached the watermark. Just return.
+                                    Ordering::Less | Ordering::Equal => false,
+                                    // Current key will be filtered by the watermark.
+                                    // Return true to further advance the key.
+                                    Ordering::Greater => true,
+                                };
+                            }
                         }
                     }
                     Ordering::Greater => {
@@ -113,8 +124,7 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
                 {
                     let key = self.inner.key();
                     let key_table_id = key.user_key.table_id;
-                    let key_vnode = key.user_key.table_key.vnode_part();
-                    let inner_key = key.user_key.table_key.key_part();
+                    let (key_vnode, inner_key) = key.user_key.table_key.split_vnode();
                     match (&key_table_id, &key_vnode).cmp(&(table_id, vnode)) {
                         Ordering::Less => {
                             return Ok(false);
@@ -139,18 +149,17 @@ impl<I: HummockIterator<Direction = Forward>> SkipWatermarkIterator<I> {
     }
 
     async fn advance_key_and_watermark(&mut self) -> HummockResult<()> {
-        // here we assume that before calling this method, it was an operation on key,
-        // so we call advance_watermark anyway at first.
-        if self.advance_watermark() {
-            loop {
-                // advance key and watermark in an interleave manner until nothing
-                // changed after the method is called.
-                if !self.advance_key().await? {
-                    break;
-                }
-                if !self.advance_watermark() {
-                    break;
-                }
+        // advance key and watermark in an interleave manner until nothing
+        // changed after the method is called.
+        loop {
+            // here we assume that before calling this method, it was an operation on key,
+            // so we call advance_watermark anyway at first.
+            if !self.advance_watermark() {
+                break;
+            }
+
+            if !self.advance_key().await? {
+                break;
             }
         }
         Ok(())
