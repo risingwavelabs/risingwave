@@ -34,7 +34,6 @@ const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
 const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
 const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 50;
 
-
 /// Each compute node reserves some memory for stack and code segment of processes, allocation
 /// overhead, network buffer, etc. based on `SYSTEM_RESERVED_MEMORY_PROPORTION`. The reserve memory
 /// size must be larger than `MIN_SYSTEM_RESERVED_MEMORY_MB`
