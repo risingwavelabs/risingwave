@@ -13,7 +13,7 @@ sinks:
     port: 4566
     database: "dev"
     user: "root"
-    table: "t"
+    table: "event"
     encoding:
       codec: "json"
     inputs:
