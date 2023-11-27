@@ -212,6 +212,10 @@ pub struct MetaConfig {
     #[serde(default)]
     pub enable_scale_in_when_recovery: bool,
 
+    /// Whether to enable auto-scaling feature.
+    #[serde(default)]
+    pub enable_automatic_parallelism_control: bool,
+
     #[serde(default = "default::meta::meta_leader_lease_secs")]
     pub meta_leader_lease_secs: u64,
 
@@ -287,6 +291,12 @@ pub struct MetaConfig {
 
     #[serde(default)]
     pub compaction_config: CompactionConfig,
+
+    #[serde(default = "default::meta::event_log_enabled")]
+    pub event_log_enabled: bool,
+    /// Keeps the latest N events per channel.
+    #[serde(default = "default::meta::event_log_channel_max_size")]
+    pub event_log_channel_max_size: u32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -974,6 +984,14 @@ pub mod default {
 
         pub fn compaction_task_max_heartbeat_interval_secs() -> u64 {
             60 // 1min
+        }
+
+        pub fn event_log_enabled() -> bool {
+            true
+        }
+
+        pub fn event_log_channel_max_size() -> u32 {
+            10
         }
     }
 

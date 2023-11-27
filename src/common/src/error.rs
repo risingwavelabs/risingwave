@@ -26,6 +26,7 @@ use thiserror::Error;
 use tokio::task::JoinError;
 
 use crate::array::ArrayError;
+use crate::session_config::SessionConfigError;
 use crate::util::value_encoding::error::ValueEncodingError;
 
 const ERROR_SUPPRESSOR_RESET_DURATION: Duration = Duration::from_millis(60 * 60 * 1000); // 1h
@@ -105,10 +106,13 @@ pub enum ErrorCode {
         #[backtrace]
         BoxedError,
     ),
-    #[error("BatchError: {0}")]
+    // TODO(error-handling): there's a limitation that `#[transparent]` can't be used with `#[backtrace]` if no `#[from]`
+    // So we emulate a transparent error with "{0}" display here.
+    #[error("{0}")]
     BatchError(
         #[source]
         #[backtrace]
+        // `BatchError`
         BoxedError,
     ),
     #[error("Array error: {0}")]
@@ -123,9 +127,12 @@ pub enum ErrorCode {
         #[source]
         BoxedError,
     ),
-    #[error(transparent)]
+    // TODO(error-handling): there's a limitation that `#[transparent]` can't be used with `#[backtrace]` if no `#[from]`
+    // So we emulate a transparent error with "{0}" display here.
+    #[error("{0}")]
     RpcError(
-        // #[backtrace] // TODO(error-handling): there's a limitation that `#[transparent]` can't be used with `#[backtrace]` if no `#[from]`
+        #[source]
+        #[backtrace]
         // `tonic::transport::Error`, `TonicStatusWrapper`, or `RpcError`
         BoxedError,
     ),
@@ -185,8 +192,12 @@ pub enum ErrorCode {
     ),
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
-    #[error("unrecognized configuration parameter \"{0}\"")]
-    UnrecognizedConfigurationParameter(String),
+    #[error("Failed to get/set session config: {0}")]
+    SessionConfig(
+        #[from]
+        #[backtrace]
+        SessionConfigError,
+    ),
 }
 
 pub fn internal_error(msg: impl Into<String>) -> RwError {
@@ -326,6 +337,12 @@ impl From<PbFieldNotFound> for RwError {
             err.0
         ))
         .into()
+    }
+}
+
+impl From<SessionConfigError> for RwError {
+    fn from(value: SessionConfigError) -> Self {
+        ErrorCode::SessionConfig(value).into()
     }
 }
 

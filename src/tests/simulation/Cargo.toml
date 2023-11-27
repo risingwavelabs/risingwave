@@ -19,6 +19,7 @@ clap = { version = "4", features = ["derive"] }
 console = "0.15"
 etcd-client = { workspace = true }
 expect-test = "1"
+fail = { version = "0.5" }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 glob = "0.3"
 itertools = "0.12"

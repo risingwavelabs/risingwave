@@ -17,7 +17,6 @@ use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{Array, DataChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::row::{repeat_n, RowExt};
@@ -29,6 +28,7 @@ use risingwave_expr::expr::{
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
+use crate::error::{BatchError, Result};
 use crate::executor::join::{concatenate, convert_row_to_chunk, JoinType};
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
@@ -84,7 +84,7 @@ impl Executor for NestedLoopJoinExecutor {
 }
 
 impl NestedLoopJoinExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let left_data_types = self.left_child.schema().data_types();
         let data_types = self.original_schema.data_types();
@@ -238,7 +238,7 @@ impl NestedLoopJoinExecutor {
 }
 
 impl NestedLoopJoinExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_inner_join(
         chunk_builder: &mut DataChunkBuilder,
         left_data_types: Vec<DataType>,
@@ -273,7 +273,7 @@ impl NestedLoopJoinExecutor {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_left_outer_join(
         chunk_builder: &mut DataChunkBuilder,
         left_data_types: Vec<DataType>,
@@ -321,7 +321,7 @@ impl NestedLoopJoinExecutor {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_left_semi_anti_join<const ANTI_JOIN: bool>(
         chunk_builder: &mut DataChunkBuilder,
         left_data_types: Vec<DataType>,
@@ -364,7 +364,7 @@ impl NestedLoopJoinExecutor {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_right_outer_join(
         chunk_builder: &mut DataChunkBuilder,
         left_data_types: Vec<DataType>,
@@ -409,7 +409,7 @@ impl NestedLoopJoinExecutor {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_right_semi_anti_join<const ANTI_JOIN: bool>(
         chunk_builder: &mut DataChunkBuilder,
         left_data_types: Vec<DataType>,
@@ -448,7 +448,7 @@ impl NestedLoopJoinExecutor {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_full_outer_join(
         chunk_builder: &mut DataChunkBuilder,
         left_data_types: Vec<DataType>,

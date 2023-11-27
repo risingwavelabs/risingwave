@@ -301,7 +301,7 @@ impl TestSuite {
         for t in 0..5 {
             let rows = transaction.query_portal(&portal, 1).await?;
             test_eq!(rows.len(), 1);
-            let row = rows.get(0).unwrap();
+            let row = rows.first().unwrap();
             let id: i32 = row.get(0);
             test_eq!(id, t);
         }
@@ -340,21 +340,21 @@ impl TestSuite {
 
         let rows = transaction.query_portal(&portal_1, 1).await?;
         test_eq!(rows.len(), 1);
-        test_eq!(rows.get(0).unwrap().get::<usize, i32>(0), 1);
+        test_eq!(rows.first().unwrap().get::<usize, i32>(0), 1);
 
         let rows = transaction.query_portal(&portal_2, 1).await?;
         test_eq!(rows.len(), 1);
-        test_eq!(rows.get(0).unwrap().get::<usize, i32>(0), 1);
+        test_eq!(rows.first().unwrap().get::<usize, i32>(0), 1);
 
         let rows = transaction.query_portal(&portal_2, 3).await?;
         test_eq!(rows.len(), 3);
-        test_eq!(rows.get(0).unwrap().get::<usize, i32>(0), 2);
+        test_eq!(rows.first().unwrap().get::<usize, i32>(0), 2);
         test_eq!(rows.get(1).unwrap().get::<usize, i32>(0), 3);
         test_eq!(rows.get(2).unwrap().get::<usize, i32>(0), 4);
 
         let rows = transaction.query_portal(&portal_1, 1).await?;
         test_eq!(rows.len(), 1);
-        test_eq!(rows.get(0).unwrap().get::<usize, i32>(0), 2);
+        test_eq!(rows.first().unwrap().get::<usize, i32>(0), 2);
 
         Ok(())
     }

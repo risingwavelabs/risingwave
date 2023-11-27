@@ -119,7 +119,7 @@ pub fn gen_create_mv_plan(
     let materialize =
         plan_root.gen_materialize_plan(table_name, definition, emit_on_window_close)?;
     let mut table = materialize.table().to_prost(schema_id, database_id);
-    if session.config().get_create_compaction_group_for_mv() {
+    if session.config().create_compaction_group_for_mv() {
         table.properties.insert(
             String::from("independent_compaction_group"),
             String::from("1"),
@@ -200,10 +200,13 @@ It only indicates the physical clustering of the data, which may improve the per
         let can_run_in_background = plan_has_backfill_leaf_nodes(&plan);
         let context = plan.plan_base().ctx().clone();
         let mut graph = build_graph(plan);
-        graph.parallelism = session
-            .config()
-            .get_streaming_parallelism()
-            .map(|parallelism| Parallelism { parallelism });
+        graph.parallelism =
+            session
+                .config()
+                .streaming_parallelism()
+                .map(|parallelism| Parallelism {
+                    parallelism: parallelism.get(),
+                });
         // Set the timezone for the stream environment
         let env = graph.env.as_mut().unwrap();
         env.timezone = context.get_session_timezone();
@@ -223,7 +226,7 @@ It only indicates the physical clustering of the data, which may improve the per
                 table.name.clone(),
             ));
 
-    let run_in_background = session.config().get_background_ddl();
+    let run_in_background = session.config().background_ddl();
     let create_type = if run_in_background && can_run_in_background {
         CreateType::Background
     } else {
@@ -261,9 +264,7 @@ pub mod tests {
     use std::collections::HashMap;
 
     use pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW;
-    use risingwave_common::catalog::{
-        row_id_column_name, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
-    };
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX};
     use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
@@ -310,9 +311,8 @@ pub mod tests {
             vec![DataType::Varchar, DataType::Varchar],
             vec!["address".to_string(), "zipcode".to_string()],
         );
-        let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
-            row_id_col_name.as_str() => DataType::Serial,
+            ROWID_PREFIX => DataType::Serial,
             "country" => DataType::new_struct(
                  vec![DataType::Varchar,city_type,DataType::Varchar],
                  vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],

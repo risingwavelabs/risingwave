@@ -54,7 +54,7 @@ use self::progress::TrackingCommand;
 use crate::barrier::notifier::BarrierInfo;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::BarrierEpochState::{Completed, InFlight};
-use crate::hummock::HummockManagerRef;
+use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     CatalogManagerRef, ClusterManagerRef, FragmentManagerRef, LocalNotification, MetaSrvEnv,
@@ -784,6 +784,7 @@ impl GlobalBarrierManager {
             Ok(node_need_collect) => {
                 // todo: the collect handler should be abort when recovery.
                 tokio::spawn(Self::collect_barrier(
+                    self.env.clone(),
                     node_need_collect,
                     self.env.stream_client_pool_ref(),
                     command_context,
@@ -851,12 +852,25 @@ impl GlobalBarrierManager {
                 .into()
             }
         });
-        try_join_all(inject_futures).await?;
+        try_join_all(inject_futures).await.inspect_err(|e| {
+            // Record failure in event log.
+            use risingwave_pb::meta::event_log;
+            use thiserror_ext::AsReport;
+            let event = event_log::EventInjectBarrierFail {
+                prev_epoch: command_context.prev_epoch.value().0,
+                cur_epoch: command_context.curr_epoch.value().0,
+                error: e.to_report_string(),
+            };
+            self.env
+                .event_log_manager_ref()
+                .add_event_logs(vec![event_log::Event::InjectBarrierFail(event)]);
+        })?;
         Ok(node_need_collect)
     }
 
     /// Send barrier-complete-rpc and wait for responses from all CNs
     async fn collect_barrier(
+        env: MetaSrvEnv,
         node_need_collect: HashMap<WorkerId, bool>,
         client_pool_ref: StreamClientPoolRef,
         command_context: Arc<CommandContext>,
@@ -894,7 +908,21 @@ impl GlobalBarrierManager {
             }
         });
 
-        let result = try_join_all(collect_futures).await.map_err(Into::into);
+        let result = try_join_all(collect_futures)
+            .await
+            .inspect_err(|e| {
+                // Record failure in event log.
+                use risingwave_pb::meta::event_log;
+                use thiserror_ext::AsReport;
+                let event = event_log::EventCollectBarrierFail {
+                    prev_epoch: command_context.prev_epoch.value().0,
+                    cur_epoch: command_context.curr_epoch.value().0,
+                    error: e.to_report_string(),
+                };
+                env.event_log_manager_ref()
+                    .add_event_logs(vec![event_log::Event::CollectBarrierFail(event)]);
+            })
+            .map_err(Into::into);
         let _ = barrier_complete_tx
             .send(BarrierCompletion { prev_epoch, result })
             .inspect_err(|err| tracing::warn!("failed to complete barrier: {err}"));
@@ -1014,24 +1042,20 @@ impl GlobalBarrierManager {
                 // the L0 layer files are generated.
                 // See https://github.com/risingwave-labs/risingwave/issues/1251
                 let kind = node.command_ctx.kind;
-                let (sst_to_worker, synced_ssts) = collect_synced_ssts(resps);
+                let commit_info = collect_commit_epoch_info(resps);
                 // hummock_manager commit epoch.
                 let mut new_snapshot = None;
 
                 match kind {
                     BarrierKind::Unspecified => unreachable!(),
                     BarrierKind::Initial => assert!(
-                        synced_ssts.is_empty(),
+                        commit_info.sstables.is_empty(),
                         "no sstables should be produced in the first epoch"
                     ),
                     BarrierKind::Checkpoint => {
                         new_snapshot = self
                             .hummock_manager
-                            .commit_epoch(
-                                node.command_ctx.prev_epoch.value().0,
-                                synced_ssts,
-                                sst_to_worker,
-                            )
+                            .commit_epoch(node.command_ctx.prev_epoch.value().0, commit_info)
                             .await?;
                     }
                     BarrierKind::Barrier => {
@@ -1114,8 +1138,23 @@ impl GlobalBarrierManager {
                     self.scheduled_barriers.force_checkpoint_in_next_barrier();
                 }
 
-                node.timer.take().unwrap().observe_duration();
+                let duration_sec = node.timer.take().unwrap().stop_and_record();
                 node.wait_commit_timer.take().unwrap().observe_duration();
+
+                {
+                    // Record barrier latency in event log.
+                    use risingwave_pb::meta::event_log;
+                    let event = event_log::EventBarrierComplete {
+                        prev_epoch: node.command_ctx.prev_epoch.value().0,
+                        cur_epoch: node.command_ctx.curr_epoch.value().0,
+                        duration_sec,
+                        command: node.command_ctx.command.to_string(),
+                        barrier_kind: node.command_ctx.kind.as_str_name().to_string(),
+                    };
+                    self.env
+                        .event_log_manager_ref()
+                        .add_event_logs(vec![event_log::Event::BarrierComplete(event)]);
+                }
 
                 Ok(())
             }
@@ -1171,12 +1210,7 @@ impl GlobalBarrierManager {
 
 pub type BarrierManagerRef = Arc<GlobalBarrierManager>;
 
-fn collect_synced_ssts(
-    resps: &mut [BarrierCompleteResponse],
-) -> (
-    HashMap<HummockSstableObjectId, WorkerId>,
-    Vec<ExtendedSstableInfo>,
-) {
+fn collect_commit_epoch_info(resps: &mut [BarrierCompleteResponse]) -> CommitEpochInfo {
     let mut sst_to_worker: HashMap<HummockSstableObjectId, WorkerId> = HashMap::new();
     let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
     for resp in &mut *resps {
@@ -1195,5 +1229,5 @@ fn collect_synced_ssts(
             .collect_vec();
         synced_ssts.append(&mut t);
     }
-    (sst_to_worker, synced_ssts)
+    CommitEpochInfo::new(synced_ssts, sst_to_worker)
 }

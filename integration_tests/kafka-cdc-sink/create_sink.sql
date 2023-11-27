@@ -4,6 +4,5 @@ WITH (
   connector = 'kafka',
   properties.bootstrap.server='message_queue:29092',
   topic = 'counts',
-  type = 'debezium',
   primary_key = 'id'
-);
+) FORMAT DEBEZIUM ENCODE JSON;
