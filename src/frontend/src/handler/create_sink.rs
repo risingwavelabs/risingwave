@@ -23,13 +23,16 @@ use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ConnectionId, DatabaseId, SchemaId, UserId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::types::Datum;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_common::{bail, catalog};
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkFormatDesc, SinkType};
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
 use risingwave_pb::ddl_service::ReplaceTablePlan;
+use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatcherType, MergeNode, StreamNode};
@@ -221,10 +224,7 @@ pub fn gen_sink_plan(
     if let Some(table_catalog) = &target_table_catalog {
         for column in sink_catalog.full_columns() {
             if column.is_generated() {
-                return Err(RwError::from(ErrorCode::BindError(
-                    "The sink to table feature for Sinks with generated columns has not been implemented yet."
-                        .to_string(),
-                )));
+                unreachable!("can not derive generated columns in a sink's catalog, but meet one");
             }
         }
 
@@ -527,8 +527,25 @@ fn derive_default_column_project_for_sink(
                 ))));
             }
         } else {
+            let data = match table_column
+                .column_desc
+                .generated_or_default_column
+                .as_ref()
+            {
+                // default column with default value
+                Some(GeneratedOrDefaultColumn::DefaultColumn(default_column)) => {
+                    Datum::from_protobuf(default_column.get_snapshot_value().unwrap(), data_type)
+                        .unwrap()
+                }
+                // default column with no default value
+                None => None,
+
+                // generated column is unreachable
+                _ => unreachable!(),
+            };
+
             exprs.push(ExprImpl::Literal(Box::new(Literal::new(
-                None,
+                data,
                 data_type.clone(),
             ))));
         };
