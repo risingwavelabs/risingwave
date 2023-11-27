@@ -19,7 +19,7 @@ use std::sync::{Arc, LazyLock, Mutex, Weak};
 use arrow_schema::{Field, Fields, Schema};
 use await_tree::InstrumentAwait;
 use cfg_or_panic::cfg_or_panic;
-use risingwave_common::array::{ArrayRef, DataChunk};
+use risingwave_common::array::{ArrayError, ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::ExprNode;
@@ -148,9 +148,9 @@ impl Build for UdfExpression {
                 .map::<Result<_>, _>(|t| {
                     Ok(Field::new(
                         "",
-                        DataType::from(t)
-                            .try_into()
-                            .map_err(risingwave_udf::Error::unsupported)?,
+                        DataType::from(t).try_into().map_err(|e: ArrayError| {
+                            risingwave_udf::Error::unsupported(e.to_string())
+                        })?,
                         true,
                     ))
                 })

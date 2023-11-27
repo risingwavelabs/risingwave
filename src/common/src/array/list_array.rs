@@ -343,6 +343,17 @@ impl ListArray {
             .map(|v| v.map(|s| s.to_owned_scalar()))
             .collect_vec()
     }
+
+    /// Returns the offsets of this list.
+    ///
+    /// # Example
+    /// ```text
+    /// list    = [[a, b, c], [], NULL, [d], [NULL, f]]
+    /// offsets = [0, 3, 3, 3, 4, 6]
+    /// ```
+    pub fn offsets(&self) -> &[u32] {
+        &self.offsets
+    }
 }
 
 #[derive(Clone, Debug, Eq, Default, PartialEq, Hash)]
