@@ -205,7 +205,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             upstream.peekable()
         };
 
-        tracing::debug!(?upstream_table_id, ?shared_cdc_source, "start cdc backfill");
         state_impl.init_epoch(first_barrier.epoch);
 
         // restore backfill state
@@ -218,7 +217,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         yield Message::Barrier(first_barrier);
 
         // Keep track of rows from the snapshot.
-        let mut total_snapshot_row_count: u64 = 0;
+        let mut total_snapshot_row_count = state.row_count as u64;
         let mut snapshot_read_epoch;
 
         let mut last_binlog_offset: Option<CdcOffset> = state
@@ -226,6 +225,15 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .map_or(upstream_table_reader.current_binlog_offset().await?, Some);
 
         let mut consumed_binlog_offset: Option<CdcOffset> = None;
+
+        tracing::info!(
+            upstream_table_id,
+            shared_cdc_source,
+            ?current_pk_pos,
+            is_finished = state.is_finished,
+            snapshot_row_count = total_snapshot_row_count,
+            "start cdc backfill"
+        );
 
         // CDC Backfill Algorithm:
         //
@@ -273,7 +281,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 }
             }
 
-            tracing::info!(upstream_table_id, initial_binlog_offset = ?last_binlog_offset, "start cdc backfill loop");
+            tracing::info!(upstream_table_id, initial_binlog_offset = ?last_binlog_offset, ?current_pk_pos, "start cdc backfill loop");
             'backfill_loop: loop {
                 let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
 
