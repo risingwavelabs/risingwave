@@ -3231,13 +3231,19 @@ impl Parser {
                 (Ok(value), _) => SetVariableValueSingle::Literal(value),
                 (Err(_), Token::Word(w)) => {
                     if w.keyword == Keyword::DEFAULT {
+                        if !values.is_empty() {
+                            self.expected(
+                                "parameter list value",
+                                Token::Word(w).with_location(token.location),
+                            )?
+                        }
                         return Ok(SetVariableValue::Default);
                     } else {
                         SetVariableValueSingle::Ident(w.to_ident()?)
                     }
                 }
                 (Err(_), unexpected) => {
-                    self.expected("variable value", unexpected.with_location(token.location))?
+                    self.expected("parameter value", unexpected.with_location(token.location))?
                 }
             };
             values.push(value);
