@@ -12,7 +12,7 @@ Refer to Sqllogictest [Doc](https://www.sqlite.org/sqllogictest/doc/trunk/about.
 
 Refer to risingwave [developer guide](../docs/developer-guide.md#end-to-end-tests).
 
-> **Note**
+> [!NOTE]
 >
 > Usually you will just need to run either batch tests or streaming tests. Other tests may need to be run under some specific settings, e.g., ddl tests need to be run on a fresh instance, and database tests need to first create a database and then connect to that database to run tests.
 >

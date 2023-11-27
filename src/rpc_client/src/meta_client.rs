@@ -1190,21 +1190,22 @@ impl MetaClient {
         self.inner.core.read().await.sink_coordinate_client.clone()
     }
 
+    pub async fn list_compact_task_assignment(&self) -> Result<Vec<CompactTaskAssignment>> {
+        let req = ListCompactTaskAssignmentRequest {};
+        let resp = self.inner.list_compact_task_assignment(req).await?;
+        Ok(resp.task_assignment)
+    }
+
     pub async fn list_event_log(&self) -> Result<Vec<EventLog>> {
         let req = ListEventLogRequest::default();
         let resp = self.inner.list_event_log(req).await?;
         Ok(resp.event_logs)
     }
 
-    pub async fn rise_ctl_list_compact_task_assignment(
-        &self,
-    ) -> Result<Vec<CompactTaskAssignment>> {
-        let req = RiseCtlListCompactTaskAssignmentRequest {};
-        let resp = self
-            .inner
-            .rise_ctl_list_compact_task_assignment(req)
-            .await?;
-        Ok(resp.task_assignment)
+    pub async fn list_compact_task_progress(&self) -> Result<Vec<CompactTaskProgress>> {
+        let req = ListCompactTaskProgressRequest {};
+        let resp = self.inner.list_compact_task_progress(req).await?;
+        Ok(resp.task_progress)
     }
 }
 
@@ -1859,7 +1860,8 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, list_branched_object, ListBranchedObjectRequest, ListBranchedObjectResponse }
             ,{ hummock_client, list_active_write_limit, ListActiveWriteLimitRequest, ListActiveWriteLimitResponse }
             ,{ hummock_client, list_hummock_meta_config, ListHummockMetaConfigRequest, ListHummockMetaConfigResponse }
-            ,{ hummock_client, rise_ctl_list_compact_task_assignment, RiseCtlListCompactTaskAssignmentRequest, RiseCtlListCompactTaskAssignmentResponse }
+            ,{ hummock_client, list_compact_task_assignment, ListCompactTaskAssignmentRequest, ListCompactTaskAssignmentResponse }
+            ,{ hummock_client, list_compact_task_progress, ListCompactTaskProgressRequest, ListCompactTaskProgressResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
