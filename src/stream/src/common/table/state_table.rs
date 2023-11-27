@@ -48,7 +48,7 @@ use risingwave_storage::row_serde::row_serde_util::{
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::{
     InitOptions, LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions,
-    StateStoreIterItemStream,
+    SealCurrentEpochOptions, StateStoreIterItemStream,
 };
 use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution, KeyedRow};
@@ -852,14 +852,14 @@ where
                     match op {
                         Op::Insert | Op::UpdateInsert => {
                             if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                    self.watermark_cache.insert(pk);
-                                }
+                                self.watermark_cache.insert(pk);
+                            }
                             self.insert_inner(TableKey(key_bytes), value);
                         }
                         Op::Delete | Op::UpdateDelete => {
                             if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                    self.watermark_cache.delete(pk);
-                                }
+                                self.watermark_cache.delete(pk);
+                            }
                             self.delete_inner(TableKey(key_bytes), value);
                         }
                     }
@@ -870,14 +870,14 @@ where
                 match op {
                     Op::Insert | Op::UpdateInsert => {
                         if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                self.watermark_cache.insert(pk);
-                            }
+                            self.watermark_cache.insert(pk);
+                        }
                         self.insert_inner(TableKey(key_bytes), value);
                     }
                     Op::Delete | Op::UpdateDelete => {
                         if USE_WATERMARK_CACHE && let Some(ref pk) = key {
-                                self.watermark_cache.delete(pk);
-                            }
+                            self.watermark_cache.delete(pk);
+                        }
                         self.delete_inner(TableKey(key_bytes), value);
                     }
                 }
@@ -910,7 +910,8 @@ where
         self.watermark_buffer_strategy.tick();
         if !self.is_dirty() {
             // If the state table is not modified, go fast path.
-            self.local_store.seal_current_epoch(new_epoch.curr);
+            self.local_store
+                .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::new());
             return Ok(());
         } else {
             self.seal_current_epoch(new_epoch.curr)
@@ -978,7 +979,8 @@ where
         // Tick the watermark buffer here because state table is expected to be committed once
         // per epoch.
         self.watermark_buffer_strategy.tick();
-        self.local_store.seal_current_epoch(new_epoch.curr);
+        self.local_store
+            .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::new());
     }
 
     /// Write to state store.
@@ -1026,11 +1028,21 @@ where
         });
 
         // Compute Delete Ranges
-        if should_clean_watermark && let Some(watermark_suffix) = watermark_suffix && let Some(first_byte) = watermark_suffix.first() {
+        if should_clean_watermark
+            && let Some(watermark_suffix) = watermark_suffix
+            && let Some(first_byte) = watermark_suffix.first()
+        {
             trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
                 self.vnodes.iter_vnodes().collect_vec()
             }, "delete range");
-            if prefix_serializer.as_ref().unwrap().get_order_types().first().unwrap().is_ascending() {
+            if prefix_serializer
+                .as_ref()
+                .unwrap()
+                .get_order_types()
+                .first()
+                .unwrap()
+                .is_ascending()
+            {
                 // We either serialize null into `0u8`, data into `(1u8 || scalar)`, or serialize null
                 // into `1u8`, data into `(0u8 || scalar)`. We do not want to delete null
                 // here, so `range_begin_suffix` cannot be `vec![]` when null is represented as `0u8`.
@@ -1077,7 +1089,13 @@ where
         }
 
         self.local_store.flush(delete_ranges).await?;
-        self.local_store.seal_current_epoch(next_epoch);
+        self.local_store
+            .seal_current_epoch(next_epoch, SealCurrentEpochOptions::new());
+        Ok(())
+    }
+
+    pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
+        self.local_store.try_flush().await?;
         Ok(())
     }
 }

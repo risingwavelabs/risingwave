@@ -15,16 +15,18 @@
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::window_function::{
     create_window_state, StateKey, WindowFuncCall, WindowStates,
 };
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use crate::error::{BatchError, Result};
 use crate::task::{BatchTaskContext, ShutdownToken};
 
 /// [`SortOverWindowExecutor`] accepts input chunks sorted by partition key and order key, and
@@ -41,6 +43,8 @@ pub struct SortOverWindowExecutor {
 struct ExecutorInner {
     calls: Vec<WindowFuncCall>,
     partition_key_indices: Vec<usize>,
+    order_key_indices: Vec<usize>,
+    order_key_order_types: Vec<OrderType>,
     chunk_size: usize,
 }
 
@@ -67,6 +71,12 @@ impl BoxedExecutorBuilder for SortOverWindowExecutor {
             .iter()
             .map(|i| *i as usize)
             .collect();
+        let (order_key_indices, order_key_order_types) = node
+            .get_order_by()
+            .iter()
+            .map(ColumnOrder::from_protobuf)
+            .map(|o| (o.column_index, o.order_type))
+            .unzip();
 
         let mut schema = child.schema().clone();
         calls.iter().for_each(|call| {
@@ -82,6 +92,8 @@ impl BoxedExecutorBuilder for SortOverWindowExecutor {
             inner: ExecutorInner {
                 calls,
                 partition_key_indices,
+                order_key_indices,
+                order_key_order_types,
                 chunk_size: source.context.get_config().developer.chunk_size,
             },
         }))
@@ -108,17 +120,24 @@ impl ExecutorInner {
             .project(&self.partition_key_indices)
             .into_owned_row()
     }
-}
 
-fn state_key_placeholder() -> StateKey {
-    StateKey {
-        order_key: vec![].into(),
-        pk: OwnedRow::empty().into(),
+    fn encode_order_key(&self, full_row: impl Row) -> Result<MemcmpEncoded> {
+        Ok(memcmp_encoding::encode_row(
+            full_row.project(&self.order_key_indices),
+            &self.order_key_order_types,
+        )?)
+    }
+
+    fn row_to_state_key(&self, full_row: impl Row) -> Result<StateKey> {
+        Ok(StateKey {
+            order_key: self.encode_order_key(full_row)?,
+            pk: OwnedRow::empty().into(), // we don't rely on the pk part in `WindowStates`
+        })
     }
 }
 
 impl SortOverWindowExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let Self {
             child,
@@ -170,7 +189,7 @@ impl SortOverWindowExecutor {
         }
     }
 
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn gen_output_for_partition<'a>(
         this: &'a ExecutorInner,
         rows: &'a mut Vec<OwnedRow>,
@@ -182,7 +201,7 @@ impl SortOverWindowExecutor {
             for (call, state) in this.calls.iter().zip_eq_fast(states.iter_mut()) {
                 // TODO(rc): batch appending
                 state.append(
-                    state_key_placeholder(), // we don't rely on the state key in `WindowStates`
+                    this.row_to_state_key(row)?,
                     row.project(call.args.val_indices())
                         .into_owned_row()
                         .as_inner()
@@ -191,12 +210,11 @@ impl SortOverWindowExecutor {
             }
         }
         for row in rows.drain(..) {
-            if let Some(chunk) =
-                chunk_builder.append_one_row(row.chain(OwnedRow::new(states.curr_output()?)))
+            if let Some(chunk) = chunk_builder
+                .append_one_row(row.chain(OwnedRow::new(states.slide_no_evict_hint()?)))
             {
                 yield chunk;
             }
-            states.just_slide_forward();
         }
     }
 }

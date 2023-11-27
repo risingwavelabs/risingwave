@@ -14,8 +14,8 @@
 
 use std::cmp::Ordering;
 use std::fmt::Debug;
+use std::future::Future;
 
-use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef};
 use risingwave_common::estimate_size::EstimateSize;
@@ -116,7 +116,6 @@ impl<const WITH_TIES: bool> Debug for TopNCache<WITH_TIES> {
 /// This trait is used as a bound. It is needed since
 /// `TopNCache::<true>::f` and `TopNCache::<false>::f`
 /// don't imply `TopNCache::<WITH_TIES>::f`.
-#[async_trait]
 pub trait TopNCacheTrait {
     /// Insert input row to corresponding cache range according to its order key.
     ///
@@ -140,7 +139,7 @@ pub trait TopNCacheTrait {
     /// operation, we need to pass in `group_key`, `epoch` and `managed_state` to do a prefix
     /// scan of the state table.
     #[allow(clippy::too_many_arguments)]
-    async fn delete<S: StateStore>(
+    fn delete<S: StateStore>(
         &mut self,
         group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
@@ -148,7 +147,7 @@ pub trait TopNCacheTrait {
         row: impl Row + Send,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
-    ) -> StreamExecutorResult<()>;
+    ) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 }
 
 impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
@@ -232,7 +231,9 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
                 return;
             }
             // For direct insert, we need to check if the key is smaller than the largest key
-            if let Some(high_last) = self.high.last_key_value() && cache_key <= *high_last.0 {
+            if let Some(high_last) = self.high.last_key_value()
+                && cache_key <= *high_last.0
+            {
                 debug_assert!(cache_key != *high_last.0, "cache_key should be unique");
                 self.high.insert(cache_key, row);
             }
@@ -247,7 +248,6 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     }
 }
 
-#[async_trait]
 impl TopNCacheTrait for TopNCache<false> {
     fn insert(
         &mut self,
@@ -260,15 +260,16 @@ impl TopNCacheTrait for TopNCache<false> {
             self.low.insert(cache_key, (&row).into());
             return;
         }
-        let elem_to_compare_with_middle =
-            if let Some(low_last) = self.low.last_entry() && cache_key <= *low_last.key() {
-                // Take the last element of `cache.low` and insert input row to it.
-                let low_last = low_last.remove_entry();
-                self.low.insert(cache_key, (&row).into());
-                low_last
-            } else {
-                (cache_key, (&row).into())
-            };
+        let elem_to_compare_with_middle = if let Some(low_last) = self.low.last_entry()
+            && cache_key <= *low_last.key()
+        {
+            // Take the last element of `cache.low` and insert input row to it.
+            let low_last = low_last.remove_entry();
+            self.low.insert(cache_key, (&row).into());
+            low_last
+        } else {
+            (cache_key, (&row).into())
+        };
 
         if !self.is_middle_cache_full() {
             self.middle.insert(
@@ -384,7 +385,6 @@ impl TopNCacheTrait for TopNCache<false> {
     }
 }
 
-#[async_trait]
 impl TopNCacheTrait for TopNCache<true> {
     fn insert(
         &mut self,
@@ -544,7 +544,6 @@ impl TopNCacheTrait for TopNCache<true> {
 }
 
 /// Similar to [`TopNCacheTrait`], but for append-only TopN.
-#[async_trait]
 pub trait AppendOnlyTopNCacheTrait {
     /// Insert input row to corresponding cache range according to its order key.
     ///
@@ -564,7 +563,6 @@ pub trait AppendOnlyTopNCacheTrait {
     ) -> StreamExecutorResult<()>;
 }
 
-#[async_trait]
 impl AppendOnlyTopNCacheTrait for TopNCache<false> {
     fn insert<S: StateStore>(
         &mut self,
@@ -586,15 +584,16 @@ impl AppendOnlyTopNCacheTrait for TopNCache<false> {
             return Ok(());
         }
 
-        let elem_to_insert_into_middle =
-            if let Some(low_last) = self.low.last_entry() && &cache_key <= low_last.key() {
-                // Take the last element of `cache.low` and insert input row to it.
-                let low_last = low_last.remove_entry();
-                self.low.insert(cache_key, row_ref.into());
-                low_last
-            } else {
-                (cache_key, row_ref.into())
-            };
+        let elem_to_insert_into_middle = if let Some(low_last) = self.low.last_entry()
+            && &cache_key <= low_last.key()
+        {
+            // Take the last element of `cache.low` and insert input row to it.
+            let low_last = low_last.remove_entry();
+            self.low.insert(cache_key, row_ref.into());
+            low_last
+        } else {
+            (cache_key, row_ref.into())
+        };
 
         if !self.is_middle_cache_full() {
             self.middle.insert(
@@ -626,7 +625,6 @@ impl AppendOnlyTopNCacheTrait for TopNCache<false> {
     }
 }
 
-#[async_trait]
 impl AppendOnlyTopNCacheTrait for TopNCache<true> {
     fn insert<S: StateStore>(
         &mut self,

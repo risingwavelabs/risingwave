@@ -113,7 +113,7 @@ impl DebeziumAvroParserConfig {
         let client = Client::new(url, client_config)?;
         let resolver = ConfluentSchemaResolver::new(client);
 
-        let name_strategy = &PbSchemaRegistryNameStrategy::TopicNameStrategyUnspecified;
+        let name_strategy = &PbSchemaRegistryNameStrategy::Unspecified;
         let key_subject = get_subject_by_strategy(name_strategy, kafka_topic, None, true)?;
         let val_subject = get_subject_by_strategy(name_strategy, kafka_topic, None, false)?;
         let key_schema = resolver.get_by_subject_name(&key_subject).await?;
@@ -204,6 +204,7 @@ mod tests {
         let inner_shema_str = r#"{
     "type": "record",
     "name": "Value",
+    "namespace": "dbserver1.inventory.customers",
     "fields": [
         {
             "name": "id",

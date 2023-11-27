@@ -140,7 +140,7 @@ impl Display for StructType {
                 (self.0.field_types.iter())
                     .zip_eq_fast(self.0.field_names.iter())
                     .map(|(d, s)| format!("{} {}", s, d))
-                    .join(",")
+                    .join(", ")
             )
         }
     }

@@ -47,7 +47,9 @@ pub async fn epoch_check(info: Arc<ExecutorInfo>, input: impl MessageStream) {
                 );
             }
 
-            if let Some(last_epoch) = last_epoch && !b.is_with_stop_mutation() {
+            if let Some(last_epoch) = last_epoch
+                && !b.is_with_stop_mutation()
+            {
                 assert_eq!(
                     b.epoch.prev,
                     last_epoch,

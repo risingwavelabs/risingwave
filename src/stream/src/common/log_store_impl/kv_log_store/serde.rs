@@ -34,6 +34,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::{
@@ -579,14 +580,16 @@ impl<S: StateStoreReadIterStream> LogStoreRowOpStream<S> {
 
         // sorted by epoch descending. Earlier epoch at the end
         self.not_started_streams
-            .sort_by_key(|(epoch, _)| u64::MAX - *epoch);
+            .sort_by_key(|(epoch, _)| MAX_EPOCH - *epoch);
 
         let (epoch, stream) = self
             .not_started_streams
             .pop()
             .expect("have check non-empty");
         self.row_streams.push(stream.into_future());
-        while let Some((stream_epoch, _)) = self.not_started_streams.last() && *stream_epoch == epoch {
+        while let Some((stream_epoch, _)) = self.not_started_streams.last()
+            && *stream_epoch == epoch
+        {
             let (_, stream) = self.not_started_streams.pop().expect("should not be empty");
             self.row_streams.push(stream.into_future());
         }

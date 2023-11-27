@@ -30,6 +30,8 @@
 #![feature(iter_from_coroutine)]
 #![feature(if_let_guard)]
 #![feature(iterator_try_collect)]
+#![feature(try_blocks)]
+#![feature(error_generic_member_access)]
 
 use std::time::Duration;
 
@@ -38,7 +40,6 @@ use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de;
 
-pub mod aws_auth;
 pub mod aws_utils;
 pub mod error;
 mod macros;
@@ -51,6 +52,9 @@ pub mod source;
 pub mod common;
 
 pub use paste::paste;
+
+#[cfg(test)]
+mod with_options_test;
 
 #[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {
@@ -110,4 +114,23 @@ where
         de::Unexpected::Str(&s),
         &"The String value unit support for one of:[“y”,“mon”,“w”,“d”,“h”,“m”,“s”, “ms”, “µs”, “ns”]",
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use expect_test::expect_file;
+
+    use crate::with_options_test::{
+        generate_with_options_yaml_sink, generate_with_options_yaml_source,
+    };
+
+    /// This test ensures that `src/connector/with_options.yaml` is up-to-date with the default values specified
+    /// in this file. Developer should run `./risedev generate-with-options` to update it if this
+    /// test fails.
+    #[test]
+    fn test_with_options_yaml_up_to_date() {
+        expect_file!("../with_options_source.yaml").assert_eq(&generate_with_options_yaml_source());
+
+        expect_file!("../with_options_sink.yaml").assert_eq(&generate_with_options_yaml_sink());
+    }
 }

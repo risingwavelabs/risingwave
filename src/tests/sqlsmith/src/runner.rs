@@ -473,7 +473,9 @@ fn validate_response(
         Ok(rows) => Ok((0, rows)),
         Err(e) => {
             // Permit runtime errors conservatively.
-            if let Some(e) = e.as_db_error() && is_permissible_error(&e.to_string()) {
+            if let Some(e) = e.as_db_error()
+                && is_permissible_error(&e.to_string())
+            {
                 tracing::info!("[SKIPPED ERROR]: {:#?}", e);
                 return Ok((1, vec![]));
             }
@@ -509,16 +511,20 @@ async fn run_query_inner(
         ),
     };
     if let Err(e) = &response
-    && let Some(e) = e.as_db_error() {
+        && let Some(e) = e.as_db_error()
+    {
         if is_recovery_in_progress_error(&e.to_string()) {
             let tries = 5;
             let interval = 1;
-            for _ in 0..tries { // retry 5 times
+            for _ in 0..tries {
+                // retry 5 times
                 sleep(Duration::from_secs(interval)).await;
                 let query_task = client.simple_query(query);
                 let response = timeout(Duration::from_secs(timeout_duration), query_task).await;
                 match response {
-                    Ok(Ok(r)) => { return Ok((0, r)); }
+                    Ok(Ok(r)) => {
+                        return Ok((0, r));
+                    }
                     Err(_) => bail!(
                         "[UNEXPECTED ERROR] Query timeout after {timeout_duration}s:\n{:?}",
                         query

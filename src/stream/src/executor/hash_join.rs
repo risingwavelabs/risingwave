@@ -40,8 +40,8 @@ use super::managed_state::join::*;
 use super::monitor::StreamingMetrics;
 use super::watermark::*;
 use super::{
-    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
-    Watermark,
+    ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message,
+    PkIndicesRef, Watermark,
 };
 use crate::common::table::state_table::StateTable;
 use crate::common::JoinStreamChunkBuilder;
@@ -226,6 +226,7 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
 /// The output columns are the concatenation of left and right columns.
 pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitive> {
     ctx: ActorContextRef,
+    info: ExecutorInfo,
 
     /// Left input executor
     input_l: Option<BoxedExecutor>,
@@ -233,10 +234,6 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     input_r: Option<BoxedExecutor>,
     /// The data types of the formed new columns
     actual_output_data_types: Vec<DataType>,
-    /// The schema of the hash join executor
-    schema: Schema,
-    /// The primary key indices of the schema
-    pk_indices: PkIndices,
     /// The parameters of the left join executor
     side_l: JoinSide<K, S>,
     /// The parameters of the right join executor
@@ -249,12 +246,6 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     /// calculation result of both side. It will be used to generate watermark into downstream
     /// and do state cleaning if `clean_state` field of that inequality is `true`.
     inequality_watermarks: Vec<Option<Watermark>>,
-    /// Identity string
-    identity: String,
-
-    #[expect(dead_code)]
-    /// Logical Operator Info
-    op_info: String,
 
     /// Whether the logic can be optimized for append-only stream
     append_only_optimize: bool,
@@ -279,8 +270,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug
             .field("input_right", &self.input_r.as_ref().unwrap().identity())
             .field("side_l", &self.side_l)
             .field("side_r", &self.side_r)
-            .field("pk_indices", &self.pk_indices)
-            .field("schema", &self.schema)
+            .field("pk_indices", &self.info.pk_indices)
+            .field("schema", &self.info.schema)
             .field("actual_output_data_types", &self.actual_output_data_types)
             .finish()
     }
@@ -292,15 +283,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> Executor for HashJoi
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        self.identity.as_str()
+        &self.info.identity
     }
 }
 
@@ -440,17 +431,15 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         input_l: BoxedExecutor,
         input_r: BoxedExecutor,
         params_l: JoinParams,
         params_r: JoinParams,
         null_safe: Vec<bool>,
-        pk_indices: PkIndices,
         output_indices: Vec<usize>,
-        executor_id: u64,
         cond: Option<NonStrictExpression>,
         inequality_pairs: Vec<(usize, usize, bool, Option<NonStrictExpression>)>,
-        op_info: String,
         state_table_l: StateTable<S>,
         degree_state_table_l: StateTable<S>,
         state_table_r: StateTable<S>,
@@ -528,14 +517,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             .iter()
             .map(|idx| state_all_data_types_r[*idx].clone())
             .collect_vec();
-
-        let original_schema = Schema {
-            fields: schema_fields,
-        };
-        let actual_schema: Schema = output_indices
-            .iter()
-            .map(|&idx| original_schema[idx].clone())
-            .collect();
 
         let null_matched = K::Bitmap::from_bool_vec(null_safe);
 
@@ -620,10 +601,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
         Self {
             ctx: ctx.clone(),
+            info,
             input_l: Some(input_l),
             input_r: Some(input_r),
             actual_output_data_types,
-            schema: actual_schema,
             side_l: JoinSide {
                 ht: JoinHashMap::new(
                     watermark_epoch.clone(),
@@ -680,12 +661,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 state_clean_columns: r_state_clean_columns,
                 need_degree_table: need_degree_table_r,
             },
-            pk_indices,
             cond,
             inequality_pairs,
             inequality_watermarks,
-            identity: format!("HashJoinExecutor {:X}", executor_id),
-            op_info,
             append_only_optimize,
             metrics,
             chunk_size,
@@ -766,6 +744,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         .join_match_duration_ns
                         .with_label_values(&[&actor_id_str, &fragment_id_str, "left"])
                         .inc_by(left_time.as_nanos() as u64);
+                    self.try_flush_data().await?;
                 }
                 AlignedMessage::Right(chunk) => {
                     let mut right_time = Duration::from_nanos(0);
@@ -792,6 +771,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         .join_match_duration_ns
                         .with_label_values(&[&actor_id_str, &fragment_id_str, "right"])
                         .inc_by(right_time.as_nanos() as u64);
+                    self.try_flush_data().await?;
                 }
                 AlignedMessage::Barrier(barrier) => {
                     let barrier_start_time = Instant::now();
@@ -836,6 +816,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         // `commit` them here.
         self.side_l.ht.flush(epoch).await?;
         self.side_r.ht.flush(epoch).await?;
+        Ok(())
+    }
+
+    async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
+        // All changes to the state has been buffered in the mem-table of the state table. Just
+        // `commit` them here.
+        self.side_l.ht.try_flush().await?;
+        self.side_r.ht.try_flush().await?;
         Ok(())
     }
 
@@ -912,13 +900,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 // allow since we will handle error manually.
                 #[allow(clippy::disallowed_methods)]
                 let eval_result = delta_expression
-                    .inner().eval_row(&OwnedRow::new(vec![Some(input_watermark.val)]))
+                    .inner()
+                    .eval_row(&OwnedRow::new(vec![Some(input_watermark.val)]))
                     .await;
                 match eval_result {
                     Ok(value) => input_watermark.val = value.unwrap(),
                     Err(err) => {
                         if !matches!(err, ExprError::NumericOutOfRange) {
-                            self.ctx.on_compute_error(err, self.identity.as_str());
+                            self.ctx.on_compute_error(err, &self.info.identity);
                         }
                         continue;
                     }
@@ -1373,25 +1362,32 @@ mod tests {
         )
         .await;
 
-        let schema_len = match T {
-            JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().len(),
-            JoinType::RightSemi | JoinType::RightAnti => source_r.schema().len(),
-            _ => source_l.schema().len() + source_r.schema().len(),
+        let schema = match T {
+            JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().clone(),
+            JoinType::RightSemi | JoinType::RightAnti => source_r.schema().clone(),
+            _ => [source_l.schema().fields(), source_r.schema().fields()]
+                .concat()
+                .into_iter()
+                .collect(),
+        };
+        let schema_len = schema.len();
+        let info = ExecutorInfo {
+            schema,
+            pk_indices: vec![1],
+            identity: "HashJoinExecutor".to_string(),
         };
 
         let executor = HashJoinExecutor::<Key64, MemoryStateStore, T>::new(
             ActorContext::create(123),
+            info,
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
             vec![null_safe],
-            vec![1],
             (0..schema_len).collect_vec(),
-            1,
             cond,
             inequality_pairs,
-            "HashJoinExecutor".to_string(),
             state_l,
             degree_state_l,
             state_r,
@@ -1455,25 +1451,33 @@ mod tests {
             0,
         )
         .await;
-        let schema_len = match T {
-            JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().len(),
-            JoinType::RightSemi | JoinType::RightAnti => source_r.schema().len(),
-            _ => source_l.schema().len() + source_r.schema().len(),
+
+        let schema = match T {
+            JoinType::LeftSemi | JoinType::LeftAnti => source_l.schema().clone(),
+            JoinType::RightSemi | JoinType::RightAnti => source_r.schema().clone(),
+            _ => [source_l.schema().fields(), source_r.schema().fields()]
+                .concat()
+                .into_iter()
+                .collect(),
+        };
+        let schema_len = schema.len();
+        let info = ExecutorInfo {
+            schema,
+            pk_indices: vec![1],
+            identity: "HashJoinExecutor".to_string(),
         };
 
         let executor = HashJoinExecutor::<Key128, MemoryStateStore, T>::new(
             ActorContext::create(123),
+            info,
             Box::new(source_l),
             Box::new(source_r),
             params_l,
             params_r,
             vec![false],
-            vec![1],
             (0..schema_len).collect_vec(),
-            1,
             cond,
             vec![],
-            "HashJoinExecutor".to_string(),
             state_l,
             degree_state_l,
             state_r,

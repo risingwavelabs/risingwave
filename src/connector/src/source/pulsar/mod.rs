@@ -21,6 +21,7 @@ pub use enumerator::*;
 use serde::Deserialize;
 use serde_with::serde_as;
 pub use split::*;
+use with_options::WithOptions;
 
 use self::source::reader::PulsarSplitReader;
 use crate::common::PulsarCommon;
@@ -36,7 +37,7 @@ impl SourceProperties for PulsarProperties {
     const SOURCE_NAME: &'static str = PULSAR_CONNECTOR;
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, WithOptions)]
 #[serde_as]
 pub struct PulsarProperties {
     #[serde(rename = "scan.startup.mode", alias = "pulsar.scan.startup.mode")]

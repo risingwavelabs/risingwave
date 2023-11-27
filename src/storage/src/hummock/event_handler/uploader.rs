@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
 use std::mem::swap;
 use std::ops::DerefMut;
@@ -28,9 +28,9 @@ use more_asserts::{assert_ge, assert_gt, assert_le};
 use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::EPOCH_LEN;
-use risingwave_hummock_sdk::{info_in_release, CompactionGroupId, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use tokio::task::JoinHandle;
-use tracing::error;
+use tracing::{debug, error, info};
 
 use crate::hummock::compactor::{merge_imms_in_memory, CompactionExecutor};
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
@@ -59,6 +59,16 @@ pub struct UploadTaskInfo {
     pub epochs: Vec<HummockEpoch>,
     pub imm_ids: Vec<ImmId>,
     pub compaction_group_index: Arc<HashMap<TableId, CompactionGroupId>>,
+}
+
+impl Display for UploadTaskInfo {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UploadTaskInfo")
+            .field("task_size", &self.task_size)
+            .field("epochs", &self.epochs)
+            .field("len(imm_ids)", &self.imm_ids.len())
+            .finish()
+    }
 }
 
 impl Debug for UploadTaskInfo {
@@ -152,6 +162,9 @@ impl Debug for UploadingTask {
 }
 
 impl UploadingTask {
+    // INFO logs will be enabled for task with size exceeding 50MB.
+    const LOG_THRESHOLD_FOR_UPLOAD_TASK_SIZE: usize = 50 * (1 << 20);
+
     fn new(payload: UploadTaskPayload, context: &UploaderContext) -> Self {
         assert!(!payload.is_empty());
         let mut epochs = payload
@@ -175,7 +188,11 @@ impl UploadingTask {
             .buffer_tracker
             .global_upload_task_size()
             .add(task_size as u64);
-        info_in_release!("start upload task: {:?}", task_info);
+        if task_info.task_size > Self::LOG_THRESHOLD_FOR_UPLOAD_TASK_SIZE {
+            info!("start upload task: {:?}", task_info);
+        } else {
+            debug!("start upload task: {:?}", task_info);
+        }
         let join_handle = (context.spawn_upload_task)(payload.clone(), task_info.clone());
         Self {
             payload,
@@ -190,7 +207,13 @@ impl UploadingTask {
     fn poll_result(&mut self, cx: &mut Context<'_>) -> Poll<HummockResult<StagingSstableInfo>> {
         Poll::Ready(match ready!(self.join_handle.poll_unpin(cx)) {
             Ok(task_result) => task_result
-                .inspect(|_| info_in_release!("upload task finish {:?}", self.task_info))
+                .inspect(|_| {
+                    if self.task_info.task_size > Self::LOG_THRESHOLD_FOR_UPLOAD_TASK_SIZE {
+                        info!("upload task finish {:?}", self.task_info)
+                    } else {
+                        debug!("upload task finish {:?}", self.task_info)
+                    }
+                })
                 .map(|ssts| {
                     StagingSstableInfo::new(
                         ssts,
@@ -226,6 +249,10 @@ impl UploadingTask {
                 }
             }
         }
+    }
+
+    pub fn get_task_info(&self) -> &UploadTaskInfo {
+        &self.task_info
     }
 }
 
@@ -296,6 +323,7 @@ impl UnsealedEpochData {
                 .stats
                 .spill_task_size_from_unsealed
                 .inc_by(task.task_info.task_size as u64);
+            info!("Spill unsealed data. Task: {}", task.get_task_info());
             self.spilled_data.add_task(task);
         }
     }
@@ -447,6 +475,7 @@ impl SealedData {
                     .stats
                     .spill_task_size_from_sealed
                     .inc_by(task.task_info.task_size as u64);
+                info!("Spill sealed data. Task: {}", task.get_task_info());
             }
             self.spilled_data.add_task(task);
         }
@@ -662,7 +691,7 @@ impl HummockUploader {
     }
 
     pub(crate) fn seal_epoch(&mut self, epoch: HummockEpoch) {
-        info_in_release!("epoch {} is sealed", epoch);
+        debug!("epoch {} is sealed", epoch);
         assert!(
             epoch > self.max_sealed_epoch,
             "sealing a sealed epoch {}. {}",
@@ -684,10 +713,10 @@ impl HummockUploader {
                     .expect("we have checked non-empty");
                 self.sealed_data.seal_new_epoch(epoch, unsealed_data);
             } else {
-                info_in_release!("epoch {} to seal has no data", epoch);
+                debug!("epoch {} to seal has no data", epoch);
             }
         } else {
-            info_in_release!("epoch {} to seal has no data", epoch);
+            debug!("epoch {} to seal has no data", epoch);
         }
     }
 
@@ -746,7 +775,7 @@ impl HummockUploader {
     }
 
     pub(crate) fn start_sync_epoch(&mut self, epoch: HummockEpoch) {
-        info_in_release!("start sync epoch: {}", epoch);
+        debug!("start sync epoch: {}", epoch);
         assert!(
             epoch > self.max_syncing_epoch,
             "the epoch {} has started syncing already: {}",
@@ -1091,6 +1120,7 @@ mod tests {
         };
         SharedBufferBatch::build_shared_buffer_batch(
             epoch,
+            0,
             sorted_items,
             size,
             vec![],
@@ -1333,7 +1363,9 @@ mod tests {
             assert_eq!(epoch, uploader.max_sealed_epoch);
             // check sealed data has two imms
             let imms_by_epoch = uploader.sealed_data.imms_by_epoch();
-            if let Some((e, imms)) = imms_by_epoch.last_key_value() && *e == epoch{
+            if let Some((e, imms)) = imms_by_epoch.last_key_value()
+                && *e == epoch
+            {
                 assert_eq!(2, imms.len());
             }
 

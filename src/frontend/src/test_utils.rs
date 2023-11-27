@@ -14,11 +14,13 @@
 
 use std::collections::HashMap;
 use std::io::Write;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use futures_async_stream::for_await;
 use parking_lot::RwLock;
+use pgwire::net::{Address, AddressRef};
 use pgwire::pg_response::StatementType;
 use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Row;
@@ -34,17 +36,22 @@ use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     PbComment, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView, Table,
 };
-use risingwave_pb::ddl_service::{create_connection_request, DdlProgress};
+use risingwave_pb::common::WorkerNode;
+use risingwave_pb::ddl_service::alter_owner_request::Object;
+use risingwave_pb::ddl_service::{
+    alter_set_schema_request, create_connection_request, DdlProgress, PbTableJobType,
+};
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    BranchedObject, CompactionGroupInfo, HummockSnapshot, HummockVersion, HummockVersionDelta,
+    BranchedObject, CompactTaskAssignment, CompactionGroupInfo, HummockSnapshot, HummockVersion,
+    HummockVersionDelta,
 };
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_fragment_distribution_response::FragmentDistribution;
 use risingwave_pb::meta::list_table_fragment_states_response::TableFragmentState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::SystemParams;
+use risingwave_pb::meta::{EventLog, SystemParams};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
@@ -75,6 +82,7 @@ impl SessionManager for LocalFrontend {
         &self,
         _database: &str,
         _user_name: &str,
+        _peer_addr: AddressRef,
     ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
         Ok(self.session_ref())
     }
@@ -103,8 +111,17 @@ impl LocalFrontend {
         &self,
         sql: impl Into<String>,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
-        let sql = sql.into();
-        self.session_ref().run_statement(sql.as_str(), vec![]).await
+        let sql: Arc<str> = Arc::from(sql.into());
+        self.session_ref().run_statement(sql, vec![]).await
+    }
+
+    pub async fn run_sql_with_session(
+        &self,
+        session_ref: Arc<SessionImpl>,
+        sql: impl Into<String>,
+    ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
+        let sql: Arc<str> = Arc::from(sql.into());
+        session_ref.run_statement(sql, vec![]).await
     }
 
     pub async fn run_user_sql(
@@ -114,9 +131,9 @@ impl LocalFrontend {
         user_name: String,
         user_id: UserId,
     ) -> std::result::Result<RwPgResponse, Box<dyn std::error::Error + Send + Sync>> {
-        let sql = sql.into();
+        let sql: Arc<str> = Arc::from(sql.into());
         self.session_user_ref(database, user_name, user_id)
-            .run_statement(sql.as_str(), vec![])
+            .run_statement(sql, vec![])
             .await
     }
 
@@ -168,6 +185,11 @@ impl LocalFrontend {
             UserAuthenticator::None,
             // Local Frontend use a non-sense id.
             (0, 0),
+            Address::Tcp(SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                6666,
+            ))
+            .into(),
         ))
     }
 }
@@ -254,6 +276,7 @@ impl CatalogWriter for MockCatalogWriter {
         source: Option<PbSource>,
         mut table: PbTable,
         graph: StreamFragmentGraph,
+        _job_type: PbTableJobType,
     ) -> Result<()> {
         if let Some(source) = source {
             let source_id = self.create_source_inner(source)?;
@@ -276,6 +299,14 @@ impl CatalogWriter for MockCatalogWriter {
     }
 
     async fn create_source(&self, source: PbSource) -> Result<()> {
+        self.create_source_inner(source).map(|_| ())
+    }
+
+    async fn create_source_with_graph(
+        &self,
+        source: PbSource,
+        _graph: StreamFragmentGraph,
+    ) -> Result<()> {
         self.create_source_inner(source).map(|_| ())
     }
 
@@ -476,6 +507,50 @@ impl CatalogWriter for MockCatalogWriter {
     async fn alter_source_column(&self, source: PbSource) -> Result<()> {
         self.catalog.write().update_source(&source);
         Ok(())
+    }
+
+    async fn alter_owner(&self, object: Object, owner_id: u32) -> Result<()> {
+        for database in self.catalog.read().iter_databases() {
+            for schema in database.iter_schemas() {
+                match object {
+                    Object::TableId(table_id) => {
+                        if let Some(table) = schema.get_table_by_id(&TableId::from(table_id)) {
+                            let mut pb_table = table.to_prost(schema.id(), database.id());
+                            pb_table.owner = owner_id;
+                            self.catalog.write().update_table(&pb_table);
+                            return Ok(());
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        }
+
+        Err(ErrorCode::ItemNotFound(format!("object not found: {:?}", object)).into())
+    }
+
+    async fn alter_set_schema(
+        &self,
+        object: alter_set_schema_request::Object,
+        new_schema_id: u32,
+    ) -> Result<()> {
+        match object {
+            alter_set_schema_request::Object::TableId(table_id) => {
+                let &schema_id = self.table_id_to_schema_id.read().get(&table_id).unwrap();
+                let database_id = self.get_database_id_by_schema(schema_id);
+                let pb_table = {
+                    let reader = self.catalog.read();
+                    let table = reader.get_table_by_id(&table_id.into())?.to_owned();
+                    table.to_prost(new_schema_id, database_id)
+                };
+                self.catalog.write().update_table(&pb_table);
+                self.table_id_to_schema_id
+                    .write()
+                    .insert(table_id, new_schema_id);
+                Ok(())
+            }
+            _ => unreachable!(),
+        }
     }
 
     async fn alter_view_name(&self, _view_id: u32, _view_name: &str) -> Result<()> {
@@ -846,6 +921,18 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_hummock_meta_configs(&self) -> RpcResult<HashMap<String, String>> {
+        unimplemented!()
+    }
+
+    async fn list_event_log(&self) -> RpcResult<Vec<EventLog>> {
+        unimplemented!()
+    }
+
+    async fn list_compact_task_assignment(&self) -> RpcResult<Vec<CompactTaskAssignment>> {
+        unimplemented!()
+    }
+
+    async fn list_all_nodes(&self) -> RpcResult<Vec<WorkerNode>> {
         unimplemented!()
     }
 }

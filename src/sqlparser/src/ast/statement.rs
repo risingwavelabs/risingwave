@@ -362,12 +362,10 @@ impl fmt::Display for CompatibleSourceSchema {
 }
 
 impl CompatibleSourceSchema {
-    pub fn into_source_schema_v2(self) -> (ConnectorSchema, Option<String>) {
+    pub(crate) fn into_v2(self) -> ConnectorSchema {
         match self {
-            CompatibleSourceSchema::RowFormat(inner) => (
-                inner.into_source_schema_v2(),
-                Some("RisingWave will stop supporting the syntax \"ROW FORMAT\" in future versions, which will be changed to \"FORMAT ... ENCODE ...\" syntax.".to_string())),
-            CompatibleSourceSchema::V2(inner) => (inner, None),
+            CompatibleSourceSchema::RowFormat(inner) => inner.into_source_schema_v2(),
+            CompatibleSourceSchema::V2(inner) => inner,
         }
     }
 }
@@ -445,14 +443,19 @@ impl Parser {
     pub fn parse_source_schema_with_connector(
         &mut self,
         connector: &str,
+        cdc_source_job: bool,
     ) -> Result<CompatibleSourceSchema, ParserError> {
         // row format for cdc source must be debezium json
         // row format for nexmark source must be native
         // default row format for datagen source is native
         if connector.contains("-cdc") {
-            let expected = ConnectorSchema::debezium_json();
+            let expected = if cdc_source_job {
+                ConnectorSchema::plain_json()
+            } else {
+                ConnectorSchema::debezium_json()
+            };
             if self.peek_source_schema_format() {
-                let schema = parse_source_schema(self)?.into_source_schema_v2().0;
+                let schema = parse_source_schema(self)?.into_v2();
                 if schema != expected {
                     return Err(ParserError::ParserError(format!(
                         "Row format for CDC connectors should be \
@@ -464,7 +467,7 @@ impl Parser {
         } else if connector.contains("nexmark") {
             let expected = ConnectorSchema::native();
             if self.peek_source_schema_format() {
-                let schema = parse_source_schema(self)?.into_source_schema_v2().0;
+                let schema = parse_source_schema(self)?.into_v2();
                 if schema != expected {
                     return Err(ParserError::ParserError(format!(
                         "Row format for nexmark connectors should be \
@@ -508,6 +511,14 @@ impl Parser {
 }
 
 impl ConnectorSchema {
+    pub const fn plain_json() -> Self {
+        ConnectorSchema {
+            format: Format::Plain,
+            row_encode: Encode::Json,
+            row_options: Vec::new(),
+        }
+    }
+
     /// Create a new source schema with `Debezium` format and `Json` encoding.
     pub const fn debezium_json() -> Self {
         ConnectorSchema {
@@ -719,10 +730,12 @@ impl ParseTo for CreateSourceStatement {
             .iter()
             .find(|&opt| opt.name.real_value() == UPSTREAM_SOURCE_KEY);
         let connector: String = option.map(|opt| opt.value.to_string()).unwrap_or_default();
-        // row format for cdc source must be debezium json
+        // The format of cdc source job is fixed to `FORMAT PLAIN ENCODE JSON`
+        let cdc_source_job =
+            connector.contains("-cdc") && columns.is_empty() && constraints.is_empty();
         // row format for nexmark source must be native
         // default row format for datagen source is native
-        let source_schema = p.parse_source_schema_with_connector(&connector)?;
+        let source_schema = p.parse_source_schema_with_connector(&connector, cdc_source_job)?;
 
         Ok(Self {
             if_not_exists,

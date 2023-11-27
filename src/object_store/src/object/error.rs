@@ -20,6 +20,8 @@ use aws_sdk_s3::error::DisplayErrorContext;
 use aws_sdk_s3::operation::get_object::GetObjectError;
 use aws_sdk_s3::operation::head_object::HeadObjectError;
 use aws_sdk_s3::primitives::ByteStreamError;
+use aws_smithy_types::body::SdkBody;
+use hyper::Response;
 use risingwave_common::error::BoxedError;
 use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
@@ -29,7 +31,7 @@ use crate::object::Error;
 #[derive(Error, Debug)]
 enum ObjectErrorInner {
     #[error("s3 error: {}", DisplayErrorContext(&**.0))]
-    S3(BoxedError),
+    S3(#[source] BoxedError),
     #[error("disk error: {msg}")]
     Disk {
         msg: String,
@@ -37,9 +39,9 @@ enum ObjectErrorInner {
         inner: io::Error,
     },
     #[error(transparent)]
-    Opendal(opendal::Error),
+    Opendal(#[from] opendal::Error),
     #[error(transparent)]
-    Mem(crate::object::mem::Error),
+    Mem(#[from] crate::object::mem::Error),
     #[error("Internal error: {0}")]
     Internal(String),
 }
@@ -79,13 +81,19 @@ impl ObjectError {
     pub fn is_object_not_found_error(&self) -> bool {
         match &self.inner {
             ObjectErrorInner::S3(e) => {
-                if let Some(aws_smithy_http::result::SdkError::ServiceError(err)) =
-                    e.downcast_ref::<aws_smithy_http::result::SdkError<GetObjectError>>()
+                if let Some(aws_smithy_runtime_api::client::result::SdkError::ServiceError(err)) = e
+                    .downcast_ref::<aws_smithy_runtime_api::client::result::SdkError<
+                        GetObjectError,
+                        Response<SdkBody>,
+                    >>()
                 {
                     return matches!(err.err(), GetObjectError::NoSuchKey(_));
                 }
-                if let Some(aws_smithy_http::result::SdkError::ServiceError(err)) =
-                    e.downcast_ref::<aws_smithy_http::result::SdkError<HeadObjectError>>()
+                if let Some(aws_smithy_runtime_api::client::result::SdkError::ServiceError(err)) = e
+                    .downcast_ref::<aws_smithy_runtime_api::client::result::SdkError<
+                        HeadObjectError,
+                        Response<SdkBody>,
+                    >>()
                 {
                     return matches!(err.err(), HeadObjectError::NotFound(_));
                 }

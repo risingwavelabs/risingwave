@@ -62,6 +62,18 @@ impl TruncateOffset {
         }
     }
 
+    pub fn check_next_offset(&self, next_offset: TruncateOffset) -> anyhow::Result<()> {
+        if *self >= next_offset {
+            Err(anyhow!(
+                "next offset {:?} should be later than current offset {:?}",
+                next_offset,
+                self
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn check_next_item_epoch(&self, epoch: u64) -> LogStoreResult<()> {
         match self {
             TruncateOffset::Chunk {
@@ -400,7 +412,9 @@ impl<'a, F: TryFuture<Ok = ()> + Unpin + 'static> DeliveryFutureManagerAddFuture
 
     pub async fn await_one_delivery(&mut self) -> Result<(), F::Error> {
         for (_, item) in &mut self.0.items {
-            if let DeliveryFutureManagerItem::Chunk {futures, ..} = item && let Some(mut delivery_future) = futures.pop_front() {
+            if let DeliveryFutureManagerItem::Chunk { futures, .. } = item
+                && let Some(mut delivery_future) = futures.pop_front()
+            {
                 self.0.future_count -= 1;
                 return poll_fn(|cx| delivery_future.try_poll_unpin(cx)).await;
             } else {

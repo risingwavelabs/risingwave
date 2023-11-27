@@ -132,13 +132,14 @@ get_rw_versions() {
   echo "--- git branch origin output"
   git branch -r | grep origin
 
+  # Extract X.Y.Z tags
   echo "--- VERSION BRANCHES"
-  local branches=$(git branch -r | grep -E "^  origin\/v[0-9]*\.[0-9]*.*-rc" | tr -d ' ' | sed -E 's/origin\/v([0-9]*\.[0-9])\-rc/\1.0/' | tr -d '\-vrcorigin\/' | tr -d ' ')
-  echo "$branches"
+  local tags=$(git tag | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+$" | tr -d 'v' | tr -d ' ')
+  echo "$tags"
 
   # Then we sort them in descending order.
   echo "--- VERSIONS"
-  local sorted_versions=$(echo -e "$branches" | sort -t '.' -n)
+  local sorted_versions=$(echo -e "$tags" | sort -t '.' -n)
   echo "$sorted_versions"
 
   # Then we take the Nth latest version.

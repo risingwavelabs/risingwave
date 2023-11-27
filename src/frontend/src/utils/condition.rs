@@ -844,12 +844,10 @@ impl Condition {
         .simplify()
     }
 
-    pub fn visit_expr<V: ExprVisitor + ?Sized>(&self, visitor: &mut V) -> V::Result {
+    pub fn visit_expr<V: ExprVisitor + ?Sized>(&self, visitor: &mut V) {
         self.conjunctions
             .iter()
-            .map(|expr| visitor.visit_expr(expr))
-            .reduce(V::merge)
-            .unwrap_or_default()
+            .for_each(|expr| visitor.visit_expr(expr));
     }
 
     pub fn visit_expr_mut(&mut self, mutator: &mut (impl ExprMutator + ?Sized)) {
@@ -889,7 +887,9 @@ impl Condition {
         }
         // remove all constant boolean `true`
         res.retain(|expr| {
-            if let Some(v) = try_get_bool_constant(expr) && v {
+            if let Some(v) = try_get_bool_constant(expr)
+                && v
+            {
                 false
             } else {
                 true

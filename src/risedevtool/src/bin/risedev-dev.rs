@@ -349,6 +349,10 @@ fn task_main(
 }
 
 fn main() -> Result<()> {
+    // Intentionally disable backtrace to provide more compact error message for `risedev dev`.
+    // Backtraces for RisingWave components are enabled in `Task::execute`.
+    std::env::set_var("RUST_BACKTRACE", "0");
+
     preflight_check()?;
 
     let task_name = std::env::args()
@@ -440,11 +444,11 @@ fn main() -> Result<()> {
         }
         Err(err) => {
             println!(
-                "{} - Failed to start: {}\nCaused by:\n\t{}",
+                "{} - Failed to start: {:?}", // with `Caused by`
                 style("ERROR").red().bold(),
                 err,
-                err.root_cause().to_string().trim(),
             );
+            println!();
             println!(
                 "* Use `{}` to enable new components, if they are missing.",
                 style("./risedev configure").blue().bold(),
@@ -464,9 +468,12 @@ fn main() -> Result<()> {
             );
             println!("---");
             println!();
-            println!();
 
-            Err(err)
+            // As we have already printed the error above, we don't need to print that error again.
+            // However, to return with a proper exit code, still return an error here.
+            Err(anyhow!(
+                "Failed to start all services. See details and instructions above."
+            ))
         }
     }
 }

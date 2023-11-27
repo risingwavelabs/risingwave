@@ -14,6 +14,7 @@
 
 //! Handle creation of logical (non-materialized) views.
 
+use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
@@ -23,10 +24,8 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Query, Statement};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::CatalogError;
 use crate::handler::HandlerArgs;
 use crate::optimizer::OptimizerContext;
-use crate::session::CheckRelationError;
 
 pub async fn handle_create_view(
     handler_args: HandlerArgs,
@@ -43,15 +42,13 @@ pub async fn handle_create_view(
 
     let properties = handler_args.with_options.clone();
 
-    match session.check_relation_name_duplicated(name.clone()) {
-        Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
-            return Ok(PgResponse::builder(StatementType::CREATE_VIEW)
-                .notice(format!("relation \"{}\" already exists, skipping", name))
-                .into());
-        }
-        Err(e) => return Err(e.into()),
-        Ok(_) => {}
-    };
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        name.clone(),
+        StatementType::CREATE_VIEW,
+        if_not_exists,
+    )? {
+        return Ok(resp);
+    }
 
     // plan the query to validate it and resolve dependencies
     let (dependent_relations, schema) = {

@@ -18,7 +18,7 @@ mod source;
 use serde::Deserialize;
 pub use source::S3FileReader;
 
-use crate::aws_auth::AwsAuthProps;
+use crate::common::AwsAuthProps;
 use crate::source::filesystem::FsSplit;
 use crate::source::SourceProperties;
 

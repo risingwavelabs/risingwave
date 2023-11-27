@@ -358,23 +358,44 @@ impl NonOverlapSubLevelPicker {
             return vec![];
         }
 
+        let mut expected = Vec::with_capacity(scores.len());
+        let mut unexpected = vec![];
+
+        for selected_task in scores {
+            if selected_task.sstable_infos.len() > MAX_COMPACT_LEVEL_COUNT {
+                unexpected.push(selected_task);
+            } else {
+                expected.push(selected_task);
+            }
+        }
+
         // The logic of sorting depends on the interval we expect to select.
         // 1. contain as many levels as possible
         // 2. fewer files in the bottom sub level, containing as many smaller intervals as possible.
-        scores.sort_by(|a, b| {
+        expected.sort_by(|a, b| {
             b.sstable_infos
                 .len()
                 .cmp(&a.sstable_infos.len())
                 .then_with(|| a.total_file_count.cmp(&b.total_file_count))
                 .then_with(|| a.total_file_size.cmp(&b.total_file_size))
         });
-        scores
+
+        unexpected.sort_by(|a, b| {
+            b.sstable_infos
+                .len()
+                .cmp(&a.sstable_infos.len())
+                .then_with(|| a.total_file_count.cmp(&b.total_file_count))
+                .then_with(|| a.total_file_size.cmp(&b.total_file_size))
+        });
+        expected.extend(unexpected);
+
+        expected
     }
 }
 
 #[cfg(test)]
 pub mod tests {
-    pub use risingwave_pb::hummock::{KeyRange, Level, LevelType};
+    pub use risingwave_pb::hummock::{Level, LevelType};
 
     use super::*;
     use crate::hummock::compaction::overlap_strategy::RangeOverlapStrategy;

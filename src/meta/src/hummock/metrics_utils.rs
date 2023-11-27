@@ -19,11 +19,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use itertools::{enumerate, Itertools};
 use prost::Message;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     object_size_map, BranchedSstInfo, HummockVersionExt,
 };
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId,
+    CompactionGroupId, HummockContextId, HummockSstableObjectId, HummockVersionId,
 };
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::write_limits::WriteLimit;
@@ -344,7 +345,7 @@ pub fn trigger_pin_unpin_snapshot_state(
     {
         metrics.min_pinned_epoch.set(m as i64);
     } else {
-        metrics.min_pinned_epoch.set(HummockEpoch::MAX as _);
+        metrics.min_pinned_epoch.set(MAX_EPOCH as _);
     }
 }
 

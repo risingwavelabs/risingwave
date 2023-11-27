@@ -23,7 +23,7 @@ use risingwave_pb::meta::SubscribeResponse;
 
 use crate::{
     LocalStorageId, StorageType, TracedHummockReadEpoch, TracedInitOptions, TracedNewLocalOptions,
-    TracedReadOptions,
+    TracedReadOptions, TracedSealCurrentEpochOptions,
 };
 
 pub type RecordId = u64;
@@ -173,7 +173,10 @@ pub enum Operation {
     ClearSharedBuffer,
 
     /// Seal current epoch
-    SealCurrentEpoch(u64),
+    SealCurrentEpoch {
+        epoch: u64,
+        opts: TracedSealCurrentEpochOptions,
+    },
 
     /// validate read epoch
     ValidateReadEpoch(TracedHummockReadEpoch),
@@ -181,6 +184,8 @@ pub enum Operation {
     LocalStorageEpoch,
 
     LocalStorageIsDirty,
+
+    TryFlush,
 
     Flush(Vec<(Bound<TracedBytes>, Bound<TracedBytes>)>),
     /// Finish operation of Hummock.
@@ -287,6 +292,7 @@ pub enum OperationResult {
     Get(TraceResult<Option<TracedBytes>>),
     Insert(TraceResult<()>),
     Delete(TraceResult<()>),
+    TryFlush(TraceResult<()>),
     Flush(TraceResult<usize>),
     Iter(TraceResult<()>),
     IterNext(TraceResult<Option<(TracedBytes, TracedBytes)>>),

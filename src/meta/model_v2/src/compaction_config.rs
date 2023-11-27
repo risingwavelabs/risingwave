@@ -12,18 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::hummock::CompactionConfig as PbCompactionConfig;
 use sea_orm::entity::prelude::*;
+use sea_orm::FromJsonQueryResult;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+use crate::CompactionGroupId;
+
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize, Default)]
 #[sea_orm(table_name = "compaction_config")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub compaction_group_id: i64,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub config: Option<Json>,
+    pub compaction_group_id: CompactionGroupId,
+    pub config: CompactionConfig,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
+
+crate::derive_from_json_struct!(CompactionConfig, PbCompactionConfig);
