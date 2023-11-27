@@ -150,7 +150,7 @@ impl MigrationTrait for Migration {
                             .boolean()
                             .not_null(),
                     )
-                    .col(ColumnDef::new(HummockVersionDelta::SerializedPayload).binary())
+                    .col(ColumnDef::new(HummockVersionDelta::FullVersionDelta).binary())
                     .to_owned(),
             )
             .await?;
@@ -251,7 +251,7 @@ enum HummockVersionDelta {
     MaxCommittedEpoch,
     SafeEpoch,
     TrivialMove,
-    SerializedPayload,
+    FullVersionDelta,
 }
 
 #[derive(DeriveIden)]
