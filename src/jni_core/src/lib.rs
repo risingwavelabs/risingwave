@@ -681,8 +681,8 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetDateValue
 
         let (date_class_ref, constructor) =
             pointer.as_ref().class_cache.date_ctor.get_or_try_init(|| {
-                let cls = env.find_class("java/sql/Date")?;
-                let init_method = env.get_method_id(&cls, "<init>", "(J)V")?;
+                let cls = env.find_class(gen_class_name!(java.sql.Date))?;
+                let init_method = env.get_method_id(&cls, "<init>", gen_jni_sig!(void Date(long)))?;
                 Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
             })?;
         unsafe {
@@ -709,8 +709,8 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetTimeValue
 
         let (time_class_ref, constructor) =
             pointer.as_ref().class_cache.time_ctor.get_or_try_init(|| {
-                let cls = env.find_class("java/sql/Time")?;
-                let init_method = env.get_method_id(&cls, "<init>", "(J)V")?;
+                let cls = env.find_class(gen_class_name!(java.sql.Time))?;
+                let init_method = env.get_method_id(&cls, "<init>", gen_jni_sig!(void Time(long)))?;
                 Ok::<_, jni::errors::Error>((env.new_global_ref(cls)?, init_method))
             })?;
         unsafe {

@@ -65,6 +65,14 @@ public class EsSink extends SinkWriterBase {
     private static final Logger LOG = LoggerFactory.getLogger(EsSink.class);
     private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
 
+    private static final TimeZone UTCTimeZone = TimeZone.getTimeZone("UTC");
+    private static final SimpleDateFormat tDfm =
+            createSimpleDateFormat("HH:mm:ss.SSS", UTCTimeZone);
+    private static final SimpleDateFormat tsDfm =
+            createSimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", UTCTimeZone);
+    private static final SimpleDateFormat tstzDfm =
+            createSimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", UTCTimeZone);
+
     private final EsSinkConfig config;
     private final BulkProcessor bulkProcessor;
     private final RestHighLevelClient client;
@@ -209,19 +217,13 @@ public class EsSink extends SinkWriterBase {
                     // construct java.sql.Time/Timestamp with milliseconds time value.
                     // it will use system timezone by default, so we have to set timezone manually
                 case TIME:
-                    SimpleDateFormat tDfm = new SimpleDateFormat("HH:mm:ss.SSS");
-                    tDfm.setTimeZone(TimeZone.getTimeZone("UTC"));
                     col = tDfm.format(col);
                     break;
                 case TIMESTAMP:
-                    SimpleDateFormat tsDfm = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
-                    tsDfm.setTimeZone(TimeZone.getTimeZone("UTC"));
                     col = tsDfm.format(col);
                     break;
                 case TIMESTAMPTZ:
-                    SimpleDateFormat tszDfm = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
-                    tszDfm.setTimeZone(TimeZone.getTimeZone("UTC"));
-                    col = tszDfm.format(col);
+                    col = tstzDfm.format(col);
                     break;
                 case JSONB:
                     ObjectMapper mapper = new ObjectMapper();
@@ -329,5 +331,12 @@ public class EsSink extends SinkWriterBase {
 
     public RestHighLevelClient getClient() {
         return client;
+    }
+
+    private static final SimpleDateFormat createSimpleDateFormat(
+            String pattern, TimeZone timeZone) {
+        SimpleDateFormat sdf = new SimpleDateFormat(pattern);
+        sdf.setTimeZone(timeZone);
+        return sdf;
     }
 }
