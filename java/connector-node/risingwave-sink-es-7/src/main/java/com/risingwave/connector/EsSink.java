@@ -22,6 +22,7 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.connector.api.sink.SinkWriterBase;
 import io.grpc.Status;
+import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -199,14 +200,28 @@ public class EsSink extends SinkWriterBase {
             var type = columnDescs.get(i).getDataType().getTypeName();
             Object col = row.get(i);
             switch (type) {
-                case DATE:
-                case TIME:
-                case TIMESTAMP:
-                case TIMESTAMPTZ:
                     // es client doesn't natively support java.sql.Timestamp/Time/Date
                     // so we need to convert Date/Time/Timestamp type into a string as suggested in
                     // https://github.com/elastic/elasticsearch/issues/31377#issuecomment-398102292
+                case DATE:
                     col = col.toString();
+                    break;
+                    // construct java.sql.Time/Timestamp with milliseconds time value.
+                    // it will use system timezone by default, so we have to set timezone manually
+                case TIME:
+                    SimpleDateFormat tDfm = new SimpleDateFormat("HH:mm:ss.SSS");
+                    tDfm.setTimeZone(TimeZone.getTimeZone("UTC"));
+                    col = tDfm.format(col);
+                    break;
+                case TIMESTAMP:
+                    SimpleDateFormat tsDfm = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+                    tsDfm.setTimeZone(TimeZone.getTimeZone("UTC"));
+                    col = tsDfm.format(col);
+                    break;
+                case TIMESTAMPTZ:
+                    SimpleDateFormat tszDfm = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+                    tszDfm.setTimeZone(TimeZone.getTimeZone("UTC"));
+                    col = tszDfm.format(col);
                     break;
                 case JSONB:
                     ObjectMapper mapper = new ObjectMapper();

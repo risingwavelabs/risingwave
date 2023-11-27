@@ -8042,6 +8042,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "cfg-or-panic",
+ "chrono",
  "expect-test",
  "futures",
  "itertools 0.12.0",
