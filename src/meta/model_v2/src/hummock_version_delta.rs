@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Formatter;
-
 use risingwave_pb::hummock::HummockVersionDelta;
 use sea_orm::entity::prelude::*;
+use sea_orm::FromJsonQueryResult;
+use serde::{Deserialize, Serialize};
 
 use crate::{Epoch, HummockVersionId};
 
@@ -28,7 +28,7 @@ pub struct Model {
     pub max_committed_epoch: Epoch,
     pub safe_epoch: Epoch,
     pub trivial_move: bool,
-    pub serialized_payload: SerializedHummockVersionDelta,
+    pub full_version_delta: FullVersionDelta,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -36,34 +36,11 @@ pub enum Relation {}
 
 impl ActiveModelBehavior for ActiveModel {}
 
-#[derive(Clone, PartialEq, Eq, DeriveValueType)]
-pub struct SerializedHummockVersionDelta(#[sea_orm] Vec<u8>);
-
-impl SerializedHummockVersionDelta {
-    fn get_delta(&self) -> HummockVersionDelta {
-        prost::Message::decode(&*self.0).expect("should be able to decode")
-    }
-
-    pub fn from_delta(delta: &HummockVersionDelta) -> Self {
-        Self(prost::Message::encode_to_vec(delta))
-    }
-}
-
-impl std::fmt::Debug for SerializedHummockVersionDelta {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.get_delta().fmt(f)
-    }
-}
-
-impl Default for SerializedHummockVersionDelta {
-    fn default() -> Self {
-        Self::from_delta(&HummockVersionDelta::default())
-    }
-}
+crate::derive_from_json_struct!(FullVersionDelta, HummockVersionDelta);
 
 impl From<Model> for HummockVersionDelta {
     fn from(value: Model) -> Self {
-        let ret = value.serialized_payload.get_delta();
+        let ret = value.full_version_delta.into_inner();
         assert_eq!(value.id, ret.id as i64);
         assert_eq!(value.prev_id, ret.prev_id as i64);
         assert_eq!(value.max_committed_epoch, ret.max_committed_epoch as i64);

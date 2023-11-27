@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_meta_model_v2::compaction_config::CompactionConfig;
 use risingwave_meta_model_v2::compaction_status::LevelHandlers;
 use risingwave_meta_model_v2::compaction_task::CompactionTask;
-use risingwave_meta_model_v2::hummock_version_delta::SerializedHummockVersionDelta;
+use risingwave_meta_model_v2::hummock_version_delta::FullVersionDelta;
 use risingwave_meta_model_v2::{
     compaction_config, compaction_status, compaction_task, hummock_pinned_snapshot,
     hummock_pinned_version, hummock_version_delta, CompactionGroupId, CompactionTaskId,
@@ -192,7 +192,7 @@ impl Transactional<Transaction> for HummockVersionDelta {
             max_committed_epoch: Set(self.max_committed_epoch as _),
             safe_epoch: Set(self.safe_epoch as _),
             trivial_move: Set(self.trivial_move),
-            serialized_payload: Set(SerializedHummockVersionDelta::from_delta(self)),
+            full_version_delta: Set(FullVersionDelta(self.clone())),
         };
         hummock_version_delta::Entity::insert(m)
             .on_conflict(
@@ -202,7 +202,7 @@ impl Transactional<Transaction> for HummockVersionDelta {
                         hummock_version_delta::Column::MaxCommittedEpoch,
                         hummock_version_delta::Column::SafeEpoch,
                         hummock_version_delta::Column::TrivialMove,
-                        hummock_version_delta::Column::SerializedPayload,
+                        hummock_version_delta::Column::FullVersionDelta,
                     ])
                     .to_owned(),
             )
