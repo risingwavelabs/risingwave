@@ -54,17 +54,10 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
             .map(|&i| i as usize)
             .collect_vec();
 
-        let schema = if node.stream_scan_type() == StreamScanType::ArrangementBackfill {
-            let upstream_schema_fields = &snapshot.schema().fields;
-            let output_schema_fields = node
-                .get_output_indices()
-                .iter()
-                .map(|i| upstream_schema_fields[*i as usize].clone())
-                .collect_vec();
-            Schema {
-                fields: output_schema_fields,
-            }
-        } else if matches!(node.stream_scan_type(), StreamScanType::Backfill) {
+        let schema = if matches!(
+            node.stream_scan_type(),
+            StreamScanType::Backfill | StreamScanType::ArrangementBackfill
+        ) {
             Schema::new(
                 output_indices
                     .iter()

@@ -88,7 +88,7 @@ where
         state_table: StateTable<S>,
         output_indices: Vec<usize>,
         progress: CreateMviewProgress,
-        _schema: Schema,
+        _schema: Schema, // Output schema of this executor
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
     ) -> Self {
@@ -109,12 +109,30 @@ where
     async fn execute_inner(mut self) {
         // The primary key columns, in the output columns of the upstream_table scan.
         // Table scan scans a subset of the columns of the upstream table.
+        let pk_in_output_indices = self.upstream_table.pk_in_output_indices().unwrap();
         let pk_indices = self.upstream_table.pk_indices().to_vec(); // We have full table.
         let state_len = pk_indices.len() + METADATA_STATE_LEN;
         let pk_order = self.upstream_table.pk_serde().get_order_types().to_vec();
         let upstream_table_id = self.upstream_table.table_id();
         let mut upstream_table = self.upstream_table;
         let vnodes = upstream_table.vnodes().clone();
+
+        // These builders will build data chunks.
+        // We must supply them with the full datatypes which correspond to
+        // pk + output_indices.
+        let snapshot_data_types = self
+            .upstream
+            .schema()
+            .fields()
+            .iter()
+            .map(|field| field.data_type.clone())
+            .collect_vec();
+        println!("snapshot_data_types: {:?}", snapshot_data_types);
+        let mut builders = upstream_table
+            .vnodes()
+            .iter_vnodes()
+            .map(|_| DataChunkBuilder::new(snapshot_data_types.clone(), self.chunk_size))
+            .collect_vec();
 
         let mut upstream = self.upstream.execute();
 
@@ -141,14 +159,6 @@ where
         // Perhaps via `progress_per_vnode`.
         // We can do it later when testing recovery + scaling mechanism.
         let mut committed_progress = HashMap::new();
-
-        // let output_data_types = upstream_table.get_output_data_types();
-        let output_data_types = upstream_table.get_data_types().to_vec();
-        let mut builders = upstream_table
-            .vnodes()
-            .iter_vnodes()
-            .map(|_| DataChunkBuilder::new(output_data_types.clone(), self.chunk_size))
-            .collect_vec();
 
         // If the snapshot is empty, we don't need to backfill.
         // We cannot complete progress now, as we want to persist
@@ -312,7 +322,7 @@ where
                                         update_pos_by_vnode(
                                             vnode,
                                             &chunk,
-                                            &pk_indices,
+                                            &pk_in_output_indices,
                                             &mut backfill_state,
                                         );
 
@@ -358,7 +368,12 @@ where
                         // Raise the current position.
                         // As snapshot read streams are ordered by pk, so we can
                         // just use the last row to update `current_pos`.
-                        update_pos_by_vnode(vnode, &chunk, &pk_indices, &mut backfill_state);
+                        update_pos_by_vnode(
+                            vnode,
+                            &chunk,
+                            &pk_in_output_indices,
+                            &mut backfill_state,
+                        );
 
                         let chunk_cardinality = chunk.cardinality() as u64;
                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
@@ -380,7 +395,7 @@ where
                             mark_chunk_ref_by_vnode(
                                 &chunk,
                                 &backfill_state,
-                                &pk_indices,
+                                &pk_in_output_indices,
                                 &pk_order,
                             )?,
                             &self.output_indices,
@@ -476,7 +491,7 @@ where
                     // (there's no epoch before the first epoch).
                     // TODO: if we reach here, maybe some vnodes do not have their state finished.
                     // We should update them to finished state.
-                    let finished_placeholder_position = construct_initial_finished_state(pk_indices.len());
+                    let finished_placeholder_position = construct_initial_finished_state(pk_in_output_indices.len());
                     for vnode in upstream_table.vnodes().iter_vnodes() {
                         let backfill_progress = backfill_state.get_progress(&vnode)?;
                         let finished_state = match backfill_progress {
@@ -584,7 +599,6 @@ where
 
             let vnode_chunk_iter =
                 iter_chunks(vnode_row_iter, builder).map_ok(move |chunk| (vnode, chunk));
-            // TODO: Is there some way to avoid double-pin
 
             // FIXME(kwannoel): Should we iterate serially? Or in parallel?
             #[for_await]

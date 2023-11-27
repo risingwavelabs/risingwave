@@ -249,7 +249,9 @@ impl StreamTableScan {
         // The required columns from the table (both scan and upstream).
         let upstream_column_ids = match self.stream_scan_type {
             // For backfill, we additionally need the primary key columns.
-            StreamScanType::Backfill | StreamScanType::ArrangementBackfill => self.core.output_and_pk_column_ids(),
+            StreamScanType::Backfill | StreamScanType::ArrangementBackfill => {
+                self.core.output_and_pk_column_ids()
+            }
             StreamScanType::Chain | StreamScanType::Rearrange | StreamScanType::UpstreamOnly => {
                 self.core.output_column_ids()
             }
@@ -285,6 +287,9 @@ impl StreamTableScan {
             .build_backfill_state_catalog(state)
             .to_internal_table_prost();
 
+        // For backfill, we first read pk + output_indices from upstream.
+        // On this, we need to further project `output_indices` to the downstream.
+        // This `output_indices` refers to that.
         let output_indices = self
             .core
             .output_column_ids()
@@ -297,10 +302,12 @@ impl StreamTableScan {
             })
             .collect_vec();
 
+        // This refers to the output indices of the originating stream.
+        let output_indices_origin = self.core.output_and_pk_column_indices();
         let upstream_table_catalog = self
             .get_upstream_state_table()
             .clone()
-            .to_replicated(output_indices.iter().map(|x| *x as usize).collect_vec());
+            .into_replicated(output_indices_origin);
 
         let arrangement_table = if self.stream_scan_type == StreamScanType::ArrangementBackfill {
             Some(upstream_table_catalog.to_internal_table_prost())

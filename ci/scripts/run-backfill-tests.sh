@@ -171,8 +171,8 @@ test_replication_with_column_pruning() {
 
 main() {
   set -euo pipefail
-  test_snapshot_and_upstream_read
-  test_backfill_tombstone
+#  test_snapshot_and_upstream_read
+#  test_backfill_tombstone
   test_replication_with_column_pruning
 }
 

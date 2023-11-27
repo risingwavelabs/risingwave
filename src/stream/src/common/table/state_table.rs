@@ -143,6 +143,12 @@ pub struct StateTableInner<
     /// Data Types
     /// We will need to use to build data chunks from state table rows.
     data_types: Vec<DataType>,
+
+    /// Output indices
+    /// Used for:
+    /// 1. Computing output_value_indices to ser/de replicated rows.
+    /// 2. Computing output pk indices to used them for backfill state.
+    output_indices: Vec<usize>,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -332,6 +338,12 @@ where
             StateTableWatermarkCache::new(0)
         };
 
+        let output_indices = table_catalog
+            .get_output_indices()
+            .iter()
+            .map(|&k| k as usize)
+            .collect_vec();
+
         Self {
             table_id,
             local_store: local_state_store,
@@ -349,6 +361,7 @@ where
             prev_cleaned_watermark: None,
             watermark_cache,
             data_types,
+            output_indices,
         }
     }
 
@@ -521,6 +534,7 @@ where
             prev_cleaned_watermark: None,
             watermark_cache,
             data_types,
+            output_indices: vec![],
         }
     }
 
@@ -575,6 +589,25 @@ where
     /// We want to check pk indices of upstream table.
     pub fn pk_indices(&self) -> &[usize] {
         &self.pk_indices
+    }
+
+    /// Get the indices of the primary key columns in the output columns.
+    ///
+    /// Returns `None` if any of the primary key columns is not in the output columns.
+    pub fn pk_in_output_indices(&self) -> Option<Vec<usize>> {
+        assert!(IS_REPLICATED);
+        self.pk_indices
+            .iter()
+            .map(|&i| self.output_indices.iter().position(|&j| i == j))
+            .collect()
+    }
+
+    pub fn dist_key_in_pk_in_output_indices(&self) -> Option<Vec<usize>> {
+        assert!(IS_REPLICATED);
+        self.dist_key_in_pk_indices
+            .iter()
+            .map(|&i| self.output_indices.iter().position(|&j| i == j))
+            .collect()
     }
 
     pub fn pk_serde(&self) -> &OrderedRowSerde {
@@ -844,12 +877,21 @@ where
     pub fn write_chunk(&mut self, chunk: StreamChunk) {
         let (chunk, op) = chunk.into_parts();
 
-        let vnodes = compute_chunk_vnode(
-            &chunk,
-            &self.dist_key_in_pk_indices,
-            &self.pk_indices,
-            &self.vnodes,
-        );
+        let vnodes = if IS_REPLICATED {
+            compute_chunk_vnode(
+                &chunk,
+                &self.dist_key_in_pk_indices,
+                &self.pk_in_output_indices().unwrap(),
+                &self.vnodes,
+            );
+        } else {
+            compute_chunk_vnode(
+                &chunk,
+                &self.dist_key_in_pk_indices,
+                &self.pk_indices,
+                &self.vnodes,
+            );
+        };
 
         let values = if let Some(ref value_indices) = self.value_indices {
             chunk.project(value_indices).serialize_with(&self.row_serde)

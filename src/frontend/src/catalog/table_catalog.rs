@@ -154,6 +154,9 @@ pub struct TableCatalog {
 
     /// description of table, set by `comment on`.
     pub description: Option<String>,
+
+    /// Output indices, only used by replicated state table.
+    pub output_indices: Vec<usize>,
 }
 
 // How the stream job was created will determine
@@ -441,6 +444,7 @@ impl TableCatalog {
             stream_job_status: PbStreamJobStatus::Creating.into(),
             create_type: self.create_type.to_prost().into(),
             description: self.description.clone(),
+            output_indices: self.output_indices.iter().map(|x| *x as _).collect(),
         }
     }
 
@@ -487,18 +491,27 @@ impl TableCatalog {
         self.columns.iter().any(|c| c.is_generated())
     }
 
+    pub fn get_output_indices(&self) -> &[usize] {
+        &self.output_indices
+    }
+
     /// Creates a new `TableCatalog`.
     /// It should not clone OR mutate the original table catalog.
     /// Instead it should move it, so the old definition will not be reused,
     /// leading to inconsistencies.
-    pub fn to_replicated(self, output_indices: Vec<usize>) -> Self {
+    pub fn into_replicated(self, output_indices: Vec<usize>) -> Self {
         let mut output_value_indices = vec![];
-        for output_idx in output_indices {
-            if self.value_indices.contains(&output_idx) {
-                output_value_indices.push(output_idx);
+        for output_idx in &output_indices {
+            if self.value_indices.contains(output_idx) {
+                output_value_indices.push(*output_idx);
             }
         }
-        Self { value_indices: output_value_indices, ..self }
+        println!("output_value_indices: {:?}", output_value_indices);
+        Self {
+            value_indices: output_value_indices,
+            output_indices,
+            ..self
+        }
     }
 }
 
@@ -569,6 +582,7 @@ impl From<PbTable> for TableCatalog {
             cleaned_by_watermark: matches!(tb.cleaned_by_watermark, true),
             create_type: CreateType::from_prost(create_type),
             description: tb.description,
+            output_indices: tb.output_indices.iter().map(|x| *x as _).collect(),
         }
     }
 }
@@ -588,6 +602,7 @@ impl OwnedByUserCatalog for TableCatalog {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::default::Default;
 
     use risingwave_common::catalog::{
         row_id_column_desc, ColumnCatalog, ColumnDesc, ColumnId, TableId,
@@ -662,6 +677,7 @@ mod tests {
             stream_job_status: PbStreamJobStatus::Creating.into(),
             create_type: PbCreateType::Foreground.into(),
             description: Some("description".to_string()),
+            ..Default::default()
         }
         .into();
 
@@ -719,6 +735,7 @@ mod tests {
                 cleaned_by_watermark: false,
                 create_type: CreateType::Foreground,
                 description: Some("description".to_string()),
+                ..Default::default()
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));
