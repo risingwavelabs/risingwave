@@ -513,12 +513,6 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
     committed_progress: &mut HashMap<VirtualNode, Vec<Datum>>,
     temporary_state: &mut [Datum],
 ) -> StreamExecutorResult<()> {
-    // No progress -> No need to commit anything.
-    // if backfill_state.has_no_progress() {
-    //     table.commit_no_data_expected(epoch);
-    //     return Ok(());
-    // }
-
     let mut has_progress = false;
     for (vnode, backfill_progress) in backfill_state.iter_backfill_progress() {
         let current_pos = match backfill_progress {

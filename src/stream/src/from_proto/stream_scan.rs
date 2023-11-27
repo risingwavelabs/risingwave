@@ -190,7 +190,6 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                                     vnodes,
                                 )
                                 .await;
-                            // FIXME(kwannoel): Use executor info
                             ArrangementBackfillExecutor::<_, $SD>::new(
                                 params.info,
                                 upstream_table,

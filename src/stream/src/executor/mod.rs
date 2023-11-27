@@ -796,7 +796,6 @@ pub async fn expect_first_barrier(
         barrier.kind,
         BarrierKind::Checkpoint | BarrierKind::Initial
     ));
-    // assert!(matches!(barrier.kind, BarrierKind::Checkpoint));
     Ok(barrier)
 }
 
