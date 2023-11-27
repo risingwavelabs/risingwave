@@ -26,11 +26,14 @@ const SYSTEM_RESERVED_MEMORY_PROPORTION: f64 = 0.2;
 const STORAGE_MEMORY_PROPORTION: f64 = 0.3;
 
 const COMPACTOR_MEMORY_PROPORTION: f64 = 0.1;
+
 const STORAGE_BLOCK_CACHE_MEMORY_PROPORTION: f64 = 0.3;
+
 const STORAGE_META_CACHE_MAX_MEMORY_MB: usize = 4096;
 const STORAGE_META_CACHE_MEMORY_PROPORTION: f64 = 0.35;
 const STORAGE_SHARED_BUFFER_MEMORY_PROPORTION: f64 = 0.3;
 const STORAGE_DEFAULT_HIGH_PRIORITY_BLOCK_CACHE_RATIO: usize = 50;
+
 
 /// Each compute node reserves some memory for stack and code segment of processes, allocation
 /// overhead, network buffer, etc. based on `SYSTEM_RESERVED_MEMORY_PROPORTION`. The reserve memory
@@ -83,9 +86,11 @@ pub fn storage_memory_config(
             default_meta_cache_capacity >> 20,
             STORAGE_META_CACHE_MAX_MEMORY_MB,
         ));
+
     let prefetch_buffer_capacity_mb = storage_config
         .prefetch_buffer_capacity_mb
         .unwrap_or(meta_cache_capacity_mb + block_cache_capacity_mb);
+
     if meta_cache_capacity_mb == STORAGE_META_CACHE_MAX_MEMORY_MB {
         block_cache_capacity_mb += (default_meta_cache_capacity >> 20) - meta_cache_capacity_mb;
     }
