@@ -24,7 +24,7 @@ use itertools::Itertools;
 
 use super::*;
 use crate::types::{Int256, StructType};
-use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+use crate::util::iter_util::ZipEqFast;
 
 /// Converts RisingWave array to Arrow array with the schema.
 /// This function will try to convert the array if the type is not same with the schema.
@@ -194,6 +194,17 @@ impl From<&arrow_schema::Fields> for StructType {
                 .map(|f| (f.name().clone(), f.data_type().into()))
                 .collect(),
         )
+    }
+}
+
+impl TryFrom<&StructType> for arrow_schema::Fields {
+    type Error = ArrayError;
+
+    fn try_from(struct_type: &StructType) -> Result<Self, Self::Error> {
+        struct_type
+            .iter()
+            .map(|(name, ty)| Ok(Field::new(name, ty.try_into()?, true)))
+            .try_collect()
     }
 }
 
@@ -710,17 +721,14 @@ impl TryFrom<&StructArray> for arrow_array::StructArray {
     type Error = ArrayError;
 
     fn try_from(array: &StructArray) -> Result<Self, Self::Error> {
-        let struct_data_vector: Vec<(arrow_schema::FieldRef, arrow_array::ArrayRef)> = array
-            .fields()
-            .zip_eq_debug(array.data_type().as_struct().iter())
-            .map(|(arr, (name, ty))| {
-                Ok((
-                    Field::new(name, ty.try_into()?, true).into(),
-                    arr.as_ref().try_into()?,
-                ))
-            })
-            .try_collect::<_, _, ArrayError>()?;
-        Ok(arrow_array::StructArray::from(struct_data_vector))
+        Ok(arrow_array::StructArray::new(
+            array.data_type().as_struct().try_into()?,
+            array
+                .fields()
+                .map(|arr| arr.as_ref().try_into())
+                .try_collect::<_, _, ArrayError>()?,
+            Some(array.null_bitmap().into()),
+        ))
     }
 }
 
