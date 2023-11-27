@@ -167,6 +167,9 @@ impl From<&EventLog> for ChannelId {
             Event::CreateStreamJobFail(_) => 1,
             Event::DirtyStreamJobClear(_) => 2,
             Event::MetaNodeStart(_) => 3,
+            Event::BarrierComplete(_) => 4,
+            Event::InjectBarrierFail(_) => 5,
+            Event::CollectBarrierFail(_) => 6,
         }
     }
 }

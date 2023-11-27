@@ -200,8 +200,11 @@ public class EsSink extends SinkWriterBase {
             Object col = row.get(i);
             switch (type) {
                 case DATE:
+                case TIME:
+                case TIMESTAMP:
+                case TIMESTAMPTZ:
                     // es client doesn't natively support java.sql.Timestamp/Time/Date
-                    // so we need to convert Date type into a string as suggested in
+                    // so we need to convert Date/Time/Timestamp type into a string as suggested in
                     // https://github.com/elastic/elasticsearch/issues/31377#issuecomment-398102292
                     col = col.toString();
                     break;
@@ -214,7 +217,6 @@ public class EsSink extends SinkWriterBase {
                 default:
                     break;
             }
-            if (col instanceof Date) {}
 
             doc.put(getTableSchema().getColumnDesc(i).getName(), col);
         }

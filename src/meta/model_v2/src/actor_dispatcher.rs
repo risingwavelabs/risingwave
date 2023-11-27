@@ -28,8 +28,6 @@ pub enum DispatcherType {
     Simple,
     #[sea_orm(string_value = "NO_SHUFFLE")]
     NoShuffle,
-    #[sea_orm(string_value = "CDC_TABLE_NAME")]
-    CdcTableName,
 }
 
 impl From<PbDispatcherType> for DispatcherType {
@@ -40,7 +38,6 @@ impl From<PbDispatcherType> for DispatcherType {
             PbDispatcherType::Broadcast => DispatcherType::Broadcast,
             PbDispatcherType::Simple => DispatcherType::Simple,
             PbDispatcherType::NoShuffle => DispatcherType::NoShuffle,
-            PbDispatcherType::CdcTablename => DispatcherType::CdcTableName,
         }
     }
 }
@@ -52,7 +49,6 @@ impl From<DispatcherType> for PbDispatcherType {
             DispatcherType::Broadcast => PbDispatcherType::Broadcast,
             DispatcherType::Simple => PbDispatcherType::Simple,
             DispatcherType::NoShuffle => PbDispatcherType::NoShuffle,
-            DispatcherType::CdcTableName => PbDispatcherType::CdcTablename,
         }
     }
 }
@@ -68,7 +64,6 @@ impl From<(u32, PbDispatcher)> for Model {
             hash_mapping: dispatcher.hash_mapping.map(ActorMapping),
             dispatcher_id: dispatcher.dispatcher_id as _,
             downstream_actor_ids: dispatcher.downstream_actor_id.into(),
-            downstream_table_name: dispatcher.downstream_table_name,
         }
     }
 }
@@ -82,7 +77,6 @@ impl From<Model> for PbDispatcher {
             hash_mapping: model.hash_mapping.map(|mapping| mapping.into_inner()),
             dispatcher_id: model.dispatcher_id as _,
             downstream_actor_id: model.downstream_actor_ids.into_u32_array(),
-            downstream_table_name: model.downstream_table_name,
         }
     }
 }
@@ -99,7 +93,6 @@ pub struct Model {
     pub hash_mapping: Option<ActorMapping>,
     pub dispatcher_id: FragmentId,
     pub downstream_actor_ids: I32Array,
-    pub downstream_table_name: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

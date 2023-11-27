@@ -447,15 +447,11 @@ impl LogicalScan {
     fn to_batch_inner_with_required(&self, required_order: &Order) -> Result<PlanRef> {
         if self.predicate().always_true() {
             required_order
-                .enforce_if_not_satisfies(BatchSeqScan::new(self.core.clone(), vec![]).into())
+                .enforce_if_not_satisfies(BatchSeqScan::new(self.core.clone(), vec![], None).into())
         } else {
             let (scan_ranges, predicate) = self.predicate().clone().split_to_scan_ranges(
                 self.core.table_desc.clone(),
-                self.base
-                    .ctx()
-                    .session_ctx()
-                    .config()
-                    .get_max_split_range_gap(),
+                self.base.ctx().session_ctx().config().max_split_range_gap() as u64,
             )?;
             let mut scan = self.clone();
             scan.core.predicate = predicate; // We want to keep `required_col_idx` unchanged, so do not call `clone_with_predicate`.
@@ -465,7 +461,7 @@ impl LogicalScan {
             } else {
                 let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
-                let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges).into();
+                let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges, None).into();
                 if !predicate.always_true() {
                     plan = BatchFilter::new(generic::Filter::new(predicate, plan)).into();
                 }
@@ -540,7 +536,7 @@ impl ToStream for LogicalScan {
                 .ctx()
                 .session_ctx()
                 .config()
-                .get_streaming_enable_arrangement_backfill()
+                .streaming_enable_arrangement_backfill()
             {
                 Ok(StreamTableScan::new_with_stream_scan_type(
                     self.core.clone(),

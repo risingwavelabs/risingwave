@@ -240,6 +240,12 @@ message FilterNode {
   expr.ExprNode search_condition = 1;
 }
 
+message CdcFilterNode {
+  expr.ExprNode search_condition = 1;
+  uint32 upstream_source_id = 2;
+  repeated int32 upstream_column_ids = 3;
+}
+
 // A materialized view is regarded as a table.
 // In addition, we also specify primary key to MV for efficient point lookup during update and deletion.
 //
@@ -733,6 +739,7 @@ message StreamNode {
     OverWindowNode over_window = 137;
     StreamFsFetchNode stream_fs_fetch = 138;
     StreamCdcScanNode stream_cdc_scan = 139;
+    CdcFilterNode cdc_filter = 140;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -761,11 +768,6 @@ enum DispatcherType {
   // piped into the downstream actor, if there are the same number of actors. If number of actors
   // are not the same, should use hash instead. Should be only used when distribution is the same.
   DISPATCHER_TYPE_NO_SHUFFLE = 4;
-
-  // Dispatch by table name from upstream DB, used in CDC scenario which should has only one downstream actor.
-  // From the optimizer's point of view, it can be treated as a specialized version of HASH distribution
-  // that the hash key is the upstream table name.
-  DISPATCHER_TYPE_CDC_TABLENAME = 5;
 }
 
 // The property of an edge in the fragment graph.
@@ -774,8 +776,6 @@ message DispatchStrategy {
   DispatcherType type = 1;
   repeated uint32 dist_key_indices = 2;
   repeated uint32 output_indices = 3;
-  // The full table name of the downstream CDC table.
-  optional string downstream_table_name = 4;
 }
 
 // A dispatcher redistribute messages.
@@ -797,8 +797,6 @@ message Dispatcher {
   uint64 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;
-  // The full table name of the downstream CDC table.
-  optional string downstream_table_name = 7;
 }
 
 // A StreamActor is a running fragment of the overall stream graph,
@@ -832,6 +830,7 @@ enum FragmentTypeFlag {
   FRAGMENT_TYPE_FLAG_BARRIER_RECV = 32;
   FRAGMENT_TYPE_FLAG_VALUES = 64;
   FRAGMENT_TYPE_FLAG_DML = 128;
+  FRAGMENT_TYPE_FLAG_CDC_FILTER = 256;
 }
 
 // The environment associated with a stream plan
