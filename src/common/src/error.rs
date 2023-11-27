@@ -72,7 +72,7 @@ impl Display for TrackingIssue {
 }
 
 #[derive(Error, Debug, Macro)]
-#[error("Feature is not yet implemented: {feature}. {issue}")]
+#[error("Feature is not yet implemented: {feature}\n{issue}")]
 #[thiserror_ext(macro(path = "crate::error"))]
 pub struct NotImplemented {
     #[message]
