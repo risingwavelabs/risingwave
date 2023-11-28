@@ -76,7 +76,7 @@ impl HeapProfiler {
         }
     }
 
-    /// Start the deamon task of auto heap profiling.
+    /// Start the daemon task of auto heap profiling.
     pub fn start(self) {
         if !self.config.enable_auto {
             tracing::info!("Auto memory dump is disabled with enable_auto=false");
