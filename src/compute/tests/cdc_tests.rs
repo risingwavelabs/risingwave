@@ -333,6 +333,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         1024,
         "RowSeqExecutor2".to_string(),
         None,
+        None,
     ));
     let mut stream = scan.execute();
     while let Some(message) = stream.next().await {

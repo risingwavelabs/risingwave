@@ -17,6 +17,7 @@ use std::sync::{Arc, Weak};
 
 use parking_lot::{MappedMutexGuard, Mutex, MutexGuard};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::util::epoch::Epoch;
 
 use super::SessionImpl;
 use crate::catalog::catalog_service::CatalogWriter;
@@ -201,7 +202,7 @@ impl SessionImpl {
         self.txn_ctx()
             .snapshot
             .get_or_insert_with(|| {
-                let query_epoch = self.config().get_query_epoch();
+                let query_epoch = self.config().query_epoch().map(|epoch| Epoch(epoch.get()));
 
                 if let Some(query_epoch) = query_epoch {
                     ReadSnapshot::Other(query_epoch)

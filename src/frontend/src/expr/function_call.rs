@@ -278,8 +278,9 @@ impl FunctionCall {
     }
 
     pub fn is_pure(&self) -> bool {
-        let mut a = ImpureAnalyzer {};
-        !a.visit_function_call(self)
+        let mut a = ImpureAnalyzer { impure: false };
+        a.visit_function_call(self);
+        !a.impure
     }
 }
 

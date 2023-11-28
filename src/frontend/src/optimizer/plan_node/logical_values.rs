@@ -27,8 +27,9 @@ use super::{
     BatchValues, ColPrunable, ExprRewritable, Logical, LogicalFilter, PlanBase, PlanRef,
     PredicatePushdown, StreamValues, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter, Literal};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -131,6 +132,12 @@ impl ExprRewritable for LogicalValues {
             .into();
         new.base = new.base.clone_with_new_plan_id();
         new.into()
+    }
+}
+
+impl ExprVisitable for LogicalValues {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.rows.iter().flatten().for_each(|e| v.visit_expr(e));
     }
 }
 

@@ -15,6 +15,7 @@
 use std::str::FromStr;
 
 use anyhow::anyhow;
+use apache_avro::schema::{DecimalSchema, RecordSchema};
 use apache_avro::types::Value;
 use apache_avro::{Decimal as AvroDecimal, Schema};
 use chrono::Datelike;
@@ -110,9 +111,9 @@ impl<'a> AvroParseOptions<'a> {
             // ---- Decimal -----
             (Some(DataType::Decimal) | None, Value::Decimal(avro_decimal)) => {
                 let (precision, scale) = match self.schema {
-                    Some(Schema::Decimal {
+                    Some(Schema::Decimal(DecimalSchema {
                         precision, scale, ..
-                    }) => (*precision, *scale),
+                    })) => (*precision, *scale),
                     _ => Err(create_error())?,
                 };
                 let decimal = avro_decimal_to_rust_decimal(avro_decimal.clone(), precision, scale)
@@ -380,7 +381,7 @@ pub fn avro_extract_field_schema<'a>(
     name: Option<&'a str>,
 ) -> anyhow::Result<&'a Schema> {
     match schema {
-        Schema::Record { fields, lookup, .. } => {
+        Schema::Record(RecordSchema { fields, lookup, .. }) => {
             let name =
                 name.ok_or_else(|| anyhow::format_err!("no name provided for a field in record"))?;
             let index = lookup.get(name).ok_or_else(|| {

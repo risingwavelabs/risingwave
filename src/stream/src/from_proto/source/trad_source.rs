@@ -107,7 +107,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
 
                 if is_fs_connector {
                     FsSourceExecutor::new(
-                        params.actor_context,
+                        params.actor_context.clone(),
                         params.info,
                         stream_source_core,
                         params.executor_stats,
@@ -144,8 +144,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     if table_type.can_backfill()
                         && let Some(table_desc) = source_info.external_table.clone()
                     {
-                        let table_schema = Schema::new(table_desc.columns.iter().map(Into::into).collect());
-                        let upstream_table_name = SchemaTableName::from_properties(&source.properties);
+                        let table_schema =
+                            Schema::new(table_desc.columns.iter().map(Into::into).collect());
+                        let upstream_table_name =
+                            SchemaTableName::from_properties(&source.properties);
                         let table_pk_indices = table_desc
                             .pk
                             .iter()
@@ -158,7 +160,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             .collect_vec();
 
                         let table_reader = table_type
-                            .create_table_reader(source.properties.clone(), table_schema.clone()).await?;
+                            .create_table_reader(source.properties.clone(), table_schema.clone())
+                            .await?;
                         let external_table = ExternalStorageTable::new(
                             TableId::new(source.source_id),
                             upstream_table_name,
@@ -173,7 +176,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                         let source_state_handler = SourceStateTableHandler::from_table_catalog(
                             source.state_table.as_ref().unwrap(),
                             store.clone(),
-                        ).await;
+                        )
+                        .await;
                         // use schema from table_desc
                         let cdc_backfill = CdcBackfillExecutor::new(
                             params.actor_context.clone(),
@@ -194,8 +198,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     }
                 }
             };
-            let rate_limit = source.get_rate_limit().cloned().ok();
-            Ok(FlowControlExecutor::new(executor, rate_limit).boxed())
+            let rate_limit = source.rate_limit.map(|x| x as _);
+            Ok(FlowControlExecutor::new(executor, params.actor_context, rate_limit).boxed())
         } else {
             // If there is no external stream source, then no data should be persisted. We pass a
             // `PanicStateStore` type here for indication.

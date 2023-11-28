@@ -919,6 +919,13 @@ impl DataChunkTestExt for DataChunk {
                                 .generate_datum(offset);
                         array_builder.append(datum);
                     }
+                    DataType::Timestamptz => {
+                        let datum =
+                            FieldGeneratorImpl::with_timestamptz(None, None, None, Self::SEED)
+                                .expect("create timestamptz generator should succeed")
+                                .generate_datum(offset);
+                        array_builder.append(datum);
+                    }
                     _ if data_type.is_numeric() => {
                         let mut data_gen = FieldGeneratorImpl::with_number_random(
                             data_type.clone(),

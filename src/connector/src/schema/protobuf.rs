@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use prost_reflect::MessageDescriptor;
 
 use super::{SchemaFetchError, MESSAGE_NAME_KEY, SCHEMA_LOCATION_KEY};
-use crate::aws_auth::AwsAuthProps;
+use crate::common::AwsAuthProps;
 use crate::parser::{EncodingProperties, ProtobufParserConfig, ProtobufProperties};
 
 /// `aws_auth_props` is only required when reading `s3://` URL.

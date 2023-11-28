@@ -25,12 +25,12 @@ use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;
 
 use crate::error::BatchError::{Internal, SenderError};
-use crate::error::{BatchError, BatchSharedResult, Result as BatchResult};
+use crate::error::{BatchError, Result as BatchResult, SharedResult};
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 #[derive(Clone)]
 pub struct HashShuffleSender {
-    senders: Vec<mpsc::Sender<BatchSharedResult<Option<DataChunkInChannel>>>>,
+    senders: Vec<mpsc::Sender<SharedResult<Option<DataChunkInChannel>>>>,
     hash_info: HashInfo,
 }
 
@@ -43,7 +43,7 @@ impl Debug for HashShuffleSender {
 }
 
 pub struct HashShuffleReceiver {
-    receiver: mpsc::Receiver<BatchSharedResult<Option<DataChunkInChannel>>>,
+    receiver: mpsc::Receiver<SharedResult<Option<DataChunkInChannel>>>,
 }
 
 fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> BatchResult<Vec<usize>> {
@@ -143,7 +143,7 @@ impl HashShuffleSender {
 }
 
 impl ChanReceiver for HashShuffleReceiver {
-    async fn recv(&mut self) -> BatchSharedResult<Option<DataChunkInChannel>> {
+    async fn recv(&mut self) -> SharedResult<Option<DataChunkInChannel>> {
         match self.receiver.recv().await {
             Some(data_chunk) => data_chunk,
             // Early close should be treated as error.

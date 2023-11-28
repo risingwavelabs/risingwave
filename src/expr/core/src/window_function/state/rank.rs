@@ -65,7 +65,10 @@ impl Default for Rank {
 
 impl RankFuncCount for Rank {
     fn count(&mut self, curr_key: StateKey) -> i64 {
-        let (curr_rank, curr_pos_in_group) = if let Some(prev_order_key) = self.prev_order_key.as_ref() && prev_order_key == &curr_key.order_key {
+        let (curr_rank, curr_pos_in_group) = if let Some(prev_order_key) =
+            self.prev_order_key.as_ref()
+            && prev_order_key == &curr_key.order_key
+        {
             // current key is in the same peer group as the previous one
             (self.prev_rank, self.prev_pos_in_peer_group + 1)
         } else {
@@ -87,8 +90,10 @@ pub struct DenseRank {
 
 impl RankFuncCount for DenseRank {
     fn count(&mut self, curr_key: StateKey) -> i64 {
-        let curr_rank = if let Some(prev_order_key) = self.prev_order_key.as_ref() && prev_order_key == &curr_key.order_key {
-             // current key is in the same peer group as the previous one
+        let curr_rank = if let Some(prev_order_key) = self.prev_order_key.as_ref()
+            && prev_order_key == &curr_key.order_key
+        {
+            // current key is in the same peer group as the previous one
             self.prev_rank
         } else {
             // starting a new peer group

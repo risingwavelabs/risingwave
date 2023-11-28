@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use pgwire::pg_response::StatementType;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::bail_not_implemented;
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{TransactionAccessMode, TransactionMode, Value};
 
 use super::{HandlerArgs, RwPgResponse};
@@ -21,7 +22,7 @@ use crate::session::transaction::AccessMode;
 
 macro_rules! not_impl {
     ($body:expr) => {
-        Err(ErrorCode::NotImplemented($body.into(), 10736.into()))
+        bail_not_implemented!(issue = 10376, "{}", $body)
     };
 }
 
@@ -40,7 +41,7 @@ pub async fn handle_begin(
                 TransactionMode::AccessMode(mode) => {
                     let _ = access_mode.replace(mode);
                 }
-                TransactionMode::IsolationLevel(_) => not_impl!("ISOLATION LEVEL")?,
+                TransactionMode::IsolationLevel(_) => not_impl!("ISOLATION LEVEL"),
             }
         }
 
@@ -74,7 +75,7 @@ pub async fn handle_commit(
     let HandlerArgs { session, .. } = handler_args;
 
     if chain {
-        not_impl!("COMMIT AND CHAIN")?;
+        not_impl!("COMMIT AND CHAIN");
     }
 
     session.txn_commit_explicit();
@@ -91,7 +92,7 @@ pub async fn handle_rollback(
     let HandlerArgs { session, .. } = handler_args;
 
     if chain {
-        not_impl!("ROLLBACK AND CHAIN")?;
+        not_impl!("ROLLBACK AND CHAIN");
     }
 
     session.txn_rollback_explicit();

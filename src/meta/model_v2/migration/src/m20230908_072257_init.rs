@@ -17,6 +17,11 @@ impl MigrationTrait for Migration {
         assert!(!manager.has_table(StreamingJob::Table.to_string()).await?);
         assert!(!manager.has_table(Fragment::Table.to_string()).await?);
         assert!(!manager.has_table(Actor::Table.to_string()).await?);
+        assert!(
+            !manager
+                .has_table(ActorDispatcher::Table.to_string())
+                .await?
+        );
         assert!(!manager.has_table(Table::Table.to_string()).await?);
         assert!(!manager.has_table(Source::Table.to_string()).await?);
         assert!(!manager.has_table(Sink::Table.to_string()).await?);
@@ -389,12 +394,72 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Actor::Splits).json())
                     .col(ColumnDef::new(Actor::ParallelUnitId).integer().not_null())
                     .col(ColumnDef::new(Actor::UpstreamActorIds).json())
-                    .col(ColumnDef::new(Actor::Dispatchers).json().not_null())
                     .col(ColumnDef::new(Actor::VnodeBitmap).json())
                     .foreign_key(
                         &mut ForeignKey::create()
                             .name("FK_actor_fragment_id")
                             .from(Actor::Table, Actor::FragmentId)
+                            .to(Fragment::Table, Fragment::FragmentId)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
+                    .to_owned(),
+            )
+            .await?;
+        manager
+            .create_table(
+                MigrationTable::create()
+                    .table(ActorDispatcher::Table)
+                    .col(
+                        ColumnDef::new(ActorDispatcher::Id)
+                            .integer()
+                            .primary_key()
+                            .auto_increment(),
+                    )
+                    .col(
+                        ColumnDef::new(ActorDispatcher::ActorId)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ActorDispatcher::DispatcherType)
+                            .string()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ActorDispatcher::DistKeyIndices)
+                            .json()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ActorDispatcher::OutputIndices)
+                            .json()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(ActorDispatcher::HashMapping).json())
+                    .col(
+                        ColumnDef::new(ActorDispatcher::DispatcherId)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(ActorDispatcher::DownstreamActorIds)
+                            .json()
+                            .not_null(),
+                    )
+                    .col(ColumnDef::new(ActorDispatcher::DownstreamTableName).string())
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_actor_dispatcher_actor_id")
+                            .from(ActorDispatcher::Table, ActorDispatcher::ActorId)
+                            .to(Actor::Table, Actor::ActorId)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_actor_dispatcher_dispatcher_id")
+                            .from(ActorDispatcher::Table, ActorDispatcher::DispatcherId)
                             .to(Fragment::Table, Fragment::FragmentId)
                             .on_delete(ForeignKeyAction::Cascade)
                             .to_owned(),
@@ -466,6 +531,7 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Table::Name).string().not_null())
                     .col(ColumnDef::new(Table::OptionalAssociatedSourceId).integer())
                     .col(ColumnDef::new(Table::TableType).string().not_null())
+                    .col(ColumnDef::new(Table::BelongsToJobId).integer())
                     .col(ColumnDef::new(Table::Columns).json().not_null())
                     .col(ColumnDef::new(Table::Pk).json().not_null())
                     .col(ColumnDef::new(Table::DistributionKey).json().not_null())
@@ -504,6 +570,14 @@ impl MigrationTrait for Migration {
                         &mut ForeignKey::create()
                             .name("FK_table_object_id")
                             .from(Table::Table, Table::TableId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_table_belongs_to_job_id")
+                            .from(Table::Table, Table::BelongsToJobId)
                             .to(Object::Table, Object::Oid)
                             .on_delete(ForeignKeyAction::Cascade)
                             .to_owned(),
@@ -790,6 +864,7 @@ impl MigrationTrait for Migration {
             StreamingJob,
             Fragment,
             Actor,
+            ActorDispatcher,
             Table,
             Source,
             Sink,
@@ -893,8 +968,21 @@ enum Actor {
     Splits,
     ParallelUnitId,
     UpstreamActorIds,
-    Dispatchers,
     VnodeBitmap,
+}
+
+#[derive(DeriveIden)]
+enum ActorDispatcher {
+    Table,
+    Id,
+    ActorId,
+    DispatcherType,
+    DistKeyIndices,
+    OutputIndices,
+    HashMapping,
+    DispatcherId,
+    DownstreamActorIds,
+    DownstreamTableName,
 }
 
 #[derive(DeriveIden)]
@@ -914,6 +1002,7 @@ enum Table {
     Name,
     OptionalAssociatedSourceId,
     TableType,
+    BelongsToJobId,
     Columns,
     Pk,
     DistributionKey,

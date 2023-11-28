@@ -156,7 +156,7 @@ async fn test_storage_basic() {
     assert_eq!(value, None);
 
     let epoch2 = epoch1 + 1;
-    hummock_storage.seal_current_epoch(epoch2);
+    hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     hummock_storage
         .ingest_batch(
             batch2,
@@ -189,7 +189,7 @@ async fn test_storage_basic() {
 
     // Write the third batch.
     let epoch3 = epoch2 + 1;
-    hummock_storage.seal_current_epoch(epoch3);
+    hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
     hummock_storage
         .ingest_batch(
             batch3,
@@ -502,7 +502,7 @@ async fn test_state_store_sync() {
         .unwrap();
 
     let epoch2 = epoch1 + 1;
-    hummock_storage.seal_current_epoch(epoch2);
+    hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
 
     // ingest more 8B then will trigger a sync behind the scene
     let mut batch3 = vec![(
@@ -734,7 +734,7 @@ async fn test_delete_get() {
         .await
         .unwrap();
     let epoch2 = initial_epoch + 2;
-    hummock_storage.seal_current_epoch(epoch2);
+    hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
@@ -814,7 +814,7 @@ async fn test_multiple_epoch_sync() {
         .unwrap();
 
     let epoch2 = initial_epoch + 2;
-    hummock_storage.seal_current_epoch(epoch2);
+    hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     let batch2 = vec![(
         gen_key_from_str(VirtualNode::ZERO, "bb"),
         StorageValue::new_delete(),
@@ -832,7 +832,7 @@ async fn test_multiple_epoch_sync() {
         .unwrap();
 
     let epoch3 = initial_epoch + 3;
-    hummock_storage.seal_current_epoch(epoch3);
+    hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
     let batch3 = vec![
         (
             gen_key_from_str(VirtualNode::ZERO, "bb"),
@@ -965,7 +965,7 @@ async fn test_iter_with_min_epoch() {
         .unwrap();
 
     let epoch2 = (32 * 1000) << 16;
-    hummock_storage.seal_current_epoch(epoch2);
+    hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     // epoch 2 write
     let batch_epoch2: Vec<(TableKey<Bytes>, StorageValue)> = (20..30)
         .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))
@@ -1186,7 +1186,7 @@ async fn test_hummock_version_reader() {
             .await
             .unwrap();
 
-        hummock_storage.seal_current_epoch(epoch2);
+        hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
         hummock_storage
             .ingest_batch(
                 batch_epoch2,
@@ -1199,7 +1199,7 @@ async fn test_hummock_version_reader() {
             .await
             .unwrap();
 
-        hummock_storage.seal_current_epoch(epoch3);
+        hummock_storage.seal_current_epoch(epoch3, SealCurrentEpochOptions::for_test());
         hummock_storage
             .ingest_batch(
                 batch_epoch3,
@@ -1601,7 +1601,7 @@ async fn test_get_with_min_epoch() {
         .unwrap();
 
     let epoch2 = (32 * 1000) << 16;
-    hummock_storage.seal_current_epoch(epoch2);
+    hummock_storage.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
     // epoch 2 write
     let batch_epoch2: Vec<(TableKey<Bytes>, StorageValue)> = (20..30)
         .map(|index| (gen_key(index), StorageValue::new_put(gen_val(index))))

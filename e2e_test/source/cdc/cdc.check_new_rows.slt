@@ -52,7 +52,7 @@ select v1, v2, v3 from mytable order by v1;
 query I
 SELECT * from products_test_cnt
 ----
-11
+12
 
 query I
 SELECT * from orders_test_cnt

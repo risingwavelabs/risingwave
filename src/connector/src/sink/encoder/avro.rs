@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use apache_avro::schema::Schema as AvroSchema;
+use apache_avro::schema::{RecordSchema, Schema as AvroSchema};
 use apache_avro::types::{Record, Value};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
@@ -250,7 +250,7 @@ fn validate_fields<'rw>(
     rw_fields: impl Iterator<Item = (&'rw str, &'rw DataType)>,
     avro: &AvroSchema,
 ) -> Result<()> {
-    let AvroSchema::Record { fields, lookup, .. } = avro else {
+    let AvroSchema::Record(RecordSchema { fields, lookup, .. }) = avro else {
         return Err(FieldEncodeError::new(format!(
             "expect avro record but got {}",
             avro.canonical_form(),
@@ -283,7 +283,7 @@ fn encode_fields<'avro, 'rw>(
     schema: &'avro AvroSchema,
 ) -> Result<Record<'avro>> {
     let mut record = Record::new(schema).unwrap();
-    let AvroSchema::Record { fields, lookup, .. } = schema else {
+    let AvroSchema::Record(RecordSchema { fields, lookup, .. }) = schema else {
         unreachable!()
     };
     let mut present = vec![false; fields.len()];
@@ -570,9 +570,7 @@ mod tests {
             Some(ScalarImpl::Interval(Interval::from_month_day_usec(
                 13, 2, 1000000,
             ))),
-            // https://github.com/apache/avro/pull/2283
-            // r#"{"type": "fixed", "name": "Duration", "size": 12, "logicalType": "duration"}"#,
-            r#"{"type": {"type": "fixed", "name": "Duration", "size": 12}, "logicalType": "duration"}"#,
+            r#"{"type": "fixed", "name": "Duration", "size": 12, "logicalType": "duration"}"#,
             Value::Duration(apache_avro::Duration::new(
                 apache_avro::Months::new(13),
                 apache_avro::Days::new(2),
@@ -648,8 +646,7 @@ mod tests {
                 -1,
                 i64::MAX,
             ))),
-            // https://github.com/apache/avro/pull/2283
-            r#"{"type": {"type": "fixed", "name": "Duration", "size": 12}, "logicalType": "duration"}"#,
+            r#"{"type": "fixed", "name": "Duration", "size": 12, "logicalType": "duration"}"#,
             "encode  error: -1 mons -1 days +2562047788:00:54.775807 overflows avro duration",
         );
 

@@ -111,7 +111,7 @@ impl ProtobufParserConfig {
             let client = Client::new(url, &protobuf_config.client_config)?;
             compile_file_descriptor_from_schema_registry(schema_value.as_str(), &client).await?
         } else {
-            let url = url.get(0).unwrap();
+            let url = url.first().unwrap();
             match url.scheme() {
                 // TODO(Tao): support local file only when it's compiled in debug mode.
                 "file" => {

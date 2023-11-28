@@ -88,7 +88,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         );
 
         let executor = FsFetchExecutor::new(
-            params.actor_context,
+            params.actor_context.clone(),
             params.info,
             stream_source_core,
             upstream,
@@ -97,7 +97,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         )
         .boxed();
 
-        let rate_limit = source.get_rate_limit().cloned().ok();
-        Ok(FlowControlExecutor::new(executor, rate_limit).boxed())
+        let rate_limit = source.rate_limit.map(|x| x as _);
+        Ok(FlowControlExecutor::new(executor, params.actor_context, rate_limit).boxed())
     }
 }

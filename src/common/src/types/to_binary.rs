@@ -16,7 +16,20 @@ use bytes::{Bytes, BytesMut};
 use postgres_types::{ToSql, Type};
 
 use super::{DataType, DatumRef, ScalarRefImpl, F32, F64};
-use crate::error::{ErrorCode, Result};
+use crate::error::NotImplemented;
+
+/// Error type for [`ToBinary`] trait.
+#[derive(thiserror::Error, Debug)]
+pub enum ToBinaryError {
+    #[error(transparent)]
+    ToSql(Box<dyn std::error::Error + Send + Sync>),
+
+    #[error(transparent)]
+    NotImplemented(#[from] NotImplemented),
+}
+
+pub type Result<T> = std::result::Result<T, ToBinaryError>;
+
 // Used to convert ScalarRef to text format
 pub trait ToBinary {
     fn to_binary_with_type(&self, ty: &DataType) -> Result<Option<Bytes>>;
@@ -32,7 +45,7 @@ macro_rules! implement_using_to_sql {
                         DataType::$data_type => {
                             let mut output = BytesMut::new();
                             #[allow(clippy::redundant_closure_call)]
-                            $accessor(self).to_sql(&Type::ANY, &mut output).unwrap();
+                            $accessor(self).to_sql(&Type::ANY, &mut output).map_err(ToBinaryError::ToSql)?;
                             Ok(Some(output.freeze()))
                         },
                         _ => unreachable!(),
@@ -74,14 +87,10 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Time(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Bytea(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Jsonb(v) => v.to_binary_with_type(ty),
-            ScalarRefImpl::Struct(_) | ScalarRefImpl::List(_) => Err(ErrorCode::NotImplemented(
-                format!(
-                    "the pgwire extended-mode encoding for {} is unsupported",
-                    ty
-                ),
-                Some(7949).into(),
-            )
-            .into()),
+            ScalarRefImpl::Struct(_) | ScalarRefImpl::List(_) => bail_not_implemented!(
+                issue = 7949,
+                "the pgwire extended-mode encoding for {ty} is unsupported"
+            ),
         }
     }
 }

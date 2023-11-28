@@ -23,7 +23,7 @@ use risingwave_common::estimate_size::EstimateSize;
 use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::Datum;
 use risingwave_common::util::row_serde::OrderedRowSerde;
-use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::aggregate::{AggCall, AggKind, BoxedAggregateFunction};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::store::PrefetchOptions;
@@ -34,7 +34,7 @@ use super::GroupKey;
 use crate::common::cache::{OrderedStateCache, TopNStateCache};
 use crate::common::table::state_table::StateTable;
 use crate::common::StateTableColumnMapping;
-use crate::executor::StreamExecutorResult;
+use crate::executor::{PkIndices, StreamExecutorResult};
 
 /// Aggregation state as a materialization of input chunks.
 ///
@@ -71,24 +71,32 @@ impl MaterializedInputState {
     pub fn new(
         version: PbAggNodeVersion,
         agg_call: &AggCall,
-        order_columns: &Vec<ColumnOrder>,
+        pk_indices: &PkIndices,
+        order_columns: &[ColumnOrder],
         col_mapping: &StateTableColumnMapping,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<Self> {
-        let arg_col_indices = agg_call.args.val_indices().to_vec();
-        let mut order_col_indices = vec![];
-        let mut order_types = vec![];
-        for o in order_columns {
-            order_col_indices.push(o.column_index);
-            order_types.push(o.order_type);
-        }
-
         if agg_call.distinct && version < PbAggNodeVersion::Issue12140 {
             panic!(
                 "RisingWave versions before issue #12140 is resolved has critical bug, you must re-create current MV to ensure correctness."
             );
         }
+
+        let arg_col_indices = agg_call.args.val_indices().to_vec();
+
+        let (order_col_indices, order_types) = if version < PbAggNodeVersion::Issue13465 {
+            generate_order_columns_before_version_issue_13465(
+                agg_call,
+                pk_indices,
+                &arg_col_indices,
+            )
+        } else {
+            order_columns
+                .iter()
+                .map(|o| (o.column_index, o.order_type))
+                .unzip()
+        };
 
         // map argument columns to state table column indices
         let state_table_arg_col_indices = arg_col_indices
@@ -224,6 +232,57 @@ impl MaterializedInputState {
     }
 }
 
+/// Copied from old code before <https://github.com/risingwavelabs/risingwave/commit/0020507edbc4010b20aeeb560c7bea9159315602>.
+fn generate_order_columns_before_version_issue_13465(
+    agg_call: &AggCall,
+    pk_indices: &PkIndices,
+    arg_col_indices: &[usize],
+) -> (Vec<usize>, Vec<OrderType>) {
+    let (mut order_col_indices, mut order_types) =
+        if matches!(agg_call.kind, AggKind::Min | AggKind::Max) {
+            // `min`/`max` need not to order by any other columns, but have to
+            // order by the agg value implicitly.
+            let order_type = if agg_call.kind == AggKind::Min {
+                OrderType::ascending()
+            } else {
+                OrderType::descending()
+            };
+            (vec![arg_col_indices[0]], vec![order_type])
+        } else {
+            agg_call
+                .column_orders
+                .iter()
+                .map(|p| {
+                    (
+                        p.column_index,
+                        if agg_call.kind == AggKind::LastValue {
+                            p.order_type.reverse()
+                        } else {
+                            p.order_type
+                        },
+                    )
+                })
+                .unzip()
+        };
+
+    if agg_call.distinct {
+        // If distinct, we need to materialize input with the distinct keys
+        // As we only support single-column distinct for now, we use the
+        // `agg_call.args.val_indices()[0]` as the distinct key.
+        if !order_col_indices.contains(&agg_call.args.val_indices()[0]) {
+            order_col_indices.push(agg_call.args.val_indices()[0]);
+            order_types.push(OrderType::ascending());
+        }
+    } else {
+        // If not distinct, we need to materialize input with the primary keys
+        let pk_len = pk_indices.len();
+        order_col_indices.extend(pk_indices.iter());
+        order_types.extend(itertools::repeat_n(OrderType::ascending(), pk_len));
+    }
+
+    (order_col_indices, order_types)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
@@ -247,7 +306,7 @@ mod tests {
     use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
     use crate::executor::aggregation::GroupKey;
-    use crate::executor::StreamExecutorResult;
+    use crate::executor::{PkIndices, StreamExecutorResult};
 
     fn create_chunk<S: StateStore>(
         pretty: &str,
@@ -317,6 +376,7 @@ mod tests {
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::Max,
             &agg_call,
+            &PkIndices::new(), // unused
             &order_columns,
             &mapping,
             usize::MAX,
@@ -370,6 +430,7 @@ mod tests {
             let mut state = MaterializedInputState::new(
                 PbAggNodeVersion::Max,
                 &agg_call,
+                &PkIndices::new(), // unused
                 &order_columns,
                 &mapping,
                 usize::MAX,
@@ -415,6 +476,7 @@ mod tests {
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::Max,
             &agg_call,
+            &PkIndices::new(), // unused
             &order_columns,
             &mapping,
             usize::MAX,
@@ -468,6 +530,7 @@ mod tests {
             let mut state = MaterializedInputState::new(
                 PbAggNodeVersion::Max,
                 &agg_call,
+                &PkIndices::new(), // unused
                 &order_columns,
                 &mapping,
                 usize::MAX,
@@ -529,6 +592,7 @@ mod tests {
         let mut state_1 = MaterializedInputState::new(
             PbAggNodeVersion::Max,
             &agg_call_1,
+            &PkIndices::new(), // unused
             &order_columns_1,
             &mapping_1,
             usize::MAX,
@@ -543,6 +607,7 @@ mod tests {
         let mut state_2 = MaterializedInputState::new(
             PbAggNodeVersion::Max,
             &agg_call_2,
+            &PkIndices::new(), // unused
             &order_columns_2,
             &mapping_2,
             usize::MAX,
@@ -630,6 +695,7 @@ mod tests {
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::Max,
             &agg_call,
+            &PkIndices::new(), // unused
             &order_columns,
             &mapping,
             usize::MAX,
@@ -682,6 +748,7 @@ mod tests {
             let mut state = MaterializedInputState::new(
                 PbAggNodeVersion::Max,
                 &agg_call,
+                &PkIndices::new(), // unused
                 &order_columns,
                 &mapping,
                 usize::MAX,
@@ -729,6 +796,7 @@ mod tests {
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::Max,
             &agg_call,
+            &PkIndices::new(), // unused
             &order_columns,
             &mapping,
             1024,
@@ -832,6 +900,7 @@ mod tests {
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::Max,
             &agg_call,
+            &PkIndices::new(), // unused
             &order_columns,
             &mapping,
             3, // cache capacity = 3 for easy testing
@@ -944,6 +1013,7 @@ mod tests {
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::Max,
             &agg_call,
+            &PkIndices::new(), // unused
             &order_columns,
             &mapping,
             usize::MAX,
@@ -1028,6 +1098,7 @@ mod tests {
         let mut state = MaterializedInputState::new(
             PbAggNodeVersion::Max,
             &agg_call,
+            &PkIndices::new(), // unused
             &order_columns,
             &mapping,
             usize::MAX,

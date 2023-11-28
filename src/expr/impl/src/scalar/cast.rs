@@ -18,12 +18,10 @@ use std::sync::Arc;
 
 use futures_util::FutureExt;
 use itertools::Itertools;
-use risingwave_common::array::{
-    Array, ArrayImpl, DataChunk, ListRef, ListValue, StructRef, StructValue, Utf8Array,
-};
+use risingwave_common::array::{ArrayImpl, DataChunk, ListRef, ListValue, StructRef, StructValue};
 use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Int256, IntoOrdered, JsonbRef, ToText, F64};
+use risingwave_common::types::{Int256, IntoOrdered, JsonbRef, ToText, F64};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{
     build_func, Context, Expression, ExpressionBoxExt, InputRefExpression,
@@ -192,61 +190,9 @@ pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
     cast::str_to_bytea(elem).map_err(|err| ExprError::Parse(err.into()))
 }
 
-// TODO(nanderstabel): optimize for multidimensional List. Depth can be given as a parameter to this
-// function.
-/// Takes a string input in the form of a comma-separated list enclosed in braces, and returns a
-/// vector of strings containing the list items.
-///
-/// # Examples
-/// - "{1, 2, 3}" => ["1", "2", "3"]
-/// - "{1, {2, 3}}" => ["1", "{2, 3}"]
-fn unnest(input: &str) -> Result<Vec<&str>> {
-    let trimmed = input.trim();
-    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
-        return Err(ExprError::Parse("Input must be braced".into()));
-    }
-    let trimmed = &trimmed[1..trimmed.len() - 1];
-
-    let mut items = Vec::new();
-    let mut depth = 0;
-    let mut start = 0;
-    for (i, c) in trimmed.chars().enumerate() {
-        match c {
-            '{' => depth += 1,
-            '}' => depth -= 1,
-            ',' if depth == 0 => {
-                let item = trimmed[start..i].trim();
-                items.push(item);
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    if depth != 0 {
-        return Err(ExprError::Parse("Unbalanced braces".into()));
-    }
-    let last = trimmed[start..].trim();
-    if !last.is_empty() {
-        items.push(last);
-    }
-    Ok(items)
-}
-
 #[function("cast(varchar) -> anyarray", type_infer = "panic")]
 fn str_to_list(input: &str, ctx: &Context) -> Result<ListValue> {
-    let cast = build_func(
-        PbType::Cast,
-        ctx.return_type.as_list().clone(),
-        vec![InputRefExpression::new(DataType::Varchar, 0).boxed()],
-    )
-    .unwrap();
-    let items = unnest(input)?.into_iter().collect::<Utf8Array>().into_ref();
-    let len = items.len();
-    let list = cast
-        .eval(&DataChunk::new(vec![items], len))
-        .now_or_never()
-        .unwrap()?;
-    Ok(ListValue::new(Arc::try_unwrap(list).unwrap()))
+    ListValue::from_str(input, &ctx.return_type).map_err(|err| ExprError::Parse(err.into()))
 }
 
 /// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.
@@ -348,31 +294,6 @@ mod tests {
         test!(general_to_text(Decimal::try_from(1.222).unwrap()), "1.222");
 
         test!(general_to_text(Decimal::NaN), "NaN");
-    }
-
-    #[test]
-    fn test_unnest() {
-        assert_eq!(unnest("{ }").unwrap(), vec![] as Vec<String>);
-        assert_eq!(
-            unnest("{1, 2, 3}").unwrap(),
-            vec!["1".to_string(), "2".to_string(), "3".to_string()]
-        );
-        assert_eq!(
-            unnest("{{1, 2, 3}, {4, 5, 6}}").unwrap(),
-            vec!["{1, 2, 3}".to_string(), "{4, 5, 6}".to_string()]
-        );
-        assert_eq!(
-            unnest("{{{1, 2, 3}}, {{4, 5, 6}}}").unwrap(),
-            vec!["{{1, 2, 3}}".to_string(), "{{4, 5, 6}}".to_string()]
-        );
-        assert_eq!(
-            unnest("{{{1, 2, 3}, {4, 5, 6}}}").unwrap(),
-            vec!["{{1, 2, 3}, {4, 5, 6}}".to_string()]
-        );
-        assert_eq!(
-            unnest("{{{aa, bb, cc}, {dd, ee, ff}}}").unwrap(),
-            vec!["{{aa, bb, cc}, {dd, ee, ff}}".to_string()]
-        );
     }
 
     #[test]
