@@ -20,8 +20,12 @@ futures-util = "0.3.28"
 static_assertions = "1"
 thiserror = "1"
 thiserror-ext = { workspace = true }
-tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "macros"] }
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "macros",
+] }
 tonic = { workspace = true }
+tracing = "0.1"
 
 [lints]
 workspace = true

@@ -14,7 +14,7 @@
 
 pub mod connection;
 pub mod my_stats;
-pub mod process_linux;
+pub mod process;
 pub mod rwlock;
 
 use std::sync::LazyLock;
@@ -25,7 +25,7 @@ use prometheus::core::{
 use prometheus::{Histogram, HistogramVec, Registry};
 
 use crate::monitor::my_stats::MyHistogram;
-use crate::monitor::process_linux::monitor_process;
+use crate::monitor::process::monitor_process;
 
 #[cfg(target_os = "linux")]
 static PAGESIZE: std::sync::LazyLock<i64> =
