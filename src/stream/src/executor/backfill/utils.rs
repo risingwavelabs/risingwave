@@ -515,7 +515,7 @@ pub(crate) fn update_pos_by_vnode(
     backfill_state: &mut BackfillState,
 ) -> StreamExecutorResult<()> {
     let new_pos = get_new_pos(chunk, pk_in_output_indices);
-    assert!(new_pos.len() > 0);
+    assert!(new_pos.len() == pk_in_output_indices);
     backfill_state.update_progress(vnode, new_pos)?;
     Ok(())
 }
