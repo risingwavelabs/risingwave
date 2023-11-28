@@ -19,7 +19,6 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::catalog::DdlType;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
@@ -30,7 +29,7 @@ use crate::barrier::{
     Command, TableActorMap, TableDefinitionMap, TableFragmentMap, TableNotifierMap,
     TableUpstreamMvCountMap,
 };
-use crate::manager::{FragmentManager, FragmentManagerRef};
+use crate::manager::{DdlType, FragmentManager, FragmentManagerRef};
 use crate::model::{ActorId, TableFragments};
 use crate::MetaResult;
 

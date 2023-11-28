@@ -39,15 +39,6 @@ enum StreamJobStatus {
   STREAM_JOB_STATUS_CREATED = 2;
 }
 
-enum DdlType {
-  DDL_TYPE_UNSPECIFIED = 0;
-  DDL_TYPE_TABLE = 1;
-  DDL_TYPE_SINK = 2;
-  DDL_TYPE_INDEX = 3;
-  DDL_TYPE_SOURCE = 4;
-  DDL_TYPE_MATERIALIZED_VIEW = 5;
-}
-
 // How the stream job was created will determine
 // whether they are persisted.
 enum CreateType {

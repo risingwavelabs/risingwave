@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use risingwave_common::catalog::TableVersionId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::catalog::{CreateType, DdlType, Index, PbSource, Sink, Table};
+use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
 
 use crate::model::FragmentId;
@@ -30,6 +30,25 @@ pub enum StreamingJob {
     Table(Option<PbSource>, Table, TableJobType),
     Index(Index, Table),
     Source(PbSource),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DdlType {
+    MaterializedView,
+    Sink,
+    Table,
+    Index,
+    Source,
+}
+
+#[cfg(test)]
+#[allow(clippy::derivable_impls)]
+impl Default for DdlType {
+    fn default() -> Self {
+        // This should not be used by mock services,
+        // so we can just pick an arbitrary default variant.
+        DdlType::Table
+    }
 }
 
 impl From<&StreamingJob> for DdlType {
