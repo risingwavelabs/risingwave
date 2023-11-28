@@ -335,3 +335,38 @@ async fn test_foreground_sink_cancel() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_background_agg_mv_recovery() -> Result<()> {
+    init_logger();
+    let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
+    let mut session = cluster.start_session();
+
+    session.run("CREATE TABLE t1 (v1 int)").await?;
+    session
+        .run("INSERT INTO t1 SELECT generate_series FROM generate_series(1, 200);")
+        .await?;
+    session.flush().await?;
+    session.run(SET_RATE_LIMIT_1).await?;
+    session.run(SET_BACKGROUND_DDL).await?;
+    session
+        .run("CREATE MATERIALIZED VIEW mv1 as select v1, count(*) from t1 group by v1;")
+        .await?;
+    sleep(Duration::from_secs(2)).await;
+
+    kill_cn_and_meta_and_wait_recover(&cluster).await;
+
+    // Now just wait for it to complete.
+    session.run(WAIT).await?;
+
+    let t_count = session.run("SELECT COUNT(v1) FROM t1").await?;
+    let mv1_count = session.run("SELECT COUNT(v1) FROM mv1").await?;
+    assert_eq!(t_count, mv1_count);
+
+    // Make sure that if MV killed and restarted
+    // it will not be dropped.
+    session.run("DROP MATERIALIZED VIEW mv1;").await?;
+    session.run("DROP TABLE t1;").await?;
+
+    Ok(())
+}
