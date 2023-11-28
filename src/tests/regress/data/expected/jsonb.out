@@ -1010,7 +1010,7 @@ ERROR:  cannot get array length of a non-array
 SELECT jsonb_array_length('4');
 ERROR:  cannot get array length of a scalar
 -- each
-SELECT jsonb_each('{"f1":[1,2,3],"f2":{"f3":1},"f4":null}'::jsonb);
+SELECT jsonb_each('{"f1":[1,2,3],"f2":{"f3":1},"f4":null}');
      jsonb_each     
 --------------------
  (f1,"[1, 2, 3]")
@@ -1028,7 +1028,7 @@ SELECT jsonb_each('{"a":{"b":"c","c":"b","1":"first"},"b":[1,2],"c":"cc","1":"fi
  (n,null)
 (5 rows)
 
-SELECT * FROM jsonb_each('{"f1":[1,2,3],"f2":{"f3":1},"f4":null,"f5":99,"f6":"stringy"}'::jsonb) q;
+SELECT * FROM jsonb_each('{"f1":[1,2,3],"f2":{"f3":1},"f4":null,"f5":99,"f6":"stringy"}') q;
  key |   value   
 -----+-----------
  f1  | [1, 2, 3]
@@ -1048,7 +1048,7 @@ SELECT * FROM jsonb_each('{"a":{"b":"c","c":"b","1":"first"},"b":[1,2],"c":"cc",
  n   | null
 (5 rows)
 
-SELECT jsonb_each_text('{"f1":[1,2,3],"f2":{"f3":1},"f4":null,"f5":"null"}'::jsonb);
+SELECT jsonb_each_text('{"f1":[1,2,3],"f2":{"f3":1},"f4":null,"f5":"null"}');
   jsonb_each_text   
 --------------------
  (f1,"[1, 2, 3]")
@@ -1067,7 +1067,7 @@ SELECT jsonb_each_text('{"a":{"b":"c","c":"b","1":"first"},"b":[1,2],"c":"cc","1
  (n,)
 (5 rows)
 
-SELECT * FROM jsonb_each_text('{"f1":[1,2,3],"f2":{"f3":1},"f4":null,"f5":99,"f6":"stringy"}'::jsonb) q;
+SELECT * FROM jsonb_each_text('{"f1":[1,2,3],"f2":{"f3":1},"f4":null,"f5":99,"f6":"stringy"}') q;
  key |   value   
 -----+-----------
  f1  | [1, 2, 3]
@@ -1991,7 +1991,7 @@ select '42'::jsonb #>> array['0'];
 (1 row)
 
 -- array_elements
-SELECT jsonb_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false]'::jsonb);
+SELECT jsonb_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false]');
     jsonb_array_elements    
 ----------------------------
  1
@@ -2002,7 +2002,7 @@ SELECT jsonb_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false]
  false
 (6 rows)
 
-SELECT * FROM jsonb_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false]'::jsonb) q;
+SELECT * FROM jsonb_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false]') q;
            value            
 ----------------------------
  1
@@ -2013,7 +2013,7 @@ SELECT * FROM jsonb_array_elements('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]}
  false
 (6 rows)
 
-SELECT jsonb_array_elements_text('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false,"stringy"]'::jsonb);
+SELECT jsonb_array_elements_text('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false,"stringy"]');
  jsonb_array_elements_text  
 ----------------------------
  1
@@ -2025,7 +2025,7 @@ SELECT jsonb_array_elements_text('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},f
  stringy
 (7 rows)
 
-SELECT * FROM jsonb_array_elements_text('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false,"stringy"]'::jsonb) q;
+SELECT * FROM jsonb_array_elements_text('[1,true,[1,[2,3]],null,{"f1":1,"f2":[7,8,9]},false,"stringy"]') q;
            value            
 ----------------------------
  1
@@ -4047,7 +4047,7 @@ select jsonb_pretty('{"a":["b", "c"], "d": {"e":"f"}}');
  }
 (1 row)
 
-select jsonb_concat('{"d": "test", "a": [1, 2]}'::jsonb, '{"g": "test2", "c": {"c1":1, "c2":2}}'::jsonb);
+select jsonb_concat('{"d": "test", "a": [1, 2]}', '{"g": "test2", "c": {"c1":1, "c2":2}}');
                            jsonb_concat                            
 -------------------------------------------------------------------
  {"a": [1, 2], "c": {"c1": 1, "c2": 2}, "d": "test", "g": "test2"}
