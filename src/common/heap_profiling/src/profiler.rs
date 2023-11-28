@@ -39,7 +39,7 @@ impl HeapProfiler {
     /// # Arguments
     ///
     /// `total_memory` must be the total available memory for the process.
-    /// It will be compared with jemalloc's allocated memory.
+    /// It will be compared with the process resident memory.
     pub fn new(total_memory: usize, config: HeapProfilingConfig) -> Self {
         let threshold_auto_dump_heap_profile =
             (total_memory as f64 * config.threshold_auto as f64) as usize;
@@ -78,8 +78,8 @@ impl HeapProfiler {
 
     /// Start the daemon task of auto heap profiling.
     pub fn start(self) {
-        if !self.config.enable_auto {
-            tracing::info!("Auto memory dump is disabled with enable_auto=false");
+        if !self.config.enable_auto || !self.opt_prof {
+            tracing::info!("Auto memory dump is disabled.");
             return;
         }
 
@@ -94,8 +94,7 @@ impl HeapProfiler {
                     let cur_used_memory_bytes = resource_util::memory::total_memory_used_bytes();
 
                     // Dump heap profile when memory usage is crossing the threshold.
-                    if self.opt_prof
-                        && cur_used_memory_bytes > self.threshold_auto_dump_heap_profile
+                    if cur_used_memory_bytes > self.threshold_auto_dump_heap_profile
                         && prev_used_memory_bytes <= self.threshold_auto_dump_heap_profile
                     {
                         self.auto_dump_heap_prof();
