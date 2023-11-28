@@ -15,7 +15,7 @@
 use std::cell::RefCell;
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::error::ErrorCode::NotImplemented;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::error::Result;
 
 use super::utils::{childless_record, Distill};
@@ -131,11 +131,7 @@ impl PredicatePushdown for LogicalShare {
 
 impl ToBatch for LogicalShare {
     fn to_batch(&self) -> Result<PlanRef> {
-        Err(NotImplemented(
-            "batch query doesn't support share operator for now".into(),
-            None.into(),
-        )
-        .into())
+        bail_not_implemented!("batch query doesn't support share operator for now");
     }
 }
 

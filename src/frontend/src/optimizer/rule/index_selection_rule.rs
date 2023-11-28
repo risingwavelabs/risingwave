@@ -104,6 +104,11 @@ impl Rule for IndexSelectionRule {
             self.estimate_full_table_scan_cost(logical_scan, primary_table_row_size),
         );
 
+        // If it is a primary lookup plan, avoid checking other indexes.
+        if primary_cost.primary_lookup {
+            return None;
+        }
+
         let mut final_plan: PlanRef = logical_scan.clone().into();
         #[expect(
             clippy::redundant_clone,
@@ -284,7 +289,7 @@ impl IndexSelectionRule {
             TableScanIoEstimator::estimate_row_size(logical_scan),
         );
         // lookup cost = index cost * LOOKUP_COST_CONST
-        let lookup_cost = index_cost.mul(&IndexCost::new(LOOKUP_COST_CONST));
+        let lookup_cost = index_cost.mul(&IndexCost::new(LOOKUP_COST_CONST, false));
 
         // 4. keep the same schema with original logical_scan
         let scan_output_col_idx = logical_scan.output_col_idx();
@@ -374,7 +379,7 @@ impl IndexSelectionRule {
 
         Some((
             lookup_join,
-            index_access_cost.mul(&IndexCost::new(LOOKUP_COST_CONST)),
+            index_access_cost.mul(&IndexCost::new(LOOKUP_COST_CONST, false)),
         ))
     }
 
@@ -812,7 +817,11 @@ impl<'a> TableScanIoEstimator<'a> {
             .reduce(|x, y| x * y)
             .unwrap();
 
-        IndexCost::new(index_cost).mul(&IndexCost::new(self.row_size))
+        // If `index_cost` equals 1, it is a primary lookup
+        let primary_lookup = index_cost == 1;
+
+        IndexCost::new(index_cost, primary_lookup)
+            .mul(&IndexCost::new(self.row_size, primary_lookup))
     }
 
     fn match_index_column(
@@ -879,17 +888,26 @@ enum MatchItem {
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug, PartialOrd, Ord)]
-struct IndexCost(usize);
+struct IndexCost {
+    cost: usize,
+    primary_lookup: bool,
+}
 
 impl Default for IndexCost {
     fn default() -> Self {
-        Self(IndexCost::maximum())
+        Self {
+            cost: IndexCost::maximum(),
+            primary_lookup: false,
+        }
     }
 }
 
 impl IndexCost {
-    fn new(cost: usize) -> IndexCost {
-        Self(min(cost, IndexCost::maximum()))
+    fn new(cost: usize, primary_lookup: bool) -> IndexCost {
+        Self {
+            cost: min(cost, IndexCost::maximum()),
+            primary_lookup,
+        }
     }
 
     fn maximum() -> usize {
@@ -898,22 +916,24 @@ impl IndexCost {
 
     fn add(&self, other: &IndexCost) -> IndexCost {
         IndexCost::new(
-            self.0
-                .checked_add(other.0)
+            self.cost
+                .checked_add(other.cost)
                 .unwrap_or_else(IndexCost::maximum),
+            self.primary_lookup && other.primary_lookup,
         )
     }
 
     fn mul(&self, other: &IndexCost) -> IndexCost {
         IndexCost::new(
-            self.0
-                .checked_mul(other.0)
+            self.cost
+                .checked_mul(other.cost)
                 .unwrap_or_else(IndexCost::maximum),
+            self.primary_lookup && other.primary_lookup,
         )
     }
 
     fn le(&self, other: &IndexCost) -> bool {
-        self.0 < other.0
+        self.cost < other.cost
     }
 }
 

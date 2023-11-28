@@ -39,7 +39,7 @@ impl FsListInner for S3SplitEnumerator {
             .send()
             .await
             .map_err(|e| anyhow!(DisplayErrorContext(e)))?;
-        if res.is_truncated() {
+        if res.is_truncated().unwrap_or_default() {
             self.next_continuation_token = res.next_continuation_token.clone();
         } else {
             has_finished = true;

@@ -184,11 +184,11 @@ pub(crate) mod tests {
     }
 
     fn get_compactor_context_impl(
-        options: Arc<StorageOpts>,
+        storage_opts: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
     ) -> CompactorContext {
         CompactorContext {
-            storage_opts: options,
+            storage_opts,
             sstable_store,
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
             is_share_buffer_compact: false,
