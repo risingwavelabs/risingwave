@@ -17,7 +17,7 @@ use std::ops::Range;
 
 use bytes::BytesMut;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, RangeFullKey};
 
 use super::{KeyPrefix, LenType, RestartPoint};
 use crate::hummock::BlockHolder;
@@ -103,13 +103,13 @@ impl BlockIterator {
         self.next_until_prev_offset(self.block.len());
     }
 
-    pub fn seek(&mut self, key: FullKey<&[u8]>) {
+    pub fn seek(&mut self, key: RangeFullKey<&[u8]>) {
         self.seek_restart_point_by_key(key);
 
         self.next_until_key(key);
     }
 
-    pub fn seek_le(&mut self, key: FullKey<&[u8]>) {
+    pub fn seek_le(&mut self, key: RangeFullKey<&[u8]>) {
         self.seek_restart_point_by_key(key);
 
         self.next_until_key(key);
@@ -176,15 +176,15 @@ impl BlockIterator {
     }
 
     /// Moves forward until reaching the first that equals or larger than the given `key`.
-    fn next_until_key(&mut self, key: FullKey<&[u8]>) {
-        while self.is_valid() && self.key().cmp(&key) == Ordering::Less {
+    fn next_until_key(&mut self, key: RangeFullKey<&[u8]>) {
+        while self.is_valid() && self.key().cmp_impl(&key) == Ordering::Less {
             self.next_inner();
         }
     }
 
     /// Moves backward until reaching the first key that equals or smaller than the given `key`.
-    fn prev_until_key(&mut self, key: FullKey<&[u8]>) {
-        while self.is_valid() && self.key().cmp(&key) == Ordering::Greater {
+    fn prev_until_key(&mut self, key: RangeFullKey<&[u8]>) {
+        while self.is_valid() && self.key().cmp_impl(&key) == Ordering::Greater {
             self.prev_inner();
         }
     }
@@ -241,7 +241,7 @@ impl BlockIterator {
     }
 
     /// Searches the restart point index that the given `key` belongs to.
-    fn search_restart_point_index_by_key(&self, key: FullKey<&[u8]>) -> usize {
+    fn search_restart_point_index_by_key(&self, key: RangeFullKey<&[u8]>) -> usize {
         // Find the largest restart point that restart key equals or less than the given key.
         self.block
             .search_restart_partition_point(
@@ -254,8 +254,8 @@ impl BlockIterator {
                         self.decode_prefix_at(probe as usize, key_len_type, value_len_type);
                     let probe_key = &self.block.data()[prefix.diff_key_range()];
                     let full_probe_key =
-                        FullKey::from_slice_without_table_id(self.block.table_id(), probe_key);
-                    match full_probe_key.cmp(&key) {
+                        RangeFullKey::from_slice_without_table_id(self.block.table_id(), probe_key);
+                    match full_probe_key.cmp_impl(&key) {
                         Ordering::Less | Ordering::Equal => true,
                         Ordering::Greater => false,
                     }
@@ -265,7 +265,7 @@ impl BlockIterator {
     }
 
     /// Seeks to the restart point that the given `key` belongs to.
-    fn seek_restart_point_by_key(&mut self, key: FullKey<&[u8]>) {
+    fn seek_restart_point_by_key(&mut self, key: RangeFullKey<&[u8]>) {
         let index = self.search_restart_point_index_by_key(key);
         self.seek_restart_point_by_index(index)
     }
@@ -322,7 +322,7 @@ mod tests {
         let mut it = build_iterator_for_test();
         it.seek_to_first();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k01", 1), it.key());
+        assert_eq!(construct_full_key_struct::<false>(0, b"k01", 1), it.key());
         assert_eq!(b"v01", it.value());
     }
 
@@ -331,7 +331,7 @@ mod tests {
         let mut it = build_iterator_for_test();
         it.seek_to_last();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k05", 5), it.key());
+        assert_eq!(construct_full_key_struct::<false>(0, b"k05", 5), it.key());
         assert_eq!(b"v05", it.value());
     }
 
@@ -340,7 +340,7 @@ mod tests {
         let mut it = build_iterator_for_test();
         it.seek(construct_full_key_struct(0, b"k00", 0));
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k01", 1), it.key());
+        assert_eq!(construct_full_key_struct::<false>(0, b"k01", 1), it.key());
         assert_eq!(b"v01", it.value());
 
         let mut it = build_iterator_for_test();
@@ -358,7 +358,7 @@ mod tests {
         let mut it = build_iterator_for_test();
         it.seek_le(construct_full_key_struct(0, b"k06", 6));
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k05", 5), it.key());
+        assert_eq!(construct_full_key_struct::<false>(0, b"k05", 5), it.key());
         assert_eq!(b"v05", it.value());
     }
 
@@ -367,13 +367,13 @@ mod tests {
         let mut it = build_iterator_for_test();
         it.seek(construct_full_key_struct(0, b"k03", 3));
         assert_eq!(
-            construct_full_key_struct(0, format!("k{:02}", 4).as_bytes(), 4),
+            construct_full_key_struct::<false>(0, format!("k{:02}", 4).as_bytes(), 4),
             it.key()
         );
 
         it.seek_le(construct_full_key_struct(0, b"k03", 3));
         assert_eq!(
-            construct_full_key_struct(0, format!("k{:02}", 2).as_bytes(), 2),
+            construct_full_key_struct::<false>(0, format!("k{:02}", 2).as_bytes(), 2),
             it.key()
         );
     }
@@ -384,22 +384,22 @@ mod tests {
 
         it.seek_to_first();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k01", 1), it.key());
+        assert_eq!(construct_full_key_struct::<false>(0, b"k01", 1), it.key());
         assert_eq!(b"v01", it.value());
 
         it.next();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k02", 2), it.key());
+        assert_eq!(construct_full_key_struct::<false>(0, b"k02", 2), it.key());
         assert_eq!(b"v02", it.value());
 
         it.next();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k04", 4), it.key());
+        assert_eq!(construct_full_key_struct::<false>(0, b"k04", 4), it.key());
         assert_eq!(b"v04", it.value());
 
         it.next();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k05", 5), it.key());
+        assert_eq!(construct_full_key_struct::<false>(0, b"k05", 5), it.key());
         assert_eq!(b"v05", it.value());
 
         it.next();
@@ -412,22 +412,22 @@ mod tests {
 
         it.seek_to_last();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k05", 5), it.key());
+        assert_eq!(construct_full_key_struct::<false>(0, b"k05", 5), it.key());
         assert_eq!(b"v05", it.value());
 
         it.prev();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k04", 4), it.key());
+        assert_eq!(construct_full_key_struct::<false>(0, b"k04", 4), it.key());
         assert_eq!(b"v04", it.value());
 
         it.prev();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k02", 2), it.key());
+        assert_eq!(construct_full_key_struct::<false>(0, b"k02", 2), it.key());
         assert_eq!(b"v02", it.value());
 
         it.prev();
         assert!(it.is_valid());
-        assert_eq!(construct_full_key_struct(0, b"k01", 1), it.key());
+        assert_eq!(construct_full_key_struct::<false>(0, b"k01", 1), it.key());
         assert_eq!(b"v01", it.value());
 
         it.prev();
@@ -440,28 +440,28 @@ mod tests {
 
         it.seek(construct_full_key_struct(0, b"k03", 3));
         assert_eq!(
-            construct_full_key_struct(0, format!("k{:02}", 4).as_bytes(), 4),
+            construct_full_key_struct::<false>(0, format!("k{:02}", 4).as_bytes(), 4),
             it.key()
         );
 
         it.prev();
         assert_eq!(
-            construct_full_key_struct(0, format!("k{:02}", 2).as_bytes(), 2),
+            construct_full_key_struct::<false>(0, format!("k{:02}", 2).as_bytes(), 2),
             it.key()
         );
 
         it.next();
         assert_eq!(
-            construct_full_key_struct(0, format!("k{:02}", 4).as_bytes(), 4),
+            construct_full_key_struct::<false>(0, format!("k{:02}", 4).as_bytes(), 4),
             it.key()
         );
     }
 
-    pub fn construct_full_key_struct(
+    pub fn construct_full_key_struct<const IS_RANGE: bool>(
         table_id: u32,
         table_key: &[u8],
         epoch: u64,
-    ) -> FullKey<&[u8]> {
+    ) -> FullKey<&[u8], IS_RANGE> {
         FullKey::for_test(TableId::new(table_id), table_key, epoch)
     }
 }

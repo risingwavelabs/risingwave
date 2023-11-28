@@ -80,8 +80,8 @@ pub async fn get_from_sstable_info(
         && !hit_sstable_bloom_filter(
             sstable.value(),
             &(
-                Bound::Included(full_key.user_key),
-                Bound::Included(full_key.user_key),
+                Bound::Included(full_key.user_key.into_range()),
+                Bound::Included(full_key.user_key.into_range()),
             ),
             hash,
             local_stats,
@@ -110,7 +110,7 @@ pub async fn get_from_sstable_info(
         sstable_store_ref.clone(),
         Arc::new(SstableIteratorReadOptions::from_read_options(read_options)),
     );
-    iter.seek(full_key).await?;
+    iter.seek(full_key.into_range()).await?;
     // Iterator has sought passed the borders.
     if !iter.is_valid() {
         if !read_options.ignore_range_tombstone {

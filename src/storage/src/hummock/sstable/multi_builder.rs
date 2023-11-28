@@ -20,7 +20,7 @@ use bytes::Bytes;
 use num_integer::Integer;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_EPOCH;
-use risingwave_hummock_sdk::key::{FullKey, PointRange, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, PointRange, RangeFullKey, UserKey};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use tokio::task::JoinHandle;
 
@@ -156,7 +156,7 @@ where
         &mut self,
         buf: Bytes,
         filter_data: Vec<u8>,
-        smallest_key: FullKey<Vec<u8>>,
+        smallest_key: RangeFullKey<Vec<u8>>,
         largest_key: Vec<u8>,
         block_meta: BlockMeta,
     ) -> HummockResult<bool> {
@@ -222,13 +222,13 @@ where
                     .event_key
                     .left_user_key
                     .as_ref()
-                    .eq(&full_key.user_key)
+                    .eq(&full_key.user_key.into_range())
                 {
                     // If the last range tombstone equals the new key, we can not create new file because we must keep the new key in origin file.
                     need_seal_current = false;
                 } else {
                     builder.add_monotonic_delete(MonotonicDeleteEvent {
-                        event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
+                        event_key: PointRange::from_user_key(full_key.user_key.to_vec().into_range(), false),
                         new_epoch: MAX_EPOCH,
                     });
                 }
@@ -250,7 +250,10 @@ where
             // two half and add the right half as a new range to next sstable.
             if need_seal_current && last_range_tombstone_epoch != MAX_EPOCH {
                 builder.add_monotonic_delete(MonotonicDeleteEvent {
-                    event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
+                    event_key: PointRange::from_user_key(
+                        full_key.user_key.to_vec().into_range(),
+                        false,
+                    ),
                     new_epoch: last_range_tombstone_epoch,
                 });
             }
@@ -610,7 +613,8 @@ mod tests {
             [VirtualNode::ZERO.to_be_bytes().as_slice(), b"k"].concat(),
             233,
         );
-        let target_extended_user_key = PointRange::from_user_key(full_key.user_key.as_ref(), false);
+        let target_extended_user_key =
+            PointRange::from_user_key(full_key.user_key.as_ref().into_range(), false);
         while del_iter.is_valid() && del_iter.key().as_ref().le(&target_extended_user_key) {
             let event_key = del_iter.key().to_vec();
             del_iter.next().await.unwrap();
@@ -647,7 +651,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             key_range.left,
-            FullKey::for_test(
+            FullKey::<_, true>::for_test(
                 table_id,
                 &[VirtualNode::ZERO.to_be_bytes().as_slice(), b"aaa"].concat(),
                 MAX_EPOCH,
@@ -656,7 +660,7 @@ mod tests {
         );
         assert_eq!(
             key_range.right,
-            FullKey::for_test(
+            FullKey::<_, true>::for_test(
                 table_id,
                 &[VirtualNode::ZERO.to_be_bytes().as_slice(), b"kkk"].concat(),
                 MAX_EPOCH
@@ -818,18 +822,22 @@ mod tests {
 
         let key_range = ssts[0].key_range.as_ref().unwrap();
         let expected_left =
-            FullKey::from_user_key(UserKey::for_test(table_id, b"aaaa"), MAX_EPOCH).encode();
+            FullKey::<_, true>::from_user_key(UserKey::for_test(table_id, b"aaaa"), MAX_EPOCH)
+                .encode();
         let expected_right =
-            FullKey::from_user_key(UserKey::for_test(table_id, b"eeee"), MAX_EPOCH).encode();
+            FullKey::<_, true>::from_user_key(UserKey::for_test(table_id, b"eeee"), MAX_EPOCH)
+                .encode();
         assert_eq!(key_range.left, expected_left);
         assert_eq!(key_range.right, expected_right);
         assert!(key_range.right_exclusive);
 
         let key_range = ssts[1].key_range.as_ref().unwrap();
         let expected_left =
-            FullKey::from_user_key(UserKey::for_test(table_id, b"eeee"), MAX_EPOCH).encode();
+            FullKey::<_, true>::from_user_key(UserKey::for_test(table_id, b"eeee"), MAX_EPOCH)
+                .encode();
         let expected_right =
-            FullKey::from_user_key(UserKey::for_test(table_id, b"gggg"), MAX_EPOCH).encode();
+            FullKey::<_, true>::from_user_key(UserKey::for_test(table_id, b"gggg"), MAX_EPOCH)
+                .encode();
         assert_eq!(key_range.left, expected_left);
         assert_eq!(key_range.right, expected_right);
         assert!(key_range.right_exclusive);

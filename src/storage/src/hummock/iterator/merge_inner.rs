@@ -18,7 +18,7 @@ use std::future::Future;
 use std::ops::{Deref, DerefMut};
 
 use bytes::Bytes;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, RangeFullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::hummock::iterator::{DirectionEnum, Forward, HummockIterator, HummockIteratorDirection};
@@ -58,8 +58,8 @@ impl<I: HummockIterator> Ord for Node<I, UnorderedNodeExtra> {
         // order should be reversed.
 
         match I::Direction::direction() {
-            DirectionEnum::Forward => other.iter.key().cmp(&self.iter.key()),
-            DirectionEnum::Backward => self.iter.key().cmp(&other.iter.key()),
+            DirectionEnum::Forward => other.iter.key().cmp_impl(&self.iter.key()),
+            DirectionEnum::Backward => self.iter.key().cmp_impl(&other.iter.key()),
         }
     }
 }
@@ -72,12 +72,12 @@ impl<I: HummockIterator> Ord for Node<I, OrderedNodeExtra> {
             DirectionEnum::Forward => other
                 .iter
                 .key()
-                .cmp(&self.iter.key())
+                .cmp_impl(&self.iter.key())
                 .then_with(|| other.extra_order_info.cmp(&self.extra_order_info)),
             DirectionEnum::Backward => self
                 .iter
                 .key()
-                .cmp(&other.iter.key())
+                .cmp_impl(&other.iter.key())
                 .then_with(|| self.extra_order_info.cmp(&other.extra_order_info)),
         }
     }
@@ -284,7 +284,7 @@ impl<'a, T: Ord> Drop for PeekMutGuard<'a, T> {
 
 impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
     async fn next_inner(&mut self) -> HummockResult<()> {
-        let top_key = {
+        let top_key: FullKey<_> = {
             let top_key = self.heap.peek().expect("no inner iter").iter.key();
             self.last_table_key.clear();
             self.last_table_key
@@ -392,7 +392,7 @@ where
         Ok(())
     }
 
-    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+    async fn seek<'a>(&'a mut self, key: RangeFullKey<&'a [u8]>) -> HummockResult<()> {
         self.reset_heap();
         futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.iter.seek(key)))
             .await?;

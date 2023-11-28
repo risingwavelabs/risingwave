@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
 use risingwave_common::util::epoch::MAX_EPOCH;
-use risingwave_hummock_sdk::key::{user_key, FullKey, MAX_KEY_LEN};
+use risingwave_hummock_sdk::key::{user_key, FullKey, RangeFullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::{BloomFilterType, SstableInfo};
@@ -239,7 +239,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         &mut self,
         buf: Bytes,
         filter_data: Vec<u8>,
-        smallest_key: FullKey<Vec<u8>>,
+        smallest_key: RangeFullKey<Vec<u8>>,
         largest_key: Vec<u8>,
         mut meta: BlockMeta,
     ) -> HummockResult<bool> {
@@ -699,11 +699,11 @@ pub(super) mod tests {
         let key_range = s.sst_info.key_range.unwrap();
         assert_eq!(
             user_key(&key_range.left),
-            UserKey::for_test(TableId::default(), b"abcd").encode()
+            UserKey::<_, false>::for_test(TableId::default(), b"abcd").encode()
         );
         assert_eq!(
             user_key(&key_range.right),
-            UserKey::for_test(TableId::default(), b"eeee").encode()
+            UserKey::<_, false>::for_test(TableId::default(), b"eeee").encode()
         );
     }
 
@@ -725,11 +725,11 @@ pub(super) mod tests {
         let info = output.sst_info.sst_info;
 
         assert_bytes_eq!(
-            test_key_of(0).encode(),
+            test_key_of::<true>(0).encode(),
             info.key_range.as_ref().unwrap().left
         );
         assert_bytes_eq!(
-            test_key_of(TEST_KEYS_COUNT - 1).encode(),
+            test_key_of::<true>(TEST_KEYS_COUNT - 1).encode(),
             info.key_range.as_ref().unwrap().right
         );
         let (data, meta) = output.writer_output;
@@ -774,7 +774,10 @@ pub(super) mod tests {
                 let key_ref = full_key.user_key.as_ref();
                 assert!(
                     table.value().may_match_hash(
-                        &(Bound::Included(key_ref), Bound::Included(key_ref)),
+                        &(
+                            Bound::Included(key_ref.into_range()),
+                            Bound::Included(key_ref.into_range())
+                        ),
                         hash
                     ),
                     "failed at {}",

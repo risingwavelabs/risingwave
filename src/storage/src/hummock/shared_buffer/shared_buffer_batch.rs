@@ -26,7 +26,10 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_EPOCH;
-use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, TableKeyRange, UserKey};
+use risingwave_hummock_sdk::key::{
+    FullKey, PointRange, RangeFullKey, RangeTableKey, RangeUserKey, TableKey, TableKeyRange,
+    UserKey,
+};
 use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::hummock::event_handler::LocalInstanceId;
@@ -324,7 +327,7 @@ impl SharedBufferBatchInner {
     }
 
     fn get_min_delete_range_epoch(&self, query_user_key: UserKey<&[u8]>) -> HummockEpoch {
-        let query_extended_user_key = PointRange::from_user_key(query_user_key, false);
+        let query_extended_user_key = PointRange::from_user_key(query_user_key.into_range(), false);
         let idx = self.monotonic_tombstone_events.partition_point(
             |MonotonicDeleteEvent { event_key, .. }| {
                 event_key.as_ref().le(&query_extended_user_key)
@@ -613,7 +616,7 @@ impl SharedBufferBatch {
         let mut vnodes = Vec::with_capacity(VirtualNode::COUNT);
         let mut next_vnode_id = 0;
         while next_vnode_id < VirtualNode::COUNT {
-            let seek_key = TableKey::new(
+            let seek_key = RangeTableKey::new(
                 VirtualNode::from_index(next_vnode_id)
                     .to_be_bytes()
                     .to_vec(),
@@ -760,7 +763,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
         Ok(())
     }
 
-    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+    async fn seek<'a>(&'a mut self, key: RangeFullKey<&'a [u8]>) -> HummockResult<()> {
         debug_assert_eq!(key.user_key.table_id, self.table_id);
         // Perform binary search on table key because the items in SharedBufferBatch is ordered
         // by table key.
@@ -876,7 +879,7 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
         }
     }
 
-    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> Self::SeekFuture<'a> {
+    fn seek<'a>(&'a mut self, target_user_key: RangeUserKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
             let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
             self.next_idx = self.inner.monotonic_tombstone_events.partition_point(

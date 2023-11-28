@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::future::Future;
 
 use risingwave_common::util::epoch::MAX_EPOCH;
-use risingwave_hummock_sdk::key::{PointRange, UserKey};
+use risingwave_hummock_sdk::key::{PointRange, RangeUserKey, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 
 use super::MonotonicDeleteEvent;
@@ -46,7 +46,7 @@ impl Eq for SortedBoundary {}
 impl Ord for SortedBoundary {
     fn cmp(&self, other: &Self) -> Ordering {
         self.user_key
-            .cmp(&other.user_key)
+            .cmp_impl(&other.user_key)
             .then_with(|| other.sequence.cmp(&self.sequence))
     }
 }
@@ -67,8 +67,8 @@ impl CompactionDeleteRangeIterator {
     #[cfg(test)]
     pub async fn get_tombstone_between(
         self,
-        smallest_user_key: UserKey<&[u8]>,
-        largest_user_key: UserKey<&[u8]>,
+        smallest_user_key: RangeUserKey<&[u8]>,
+        largest_user_key: RangeUserKey<&[u8]>,
     ) -> HummockResult<Vec<MonotonicDeleteEvent>> {
         let mut iter = self;
         iter.seek(smallest_user_key).await?;
@@ -121,7 +121,8 @@ impl CompactionDeleteRangeIterator {
         target_user_key: UserKey<&[u8]>,
         epoch: HummockEpoch,
     ) -> HummockResult<HummockEpoch> {
-        let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
+        let target_extended_user_key =
+            PointRange::from_user_key(target_user_key.into_range(), false);
         while self.inner.is_valid()
             && self
                 .inner
@@ -150,7 +151,10 @@ impl CompactionDeleteRangeIterator {
     }
 
     /// seek to the first key which larger than `target_user_key`.
-    pub async fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> HummockResult<()> {
+    pub async fn seek<'a>(
+        &'a mut self,
+        target_user_key: RangeUserKey<&'a [u8]>,
+    ) -> HummockResult<()> {
         self.inner.seek(target_user_key).await
     }
 
@@ -216,7 +220,7 @@ impl DeleteRangeIterator for SstableDeleteRangeIterator {
         }
     }
 
-    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> Self::SeekFuture<'_> {
+    fn seek<'a>(&'a mut self, target_user_key: RangeUserKey<&'a [u8]>) -> Self::SeekFuture<'_> {
         async move {
             let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
             self.next_idx = self
@@ -240,7 +244,7 @@ pub fn get_min_delete_range_epoch_from_sstable(
     table: &Sstable,
     query_user_key: UserKey<&[u8]>,
 ) -> HummockEpoch {
-    let query_extended_user_key = PointRange::from_user_key(query_user_key, false);
+    let query_extended_user_key = PointRange::from_user_key(query_user_key.into_range(), false);
     let idx = table.meta.monotonic_tombstone_events.partition_point(
         |MonotonicDeleteEvent { event_key, .. }| event_key.as_ref().le(&query_extended_user_key),
     );

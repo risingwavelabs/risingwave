@@ -240,7 +240,7 @@ impl BlockBasedXor16Filter {
             Bound::Included(left) | Bound::Excluded(left) => self
                 .filters
                 .partition_point(|(smallest_key, _)| {
-                    let ord = FullKey::decode(smallest_key).user_key.cmp(&left);
+                    let ord = FullKey::decode(smallest_key).user_key.cmp_impl(&left);
                     ord == Ordering::Less || ord == Ordering::Equal
                 })
                 .saturating_sub(1),
@@ -252,13 +252,13 @@ impl BlockBasedXor16Filter {
                 Bound::Included(right) => {
                     let ord = FullKey::decode(&self.filters[block_idx].0)
                         .user_key
-                        .cmp(&right);
+                        .cmp_impl(&right);
                     ord == Ordering::Greater
                 }
                 Bound::Excluded(right) => {
                     let ord = FullKey::decode(&self.filters[block_idx].0)
                         .user_key
-                        .cmp(&right);
+                        .cmp_impl(&right);
                     ord != Ordering::Less
                 }
             };

@@ -33,7 +33,7 @@ pub struct BackwardUserIterator<I: HummockIterator<Direction = Backward>> {
     just_met_new_key: bool,
 
     /// Last user key
-    last_key: FullKey<Bytes>,
+    last_key: Option<FullKey<Bytes>>,
 
     /// Last user value
     last_val: Bytes,
@@ -75,7 +75,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
             out_of_range: false,
             key_range,
             just_met_new_key: false,
-            last_key: FullKey::default(),
+            last_key: None,
             last_val: Bytes::new(),
             last_delete: true,
             read_epoch,
@@ -94,7 +94,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     }
 
     fn reset(&mut self) {
-        self.last_key = FullKey::default();
+        self.last_key = None;
         self.just_met_new_key = false;
         self.last_delete = true;
         self.out_of_range = false;
@@ -141,14 +141,17 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
 
             if epoch > self.min_epoch && epoch <= self.read_epoch {
                 if self.just_met_new_key {
-                    self.last_key = full_key.copy_into();
+                    self.last_key = Some(full_key.copy_into());
                     self.just_met_new_key = false;
                     // If we encounter an out-of-range key, stop early.
-                    if self.out_of_range(self.last_key.user_key.as_ref()) {
+                    if self.out_of_range(full_key.user_key) {
                         self.out_of_range = true;
                         break;
                     }
-                } else if self.last_key.user_key.as_ref() != *key {
+                } else if match &self.last_key {
+                    None => true,
+                    Some(last_key) => last_key.user_key.as_ref() != *key,
+                } {
                     if !self.last_delete {
                         // We remark that we don't check `out_of_range` here as the other two cases
                         // covered all situation. 2(a)
@@ -157,9 +160,9 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
                         return Ok(());
                     } else {
                         // 2(b)
-                        self.last_key = full_key.copy_into();
+                        self.last_key = Some(full_key.copy_into());
                         // If we encounter an out-of-range key, stop early.
-                        if self.out_of_range(self.last_key.user_key.as_ref()) {
+                        if self.out_of_range(full_key.user_key) {
                             self.out_of_range = true;
                             break;
                         }
@@ -175,7 +178,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
                 match self.iterator.value() {
                     HummockValue::Put(val) => {
                         // TODO: unconditionally set the last key may lead to redundant copies
-                        self.last_key = full_key.copy_into();
+                        self.last_key = Some(full_key.copy_into());
                         self.last_val = Bytes::copy_from_slice(val);
                         self.last_delete = false;
                     }
@@ -198,7 +201,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
     /// Note: before call the function you need to ensure that the iterator is valid.
     pub fn key(&self) -> &FullKey<Bytes> {
         assert!(self.is_valid());
-        &self.last_key
+        self.last_key.as_ref().expect("should when valid")
     }
 
     /// The returned value is in the form of user value.
@@ -239,11 +242,11 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
                 if end_key < user_key {
                     end_key
                 } else {
-                    user_key
+                    user_key.into_range()
                 }
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
-            Unbounded => user_key,
+            Unbounded => user_key.into_range(),
         };
         let full_key = FullKey {
             user_key,
@@ -312,7 +315,7 @@ mod tests {
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
     use risingwave_common::catalog::TableId;
-    use risingwave_hummock_sdk::key::prev_key;
+    use risingwave_hummock_sdk::key::{prev_key, RangeUserKey};
     use risingwave_hummock_sdk::EpochWithGap;
 
     use super::*;
@@ -810,7 +813,7 @@ mod tests {
         assert!(!bui.is_valid());
     }
 
-    fn key_from_num(num: usize) -> UserKey<Vec<u8>> {
+    fn key_from_num<const IS_RANGE: bool>(num: usize) -> UserKey<Vec<u8>, IS_RANGE> {
         let width = 20;
         UserKey::for_test(
             TableId::default(),
@@ -823,14 +826,14 @@ mod tests {
     #[allow(clippy::mutable_key_type)]
     async fn chaos_test_case(
         handle: TableHolder,
-        start_bound: Bound<UserKey<Bytes>>,
-        end_bound: Bound<UserKey<Bytes>>,
+        start_bound: Bound<RangeUserKey<Bytes>>,
+        end_bound: Bound<RangeUserKey<Bytes>>,
         truth: &ChaosTestTruth,
         sstable_store: SstableStoreRef,
     ) {
         let start_key = match &start_bound {
             Bound::Included(b) => {
-                UserKey::for_test(b.table_id, Bytes::from(prev_key(&b.table_key.clone())))
+                RangeUserKey::for_test(b.table_id, Bytes::from(prev_key(&b.table_key.clone())))
             }
             Bound::Excluded(b) => b.clone(),
             Unbounded => key_from_num(0).into_bytes(),
@@ -946,11 +949,6 @@ mod tests {
         let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
         let repeat = 20;
         for _ in 0..repeat {
-            let mut rng = thread_rng();
-            let end_key: usize = rng.gen_range(2..=prev_key_number);
-            let end_key_bytes = key_from_num(end_key);
-            let begin_key: usize = rng.gen_range(1..=end_key);
-            let begin_key_bytes = key_from_num(begin_key);
             chaos_test_case(
                 sst.clone(),
                 Unbounded,
@@ -970,8 +968,6 @@ mod tests {
             let mut rng = thread_rng();
             let end_key: usize = rng.gen_range(2..=prev_key_number);
             let end_key_bytes = key_from_num(end_key).into_bytes();
-            let begin_key: usize = rng.gen_range(1..=end_key);
-            let begin_key_bytes = key_from_num(begin_key);
             chaos_test_case(
                 sst.clone(),
                 Unbounded,
@@ -990,7 +986,6 @@ mod tests {
         for _ in 0..repeat {
             let mut rng = thread_rng();
             let end_key: usize = rng.gen_range(2..=prev_key_number);
-            let end_key_bytes = key_from_num(end_key);
             let begin_key: usize = rng.gen_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
@@ -1011,7 +1006,6 @@ mod tests {
         for _ in 0..repeat {
             let mut rng = thread_rng();
             let end_key: usize = rng.gen_range(2..=prev_key_number);
-            let end_key_bytes = key_from_num(end_key);
             let begin_key: usize = rng.gen_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(

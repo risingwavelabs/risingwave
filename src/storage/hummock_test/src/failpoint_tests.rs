@@ -71,7 +71,7 @@ async fn test_failpoints_state_store_read_upload() {
             StorageValue::new_put("222"),
         ),
     ];
-    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp_impl(k2));
 
     let mut batch2 = vec![
         (
@@ -81,7 +81,7 @@ async fn test_failpoints_state_store_read_upload() {
         (anchor.clone(), StorageValue::new_delete()),
     ];
     // Make sure the batch is sorted.
-    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp_impl(k2));
     local.init_for_test(1).await.unwrap();
     local
         .ingest_batch(

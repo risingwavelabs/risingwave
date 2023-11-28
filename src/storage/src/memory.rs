@@ -546,7 +546,10 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
-        let range_bounds = (Bound::Included(key.clone()), Bound::Included(key));
+        let range_bounds = (
+            Bound::Included(key.clone().into_range()),
+            Bound::Included(key.into_range()),
+        );
         // We do not really care about vnodes here, so we just use the default value.
         let res = self.scan(range_bounds, epoch, read_options.table_id, Some(1))?;
 
@@ -784,13 +787,13 @@ mod tests {
                 .unwrap(),
             vec![
                 (
-                    FullKey::for_test(Default::default(), Bytes::from("a"), 0)
+                    FullKey::<_, false>::for_test(Default::default(), Bytes::from("a"), 0)
                         .encode()
                         .into(),
                     b"v1".to_vec().into()
                 ),
                 (
-                    FullKey::for_test(Default::default(), Bytes::from("b"), 0)
+                    FullKey::<_, false>::for_test(Default::default(), Bytes::from("b"), 0)
                         .encode()
                         .into(),
                     b"v1".to_vec().into()
@@ -810,7 +813,7 @@ mod tests {
                 )
                 .unwrap(),
             vec![(
-                FullKey::for_test(Default::default(), b"a".to_vec(), 0)
+                FullKey::<_, false>::for_test(Default::default(), b"a".to_vec(), 0)
                     .encode()
                     .into(),
                 b"v1".to_vec().into()
@@ -829,7 +832,7 @@ mod tests {
                 )
                 .unwrap(),
             vec![(
-                FullKey::for_test(Default::default(), b"a".to_vec(), 1)
+                FullKey::<_, false>::for_test(Default::default(), b"a".to_vec(), 1)
                     .encode()
                     .into(),
                 b"v2".to_vec().into()

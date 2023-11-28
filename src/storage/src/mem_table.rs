@@ -24,7 +24,7 @@ use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::estimate_size::{EstimateSize, KvSize};
-use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{FullKey, RangeTableKey, TableKey, TableKeyRange};
 use thiserror::Error;
 
 use crate::error::{StorageError, StorageResult};
@@ -93,7 +93,10 @@ impl RustIteratorBuilder for MemTableIteratorBuilder {
     type SeekIter<'a> =
         impl Iterator<Item = (TableKey<&'a [u8]>, HummockValue<&'a [u8]>)> + Send + 'a;
 
-    fn seek<'a>(iterable: &'a Self::Iterable, seek_key: TableKey<&[u8]>) -> Self::SeekIter<'a> {
+    fn seek<'a>(
+        iterable: &'a Self::Iterable,
+        seek_key: RangeTableKey<&[u8]>,
+    ) -> Self::SeekIter<'a> {
         iterable
             .range::<[u8], _>((Included(seek_key.as_ref()), Unbounded))
             .map(map_to_hummock_value)
@@ -296,14 +299,18 @@ impl MemTable {
         self.buffer
     }
 
-    pub fn iter<'a, R>(
+    pub fn iter<'a, 'b, R>(
         &'a self,
         key_range: R,
     ) -> impl Iterator<Item = (&'a TableKey<Bytes>, &'a KeyOp)>
     where
-        R: RangeBounds<TableKey<Bytes>> + 'a,
+        R: RangeBounds<RangeTableKey<Bytes>> + 'b,
     {
-        self.buffer.range(key_range)
+        let key_range = (
+            key_range.start_bound().map(|key| key.as_ref()),
+            key_range.end_bound().map(|key| key.as_ref()),
+        );
+        self.buffer.range::<[u8], _>(key_range)
     }
 
     fn sub_origin_size(&mut self, origin_value: Option<KeyOp>, key_len: usize) {

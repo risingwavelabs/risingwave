@@ -107,8 +107,8 @@ impl LocalHummockStorage {
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         let table_key_range = (
-            Bound::Included(table_key.clone()),
-            Bound::Included(table_key.clone()),
+            Bound::Included(table_key.clone().into_range()),
+            Bound::Included(table_key.clone().into_range()),
         );
 
         let read_snapshot = read_filter_for_local(

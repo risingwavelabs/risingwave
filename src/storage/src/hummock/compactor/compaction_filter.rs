@@ -16,10 +16,10 @@ use std::collections::{HashMap, HashSet};
 
 use dyn_clone::DynClone;
 use risingwave_common::catalog::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::RangeFullKey;
 
 pub trait CompactionFilter: Send + Sync + DynClone {
-    fn should_delete(&mut self, _: FullKey<&[u8]>) -> bool {
+    fn should_delete(&mut self, _: RangeFullKey<&[u8]>) -> bool {
         false
     }
 }
@@ -47,7 +47,7 @@ impl StateCleanUpCompactionFilter {
 }
 
 impl CompactionFilter for StateCleanUpCompactionFilter {
-    fn should_delete(&mut self, key: FullKey<&[u8]>) -> bool {
+    fn should_delete(&mut self, key: RangeFullKey<&[u8]>) -> bool {
         let table_id = key.user_key.table_id.table_id();
         if let Some((last_table_id, removed)) = self.last_table.as_ref() {
             if *last_table_id == table_id {
@@ -68,7 +68,7 @@ pub struct TtlCompactionFilter {
 }
 
 impl CompactionFilter for TtlCompactionFilter {
-    fn should_delete(&mut self, key: FullKey<&[u8]>) -> bool {
+    fn should_delete(&mut self, key: RangeFullKey<&[u8]>) -> bool {
         pub use risingwave_common::util::epoch::Epoch;
         let table_id = key.user_key.table_id.table_id();
         let epoch = key.epoch_with_gap.pure_epoch();
@@ -108,7 +108,7 @@ pub struct MultiCompactionFilter {
 }
 
 impl CompactionFilter for MultiCompactionFilter {
-    fn should_delete(&mut self, key: FullKey<&[u8]>) -> bool {
+    fn should_delete(&mut self, key: RangeFullKey<&[u8]>) -> bool {
         self.filter_vec
             .iter_mut()
             .any(|filter| filter.should_delete(key))

@@ -23,7 +23,7 @@ use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
-use risingwave_hummock_sdk::key::{FullKey, PointRange};
+use risingwave_hummock_sdk::key::{FullKey, PointRange, RangeFullKey};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{can_concat, EpochWithGap};
@@ -670,13 +670,13 @@ where
     };
 
     let end_key = if task_config.key_range.right.is_empty() {
-        FullKey::default()
+        RangeFullKey::default()
     } else {
-        FullKey::decode(&task_config.key_range.right).to_vec()
+        RangeFullKey::decode(&task_config.key_range.right).to_vec()
     };
     let max_key = end_key.to_ref();
 
-    let mut last_key = FullKey::default();
+    let mut last_key: Option<FullKey<_>> = None;
     let mut watermark_can_see_last_key = false;
     let mut user_key_last_delete_epoch = MAX_EPOCH;
     let mut local_stats = StoreLocalStatistic::default();
@@ -701,8 +701,8 @@ where
         let mut iter_key = iter.key();
         compaction_statistics.iter_total_key_counts += 1;
 
-        let mut is_new_user_key =
-            last_key.is_empty() || iter_key.user_key != last_key.user_key.as_ref();
+        let mut is_new_user_key = last_key.is_none()
+            || iter_key.user_key != last_key.as_ref().expect("should exist").user_key.as_ref();
 
         let mut drop = false;
 
@@ -712,7 +712,10 @@ where
             if !max_key.is_empty() && iter_key >= max_key {
                 break;
             }
-            last_key.set(iter_key);
+            match &mut last_key {
+                Some(last_key) => last_key.set(iter_key),
+                None => last_key = Some(iter_key.to_vec()),
+            };
             watermark_can_see_last_key = false;
             user_key_last_delete_epoch = MAX_EPOCH;
             if value.is_delete() {
@@ -721,6 +724,8 @@ where
         } else {
             local_stats.skip_multi_version_key_count += 1;
         }
+
+        let last_key = last_key.as_ref().unwrap();
 
         if last_table_id.map_or(true, |last_table_id| {
             last_table_id != last_key.user_key.table_id.table_id
@@ -731,7 +736,8 @@ where
             last_table_id = Some(last_key.user_key.table_id.table_id);
         }
 
-        let target_extended_user_key = PointRange::from_user_key(iter_key.user_key, false);
+        let target_extended_user_key =
+            PointRange::from_user_key(iter_key.user_key.into_range(), false);
         while del_iter.is_valid() && del_iter.key().as_ref().le(&target_extended_user_key) {
             let event_key = del_iter.key().to_vec();
             del_iter.next().await?;
@@ -769,7 +775,7 @@ where
             drop = true;
         }
 
-        if !drop && compaction_filter.should_delete(iter_key) {
+        if !drop && compaction_filter.should_delete(iter_key.into_range()) {
             drop = true;
         }
 
@@ -886,7 +892,7 @@ mod tests {
     use std::collections::HashSet;
 
     use risingwave_common::catalog::TableId;
-    use risingwave_hummock_sdk::key::UserKey;
+    use risingwave_hummock_sdk::key::RangeUserKey;
     use risingwave_pb::hummock::InputLevel;
 
     use super::*;
@@ -967,8 +973,8 @@ mod tests {
 
         let ret = CompactionDeleteRangeIterator::new(iter)
             .get_tombstone_between(
-                UserKey::<Bytes>::default().as_ref(),
-                UserKey::<Bytes>::default().as_ref(),
+                RangeUserKey::<Bytes>::default().as_ref(),
+                RangeUserKey::<Bytes>::default().as_ref(),
             )
             .await
             .unwrap();

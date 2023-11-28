@@ -584,11 +584,7 @@ impl HummockVersionReader {
             Sstable::hash_for_bloom_filter(dist_key.as_ref(), read_options.table_id.table_id())
         });
 
-        let full_key = FullKey::new(
-            read_options.table_id,
-            TableKey::new(table_key.clone()),
-            epoch,
-        );
+        let full_key = FullKey::new(read_options.table_id, table_key.clone(), epoch);
         for local_sst in &uncommitted_ssts {
             local_stats.staging_sst_get_count += 1;
             if let Some((data, data_epoch)) = get_from_sstable_info(
@@ -620,7 +616,8 @@ impl HummockVersionReader {
 
             match level.level_type() {
                 LevelType::Overlapping | LevelType::Unspecified => {
-                    let single_table_key_range = table_key.clone()..=table_key.clone();
+                    let single_table_key_range =
+                        table_key.clone().into_range()..=table_key.clone().into_range();
                     let sstable_infos = prune_overlapping_ssts(
                         &level.table_infos,
                         read_options.table_id,
@@ -648,7 +645,7 @@ impl HummockVersionReader {
                 }
                 LevelType::Nonoverlapping => {
                     let mut table_info_idx =
-                        search_sst_idx(&level.table_infos, full_key.user_key.as_ref());
+                        search_sst_idx(&level.table_infos, full_key.user_key.as_ref().into_range());
                     if table_info_idx == 0 {
                         continue;
                     }

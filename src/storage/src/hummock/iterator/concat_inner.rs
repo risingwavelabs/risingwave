@@ -15,7 +15,7 @@
 use std::cmp::Ordering::{Equal, Greater, Less};
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, RangeFullKey};
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::iterator::{DirectionEnum, HummockIterator, HummockIteratorDirection};
@@ -72,7 +72,7 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
     async fn seek_idx(
         &mut self,
         idx: usize,
-        seek_key: Option<FullKey<&[u8]>>,
+        seek_key: Option<RangeFullKey<&[u8]>>,
     ) -> HummockResult<()> {
         if idx >= self.tables.len() {
             if let Some(old_iter) = self.sstable_iter.take() {
@@ -147,17 +147,17 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
         Ok(())
     }
 
-    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+    async fn seek<'a>(&'a mut self, key: RangeFullKey<&'a [u8]>) -> HummockResult<()> {
         let mut table_idx = self
             .tables
             .partition_point(|table| match Self::Direction::direction() {
                 DirectionEnum::Forward => {
-                    let ord = FullKey::decode(smallest_key(table)).cmp(&key);
+                    let ord = FullKey::decode(smallest_key(table)).cmp_impl(&key);
 
                     ord == Less || ord == Equal
                 }
                 DirectionEnum::Backward => {
-                    let ord = FullKey::decode(largest_key(table)).cmp(&key);
+                    let ord = FullKey::decode(largest_key(table)).cmp_impl(&key);
                     ord == Greater
                         || (ord == Equal && !table.key_range.as_ref().unwrap().right_exclusive)
                 }

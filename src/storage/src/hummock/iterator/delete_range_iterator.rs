@@ -16,7 +16,7 @@ use std::collections::{BTreeSet, BinaryHeap};
 use std::future::Future;
 
 use risingwave_common::util::epoch::MAX_EPOCH;
-use risingwave_hummock_sdk::key::{PointRange, UserKey};
+use risingwave_hummock_sdk::key::{PointRange, RangeUserKey, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
 
@@ -93,7 +93,7 @@ pub trait DeleteRangeIterator {
     /// - Do not decide whether the position is valid or not by checking the returned error of this
     ///   function. This function WON'T return an `Err` if invalid. You should check `is_valid`
     ///   before starting iteration.
-    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> Self::SeekFuture<'_>;
+    fn seek<'a>(&'a mut self, target_user_key: RangeUserKey<&'a [u8]>) -> Self::SeekFuture<'_>;
 
     /// Indicates whether the iterator can be used.
     ///
@@ -150,7 +150,7 @@ impl DeleteRangeIterator for RangeIteratorTyped {
         }
     }
 
-    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> Self::SeekFuture<'_> {
+    fn seek<'a>(&'a mut self, target_user_key: RangeUserKey<&'a [u8]>) -> Self::SeekFuture<'_> {
         async move {
             match self {
                 RangeIteratorTyped::Sst(sst) => sst.seek(target_user_key).await,
@@ -270,7 +270,8 @@ impl ForwardMergeRangeIterator {
         &mut self,
         target_user_key: UserKey<&[u8]>,
     ) -> HummockResult<()> {
-        let target_extended_user_key = PointRange::from_user_key(target_user_key, false);
+        let target_extended_user_key =
+            PointRange::from_user_key(target_user_key.into_range(), false);
         while self.is_valid() && self.next_extended_user_key().le(&target_extended_user_key) {
             self.next().await?;
         }
@@ -359,7 +360,7 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
         }
     }
 
-    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> Self::SeekFuture<'_> {
+    fn seek<'a>(&'a mut self, target_user_key: RangeUserKey<&'a [u8]>) -> Self::SeekFuture<'_> {
         async move {
             self.current_epochs.clear();
             let mut iters = std::mem::take(&mut self.unused_iters);

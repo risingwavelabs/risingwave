@@ -14,7 +14,7 @@
 
 use std::future::Future;
 
-use risingwave_hummock_sdk::key::{FullKey, PointRange, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, PointRange, RangeFullKey, RangeUserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
 
@@ -99,7 +99,7 @@ impl ConcatDeleteRangeIterator {
     async fn seek_idx(
         &mut self,
         idx: usize,
-        seek_key: Option<UserKey<&[u8]>>,
+        seek_key: Option<RangeUserKey<&[u8]>>,
     ) -> HummockResult<()> {
         self.current.take();
         if idx < self.sstables.len() {
@@ -153,12 +153,12 @@ impl DeleteRangeIterator for ConcatDeleteRangeIterator {
         }
     }
 
-    fn seek<'a>(&'a mut self, target_user_key: UserKey<&'a [u8]>) -> Self::SeekFuture<'_> {
+    fn seek<'a>(&'a mut self, target_user_key: RangeUserKey<&'a [u8]>) -> Self::SeekFuture<'_> {
         async move {
             let mut idx = self
                 .sstables
                 .partition_point(|sst| {
-                    FullKey::decode(&sst.key_range.as_ref().unwrap().left)
+                    RangeFullKey::decode(&sst.key_range.as_ref().unwrap().left)
                         .user_key
                         .le(&target_user_key)
                 })
@@ -255,25 +255,25 @@ mod tests {
         assert_eq!(concat_iterator.current_epoch(), MAX_EPOCH);
         assert_eq!(
             concat_iterator.next_extended_user_key().left_user_key,
-            test_user_key(b"aaaa").as_ref()
+            test_user_key::<true>(b"aaaa").as_ref()
         );
         concat_iterator.next().await.unwrap();
         assert_eq!(concat_iterator.current_epoch(), 10);
         assert_eq!(
             concat_iterator.next_extended_user_key().left_user_key,
-            test_user_key(b"bbbb").as_ref()
+            test_user_key::<true>(b"bbbb").as_ref()
         );
         concat_iterator.next().await.unwrap();
         assert_eq!(concat_iterator.current_epoch(), 10);
         assert_eq!(
             concat_iterator.next_extended_user_key().left_user_key,
-            test_user_key(b"dddd").as_ref()
+            test_user_key::<true>(b"dddd").as_ref()
         );
         concat_iterator.next().await.unwrap();
         assert_eq!(concat_iterator.current_epoch(), 12);
         assert_eq!(
             concat_iterator.next_extended_user_key().left_user_key,
-            test_user_key(b"eeee").as_ref()
+            test_user_key::<true>(b"eeee").as_ref()
         );
         concat_iterator.next().await.unwrap();
         assert!(!concat_iterator.is_valid());

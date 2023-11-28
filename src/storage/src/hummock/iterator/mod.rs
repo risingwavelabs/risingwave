@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
@@ -36,7 +37,7 @@ pub mod forward_user;
 mod merge_inner;
 pub use forward_user::*;
 pub use merge_inner::{OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, RangeFullKey, RangeTableKey, TableKey, UserKey};
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
 
@@ -119,7 +120,7 @@ pub trait HummockIterator: Send + Sync {
     ///   before starting iteration.
     fn seek<'a>(
         &'a mut self,
-        key: FullKey<&'a [u8]>,
+        key: RangeFullKey<&'a [u8]>,
     ) -> impl Future<Output = HummockResult<()>> + Send + '_;
 
     /// take local statistic info from iterator to report metrics.
@@ -154,7 +155,7 @@ impl<D: HummockIteratorDirection> HummockIterator for PhantomHummockIterator<D> 
         unreachable!()
     }
 
-    async fn seek<'a>(&'a mut self, _key: FullKey<&'a [u8]>) -> HummockResult<()> {
+    async fn seek<'a>(&'a mut self, _key: RangeFullKey<&'a [u8]>) -> HummockResult<()> {
         unreachable!()
     }
 
@@ -241,7 +242,7 @@ impl<
         }
     }
 
-    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+    async fn seek<'a>(&'a mut self, key: RangeFullKey<&'a [u8]>) -> HummockResult<()> {
         match self {
             First(iter) => iter.seek(key).await,
             Second(iter) => iter.seek(key).await,
@@ -283,7 +284,7 @@ impl<I: HummockIterator> HummockIterator for Box<I> {
         (*self).deref_mut().rewind().await
     }
 
-    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+    async fn seek<'a>(&'a mut self, key: RangeFullKey<&'a [u8]>) -> HummockResult<()> {
         (*self).deref_mut().seek(key).await
     }
 
@@ -319,7 +320,8 @@ pub trait RustIteratorBuilder: Send + Sync + 'static {
         + Sync
         + 'a;
 
-    fn seek<'a>(iterable: &'a Self::Iterable, seek_key: TableKey<&[u8]>) -> Self::SeekIter<'a>;
+    fn seek<'a>(iterable: &'a Self::Iterable, seek_key: RangeTableKey<&[u8]>)
+        -> Self::SeekIter<'a>;
     fn rewind(iterable: &Self::Iterable) -> Self::RewindIter<'_>;
 }
 
@@ -390,7 +392,7 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
         Ok(())
     }
 
-    async fn seek<'b>(&'b mut self, key: FullKey<&'b [u8]>) -> HummockResult<()> {
+    async fn seek<'b>(&'b mut self, key: RangeFullKey<&'b [u8]>) -> HummockResult<()> {
         if self.table_id < key.user_key.table_id {
             // returns None when the range of self.table_id must not include the given key
             self.iter = None;
@@ -409,16 +411,16 @@ impl<'a, B: RustIteratorBuilder> HummockIterator for FromRustIterator<'a, B> {
                         table_key: first_key,
                     },
                 };
-                if first_full_key < key {
+                if first_full_key.cmp_impl(&key) == Ordering::Less {
                     // The semantic of `seek_fn` will ensure that `first_key` >= table_key of `key`.
                     // At the beginning we have checked that `self.table_id` >= table_id of `key`.
                     // Therefore, when `first_full_key` < `key`, the only possibility is that
                     // `first_key` == table_key of `key`, and `self.table_id` == table_id of `key`,
                     // the `self.epoch` < epoch of `key`.
-                    assert_eq!(first_key, key.user_key.table_key);
+                    assert_eq!(first_key.as_ref(), key.user_key.table_key.as_ref());
                     match iter.next() {
                         Some((next_key, next_value)) => {
-                            assert_gt!(next_key, first_key);
+                            assert_gt!(next_key.as_ref(), first_key.as_ref());
                             self.iter =
                                 Some((RustIteratorOfBuilder::Seek(iter), next_key, next_value));
                         }

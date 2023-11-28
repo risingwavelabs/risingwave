@@ -53,7 +53,7 @@ async fn test_storage_basic() {
     ];
 
     // Make sure the batch is sorted.
-    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp_impl(k2));
 
     // Second batch modifies the anchor.
     let mut batch2 = vec![
@@ -68,7 +68,7 @@ async fn test_storage_basic() {
     ];
 
     // Make sure the batch is sorted.
-    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp_impl(k2));
 
     // Third batch deletes the anchor
     let mut batch3 = vec![
@@ -87,7 +87,7 @@ async fn test_storage_basic() {
     ];
 
     // Make sure the batch is sorted.
-    batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    batch3.sort_by(|(k1, _), (k2, _)| k1.cmp_impl(k2));
 
     // epoch 0 is reserved by storage service
     let epoch1: u64 = 1;
@@ -460,7 +460,7 @@ async fn test_state_store_sync() {
         ),
     ];
 
-    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp_impl(k2));
     hummock_storage
         .ingest_batch(
             batch1,
@@ -488,7 +488,7 @@ async fn test_state_store_sync() {
             StorageValue::new_put("5555"),
         ),
     ];
-    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp_impl(k2));
     hummock_storage
         .ingest_batch(
             batch2,
@@ -509,7 +509,7 @@ async fn test_state_store_sync() {
         gen_key_from_str(VirtualNode::ZERO, "eeee"),
         StorageValue::new_put("6666"),
     )];
-    batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    batch3.sort_by(|(k1, _), (k2, _)| k1.cmp_impl(k2));
     hummock_storage
         .ingest_batch(
             batch3,
@@ -1486,7 +1486,10 @@ async fn test_hummock_version_reader() {
                 let start_key = gen_key(25);
                 let end_key = gen_key(50);
 
-                let key_range = (Included(start_key), Excluded(end_key));
+                let key_range = (
+                    Included(start_key.into_range()),
+                    Excluded(end_key.into_range()),
+                );
 
                 {
                     let read_snapshot = {

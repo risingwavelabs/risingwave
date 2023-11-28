@@ -60,7 +60,7 @@ mod test {
         while mi.is_valid() {
             let key = mi.key();
             let val = mi.value();
-            assert_eq!(key, iterator_test_key_of(i).to_ref());
+            assert_eq!(key, iterator_test_key_of::<false>(i).to_ref());
             assert_eq!(
                 val.into_user_value().unwrap(),
                 iterator_test_value_of(i).as_slice()
@@ -123,7 +123,10 @@ mod test {
             v.into_user_value().unwrap(),
             iterator_test_value_of(TEST_KEYS_COUNT + 4).as_slice()
         );
-        assert_eq!(k, iterator_test_key_of(TEST_KEYS_COUNT + 4).to_ref());
+        assert_eq!(
+            k,
+            iterator_test_key_of::<false>(TEST_KEYS_COUNT + 4).to_ref()
+        );
 
         mi.seek(iterator_test_key_of(2 * TEST_KEYS_COUNT + 7).to_ref())
             .await
@@ -134,7 +137,10 @@ mod test {
             v.into_user_value().unwrap(),
             iterator_test_value_of(2 * TEST_KEYS_COUNT + 7).as_slice()
         );
-        assert_eq!(k, iterator_test_key_of(2 * TEST_KEYS_COUNT + 7).to_ref());
+        assert_eq!(
+            k,
+            iterator_test_key_of::<false>(2 * TEST_KEYS_COUNT + 7).to_ref()
+        );
 
         // left edge case
         mi.seek(iterator_test_key_of(3 * TEST_KEYS_COUNT).to_ref())
@@ -146,7 +152,10 @@ mod test {
             v.into_user_value().unwrap(),
             iterator_test_value_of(3 * TEST_KEYS_COUNT).as_slice()
         );
-        assert_eq!(k, iterator_test_key_of(3 * TEST_KEYS_COUNT).to_ref());
+        assert_eq!(
+            k,
+            iterator_test_key_of::<false>(3 * TEST_KEYS_COUNT).to_ref()
+        );
     }
 
     #[tokio::test]

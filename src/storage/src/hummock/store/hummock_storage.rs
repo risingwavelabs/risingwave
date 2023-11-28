@@ -231,7 +231,10 @@ impl HummockStorage {
         epoch: HummockEpoch,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
-        let key_range = (Bound::Included(key.clone()), Bound::Included(key.clone()));
+        let key_range = (
+            Bound::Included(key.clone().into_range()),
+            Bound::Included(key.clone().into_range()),
+        );
 
         let read_version_tuple = if read_options.read_version_from_backup {
             self.build_read_version_tuple_from_backup(epoch).await?

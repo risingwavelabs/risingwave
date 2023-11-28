@@ -22,7 +22,7 @@ use std::time::Instant;
 use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, RangeFullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::{can_concat, EpochWithGap, LocalSstableInfo};
@@ -139,9 +139,9 @@ impl BlockStreamIterator {
         }
     }
 
-    fn key(&self) -> FullKey<&[u8]> {
+    fn min_key(&self) -> RangeFullKey<&[u8]> {
         match self.iter.as_ref() {
-            Some(iter) => iter.key(),
+            Some(iter) => iter.key().into_range(),
             None => FullKey::decode(
                 self.sstable.value().meta.block_metas[self.next_block_index]
                     .smallest_key
@@ -363,8 +363,8 @@ impl CompactorRunner {
             let ret = self
                 .left
                 .current_sstable()
-                .key()
-                .cmp(&self.right.current_sstable().key());
+                .min_key()
+                .cmp_impl(&self.right.current_sstable().min_key());
             let (first, second) = if ret == Ordering::Less {
                 (&mut self.left, &mut self.right)
             } else {
@@ -372,7 +372,7 @@ impl CompactorRunner {
             };
             assert!(ret != Ordering::Equal);
             if first.current_sstable().iter.is_none() {
-                let right_key = second.current_sstable().key();
+                let right_key = second.current_sstable().min_key();
                 while first.current_sstable().is_valid() {
                     let full_key = FullKey::decode(first.current_sstable().next_block_largest());
                     // the full key may be either Excluded key or Included key, so we do not allow
@@ -431,7 +431,7 @@ impl CompactorRunner {
                 first.init_block_iter().await?;
             }
 
-            let target_key = second.current_sstable().key();
+            let target_key = second.current_sstable().min_key();
             let iter = first.sstable_iter.as_mut().unwrap().iter.as_mut().unwrap();
             self.executor.run(iter, target_key).await?;
             if !iter.is_valid() {
@@ -512,7 +512,7 @@ impl CompactorRunner {
 }
 
 pub struct CompactTaskExecutor<F: TableBuilderFactory> {
-    last_key: FullKey<Vec<u8>>,
+    last_key: RangeFullKey<Vec<u8>>,
     compaction_statistics: CompactionStatistics,
     last_table_id: Option<u32>,
     last_table_stats: TableStats,
@@ -575,7 +575,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
     pub async fn run(
         &mut self,
         iter: &mut BlockIterator,
-        target_key: FullKey<&[u8]>,
+        target_key: RangeFullKey<&[u8]>,
     ) -> HummockResult<()> {
         while iter.is_valid() && iter.key().le(&target_key) {
             let is_new_user_key =
@@ -587,7 +587,7 @@ impl<F: TableBuilderFactory> CompactTaskExecutor<F> {
             let epoch = iter.key().epoch_with_gap.pure_epoch();
             let value = HummockValue::from_slice(iter.value()).unwrap();
             if is_new_user_key || self.last_key.is_empty() {
-                self.last_key.set(iter.key());
+                self.last_key.set(iter.key().into_range());
                 self.watermark_can_see_last_key = false;
                 self.last_key_is_delete = false;
             }

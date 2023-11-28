@@ -24,7 +24,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::must_match;
 use risingwave_common::util::epoch::MAX_EPOCH;
-use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, PointRange, RangeFullKey, TableKey, UserKey};
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, HummockSstableObjectId};
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
@@ -112,8 +112,8 @@ pub fn gen_dummy_sst_info(
         object_id: id,
         sst_id: id,
         key_range: Some(KeyRange {
-            left: FullKey::for_test(table_id, min_table_key, epoch).encode(),
-            right: FullKey::for_test(table_id, max_table_key, epoch).encode(),
+            left: RangeFullKey::for_test(table_id, min_table_key, epoch).encode(),
+            right: RangeFullKey::for_test(table_id, max_table_key, epoch).encode(),
             right_exclusive: false,
         }),
         file_size,
@@ -227,19 +227,20 @@ pub async fn gen_test_sstable_impl<B: AsRef<[u8]> + Clone + Default + Eq, F: Fil
         None,
     );
 
-    let mut last_key = FullKey::<B>::default();
+    let mut last_key: Option<FullKey<B>> = None;
     let mut user_key_last_delete = MAX_EPOCH;
     for (mut key, value) in kv_iter {
-        let is_new_user_key =
-            last_key.is_empty() || key.user_key.as_ref() != last_key.user_key.as_ref();
+        let is_new_user_key = last_key.is_none()
+            || key.user_key.as_ref() != last_key.as_ref().unwrap().user_key.as_ref();
         let epoch = key.epoch_with_gap.pure_epoch();
         if is_new_user_key {
-            last_key = key.clone();
+            last_key = Some(key.clone());
             user_key_last_delete = MAX_EPOCH;
         }
 
         let mut earliest_delete_epoch = MAX_EPOCH;
-        let extended_user_key = PointRange::from_user_key(key.user_key.as_ref(), false);
+        let extended_user_key =
+            PointRange::from_user_key(key.user_key.as_ref().into_range(), false);
         for range_tombstone in &range_tombstones {
             if range_tombstone
                 .start_user_key
@@ -331,19 +332,21 @@ pub async fn gen_test_sstable_with_range_tombstone(
 }
 
 /// Generates a user key with table id 0 and the given `table_key`
-pub fn test_user_key(table_key: impl AsRef<[u8]>) -> UserKey<Vec<u8>> {
+pub fn test_user_key<const IS_RANGE: bool>(
+    table_key: impl AsRef<[u8]>,
+) -> UserKey<Vec<u8>, IS_RANGE> {
     UserKey::for_test(TableId::default(), table_key.as_ref().to_vec())
 }
 
 /// Generates a user key with table id 0 and table key format of `key_test_{idx * 2}`
-pub fn test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
+pub fn test_user_key_of<const IS_RANGE: bool>(idx: usize) -> UserKey<Vec<u8>, IS_RANGE> {
     let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
     table_key.extend_from_slice(format!("key_test_{:05}", idx * 2).as_bytes());
     UserKey::for_test(TableId::default(), table_key)
 }
 
 /// Generates a full key with table id 0 and epoch 123. User key is created with `test_user_key_of`.
-pub fn test_key_of(idx: usize) -> FullKey<Vec<u8>> {
+pub fn test_key_of<const IS_RANGE: bool>(idx: usize) -> FullKey<Vec<u8>, IS_RANGE> {
     FullKey {
         user_key: test_user_key_of(idx),
         epoch_with_gap: EpochWithGap::new_from_epoch(233),

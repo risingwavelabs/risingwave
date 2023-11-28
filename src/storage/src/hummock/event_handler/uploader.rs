@@ -1053,7 +1053,7 @@ mod tests {
     use prometheus::core::GenericGauge;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_hummock_sdk::key::{FullKey, TableKey};
+    use risingwave_hummock_sdk::key::{RangeFullKey, TableKey};
     use risingwave_hummock_sdk::{HummockEpoch, LocalSstableInfo};
     use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
     use spin::Mutex;
@@ -1143,8 +1143,9 @@ mod tests {
         end_epoch: HummockEpoch,
     ) -> Vec<LocalSstableInfo> {
         let start_full_key =
-            FullKey::new(TEST_TABLE_ID, TableKey::new(dummy_table_key()), start_epoch);
-        let end_full_key = FullKey::new(TEST_TABLE_ID, TableKey::new(dummy_table_key()), end_epoch);
+            RangeFullKey::new(TEST_TABLE_ID, TableKey::new(dummy_table_key()), start_epoch);
+        let end_full_key =
+            RangeFullKey::new(TEST_TABLE_ID, TableKey::new(dummy_table_key()), end_epoch);
         let gen_sst_object_id = (start_epoch << 8) + end_epoch;
         vec![LocalSstableInfo::for_test(SstableInfo {
             object_id: gen_sst_object_id,

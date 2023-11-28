@@ -80,7 +80,7 @@ async fn test_failpoints_concat_read_err() {
     while iter.is_valid() {
         let key = iter.key();
         let val = iter.value();
-        assert_eq!(key, iterator_test_key_of(i * 2).to_ref());
+        assert_eq!(key, iterator_test_key_of::<false>(i * 2).to_ref());
         assert_eq!(
             val.into_user_value().unwrap(),
             iterator_test_value_of(i * 2).as_slice()
@@ -137,7 +137,7 @@ async fn test_failpoints_backward_concat_read_err() {
         i -= 1;
         let key = iter.key();
         let val = iter.value();
-        assert_eq!(key, iterator_test_key_of(i * 2).to_ref());
+        assert_eq!(key, iterator_test_key_of::<false>(i * 2).to_ref());
         assert_eq!(
             val.into_user_value().unwrap(),
             iterator_test_value_of(i * 2).as_slice()
@@ -414,7 +414,7 @@ async fn test_failpoints_compactor_iterator_recreate() {
     while sstable_iter.is_valid() {
         let key = sstable_iter.key();
         let value = sstable_iter.value();
-        assert_eq!(key, test_key_of(cnt).to_ref());
+        assert_eq!(key, test_key_of::<false>(cnt).to_ref());
         let expected = test_value_of(cnt);
         let expected_slice = expected.as_slice();
         assert_eq!(value.into_user_value().unwrap(), expected_slice);

@@ -32,7 +32,7 @@ pub struct UserIterator<I: HummockIterator<Direction = Forward>> {
     iterator: I,
 
     /// Last full key.
-    last_key: FullKey<Bytes>,
+    last_key: Option<FullKey<Bytes>>,
 
     /// Last user value
     last_val: Bytes,
@@ -72,7 +72,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
             iterator,
             out_of_range: false,
             key_range,
-            last_key: FullKey::default(),
+            last_key: None,
             last_val: Bytes::new(),
             read_epoch,
             min_epoch,
@@ -112,7 +112,12 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                 continue;
             }
 
-            if self.last_key.user_key.as_ref() != full_key.user_key {
+            if self
+                .last_key
+                .as_ref()
+                .map(|last_key| last_key.user_key.as_ref() != full_key.user_key)
+                .unwrap_or(true)
+            {
                 // It is better to early return here if the user key is already
                 // out of range to avoid unnecessary access on the range tomestones
                 // via `delete_range_iter`.
@@ -124,7 +129,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                     return Ok(());
                 }
 
-                self.last_key = full_key.copy_into();
+                self.last_key = Some(full_key.copy_into());
                 // handle delete operation
                 match self.iterator.value() {
                     HummockValue::Put(val) => {
@@ -163,7 +168,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Note: before call the function you need to ensure that the iterator is valid.
     pub fn key(&self) -> &FullKey<Bytes> {
         assert!(self.is_valid());
-        &self.last_key
+        self.last_key.as_ref().expect("should be valid")
     }
 
     /// The returned value is in the form of user value.
@@ -210,7 +215,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         };
 
         // Handle multi-version
-        self.last_key = FullKey::default();
+        self.last_key = None;
         // Handles range scan when key > end_key
         self.next().await
     }
@@ -227,11 +232,11 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
                 if begin_key > user_key {
                     begin_key
                 } else {
-                    user_key
+                    user_key.into_range()
                 }
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
-            Unbounded => user_key,
+            Unbounded => user_key.into_range(),
         };
 
         let full_key = FullKey {
@@ -251,7 +256,7 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
         self.delete_range_iter.seek(full_key.user_key).await?;
 
         // Handle multi-version
-        self.last_key = FullKey::default();
+        self.last_key = None;
         // Handle range scan when key > end_key
 
         self.next().await
@@ -858,9 +863,15 @@ mod tests {
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
         assert!(ui.is_valid());
-        assert_eq!(ui.key().user_key, iterator_test_bytes_user_key_of(0));
+        assert_eq!(
+            ui.key().user_key,
+            iterator_test_bytes_user_key_of::<false>(0)
+        );
         ui.next().await.unwrap();
-        assert_eq!(ui.key().user_key, iterator_test_bytes_user_key_of(8));
+        assert_eq!(
+            ui.key().user_key,
+            iterator_test_bytes_user_key_of::<false>(8)
+        );
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
@@ -868,7 +879,10 @@ mod tests {
         ui.seek(iterator_test_bytes_user_key_of(1).as_ref())
             .await
             .unwrap();
-        assert_eq!(ui.key().user_key, iterator_test_bytes_user_key_of(8));
+        assert_eq!(
+            ui.key().user_key,
+            iterator_test_bytes_user_key_of::<false>(8)
+        );
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
@@ -885,9 +899,15 @@ mod tests {
             UserIterator::new(mi, (Unbounded, Unbounded), 300, 0, None, del_iter);
         ui.rewind().await.unwrap();
         assert!(ui.is_valid());
-        assert_eq!(ui.key().user_key, iterator_test_bytes_user_key_of(2));
+        assert_eq!(
+            ui.key().user_key,
+            iterator_test_bytes_user_key_of::<false>(2)
+        );
         ui.next().await.unwrap();
-        assert_eq!(ui.key().user_key, iterator_test_bytes_user_key_of(8));
+        assert_eq!(
+            ui.key().user_key,
+            iterator_test_bytes_user_key_of::<false>(8)
+        );
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
     }

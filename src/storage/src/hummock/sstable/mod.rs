@@ -41,7 +41,7 @@ pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
 use risingwave_hummock_sdk::key::{
-    FullKey, KeyPayloadType, PointRange, TableKey, UserKey, UserKeyRangeRef,
+    FullKey, KeyPayloadType, PointRange, RangeUserKey, TableKey, UserKey, UserKeyRangeRef,
 };
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 
@@ -497,7 +497,7 @@ impl SstableMeta {
 #[derive(Default)]
 pub struct SstableIteratorReadOptions {
     pub cache_policy: CachePolicy,
-    pub must_iterated_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
+    pub must_iterated_end_user_key: Option<Bound<RangeUserKey<KeyPayloadType>>>,
     pub max_preload_retry_times: usize,
 }
 

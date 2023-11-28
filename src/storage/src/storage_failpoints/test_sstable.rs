@@ -56,7 +56,7 @@ async fn test_failpoints_table_read() {
     sstable_iter.rewind().await.unwrap();
 
     sstable_iter.seek(test_key_of(500).to_ref()).await.unwrap();
-    assert_eq!(sstable_iter.key(), test_key_of(500).to_ref());
+    assert_eq!(sstable_iter.key(), test_key_of::<false>(500).to_ref());
     // Injection failure to read object_store
     fail::cfg(mem_read_err_fp, "return").unwrap();
 
@@ -72,10 +72,10 @@ async fn test_failpoints_table_read() {
     let result = sstable_iter.seek(seek_key.to_ref()).await;
     assert!(result.is_err());
 
-    assert_eq!(sstable_iter.key(), test_key_of(500).to_ref());
+    assert_eq!(sstable_iter.key(), test_key_of::<false>(500).to_ref());
     fail::remove(mem_read_err_fp);
     sstable_iter.seek(seek_key.to_ref()).await.unwrap();
-    assert_eq!(sstable_iter.key(), test_key_of(600).to_ref());
+    assert_eq!(sstable_iter.key(), test_key_of::<false>(600).to_ref());
 }
 
 #[tokio::test]
@@ -134,7 +134,7 @@ async fn test_failpoints_vacuum_and_metadata() {
     while sstable_iter.is_valid() {
         let key = sstable_iter.key();
         let value = sstable_iter.value();
-        assert_eq!(key, test_key_of(cnt).to_ref());
+        assert_eq!(key, test_key_of::<false>(cnt).to_ref());
         assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
         cnt += 1;
         sstable_iter.next().await.unwrap();

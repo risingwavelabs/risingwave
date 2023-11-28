@@ -120,7 +120,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
             async move {
                 state_store
                     .iter(
-                        (Included(range_start), Excluded(range_end)),
+                        (Included(range_start), Excluded(range_end.into_range())),
                         MAX_EPOCH,
                         ReadOptions {
                             prefetch_options: PrefetchOptions::default(),
@@ -231,7 +231,10 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
                                 Ok::<_, anyhow::Error>(Box::pin(
                                     state_store
                                         .iter(
-                                            (Included(range_start), Included(range_end)),
+                                            (
+                                                Included(range_start.into_range()),
+                                                Included(range_end.into_range()),
+                                            ),
                                             MAX_EPOCH,
                                             ReadOptions {
                                                 prefetch_options: PrefetchOptions::default(),

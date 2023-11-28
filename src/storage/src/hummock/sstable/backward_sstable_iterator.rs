@@ -16,7 +16,7 @@ use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
 use risingwave_common::cache::CachePriority;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, RangeFullKey};
 
 use crate::hummock::iterator::{Backward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -57,7 +57,7 @@ impl BackwardSstableIterator {
     async fn seek_idx(
         &mut self,
         idx: isize,
-        seek_key: Option<FullKey<&[u8]>>,
+        seek_key: Option<RangeFullKey<&[u8]>>,
     ) -> HummockResult<()> {
         if idx >= self.sst.value().block_count() as isize || idx < 0 {
             self.block_iter = None;
@@ -121,7 +121,7 @@ impl HummockIterator for BackwardSstableIterator {
             .await
     }
 
-    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+    async fn seek<'a>(&'a mut self, key: RangeFullKey<&'a [u8]>) -> HummockResult<()> {
         let block_idx = self
             .sst
             .value()
@@ -131,7 +131,7 @@ impl HummockIterator for BackwardSstableIterator {
                 // Compare by version comparator
                 // Note: we are comparing against the `smallest_key` of the `block`, thus the
                 // partition point should be `prev(<=)` instead of `<`.
-                let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
+                let ord = FullKey::decode(&block_meta.smallest_key).cmp_impl(&key);
                 ord == Less || ord == Equal
             })
             .saturating_sub(1); // considering the boundary of 0
@@ -195,7 +195,7 @@ mod tests {
             cnt -= 1;
             let key = sstable_iter.key();
             let value = sstable_iter.value();
-            assert_eq!(key, test_key_of(cnt).to_ref());
+            assert_eq!(key, test_key_of::<false>(cnt).to_ref());
             assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
             sstable_iter.next().await.unwrap();
         }
@@ -222,7 +222,7 @@ mod tests {
             sstable_iter.seek(test_key_of(i).to_ref()).await.unwrap();
             // sstable_iter.next().await.unwrap();
             let key = sstable_iter.key();
-            assert_eq!(key, test_key_of(i).to_ref());
+            assert_eq!(key, test_key_of::<false>(i).to_ref());
         }
 
         // Seek to key #TEST_KEYS_COUNT-500 and start iterating
@@ -232,7 +232,7 @@ mod tests {
             .unwrap();
         for i in (0..TEST_KEYS_COUNT - 500 + 1).rev() {
             let key = sstable_iter.key();
-            assert_eq!(key, test_key_of(i).to_ref(), "key index:{}", i);
+            assert_eq!(key, test_key_of::<false>(i).to_ref(), "key index:{}", i);
             sstable_iter.next().await.unwrap();
         }
         assert!(!sstable_iter.is_valid());
@@ -248,7 +248,7 @@ mod tests {
         );
         sstable_iter.seek(largest_key.to_ref()).await.unwrap();
         let key = sstable_iter.key();
-        assert_eq!(key, test_key_of(TEST_KEYS_COUNT - 1).to_ref());
+        assert_eq!(key, test_key_of::<false>(TEST_KEYS_COUNT - 1).to_ref());
 
         // Seek to > last key
         let smallest_key = FullKey::for_test(
@@ -286,7 +286,7 @@ mod tests {
                 .unwrap();
 
             let key = sstable_iter.key();
-            assert_eq!(key, test_key_of(idx - 1).to_ref());
+            assert_eq!(key, test_key_of::<false>(idx - 1).to_ref());
             sstable_iter.next().await.unwrap();
         }
         assert!(!sstable_iter.is_valid());

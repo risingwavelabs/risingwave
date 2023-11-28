@@ -16,7 +16,7 @@ use std::cmp::Ordering::{Equal, Less};
 use std::ops::Bound::*;
 use std::sync::Arc;
 
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, RangeFullKey};
 
 use super::super::{HummockResult, HummockValue};
 use crate::hummock::iterator::{Forward, HummockIterator};
@@ -105,7 +105,7 @@ impl SstableIterator {
     async fn seek_idx(
         &mut self,
         idx: usize,
-        seek_key: Option<FullKey<&[u8]>>,
+        seek_key: Option<RangeFullKey<&[u8]>>,
     ) -> HummockResult<()> {
         tracing::debug!(
             target: "events::storage::sstable::block_seek",
@@ -247,7 +247,7 @@ impl HummockIterator for SstableIterator {
         Ok(())
     }
 
-    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+    async fn seek<'a>(&'a mut self, key: RangeFullKey<&'a [u8]>) -> HummockResult<()> {
         let block_idx = self
             .sst
             .value()
@@ -257,7 +257,7 @@ impl HummockIterator for SstableIterator {
                 // compare by version comparator
                 // Note: we are comparing against the `smallest_key` of the `block`, thus the
                 // partition point should be `prev(<=)` instead of `<`.
-                let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
+                let ord = RangeFullKey::decode(&block_meta.smallest_key).cmp_impl(&key);
                 ord == Less || ord == Equal
             })
             .saturating_sub(1); // considering the boundary of 0
@@ -290,13 +290,11 @@ impl SstableIteratorType for SstableIterator {
 mod tests {
     use std::collections::Bound;
 
-    use bytes::Bytes;
     use itertools::Itertools;
     use rand::prelude::*;
     use risingwave_common::cache::CachePriority;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
-    use risingwave_hummock_sdk::key::{TableKey, UserKey};
 
     use super::*;
     use crate::assert_bytes_eq;
@@ -321,7 +319,7 @@ mod tests {
         while sstable_iter.is_valid() {
             let key = sstable_iter.key();
             let value = sstable_iter.value();
-            assert_eq!(key, test_key_of(cnt).to_ref());
+            assert_eq!(key, test_key_of::<false>(cnt).to_ref());
             assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
             cnt += 1;
             sstable_iter.next().await.unwrap();
@@ -367,14 +365,14 @@ mod tests {
             sstable_iter.seek(test_key_of(i).to_ref()).await.unwrap();
             // sstable_iter.next().await.unwrap();
             let key = sstable_iter.key();
-            assert_eq!(key, test_key_of(i).to_ref());
+            assert_eq!(key, test_key_of::<false>(i).to_ref());
         }
 
         // Seek to key #500 and start iterating.
         sstable_iter.seek(test_key_of(500).to_ref()).await.unwrap();
         for i in 500..TEST_KEYS_COUNT {
             let key = sstable_iter.key();
-            assert_eq!(key, test_key_of(i).to_ref());
+            assert_eq!(key, test_key_of::<false>(i).to_ref());
             sstable_iter.next().await.unwrap();
         }
         assert!(!sstable_iter.is_valid());
@@ -391,7 +389,7 @@ mod tests {
         );
         sstable_iter.seek(smallest_key.to_ref()).await.unwrap();
         let key = sstable_iter.key();
-        assert_eq!(key, test_key_of(0).to_ref());
+        assert_eq!(key, test_key_of::<false>(0).to_ref());
 
         // Seek to > last key
         let largest_key = FullKey::for_test(
@@ -429,7 +427,7 @@ mod tests {
                 .unwrap();
 
             let key = sstable_iter.key();
-            assert_eq!(key, test_key_of(idx).to_ref());
+            assert_eq!(key, test_key_of::<false>(idx).to_ref());
             sstable_iter.next().await.unwrap();
         }
         assert!(!sstable_iter.is_valid());
@@ -450,10 +448,7 @@ mod tests {
         .await;
 
         let end_key = test_key_of(TEST_KEYS_COUNT / 2);
-        let uk = UserKey::new(
-            end_key.user_key.table_id,
-            TableKey::new(Bytes::from(end_key.user_key.table_key.into_inner())),
-        );
+        let uk = end_key.user_key.into_bytes();
         let mut sstable_iter = SstableIterator::create(
             table,
             sstable_store,
@@ -468,7 +463,7 @@ mod tests {
         while sstable_iter.is_valid() {
             let key = sstable_iter.key();
             let value = sstable_iter.value();
-            assert_eq!(key, test_key_of(cnt).to_ref());
+            assert_eq!(key, test_key_of::<false>(cnt).to_ref());
             assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
             cnt += 1;
             sstable_iter.next().await.unwrap();

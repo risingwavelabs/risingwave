@@ -1523,14 +1523,22 @@ pub(crate) mod tests {
             assert_eq!(normal_iter.value(), fast_iter.value());
             let key_ref = fast_iter.key().user_key.as_ref();
             assert!(normal_tables.iter().any(|table| {
-                table
-                    .value()
-                    .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
+                table.value().may_match_hash(
+                    &(
+                        Bound::Included(key_ref.into_range()),
+                        Bound::Included(key_ref.into_range()),
+                    ),
+                    hash,
+                )
             }));
             assert!(fast_tables.iter().any(|table| {
-                table
-                    .value()
-                    .may_match_hash(&(Bound::Included(key_ref), Bound::Included(key_ref)), hash)
+                table.value().may_match_hash(
+                    &(
+                        Bound::Included(key_ref.into_range()),
+                        Bound::Included(key_ref.into_range()),
+                    ),
+                    hash,
+                )
             }));
             normal_iter.next().await.unwrap();
             fast_iter.next().await.unwrap();

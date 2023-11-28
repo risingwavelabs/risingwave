@@ -189,7 +189,7 @@ async fn compact_shared_buffer(
                 if last_buffer_size >= sub_compaction_data_size
                     && last_user_key.as_ref() != user_key
                 {
-                    last_user_key.set(user_key);
+                    last_user_key.set(user_key.into_range());
                     key_split_append(
                         &FullKey {
                             user_key,
@@ -200,7 +200,7 @@ async fn compact_shared_buffer(
                     );
                     last_buffer_size = data_size;
                 } else {
-                    last_user_key.set(user_key);
+                    last_user_key.set(user_key.into_range());
                     last_buffer_size += data_size;
                 }
             }
@@ -379,7 +379,7 @@ pub async fn merge_imms_in_memory(
     let mut pivot = items
         .first()
         .map(|((k, _), _)| k.clone())
-        .unwrap_or_default();
+        .expect("merged result should not be empty");
     let mut monotonic_tombstone_events = vec![];
     let target_extended_user_key =
         PointRange::from_user_key(UserKey::new(table_id, TableKey::new(pivot.as_ref())), false);

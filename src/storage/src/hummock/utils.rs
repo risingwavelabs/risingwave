@@ -24,7 +24,7 @@ use bytes::Bytes;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::key::{
-    bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
+    bound_table_key_range, EmptySliceRef, FullKey, RangeTableKey, RangeUserKey, TableKey,
 };
 use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::{HummockVersion, SstableInfo};
@@ -98,15 +98,15 @@ pub fn validate_table_key_range(version: &HummockVersion) {
 
 pub fn filter_single_sst<R, B>(info: &SstableInfo, table_id: TableId, table_key_range: &R) -> bool
 where
-    R: RangeBounds<TableKey<B>>,
+    R: RangeBounds<RangeTableKey<B>>,
     B: AsRef<[u8]> + EmptySliceRef,
 {
     let table_range = info.key_range.as_ref().unwrap();
     let table_start = FullKey::decode(table_range.left.as_slice()).user_key;
     let table_end = FullKey::decode(table_range.right.as_slice()).user_key;
     let (left, right) = bound_table_key_range(table_id, table_key_range);
-    let left: Bound<UserKey<&[u8]>> = left.as_ref().map(|key| key.as_ref());
-    let right: Bound<UserKey<&[u8]>> = right.as_ref().map(|key| key.as_ref());
+    let left: Bound<RangeUserKey<&[u8]>> = left.as_ref().map(|key| key.as_ref());
+    let right: Bound<RangeUserKey<&[u8]>> = right.as_ref().map(|key| key.as_ref());
     range_overlap(
         &(left, right),
         &table_start,
@@ -122,11 +122,11 @@ where
 }
 
 /// Search the SST containing the specified key within a level, using binary search.
-pub(crate) fn search_sst_idx(ssts: &[SstableInfo], key: UserKey<&[u8]>) -> usize {
+pub(crate) fn search_sst_idx(ssts: &[SstableInfo], key: RangeUserKey<&[u8]>) -> usize {
     ssts.partition_point(|table| {
         let ord = FullKey::decode(&table.key_range.as_ref().unwrap().left)
             .user_key
-            .cmp(&key);
+            .cmp_impl(&key);
         ord == Ordering::Less || ord == Ordering::Equal
     })
 }
@@ -139,7 +139,7 @@ pub fn prune_overlapping_ssts<'a, R, B>(
     table_key_range: &'a R,
 ) -> impl DoubleEndedIterator<Item = &'a SstableInfo>
 where
-    R: RangeBounds<TableKey<B>>,
+    R: RangeBounds<RangeTableKey<B>>,
     B: AsRef<[u8]> + EmptySliceRef,
 {
     ssts.iter()
@@ -151,7 +151,7 @@ where
 #[allow(clippy::type_complexity)]
 pub fn prune_nonoverlapping_ssts<'a>(
     ssts: &'a [SstableInfo],
-    user_key_range: (Bound<UserKey<&'a [u8]>>, Bound<UserKey<&'a [u8]>>),
+    user_key_range: (Bound<RangeUserKey<&'a [u8]>>, Bound<RangeUserKey<&'a [u8]>>),
 ) -> impl DoubleEndedIterator<Item = &'a SstableInfo> {
     debug_assert!(can_concat(ssts));
     let start_table_idx = match user_key_range.0 {

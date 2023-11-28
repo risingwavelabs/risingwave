@@ -96,7 +96,7 @@ async fn test_basic_inner(
     ];
 
     // Make sure the batch is sorted.
-    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp_impl(k2));
 
     // Second batch modifies the anchor.
     let mut batch2 = vec![
@@ -108,7 +108,7 @@ async fn test_basic_inner(
     ];
 
     // Make sure the batch is sorted.
-    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp_impl(k2));
 
     // Third batch deletes the anchor
     let mut batch3 = vec![
@@ -124,7 +124,7 @@ async fn test_basic_inner(
     ];
 
     // Make sure the batch is sorted.
-    batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    batch3.sort_by(|(k1, _), (k2, _)| k1.cmp_impl(k2));
 
     let mut local = hummock_storage.new_local(Default::default()).await;
 
@@ -426,7 +426,7 @@ async fn test_state_store_sync_inner(
     ];
 
     // Make sure the batch is sorted.
-    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp_impl(k2));
 
     let mut local = hummock_storage
         .new_local(NewLocalOptions::for_test(Default::default()))
@@ -459,7 +459,7 @@ async fn test_state_store_sync_inner(
             StorageValue::new_put("5555"),
         ),
     ];
-    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp_impl(k2));
     local
         .ingest_batch(
             batch2,
@@ -489,7 +489,7 @@ async fn test_state_store_sync_inner(
         gen_key_from_str(VirtualNode::ZERO, "\0\0eeee"),
         StorageValue::new_put("5555"),
     )];
-    batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    batch3.sort_by(|(k1, _), (k2, _)| k1.cmp_impl(k2));
     local
         .ingest_batch(
             batch3,
@@ -545,7 +545,7 @@ async fn test_reload_storage() {
     ];
 
     // Make sure the batch is sorted.
-    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp_impl(k2));
 
     // Second batch modifies the anchor.
     let mut batch2 = vec![
@@ -557,7 +557,7 @@ async fn test_reload_storage() {
     ];
 
     // Make sure the batch is sorted.
-    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp_impl(k2));
 
     // epoch 0 is reserved by storage service
     let epoch1: u64 = 1;
@@ -1410,7 +1410,7 @@ async fn test_replicated_local_hummock_storage() {
         ),
     ];
 
-    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp_impl(k2));
     local_hummock_storage
         .ingest_batch(
             batch1,
@@ -1480,7 +1480,7 @@ async fn test_replicated_local_hummock_storage() {
             StorageValue::new_put("4444"),
         ),
     ];
-    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp_impl(k2));
 
     local_hummock_storage_2
         .ingest_batch(

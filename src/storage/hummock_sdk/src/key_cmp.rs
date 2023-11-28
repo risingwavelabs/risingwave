@@ -15,7 +15,7 @@
 use std::cmp::{self, Ordering};
 
 use super::key::split_key_epoch;
-use crate::key::UserKey;
+use crate::key::{RangeUserKey, UserKey};
 
 /// A comparator for comparing [`crate::key::FullKey`] and [`crate::key::UserKey`] with possibly
 /// different table key types.
@@ -37,36 +37,36 @@ impl KeyComparator {
     }
 
     /// Used to compare [`UserKey`] and its encoded format.
-    pub fn compare_user_key_cross_format(
+    pub fn compare_user_key_cross_format<const IS_RANGE: bool>(
         encoded: impl AsRef<[u8]>,
-        unencoded: &UserKey<impl AsRef<[u8]>>,
+        unencoded: &UserKey<impl AsRef<[u8]>, IS_RANGE>,
     ) -> Ordering {
-        UserKey::decode(encoded.as_ref()).cmp(&unencoded.as_ref())
+        RangeUserKey::decode(encoded.as_ref()).cmp_impl(&unencoded.as_ref())
     }
 
     #[inline(always)]
     /// Used to compare [`UserKey`] and its encoded format.
-    pub fn encoded_less_than_unencoded(
+    pub fn encoded_less_than_unencoded<const IS_RANGE: bool>(
         encoded: impl AsRef<[u8]>,
-        unencoded: &UserKey<impl AsRef<[u8]>>,
+        unencoded: &UserKey<impl AsRef<[u8]>, IS_RANGE>,
     ) -> bool {
         Self::compare_user_key_cross_format(encoded, unencoded) == Ordering::Less
     }
 
     #[inline(always)]
     /// Used to compare [`UserKey`] and its encoded format.
-    pub fn encoded_less_equal_unencoded(
+    pub fn encoded_less_equal_unencoded<const IS_RANGE: bool>(
         encoded: impl AsRef<[u8]>,
-        unencoded: &UserKey<impl AsRef<[u8]>>,
+        unencoded: &UserKey<impl AsRef<[u8]>, IS_RANGE>,
     ) -> bool {
         Self::compare_user_key_cross_format(encoded, unencoded) != Ordering::Greater
     }
 
     #[inline(always)]
     /// Used to compare [`UserKey`] and its encoded format.
-    pub fn encoded_greater_than_unencoded(
+    pub fn encoded_greater_than_unencoded<const IS_RANGE: bool>(
         encoded: impl AsRef<[u8]>,
-        unencoded: &UserKey<impl AsRef<[u8]>>,
+        unencoded: &UserKey<impl AsRef<[u8]>, IS_RANGE>,
     ) -> bool {
         Self::compare_user_key_cross_format(encoded, unencoded) == Ordering::Greater
     }
@@ -78,16 +78,16 @@ mod tests {
 
     use risingwave_common::catalog::TableId;
 
-    use crate::key::{FullKey, UserKey};
+    use crate::key::{RangeFullKey, RangeUserKey};
     use crate::KeyComparator;
 
     #[test]
     fn test_cmp_encoded_full_key() {
         // 1 compared with 256 under little-endian encoding would return wrong result.
-        let key1 = FullKey::for_test(TableId::new(0), b"0".to_vec(), 1);
-        let key2 = FullKey::for_test(TableId::new(1), b"0".to_vec(), 1);
-        let key3 = FullKey::for_test(TableId::new(1), b"1".to_vec(), 256);
-        let key4 = FullKey::for_test(TableId::new(1), b"1".to_vec(), 1);
+        let key1 = RangeFullKey::for_test(TableId::new(0), b"0".to_vec(), 1);
+        let key2 = RangeFullKey::for_test(TableId::new(1), b"0".to_vec(), 1);
+        let key3 = RangeFullKey::for_test(TableId::new(1), b"1".to_vec(), 256);
+        let key4 = RangeFullKey::for_test(TableId::new(1), b"1".to_vec(), 1);
 
         assert_eq!(
             KeyComparator::compare_encoded_full_key(&key1.encode(), &key1.encode()),
@@ -109,9 +109,9 @@ mod tests {
 
     #[test]
     fn test_cmp_user_key_cross_format() {
-        let key1 = UserKey::for_test(TableId::new(0), b"0".to_vec());
-        let key2 = UserKey::for_test(TableId::new(0), b"1".to_vec());
-        let key3 = UserKey::for_test(TableId::new(1), b"0".to_vec());
+        let key1 = RangeUserKey::for_test(TableId::new(0), b"0".to_vec());
+        let key2 = RangeUserKey::for_test(TableId::new(0), b"1".to_vec());
+        let key3 = RangeUserKey::for_test(TableId::new(1), b"0".to_vec());
 
         assert_eq!(
             KeyComparator::compare_user_key_cross_format(key1.encode(), &key1),

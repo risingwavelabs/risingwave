@@ -34,17 +34,17 @@ pub const MAX_KEY_LEN: usize = u16::MAX as usize;
 
 pub type KeyPayloadType = Bytes;
 pub type TableKeyRange = (
-    Bound<TableKey<KeyPayloadType>>,
-    Bound<TableKey<KeyPayloadType>>,
+    Bound<RangeTableKey<KeyPayloadType>>,
+    Bound<RangeTableKey<KeyPayloadType>>,
 );
 pub type UserKeyRange = (
-    Bound<UserKey<KeyPayloadType>>,
-    Bound<UserKey<KeyPayloadType>>,
+    Bound<RangeUserKey<KeyPayloadType>>,
+    Bound<RangeUserKey<KeyPayloadType>>,
 );
-pub type UserKeyRangeRef<'a> = (Bound<UserKey<&'a [u8]>>, Bound<UserKey<&'a [u8]>>);
+pub type UserKeyRangeRef<'a> = (Bound<RangeUserKey<&'a [u8]>>, Bound<RangeUserKey<&'a [u8]>>);
 pub type FullKeyRange = (
-    Bound<FullKey<KeyPayloadType>>,
-    Bound<FullKey<KeyPayloadType>>,
+    Bound<RangeFullKey<KeyPayloadType>>,
+    Bound<RangeFullKey<KeyPayloadType>>,
 );
 
 /// Converts user key to full key by appending `epoch` to the user key.
@@ -371,16 +371,48 @@ impl CopyFromSlice for Bytes {
 ///
 /// Its name come from the assumption that Hummock is always accessed by a table-like structure
 /// identified by a [`TableId`].
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct TableKey<T: AsRef<[u8]>>(T);
+#[derive(Clone, Copy, Hash)]
+pub struct TableKey<T: AsRef<[u8]>, const IS_RANGE: bool = false>(T);
 
-impl<T: AsRef<[u8]>> Debug for TableKey<T> {
+pub type RangeTableKey<T> = TableKey<T, true>;
+
+impl<T: AsRef<[u8]> + Eq, const IS_RANGE: bool, const OTHER_IS_RANGE: bool>
+    PartialEq<TableKey<T, OTHER_IS_RANGE>> for TableKey<T, IS_RANGE>
+{
+    fn eq(&self, other: &TableKey<T, OTHER_IS_RANGE>) -> bool {
+        self.0.eq(&other.0)
+    }
+}
+
+impl<T: AsRef<[u8]> + Ord, const IS_RANGE: bool, const OTHER_IS_RANGE: bool>
+    PartialOrd<TableKey<T, OTHER_IS_RANGE>> for TableKey<T, IS_RANGE>
+{
+    fn partial_cmp(&self, other: &TableKey<T, OTHER_IS_RANGE>) -> Option<Ordering> {
+        Some(TableKey::cmp_impl(self, other))
+    }
+}
+
+impl<T: AsRef<[u8]> + Ord, const IS_RANGE: bool> Eq for TableKey<T, IS_RANGE> {}
+
+impl<T: AsRef<[u8]> + Ord, const IS_RANGE: bool> Ord for TableKey<T, IS_RANGE> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        TableKey::cmp_impl(self, other)
+    }
+}
+
+impl<T: AsRef<[u8]> + Default> Default for RangeTableKey<T> {
+    fn default() -> Self {
+        Self(T::default())
+    }
+}
+
+impl<T: AsRef<[u8]>, const IS_RANGE: bool> Debug for TableKey<T, IS_RANGE> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "TableKey {{ {} }}", hex::encode(self.0.as_ref()))
     }
 }
 
-impl<T: AsRef<[u8]>> Deref for TableKey<T> {
+impl<T: AsRef<[u8]>, const IS_RANGE: bool> Deref for TableKey<T, IS_RANGE> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -388,24 +420,39 @@ impl<T: AsRef<[u8]>> Deref for TableKey<T> {
     }
 }
 
-impl<T: AsRef<[u8]>> AsRef<[u8]> for TableKey<T> {
+impl<T: AsRef<[u8]>, const IS_RANGE: bool> AsRef<[u8]> for TableKey<T, IS_RANGE> {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
     }
 }
 
-impl<T: AsRef<[u8]>> TableKey<T> {
+impl<T: AsRef<[u8]>, const IS_RANGE: bool> TableKey<T, IS_RANGE> {
     pub fn new(value: T) -> Self {
-        debug_assert!(
-            value.as_ref().len() >= VirtualNode::SIZE,
-            "too short table key: {:?}",
-            value.as_ref()
-        );
+        if !IS_RANGE {
+            debug_assert!(
+                value.as_ref().len() >= VirtualNode::SIZE,
+                "too short table key: {:?}",
+                value.as_ref()
+            );
+        }
         Self(value)
     }
 
     pub fn into_inner(self) -> T {
         self.0
+    }
+
+    pub fn cmp_impl<const OTHER_IS_RANGE: bool>(
+        &self,
+        other: &TableKey<T, OTHER_IS_RANGE>,
+    ) -> Ordering {
+        self.0.as_ref().cmp(other.0.as_ref())
+    }
+}
+
+impl<T: AsRef<[u8]>> TableKey<T> {
+    pub fn into_range(self) -> RangeTableKey<T> {
+        TableKey(self.0)
     }
 
     pub fn vnode_part(&self) -> VirtualNode {
@@ -418,6 +465,20 @@ impl<T: AsRef<[u8]>> TableKey<T> {
 
     pub fn key_part(&self) -> &[u8] {
         &self.0.as_ref()[VirtualNode::SIZE..]
+    }
+}
+
+impl<T: AsRef<[u8]>> RangeTableKey<T> {
+    pub fn vnode_part(&self) -> Option<VirtualNode> {
+        let slice = self.0.as_ref();
+        if slice.len() < VirtualNode::SIZE {
+            return None;
+        }
+        Some(VirtualNode::from_be_bytes(
+            self.0.as_ref()[..VirtualNode::SIZE]
+                .try_into()
+                .expect("slice with incorrect length"),
+        ))
     }
 }
 
@@ -449,15 +510,50 @@ pub fn map_table_key_range(range: (Bound<KeyPayloadType>, Bound<KeyPayloadType>)
 /// will group these two values into one struct for convenient filtering.
 ///
 /// The encoded format is | `table_id` | `table_key` |.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct UserKey<T: AsRef<[u8]>> {
+#[derive(Clone, Copy, Hash)]
+pub struct UserKey<T: AsRef<[u8]>, const IS_RANGE: bool = false> {
     // When comparing `UserKey`, we first compare `table_id`, then `table_key`. So the order of
     // declaration matters.
     pub table_id: TableId,
-    pub table_key: TableKey<T>,
+    pub table_key: TableKey<T, IS_RANGE>,
 }
 
-impl<T: AsRef<[u8]>> Debug for UserKey<T> {
+pub type RangeUserKey<T> = UserKey<T, true>;
+
+impl<T: AsRef<[u8]> + Eq + Ord, const IS_RANGE: bool, const OTHER_IS_RANGE: bool>
+    PartialEq<UserKey<T, OTHER_IS_RANGE>> for UserKey<T, IS_RANGE>
+{
+    fn eq(&self, other: &UserKey<T, OTHER_IS_RANGE>) -> bool {
+        self.table_id.eq(&other.table_id) && self.table_key.eq(&other.table_key)
+    }
+}
+
+impl<T: AsRef<[u8]> + Eq + Ord, const IS_RANGE: bool, const OTHER_IS_RANGE: bool>
+    PartialOrd<UserKey<T, OTHER_IS_RANGE>> for UserKey<T, IS_RANGE>
+{
+    fn partial_cmp(&self, other: &UserKey<T, OTHER_IS_RANGE>) -> Option<Ordering> {
+        Some(UserKey::cmp_impl(self, other))
+    }
+}
+
+impl<T: AsRef<[u8]> + Eq + Ord, const IS_RANGE: bool> Eq for UserKey<T, IS_RANGE> {}
+
+impl<T: AsRef<[u8]> + Eq + Ord, const IS_RANGE: bool> Ord for UserKey<T, IS_RANGE> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        UserKey::cmp_impl(self, other)
+    }
+}
+
+impl<T: AsRef<[u8]> + Default> Default for RangeUserKey<T> {
+    fn default() -> Self {
+        Self {
+            table_id: TableId::default(),
+            table_key: RangeTableKey::default(),
+        }
+    }
+}
+
+impl<T: AsRef<[u8]>, const IS_RANGE: bool> Debug for UserKey<T, IS_RANGE> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -468,11 +564,26 @@ impl<T: AsRef<[u8]>> Debug for UserKey<T> {
 }
 
 impl<T: AsRef<[u8]>> UserKey<T> {
-    pub fn new(table_id: TableId, table_key: TableKey<T>) -> Self {
-        Self {
-            table_id,
-            table_key,
+    pub fn get_vnode_id(&self) -> usize {
+        self.table_key.vnode_part().to_index()
+    }
+
+    pub fn into_range(self) -> RangeUserKey<T> {
+        RangeUserKey {
+            table_id: self.table_id,
+            table_key: self.table_key.into_range(),
         }
+    }
+}
+
+impl<T: AsRef<[u8]>, const IS_RANGE: bool> UserKey<T, IS_RANGE> {
+    pub fn cmp_impl<const OTHER_IS_RANGE: bool>(
+        &self,
+        other: &UserKey<T, OTHER_IS_RANGE>,
+    ) -> Ordering {
+        self.table_id
+            .cmp(&other.table_id)
+            .then_with(|| self.table_key.cmp_impl(&other.table_key))
     }
 
     /// Pass the inner type of `table_key` to make the code less verbose.
@@ -480,6 +591,13 @@ impl<T: AsRef<[u8]>> UserKey<T> {
         Self {
             table_id,
             table_key: TableKey::new(table_key),
+        }
+    }
+
+    pub fn new(table_id: TableId, table_key: TableKey<T, IS_RANGE>) -> Self {
+        Self {
+            table_id,
+            table_key,
         }
     }
 
@@ -514,13 +632,9 @@ impl<T: AsRef<[u8]>> UserKey<T> {
     pub fn encoded_len(&self) -> usize {
         self.table_key.as_ref().len() + TABLE_PREFIX_LEN
     }
-
-    pub fn get_vnode_id(&self) -> usize {
-        self.table_key.vnode_part().to_index()
-    }
 }
 
-impl<'a> UserKey<&'a [u8]> {
+impl<'a, const IS_RANGE: bool> UserKey<&'a [u8], IS_RANGE> {
     /// Construct a [`UserKey`] from a byte slice. Its `table_key` will be a part of the input
     /// `slice`.
     pub fn decode(slice: &'a [u8]) -> Self {
@@ -532,11 +646,11 @@ impl<'a> UserKey<&'a [u8]> {
         }
     }
 
-    pub fn to_vec(self) -> UserKey<Vec<u8>> {
+    pub fn to_vec(self) -> UserKey<Vec<u8>, IS_RANGE> {
         self.copy_into()
     }
 
-    pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(self) -> UserKey<T> {
+    pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(self) -> UserKey<T, IS_RANGE> {
         UserKey {
             table_id: self.table_id,
             table_key: TableKey::new(T::copy_from_slice(self.table_key.0)),
@@ -544,8 +658,8 @@ impl<'a> UserKey<&'a [u8]> {
     }
 }
 
-impl<'a, T: AsRef<[u8]> + Clone> UserKey<&'a T> {
-    pub fn cloned(self) -> UserKey<T> {
+impl<'a, T: AsRef<[u8]> + Clone, const IS_RANGE: bool> UserKey<&'a T, IS_RANGE> {
+    pub fn cloned(self) -> UserKey<T, IS_RANGE> {
         UserKey {
             table_id: self.table_id,
             table_key: TableKey::new(self.table_key.0.clone()),
@@ -553,13 +667,13 @@ impl<'a, T: AsRef<[u8]> + Clone> UserKey<&'a T> {
     }
 }
 
-impl<T: AsRef<[u8]>> UserKey<T> {
-    pub fn as_ref(&self) -> UserKey<&[u8]> {
+impl<T: AsRef<[u8]>, const IS_RANGE: bool> UserKey<T, IS_RANGE> {
+    pub fn as_ref(&self) -> UserKey<&[u8], IS_RANGE> {
         UserKey::new(self.table_id, TableKey::new(self.table_key.as_ref()))
     }
 }
 
-impl UserKey<Vec<u8>> {
+impl<const IS_RANGE: bool> UserKey<Vec<u8>, IS_RANGE> {
     pub fn decode_length_prefixed(buf: &mut &[u8]) -> Self {
         let table_id = buf.get_u32();
         let len = buf.get_u32() as usize;
@@ -576,13 +690,13 @@ impl UserKey<Vec<u8>> {
 
     /// Use this method to override an old `UserKey<Vec<u8>>` with a `UserKey<&[u8]>` to own the
     /// table key without reallocating a new `UserKey` object.
-    pub fn set(&mut self, other: UserKey<&[u8]>) {
+    pub fn set(&mut self, other: UserKey<&[u8], IS_RANGE>) {
         self.table_id = other.table_id;
         self.table_key.0.clear();
         self.table_key.0.extend_from_slice(other.table_key.as_ref());
     }
 
-    pub fn into_bytes(self) -> UserKey<Bytes> {
+    pub fn into_bytes(self) -> UserKey<Bytes, IS_RANGE> {
         UserKey {
             table_id: self.table_id,
             table_key: TableKey::new(Bytes::from(self.table_key.0)),
@@ -593,13 +707,48 @@ impl UserKey<Vec<u8>> {
 /// [`FullKey`] is an internal concept in storage. It associates [`UserKey`] with an epoch.
 ///
 /// The encoded format is | `user_key` | `epoch` |.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct FullKey<T: AsRef<[u8]>> {
-    pub user_key: UserKey<T>,
+#[derive(Clone, Copy, Hash)]
+pub struct FullKey<T: AsRef<[u8]>, const IS_RANGE: bool = false> {
+    pub user_key: UserKey<T, IS_RANGE>,
     pub epoch_with_gap: EpochWithGap,
 }
 
-impl<T: AsRef<[u8]>> Debug for FullKey<T> {
+pub type RangeFullKey<T> = FullKey<T, true>;
+
+impl<T: AsRef<[u8]> + Eq + Ord, const IS_RANGE: bool> Eq for FullKey<T, IS_RANGE> {}
+
+impl<T: AsRef<[u8]> + Eq + Ord, const IS_RANGE: bool, const OTHER_IS_RANGE: bool>
+    PartialEq<FullKey<T, OTHER_IS_RANGE>> for FullKey<T, IS_RANGE>
+{
+    fn eq(&self, other: &FullKey<T, OTHER_IS_RANGE>) -> bool {
+        self.user_key.eq(&other.user_key) && self.epoch_with_gap.eq(&self.epoch_with_gap)
+    }
+}
+
+impl<T: AsRef<[u8]> + Eq + Ord, const IS_RANGE: bool> Ord for FullKey<T, IS_RANGE> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        FullKey::cmp_impl(self, other)
+    }
+}
+
+impl<T: AsRef<[u8]> + Eq + Ord, const IS_RANGE: bool, const OTHER_IS_RANGE: bool>
+    PartialOrd<FullKey<T, OTHER_IS_RANGE>> for FullKey<T, IS_RANGE>
+{
+    fn partial_cmp(&self, other: &FullKey<T, OTHER_IS_RANGE>) -> Option<Ordering> {
+        Some(FullKey::cmp_impl(self, other))
+    }
+}
+
+impl<T: AsRef<[u8]> + Default> Default for RangeFullKey<T> {
+    fn default() -> Self {
+        Self {
+            user_key: RangeUserKey::default(),
+            epoch_with_gap: EpochWithGap::default(),
+        }
+    }
+}
+
+impl<T: AsRef<[u8]>, const IS_RANGE: bool> Debug for FullKey<T, IS_RANGE> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -611,8 +760,8 @@ impl<T: AsRef<[u8]>> Debug for FullKey<T> {
     }
 }
 
-impl<T: AsRef<[u8]>> FullKey<T> {
-    pub fn new(table_id: TableId, table_key: TableKey<T>, epoch: HummockEpoch) -> Self {
+impl<T: AsRef<[u8]>, const IS_RANGE: bool> FullKey<T, IS_RANGE> {
+    pub fn new(table_id: TableId, table_key: TableKey<T, IS_RANGE>, epoch: HummockEpoch) -> Self {
         Self {
             user_key: UserKey::new(table_id, table_key),
             epoch_with_gap: EpochWithGap::new(epoch, 0),
@@ -621,7 +770,7 @@ impl<T: AsRef<[u8]>> FullKey<T> {
 
     pub fn new_with_gap_epoch(
         table_id: TableId,
-        table_key: TableKey<T>,
+        table_key: TableKey<T, IS_RANGE>,
         epoch_with_gap: EpochWithGap,
     ) -> Self {
         Self {
@@ -630,7 +779,7 @@ impl<T: AsRef<[u8]>> FullKey<T> {
         }
     }
 
-    pub fn from_user_key(user_key: UserKey<T>, epoch: HummockEpoch) -> Self {
+    pub fn from_user_key(user_key: UserKey<T, IS_RANGE>, epoch: HummockEpoch) -> Self {
         Self {
             user_key,
             epoch_with_gap: EpochWithGap::new_from_epoch(epoch),
@@ -684,9 +833,24 @@ impl<T: AsRef<[u8]>> FullKey<T> {
     }
 }
 
-impl<'a> FullKey<&'a [u8]> {
-    /// Construct a [`FullKey`] from a byte slice.
+impl<T: AsRef<[u8]>> FullKey<T> {
+    pub fn into_range(self) -> RangeFullKey<T> {
+        RangeFullKey {
+            user_key: self.user_key.into_range(),
+            epoch_with_gap: self.epoch_with_gap,
+        }
+    }
+}
+
+impl<'a> RangeFullKey<&'a [u8]> {
     pub fn decode(slice: &'a [u8]) -> Self {
+        Self::decode_inner(slice)
+    }
+}
+
+impl<'a, const IS_RANGE: bool> FullKey<&'a [u8], IS_RANGE> {
+    /// Construct a [`FullKey`] from a byte slice.
+    fn decode_inner(slice: &'a [u8]) -> Self {
         let epoch_pos = slice.len() - EPOCH_LEN;
         let epoch = (&slice[epoch_pos..]).get_u64();
 
@@ -724,11 +888,11 @@ impl<'a> FullKey<&'a [u8]> {
         }
     }
 
-    pub fn to_vec(self) -> FullKey<Vec<u8>> {
+    pub fn to_vec(self) -> FullKey<Vec<u8>, IS_RANGE> {
         self.copy_into()
     }
 
-    pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(self) -> FullKey<T> {
+    pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(self) -> FullKey<T, IS_RANGE> {
         FullKey {
             user_key: self.user_key.copy_into(),
             epoch_with_gap: self.epoch_with_gap,
@@ -736,10 +900,10 @@ impl<'a> FullKey<&'a [u8]> {
     }
 }
 
-impl FullKey<Vec<u8>> {
+impl<const IS_RANGE: bool> FullKey<Vec<u8>, IS_RANGE> {
     /// Calling this method may accidentally cause memory allocation when converting `Vec` into
     /// `Bytes`
-    pub fn into_bytes(self) -> FullKey<Bytes> {
+    pub fn into_bytes(self) -> FullKey<Bytes, IS_RANGE> {
         FullKey {
             epoch_with_gap: self.epoch_with_gap,
             user_key: self.user_key.into_bytes(),
@@ -747,8 +911,8 @@ impl FullKey<Vec<u8>> {
     }
 }
 
-impl<T: AsRef<[u8]>> FullKey<T> {
-    pub fn to_ref(&self) -> FullKey<&[u8]> {
+impl<T: AsRef<[u8]>, const IS_RANGE: bool> FullKey<T, IS_RANGE> {
+    pub fn to_ref(&self) -> FullKey<&[u8], IS_RANGE> {
         FullKey {
             user_key: self.user_key.as_ref(),
             epoch_with_gap: self.epoch_with_gap,
@@ -756,43 +920,65 @@ impl<T: AsRef<[u8]>> FullKey<T> {
     }
 }
 
-impl FullKey<Vec<u8>> {
+impl<const IS_RANGE: bool> FullKey<Vec<u8>, IS_RANGE> {
     /// Use this method to override an old `FullKey<Vec<u8>>` with a `FullKey<&[u8]>` to own the
     /// table key without reallocating a new `FullKey` object.
-    pub fn set(&mut self, other: FullKey<&[u8]>) {
+    pub fn set(&mut self, other: FullKey<&[u8], IS_RANGE>) {
         self.user_key.set(other.user_key);
         self.epoch_with_gap = other.epoch_with_gap;
     }
 }
 
-impl<T: AsRef<[u8]> + Ord + Eq> Ord for FullKey<T> {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+impl<T: AsRef<[u8]> + Ord, const IS_RANGE: bool> FullKey<T, IS_RANGE> {
+    pub fn cmp_impl<const OTHER_IS_RANGE: bool>(
+        &self,
+        other: &FullKey<T, OTHER_IS_RANGE>,
+    ) -> Ordering {
         // When `user_key` is the same, greater epoch comes first.
         self.user_key
-            .cmp(&other.user_key)
+            .cmp_impl(&other.user_key)
             .then_with(|| other.epoch_with_gap.cmp(&self.epoch_with_gap))
     }
 }
 
-impl<T: AsRef<[u8]> + Ord + Eq> PartialOrd for FullKey<T> {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Debug)]
 pub struct PointRange<T: AsRef<[u8]>> {
-    // When comparing `PointRange`, we first compare `left_user_key`, then
-    // `is_exclude_left_key`. Therefore the order of declaration matters.
-    pub left_user_key: UserKey<T>,
+    pub left_user_key: RangeUserKey<T>,
     /// `PointRange` represents the left user key itself if `is_exclude_left_key==false`
     /// while represents the right δ Neighborhood of the left user key if
     /// `is_exclude_left_key==true`.
     pub is_exclude_left_key: bool,
 }
 
+impl<T: AsRef<[u8]> + Eq + Ord> Eq for PointRange<T> {}
+
+impl<T: AsRef<[u8]> + Eq + Ord> PartialEq<Self> for PointRange<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.left_user_key.eq(&other.left_user_key)
+            && self.is_exclude_left_key.eq(&other.is_exclude_left_key)
+    }
+}
+
+impl<T: AsRef<[u8]> + Eq + Ord> PartialOrd for PointRange<T> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(std::cmp::Ord::cmp(self, other))
+    }
+}
+
+impl<T: AsRef<[u8]> + Eq + Ord> Ord for PointRange<T> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.cmp_inner(other)
+    }
+}
+
 impl<T: AsRef<[u8]>> PointRange<T> {
-    pub fn from_user_key(left_user_key: UserKey<T>, is_exclude_left_key: bool) -> Self {
+    fn cmp_inner(&self, other: &Self) -> Ordering {
+        self.left_user_key
+            .cmp_impl(&other.left_user_key)
+            .then_with(|| self.is_exclude_left_key.cmp(&other.is_exclude_left_key))
+    }
+
+    pub fn from_user_key(left_user_key: RangeUserKey<T>, is_exclude_left_key: bool) -> Self {
         Self {
             left_user_key,
             is_exclude_left_key,
@@ -849,8 +1035,8 @@ impl<'a> EmptySliceRef for &'a [u8] {
 /// Bound table key range with table id to generate a new user key range.
 pub fn bound_table_key_range<T: AsRef<[u8]> + EmptySliceRef>(
     table_id: TableId,
-    table_key_range: &impl RangeBounds<TableKey<T>>,
-) -> (Bound<UserKey<&T>>, Bound<UserKey<&T>>) {
+    table_key_range: &impl RangeBounds<RangeTableKey<T>>,
+) -> (Bound<RangeUserKey<&T>>, Bound<RangeUserKey<&T>>) {
     let start = match table_key_range.start_bound() {
         Included(b) => Included(UserKey::new(table_id, TableKey::new(&b.0))),
         Excluded(b) => Excluded(UserKey::new(table_id, TableKey::new(&b.0))),
@@ -884,18 +1070,18 @@ mod tests {
     #[test]
     fn test_encode_decode() {
         let table_key = b"abc".to_vec();
-        let key = FullKey::for_test(TableId::new(0), &table_key[..], 0);
+        let key = RangeFullKey::for_test(TableId::new(0), &table_key[..], 0);
         let buf = key.encode();
         assert_eq!(FullKey::decode(&buf), key);
-        let key = FullKey::for_test(TableId::new(1), &table_key[..], 1);
+        let key = RangeFullKey::for_test(TableId::new(1), &table_key[..], 1);
         let buf = key.encode();
         assert_eq!(FullKey::decode(&buf), key);
         let mut table_key = vec![1];
-        let a = FullKey::for_test(TableId::new(1), table_key.clone(), 1);
+        let a = RangeFullKey::for_test(TableId::new(1), table_key.clone(), 1);
         table_key[0] = 2;
-        let b = FullKey::for_test(TableId::new(1), table_key.clone(), 1);
+        let b = RangeFullKey::for_test(TableId::new(1), table_key.clone(), 1);
         table_key[0] = 129;
-        let c = FullKey::for_test(TableId::new(1), table_key, 1);
+        let c = RangeFullKey::for_test(TableId::new(1), table_key, 1);
         assert!(a.lt(&b));
         assert!(b.lt(&c));
     }
@@ -903,15 +1089,15 @@ mod tests {
     #[test]
     fn test_key_cmp() {
         // 1 compared with 256 under little-endian encoding would return wrong result.
-        let key1 = FullKey::for_test(TableId::new(0), b"0".to_vec(), 1);
-        let key2 = FullKey::for_test(TableId::new(1), b"0".to_vec(), 1);
-        let key3 = FullKey::for_test(TableId::new(1), b"1".to_vec(), 256);
-        let key4 = FullKey::for_test(TableId::new(1), b"1".to_vec(), 1);
+        let key1 = RangeFullKey::for_test(TableId::new(0), b"0".to_vec(), 1);
+        let key2 = RangeFullKey::for_test(TableId::new(1), b"0".to_vec(), 1);
+        let key3 = RangeFullKey::for_test(TableId::new(1), b"1".to_vec(), 256);
+        let key4 = RangeFullKey::for_test(TableId::new(1), b"1".to_vec(), 1);
 
-        assert_eq!(key1.cmp(&key1), Ordering::Equal);
-        assert_eq!(key1.cmp(&key2), Ordering::Less);
-        assert_eq!(key2.cmp(&key3), Ordering::Less);
-        assert_eq!(key3.cmp(&key4), Ordering::Less);
+        assert_eq!(key1.cmp_impl(&key1), Ordering::Equal);
+        assert_eq!(key1.cmp_impl(&key2), Ordering::Less);
+        assert_eq!(key2.cmp_impl(&key3), Ordering::Less);
+        assert_eq!(key3.cmp_impl(&key4), Ordering::Less);
     }
 
     #[test]
@@ -1011,9 +1197,9 @@ mod tests {
 
     #[test]
     fn test_uesr_key_order() {
-        let a = UserKey::new(TableId::new(1), TableKey::new(b"aaa".to_vec()));
-        let b = UserKey::new(TableId::new(2), TableKey::new(b"aaa".to_vec()));
-        let c = UserKey::new(TableId::new(2), TableKey::new(b"bbb".to_vec()));
+        let a = UserKey::<_, false>::new(TableId::new(1), TableKey::new(b"aaa".to_vec()));
+        let b = UserKey::<_, false>::new(TableId::new(2), TableKey::new(b"aaa".to_vec()));
+        let c = UserKey::<_, false>::new(TableId::new(2), TableKey::new(b"bbb".to_vec()));
         assert!(a.lt(&b));
         assert!(b.lt(&c));
         let a = a.encode();

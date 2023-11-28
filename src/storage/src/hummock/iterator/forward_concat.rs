@@ -69,7 +69,7 @@ mod tests {
         while iter.is_valid() {
             let key = iter.key();
             let val = iter.value();
-            assert_eq!(key, iterator_test_key_of(i).to_ref());
+            assert_eq!(key, iterator_test_key_of::<false>(i).to_ref());
             assert_eq!(
                 val.into_user_value().unwrap(),
                 iterator_test_value_of(i).as_slice()
@@ -85,7 +85,7 @@ mod tests {
         iter.rewind().await.unwrap();
         let key = iter.key();
         let val = iter.value();
-        assert_eq!(key, iterator_test_key_of(0).to_ref());
+        assert_eq!(key, iterator_test_key_of::<false>(0).to_ref());
         assert_eq!(
             val.into_user_value().unwrap(),
             iterator_test_value_of(0).as_slice()
@@ -131,7 +131,10 @@ mod tests {
 
         let key = iter.key();
         let val = iter.value();
-        assert_eq!(key, iterator_test_key_of(TEST_KEYS_COUNT + 1).to_ref());
+        assert_eq!(
+            key,
+            iterator_test_key_of::<false>(TEST_KEYS_COUNT + 1).to_ref()
+        );
         assert_eq!(
             val.into_user_value().unwrap(),
             iterator_test_value_of(TEST_KEYS_COUNT + 1).as_slice()
@@ -141,7 +144,7 @@ mod tests {
         iter.seek(iterator_test_key_of(0).to_ref()).await.unwrap();
         let key = iter.key();
         let val = iter.value();
-        assert_eq!(key, iterator_test_key_of(0).to_ref());
+        assert_eq!(key, iterator_test_key_of::<false>(0).to_ref());
         assert_eq!(
             val.into_user_value().unwrap(),
             iterator_test_value_of(0).as_slice()
@@ -154,7 +157,10 @@ mod tests {
 
         let key = iter.key();
         let val = iter.value();
-        assert_eq!(key, iterator_test_key_of(3 * TEST_KEYS_COUNT - 1).to_ref());
+        assert_eq!(
+            key,
+            iterator_test_key_of::<false>(3 * TEST_KEYS_COUNT - 1).to_ref()
+        );
         assert_eq!(
             val.into_user_value().unwrap(),
             iterator_test_value_of(3 * TEST_KEYS_COUNT - 1).as_slice()
@@ -206,7 +212,10 @@ mod tests {
 
         let key = iter.key();
         let val = iter.value();
-        assert_eq!(key, iterator_test_key_of(TEST_KEYS_COUNT + 2).to_ref());
+        assert_eq!(
+            key,
+            iterator_test_key_of::<false>(TEST_KEYS_COUNT + 2).to_ref()
+        );
         assert_eq!(
             val.into_user_value().unwrap(),
             iterator_test_value_of(TEST_KEYS_COUNT + 2).as_slice()
@@ -219,7 +228,10 @@ mod tests {
 
         let key = iter.key();
         let val = iter.value();
-        assert_eq!(key, iterator_test_key_of(TEST_KEYS_COUNT * 4).to_ref());
+        assert_eq!(
+            key,
+            iterator_test_key_of::<false>(TEST_KEYS_COUNT * 4).to_ref()
+        );
         assert_eq!(
             val.into_user_value().unwrap(),
             iterator_test_value_of(TEST_KEYS_COUNT * 4).as_slice()
@@ -261,7 +273,7 @@ mod tests {
 
         let key = iter.key();
         let val = iter.value();
-        assert_eq!(key, iterator_test_key_of(TEST_KEYS_COUNT).to_ref());
+        assert_eq!(key, iterator_test_key_of::<false>(TEST_KEYS_COUNT).to_ref());
         assert_eq!(
             val.into_user_value().unwrap(),
             iterator_test_value_of(TEST_KEYS_COUNT).as_slice()
