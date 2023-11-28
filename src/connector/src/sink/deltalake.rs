@@ -18,7 +18,6 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use deltalake::kernel::{Action, Add, DataType as DeltaLakeDataType, PrimitiveType, StructType};
-use deltalake::operations::transaction::commit;
 use deltalake::protocol::{DeltaOperation, SaveMode};
 use deltalake::table::builder::s3_storage_options::{
     AWS_ACCESS_KEY_ID, AWS_ALLOW_HTTP, AWS_ENDPOINT_URL, AWS_REGION, AWS_S3_ALLOW_UNSAFE_RENAME,
@@ -111,16 +110,10 @@ pub struct DeltaLakeConfig {
 
 impl DeltaLakeConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
-        let config =
-            serde_json::from_value::<DeltaLakeConfig>(serde_json::to_value(properties).unwrap())
-                .map_err(|e| SinkError::Config(anyhow!(e)))?;
-        if config.r#type != SINK_TYPE_APPEND_ONLY
-            && config.r#type != SINK_USER_FORCE_APPEND_ONLY_OPTION
-        {
-            return Err(SinkError::Config(anyhow!(
-                "only append-only delta lake sink is supported",
-            )));
-        }
+        let config = serde_json::from_value::<DeltaLakeConfig>(
+            serde_json::to_value(properties).map_err(|e| SinkError::DeltaLake(e.to_string()))?,
+        )
+        .map_err(|e| SinkError::Config(anyhow!(e)))?;
         Ok(config)
     }
 }
@@ -193,69 +186,41 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
                 DeltaLakeDataType::Primitive(PrimitiveType::String)
             )
         }
-        DataType::Time => {
-            return Err(SinkError::DeltaLake(
-                "deltalake cannot support type Time".to_string(),
-            ))
-        }
         DataType::Timestamp => {
             matches!(
                 dl_data_type,
                 DeltaLakeDataType::Primitive(PrimitiveType::Timestamp)
             )
         }
-        DataType::Timestamptz => {
-            return Err(SinkError::DeltaLake(
-                "deltalake cannot support type Timestamptz".to_string(),
-            ))
-        }
-        DataType::Interval => {
-            return Err(SinkError::DeltaLake(
-                "deltalake cannot support type Interval".to_string(),
-            ))
-        }
-        DataType::Struct(rw_s) => {
-            if let DeltaLakeDataType::Struct(dl_s) = dl_data_type {
+        DataType::Struct(rw_struct) => {
+            if let DeltaLakeDataType::Struct(dl_struct) = dl_data_type {
                 let mut result = true;
-                for ((rw_n, rw_t), dl_f) in rw_s
+                for ((rw_name, rw_type), dl_field) in rw_struct
                     .names()
-                    .zip_eq_fast(rw_s.types())
-                    .zip_eq_fast(dl_s.fields())
+                    .zip_eq_fast(rw_struct.types())
+                    .zip_eq_fast(dl_struct.fields())
                 {
-                    result =
-                        check_field_type(rw_t, dl_f.data_type())? && result && rw_n.eq(dl_f.name());
+                    result = check_field_type(rw_type, dl_field.data_type())?
+                        && result
+                        && rw_name.eq(dl_field.name());
                 }
                 result
             } else {
                 false
             }
         }
-        DataType::List(rw_l) => {
-            if let DeltaLakeDataType::Array(dl_l) = dl_data_type {
-                check_field_type(rw_l, dl_l.element_type())?
+        DataType::List(rw_list) => {
+            if let DeltaLakeDataType::Array(dl_list) = dl_data_type {
+                check_field_type(rw_list, dl_list.element_type())?
             } else {
                 false
             }
         }
-        DataType::Bytea => {
-            return Err(SinkError::DeltaLake(
-                "deltalake cannot support type Bytea".to_string(),
-            ))
-        }
-        DataType::Jsonb => {
-            return Err(SinkError::DeltaLake(
-                "deltalake cannot support type Jsonb".to_string(),
-            ))
-        }
-        DataType::Serial => {
-            return Err(SinkError::DeltaLake(
-                "deltalake cannot support type Serial".to_string(),
-            ))
-        }
-        DataType::Int256 => {
-            return Err(SinkError::DeltaLake(
-                "deltalake cannot support type Int256".to_string(),
-            ))
+        _ => {
+            return Err(SinkError::DeltaLake(format!(
+                "deltalake cannot support type {:?}",
+                rw_data_type.to_string()
+            )))
         }
     };
     Ok(result)
@@ -294,6 +259,13 @@ impl Sink for DeltaLakeSink {
     }
 
     async fn validate(&self) -> Result<()> {
+        if self.config.r#type != SINK_TYPE_APPEND_ONLY
+            && self.config.r#type != SINK_USER_FORCE_APPEND_ONLY_OPTION
+        {
+            return Err(SinkError::Config(anyhow!(
+                "only append-only delta lake sink is supported",
+            )));
+        }
         let table = self.config.common.create_deltalake_client().await?;
         let deltalake_fields: HashMap<&String, &DeltaLakeDataType> = table
             .get_schema()?
@@ -364,7 +336,7 @@ impl DeltaLakeSinkWriter {
         let dl_table = config.common.create_deltalake_client().await?;
         let writer = RecordBatchWriter::for_table(&dl_table)?;
         let dl_schema: Arc<deltalake::arrow::datatypes::Schema> =
-            Arc::new(covert_schema(dl_table.get_schema()?)?);
+            Arc::new(convert_schema(dl_table.get_schema()?)?);
 
         Ok(Self {
             config,
@@ -385,7 +357,7 @@ impl DeltaLakeSinkWriter {
     }
 }
 
-fn covert_schema(schema: &StructType) -> Result<deltalake::arrow::datatypes::Schema> {
+fn convert_schema(schema: &StructType) -> Result<deltalake::arrow::datatypes::Schema> {
     let mut builder = deltalake::arrow::datatypes::SchemaBuilder::new();
     for field in schema.fields() {
         let dl_field = deltalake::arrow::datatypes::Field::new(
@@ -404,13 +376,7 @@ impl SinkWriter for DeltaLakeSinkWriter {
     type CommitMetadata = Option<SinkMetadata>;
 
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        if self.is_append_only {
-            self.write(chunk).await
-        } else {
-            Err(SinkError::DeltaLake(
-                "only append-only delta lake sink is supported".to_string(),
-            ))
-        }
+        self.write(chunk).await
     }
 
     async fn begin_epoch(&mut self, _epoch: u64) -> Result<()> {
@@ -464,7 +430,7 @@ impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
         if write_adds.is_empty() {
             return Ok(());
         }
-        let partition_cols = self.table.get_metadata().unwrap().partition_columns.clone();
+        let partition_cols = self.table.get_metadata()?.partition_columns.clone();
         let partition_by = if !partition_cols.is_empty() {
             Some(partition_cols)
         } else {
@@ -475,15 +441,14 @@ impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
             partition_by,
             predicate: None,
         };
-        let version = commit(
+        let version = deltalake::operations::transaction::commit(
             self.table.log_store().as_ref(),
             &write_adds,
             operation,
             &self.table.state,
             None,
         )
-        .await
-        .unwrap();
+        .await?;
         self.table.update().await?;
         tracing::info!(
             "Succeeded to commit ti DeltaLake table in epoch {epoch} version {version}."
@@ -535,7 +500,7 @@ impl DeltaLakeWriteResult {
                 .into_iter()
                 .map(serde_json::from_value)
                 .collect::<std::result::Result<Vec<Add>, serde_json::Error>>()
-                .unwrap();
+                .map_err(|e| SinkError::DeltaLake(e.to_string()))?;
             Ok(DeltaLakeWriteResult { adds })
         } else {
             Err(anyhow!("Can't create deltalake sink write result from empty data!").into())
