@@ -84,11 +84,6 @@ steps:
           - "elasticsearch-sink"
           - "redis-sink"
           - "vector"
-      adjustments:
-        - with:
-            testcase: "twitter-pulsar"
-            format: "protobuf"
-          skip: true
 
   - label: "Run Demos {{matrix.testcase}} {{matrix.format}}"
     command: "ci/scripts/integration-tests.sh -c {{matrix.testcase}} -f json"
