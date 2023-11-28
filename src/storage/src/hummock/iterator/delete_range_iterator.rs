@@ -15,6 +15,7 @@
 use std::collections::{BTreeSet, BinaryHeap};
 use std::future::Future;
 
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::key::{PointRange, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::SstableInfo;
@@ -299,7 +300,7 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
             }
             for node in &self.tmp_buffer {
                 let epoch = node.current_epoch();
-                if epoch != HummockEpoch::MAX {
+                if epoch < MAX_EPOCH {
                     self.current_epochs.remove(&epoch);
                 }
             }
@@ -308,7 +309,7 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
                 node.next().await?;
                 if node.is_valid() {
                     let epoch = node.current_epoch();
-                    if epoch != HummockEpoch::MAX {
+                    if epoch < MAX_EPOCH {
                         self.current_epochs.insert(epoch);
                     }
                     self.heap.push(node);
@@ -329,7 +330,7 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
                 node.rewind().await?;
                 if node.is_valid() {
                     let epoch = node.current_epoch();
-                    if epoch != HummockEpoch::MAX {
+                    if epoch < MAX_EPOCH {
                         self.current_epochs.insert(epoch);
                     }
                     self.heap.push(node);
@@ -348,7 +349,7 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
                 node.seek(target_user_key).await?;
                 if node.is_valid() {
                     let epoch = node.current_epoch();
-                    if epoch != HummockEpoch::MAX {
+                    if epoch < MAX_EPOCH {
                         self.current_epochs.insert(epoch);
                     }
                     self.heap.push(node);

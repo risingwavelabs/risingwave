@@ -18,6 +18,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::key::{PointRange, UserKey};
 use risingwave_hummock_sdk::HummockEpoch;
 
@@ -172,13 +173,13 @@ impl CompactionDeleteRangesBuilder {
         for monotonic_deletes in self.events {
             let mut last_exit_epoch = HummockEpoch::MAX;
             for delete_event in monotonic_deletes {
-                if last_exit_epoch != HummockEpoch::MAX {
+                if last_exit_epoch < MAX_EPOCH {
                     let entry = ret.entry(delete_event.event_key.clone()).or_default();
                     entry.0.push(TombstoneEnterExitEvent {
                         tombstone_epoch: last_exit_epoch,
                     });
                 }
-                if delete_event.new_epoch != HummockEpoch::MAX {
+                if delete_event.new_epoch < MAX_EPOCH {
                     let entry = ret.entry(delete_event.event_key).or_default();
                     entry.1.push(TombstoneEnterExitEvent {
                         tombstone_epoch: delete_event.new_epoch,

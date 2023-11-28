@@ -19,6 +19,7 @@ use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use futures::{stream, FutureExt, StreamExt};
 use itertools::Itertools;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
@@ -675,7 +676,7 @@ where
         del_iter.seek(full_key.user_key);
         if !task_config.gc_delete_keys
             && del_iter.is_valid()
-            && del_iter.earliest_epoch() != HummockEpoch::MAX
+            && del_iter.earliest_epoch() < MAX_EPOCH
         {
             sst_builder
                 .add_monotonic_delete(MonotonicDeleteEvent {
