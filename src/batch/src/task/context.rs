@@ -195,8 +195,7 @@ impl ComputeNodeContext {
             batch_metrics: None,
             cur_mem_val: Arc::new(0.into()),
             last_mem_val: Arc::new(0.into()),
-            // Leave it for now, it should be None
-            mem_context: MemoryContext::root(LabelGuardedIntGauge::<4>::test_int_gauge()),
+            mem_context: MemoryContext::none(),
         }
     }
 
