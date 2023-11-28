@@ -18,7 +18,7 @@ pub const MANUALLY_DUMP_SUFFIX: &str = "manual.heap";
 pub const AUTO_DUMP_SUFFIX: &str = "auto.heap";
 pub const COLLAPSED_SUFFIX: &str = "collapsed";
 
+pub mod auto_dump;
 pub mod jeprof;
-pub mod profiler;
 
-pub use profiler::HeapProfiler;
+pub use auto_dump::AutoDump;

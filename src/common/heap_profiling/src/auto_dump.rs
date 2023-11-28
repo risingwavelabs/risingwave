@@ -25,7 +25,7 @@ use tokio::time::{self, Duration};
 
 use super::AUTO_DUMP_SUFFIX;
 
-pub struct HeapProfiler {
+pub struct AutoDump {
     config: HeapProfilingConfig,
     threshold_auto_dump_heap_profile: usize,
     jemalloc_dump_mib: jemalloc_prof::dump_mib,
@@ -35,7 +35,7 @@ pub struct HeapProfiler {
     opt_prof: bool,
 }
 
-impl HeapProfiler {
+impl AutoDump {
     /// # Arguments
     ///
     /// `total_memory` must be the total available memory for the process.
@@ -58,38 +58,25 @@ impl HeapProfiler {
         }
     }
 
-    fn dump_heap_prof(&self, cur_used_memory_bytes: usize, prev_used_memory_bytes: usize) {
-        if !self.config.enable_auto {
-            return;
-        }
+    fn auto_dump_heap_prof(&self) {
+        let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S");
+        let file_name = format!("{}.{}", time_prefix, AUTO_DUMP_SUFFIX);
 
-        if cur_used_memory_bytes > self.threshold_auto_dump_heap_profile
-            && prev_used_memory_bytes <= self.threshold_auto_dump_heap_profile
+        let file_path = Path::new(&self.config.dir)
+            .join(&file_name)
+            .to_str()
+            .expect("file path is not valid utf8")
+            .to_owned();
+        let file_path_c = CString::new(file_path).expect("0 byte in file path");
+
+        // FIXME(yuhao): `unsafe` here because `jemalloc_dump_mib.write` requires static lifetime
+        if let Err(e) = self
+            .jemalloc_dump_mib
+            .write(unsafe { &*(file_path_c.as_c_str() as *const _) })
         {
-            if !self.opt_prof {
-                tracing::info!("Cannot dump heap profile because Jemalloc prof is not enabled");
-                return;
-            }
-
-            let time_prefix = chrono::Local::now().format("%Y-%m-%d-%H-%M-%S");
-            let file_name = format!("{}.{}", time_prefix, AUTO_DUMP_SUFFIX);
-
-            let file_path = Path::new(&self.config.dir)
-                .join(&file_name)
-                .to_str()
-                .expect("file path is not valid utf8")
-                .to_owned();
-            let file_path_c = CString::new(file_path).expect("0 byte in file path");
-
-            // FIXME(yuhao): `unsafe` here because `jemalloc_dump_mib.write` requires static lifetime
-            if let Err(e) = self
-                .jemalloc_dump_mib
-                .write(unsafe { &*(file_path_c.as_c_str() as *const _) })
-            {
-                tracing::warn!("Auto Jemalloc dump heap file failed! {:?}", e);
-            } else {
-                tracing::info!("Successfully dumped heap profile to {}", file_name);
-            }
+            tracing::warn!("Auto Jemalloc dump heap file failed! {:?}", e);
+        } else {
+            tracing::info!("Successfully dumped heap profile to {}", file_name);
         }
     }
 
@@ -104,19 +91,29 @@ impl HeapProfiler {
         })
     }
 
+    /// Start the deamon task of auto heap profiling.
     pub fn start(self) {
+        if !self.config.enable_auto {
+            return;
+        }
+
         static START: Once = Once::new();
         START.call_once(|| {
             fs::create_dir_all(&self.config.dir).unwrap();
             tokio::spawn(async move {
                 let mut interval = time::interval(Duration::from_millis(500));
-                let mut prev_jemalloc_allocated_bytes = 0;
+                let mut prev_used_memory_bytes = 0;
                 loop {
                     interval.tick().await;
-                    let jemalloc_allocated_bytes =
-                        self.advance_jemalloc_epoch(prev_jemalloc_allocated_bytes);
-                    self.dump_heap_prof(jemalloc_allocated_bytes, prev_jemalloc_allocated_bytes);
-                    prev_jemalloc_allocated_bytes = jemalloc_allocated_bytes;
+                    let cur_used_memory_bytes = self.advance_jemalloc_epoch(prev_used_memory_bytes);
+
+                    if self.opt_prof
+                        && cur_used_memory_bytes > self.threshold_auto_dump_heap_profile
+                        && prev_used_memory_bytes <= self.threshold_auto_dump_heap_profile
+                    {
+                        self.auto_dump_heap_prof();
+                    }
+                    prev_used_memory_bytes = cur_used_memory_bytes;
                 }
             });
         })

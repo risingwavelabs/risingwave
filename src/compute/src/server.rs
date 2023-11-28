@@ -33,7 +33,7 @@ use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::pretty_bytes::convert;
 use risingwave_common::{GIT_SHA, RW_VERSION};
-use risingwave_common_heap_profiling::HeapProfiler;
+use risingwave_common_heap_profiling::AutoDump;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_common_service::tracing::TracingExtractLayer;
@@ -287,7 +287,7 @@ pub async fn compute_node_serve(
         system_params_manager.watch_params(),
     ));
 
-    let heap_profiler = HeapProfiler::new(
+    let heap_profiler = AutoDump::new(
         opts.total_memory_bytes,
         config.server.heap_profiling.clone(),
     );
