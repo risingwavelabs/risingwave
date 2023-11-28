@@ -14,6 +14,7 @@
 
 use itertools::Itertools as _;
 use num_integer::Integer as _;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -629,15 +630,12 @@ fn infer_type_name<'a>(
     let mut candidates = top_matches(&candidates, inputs);
 
     if candidates.is_empty() {
-        return Err(ErrorCode::NotImplemented(
-            format!(
-                "{:?}{:?}",
-                func_type,
-                inputs.iter().map(TypeDebug).collect_vec()
-            ),
-            112.into(),
-        )
-        .into());
+        bail_not_implemented!(
+            issue = 112,
+            "{:?}{:?}",
+            func_type,
+            inputs.iter().map(TypeDebug).collect_vec()
+        );
     }
 
     // After this line `candidates` will never be empty, as the narrow rules will retain original
