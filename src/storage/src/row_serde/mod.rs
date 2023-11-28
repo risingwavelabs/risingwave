@@ -93,6 +93,7 @@ mod test {
                         field_descs: [],
                         type_name: "",
                         generated_or_default_column: None,
+                        description: None,
                     },
                     ColumnDesc {
                         data_type: Int16,
@@ -101,6 +102,7 @@ mod test {
                         field_descs: [],
                         type_name: "",
                         generated_or_default_column: None,
+                        description: None,
                     },
                 ],
                 [
@@ -129,6 +131,7 @@ mod test {
                             field_descs: [],
                             type_name: "",
                             generated_or_default_column: None,
+                            description: None,
                         },
                         ColumnDesc {
                             data_type: Varchar,
@@ -137,6 +140,7 @@ mod test {
                             field_descs: [],
                             type_name: "",
                             generated_or_default_column: None,
+                            description: None,
                         },
                     ],
                     [
