@@ -909,8 +909,16 @@ where
         match is_checkpoint {
             false => {
                 self.local_store.try_flush().await?;
-                self.local_store
-                    .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::new());
+                if !self.is_dirty() {
+                    // If the state table is not modified, go fast path.
+                    self.local_store
+                        .seal_current_epoch(new_epoch.curr, SealCurrentEpochOptions::new());
+                    return Ok(());
+                } else {
+                    self.seal_current_epoch(new_epoch.curr)
+                        .instrument(tracing::info_span!("state_table_commit"))
+                        .await?;
+                }
             }
             true => {
                 self.watermark_buffer_strategy.tick();
