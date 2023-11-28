@@ -61,7 +61,7 @@ export const dependentsColumn: Column<Relation> = {
       <Button
         size="sm"
         aria-label="view dependents"
-        colorScheme="teal"
+        colorScheme="blue"
         variant="link"
       >
         D
@@ -78,7 +78,7 @@ export const fragmentsColumn: Column<StreamingJob> = {
       <Button
         size="sm"
         aria-label="view fragments"
-        colorScheme="teal"
+        colorScheme="blue"
         variant="link"
       >
         F
@@ -195,7 +195,7 @@ export function Relations<R extends Relation>(
                   <Button
                     size="sm"
                     aria-label="view catalog"
-                    colorScheme="teal"
+                    colorScheme="blue"
                     variant="link"
                     onClick={() => openRelationCatalog(r)}
                   >
@@ -209,7 +209,7 @@ export function Relations<R extends Relation>(
                 ))}
                 <Td overflowWrap="normal">
                   {r.columns
-                    .filter((col) => !col.isHidden)
+                    .filter((col) => ("isHidden" in col ? !col.isHidden : true))
                     .map((col) => extractColumnInfo(col))
                     .join(", ")}
                 </Td>

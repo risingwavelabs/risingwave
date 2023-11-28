@@ -38,7 +38,11 @@ export default function Home() {
         <VStack spacing={3}>
           <HStack spacing={2}>
             <Flex flexDirection="column" width="md" alignItems="end">
-              <Image boxSize="sm" src="/risingwave.svg" alt="RisingWave Logo" />
+              <Image
+                boxSize="200px"
+                src="/risingwave.svg"
+                alt="RisingWave Logo"
+              />
             </Flex>
             <VStack alignItems="start" width="md">
               <Text fontSize="2xl">Welcome to</Text>

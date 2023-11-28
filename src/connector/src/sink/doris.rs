@@ -44,7 +44,7 @@ use crate::sink::{DummySinkCommitCoordinator, Sink, SinkParam, SinkWriter, SinkW
 
 pub const DORIS_SINK: &str = "doris";
 
-#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct DorisCommon {
     #[serde(rename = "doris.url")]
     pub url: String,

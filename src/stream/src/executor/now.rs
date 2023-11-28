@@ -18,46 +18,36 @@ use std::ops::Bound::Unbounded;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::{
-    Barrier, BoxedMessageStream, Executor, Message, Mutation, PkIndices, PkIndicesRef,
+    Barrier, BoxedMessageStream, Executor, ExecutorInfo, Message, Mutation, PkIndicesRef,
     StreamExecutorError, Watermark,
 };
 use crate::common::table::state_table::StateTable;
 
 pub struct NowExecutor<S: StateStore> {
+    info: ExecutorInfo,
+
     /// Receiver of barrier channel.
     barrier_receiver: UnboundedReceiver<Barrier>,
 
-    pk_indices: PkIndices,
-    identity: String,
-    schema: Schema,
     state_table: StateTable<S>,
 }
 
 impl<S: StateStore> NowExecutor<S> {
     pub fn new(
+        info: ExecutorInfo,
         barrier_receiver: UnboundedReceiver<Barrier>,
-        executor_id: u64,
         state_table: StateTable<S>,
     ) -> Self {
-        let schema = Schema::new(vec![Field {
-            data_type: DataType::Timestamptz,
-            name: String::from("now"),
-            sub_fields: vec![],
-            type_name: String::default(),
-        }]);
-
         Self {
+            info,
             barrier_receiver,
-            pk_indices: vec![],
-            identity: format!("NowExecutor {:X}", executor_id),
-            schema,
             state_table,
         }
     }
@@ -67,7 +57,7 @@ impl<S: StateStore> NowExecutor<S> {
         let Self {
             mut barrier_receiver,
             mut state_table,
-            schema,
+            info,
             ..
         } = self;
 
@@ -132,13 +122,13 @@ impl<S: StateStore> NowExecutor<S> {
 
                 StreamChunk::from_rows(
                     &[(Op::Delete, last_row), (Op::Insert, row)],
-                    &schema.data_types(),
+                    &info.schema.data_types(),
                 )
             } else {
                 let row = row::once(&timestamp);
                 state_table.insert(row);
 
-                StreamChunk::from_rows(&[(Op::Insert, row)], &schema.data_types())
+                StreamChunk::from_rows(&[(Op::Insert, row)], &info.schema.data_types())
             };
 
             yield Message::Chunk(stream_chunk);
@@ -160,25 +150,24 @@ impl<S: StateStore> Executor for NowExecutor<S> {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        self.identity.as_str()
+        &self.info.identity
     }
 }
 
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
@@ -186,7 +175,8 @@ mod tests {
     use crate::common::table::state_table::StateTable;
     use crate::executor::test_utils::StreamExecutorTestExt;
     use crate::executor::{
-        Barrier, BoxedMessageStream, Executor, Mutation, PkIndices, StreamExecutorResult, Watermark,
+        Barrier, BoxedMessageStream, Executor, ExecutorInfo, Mutation, StreamExecutorResult,
+        Watermark,
     };
 
     #[tokio::test]
@@ -389,16 +379,6 @@ mod tests {
         Ok(())
     }
 
-    #[inline]
-    fn create_pk_indices() -> PkIndices {
-        vec![]
-    }
-
-    #[inline]
-    fn create_order_types() -> Vec<OrderType> {
-        vec![]
-    }
-
     fn create_state_store() -> MemoryStateStore {
         MemoryStateStore::new()
     }
@@ -408,19 +388,33 @@ mod tests {
     ) -> (UnboundedSender<Barrier>, BoxedMessageStream) {
         let table_id = TableId::new(1);
         let column_descs = vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Timestamptz)];
-        let order_types = create_order_types();
-        let pk_indices = create_pk_indices();
         let state_table = StateTable::new_without_distribution(
             state_store.clone(),
             table_id,
             column_descs,
-            order_types,
-            pk_indices,
+            vec![],
+            vec![],
         )
         .await;
 
         let (sender, barrier_receiver) = unbounded_channel();
-        let now_executor = NowExecutor::new(barrier_receiver, 1, state_table);
+
+        let schema = Schema::new(vec![Field {
+            data_type: DataType::Timestamptz,
+            name: String::from("now"),
+            sub_fields: vec![],
+            type_name: String::default(),
+        }]);
+
+        let now_executor = NowExecutor::new(
+            ExecutorInfo {
+                schema,
+                pk_indices: vec![],
+                identity: "NowExecutor".to_string(),
+            },
+            barrier_receiver,
+            state_table,
+        );
         (sender, Box::new(now_executor).execute())
     }
 }

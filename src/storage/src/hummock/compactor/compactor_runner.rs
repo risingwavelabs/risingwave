@@ -408,6 +408,8 @@ pub async fn compact(
         (context.storage_opts.block_size_kb as u64) * (1 << 10),
         context
             .storage_opts
+            .object_store_config
+            .s3
             .object_store_recv_buffer_size
             .unwrap_or(6 * 1024 * 1024) as u64,
         capacity as u64,
@@ -892,8 +894,9 @@ mod tests {
     use super::*;
     use crate::hummock::compactor::StateCleanUpCompactionFilter;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::test_utils::delete_range::create_monotonic_events;
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_impl};
-    use crate::hummock::{create_monotonic_events, DeleteRangeTombstone, Xor16FilterBuilder};
+    use crate::hummock::{DeleteRangeTombstone, Xor16FilterBuilder};
 
     #[tokio::test]
     async fn test_delete_range_aggregator_with_filter() {

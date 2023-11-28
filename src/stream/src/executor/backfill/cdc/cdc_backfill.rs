@@ -141,20 +141,30 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // Check whether this parallelism has been assigned splits,
         // if not, we should bypass the backfill directly.
         let mut state_impl = if shared_cdc_source {
-            assert!(self.state_table.is_some(), "expect state table for shared cdc source");
-            CdcBackfillStateImpl::MultiTable(MultiBackfillState::new(upstream_table_id, self.state_table.unwrap(), pk_in_output_indices.len() + METADATA_STATE_LEN))
-        } else if let Some(mutation) = first_barrier.mutation.as_ref() &&
-            let Mutation::Add{splits, ..} = mutation.as_ref()
+            assert!(
+                self.state_table.is_some(),
+                "expect state table for shared cdc source"
+            );
+            CdcBackfillStateImpl::MultiTable(MultiBackfillState::new(
+                upstream_table_id,
+                self.state_table.unwrap(),
+                pk_in_output_indices.len() + METADATA_STATE_LEN,
+            ))
+        } else if let Some(mutation) = first_barrier.mutation.as_ref()
+            && let Mutation::Add { splits, .. } = mutation.as_ref()
         {
             tracing::info!(?mutation, ?shared_cdc_source, "got first barrier");
 
-            assert!(self.source_state_handler.is_some(), "expect source state handler");
+            assert!(
+                self.source_state_handler.is_some(),
+                "expect source state handler"
+            );
 
             // We can assume for cdc table, the parallism of the fragment must be 1
             match splits.get(&self.actor_ctx.id) {
                 None => {
                     unreachable!("expect to receive the cdc split, please check the parallelism of the fragment")
-                },
+                }
                 Some(splits) => {
                     if splits.is_empty() {
                         tracing::info!(?splits, "got empty cdc split, bypass the backfill");
@@ -172,15 +182,19 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                     let split = splits.iter().exactly_one().map_err(|_err| {
                         StreamExecutorError::from(anyhow!(
-                                "expect only one cdc split for table {}",
-                                upstream_table_id
-                            ))
+                            "expect only one cdc split for table {}",
+                            upstream_table_id
+                        ))
                     })?;
-                    CdcBackfillStateImpl::SingleTable(SingleBackfillState::new(self.source_state_handler.unwrap(), upstream_table_id, split.id(), split.clone()))
+                    CdcBackfillStateImpl::SingleTable(SingleBackfillState::new(
+                        self.source_state_handler.unwrap(),
+                        upstream_table_id,
+                        split.id(),
+                        split.clone(),
+                    ))
                 }
             }
-        }
-        else {
+        } else {
             unreachable!("backfilled cdc source init fail")
         };
 
@@ -383,7 +397,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     // `last_binlog_offset`, skip the chunk that *only* contains
                                     // events before `last_binlog_offset`.
                                     if let Some(last_binlog_offset) = last_binlog_offset.as_ref() {
-                                        if let Some(chunk_offset) = chunk_binlog_offset && chunk_offset < *last_binlog_offset {
+                                        if let Some(chunk_offset) = chunk_binlog_offset
+                                            && chunk_offset < *last_binlog_offset
+                                        {
                                             tracing::trace!(
                                                 target: "events::stream::cdc_backfill",
                                                 "skip changelog chunk: chunk_offset {:?}, capacity {}",

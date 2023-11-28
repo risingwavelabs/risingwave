@@ -404,7 +404,7 @@ impl<S: StateStore, SD: ValueRowSerde> Executor for MaterializeExecutor<S, SD> {
     }
 
     fn identity(&self) -> &str {
-        self.info.identity.as_str()
+        &self.info.identity
     }
 
     fn info(&self) -> ExecutorInfo {

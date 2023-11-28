@@ -209,7 +209,7 @@ pub async fn collect_global_gc_watermark(
     let workers = [
         cluster_manager.list_active_streaming_compute_nodes().await,
         cluster_manager
-            .list_worker_node(WorkerType::Compactor, Some(Running))
+            .list_worker_node(Some(WorkerType::Compactor), Some(Running))
             .await,
     ]
     .concat();
@@ -237,11 +237,11 @@ pub async fn collect_global_gc_watermark(
                 };
                 match init_version_id.as_ref() {
                     None => {
-                        init_version_id = Some(worker_info.info_version_id());
+                        init_version_id = Some(worker_info.info_version_id);
                     }
                     Some(init_version_id) => {
-                        if worker_info.info_version_id() >= *init_version_id + 2 {
-                            return worker_info.hummock_gc_watermark();
+                        if worker_info.info_version_id >= *init_version_id + 2 {
+                            return worker_info.hummock_gc_watermark;
                         }
                     }
                 }

@@ -176,8 +176,7 @@ create table s11 with (
   connector = 'kafka',
   topic = 'proto_c_bin',
   properties.bootstrap.server = 'message_queue:29092',
-  scan.startup.mode = 'earliest',
-  proto.message = 'test.User'
+  scan.startup.mode = 'earliest'
 ) row format protobuf message 'test.User' row schema location 'file:///risingwave/proto-complex-schema'
 
 statement ok
@@ -260,8 +259,7 @@ create source s17 with (
   connector = 'kafka',
   topic = 'proto_c_bin',
   properties.bootstrap.server = 'message_queue:29092',
-  scan.startup.mode = 'earliest',
-  proto.message = 'test.User'
+  scan.startup.mode = 'earliest'
 ) row format protobuf message 'test.User' row schema location 'file:///risingwave/proto-complex-schema'
 
 statement ok
@@ -583,17 +581,17 @@ select id, sequence_id, name, score, avg_score, is_lasted, entrance_date, birthd
 query ITITT
 select id, code, timestamp, xfas, contacts, sex from s10;
 ----
-100 abc 1473305798 {"(0,200,10.0.0.1)","(1,400,10.0.0.2)"} ({1xxx,2xxx},{1xxx,2xxx}) MALE
+100 abc 1473305798 {"(0,200,10.0.0.1)","(1,400,10.0.0.2)"} ("{1xxx,2xxx}","{1xxx,2xxx}") MALE
 
 query ITITT
 select id, code, timestamp, xfas, contacts, sex from s11;
 ----
-0 abc 1473305798 {"(0,200,127.0.0.1)","(1,400,127.0.0.2)"} ({1xxx,2xxx},{1xxx,2xxx}) MALE
+0 abc 1473305798 {"(0,200,127.0.0.1)","(1,400,127.0.0.2)"} ("{1xxx,2xxx}","{1xxx,2xxx}") MALE
 
 query ITITT
 select id, code, timestamp, xfas, contacts, jsonb from s12;
 ----
-100 abc 1473305798 {"(0,200,10.0.0.1)","(1,400,10.0.0.2)"} ({1xxx,2xxx},{1xxx,2xxx}) {"blockNumber": 16938734}
+100 abc 1473305798 {"(0,200,10.0.0.1)","(1,400,10.0.0.2)"} ("{1xxx,2xxx}","{1xxx,2xxx}") {"blockNumber": 16938734}
 
 query ITIT
 select * from s13 order by id;
@@ -665,7 +663,12 @@ ORDER BY
 
 query II
 SELECT
-	*
+	"ID",
+  "firstName",
+  "lastName",
+  "age",
+  "height",
+  "weight"
 FROM
 	upsert_students
 ORDER BY
@@ -681,7 +684,12 @@ ORDER BY
 
 query II
 SELECT
-	*
+	"ID",
+  "firstName",
+  "lastName",
+  "age",
+  "height",
+  "weight"
 FROM
 	upsert_students_default_key
 ORDER BY
@@ -709,7 +717,7 @@ order by
 56166    2
 
 query I
-SELECT * FROM source_mv3 ORDER BY id;
+SELECT id FROM source_mv3 ORDER BY id;
 ----
 \x6b6b
 \x776561776566776566

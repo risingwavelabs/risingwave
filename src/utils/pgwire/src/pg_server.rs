@@ -31,7 +31,9 @@ use crate::pg_response::{PgResponse, ValuesStream};
 use crate::types::Format;
 
 pub type BoxedError = Box<dyn std::error::Error + Send + Sync>;
-pub type SessionId = (i32, i32);
+type ProcessId = i32;
+type SecretKey = i32;
+pub type SessionId = (ProcessId, SecretKey);
 
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
@@ -104,7 +106,7 @@ pub trait Session: Send + Sync {
 
     fn id(&self) -> SessionId;
 
-    fn set_config(&self, key: &str, value: Vec<String>) -> Result<(), BoxedError>;
+    fn set_config(&self, key: &str, value: String) -> Result<(), BoxedError>;
 
     fn transaction_status(&self) -> TransactionStatus;
 
@@ -349,7 +351,7 @@ mod tests {
             (0, 0)
         }
 
-        fn set_config(&self, _key: &str, _value: Vec<String>) -> Result<(), BoxedError> {
+        fn set_config(&self, _key: &str, _value: String) -> Result<(), BoxedError> {
             Ok(())
         }
 
