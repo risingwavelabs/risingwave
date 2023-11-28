@@ -768,6 +768,13 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::stream_exchange_concurrent_barriers")]
     pub exchange_concurrent_barriers: usize,
 
+    /// The concurrency for dispatching messages to different downstream jobs.
+    ///
+    /// - `1` means no concurrency, i.e., dispatch messages to downstream jobs one by one.
+    /// - `0` means unlimited concurrency.
+    #[serde(default = "default::developer::stream_exchange_concurrent_dispatchers")]
+    pub exchange_concurrent_dispatchers: usize,
+
     /// The initial permits for a dml channel, i.e., the maximum row count can be buffered in
     /// the channel.
     #[serde(default = "default::developer::stream_dml_channel_initial_permits")]
@@ -1296,6 +1303,10 @@ pub mod default {
 
         pub fn stream_exchange_concurrent_barriers() -> usize {
             1
+        }
+
+        pub fn stream_exchange_concurrent_dispatchers() -> usize {
+            32
         }
 
         pub fn stream_dml_channel_initial_permits() -> usize {
