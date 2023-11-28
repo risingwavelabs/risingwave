@@ -133,7 +133,7 @@ class TypeUtils {
                 var subhint = field.getAnnotation(DataTypeHint.class);
                 fields.add(classToField(field.getType(), subhint, field.getName()));
             }
-            return new Field("", FieldType.nullable(new ArrowType.Struct()), fields);
+            return new Field(name, FieldType.nullable(new ArrowType.Struct()), fields);
             // TODO: more types
             // throw new IllegalArgumentException("Unsupported type: " + param);
         }
@@ -374,7 +374,9 @@ class TypeUtils {
                         var javaField = values[0].getClass().getDeclaredField(field.getName());
                         var varHandle = lookup.unreflectVarHandle(javaField);
                         for (int i = 0; i < values.length; i++) {
-                            subvalues[i] = varHandle.get(values[i]);
+                            if (values[i] != null) {
+                                subvalues[i] = varHandle.get(values[i]);
+                            }
                         }
                     } catch (NoSuchFieldException | IllegalAccessException e) {
                         throw new RuntimeException(e);
@@ -384,7 +386,9 @@ class TypeUtils {
                 fillVector(subvector, subvalues);
             }
             for (int i = 0; i < values.length; i++) {
-                vector.setIndexDefined(i);
+                if (values[i] != null) {
+                    vector.setIndexDefined(i);
+                }
             }
         } else {
             throw new IllegalArgumentException("Unsupported type: " + fieldVector.getClass());
@@ -482,8 +486,10 @@ class TypeUtils {
                 return obj -> ((List<?>) obj).stream().map(subfunc).toArray(String[]::new);
             } else if (subfield.getType() instanceof ArrowType.Binary) {
                 return obj -> ((List<?>) obj).stream().map(subfunc).toArray(byte[][]::new);
+            } else if (subfield.getType() instanceof ArrowType.Struct) {
+                return obj -> ((List<?>) obj).stream().map(subfunc).toArray();
             }
-            throw new IllegalArgumentException("Unsupported type: " + field.getType());
+            throw new IllegalArgumentException("Unsupported type: " + subfield.getType());
         } else if (field.getType() instanceof ArrowType.Struct) {
             // object is org.apache.arrow.vector.util.JsonStringHashMap
             var subfields = field.getChildren();
