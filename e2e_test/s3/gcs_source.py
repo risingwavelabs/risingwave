@@ -110,8 +110,9 @@ if __name__ == "__main__":
     _gcs = lambda idx: f"{run_id}_data_{idx}.{fmt}"
 
     # put gcs files
-    op = opendal.Operator("gcs", root="/ci/temp/", bucket=config["GCS_BUCKET"], credential=config["GOOGLE_APPLICATION_CREDENTIALS"])
+    op = opendal.Operator("gcs", root="/", bucket=config["GCS_BUCKET"], credential=config["GOOGLE_APPLICATION_CREDENTIALS"])
 
+    print("upload file to gcs")
     for idx, file_str in enumerate(formatted_files):
         with open(_local(idx), "w") as f:
             f.write(file_str)
@@ -120,8 +121,10 @@ if __name__ == "__main__":
         op.write(_gcs(idx), file_bytes)
 
     # do test
+    print("do test")
     do_test(config, FILE_NUM, ITEM_NUM_PER_FILE, run_id, fmt)
 
     # clean up gcs files
+    print("clean up gcs files")
     for idx, _ in enumerate(formatted_files):
         op.delete(_gcs(idx))
