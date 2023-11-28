@@ -73,7 +73,7 @@ async fn cancel_stream_jobs(session: &mut Session) -> Result<Vec<u32>> {
     tracing::info!("cancelling streaming jobs");
     let ids = ids.split('\n').collect::<Vec<_>>().join(",");
     let result = session.run(&format!("cancel jobs {};", ids)).await?;
-    tracing::info!("cancelled streaming jobs, {:#?}", result);
+    tracing::info!("cancelled streaming jobs, {}", result);
     let ids = result
         .split('\n')
         .map(|s| s.parse::<u32>().unwrap())
@@ -194,7 +194,7 @@ async fn test_background_ddl_cancel() -> Result<()> {
     session.run(CREATE_TABLE).await?;
     session.run(SEED_TABLE_500).await?;
     session.flush().await?;
-    session.run(SET_RATE_LIMIT_2).await?;
+    session.run(SET_RATE_LIMIT_1).await?;
     session.run(SET_BACKGROUND_DDL).await?;
 
     for _ in 0..5 {

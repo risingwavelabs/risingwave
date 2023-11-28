@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::pin::pin;
 use std::sync::Arc;
 
@@ -25,7 +24,6 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_common::types::Datum;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
@@ -33,7 +31,7 @@ use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 use crate::executor::backfill::utils::{
-    compute_bounds, construct_initial_finished_state, get_progress_per_vnode, iter_chunks,
+    compute_bounds, get_progress_per_vnode, iter_chunks,
     mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, owned_row_iter,
     persist_state_per_vnode, update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
     METADATA_STATE_LEN,
@@ -144,7 +142,7 @@ where
 
         let is_completely_finished = progress_per_vnode
             .iter()
-            .all(|(_, p)| matches!(p, BackfillProgressPerVnode::Completed(_)));
+            .all(|(_, p)| matches!(p.current_state(), &BackfillProgressPerVnode::Completed{ .. }));
         if is_completely_finished {
             assert!(!first_barrier.is_newly_added(self.actor_id));
         }
@@ -154,8 +152,6 @@ where
         upstream_table.init_epoch(first_epoch).await?;
 
         let mut backfill_state: BackfillState = progress_per_vnode.into();
-        // FIXME(kwannoel): This initial committed progress should also be read from state table.
-        let mut committed_progress = HashMap::new();
 
         // If the snapshot is empty, we don't need to backfill.
         // We cannot complete progress now, as we want to persist
@@ -188,12 +184,6 @@ where
         // | f                    | t              | -> | f                |
         // | f                    | f              | -> | t                |
         let to_backfill = !is_completely_finished && !is_snapshot_empty;
-
-        // Use these to persist state.
-        // They contain the backfill position, and the progress.
-        // However, they do not contain the vnode key (index 0).
-        // That is filled in when we flush the state table.
-        let mut temporary_state: Vec<Datum> = vec![None; state_len];
 
         // If no need backfill, but state was still "unfinished" we need to finish it.
         // So we just update the state + progress to meta at the next barrier to finish progress,
@@ -321,7 +311,7 @@ where
                                             &chunk,
                                             &pk_in_output_indices,
                                             &mut backfill_state,
-                                        );
+                                        )?;
 
                                         let chunk_cardinality = chunk.cardinality() as u64;
                                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
@@ -370,7 +360,7 @@ where
                             &chunk,
                             &pk_in_output_indices,
                             &mut backfill_state,
-                        );
+                        )?;
 
                         let chunk_cardinality = chunk.cardinality() as u64;
                         cur_barrier_snapshot_processed_rows += chunk_cardinality;
@@ -442,9 +432,9 @@ where
                     barrier.epoch,
                     &mut self.state_table,
                     false,
-                    &backfill_state,
-                    &mut committed_progress,
-                    &mut temporary_state,
+                    &mut backfill_state,
+                    state_len,
+                    vnodes.iter_vnodes()
                 )
                 .await?;
 
@@ -486,24 +476,17 @@ where
                     // This is because we can't update state table in first epoch,
                     // since it expects to have been initialized in previous epoch
                     // (there's no epoch before the first epoch).
-                    let finished_placeholder_position = construct_initial_finished_state(pk_in_output_indices.len());
                     for vnode in upstream_table.vnodes().iter_vnodes() {
-                        let backfill_progress = backfill_state.get_progress(&vnode)?;
-                        let finished_state = match backfill_progress {
-                            BackfillProgressPerVnode::NotStarted => finished_placeholder_position.clone(),
-                            BackfillProgressPerVnode::InProgress(p) | BackfillProgressPerVnode::Completed(p) =>
-                              p.clone(),
-                        };
-                        backfill_state.update_progress(vnode, BackfillProgressPerVnode::Completed(finished_state.clone()));
+                        backfill_state.finish_progress(vnode, self.state_table.pk_indices().len());
                     }
 
                     persist_state_per_vnode(
                         barrier.epoch,
                         &mut self.state_table,
                         true,
-                        &backfill_state,
-                        &mut committed_progress,
-                        &mut temporary_state,
+                        &mut backfill_state,
+                        state_len,
+                        vnodes.iter_vnodes()
                     )
                     .await?;
 
@@ -585,6 +568,12 @@ where
             }
             let range_bounds = range_bounds.unwrap();
 
+            tracing::trace!(
+                vnode = ?vnode,
+                current_pos = ?current_pos,
+                range_bounds = ?range_bounds,
+                "iter_with_vnode_and_output_indices"
+            );
             let vnode_row_iter = upstream_table
                 .iter_with_vnode_and_output_indices(vnode, &range_bounds, Default::default())
                 .await?;

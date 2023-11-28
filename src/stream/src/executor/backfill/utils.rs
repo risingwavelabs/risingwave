@@ -27,7 +27,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::Datum;
+use risingwave_common::types::{Datum, DefaultOrd};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -51,18 +51,19 @@ pub const METADATA_STATE_LEN: usize = 3;
 #[derive(Clone, Debug)]
 pub struct BackfillState {
     /// Used to track backfill progress.
-    inner: HashMap<VirtualNode, BackfillProgressPerVnode>,
+    // TODO: Instead of using hashmap, perhaps we can just use static array.
+    inner: HashMap<VirtualNode, BackfillStatePerVnode>,
 }
 
 impl BackfillState {
-    fn has_no_progress(&self) -> bool {
+    pub(crate) fn has_progress(&self) -> bool {
         self.inner
             .values()
-            .all(|p| !matches!(p, BackfillProgressPerVnode::InProgress(_)))
+            .any(|p| matches!(p.current_state(), &BackfillProgressPerVnode::InProgress{..}))
     }
 
-    pub(crate) fn has_progress(&self) -> bool {
-        !self.has_no_progress()
+    pub(crate) fn get_current_state(&mut self, vnode: &VirtualNode) -> &mut BackfillProgressPerVnode {
+        &mut self.inner.get_mut(vnode).unwrap().current_state
     }
 
     // Expects the vnode to always have progress, otherwise it will return an error.
@@ -71,7 +72,7 @@ impl BackfillState {
         vnode: &VirtualNode,
     ) -> StreamExecutorResult<&BackfillProgressPerVnode> {
         match self.inner.get(vnode) {
-            Some(p) => Ok(p),
+            Some(p) => Ok(p.current_state()),
             None => bail!(
                     "Backfill progress for vnode {:#?} not found, backfill_state not initialized properly",
                     vnode,
@@ -82,20 +83,139 @@ impl BackfillState {
     pub(crate) fn update_progress(
         &mut self,
         vnode: VirtualNode,
-        progress: BackfillProgressPerVnode,
-    ) -> Option<BackfillProgressPerVnode> {
-        self.inner.insert(vnode, progress)
+        new_pos: OwnedRow,
+    ) -> StreamExecutorResult<()> {
+        let state = self.get_current_state(&vnode);
+        let new_state = BackfillProgressPerVnode::InProgress(new_pos);
+        match state {
+            BackfillProgressPerVnode::NotStarted => {
+                *state = new_state
+            }
+            BackfillProgressPerVnode::InProgress(current_pos) => {
+                *state = new_state
+            }
+            BackfillProgressPerVnode::Completed{ .. } => unreachable!(),
+        }
+        Ok(())
     }
 
-    fn iter_backfill_progress(
-        &self,
-    ) -> impl Iterator<Item = (&VirtualNode, &BackfillProgressPerVnode)> {
-        self.inner.iter()
+    pub(crate) fn finish_progress(
+        &mut self,
+        vnode: VirtualNode,
+        pos_len: usize,
+    ) {
+        let finished_placeholder_position = construct_initial_finished_state(pos_len);
+        let current_state = self.get_current_state(&vnode);
+        let new_pos = match current_state {
+            BackfillProgressPerVnode::NotStarted => finished_placeholder_position,
+            BackfillProgressPerVnode::InProgress(current_pos) => current_pos.clone(),
+            BackfillProgressPerVnode::Completed{ .. } => {
+                return;
+            },
+        };
+        *current_state = BackfillProgressPerVnode::Completed(new_pos);
+    }
+
+    /// If can commit, return state to be committed.
+    fn get_commit_state(&self, vnode: &VirtualNode) -> Option<(Option<Vec<Datum>>, Vec<Datum>)> {
+        if !self.can_commit(vnode) {
+            return None;
+        }
+        let new_state = self.inner.get(vnode).unwrap().current_state().clone();
+        let new_encoded_state = match new_state {
+            BackfillProgressPerVnode::NotStarted => unreachable!(),
+            BackfillProgressPerVnode::InProgress(current_pos) => {
+                let mut encoded_state = vec![None; current_pos.len() + 3];
+                encoded_state[0] = Some(vnode.to_scalar().into());
+                encoded_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
+                encoded_state[current_pos.len() + 1] = Some(false.into());
+                encoded_state[current_pos.len() + 2] = Some(0i64.into());
+                encoded_state
+            }
+            BackfillProgressPerVnode::Completed(current_pos) => {
+                let mut encoded_state = vec![None; current_pos.len() + 3];
+                encoded_state[0] = Some(vnode.to_scalar().into());
+                encoded_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
+                encoded_state[current_pos.len() + 1] = Some(true.into());
+                encoded_state[current_pos.len() + 2] = Some(0i64.into());
+                encoded_state
+            }
+        };
+        let old_state = self.inner.get(vnode).unwrap().committed_state().clone();
+        let old_encoded_state = match old_state {
+            BackfillProgressPerVnode::NotStarted => None,
+            BackfillProgressPerVnode::InProgress(committed_pos) => {
+                let mut encoded_state = vec![None; committed_pos.len() + 3];
+                encoded_state[0] = Some(vnode.to_scalar().into());
+                encoded_state[1..committed_pos.len() + 1].clone_from_slice(committed_pos.as_inner());
+                encoded_state[committed_pos.len() + 1] = Some(false.into());
+                encoded_state[committed_pos.len() + 2] = Some(0i64.into());
+                Some(encoded_state)
+            }
+            BackfillProgressPerVnode::Completed(committed_pos) => {
+                let mut encoded_state = vec![None; committed_pos.len() + 3];
+                encoded_state[0] = Some(vnode.to_scalar().into());
+                encoded_state[1..committed_pos.len() + 1].clone_from_slice(committed_pos.as_inner());
+                encoded_state[committed_pos.len() + 1] = Some(true.into());
+                encoded_state[committed_pos.len() + 2] = Some(0i64.into());
+                Some(encoded_state)
+            }
+        };
+        Some((old_encoded_state, new_encoded_state))
+    }
+
+    // TODO: We can add a committed flag to speed up this check.
+    fn can_commit(&self, vnode: &VirtualNode) -> bool {
+        let state = self.inner.get(vnode).unwrap();
+        match state.current_state() {
+            s @ BackfillProgressPerVnode::InProgress(current_pos)
+                | s @ BackfillProgressPerVnode::Completed(current_pos)
+            => {
+                s != state.committed_state()
+            }
+            BackfillProgressPerVnode::NotStarted => false,
+        }
+    }
+
+    fn mark_committed(&mut self, vnode: VirtualNode) {
+        let BackfillStatePerVnode {
+            committed_state,
+            current_state,
+        } = self.inner.get_mut(&vnode).unwrap();
+
+        assert!(matches!(current_state, BackfillProgressPerVnode::InProgress(_) | BackfillProgressPerVnode::Completed(_)));
+        *committed_state = current_state.clone();
     }
 }
 
-impl From<Vec<(VirtualNode, BackfillProgressPerVnode)>> for BackfillState {
-    fn from(v: Vec<(VirtualNode, BackfillProgressPerVnode)>) -> Self {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BackfillStatePerVnode {
+    committed_state: BackfillProgressPerVnode,
+    current_state: BackfillProgressPerVnode,
+}
+
+impl BackfillStatePerVnode {
+    pub(crate) fn new(
+        committed_state: BackfillProgressPerVnode,
+        current_state: BackfillProgressPerVnode,
+    ) -> Self {
+        Self {
+            committed_state,
+            current_state,
+        }
+    }
+
+    pub(crate) fn committed_state(&self) -> &BackfillProgressPerVnode {
+        &self.committed_state
+    }
+
+    pub(crate) fn current_state(&self) -> &BackfillProgressPerVnode {
+        &self.current_state
+    }
+}
+
+impl From<Vec<(VirtualNode, BackfillStatePerVnode)>> for BackfillState {
+    fn from(v: Vec<(VirtualNode, BackfillStatePerVnode)>) -> Self {
         Self {
             inner: v.into_iter().collect(),
         }
@@ -103,8 +223,10 @@ impl From<Vec<(VirtualNode, BackfillProgressPerVnode)>> for BackfillState {
 }
 
 /// Used for tracking backfill state per vnode
+/// The `OwnedRow` only contains the pk of upstream, to track `current_pos`.
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub enum BackfillProgressPerVnode {
+    /// no entry exists for a vnode, or on initialization of the executor.
     NotStarted,
     InProgress(OwnedRow),
     Completed(OwnedRow),
@@ -159,7 +281,7 @@ pub(crate) fn mark_chunk_ref_by_vnode(
         let vnode = VirtualNode::compute_row(row, pk_in_output_indices);
         let v = match backfill_state.get_progress(&vnode)? {
             // We want to just forward the row, if the vnode has finished backfill.
-            BackfillProgressPerVnode::Completed(_current_pos) => true,
+            BackfillProgressPerVnode::Completed(_) => true,
             // If not started, no need to forward.
             BackfillProgressPerVnode::NotStarted => false,
             // If in progress, we need to check row <= current_pos.
@@ -280,10 +402,10 @@ pub(crate) fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Optio
     }
 }
 
-/// Gets progress per vnode, so we know which to backfill.
+/// Recovers progress per vnode, so we know which to backfill.
 pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
     state_table: &StateTableInner<S, BasicSerde, IS_REPLICATED>,
-) -> StreamExecutorResult<Vec<(VirtualNode, BackfillProgressPerVnode)>> {
+) -> StreamExecutorResult<Vec<(VirtualNode, BackfillStatePerVnode)>> {
     debug_assert!(!state_table.vnode_bitmap().is_empty());
     let vnodes = state_table.vnodes().iter_vnodes();
     let mut result = Vec::with_capacity(state_table.vnodes().len());
@@ -298,16 +420,32 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
         .iter_vnodes()
         .zip_eq_debug(states_for_vnode_keys)
     {
+        // NOTE(kwannoel): state_for_vnode_key does not include the vnode prefix.
         let backfill_progress = match state_for_vnode_key {
             Some(row) => {
-                let vnode_is_finished = row.last().unwrap();
-                if vnode_is_finished.into_bool() {
-                    BackfillProgressPerVnode::Completed(row)
+                let vnode_is_finished = row.as_inner().get(row.len() - 2).unwrap();
+                let vnode_is_finished = vnode_is_finished.as_ref().unwrap();
+
+                // Only the current pos should be contained in the in-memory backfill state.
+                // Row count will be added later.
+                let current_pos = row.as_inner().get(..row.len() - 2).unwrap();
+                let current_pos = current_pos.into_owned_row();
+                if *vnode_is_finished.as_bool() {
+                    BackfillStatePerVnode::new(
+                        BackfillProgressPerVnode::Completed(current_pos.clone()),
+                        BackfillProgressPerVnode::Completed(current_pos),
+                    )
                 } else {
-                    BackfillProgressPerVnode::InProgress(row)
+                    BackfillStatePerVnode::new(
+                        BackfillProgressPerVnode::InProgress(current_pos.clone()),
+                        BackfillProgressPerVnode::InProgress(current_pos),
+                    )
                 }
             }
-            None => BackfillProgressPerVnode::NotStarted,
+            None => BackfillStatePerVnode::new(
+                BackfillProgressPerVnode::NotStarted,
+                BackfillProgressPerVnode::NotStarted,
+            )
         };
         result.push((vnode, backfill_progress));
     }
@@ -354,11 +492,12 @@ pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
 
 /// We want to avoid allocating a row for every vnode.
 pub(crate) fn build_temporary_state_with_vnode(
-    row_state: &mut [Datum],
+    state_len: usize,
     vnode: VirtualNode,
     is_finished: bool,
     current_pos: &OwnedRow,
-) {
+) -> Vec<Datum> {
+    let mut row_state = vec![None; state_len];
     // vnode
     row_state[0] = Some(vnode.to_scalar().into());
     // pk
@@ -368,6 +507,7 @@ pub(crate) fn build_temporary_state_with_vnode(
     // row_count
     // FIXME(kwannoel): Currently arrangement backfill will not persist row_count.
     row_state[current_pos.len() + 2] = Some(0i64.into());
+    row_state
 }
 
 /// We want to avoid allocating a row for every vnode.
@@ -393,9 +533,11 @@ pub(crate) fn update_pos_by_vnode(
     chunk: &StreamChunk,
     pk_in_output_indices: &[usize],
     backfill_state: &mut BackfillState,
-) {
+) -> StreamExecutorResult<()> {
     let new_pos = get_new_pos(chunk, pk_in_output_indices);
-    backfill_state.update_progress(vnode, BackfillProgressPerVnode::InProgress(new_pos));
+    assert!(new_pos.len() > 0);
+    backfill_state.update_progress(vnode, new_pos)?;
+    Ok(())
 }
 
 /// Get new backfill pos from the chunk. Since chunk should have ordered rows, we can just take the
@@ -503,51 +645,59 @@ where
 /// - If previous state is `InProgress` / `NotStarted`: Persist.
 /// - If previous state is Completed: Do not persist.
 /// TODO(kwannoel): we should check committed state to be all `finished` in the tests.
+/// TODO(kwannoel): Instead of persisting state per vnode each time,
+/// we can optimize by persisting state for a subset of vnodes which were updated.
 pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
     epoch: EpochPair,
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
     is_finished: bool,
-    backfill_state: &BackfillState,
-    committed_progress: &mut HashMap<VirtualNode, Vec<Datum>>,
-    temporary_state: &mut [Datum],
+    backfill_state: &mut BackfillState,
+    state_len: usize,
+    vnodes: impl Iterator<Item = VirtualNode>,
 ) -> StreamExecutorResult<()> {
     let mut has_progress = false;
-    for (vnode, backfill_progress) in backfill_state.iter_backfill_progress() {
-        let current_pos = match backfill_progress {
-            BackfillProgressPerVnode::NotStarted => {
-                continue;
-            }
-            BackfillProgressPerVnode::Completed(current_pos)
-            | BackfillProgressPerVnode::InProgress(current_pos) => current_pos,
+    for vnode in vnodes {
+        let Some((encoded_prev_state, encoded_current_state)) = backfill_state.get_commit_state(&vnode) else {
+            continue;
         };
-        build_temporary_state_with_vnode(temporary_state, *vnode, is_finished, current_pos);
-
-        let old_state = committed_progress.get(vnode);
-
-        if let Some(old_state) = old_state {
-            // No progress for vnode, means no data
-            if &old_state[1..current_pos.len() + 1] == current_pos.as_inner()
-                && old_state[current_pos.len() + 1] == Some(is_finished.into())
+        if let Some(encoded_prev_state) = encoded_prev_state {
+            // There's some progress, update the state.
+            #[cfg(debug_assertions)]
             {
-                continue;
-            } else {
-                assert_eq!(old_state[0], Some((*vnode).to_scalar().into()));
-                assert_eq!(old_state.len(), temporary_state.len());
-                // There's some progress, update the state.
-                table.write_record(Record::Update {
-                    old_row: &old_state[..],
-                    new_row: &(*temporary_state),
-                });
-                has_progress = true;
+                let pk: &[Datum; 1] = &[Some(vnode.to_scalar().into())];
+                // old_row only contains the value segment.
+                let old_row = table.get_row(pk).await?;
+                match old_row {
+                    Some(old_row) => {
+                        let inner = old_row.as_inner();
+                        // value segment (without vnode) should be used for comparison
+                        assert_eq!(inner, &encoded_prev_state[1..]);
+                        assert_ne!(inner, &encoded_current_state[1..]);
+                    }
+                    None => {
+                        panic!("row {:#?} not found", pk);
+                    }
+                }
             }
+            table.write_record(Record::Update {
+                old_row: &encoded_prev_state[..],
+                new_row: &encoded_current_state[..],
+            });
+            has_progress = true;
         } else {
             // No existing state, create a new entry.
+            #[cfg(debug_assertions)]
+            {
+                let pk: &[Datum; 1] = &[Some(vnode.to_scalar().into())];
+                let row = table.get_row(pk).await?;
+                assert!(row.is_none(), "row {:#?}", row);
+            }
             table.write_record(Record::Insert {
-                new_row: &(*temporary_state),
+                new_row: &encoded_current_state[..],
             });
             has_progress = true;
         }
-        committed_progress.insert(*vnode, temporary_state.to_vec());
+        backfill_state.mark_committed(vnode);
     }
     if has_progress {
         table.commit(epoch).await?;
