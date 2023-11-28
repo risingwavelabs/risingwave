@@ -14,7 +14,8 @@
 
 use std::time::Duration;
 
-use risingwave_pb::meta::subscribe_response::Info;
+use risingwave_pb::meta::subscribe_response::info_wrap::Info;
+use risingwave_pb::meta::subscribe_response::InfoWrap;
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::MetaClient;
@@ -121,7 +122,12 @@ where
             // notification before init notification must be received successfully.
             match self.rx.message().await? {
                 Some(notification) => {
-                    if !matches!(notification.info.as_ref().unwrap(), &Info::Snapshot(_)) {
+                    if !matches!(
+                        notification.infos.as_slice(),
+                        [InfoWrap {
+                            info: Some(Info::Snapshot(_))
+                        }]
+                    ) {
                         notification_vec.push(notification);
                     } else {
                         break notification;
@@ -131,7 +137,10 @@ where
             }
         };
 
-        let Info::Snapshot(info) = init_notification.info.as_ref().unwrap() else {
+        let InfoWrap {
+            info: Some(Info::Snapshot(info)),
+        } = init_notification.infos[0]
+        else {
             unreachable!();
         };
 
