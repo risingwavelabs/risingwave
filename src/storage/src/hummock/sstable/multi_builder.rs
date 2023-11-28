@@ -230,7 +230,7 @@ where
                         event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
                         new_epoch: HummockEpoch::MAX,
                     };
-                    warn!("====!!!switch sstable file must add current key as end of range: {:?}", key);
+                    tracing::warn!("====!!!switch sstable file must add current key as end of range: {:?}", key);
                     builder.add_monotonic_delete(key);
                 }
             }
@@ -254,7 +254,10 @@ where
                     event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
                     new_epoch: last_range_tombstone_epoch,
                 };
-                warn!("====!!!switch sstable file must add current key as start of next file: {:?}", key);
+                tracing::warn!(
+                    "====!!!switch sstable file must add current key as start of next file: {:?}",
+                    key
+                );
                 builder.add_monotonic_delete(key);
             }
             self.current_builder = Some(builder);
@@ -316,7 +319,7 @@ where
                     event_key: event.event_key.clone(),
                     new_epoch: HummockEpoch::MAX,
                 };
-                warn!("====!!!switch sstable file must add split point range key: {:?}", key);
+                tracing::warn!("====!!!switch sstable file must add split point range key: {:?}", key);
                 builder.add_monotonic_delete(key);
             }
             self.seal_current().await?;

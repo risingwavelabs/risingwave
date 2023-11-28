@@ -314,7 +314,7 @@ impl CompactionDeleteRangeIterator {
         self.apply(self.seek_idx);
     }
 
-    pub fn last_key(&self) -> Option<PointRange<Vec<u8>>> {
+    pub fn last_key(&self) -> Option<&PointRange<Vec<u8>>> {
         self.events.events.last().map(|event| &event.0)
     }
 
