@@ -17,6 +17,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -48,7 +49,7 @@ pub async fn handle_alter_table_column(
     let db_name = session.database();
     let (schema_name, real_table_name) =
         Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
-    let search_path = session.config().get_search_path();
+    let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -97,10 +98,7 @@ pub async fn handle_alter_table_column(
 
     if let Some(source_schema) = &source_schema {
         if schema_has_schema_registry(source_schema) {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "Alter table with source having schema registry".into(),
-                None.into(),
-            )));
+            bail_not_implemented!("Alter table with source having schema registry");
         }
     }
 
@@ -140,10 +138,7 @@ pub async fn handle_alter_table_column(
             cascade,
         } => {
             if cascade {
-                Err(ErrorCode::NotImplemented(
-                    "drop column cascade".to_owned(),
-                    6903.into(),
-                ))?
+                bail_not_implemented!(issue = 6903, "drop column cascade");
             }
 
             // Locate the column by name and remove it.
@@ -225,8 +220,10 @@ pub async fn handle_alter_table_column(
         let graph = StreamFragmentGraph {
             parallelism: session
                 .config()
-                .get_streaming_parallelism()
-                .map(|parallelism| Parallelism { parallelism }),
+                .streaming_parallelism()
+                .map(|parallelism| Parallelism {
+                    parallelism: parallelism.get(),
+                }),
             ..build_graph(plan)
         };
 

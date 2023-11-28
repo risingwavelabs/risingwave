@@ -94,6 +94,13 @@ pub enum BatchError {
         BoxedError,
     ),
 
+    #[error("Failed to read from system table: {0}")]
+    SystemTable(
+        #[from]
+        #[backtrace]
+        BoxedError,
+    ),
+
     // Make the ref-counted type to be a variant for easier code structuring.
     #[error(transparent)]
     Shared(

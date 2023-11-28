@@ -3224,19 +3224,31 @@ impl Parser {
     }
 
     fn parse_set_variable(&mut self) -> Result<SetVariableValue, ParserError> {
-        let token = self.peek_token();
-        match (self.parse_value(), token.token) {
-            (Ok(value), _) => Ok(SetVariableValue::Literal(value)),
-            (Err(_), Token::Word(w)) => {
-                if w.keyword == Keyword::DEFAULT {
-                    Ok(SetVariableValue::Default)
-                } else {
-                    Ok(SetVariableValue::Ident(w.to_ident()?))
+        let mut values = vec![];
+        loop {
+            let token = self.peek_token();
+            let value = match (self.parse_value(), token.token) {
+                (Ok(value), _) => SetVariableValue::Literal(value),
+                (Err(_), Token::Word(w)) => {
+                    if w.keyword == Keyword::DEFAULT {
+                        SetVariableValue::Default
+                    } else {
+                        SetVariableValue::Ident(w.to_ident()?)
+                    }
                 }
+                (Err(_), unexpected) => {
+                    self.expected("variable value", unexpected.with_location(token.location))?
+                }
+            };
+            values.push(value);
+            if !self.consume_token(&Token::Comma) {
+                break;
             }
-            (Err(_), unexpected) => {
-                self.expected("variable value", unexpected.with_location(token.location))
-            }
+        }
+        if values.len() == 1 {
+            Ok(values[0].clone())
+        } else {
+            Ok(SetVariableValue::List(values))
         }
     }
 
@@ -4015,19 +4027,12 @@ impl Parser {
         }
         let variable = self.parse_identifier()?;
         if self.consume_token(&Token::Eq) || self.parse_keyword(Keyword::TO) {
-            let mut values = vec![];
-            loop {
-                let value = self.parse_set_variable()?;
-                values.push(value);
-                if self.consume_token(&Token::Comma) {
-                    continue;
-                }
-                return Ok(Statement::SetVariable {
-                    local: modifier == Some(Keyword::LOCAL),
-                    variable,
-                    value: values,
-                });
-            }
+            let value = self.parse_set_variable()?;
+            Ok(Statement::SetVariable {
+                local: modifier == Some(Keyword::LOCAL),
+                variable,
+                value,
+            })
         } else if variable.value == "CHARACTERISTICS" {
             self.expect_keywords(&[Keyword::AS, Keyword::TRANSACTION])?;
             Ok(Statement::SetTransaction {

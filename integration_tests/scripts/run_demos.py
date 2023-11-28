@@ -6,6 +6,7 @@ import sys
 import subprocess
 from time import sleep
 import argparse
+import json
 
 
 def run_sql_file(f: str, dir: str):
@@ -231,6 +232,80 @@ def run_cassandra_and_scylladb_sink_demo():
         if len(failed_cases) != 0:
             raise Exception("Data check failed for case {}".format(failed_cases))
 
+def run_elasticsearch_sink_demo():
+    demo = "elasticsearch-sink"
+    file_dir = dirname(abspath(__file__))
+    project_dir = dirname(file_dir)
+    demo_dir = os.path.join(project_dir, demo)
+    print("Running demo: {}".format(demo))
+
+    subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=demo_dir, check=True)
+    sleep(60)
+
+    sql_files = ['create_source.sql', 'create_mv.sql', 'create_sink.sql']
+    for fname in sql_files:
+        sql_file = os.path.join(demo_dir,  fname)
+        print("executing sql: ", open(sql_file).read())
+        run_sql_file(sql_file, demo_dir)
+
+    print("sink created. Wait for half min time for ingestion")
+
+    # wait for half min ingestion
+    sleep(30)
+
+    versions = ['7', '8']
+    sink_check_file = os.path.join(demo_dir, 'sink_check')
+    with open(sink_check_file) as f:
+        relations = f.read().strip().split(",")
+        failed_cases = []
+        for rel in relations:
+            query = 'curl -XGET -u elastic:risingwave "http://localhost:9200/{}/_count"  -H "Content-Type: application/json"'.format(rel)
+            for v in versions:
+                es = 'elasticsearch{}'.format(v)
+                print("Running Query: {} on {}".format(query, es))
+                counts = subprocess.check_output(["docker", "compose", "exec", es, "bash", "-c", query], cwd=demo_dir)
+                counts = json.loads(counts)['count']
+                print("{} counts in {}_{}".format(counts, es, rel))
+                if counts < 1:
+                    failed_cases.append(es + '_' + rel)
+        if len(failed_cases) != 0:
+            raise Exception("Data check failed for case {}".format(failed_cases))
+
+def run_redis_demo():
+    demo = "redis-sink"
+    file_dir = dirname(abspath(__file__))
+    project_dir = dirname(file_dir)
+    demo_dir = os.path.join(project_dir, demo)
+    print("Running demo: {}".format(demo))
+
+    subprocess.run(["docker", "compose", "up", "-d", "--build"], cwd=demo_dir, check=True)
+    sleep(40)
+
+    sql_files = ['create_source.sql', 'create_mv.sql', 'create_sink.sql']
+    for fname in sql_files:
+        sql_file = os.path.join(demo_dir,  fname)
+        print("executing sql: ", open(sql_file).read())
+        run_sql_file(sql_file, demo_dir)
+
+    sleep(40)
+    sink_check_file = os.path.join(demo_dir, 'sink_check')
+    with open(sink_check_file) as f:
+        relations = f.read().strip().split(",")
+        failed_cases = []
+        for rel in relations:
+            query = "*{}*".format(rel)
+            print("Running query: scan on Redis".format(query))
+            output = subprocess.Popen(["docker", "compose", "exec", "redis", "redis-cli", "--scan", "--pattern", query], cwd=demo_dir, stdout=subprocess.PIPE)
+            rows = subprocess.check_output(["wc", "-l"], cwd=demo_dir, stdin=output.stdout)
+            output.stdout.close()
+            output.wait()
+            rows = int(rows.decode('utf8').strip())
+            print("{} keys in '*{}*'".format(rows, rel))
+            if rows < 1:
+                failed_cases.append(rel)
+        if len(failed_cases) != 0:
+            raise Exception("Data check failed for case {}".format(failed_cases))
+
 arg_parser = argparse.ArgumentParser(description='Run the demo')
 arg_parser.add_argument('--format',
                         metavar='format',
@@ -259,5 +334,9 @@ elif args.case == "kafka-cdc-sink":
     run_kafka_cdc_demo()
 elif args.case == "cassandra-and-scylladb-sink":
     run_cassandra_and_scylladb_sink_demo()
+elif args.case == "elasticsearch-sink":
+    run_elasticsearch_sink_demo()
+elif args.case == "redis-sink":
+    run_redis_demo()
 else:
     run_demo(args.case, args.format)

@@ -29,6 +29,7 @@ pub mod s3;
 use await_tree::InstrumentAwait;
 use futures::stream::BoxStream;
 use futures::StreamExt;
+use risingwave_common::config::ObjectStoreConfig;
 pub use s3::*;
 
 pub mod error;
@@ -125,6 +126,11 @@ pub trait ObjectStore: Send + Sync {
     fn recv_buffer_size(&self) -> usize {
         // 2MB
         1 << 21
+    }
+
+    fn config(&self) -> Option<&ObjectStoreConfig> {
+        // TODO: remove option
+        None
     }
 }
 
@@ -250,41 +256,6 @@ impl ObjectStoreImpl {
                 store.inner.op.info().native_capability().write_can_multi
             }
             ObjectStoreImpl::S3(_) => true,
-        }
-    }
-
-    pub fn set_opts(
-        &mut self,
-        streaming_read_timeout_ms: u64,
-        streaming_upload_timeout_ms: u64,
-        read_timeout_ms: u64,
-        upload_timeout_ms: u64,
-    ) {
-        match self {
-            ObjectStoreImpl::InMem(s) => {
-                s.set_opts(
-                    streaming_read_timeout_ms,
-                    streaming_upload_timeout_ms,
-                    read_timeout_ms,
-                    upload_timeout_ms,
-                );
-            }
-            ObjectStoreImpl::Opendal(s) => {
-                s.set_opts(
-                    streaming_read_timeout_ms,
-                    streaming_upload_timeout_ms,
-                    read_timeout_ms,
-                    upload_timeout_ms,
-                );
-            }
-            ObjectStoreImpl::S3(s) => {
-                s.set_opts(
-                    streaming_read_timeout_ms,
-                    streaming_upload_timeout_ms,
-                    read_timeout_ms,
-                    upload_timeout_ms,
-                );
-            }
         }
     }
 
@@ -531,13 +502,28 @@ pub struct MonitoredObjectStore<OS: ObjectStore> {
 ///   - `failure-count`
 impl<OS: ObjectStore> MonitoredObjectStore<OS> {
     pub fn new(store: OS, object_store_metrics: Arc<ObjectStoreMetrics>) -> Self {
-        Self {
-            inner: store,
-            object_store_metrics,
-            streaming_read_timeout: None,
-            streaming_upload_timeout: None,
-            read_timeout: None,
-            upload_timeout: None,
+        if let Some(config) = store.config() {
+            Self {
+                object_store_metrics,
+                streaming_read_timeout: Some(Duration::from_millis(
+                    config.object_store_streaming_read_timeout_ms,
+                )),
+                streaming_upload_timeout: Some(Duration::from_millis(
+                    config.object_store_streaming_upload_timeout_ms,
+                )),
+                read_timeout: Some(Duration::from_millis(config.object_store_read_timeout_ms)),
+                upload_timeout: Some(Duration::from_millis(config.object_store_upload_timeout_ms)),
+                inner: store,
+            }
+        } else {
+            Self {
+                inner: store,
+                object_store_metrics,
+                streaming_read_timeout: None,
+                streaming_upload_timeout: None,
+                read_timeout: None,
+                upload_timeout: None,
+            }
         }
     }
 
@@ -547,6 +533,10 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
 
     pub fn inner(&self) -> &OS {
         &self.inner
+    }
+
+    pub fn mut_inner(&mut self) -> &mut OS {
+        &mut self.inner
     }
 
     pub async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
@@ -780,34 +770,23 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         res
     }
 
-    fn set_opts(
-        &mut self,
-        streaming_read_timeout_ms: u64,
-        streaming_upload_timeout_ms: u64,
-        read_timeout_ms: u64,
-        upload_timeout_ms: u64,
-    ) {
-        self.streaming_read_timeout = Some(Duration::from_millis(streaming_read_timeout_ms));
-        self.streaming_upload_timeout = Some(Duration::from_millis(streaming_upload_timeout_ms));
-        self.read_timeout = Some(Duration::from_millis(read_timeout_ms));
-        self.upload_timeout = Some(Duration::from_millis(upload_timeout_ms));
-    }
-
     fn recv_buffer_size(&self) -> usize {
         self.inner.recv_buffer_size()
     }
 }
 
-pub async fn parse_remote_object_store(
+pub async fn build_remote_object_store(
     url: &str,
     metrics: Arc<ObjectStoreMetrics>,
     ident: &str,
+    config: ObjectStoreConfig,
 ) -> ObjectStoreImpl {
     match url {
         s3 if s3.starts_with("s3://") => ObjectStoreImpl::S3(
-            S3ObjectStore::new(
+            S3ObjectStore::new_with_config(
                 s3.strip_prefix("s3://").unwrap().to_string(),
                 metrics.clone(),
+                config,
             )
             .await
             .monitored(metrics),

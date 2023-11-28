@@ -54,7 +54,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
             // There could be arbitrary number of upstreams with simple dispatcher.
             DispatcherType::Simple => false,
             // There should be always only one upstream with no-shuffle dispatcher.
-            DispatcherType::NoShuffle | DispatcherType::CdcTablename => true,
+            DispatcherType::NoShuffle => true,
         };
 
         if always_single_input {

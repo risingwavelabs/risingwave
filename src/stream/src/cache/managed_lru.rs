@@ -30,11 +30,11 @@ use crate::common::metrics::MetricsInfo;
 const REPORT_SIZE_EVERY_N_KB_CHANGE: usize = 4096;
 
 /// The managed cache is a lru cache that bounds the memory usage by epoch.
-/// Should be used with `GlobalMemoryManager`.
+/// Should be used with `MemoryManager`.
 pub struct ManagedLruCache<K, V, S = DefaultHasher, A: Clone + Allocator = Global> {
     inner: LruCache<K, V, S, A>,
     /// The entry with epoch less than water should be evicted.
-    /// Should only be updated by the `GlobalMemoryManager`.
+    /// Should only be updated by the `MemoryManager`.
     watermark_epoch: Arc<AtomicU64>,
     /// The heap size of keys/values
     kv_heap_size: usize,

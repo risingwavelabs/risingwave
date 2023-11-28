@@ -23,9 +23,11 @@ use memcomparable::Error as MemComparableError;
 use risingwave_error::tonic::{ToTonicStatus, TonicStatusWrapper};
 use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
+use thiserror_ext::Macro;
 use tokio::task::JoinError;
 
 use crate::array::ArrayError;
+use crate::session_config::SessionConfigError;
 use crate::util::value_encoding::error::ValueEncodingError;
 
 const ERROR_SUPPRESSOR_RESET_DURATION: Duration = Duration::from_millis(60 * 60 * 1000); // 1h
@@ -35,7 +37,7 @@ pub type BoxedError = Box<dyn Error>;
 
 pub use anyhow::anyhow as anyhow_error;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct TrackingIssue(Option<u32>);
 
 impl TrackingIssue {
@@ -69,6 +71,15 @@ impl Display for TrackingIssue {
     }
 }
 
+#[derive(Error, Debug, Macro)]
+#[error("Feature is not yet implemented: {feature}\n{issue}")]
+#[thiserror_ext(macro(path = "crate::error"))]
+pub struct NotImplemented {
+    #[message]
+    pub feature: String,
+    pub issue: TrackingIssue,
+}
+
 #[derive(Error, Debug)]
 pub enum ErrorCode {
     #[error("internal error: {0}")]
@@ -86,8 +97,8 @@ pub enum ErrorCode {
         #[backtrace]
         BoxedError,
     ),
-    #[error("Feature is not yet implemented: {0}\n{1}")]
-    NotImplemented(String, TrackingIssue),
+    #[error(transparent)]
+    NotImplemented(#[from] NotImplemented),
     // Tips: Use this only if it's intended to reject the query
     #[error("Not supported: {0}\nHINT: {1}")]
     NotSupported(String, String),
@@ -191,8 +202,19 @@ pub enum ErrorCode {
     ),
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
-    #[error("unrecognized configuration parameter \"{0}\"")]
-    UnrecognizedConfigurationParameter(String),
+    #[error("Failed to get/set session config: {0}")]
+    SessionConfig(
+        #[from]
+        #[backtrace]
+        SessionConfigError,
+    ),
+}
+
+// TODO(error-handling): automatically generate this impl.
+impl From<NotImplemented> for RwError {
+    fn from(value: NotImplemented) -> Self {
+        ErrorCode::from(value).into()
+    }
 }
 
 pub fn internal_error(msg: impl Into<String>) -> RwError {
@@ -335,6 +357,12 @@ impl From<PbFieldNotFound> for RwError {
     }
 }
 
+impl From<SessionConfigError> for RwError {
+    fn from(value: SessionConfigError) -> Self {
+        ErrorCode::SessionConfig(value).into()
+    }
+}
+
 impl From<tonic::transport::Error> for RwError {
     fn from(err: tonic::transport::Error) -> Self {
         ErrorCode::RpcError(err.into()).into()
@@ -468,14 +496,8 @@ macro_rules! ensure_eq {
 
 #[macro_export]
 macro_rules! bail {
-    ($msg:literal $(,)?) => {
-        return Err($crate::error::anyhow_error!($msg).into())
-    };
-    ($err:expr $(,)?) => {
-        return Err($crate::error::anyhow_error!($err).into())
-    };
-    ($fmt:expr, $($arg:tt)*) => {
-        return Err($crate::error::anyhow_error!($fmt, $($arg)*).into())
+    ($($arg:tt)*) => {
+        return Err($crate::error::anyhow_error!($($arg)*).into())
     };
 }
 
@@ -605,7 +627,7 @@ mod tests {
         check_grpc_error(ErrorCode::TaskNotFound, Code::Internal);
         check_grpc_error(ErrorCode::InternalError(String::new()), Code::Internal);
         check_grpc_error(
-            ErrorCode::NotImplemented(String::new(), None.into()),
+            ErrorCode::NotImplemented(not_implemented!("test")),
             Code::Internal,
         );
     }

@@ -158,19 +158,6 @@ pub struct MetaNodeOpts {
     #[override_opts(path = system.backup_storage_directory)]
     backup_storage_directory: Option<String>,
 
-    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_READ_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_streaming_read_timeout_ms)]
-    pub object_store_streaming_read_timeout_ms: Option<u64>,
-    #[clap(long, env = "RW_OBJECT_STORE_STREAMING_UPLOAD_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_streaming_upload_timeout_ms)]
-    pub object_store_streaming_upload_timeout_ms: Option<u64>,
-    #[clap(long, env = "RW_OBJECT_STORE_UPLOAD_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_upload_timeout_ms)]
-    pub object_store_upload_timeout_ms: Option<u64>,
-    #[clap(long, env = "RW_OBJECT_STORE_READ_TIMEOUT_MS", value_enum)]
-    #[override_opts(path = storage.object_store_read_timeout_ms)]
-    pub object_store_read_timeout_ms: Option<u64>,
-
     /// Enable heap profile dump when memory usage is high.
     #[clap(long, env = "RW_HEAP_PROFILING_DIR")]
     #[override_opts(path = server.heap_profiling.dir)]
@@ -256,6 +243,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             MetaOpts {
                 enable_recovery: !config.meta.disable_recovery,
                 enable_scale_in_when_recovery: config.meta.enable_scale_in_when_recovery,
+                enable_automatic_parallelism_control: config
+                    .meta
+                    .enable_automatic_parallelism_control,
                 in_flight_barrier_nums,
                 max_idle_ms,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,

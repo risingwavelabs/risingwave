@@ -17,6 +17,7 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::{bail_not_implemented, not_implemented};
 use risingwave_expr::aggregate::{agg_kinds, AggKind};
 
 use super::generic::{self, Agg, GenericPlanRef, PlanAggCall, ProjectBuilder};
@@ -297,12 +298,7 @@ impl LogicalAggBuilder {
                         set.into_iter()
                             .map(|expr| input_proj_builder.add_expr(&expr))
                             .try_collect()
-                            .map_err(|err| {
-                                ErrorCode::NotImplemented(
-                                    format!("{err} inside GROUP BY"),
-                                    None.into(),
-                                )
-                            })
+                            .map_err(|err| not_implemented!("{err} inside GROUP BY"))
                     })
                     .try_collect()?;
 
@@ -322,9 +318,7 @@ impl LogicalAggBuilder {
                     .into_iter()
                     .map(|expr| input_proj_builder.add_expr(&expr))
                     .try_collect()
-                    .map_err(|err| {
-                        ErrorCode::NotImplemented(format!("{err} inside GROUP BY"), None.into())
-                    })?;
+                    .map_err(|err| not_implemented!("{err} inside GROUP BY"))?;
                 (group_key, vec![])
             }
             GroupBy::GroupingSets(grouping_sets) => gen_group_key_and_grouping_sets(grouping_sets)?,
@@ -477,9 +471,7 @@ impl LogicalAggBuilder {
                 Ok(InputRef::new(index, expr.return_type()))
             })
             .try_collect()
-            .map_err(|err: &'static str| {
-                ErrorCode::NotImplemented(format!("{err} inside aggregation calls"), None.into())
-            })?;
+            .map_err(|err: &'static str| not_implemented!("{err} inside aggregation calls"))?;
 
         let order_by: Vec<_> = order_by
             .sort_exprs
@@ -490,10 +482,7 @@ impl LogicalAggBuilder {
             })
             .try_collect()
             .map_err(|err: &'static str| {
-                ErrorCode::NotImplemented(
-                    format!("{err} inside aggregation calls order by"),
-                    None.into(),
-                )
+                not_implemented!("{err} inside aggregation calls order by")
             })?;
 
         match agg_kind {
@@ -786,10 +775,13 @@ impl ExprRewriter for LogicalAggBuilder {
 
     fn rewrite_subquery(&mut self, subquery: crate::expr::Subquery) -> ExprImpl {
         if subquery.is_correlated(0) {
-            self.error = Some(ErrorCode::NotImplemented(
-                "correlated subquery in HAVING or SELECT with agg".into(),
-                2275.into(),
-            ));
+            self.error = Some(
+                not_implemented!(
+                    issue = 2275,
+                    "correlated subquery in HAVING or SELECT with agg",
+                )
+                .into(),
+            );
         }
         subquery.into()
     }
@@ -1101,11 +1093,7 @@ impl ToBatch for LogicalAgg {
         };
         let agg_plan = if self.group_key().is_empty() {
             BatchSimpleAgg::new(new_logical).into()
-        } else if self
-            .ctx()
-            .session_ctx()
-            .config()
-            .get_batch_enable_sort_agg()
+        } else if self.ctx().session_ctx().config().batch_enable_sort_agg()
             && new_logical.input_provides_order_on_group_keys()
         {
             BatchSortAgg::new(new_logical).into()
@@ -1150,11 +1138,7 @@ impl ToStream for LogicalAgg {
 
         for agg_call in self.agg_calls() {
             if matches!(agg_call.agg_kind, agg_kinds::unimplemented_in_stream!()) {
-                return Err(ErrorCode::NotImplemented(
-                    format!("{} aggregation in materialized view", agg_call.agg_kind),
-                    None.into(),
-                )
-                .into());
+                bail_not_implemented!("{} aggregation in materialized view", agg_call.agg_kind);
             }
         }
         let eowc = ctx.emit_on_window_close();

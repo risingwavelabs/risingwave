@@ -116,6 +116,8 @@ steps:
           - "cockroach-sink"
           - "kafka-cdc-sink"
           - "cassandra-and-scylladb-sink"
+          - "elasticsearch-sink"
+          - "redis-sink"
         format:
           - "json"
           - "protobuf"
@@ -162,5 +164,13 @@ steps:
           skip: true
         - with:
             testcase: "cassandra-and-scylladb-sink"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "elasticsearch-sink"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "redis-sink"
             format: "protobuf"
           skip: true

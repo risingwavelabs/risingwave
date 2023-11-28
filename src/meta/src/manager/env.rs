@@ -24,7 +24,7 @@ use sea_orm::EntityTrait;
 use super::{SystemParamsManager, SystemParamsManagerRef};
 use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
 use crate::controller::SqlMetaStore;
-use crate::manager::event_log::{start_event_log_manager, EventLogManger, EventLogMangerRef};
+use crate::manager::event_log::{start_event_log_manager, EventLogMangerRef};
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
     NotificationManagerRef,
@@ -86,6 +86,9 @@ pub struct MetaOpts {
     pub enable_recovery: bool,
     /// Whether to enable the scale-in feature when compute-node is removed.
     pub enable_scale_in_when_recovery: bool,
+    /// Whether to enable the auto-scaling feature when compute-node is joined.
+    /// The semantics of this configuration will be expanded in the future to control the automatic scaling of the entire cluster.
+    pub enable_automatic_parallelism_control: bool,
     /// The maximum number of barriers in-flight in the compute nodes.
     pub in_flight_barrier_nums: usize,
     /// After specified seconds of idle (no mview or flush), the process will be exited.
@@ -186,6 +189,7 @@ impl MetaOpts {
         Self {
             enable_recovery,
             enable_scale_in_when_recovery: false,
+            enable_automatic_parallelism_control: false,
             in_flight_barrier_nums: 40,
             max_idle_ms: 0,
             compaction_deterministic_test: false,
@@ -382,6 +386,8 @@ impl MetaSrvEnv {
     }
 
     pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {
+        use crate::manager::event_log::EventLogManger;
+
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let meta_store = MemStore::default().into_ref();
         #[cfg(madsim)]
