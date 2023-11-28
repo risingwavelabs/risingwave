@@ -127,7 +127,7 @@ test_backfill_tombstone() {
     fields.v1._.kind = 'sequence',
     datagen.rows.per.second = '2000000'
   )
-  FORMAT DEBEZIUM
+  FORMAT PLAIN
   ENCODE JSON;
   "
 

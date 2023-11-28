@@ -312,9 +312,10 @@ async fn test_sink_create() -> Result<()> {
     let mut session2 = cluster.start_session();
     tokio::spawn(async move {
         session2.run(SET_RATE_LIMIT_2).await.unwrap();
-        let result = session2
+        session2
             .run("CREATE SINK s FROM t WITH (connector='blackhole');")
-            .await;
+            .await
+            .expect("create sink should succeed");
     });
 
     // Wait for job to start
