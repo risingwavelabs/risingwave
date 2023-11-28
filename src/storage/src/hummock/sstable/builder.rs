@@ -198,9 +198,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
             self.table_ids.insert(table_id);
         }
-        if event.new_epoch == MAX_EPOCH
+        if event.new_epoch >= MAX_EPOCH
             && self.monotonic_deletes.last().map_or(true, |last| {
-                last.new_epoch == MAX_EPOCH
+                last.new_epoch >= MAX_EPOCH
                     && last.event_key.left_user_key.table_id
                         == event.event_key.left_user_key.table_id
             })
@@ -208,7 +208,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             // This range would never delete any key so we can merge it with last range.
             return;
         }
-        if event.new_epoch != MAX_EPOCH {
+        if event.new_epoch < MAX_EPOCH {
             self.epoch_set.insert(event.new_epoch);
         }
         self.range_tombstone_size += event.encoded_size();
@@ -495,7 +495,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             let mut tombstone_max_epoch = u64::MIN;
 
             for monotonic_delete in &meta.monotonic_tombstone_events {
-                if monotonic_delete.new_epoch != MAX_EPOCH {
+                if monotonic_delete.new_epoch < MAX_EPOCH {
                     tombstone_min_epoch = cmp::min(tombstone_min_epoch, monotonic_delete.new_epoch);
                     tombstone_max_epoch = cmp::max(tombstone_max_epoch, monotonic_delete.new_epoch);
                 }

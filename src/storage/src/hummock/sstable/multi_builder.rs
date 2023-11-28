@@ -215,7 +215,7 @@ where
             }
             if need_seal_current
                 && let Some(event) = builder.last_range_tombstone()
-                && event.new_epoch != MAX_EPOCH
+                && event.new_epoch < MAX_EPOCH
             {
                 last_range_tombstone_epoch = event.new_epoch;
                 if event
@@ -248,7 +248,7 @@ where
             let mut builder = self.builder_factory.open_builder().await?;
             // If last_range_tombstone_epoch is not MAX, it means that we cut one range-tombstone to
             // two half and add the right half as a new range to next sstable.
-            if need_seal_current && last_range_tombstone_epoch != MAX_EPOCH {
+            if need_seal_current && last_range_tombstone_epoch < MAX_EPOCH {
                 builder.add_monotonic_delete(MonotonicDeleteEvent {
                     event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
                     new_epoch: last_range_tombstone_epoch,
@@ -306,9 +306,9 @@ where
     pub async fn add_monotonic_delete(&mut self, event: MonotonicDeleteEvent) -> HummockResult<()> {
         if let Some(builder) = self.current_builder.as_mut()
             && builder.reach_capacity()
-            && event.new_epoch != MAX_EPOCH
+            && event.new_epoch < MAX_EPOCH
         {
-            if builder.last_range_tombstone_epoch() != MAX_EPOCH {
+            if builder.last_range_tombstone_epoch() < MAX_EPOCH {
                 builder.add_monotonic_delete(MonotonicDeleteEvent {
                     event_key: event.event_key.clone(),
                     new_epoch: MAX_EPOCH,
@@ -318,7 +318,7 @@ where
         }
 
         if self.current_builder.is_none() {
-            if event.new_epoch == MAX_EPOCH {
+            if event.new_epoch >= MAX_EPOCH {
                 return Ok(());
             }
 

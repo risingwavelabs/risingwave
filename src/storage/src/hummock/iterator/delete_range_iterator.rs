@@ -319,7 +319,7 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
             }
             for node in &self.tmp_buffer {
                 let epoch = node.current_epoch();
-                if epoch != MAX_EPOCH {
+                if epoch < MAX_EPOCH {
                     self.current_epochs.remove(&epoch);
                 }
             }
@@ -328,7 +328,7 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
                 node.next().await?;
                 if node.is_valid() {
                     let epoch = node.current_epoch();
-                    if epoch != MAX_EPOCH {
+                    if epoch < MAX_EPOCH {
                         self.current_epochs.insert(epoch);
                     }
                     self.heap.push(node);
@@ -349,7 +349,7 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
                 node.rewind().await?;
                 if node.is_valid() {
                     let epoch = node.current_epoch();
-                    if epoch != MAX_EPOCH {
+                    if epoch < MAX_EPOCH {
                         self.current_epochs.insert(epoch);
                     }
                     self.heap.push(node);
@@ -368,7 +368,7 @@ impl DeleteRangeIterator for ForwardMergeRangeIterator {
                 node.seek(target_user_key).await?;
                 if node.is_valid() {
                     let epoch = node.current_epoch();
-                    if epoch != MAX_EPOCH {
+                    if epoch < MAX_EPOCH {
                         self.current_epochs.insert(epoch);
                     }
                     self.heap.push(node);

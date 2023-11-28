@@ -31,7 +31,7 @@ pub async fn list_kv(
     let hummock = context
         .hummock_store(HummockServiceOpts::from_env(data_dir)?)
         .await?;
-    if epoch == MAX_EPOCH {
+    if epoch >= MAX_EPOCH {
         tracing::info!("using MAX_EPOCH as epoch");
     }
     let scan_result = {

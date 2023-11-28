@@ -657,7 +657,7 @@ where
         del_iter.seek(full_key.user_key).await?;
         if !task_config.gc_delete_keys
             && del_iter.is_valid()
-            && del_iter.earliest_epoch() != MAX_EPOCH
+            && del_iter.earliest_epoch() < MAX_EPOCH
         {
             sst_builder
                 .add_monotonic_delete(MonotonicDeleteEvent {
