@@ -143,7 +143,7 @@ mod test {
                 code: 0,
                 message: "abc".to_string(),
             }),
-            infos: vec![],
+            info: None,
             operation: 1,
             version: 100,
         });

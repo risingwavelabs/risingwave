@@ -1990,7 +1990,7 @@ impl CatalogManager {
                             with_grant_option: false,
                             granted_by: old_owner_id,
                         }
-                    }],
+                    }]
                 };
                 if let Some(privilege) = user
                     .grant_privileges
@@ -2005,9 +2005,7 @@ impl CatalogManager {
                 commit_meta!(self, databases, users)?;
                 user_core.increase_ref(owner_id);
                 user_core.decrease_ref(old_owner_id);
-                let version = self
-                    .notify_frontend(Operation::Update, vec![relation_info, user_info])
-                    .await;
+                let version = self.notify_frontend(Operation::Update, vec![relation_info, user_info]).await;
                 return Ok(version);
             }
             alter_owner_request::Object::SchemaId(schema_id) => {
@@ -2026,9 +2024,7 @@ impl CatalogManager {
             }
         };
 
-        let version = self
-            .notify_frontend(Operation::Update, vec![relation_info])
-            .await;
+        let version = self.notify_frontend(Operation::Update, vec![relation_info]).await;
 
         Ok(version)
     }

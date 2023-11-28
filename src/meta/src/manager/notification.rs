@@ -67,7 +67,7 @@ impl From<SubscribeType> for Target {
 struct Task {
     target: Target,
     operation: Operation,
-    infos: Vec<Info>,
+    info: Info,
     version: Option<NotificationVersion>,
 }
 
@@ -93,7 +93,7 @@ impl NotificationManager {
                 let response = SubscribeResponse {
                     status: None,
                     operation: task.operation as i32,
-                    infos: task.info,
+                    info: Some(task.info),
                     version: task.version.unwrap_or_default(),
                 };
 
@@ -120,13 +120,13 @@ impl NotificationManager {
         &self,
         target: Target,
         operation: Operation,
-        infos: Vec<Info>,
+        info: Info,
         version: Option<NotificationVersion>,
     ) {
         let task = Task {
             target,
             operation,
-            infos,
+            info,
             version,
         };
         self.task_tx.send(task).unwrap();
@@ -137,19 +137,19 @@ impl NotificationManager {
         &self,
         target: Target,
         operation: Operation,
-        infos: Vec<Info>,
+        info: Info,
     ) -> NotificationVersion {
         let mut version_guard = self.current_version.lock().await;
         version_guard.increase_version(&self.meta_store).await;
         let version = version_guard.version();
-        self.notify(target, operation, infos, Some(version));
+        self.notify(target, operation, info, Some(version));
         version
     }
 
     /// Add a notification to the waiting queue and return immediately
     #[inline(always)]
-    fn notify_without_version(&self, target: Target, operation: Operation, infos: Vec<Info>) {
-        self.notify(target, operation, infos, None);
+    fn notify_without_version(&self, target: Target, operation: Operation, info: Info) {
+        self.notify(target, operation, info, None);
     }
 
     pub fn notify_snapshot(
@@ -164,16 +164,12 @@ impl NotificationManager {
                 worker_key: Some(worker_key),
             },
             Operation::Snapshot,
-            vec![Info::Snapshot(meta_snapshot)],
+            Info::Snapshot(meta_snapshot),
         )
     }
 
-    pub async fn notify_frontend(
-        &self,
-        operation: Operation,
-        infos: Vec<Info>,
-    ) -> NotificationVersion {
-        self.notify_with_version(SubscribeType::Frontend.into(), operation, infos)
+    pub async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
+        self.notify_with_version(SubscribeType::Frontend.into(), operation, info)
             .await
     }
 
@@ -185,17 +181,17 @@ impl NotificationManager {
         self.notify_with_version(
             SubscribeType::Frontend.into(),
             operation,
-            vec![Info::RelationGroup(RelationGroup {
+            Info::RelationGroup(RelationGroup {
                 relations: vec![Relation {
                     relation_info: relation_info.into(),
                 }],
-            })],
+            }),
         )
         .await
     }
 
     pub async fn notify_hummock(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify_with_version(SubscribeType::Hummock.into(), operation, vec![info])
+        self.notify_with_version(SubscribeType::Hummock.into(), operation, info)
             .await
     }
 
@@ -207,17 +203,17 @@ impl NotificationManager {
         self.notify_with_version(
             SubscribeType::Hummock.into(),
             operation,
-            vec![Info::RelationGroup(RelationGroup {
+            Info::RelationGroup(RelationGroup {
                 relations: vec![Relation {
                     relation_info: relation_info.into(),
                 }],
-            })],
+            }),
         )
         .await
     }
 
     pub async fn notify_compactor(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify_with_version(SubscribeType::Compactor.into(), operation, vec![info])
+        self.notify_with_version(SubscribeType::Compactor.into(), operation, info)
             .await
     }
 
@@ -229,30 +225,30 @@ impl NotificationManager {
         self.notify_with_version(
             SubscribeType::Compactor.into(),
             operation,
-            vec![Info::RelationGroup(RelationGroup {
+            Info::RelationGroup(RelationGroup {
                 relations: vec![Relation {
                     relation_info: relation_info.into(),
                 }],
-            })],
+            }),
         )
         .await
     }
 
     pub async fn notify_compute(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify_with_version(SubscribeType::Compute.into(), operation, vec![info])
+        self.notify_with_version(SubscribeType::Compute.into(), operation, info)
             .await
     }
 
     pub fn notify_compute_without_version(&self, operation: Operation, info: Info) {
-        self.notify_without_version(SubscribeType::Compute.into(), operation, vec![info])
+        self.notify_without_version(SubscribeType::Compute.into(), operation, info)
     }
 
-    pub fn notify_frontend_without_version(&self, operation: Operation, infos: Vec<Info>) {
-        self.notify_without_version(SubscribeType::Frontend.into(), operation, infos)
+    pub fn notify_frontend_without_version(&self, operation: Operation, info: Info) {
+        self.notify_without_version(SubscribeType::Frontend.into(), operation, info)
     }
 
     pub fn notify_hummock_without_version(&self, operation: Operation, info: Info) {
-        self.notify_without_version(SubscribeType::Hummock.into(), operation, vec![info])
+        self.notify_without_version(SubscribeType::Hummock.into(), operation, info)
     }
 
     #[cfg(any(test, feature = "test"))]

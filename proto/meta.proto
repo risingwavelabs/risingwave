@@ -409,29 +409,25 @@ message SubscribeResponse {
   common.Status status = 1;
   Operation operation = 2;
   uint64 version = 3;
-
-  message InfoWrap {
-    oneof info {
-      catalog.Database database = 4;
-      catalog.Schema schema = 5;
-      catalog.Function function = 6;
-      user.UserInfo user = 11;
-      // for streaming
-      FragmentParallelUnitMapping parallel_unit_mapping = 12;
-      common.WorkerNode node = 13;
-      hummock.HummockSnapshot hummock_snapshot = 14;
-      hummock.HummockVersionDeltas hummock_version_deltas = 15;
-      MetaSnapshot snapshot = 16;
-      backup_service.MetaBackupManifestId meta_backup_manifest_id = 17;
-      SystemParams system_params = 19;
-      hummock.WriteLimits hummock_write_limits = 20;
-      RelationGroup relation_group = 21;
-      catalog.Connection connection = 22;
-      FragmentParallelUnitMappings serving_parallel_unit_mappings = 23;
-      hummock.HummockVersionStats hummock_stats = 24;
-    };
+  oneof info {
+    catalog.Database database = 4;
+    catalog.Schema schema = 5;
+    catalog.Function function = 6;
+    user.UserInfo user = 11;
+    // for streaming
+    FragmentParallelUnitMapping parallel_unit_mapping = 12;
+    common.WorkerNode node = 13;
+    hummock.HummockSnapshot hummock_snapshot = 14;
+    hummock.HummockVersionDeltas hummock_version_deltas = 15;
+    MetaSnapshot snapshot = 16;
+    backup_service.MetaBackupManifestId meta_backup_manifest_id = 17;
+    SystemParams system_params = 19;
+    hummock.WriteLimits hummock_write_limits = 20;
+    RelationGroup relation_group = 21;
+    catalog.Connection connection = 22;
+    FragmentParallelUnitMappings serving_parallel_unit_mappings = 23;
+    hummock.HummockVersionStats hummock_stats = 24;
   }
-  repeated InfoWrap infos = 50;
 }
 
 service NotificationService {
