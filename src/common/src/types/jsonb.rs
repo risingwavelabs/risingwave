@@ -374,6 +374,11 @@ impl<'a> JsonbRef<'a> {
             Serializer::with_formatter(FmtToIoUnchecked(f), PrettyFormatter::with_indent(b"    "));
         self.0.serialize(&mut ser).map_err(|_| std::fmt::Error)
     }
+
+    /// Returns the capacity of the underlying buffer.
+    pub fn capacity(self) -> usize {
+        self.0.capacity()
+    }
 }
 
 /// A custom implementation for [`serde_json::ser::Formatter`] to match PostgreSQL, which adds extra

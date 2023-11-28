@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::DataType;
 use risingwave_expr::sig::FUNCTION_REGISTRY;
@@ -73,21 +74,16 @@ impl WindowFunction {
                     .into());
                 }
                 if !offset.is_const() {
-                    return Err(ErrorCode::NotImplemented(
-                        format!("non-const `offset` of `{kind}` function is not supported yet"),
-                        None.into(),
-                    )
-                    .into());
+                    bail_not_implemented!(
+                        "non-const `offset` of `{kind}` function is not supported yet"
+                    );
                 }
                 Ok(value.return_type())
             }
             (Lag | Lead, [_value, _offset, _default]) => {
-                Err(RwError::from(ErrorCode::NotImplemented(
-                    format!(
-                        "`{kind}` window function with `default` argument is not supported yet"
-                    ),
-                    None.into(),
-                )))
+                bail_not_implemented!(
+                    "`{kind}` window function with `default` argument is not supported yet"
+                );
             }
 
             (Aggregate(agg_kind), args) => {

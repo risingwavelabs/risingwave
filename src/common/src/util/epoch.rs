@@ -141,6 +141,12 @@ impl EpochPair {
         self.prev += 1;
     }
 
+    pub fn inc_for_test(&mut self, inc_by: u64) {
+        self.prev = self.curr;
+
+        self.curr += inc_by;
+    }
+
     pub fn new_test_epoch(curr: u64) -> Self {
         assert!(curr > 0);
         Self::new(curr, curr - 1)
