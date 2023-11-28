@@ -127,7 +127,6 @@ where
             .iter()
             .map(|field| field.data_type.clone())
             .collect_vec();
-        println!("snapshot_data_types: {:?}", snapshot_data_types);
         let mut builders = upstream_table
             .vnodes()
             .iter_vnodes()
