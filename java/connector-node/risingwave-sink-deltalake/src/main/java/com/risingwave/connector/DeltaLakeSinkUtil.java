@@ -89,7 +89,6 @@ class DeltaLakeSinkUtil {
             case VARCHAR:
                 return dataType.equals(new StringType());
             case DECIMAL:
-                System.out.println(dataType.getTypeName());
                 return dataType.getTypeName().contains("decimal");
             case TIMESTAMP:
                 return dataType.equals(new TimestampType());
