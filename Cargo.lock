@@ -8639,6 +8639,7 @@ dependencies = [
  "static_assertions",
  "task_stats_alloc",
  "thiserror",
+ "thiserror-ext",
  "tokio-metrics",
  "tokio-stream",
  "tracing",
