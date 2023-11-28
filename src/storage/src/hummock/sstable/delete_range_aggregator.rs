@@ -260,14 +260,8 @@ impl CompactionDeleteRanges {
                 && a.new_epoch == b.new_epoch
         });
         if !monotonic_events.is_empty() {
-            assert_ne!(
-                monotonic_events.first().unwrap().new_epoch,
-                HummockEpoch::MAX
-            );
-            assert_eq!(
-                monotonic_events.last().unwrap().new_epoch,
-                HummockEpoch::MAX
-            );
+            assert!(monotonic_events.first().unwrap().new_epoch < MAX_EPOCH);
+            assert!(monotonic_events.last().unwrap().new_epoch >= MAX_EPOCH);
         }
         monotonic_events
     }
