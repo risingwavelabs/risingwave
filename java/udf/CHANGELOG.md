@@ -7,19 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.0.12] - 2023-11-28
+## [0.1.1] - 2023-11-28
+
+### Added
+
+- Support struct in struct and struct[] in struct.
 
 ### Changed
 
-- Change the default struct field name to `f{i}`.
+- Bump Arrow version to 14.
 
-### Fixed
+## [0.1.0] - 2023-09-01
 
-- Fix parsing nested struct type.
-
-
-## [0.0.11] - 2023-11-06
-
-### Fixed
-
-- Hook SIGTERM to stop the UDF server gracefully.
+- Initial release.
