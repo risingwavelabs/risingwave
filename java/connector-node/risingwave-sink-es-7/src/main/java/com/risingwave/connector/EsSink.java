@@ -66,12 +66,9 @@ public class EsSink extends SinkWriterBase {
     private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
 
     private static final TimeZone UTCTimeZone = TimeZone.getTimeZone("UTC");
-    private static final SimpleDateFormat tDfm =
-            createSimpleDateFormat("HH:mm:ss.SSS", UTCTimeZone);
-    private static final SimpleDateFormat tsDfm =
-            createSimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", UTCTimeZone);
-    private static final SimpleDateFormat tstzDfm =
-            createSimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", UTCTimeZone);
+    private final SimpleDateFormat tDfm;
+    private final SimpleDateFormat tsDfm;
+    private final SimpleDateFormat tstzDfm;
 
     private final EsSinkConfig config;
     private final BulkProcessor bulkProcessor;
@@ -114,6 +111,10 @@ public class EsSink extends SinkWriterBase {
         for (String primaryKey : tableSchema.getPrimaryKeys()) {
             primaryKeyIndexes.add(tableSchema.getColumnIndex(primaryKey));
         }
+
+        tDfm = createSimpleDateFormat("HH:mm:ss.SSS", UTCTimeZone);
+        tsDfm = createSimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", UTCTimeZone);
+        tstzDfm = createSimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", UTCTimeZone);
     }
 
     private static RestClientBuilder configureRestClientBuilder(
@@ -333,8 +334,7 @@ public class EsSink extends SinkWriterBase {
         return client;
     }
 
-    private static final SimpleDateFormat createSimpleDateFormat(
-            String pattern, TimeZone timeZone) {
+    private final SimpleDateFormat createSimpleDateFormat(String pattern, TimeZone timeZone) {
         SimpleDateFormat sdf = new SimpleDateFormat(pattern);
         sdf.setTimeZone(timeZone);
         return sdf;
