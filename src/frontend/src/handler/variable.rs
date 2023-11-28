@@ -26,15 +26,16 @@ use super::RwPgResponse;
 use crate::handler::HandlerArgs;
 use crate::utils::infer_stmt_row_desc::infer_show_variable;
 
-fn set_var_to_guc_str(value: &SetVariableValue) -> String {
+/// convert `SetVariableValue` to string while remove the quotes on literals.
+pub(crate) fn set_var_to_param_str(value: &SetVariableValue) -> Option<String> {
     match value {
-        SetVariableValue::Literal(Value::DoubleQuotedString(s))
-        | SetVariableValue::Literal(Value::SingleQuotedString(s)) => s.clone(),
-        SetVariableValue::List(list) => list
-            .iter()
-            .map(set_var_to_guc_str)
-            .join(SESSION_CONFIG_LIST_SEP),
-        _ => value.to_string(),
+        SetVariableValue::Single(var) => Some(var.to_string_unquoted()),
+        SetVariableValue::List(list) => Some(
+            list.iter()
+                .map(|var| var.to_string_unquoted())
+                .join(SESSION_CONFIG_LIST_SEP),
+        ),
+        SetVariableValue::Default => None,
     }
 }
 
@@ -44,7 +45,9 @@ pub fn handle_set(
     value: SetVariableValue,
 ) -> Result<RwPgResponse> {
     // Strip double and single quotes
-    let string_val = set_var_to_guc_str(&value);
+    let string_val = set_var_to_param_str(&value).ok_or(ErrorCode::InternalError(
+        "SET TO DEFAULT is not supported yet".to_string(),
+    ))?;
 
     let mut status = ParameterStatus::default();
 
