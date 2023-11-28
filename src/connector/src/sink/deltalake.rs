@@ -54,10 +54,8 @@ pub struct DeltaLakeCommon {
     pub s3_access_key: Option<String>,
     #[serde(rename = "s3.secret.key")]
     pub s3_secret_key: Option<String>,
-    #[serde(rename = "local.path")]
-    pub local_path: Option<String>,
-    #[serde(rename = "s3.path")]
-    pub s3_path: Option<String>,
+    #[serde(rename = "path")]
+    pub path: String,
     #[serde(rename = "s3.region")]
     pub s3_region: Option<String>,
     #[serde(rename = "s3.endpoint")]
@@ -65,38 +63,52 @@ pub struct DeltaLakeCommon {
 }
 impl DeltaLakeCommon {
     pub async fn create_deltalake_client(&self) -> Result<DeltaTable> {
-        let table = if let Some(local_path) = &self.local_path {
-            deltalake::open_table(local_path).await?
-        } else if let Some(s3_path) = &self.s3_path {
-            let mut storage_options = HashMap::new();
-            storage_options.insert(
-                AWS_ACCESS_KEY_ID.to_string(),
-                self.s3_access_key.clone().ok_or_else(|| {
-                    SinkError::Config(anyhow!("s3.access.key is required with aws s3"))
-                })?,
-            );
-            storage_options.insert(
-                AWS_SECRET_ACCESS_KEY.to_string(),
-                self.s3_secret_key.clone().ok_or_else(|| {
-                    SinkError::Config(anyhow!("s3.secret.key is required with aws s3"))
-                })?,
-            );
-            if let Some(s3_region) = &self.s3_region {
-                storage_options.insert(AWS_REGION.to_string(), s3_region.clone());
+        let table = match Self::get_table_url(&self.path)? {
+            DeltaTableUrl::S3(s3_path) => {
+                let mut storage_options = HashMap::new();
+                storage_options.insert(
+                    AWS_ACCESS_KEY_ID.to_string(),
+                    self.s3_access_key.clone().ok_or_else(|| {
+                        SinkError::Config(anyhow!("s3.access.key is required with aws s3"))
+                    })?,
+                );
+                storage_options.insert(
+                    AWS_SECRET_ACCESS_KEY.to_string(),
+                    self.s3_secret_key.clone().ok_or_else(|| {
+                        SinkError::Config(anyhow!("s3.secret.key is required with aws s3"))
+                    })?,
+                );
+                if let Some(s3_region) = &self.s3_region {
+                    storage_options.insert(AWS_REGION.to_string(), s3_region.clone());
+                }
+                if let Some(s3_endpoint) = &self.s3_endpoint {
+                    storage_options.insert(AWS_ENDPOINT_URL.to_string(), s3_endpoint.clone());
+                }
+                storage_options.insert(AWS_ALLOW_HTTP.to_string(), "true".to_string());
+                storage_options.insert(AWS_S3_ALLOW_UNSAFE_RENAME.to_string(), "true".to_string());
+                deltalake::open_table_with_storage_options(s3_path.clone(), storage_options).await?
             }
-            if let Some(s3_endpoint) = &self.s3_endpoint {
-                storage_options.insert(AWS_ENDPOINT_URL.to_string(), s3_endpoint.clone());
-            }
-            storage_options.insert(AWS_ALLOW_HTTP.to_string(), "true".to_string());
-            storage_options.insert(AWS_S3_ALLOW_UNSAFE_RENAME.to_string(), "true".to_string());
-            deltalake::open_table_with_storage_options(s3_path.clone(), storage_options).await?
-        } else {
-            return Err(SinkError::DeltaLake(
-                "`local.path` or `s3.path` set at least one, configure as needed.".to_string(),
-            ));
+            DeltaTableUrl::Local(local_path) => deltalake::open_table(local_path).await?,
         };
         Ok(table)
     }
+
+    fn get_table_url(path: &str) -> Result<DeltaTableUrl> {
+        if path.starts_with("s3://") || path.starts_with("s3a://") {
+            Ok(DeltaTableUrl::S3(path.to_string()))
+        } else if let Some(path) = path.strip_prefix("file://") {
+            Ok(DeltaTableUrl::Local(path.to_string()))
+        } else {
+            Err(SinkError::DeltaLake(
+                "path need to start with 's3://','s3a://'(s3) or file://(local)".to_string(),
+            ))
+        }
+    }
+}
+
+enum DeltaTableUrl {
+    S3(String),
+    Local(String),
 }
 
 #[serde_as]
