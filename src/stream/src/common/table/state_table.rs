@@ -602,14 +602,6 @@ where
             .collect()
     }
 
-    pub fn dist_key_in_pk_in_output_indices(&self) -> Option<Vec<usize>> {
-        assert!(IS_REPLICATED);
-        self.dist_key_in_pk_indices
-            .iter()
-            .map(|&i| self.output_indices.iter().position(|&j| i == j))
-            .collect()
-    }
-
     pub fn pk_serde(&self) -> &OrderedRowSerde {
         &self.pk_serde
     }
@@ -877,21 +869,12 @@ where
     pub fn write_chunk(&mut self, chunk: StreamChunk) {
         let (chunk, op) = chunk.into_parts();
 
-        let vnodes = if IS_REPLICATED {
-            compute_chunk_vnode(
-                &chunk,
-                &self.dist_key_in_pk_indices,
-                &self.pk_in_output_indices().unwrap(),
-                &self.vnodes,
-            )
-        } else {
-            compute_chunk_vnode(
-                &chunk,
-                &self.dist_key_in_pk_indices,
-                &self.pk_indices,
-                &self.vnodes,
-            )
-        };
+        let vnodes = compute_chunk_vnode(
+            &chunk,
+            &self.dist_key_in_pk_indices,
+            &self.pk_indices,
+            &self.vnodes,
+        );
 
         let values = if let Some(ref value_indices) = self.value_indices {
             chunk.project(value_indices).serialize_with(&self.row_serde)
