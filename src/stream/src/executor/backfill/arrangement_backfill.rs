@@ -590,23 +590,17 @@ where
                 .iter_with_vnode_and_output_indices(vnode, &range_bounds, Default::default())
                 .await?;
 
-            // TODO: Is there some way to avoid double-pin here?
             let vnode_row_iter = Box::pin(owned_row_iter(vnode_row_iter));
 
             let vnode_chunk_iter =
                 iter_chunks(vnode_row_iter, builder).map_ok(move |chunk| (vnode, chunk));
 
-            // FIXME(kwannoel): Should we iterate serially? Or in parallel?
+            // This means we iterate serially rather than in parallel across vnodes.
             #[for_await]
             for chunk in vnode_chunk_iter {
                 yield Some(chunk?);
             }
-            // streams.push(Box::pin(vnode_chunk_iter));
         }
-        // #[for_await]
-        // for chunk in select_all(streams) {
-        //     yield Some(chunk?);
-        // }
         yield None;
         return Ok(());
     }
