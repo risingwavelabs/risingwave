@@ -502,9 +502,7 @@ where
 /// - Format: | vnode | pk | true |
 /// - If previous state is `InProgress` / `NotStarted`: Persist.
 /// - If previous state is Completed: Do not persist.
-///
-/// TODO(kwannoel): Why this did not persist state for all vnodes?
-/// Also we should check committed state to be all `finished` in the tests.
+/// TODO(kwannoel): we should check committed state to be all `finished` in the tests.
 pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
     epoch: EpochPair,
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,

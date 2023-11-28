@@ -155,9 +155,7 @@ where
         upstream_table.init_epoch(first_epoch).await?;
 
         let mut backfill_state: BackfillState = progress_per_vnode.into();
-        // TODO(kwannoel): This initial committed progress should also be read from state table,
-        // Perhaps via `progress_per_vnode`.
-        // We can do it later when testing recovery + scaling mechanism.
+        // FIXME(kwannoel): This initial committed progress should also be read from state table.
         let mut committed_progress = HashMap::new();
 
         // If the snapshot is empty, we don't need to backfill.
@@ -172,7 +170,7 @@ where
                 let snapshot_is_empty = {
                     let snapshot = Self::snapshot_read_per_vnode(
                         &upstream_table,
-                        backfill_state.clone(), // FIXME: temporary workaround... How to avoid it?
+                        backfill_state.clone(), // FIXME(kwannoel): use mutable reference instead.
                         &mut builders,
                     );
                     pin_mut!(snapshot);
@@ -255,7 +253,7 @@ where
 
                     let right_snapshot = pin!(Self::snapshot_read_per_vnode(
                         &upstream_table,
-                        backfill_state.clone(), // FIXME: temporary workaround, how to avoid it?
+                        backfill_state.clone(), // FIXME: Use mutable reference instead.
                         &mut builders,
                     )
                     .map(Either::Right),);
@@ -489,8 +487,6 @@ where
                     // This is because we can't update state table in first epoch,
                     // since it expects to have been initialized in previous epoch
                     // (there's no epoch before the first epoch).
-                    // TODO: if we reach here, maybe some vnodes do not have their state finished.
-                    // We should update them to finished state.
                     let finished_placeholder_position = construct_initial_finished_state(pk_in_output_indices.len());
                     for vnode in upstream_table.vnodes().iter_vnodes() {
                         let backfill_progress = backfill_state.get_progress(&vnode)?;
