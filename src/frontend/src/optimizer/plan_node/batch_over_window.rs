@@ -25,6 +25,7 @@ use super::{
     generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
     ToLocalBatch,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Order, RequiredDist};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -125,3 +126,5 @@ impl ToBatchPb for BatchOverWindow {
 }
 
 impl ExprRewritable for BatchOverWindow {}
+
+impl ExprVisitable for BatchOverWindow {}

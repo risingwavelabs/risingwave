@@ -93,7 +93,10 @@ pub async fn get_from_sstable_info(
                 full_key.user_key,
             );
             if delete_epoch <= full_key.epoch_with_gap.pure_epoch() {
-                return Ok(Some((HummockValue::Delete, EpochWithGap::new_from_epoch(delete_epoch))));
+                return Ok(Some((
+                    HummockValue::Delete,
+                    EpochWithGap::new_from_epoch(delete_epoch),
+                )));
             }
         }
 

@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-pub use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::CompactionConfig;
 

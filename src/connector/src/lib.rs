@@ -40,7 +40,6 @@ use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_rpc_client::ConnectorClient;
 use serde::de;
 
-pub mod aws_auth;
 pub mod aws_utils;
 pub mod error;
 mod macros;

@@ -161,6 +161,11 @@ where
     }
 
     async fn run_consumer(self) -> StreamResult<()> {
+        fail::fail_point!("start_actors_err", |_| Err(anyhow::anyhow!(
+            "intentional start_actors_err"
+        )
+        .into()));
+
         let id = self.actor_context.id;
 
         let span_name = format!("Actor {id}");
@@ -194,6 +199,11 @@ where
                 Ok(None) => break Err(anyhow!("actor exited unexpectedly").into()),
                 Err(err) => break Err(err),
             };
+
+            fail::fail_point!("collect_actors_err", id == 10, |_| Err(anyhow::anyhow!(
+                "intentional collect_actors_err"
+            )
+            .into()));
 
             // Collect barriers to local barrier manager
             self.context.lock_barrier_manager().collect(id, &barrier);

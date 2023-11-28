@@ -73,7 +73,7 @@ class DeltaLakeSinkUtil {
         }
     }
 
-    private static DataType convertType(Data.DataType.TypeName typeName) {
+    public static DataType convertType(Data.DataType.TypeName typeName) {
         switch (typeName) {
             case INT16:
                 return new ShortType();
@@ -115,7 +115,9 @@ class DeltaLakeSinkUtil {
 
     public static Schema convertSchema(DeltaLog log, TableSchema tableSchema) {
         StructType schema = log.snapshot().getMetadata().getSchema();
-        MessageType parquetSchema = ParquetSchemaConverter.deltaToParquet(schema);
+        MessageType parquetSchema =
+                ParquetSchemaConverter.deltaToParquet(
+                        schema, ParquetSchemaConverter.ParquetOutputTimestampType.TIMESTAMP_MILLIS);
         return new AvroSchemaConverter().convert(parquetSchema);
     }
 }

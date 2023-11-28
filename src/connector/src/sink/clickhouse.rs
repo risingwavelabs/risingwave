@@ -45,7 +45,7 @@ const QUERY_COLUMN: &str =
 pub const CLICKHOUSE_SINK: &str = "clickhouse";
 const BUFFER_SIZE: usize = 1024;
 
-#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct ClickHouseCommon {
     #[serde(rename = "clickhouse.url")]
     pub url: String,
@@ -569,7 +569,8 @@ async fn query_column_engine_from_ck(
         )));
     }
 
-    let clickhouse_engine = ClickHouseEngine::from_query_engine(clickhouse_engine.get(0).unwrap())?;
+    let clickhouse_engine =
+        ClickHouseEngine::from_query_engine(clickhouse_engine.first().unwrap())?;
 
     if let Some(sign) = &clickhouse_engine.get_sign_name() {
         clickhouse_column.retain(|a| sign.ne(&a.name))

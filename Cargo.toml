@@ -68,35 +68,38 @@ repository = "https://github.com/risingwavelabs/risingwave"
 
 [workspace.dependencies]
 await-tree = "0.1.1"
-aws-config = { version = "0.57", default-features = false, features = [
+aws-config = { version = "1", default-features = false, features = [
+  "behavior-version-latest",
   "rt-tokio",
   "rustls",
 ] }
-aws-credential-types = { version = "0.57", default-features = false, features = [
+aws-credential-types = { version = "1", default-features = false, features = [
   "hardcoded-credentials",
 ] }
-aws-sdk-kinesis = { version = "0.35", default-features = false, features = [
+aws-sdk-kinesis = { version = "1", default-features = false, features = [
   "rt-tokio",
   "rustls",
 ] }
-aws-sdk-s3 = { version = "0.35", default-features = false, features = [
+aws-sdk-s3 = { version = "1", default-features = false, features = [
   "rt-tokio",
   "rustls",
 ] }
-aws-sdk-ec2 = { version = "0.35", default-features = false, features = [
+aws-sdk-ec2 = { version = "1", default-features = false, features = [
   "rt-tokio",
   "rustls",
 ] }
-aws-sdk-sqs = { version = "0.35", default-features = false, features = [
+aws-sdk-sqs = { version = "1", default-features = false, features = [
   "rt-tokio",
   "rustls",
 ] }
-aws-smithy-http = "0.57"
-aws-smithy-runtime-api = "0.57"
-aws-smithy-runtime = "0.57"
-aws-smithy-types = { version = "0.57", default-features = false, features = ["hyper-0-14-x"] }
-aws-endpoint = "0.57"
-aws-types = "0.57"
+aws-smithy-http = "0.60"
+aws-smithy-runtime-api = "1"
+aws-smithy-runtime = "1"
+aws-smithy-types = { version = "1", default-features = false, features = [
+  "hyper-0-14-x",
+] }
+aws-endpoint = "0.60"
+aws-types = "1"
 etcd-client = { package = "madsim-etcd-client", version = "0.4" }
 futures-async-stream = "0.2.9"
 hytra = "0.1"
@@ -124,7 +127,7 @@ arrow-flight = "49"
 arrow-select = "49"
 arrow-ord = "49"
 arrow-row = "49"
-thiserror-ext = "0.0.6"
+thiserror-ext = "0.0.7"
 tikv-jemalloc-ctl = { git = "https://github.com/risingwavelabs/jemallocator.git", rev = "64a2d9" }
 tikv-jemallocator = { git = "https://github.com/risingwavelabs/jemallocator.git", features = [
   "profiling",

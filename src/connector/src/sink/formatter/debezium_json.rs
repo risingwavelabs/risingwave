@@ -21,7 +21,7 @@ use tracing::warn;
 
 use super::{Result, SinkFormatter, StreamChunk};
 use crate::sink::encoder::{
-    JsonEncoder, RowEncoder, TimestampHandlingMode, TimestamptzHandlingMode,
+    DateHandlingMode, JsonEncoder, RowEncoder, TimestampHandlingMode, TimestamptzHandlingMode,
 };
 use crate::tri;
 
@@ -64,12 +64,14 @@ impl DebeziumJsonFormatter {
         let key_encoder = JsonEncoder::new(
             schema.clone(),
             Some(pk_indices.clone()),
+            DateHandlingMode::FromEpoch,
             TimestampHandlingMode::Milli,
             TimestamptzHandlingMode::UtcString,
         );
         let val_encoder = JsonEncoder::new(
             schema.clone(),
             None,
+            DateHandlingMode::FromEpoch,
             TimestampHandlingMode::Milli,
             TimestamptzHandlingMode::UtcString,
         );
@@ -270,39 +272,56 @@ pub(crate) fn fields_to_json(fields: &[Field]) -> Value {
 
 pub(crate) fn field_to_json(field: &Field) -> Value {
     // mapping from 'https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-data-types'
-    let r#type = match field.data_type() {
-        risingwave_common::types::DataType::Boolean => "boolean",
-        risingwave_common::types::DataType::Int16 => "int16",
-        risingwave_common::types::DataType::Int32 => "int32",
-        risingwave_common::types::DataType::Int64 => "int64",
-        risingwave_common::types::DataType::Int256 => "string",
-        risingwave_common::types::DataType::Float32 => "float",
-        risingwave_common::types::DataType::Float64 => "double",
+    let (r#type, name) = match field.data_type() {
+        risingwave_common::types::DataType::Boolean => ("boolean", ""),
+        risingwave_common::types::DataType::Int16 => ("int16", ""),
+        risingwave_common::types::DataType::Int32 => ("int32", ""),
+        risingwave_common::types::DataType::Int64 => ("int64", ""),
+        risingwave_common::types::DataType::Int256 => ("string", ""),
+        risingwave_common::types::DataType::Float32 => ("float", ""),
+        risingwave_common::types::DataType::Float64 => ("double", ""),
         // currently, we only support handling decimal as string.
         // https://debezium.io/documentation/reference/2.1/connectors/postgresql.html#postgresql-decimal-types
-        risingwave_common::types::DataType::Decimal => "string",
+        risingwave_common::types::DataType::Decimal => ("string", ""),
 
-        risingwave_common::types::DataType::Varchar => "string",
+        risingwave_common::types::DataType::Varchar => ("string", ""),
 
-        risingwave_common::types::DataType::Date => "int32",
-        risingwave_common::types::DataType::Time => "int64",
-        risingwave_common::types::DataType::Timestamp => "int64",
-        risingwave_common::types::DataType::Timestamptz => "string",
-        risingwave_common::types::DataType::Interval => "string",
+        // use built-in Kafka Connect logical types.
+        risingwave_common::types::DataType::Date => ("int32", "org.apache.kafka.connect.data.Date"),
+        // may lose precision when Time/Timestamp has a fractional second precision value that is greater than 3. But for TimestampHandlingMode:Milli, it is sufficient.
+        risingwave_common::types::DataType::Time => ("int64", "org.apache.kafka.connect.data.Time"),
+        risingwave_common::types::DataType::Timestamp => {
+            ("int64", "org.apache.kafka.connect.data.Timestamp")
+        }
 
-        risingwave_common::types::DataType::Bytea => "bytes",
-        risingwave_common::types::DataType::Jsonb => "string",
-        risingwave_common::types::DataType::Serial => "int32",
+        risingwave_common::types::DataType::Timestamptz => {
+            ("string", "io.debezium.time.ZonedTimestamp")
+        }
+        risingwave_common::types::DataType::Interval => ("string", "io.debezium.time.Interval"),
+
+        risingwave_common::types::DataType::Bytea => ("bytes", ""),
+        risingwave_common::types::DataType::Jsonb => ("string", "io.debezium.data.Json"),
+        risingwave_common::types::DataType::Serial => ("int32", ""),
         // since the original debezium pg support HSTORE via encoded as json string by default,
         // we do the same here
-        risingwave_common::types::DataType::Struct(_) => "string",
-        risingwave_common::types::DataType::List { .. } => "string",
+        risingwave_common::types::DataType::Struct(_) => ("string", ""),
+        risingwave_common::types::DataType::List { .. } => ("string", ""),
     };
-    json!({
-        "field": field.name,
-        "optional": true,
-        "type": r#type,
-    })
+
+    if name.is_empty() {
+        json!({
+            "field": field.name,
+            "optional": true,
+            "type": r#type
+        })
+    } else {
+        json!({
+            "field": field.name,
+            "optional": true,
+            "type": r#type,
+            "name": name
+        })
+    }
 }
 
 #[cfg(test)]
@@ -371,6 +390,7 @@ mod tests {
         let encoder = JsonEncoder::new(
             schema.clone(),
             None,
+            DateHandlingMode::FromEpoch,
             TimestampHandlingMode::Milli,
             TimestamptzHandlingMode::UtcString,
         );

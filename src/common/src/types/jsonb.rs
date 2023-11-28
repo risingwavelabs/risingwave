@@ -128,7 +128,7 @@ impl crate::types::to_binary::ToBinary for JsonbRef<'_> {
     fn to_binary_with_type(
         &self,
         _ty: &crate::types::DataType,
-    ) -> crate::error::Result<Option<bytes::Bytes>> {
+    ) -> super::to_binary::Result<Option<bytes::Bytes>> {
         Ok(Some(self.value_serialize().into()))
     }
 }
@@ -373,6 +373,11 @@ impl<'a> JsonbRef<'a> {
         let mut ser =
             Serializer::with_formatter(FmtToIoUnchecked(f), PrettyFormatter::with_indent(b"    "));
         self.0.serialize(&mut ser).map_err(|_| std::fmt::Error)
+    }
+
+    /// Returns the capacity of the underlying buffer.
+    pub fn capacity(self) -> usize {
+        self.0.capacity()
     }
 }
 

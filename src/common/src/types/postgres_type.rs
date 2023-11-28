@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use super::DataType;
-use crate::error::ErrorCode;
 
 /// `DataType` information extracted from PostgreSQL `pg_type`
 ///
@@ -49,6 +48,10 @@ macro_rules! for_all_base_types {
     };
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Unsupported oid {0}")]
+pub struct UnsupportedOid(i32);
+
 /// Get type information compatible with Postgres type, such as oid, type length.
 impl DataType {
     pub fn type_len(&self) -> i16 {
@@ -73,7 +76,7 @@ impl DataType {
     // Such as:
     //  https://github.com/postgres/postgres/blob/master/src/include/catalog/pg_type.dat#L347
     //  For Numeric(aka Decimal): oid = 1700, array_type_oid = 1231
-    pub fn from_oid(oid: i32) -> crate::error::Result<Self> {
+    pub fn from_oid(oid: i32) -> Result<Self, UnsupportedOid> {
         macro_rules! impl_from_oid {
             ($( { $enum:ident | $oid:literal | $oid_array:literal | $name:ident | $input:ident | $len:literal } )*) => {
                 match oid {
@@ -86,7 +89,7 @@ impl DataType {
                     // workaround to support text in extended mode.
                     25 => Ok(DataType::Varchar),
                     1009 => Ok(DataType::List(Box::new(DataType::Varchar))),
-                    _ => Err(ErrorCode::InternalError(format!("Unsupported oid {}", oid)).into()),
+                    _ => Err(UnsupportedOid(oid)),
                 }
             }
         }
