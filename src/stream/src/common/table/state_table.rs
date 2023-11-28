@@ -645,7 +645,14 @@ where
         match encoded_row {
             Some(encoded_row) => {
                 let row = self.row_serde.deserialize(&encoded_row)?;
-                Ok(Some(OwnedRow::new(row)))
+                if IS_REPLICATED {
+                    // If the table is replicated, we need to deserialize the row with the output
+                    // indices.
+                    let row = row.project(&self.output_indices);
+                    Ok(Some(row.into_owned_row()))
+                } else {
+                    Ok(Some(OwnedRow::new(row)))
+                }
             }
             None => Ok(None),
         }

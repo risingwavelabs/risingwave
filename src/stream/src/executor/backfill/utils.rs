@@ -367,7 +367,7 @@ pub(crate) fn build_temporary_state_with_vnode(
     row_state[current_pos.len() + 1] = Some(is_finished.into());
     // row_count
     // FIXME(kwannoel): Currently arrangement backfill will not persist row_count.
-    row_state[current_pos.len() + 2] = Some(0.into());
+    row_state[current_pos.len() + 2] = Some(0i64.into());
 }
 
 /// We want to avoid allocating a row for every vnode.
