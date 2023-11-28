@@ -202,8 +202,8 @@ test_sink_backfill_recovery() {
 
 main() {
   set -euo pipefail
-#  test_snapshot_and_upstream_read
-#  test_backfill_tombstone
+  test_snapshot_and_upstream_read
+  test_backfill_tombstone
   test_sink_backfill_recovery
 }
 
