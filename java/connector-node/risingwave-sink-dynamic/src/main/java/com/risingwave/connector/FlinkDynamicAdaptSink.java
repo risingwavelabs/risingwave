@@ -28,6 +28,9 @@ import org.apache.flink.api.connector.sink.Sink;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.apache.flink.table.data.RowData;
 
+/*
+ * A wrapper class for SinkWriterAdapt, used for adapting between RW SinkWriter and Flink Sink.
+ */
 public class FlinkDynamicAdaptSink<CommT> extends SinkWriterBase {
     SinkWriterAdapt<CommT> sinkWriterAdapt;
 

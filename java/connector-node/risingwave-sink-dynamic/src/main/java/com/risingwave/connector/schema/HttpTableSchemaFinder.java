@@ -23,6 +23,9 @@ import com.risingwave.connector.api.TableSchema;
 import io.grpc.StatusRuntimeException;
 import java.util.List;
 
+/*
+ * The HTTP sink implementation of FlinkSinkTableSchemaFinder, requiring no additional operations.
+ */
 public class HttpTableSchemaFinder implements FlinkSinkTableSchemaFinder {
 
     public HttpTableSchemaFinder(TableSchema tableSchema, FlinkDynamicAdaptConfig config) {

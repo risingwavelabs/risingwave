@@ -28,6 +28,7 @@ import org.apache.flink.table.types.DataType;
 
 public class FlinkDynamicAdaptUtil {
 
+    // Discover FlinkSinkTableSchemaFinder with sink name.
     public static FlinkSinkTableSchemaFinder discoverSchemaFinder(
             TableSchema tableSchema, FlinkDynamicAdaptConfig config) {
         if (config.getConnector().equals("http-sink")) {

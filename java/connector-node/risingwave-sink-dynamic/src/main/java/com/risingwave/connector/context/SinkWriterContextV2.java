@@ -33,6 +33,9 @@ import org.apache.flink.streaming.runtime.tasks.mailbox.MailboxProcessor;
 import org.apache.flink.util.SimpleUserCodeClassLoader;
 import org.apache.flink.util.UserCodeClassLoader;
 
+/*
+ * A simulated implementation of the InitContext, passed down and utilized in the downstream of the sink (SinkV2).
+ */
 public class SinkWriterContextV2 implements Sink.InitContext {
     class ProcessingTimeServiceImpl implements ProcessingTimeService {
         private final ScheduledThreadPoolExecutor timerService;

@@ -19,6 +19,9 @@ package com.risingwave.connector.sinkwriter;
 import org.apache.flink.streaming.api.functions.sink.SinkFunction;
 import org.apache.flink.table.data.RowData;
 
+/*
+ * The SinkFunction-type sink will invoke this class to write RW data to the downstream.
+ */
 public class SinkFunctionImpl implements SinkWriterAdapt {
     SinkFunction<RowData> sinkFunction;
 

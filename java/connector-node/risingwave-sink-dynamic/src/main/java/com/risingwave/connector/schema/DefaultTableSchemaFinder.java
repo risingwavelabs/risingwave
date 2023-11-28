@@ -41,6 +41,10 @@ import org.apache.flink.table.factories.CatalogFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 import org.apache.flink.table.types.DataType;
 
+/*
+ * The default implementation of FlinkSinkTableSchemaFinder requires downstream implementation of Flink's catalog interface.
+ * It retrieves the schema of the downstream table from the catalog interface and performs a matching check with the RW schema.
+ */
 public class DefaultTableSchemaFinder implements FlinkSinkTableSchemaFinder {
     Catalog catalog;
     FlinkDynamicAdaptConfig config;

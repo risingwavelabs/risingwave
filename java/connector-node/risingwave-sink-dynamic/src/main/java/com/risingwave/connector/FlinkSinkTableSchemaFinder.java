@@ -20,6 +20,9 @@ import com.risingwave.connector.api.ColumnDesc;
 import io.grpc.StatusRuntimeException;
 import java.util.List;
 
+/*
+ * Flink schema calibration interface; it needs to be implemented for different sinks.
+ */
 public interface FlinkSinkTableSchemaFinder {
     public void validate(List<ColumnDesc> rwColumnDescs) throws StatusRuntimeException;
 }

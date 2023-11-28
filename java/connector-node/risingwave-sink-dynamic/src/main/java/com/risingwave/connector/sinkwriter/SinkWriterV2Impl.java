@@ -21,6 +21,9 @@ import java.io.IOException;
 import org.apache.flink.api.connector.sink2.SinkWriter;
 import org.apache.flink.table.data.RowData;
 
+/*
+ * The SinkV2-type sink will invoke this class to write RW data to the downstream.
+ */
 public class SinkWriterV2Impl implements SinkWriterAdapt {
 
     org.apache.flink.api.connector.sink2.Sink<RowData> sink;

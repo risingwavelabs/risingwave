@@ -26,6 +26,9 @@ import java.util.Base64;
 import org.apache.flink.table.data.*;
 import org.apache.flink.types.RowKind;
 
+/*
+ * Converts data types from RW to Flink's RowData type.
+ */
 public class RowDataImpl implements RowData {
 
     private SinkRow sinkRow;

@@ -25,6 +25,9 @@ import org.apache.flink.api.connector.sink.Committer;
 import org.apache.flink.api.connector.sink.Sink;
 import org.apache.flink.table.data.RowData;
 
+/*
+ * The Sink-type sink will invoke this class to write RW data to the downstream.
+ */
 public class SinkWriterImpl<CommT> implements SinkWriterAdapt {
     Sink<RowData, CommT, ?, ?> sink;
     org.apache.flink.api.connector.sink.SinkWriter<RowData, ?, ?> writer;

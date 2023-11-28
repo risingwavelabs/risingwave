@@ -24,6 +24,10 @@ import java.util.stream.Collectors;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.table.catalog.ObjectPath;
 
+/*
+ * The user-input configuration items will be passed downstream to create the corresponding factory.
+ * However, there are some RW-required configuration items that we need to remove to prevent errors.
+ */
 public class FlinkDynamicAdaptConfig extends CommonSinkConfig {
     Map<String, String> option;
 

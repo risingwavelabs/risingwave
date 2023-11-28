@@ -24,6 +24,9 @@ import org.apache.flink.api.connector.sink.Sink;
 import org.apache.flink.metrics.groups.SinkWriterMetricGroup;
 import org.apache.flink.util.UserCodeClassLoader;
 
+/*
+ * A simulated implementation of the InitContext, passed down and utilized in the downstream of the sink (SinkV1).
+ */
 public class SinkWriterContext implements org.apache.flink.api.connector.sink.Sink.InitContext {
     static class ProcessingTimeCallbackAdapter
             implements ProcessingTimeService.ProcessingTimeCallback {

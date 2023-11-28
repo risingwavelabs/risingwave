@@ -40,6 +40,7 @@ import org.apache.flink.table.runtime.connector.sink.SinkRuntimeProviderContext;
 
 public class FlinkDynamicAdaptFactory implements SinkFactory {
 
+    // Find the corresponding SinkFactory from the class loader for creating the sink.
     public DynamicTableSink.SinkRuntimeProvider buildDynamicTableSinkProvider(
             TableSchema tableSchema, FlinkDynamicAdaptConfig config) {
         List<Column> flinkColumns = FlinkDynamicAdaptUtil.getFlinkColumnsFromSchema(tableSchema);
