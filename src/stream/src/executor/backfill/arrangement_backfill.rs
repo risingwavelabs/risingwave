@@ -31,10 +31,9 @@ use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
 use crate::executor::backfill::utils::{
-    compute_bounds, get_progress_per_vnode, iter_chunks,
-    mapping_chunk, mapping_message, mark_chunk_ref_by_vnode, owned_row_iter,
-    persist_state_per_vnode, update_pos_by_vnode, BackfillProgressPerVnode, BackfillState,
-    METADATA_STATE_LEN,
+    compute_bounds, get_progress_per_vnode, iter_chunks, mapping_chunk, mapping_message,
+    mark_chunk_ref_by_vnode, owned_row_iter, persist_state_per_vnode, update_pos_by_vnode,
+    BackfillProgressPerVnode, BackfillState, METADATA_STATE_LEN,
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
@@ -140,9 +139,12 @@ where
 
         let progress_per_vnode = get_progress_per_vnode(&self.state_table).await?;
 
-        let is_completely_finished = progress_per_vnode
-            .iter()
-            .all(|(_, p)| matches!(p.current_state(), &BackfillProgressPerVnode::Completed{ .. }));
+        let is_completely_finished = progress_per_vnode.iter().all(|(_, p)| {
+            matches!(
+                p.current_state(),
+                &BackfillProgressPerVnode::Completed { .. }
+            )
+        });
         if is_completely_finished {
             assert!(!first_barrier.is_newly_added(self.actor_id));
         }
@@ -434,7 +436,7 @@ where
                     false,
                     &mut backfill_state,
                     state_len,
-                    vnodes.iter_vnodes()
+                    vnodes.iter_vnodes(),
                 )
                 .await?;
 

@@ -27,7 +27,7 @@ use risingwave_common::bail;
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::{Datum, DefaultOrd};
+use risingwave_common::types::Datum;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -57,12 +57,18 @@ pub struct BackfillState {
 
 impl BackfillState {
     pub(crate) fn has_progress(&self) -> bool {
-        self.inner
-            .values()
-            .any(|p| matches!(p.current_state(), &BackfillProgressPerVnode::InProgress{..}))
+        self.inner.values().any(|p| {
+            matches!(
+                p.current_state(),
+                &BackfillProgressPerVnode::InProgress { .. }
+            )
+        })
     }
 
-    pub(crate) fn get_current_state(&mut self, vnode: &VirtualNode) -> &mut BackfillProgressPerVnode {
+    pub(crate) fn get_current_state(
+        &mut self,
+        vnode: &VirtualNode,
+    ) -> &mut BackfillProgressPerVnode {
         &mut self.inner.get_mut(vnode).unwrap().current_state
     }
 
@@ -88,30 +94,22 @@ impl BackfillState {
         let state = self.get_current_state(&vnode);
         let new_state = BackfillProgressPerVnode::InProgress(new_pos);
         match state {
-            BackfillProgressPerVnode::NotStarted => {
-                *state = new_state
-            }
-            BackfillProgressPerVnode::InProgress(current_pos) => {
-                *state = new_state
-            }
-            BackfillProgressPerVnode::Completed{ .. } => unreachable!(),
+            BackfillProgressPerVnode::NotStarted => *state = new_state,
+            BackfillProgressPerVnode::InProgress(_current_pos) => *state = new_state,
+            BackfillProgressPerVnode::Completed { .. } => unreachable!(),
         }
         Ok(())
     }
 
-    pub(crate) fn finish_progress(
-        &mut self,
-        vnode: VirtualNode,
-        pos_len: usize,
-    ) {
+    pub(crate) fn finish_progress(&mut self, vnode: VirtualNode, pos_len: usize) {
         let finished_placeholder_position = construct_initial_finished_state(pos_len);
         let current_state = self.get_current_state(&vnode);
         let new_pos = match current_state {
             BackfillProgressPerVnode::NotStarted => finished_placeholder_position,
             BackfillProgressPerVnode::InProgress(current_pos) => current_pos.clone(),
-            BackfillProgressPerVnode::Completed{ .. } => {
+            BackfillProgressPerVnode::Completed { .. } => {
                 return;
-            },
+            }
         };
         *current_state = BackfillProgressPerVnode::Completed(new_pos);
     }
@@ -147,7 +145,8 @@ impl BackfillState {
             BackfillProgressPerVnode::InProgress(committed_pos) => {
                 let mut encoded_state = vec![None; committed_pos.len() + 3];
                 encoded_state[0] = Some(vnode.to_scalar().into());
-                encoded_state[1..committed_pos.len() + 1].clone_from_slice(committed_pos.as_inner());
+                encoded_state[1..committed_pos.len() + 1]
+                    .clone_from_slice(committed_pos.as_inner());
                 encoded_state[committed_pos.len() + 1] = Some(false.into());
                 encoded_state[committed_pos.len() + 2] = Some(0i64.into());
                 Some(encoded_state)
@@ -155,7 +154,8 @@ impl BackfillState {
             BackfillProgressPerVnode::Completed(committed_pos) => {
                 let mut encoded_state = vec![None; committed_pos.len() + 3];
                 encoded_state[0] = Some(vnode.to_scalar().into());
-                encoded_state[1..committed_pos.len() + 1].clone_from_slice(committed_pos.as_inner());
+                encoded_state[1..committed_pos.len() + 1]
+                    .clone_from_slice(committed_pos.as_inner());
                 encoded_state[committed_pos.len() + 1] = Some(true.into());
                 encoded_state[committed_pos.len() + 2] = Some(0i64.into());
                 Some(encoded_state)
@@ -168,11 +168,8 @@ impl BackfillState {
     fn can_commit(&self, vnode: &VirtualNode) -> bool {
         let state = self.inner.get(vnode).unwrap();
         match state.current_state() {
-            s @ BackfillProgressPerVnode::InProgress(current_pos)
-                | s @ BackfillProgressPerVnode::Completed(current_pos)
-            => {
-                s != state.committed_state()
-            }
+            s @ BackfillProgressPerVnode::InProgress(_current_pos)
+            | s @ BackfillProgressPerVnode::Completed(_current_pos) => s != state.committed_state(),
             BackfillProgressPerVnode::NotStarted => false,
         }
     }
@@ -183,7 +180,10 @@ impl BackfillState {
             current_state,
         } = self.inner.get_mut(&vnode).unwrap();
 
-        assert!(matches!(current_state, BackfillProgressPerVnode::InProgress(_) | BackfillProgressPerVnode::Completed(_)));
+        assert!(matches!(
+            current_state,
+            BackfillProgressPerVnode::InProgress(_) | BackfillProgressPerVnode::Completed(_)
+        ));
         *committed_state = current_state.clone();
     }
 }
@@ -445,7 +445,7 @@ pub(crate) async fn get_progress_per_vnode<S: StateStore, const IS_REPLICATED: b
             None => BackfillStatePerVnode::new(
                 BackfillProgressPerVnode::NotStarted,
                 BackfillProgressPerVnode::NotStarted,
-            )
+            ),
         };
         result.push((vnode, backfill_progress));
     }
@@ -488,26 +488,6 @@ pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
         });
     }
     table.commit(epoch).await
-}
-
-/// We want to avoid allocating a row for every vnode.
-pub(crate) fn build_temporary_state_with_vnode(
-    state_len: usize,
-    vnode: VirtualNode,
-    is_finished: bool,
-    current_pos: &OwnedRow,
-) -> Vec<Datum> {
-    let mut row_state = vec![None; state_len];
-    // vnode
-    row_state[0] = Some(vnode.to_scalar().into());
-    // pk
-    row_state[1..current_pos.len() + 1].clone_from_slice(current_pos.as_inner());
-    // is_finished
-    row_state[current_pos.len() + 1] = Some(is_finished.into());
-    // row_count
-    // FIXME(kwannoel): Currently arrangement backfill will not persist row_count.
-    row_state[current_pos.len() + 2] = Some(0i64.into());
-    row_state
 }
 
 /// We want to avoid allocating a row for every vnode.
@@ -650,14 +630,16 @@ where
 pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
     epoch: EpochPair,
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
-    is_finished: bool,
+    _is_finished: bool,
     backfill_state: &mut BackfillState,
-    state_len: usize,
+    _state_len: usize,
     vnodes: impl Iterator<Item = VirtualNode>,
 ) -> StreamExecutorResult<()> {
     let mut has_progress = false;
     for vnode in vnodes {
-        let Some((encoded_prev_state, encoded_current_state)) = backfill_state.get_commit_state(&vnode) else {
+        let Some((encoded_prev_state, encoded_current_state)) =
+            backfill_state.get_commit_state(&vnode)
+        else {
             continue;
         };
         if let Some(encoded_prev_state) = encoded_prev_state {
