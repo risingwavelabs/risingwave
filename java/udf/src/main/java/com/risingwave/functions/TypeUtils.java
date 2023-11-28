@@ -15,6 +15,7 @@
 package com.risingwave.functions;
 
 import java.lang.invoke.MethodHandles;
+import java.lang.reflect.Array;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.ParameterizedType;
@@ -359,19 +360,52 @@ class TypeUtils {
             } else if (vector.getDataVector() instanceof VarBinaryVector) {
                 TypeUtils.<VarBinaryVector, byte[]>fillListVector(
                         vector, values, (vec, i, val) -> vec.set(i, val));
+            } else if (vector.getDataVector() instanceof StructVector) {
+                // flatten the `values`
+                var flattenLength = 0;
+                for (int i = 0; i < values.length; i++) {
+                    if (values[i] == null) {
+                        continue;
+                    }
+                    var len = Array.getLength(values[i]);
+                    vector.startNewValue(i);
+                    vector.endValue(i, len);
+                    flattenLength += len;
+                }
+                var flattenValues = new Object[flattenLength];
+                var ii = 0;
+                for (var list : values) {
+                    if (list == null) {
+                        continue;
+                    }
+                    var length = Array.getLength(list);
+                    for (int i = 0; i < length; i++) {
+                        flattenValues[ii++] = Array.get(list, i);
+                    }
+                }
+                fillVector(vector.getDataVector(), flattenValues);
             } else {
-                throw new IllegalArgumentException("Unsupported type: " + fieldVector.getClass());
+                throw new IllegalArgumentException(
+                        "Unsupported type: " + vector.getDataVector().getClass());
             }
         } else if (fieldVector instanceof StructVector) {
             var vector = (StructVector) fieldVector;
             vector.allocateNew();
             var lookup = MethodHandles.lookup();
+            // get class of the first non-null value
+            Class<?> valueClass = null;
+            for (int i = 0; i < values.length; i++) {
+                if (values[i] != null) {
+                    valueClass = values[i].getClass();
+                    break;
+                }
+            }
             for (var field : vector.getField().getChildren()) {
                 // extract field from values
                 var subvalues = new Object[values.length];
-                if (values.length != 0) {
+                if (valueClass != null) {
                     try {
-                        var javaField = values[0].getClass().getDeclaredField(field.getName());
+                        var javaField = valueClass.getDeclaredField(field.getName());
                         var varHandle = lookup.unreflectVarHandle(javaField);
                         for (int i = 0; i < values.length; i++) {
                             if (values[i] != null) {
@@ -487,7 +521,14 @@ class TypeUtils {
             } else if (subfield.getType() instanceof ArrowType.Binary) {
                 return obj -> ((List<?>) obj).stream().map(subfunc).toArray(byte[][]::new);
             } else if (subfield.getType() instanceof ArrowType.Struct) {
-                return obj -> ((List<?>) obj).stream().map(subfunc).toArray();
+                return obj -> {
+                    var list = (List<?>) obj;
+                    Object array = Array.newInstance(targetClass.getComponentType(), list.size());
+                    for (int i = 0; i < list.size(); i++) {
+                        Array.set(array, i, subfunc.apply(list.get(i)));
+                    }
+                    return array;
+                };
             }
             throw new IllegalArgumentException("Unsupported type: " + subfield.getType());
         } else if (field.getType() instanceof ArrowType.Struct) {
