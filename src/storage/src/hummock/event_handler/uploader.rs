@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::Future;
@@ -28,6 +29,9 @@ use more_asserts::{assert_ge, assert_gt, assert_le};
 use prometheus::core::{AtomicU64, GenericGauge};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::EPOCH_LEN;
+use risingwave_hummock_sdk::table_watermark::{
+    TableWatermarks, VnodeWatermark, WatermarkDirection,
+};
 use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info};
@@ -311,6 +315,8 @@ struct UnsealedEpochData {
     // newer data at the front
     imms: VecDeque<ImmutableMemtable>,
     spilled_data: SpilledData,
+
+    watermarks: HashMap<TableId, (WatermarkDirection, Vec<VnodeWatermark>)>,
 }
 
 impl UnsealedEpochData {
@@ -348,6 +354,8 @@ struct SealedData {
     merging_tasks: VecDeque<MergingImmTask>,
 
     spilled_data: SpilledData,
+
+    watermarks: HashMap<TableId, TableWatermarks>,
 }
 
 impl SealedData {
@@ -361,6 +369,7 @@ impl SealedData {
             .iter()
             .for_each(|task| task.join_handle.abort());
         self.merging_tasks.clear();
+        self.watermarks.clear();
     }
 
     /// Add the data of a newly sealed epoch.
@@ -418,6 +427,18 @@ impl SealedData {
             .append(&mut self.spilled_data.uploaded_data);
         self.spilled_data.uploading_tasks = unseal_epoch_data.spilled_data.uploading_tasks;
         self.spilled_data.uploaded_data = unseal_epoch_data.spilled_data.uploaded_data;
+        for (table_id, (direction, watermarks)) in unseal_epoch_data.watermarks {
+            match self.watermarks.entry(table_id) {
+                Entry::Occupied(mut entry) => {
+                    entry
+                        .get_mut()
+                        .add_new_epoch_watermarks(epoch, watermarks, direction);
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(TableWatermarks::single_epoch(epoch, watermarks, direction));
+                }
+            };
+        }
     }
 
     fn add_merged_imm(&mut self, merged_imm: &ImmutableMemtable) {
@@ -540,10 +561,16 @@ struct SyncingData {
     uploading_tasks: Option<TryJoinAll<UploadingTask>>,
     // newer data at the front
     uploaded: VecDeque<StagingSstableInfo>,
+    watermarks: HashMap<TableId, TableWatermarks>,
+}
+
+pub struct SyncedData {
+    pub staging_ssts: Vec<StagingSstableInfo>,
+    pub watermarks: HashMap<TableId, TableWatermarks>,
 }
 
 // newer staging sstable info at the front
-type SyncedDataState = HummockResult<Vec<StagingSstableInfo>>;
+type SyncedDataState = HummockResult<SyncedData>;
 
 struct UploaderContext {
     pinned_version: PinnedVersion,
@@ -690,6 +717,43 @@ impl HummockUploader {
             .push_front(imm);
     }
 
+    #[expect(dead_code)]
+    pub(crate) fn add_watermark(
+        &mut self,
+        epoch: u64,
+        table_id: TableId,
+        watermarks: Vec<VnodeWatermark>,
+        direction: WatermarkDirection,
+    ) {
+        assert!(
+            epoch > self.max_sealed_epoch,
+            "imm epoch {} older than max sealed epoch {}",
+            epoch,
+            self.max_sealed_epoch
+        );
+        match self
+            .unsealed_data
+            .entry(epoch)
+            .or_default()
+            .watermarks
+            .entry(table_id)
+        {
+            Entry::Occupied(mut entry) => {
+                let (prev_direction, prev_watermarks) = entry.get_mut();
+                assert_eq!(
+                    *prev_direction, direction,
+                    "table id {} new watermark direction not match with previous",
+                    table_id
+                );
+                // TODO: may add check on writing vnode for multiple times
+                prev_watermarks.extend(watermarks);
+            }
+            Entry::Vacant(entry) => {
+                entry.insert((direction, watermarks));
+            }
+        };
+    }
+
     pub(crate) fn seal_epoch(&mut self, epoch: HummockEpoch) {
         debug!("epoch {} is sealed", epoch);
         assert!(
@@ -801,6 +865,7 @@ impl HummockUploader {
                     uploading_tasks,
                     uploaded_data,
                 },
+            watermarks,
             ..
         } = self.sealed_data.drain();
 
@@ -820,6 +885,7 @@ impl HummockUploader {
             sync_epoch: epoch,
             uploading_tasks: try_join_all_upload_task,
             uploaded: uploaded_data,
+            watermarks,
         });
     }
 
@@ -940,7 +1006,10 @@ impl HummockUploader {
                 // The newly uploaded `sstable_infos` contains newer data. Therefore,
                 // `sstable_infos` at the front
                 sstable_infos.extend(syncing_data.uploaded);
-                sstable_infos
+                SyncedData {
+                    staging_ssts: sstable_infos,
+                    watermarks: syncing_data.watermarks,
+                }
             });
             self.add_synced_data(epoch, result);
             Poll::Ready(Some((epoch, newly_uploaded_sstable_infos)))
@@ -1038,7 +1107,7 @@ impl<'a> Future for NextUploaderEvent<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
+    use std::collections::{HashMap, VecDeque};
     use std::future::{poll_fn, Future};
     use std::ops::Deref;
     use std::sync::atomic::AtomicUsize;
@@ -1094,6 +1163,7 @@ mod tests {
             levels: Default::default(),
             max_committed_epoch: epoch,
             safe_epoch: 0,
+            table_watermarks: HashMap::new(),
         }
     }
 
@@ -1314,7 +1384,7 @@ mod tests {
         };
         assert_eq!(epoch1, uploader.max_synced_epoch());
         let synced_data = uploader.get_synced_data(epoch1).unwrap();
-        let ssts = synced_data.as_ref().unwrap();
+        let ssts = &synced_data.as_ref().unwrap().staging_ssts;
         assert_eq!(1, ssts.len());
         let staging_sst = ssts.first().unwrap();
         assert_eq!(&vec![epoch1], staging_sst.epochs());
@@ -1793,7 +1863,12 @@ mod tests {
             unreachable!("should be sync finish");
         }
         assert_eq!(epoch1, uploader.max_synced_epoch);
-        let synced_data1 = uploader.get_synced_data(epoch1).unwrap().as_ref().unwrap();
+        let synced_data1 = &uploader
+            .get_synced_data(epoch1)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .staging_ssts;
         assert_eq!(3, synced_data1.len());
         assert_eq!(&vec![imm1_4.batch_id()], synced_data1[0].imm_ids());
         assert_eq!(&vec![imm1_3.batch_id()], synced_data1[1].imm_ids());
@@ -1817,7 +1892,12 @@ mod tests {
             unreachable!("should be sync finish");
         }
         assert_eq!(epoch2, uploader.max_synced_epoch);
-        let synced_data2 = uploader.get_synced_data(epoch2).unwrap().as_ref().unwrap();
+        let synced_data2 = &uploader
+            .get_synced_data(epoch2)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .staging_ssts;
         assert_eq!(1, synced_data2.len());
         assert_eq!(&vec![imm2.batch_id()], synced_data2[0].imm_ids());
 
@@ -1873,7 +1953,12 @@ mod tests {
             unreachable!("should be sync finish");
         }
         assert_eq!(epoch4, uploader.max_synced_epoch);
-        let synced_data4 = uploader.get_synced_data(epoch4).unwrap().as_ref().unwrap();
+        let synced_data4 = &uploader
+            .get_synced_data(epoch4)
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .staging_ssts;
         assert_eq!(3, synced_data4.len());
         assert_eq!(&vec![epoch4, epoch3], synced_data4[0].epochs());
         assert_eq!(

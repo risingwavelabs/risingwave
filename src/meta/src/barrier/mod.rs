@@ -28,6 +28,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::system_param::PAUSE_ON_NEXT_BOOTSTRAP_KEY;
 use risingwave_common::util::tracing::TracingContext;
+use risingwave_hummock_sdk::table_watermark::merge_multiple_new_table_watermarks;
 use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -1229,5 +1230,9 @@ fn collect_commit_epoch_info(resps: &mut [BarrierCompleteResponse]) -> CommitEpo
             .collect_vec();
         synced_ssts.append(&mut t);
     }
-    CommitEpochInfo::new(synced_ssts, sst_to_worker)
+    CommitEpochInfo::new(
+        synced_ssts,
+        merge_multiple_new_table_watermarks(resps.iter().map(|resp| resp.table_watermarks.clone())),
+        sst_to_worker,
+    )
 }

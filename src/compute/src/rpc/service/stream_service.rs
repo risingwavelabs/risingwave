@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -189,7 +190,7 @@ impl StreamService for StreamServiceImpl {
             .await
             .inspect_err(|err| tracing::error!("failed to collect barrier: {}", err))?;
 
-        let synced_sstables = match kind {
+        let (synced_sstables, table_watermarks) = match kind {
             BarrierKind::Unspecified => unreachable!(),
             BarrierKind::Initial => {
                 if let Some(hummock) = self.env.state_store().as_hummock() {
@@ -203,9 +204,9 @@ impl StreamService for StreamServiceImpl {
                     epoch = req.prev_epoch,
                     "ignored syncing data for the first barrier"
                 );
-                Vec::new()
+                (Vec::new(), HashMap::new())
             }
-            BarrierKind::Barrier => Vec::new(),
+            BarrierKind::Barrier => (Vec::new(), HashMap::new()),
             BarrierKind::Checkpoint => {
                 let span = TracingContext::from_protobuf(&req.tracing_context).attach(
                     tracing::info_span!("sync_epoch", prev_epoch = req.prev_epoch),
@@ -213,11 +214,13 @@ impl StreamService for StreamServiceImpl {
 
                 // Must finish syncing data written in the epoch before respond back to ensure
                 // persistence of the state.
-                self.mgr
+                let sync_result = self
+                    .mgr
                     .sync_epoch(req.prev_epoch)
                     .instrument(span)
                     .instrument_await(format!("sync_epoch (epoch {})", req.prev_epoch))
-                    .await?
+                    .await?;
+                (sync_result.uncommitted_ssts, sync_result.watermarks)
             }
         };
 
@@ -240,6 +243,10 @@ impl StreamService for StreamServiceImpl {
                 )
                 .collect_vec(),
             worker_id: self.env.worker_id(),
+            table_watermarks: table_watermarks
+                .into_iter()
+                .map(|(key, value)| (key.table_id as u64, value.to_protobuf()))
+                .collect(),
         }))
     }
 
