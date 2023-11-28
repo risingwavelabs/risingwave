@@ -51,7 +51,7 @@ impl GrpcExchangeSource {
                     plan: plan.plan,
                     epoch: plan.epoch,
                     tracing_context: plan.tracing_context,
-                    captured_context: Some(capture_context()),
+                    captured_context: Some(capture_context()?),
                 };
                 client.execute(execute_request).await?
             }

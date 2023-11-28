@@ -361,7 +361,3 @@ message PlanFragment {
   PlanNode root = 1;
   ExchangeInfo exchange_info = 2;
 }
-
-message CapturedContext {
-  optional string time_zone = 1;
-}

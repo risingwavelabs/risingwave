@@ -664,8 +664,7 @@ pub fn captured_context_scope(input: TokenStream) -> TokenStream {
             body = quote! {
                 async {
                     use risingwave_expr::captured_context::#local_key_name;
-                    let #field = ctx.#field.unwrap_or_default();
-                    #local_key_name::scope(#field.to_owned(), #body).await
+                    #local_key_name::scope(ctx.#field.to_owned(), #body).await
                 }
             };
         });

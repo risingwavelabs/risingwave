@@ -12,18 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::define_context;
-use risingwave_pb::batch_plan::CapturedContext;
+use risingwave_expr::{define_context, Result as ExprResult};
+use risingwave_pb::stream_plan::CapturedContext;
 
 // For all execution mode.
 define_context! {
     pub TIME_ZONE: String,
 }
 
-pub fn capture_context() -> CapturedContext {
-    let mut ctx = CapturedContext::default();
-    let _ = TIME_ZONE::try_with(|time_zone| {
-        ctx.time_zone = Some(time_zone.to_string());
-    });
-    ctx
+pub fn capture_context() -> ExprResult<CapturedContext> {
+    let ctx = TIME_ZONE::try_with(|time_zone| CapturedContext {
+        time_zone: time_zone.to_owned(),
+    })?;
+    Ok(ctx)
 }

@@ -39,11 +39,11 @@ use risingwave_connector::source::SplitMetaData;
 use risingwave_expr::captured_context_scope;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
-    CapturedContext, DistributedLookupJoinNode, ExchangeNode, ExchangeSource,
-    MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodePb, PlanNode, TaskId as TaskIdPb,
-    TaskOutputId,
+    DistributedLookupJoinNode, ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment,
+    PlanNode as PlanNodePb, PlanNode, TaskId as TaskIdPb, TaskOutputId,
 };
 use risingwave_pb::common::{BatchQueryEpoch, HostAddress, WorkerNode};
+use risingwave_pb::stream_plan::CapturedContext;
 use risingwave_pb::task_service::{CancelTaskRequest, TaskInfoResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::spawn;
@@ -633,8 +633,7 @@ impl StageRunner {
 
     async fn schedule_tasks_for_all(&mut self, shutdown_rx: ShutdownToken) -> SchedulerResult<()> {
         let captured_context = CapturedContext {
-            // TODO(kexiang): We go through the plan to make sure only the neccessay context is captured.
-            time_zone: Some(self.ctx.session().config().timezone().to_owned()),
+            time_zone: self.ctx.session().config().timezone().to_owned(),
         };
         // If root, we execute it locally.
         if !self.is_root_stage() {

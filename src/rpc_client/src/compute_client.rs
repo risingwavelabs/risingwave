@@ -21,7 +21,7 @@ use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::monitor::connection::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::tracing::TracingContext;
-use risingwave_pb::batch_plan::{CapturedContext, PlanFragment, TaskId, TaskOutputId};
+use risingwave_pb::batch_plan::{PlanFragment, TaskId, TaskOutputId};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::compute::config_service_client::ConfigServiceClient;
 use risingwave_pb::compute::{ShowConfigRequest, ShowConfigResponse};
@@ -31,6 +31,7 @@ use risingwave_pb::monitor_service::{
     ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
     StackTraceRequest, StackTraceResponse,
 };
+use risingwave_pb::stream_plan::CapturedContext;
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
