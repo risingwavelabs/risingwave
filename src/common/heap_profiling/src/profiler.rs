@@ -24,7 +24,10 @@ use tokio::time::{self, Duration};
 
 use super::AUTO_DUMP_SUFFIX;
 
-pub struct AutoDump {
+/// `HeapProfiler` automatically triggers heap profiling when memory usage is higher than the threshold.
+///
+/// To use it, both JeMalloc's `opt.prof` and RisingWave's `config.auto_dump` must be set to true.
+pub struct HeapProfiler {
     config: HeapProfilingConfig,
     threshold_auto_dump_heap_profile: usize,
     jemalloc_dump_mib: jemalloc_prof::dump_mib,
@@ -32,7 +35,7 @@ pub struct AutoDump {
     opt_prof: bool,
 }
 
-impl AutoDump {
+impl HeapProfiler {
     /// # Arguments
     ///
     /// `total_memory` must be the total available memory for the process.

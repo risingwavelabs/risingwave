@@ -26,7 +26,7 @@ use redact::Secret;
 use risingwave_common::config::OverrideConfig;
 use risingwave_common::util::resource_util;
 use risingwave_common::{GIT_SHA, RW_VERSION};
-use risingwave_common_heap_profiling::AutoDump;
+use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_meta::*;
 use risingwave_meta_service::*;
 pub use rpc::{ElectionClient, ElectionMember, EtcdElectionClient};
@@ -207,7 +207,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         validate_config(&config);
 
         let total_memory_bytes = resource_util::memory::system_memory_available_bytes();
-        let heap_profiler = AutoDump::new(total_memory_bytes, config.server.heap_profiling.clone());
+        let heap_profiler =
+            HeapProfiler::new(total_memory_bytes, config.server.heap_profiling.clone());
         // Run a background heap profiler
         heap_profiler.start();
 
