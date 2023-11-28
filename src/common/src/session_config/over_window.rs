@@ -15,14 +15,10 @@
 use std::str::FromStr;
 
 use enum_as_inner::EnumAsInner;
-use parse_display::{Display, FromStr};
+use parse_display::Display;
 use risingwave_pb::stream_plan::PbOverWindowCachePolicy;
 
-use super::{ConfigEntry, CONFIG_KEYS, STREAMING_OVER_WINDOW_CACHE_POLICY};
-use crate::error::ErrorCode::{self, InvalidConfigValue};
-use crate::error::RwError;
-
-#[derive(Copy, Default, Debug, Clone, PartialEq, Eq, FromStr, Display, EnumAsInner)]
+#[derive(Copy, Default, Debug, Clone, PartialEq, Eq, Display, EnumAsInner)]
 #[display(style = "snake_case")]
 pub enum OverWindowCachePolicy {
     /// Cache all entries.
@@ -36,32 +32,18 @@ pub enum OverWindowCachePolicy {
     RecentLastN,
 }
 
-impl TryFrom<&[&str]> for OverWindowCachePolicy {
-    type Error = RwError;
+impl FromStr for OverWindowCachePolicy {
+    type Err = &'static str;
 
-    fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
-        if value.len() != 1 {
-            return Err(ErrorCode::InternalError(format!(
-                "SET {} takes only one argument",
-                Self::entry_name()
-            ))
-            .into());
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.to_ascii_lowercase().replace('-', "_");
+        match s.as_str() {
+            "full" => Ok(Self::Full),
+            "recent" => Ok(Self::Recent),
+            "recent_first_n" => Ok(Self::RecentFirstN),
+            "recent_last_n" => Ok(Self::RecentLastN),
+            _ => Err("expect one of [full, recent, recent_first_n, recent_last_n]"),
         }
-
-        let s = value[0].to_ascii_lowercase().replace('-', "_");
-        OverWindowCachePolicy::from_str(&s).map_err(|_| {
-            InvalidConfigValue {
-                config_entry: Self::entry_name().to_string(),
-                config_value: s.to_string(),
-            }
-            .into()
-        })
-    }
-}
-
-impl ConfigEntry for OverWindowCachePolicy {
-    fn entry_name() -> &'static str {
-        CONFIG_KEYS[STREAMING_OVER_WINDOW_CACHE_POLICY]
     }
 }
 
@@ -93,33 +75,33 @@ mod tests {
     #[test]
     fn parse_over_window_cache_policy() {
         assert_eq!(
-            OverWindowCachePolicy::try_from(["full"].as_slice()).unwrap(),
+            OverWindowCachePolicy::from_str("full").unwrap(),
             OverWindowCachePolicy::Full
         );
         assert_eq!(
-            OverWindowCachePolicy::try_from(["recent"].as_slice()).unwrap(),
+            OverWindowCachePolicy::from_str("recent").unwrap(),
             OverWindowCachePolicy::Recent
         );
         assert_eq!(
-            OverWindowCachePolicy::try_from(["RECENT"].as_slice()).unwrap(),
+            OverWindowCachePolicy::from_str("RECENT").unwrap(),
             OverWindowCachePolicy::Recent
         );
         assert_eq!(
-            OverWindowCachePolicy::try_from(["recent_first_n"].as_slice()).unwrap(),
+            OverWindowCachePolicy::from_str("recent_first_n").unwrap(),
             OverWindowCachePolicy::RecentFirstN
         );
         assert_eq!(
-            OverWindowCachePolicy::try_from(["recent_last_n"].as_slice()).unwrap(),
+            OverWindowCachePolicy::from_str("recent_last_n").unwrap(),
             OverWindowCachePolicy::RecentLastN
         );
         assert_eq!(
-            OverWindowCachePolicy::try_from(["recent-last-n"].as_slice()).unwrap(),
+            OverWindowCachePolicy::from_str("recent-last-n").unwrap(),
             OverWindowCachePolicy::RecentLastN
         );
         assert_eq!(
-            OverWindowCachePolicy::try_from(["recent_last_N"].as_slice()).unwrap(),
+            OverWindowCachePolicy::from_str("recent_last_N").unwrap(),
             OverWindowCachePolicy::RecentLastN
         );
-        assert!(OverWindowCachePolicy::try_from(["foo"].as_slice()).is_err());
+        assert!(OverWindowCachePolicy::from_str("foo").is_err());
     }
 }

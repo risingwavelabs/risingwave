@@ -20,7 +20,7 @@ use std::time::Duration;
 use enum_as_inner::EnumAsInner;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::observer_manager::RpcNotificationClient;
-use risingwave_object_store::object::parse_remote_object_store;
+use risingwave_object_store::object::build_remote_object_store;
 
 use crate::error::StorageResult;
 use crate::filter_key_extractor::{RemoteTableAccessor, RpcFilterKeyExtractorManager};
@@ -445,11 +445,11 @@ pub mod verify {
             Ok(())
         }
 
-        fn seal_current_epoch(&mut self, next_epoch: u64) {
-            self.actual.seal_current_epoch(next_epoch);
+        fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
             if let Some(expected) = &mut self.expected {
-                expected.seal_current_epoch(next_epoch);
+                expected.seal_current_epoch(next_epoch, opts.clone());
             }
+            self.actual.seal_current_epoch(next_epoch, opts);
         }
 
         fn epoch(&self) -> u64 {
@@ -557,13 +557,11 @@ impl StateStoreImpl {
                 catalog_bits: opts.data_file_cache_catalog_bits,
                 admissions: vec![],
                 reinsertions: vec![],
-                compression: match opts.data_file_cache_compression.as_str() {
-                    "none" => foyer::storage::compress::Compression::None,
-                    _ => panic!(
-                        "data file cache compression type not support: {}",
-                        opts.data_file_cache_compression
-                    ),
-                },
+                compression: opts
+                    .data_file_cache_compression
+                    .as_str()
+                    .try_into()
+                    .map_err(HummockError::file_cache)?,
             };
             let cache = FileCache::open(config)
                 .await
@@ -598,13 +596,11 @@ impl StateStoreImpl {
                 catalog_bits: opts.meta_file_cache_catalog_bits,
                 admissions: vec![],
                 reinsertions: vec![],
-                compression: match opts.meta_file_cache_compression.as_str() {
-                    "none" => foyer::storage::compress::Compression::None,
-                    _ => panic!(
-                        "meta file cache compression type not support: {}",
-                        opts.meta_file_cache_compression
-                    ),
-                },
+                compression: opts
+                    .meta_file_cache_compression
+                    .as_str()
+                    .try_into()
+                    .map_err(HummockError::file_cache)?,
             };
             FileCache::open(config)
                 .await
@@ -613,18 +609,13 @@ impl StateStoreImpl {
 
         let store = match s {
             hummock if hummock.starts_with("hummock+") => {
-                let mut object_store = parse_remote_object_store(
+                let object_store = build_remote_object_store(
                     hummock.strip_prefix("hummock+").unwrap(),
                     object_store_metrics.clone(),
                     "Hummock",
+                    opts.object_store_config.clone(),
                 )
                 .await;
-                object_store.set_opts(
-                    opts.object_store_streaming_read_timeout_ms,
-                    opts.object_store_streaming_upload_timeout_ms,
-                    opts.object_store_read_timeout_ms,
-                    opts.object_store_upload_timeout_ms,
-                );
 
                 let sstable_store = Arc::new(SstableStore::new(
                     Arc::new(object_store),
@@ -632,6 +623,7 @@ impl StateStoreImpl {
                     opts.block_cache_capacity_mb * (1 << 20),
                     opts.meta_cache_capacity_mb * (1 << 20),
                     opts.high_priority_ratio,
+                    opts.large_query_memory_usage_mb * (1 << 20),
                     data_file_cache,
                     meta_file_cache,
                     recent_filter,
@@ -799,7 +791,7 @@ pub mod boxed_state_store {
 
         async fn init(&mut self, epoch: InitOptions) -> StorageResult<()>;
 
-        fn seal_current_epoch(&mut self, next_epoch: u64);
+        fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions);
     }
 
     #[async_trait::async_trait]
@@ -864,8 +856,8 @@ pub mod boxed_state_store {
             self.init(options).await
         }
 
-        fn seal_current_epoch(&mut self, next_epoch: u64) {
-            self.seal_current_epoch(next_epoch)
+        fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
+            self.seal_current_epoch(next_epoch, opts)
         }
     }
 
@@ -937,8 +929,8 @@ pub mod boxed_state_store {
             self.deref_mut().init(options)
         }
 
-        fn seal_current_epoch(&mut self, next_epoch: u64) {
-            self.deref_mut().seal_current_epoch(next_epoch)
+        fn seal_current_epoch(&mut self, next_epoch: u64, opts: SealCurrentEpochOptions) {
+            self.deref_mut().seal_current_epoch(next_epoch, opts)
         }
     }
 

@@ -32,7 +32,7 @@ pub async fn handle_rename_table(
     let (schema_name, real_table_name) =
         Binder::resolve_schema_qualified_name(db_name, table_name.clone())?;
     let new_table_name = Binder::resolve_table_name(new_table_name)?;
-    let search_path = session.config().get_search_path();
+    let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -76,7 +76,7 @@ pub async fn handle_rename_index(
     let (schema_name, real_index_name) =
         Binder::resolve_schema_qualified_name(db_name, index_name.clone())?;
     let new_index_name = Binder::resolve_index_name(new_index_name)?;
-    let search_path = session.config().get_search_path();
+    let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -107,7 +107,7 @@ pub async fn handle_rename_view(
     let (schema_name, real_view_name) =
         Binder::resolve_schema_qualified_name(db_name, view_name.clone())?;
     let new_view_name = Binder::resolve_view_name(new_view_name)?;
-    let search_path = session.config().get_search_path();
+    let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -137,7 +137,7 @@ pub async fn handle_rename_sink(
     let (schema_name, real_sink_name) =
         Binder::resolve_schema_qualified_name(db_name, sink_name.clone())?;
     let new_sink_name = Binder::resolve_sink_name(new_sink_name)?;
-    let search_path = session.config().get_search_path();
+    let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
@@ -167,7 +167,7 @@ pub async fn handle_rename_source(
     let (schema_name, real_source_name) =
         Binder::resolve_schema_qualified_name(db_name, source_name.clone())?;
     let new_source_name = Binder::resolve_source_name(new_source_name)?;
-    let search_path = session.config().get_search_path();
+    let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);

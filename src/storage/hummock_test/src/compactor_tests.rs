@@ -62,10 +62,9 @@ pub(crate) mod tests {
     use risingwave_storage::hummock::test_utils::gen_test_sstable_info;
     use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{
-        CachePolicy, CompactionDeleteRanges, CompressionAlgorithm,
-        HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
-        SharedComapctorObjectIdManager, Sstable, SstableBuilderOptions, SstableIteratorReadOptions,
-        SstableObjectIdManager,
+        CachePolicy, CompressionAlgorithm, HummockStorage as GlobalHummockStorage, HummockStorage,
+        MemoryLimiter, SharedComapctorObjectIdManager, Sstable, SstableBuilderOptions,
+        SstableIteratorReadOptions, SstableObjectIdManager,
     };
     use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
     use risingwave_storage::opts::StorageOpts;
@@ -166,9 +165,9 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
             if i + 1 < epochs.len() {
-                local.seal_current_epoch(epochs[i + 1]);
+                local.seal_current_epoch(epochs[i + 1], SealCurrentEpochOptions::for_test());
             } else {
-                local.seal_current_epoch(u64::MAX);
+                local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
             }
             let ssts = storage
                 .seal_and_sync_epoch(epoch)
@@ -185,11 +184,11 @@ pub(crate) mod tests {
     }
 
     fn get_compactor_context_impl(
-        options: Arc<StorageOpts>,
+        storage_opts: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
     ) -> CompactorContext {
         CompactorContext {
-            storage_opts: options,
+            storage_opts,
             sstable_store,
             compactor_metrics: Arc::new(CompactorMetrics::unused()),
             is_share_buffer_compact: false,
@@ -250,6 +249,7 @@ pub(crate) mod tests {
                 WorkerType::ComputeNode,
                 HostAddress::default(),
                 Property::default(),
+                Default::default(),
             )
             .await
             .unwrap();
@@ -549,7 +549,7 @@ pub(crate) mod tests {
                     .unwrap();
             }
             local.flush(Vec::new()).await.unwrap();
-            local.seal_current_epoch(epoch + 1);
+            local.seal_current_epoch(epoch + 1, SealCurrentEpochOptions::for_test());
 
             flush_and_commit(&hummock_meta_client, storage, epoch).await;
         }
@@ -734,8 +734,8 @@ pub(crate) mod tests {
                 .insert(TableKey(prefix.freeze()), val.clone(), None)
                 .unwrap();
             storage.flush(Vec::new()).await.unwrap();
-            storage.seal_current_epoch(next_epoch);
-            other.seal_current_epoch(next_epoch);
+            storage.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
+            other.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
             let ssts = global_storage
                 .seal_and_sync_epoch(epoch)
@@ -839,7 +839,7 @@ pub(crate) mod tests {
                 None,
                 ReadOptions {
                     table_id: TableId::from(existing_table_ids),
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
                 },
@@ -925,7 +925,7 @@ pub(crate) mod tests {
                 .insert(TableKey(prefix.freeze()), val.clone(), None)
                 .unwrap();
             local.flush(Vec::new()).await.unwrap();
-            local.seal_current_epoch(next_epoch);
+            local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
 
             let ssts = storage
                 .seal_and_sync_epoch(epoch)
@@ -1035,7 +1035,7 @@ pub(crate) mod tests {
                 None,
                 ReadOptions {
                     table_id: TableId::from(existing_table_id),
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
                 },
@@ -1123,7 +1123,7 @@ pub(crate) mod tests {
                 .insert(TableKey(Bytes::from(ramdom_key)), val.clone(), None)
                 .unwrap();
             local.flush(Vec::new()).await.unwrap();
-            local.seal_current_epoch(next_epoch);
+            local.seal_current_epoch(next_epoch, SealCurrentEpochOptions::for_test());
             let ssts = storage
                 .seal_and_sync_epoch(epoch)
                 .await
@@ -1236,7 +1236,7 @@ pub(crate) mod tests {
                 ReadOptions {
                     prefix_hint: Some(Bytes::from(bloom_filter_key)),
                     table_id: TableId::from(existing_table_id),
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    prefetch_options: PrefetchOptions::default(),
                     cache_policy: CachePolicy::Fill(CachePriority::High),
                     ..Default::default()
                 },
@@ -1294,7 +1294,7 @@ pub(crate) mod tests {
             .flush(vec![prefix_key_range(1u16), prefix_key_range(2u16)])
             .await
             .unwrap();
-        local.seal_current_epoch(u64::MAX);
+        local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
 
         flush_and_commit(&hummock_meta_client, &storage, 130).await;
 
@@ -1421,7 +1421,6 @@ pub(crate) mod tests {
             gc_delete_keys: true,
             ..Default::default()
         };
-        let deg = Arc::new(CompactionDeleteRanges::default());
         let multi_filter_key_extractor =
             Arc::new(FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor));
         let compaction_filter = DummyCompactionFilter {};
@@ -1446,7 +1445,6 @@ pub(crate) mod tests {
             .run(
                 compaction_filter,
                 multi_filter_key_extractor,
-                deg,
                 Arc::new(TaskProgress::default()),
             )
             .await

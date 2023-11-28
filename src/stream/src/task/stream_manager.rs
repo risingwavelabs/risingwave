@@ -126,11 +126,6 @@ pub struct ExecutorParams {
     /// Basic information about the executor.
     pub info: ExecutorInfo,
 
-    // TODO(rc): The following three fields will be removed. Executor builders should use `info` instead.
-    pub schema: Schema,
-    pub pk_indices: PkIndices,
-    pub identity: String,
-
     /// Executor id, unique across all actors.
     pub executor_id: u64,
 
@@ -516,6 +511,7 @@ impl LocalStreamManagerCore {
                     | NodeBody::DeltaIndexJoin(_)
                     | NodeBody::Lookup(_)
                     | NodeBody::StreamScan(_)
+                    | NodeBody::StreamCdcScan(_)
                     | NodeBody::DynamicFilter(_)
                     | NodeBody::GroupTopN(_)
                     | NodeBody::Now(_)
@@ -570,11 +566,6 @@ impl LocalStreamManagerCore {
                 identity: identity.clone(),
             },
 
-            // TODO(rc): The following three fields will be removed. Executor builders should use `info` instead.
-            schema: schema.clone(),
-            pk_indices: pk_indices.clone(),
-            identity: identity.clone(),
-
             executor_id,
             operator_id,
             op_info,
@@ -591,6 +582,12 @@ impl LocalStreamManagerCore {
             executor.pk_indices(),
             &pk_indices,
             "`pk_indices` of {} not consistent with what derived by optimizer",
+            executor.identity()
+        );
+        assert_eq!(
+            executor.schema(),
+            &schema,
+            "`schema` of {} not consistent with what derived by optimizer",
             executor.identity()
         );
 

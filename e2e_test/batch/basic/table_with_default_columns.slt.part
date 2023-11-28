@@ -66,7 +66,7 @@ create table t2 (v1 int, v2 int default 1.5);
 statement ok
 insert into t2 values (1), (2);
 
-query II
+query II rowsort
 select * from t2;
 ----
 1 2
@@ -76,7 +76,7 @@ select * from t2;
 statement ok
 alter table t2 add column v3 timestamp with time zone default now();
 
-query IT
+query IT rowsort
 select v1, v3 >= date '2021-01-01' as later_than_2021 from t2;
 ----
 1 t

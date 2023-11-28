@@ -26,21 +26,16 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_id::RowIdGenerator;
 
 use super::{
-    expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, PkIndices, PkIndicesRef,
+    expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, PkIndicesRef,
 };
 use crate::executor::{Message, StreamExecutorError};
 
 /// [`RowIdGenExecutor`] generates row id for data, where the user has not specified a pk.
 pub struct RowIdGenExecutor {
     ctx: ActorContextRef,
+    info: ExecutorInfo,
 
     upstream: Option<BoxedExecutor>,
-
-    schema: Schema,
-
-    pk_indices: PkIndices,
-
-    identity: String,
 
     row_id_index: usize,
 
@@ -50,19 +45,15 @@ pub struct RowIdGenExecutor {
 impl RowIdGenExecutor {
     pub fn new(
         ctx: ActorContextRef,
+        info: ExecutorInfo,
         upstream: BoxedExecutor,
-        schema: Schema,
-        pk_indices: PkIndices,
-        executor_id: u64,
         row_id_index: usize,
         vnodes: Bitmap,
     ) -> Self {
         Self {
             ctx,
+            info,
             upstream: Some(upstream),
-            schema,
-            pk_indices,
-            identity: format!("RowIdGenExecutor {:X}", executor_id),
             row_id_index,
             row_id_generator: Self::new_generator(&vnodes),
         }
@@ -130,15 +121,15 @@ impl Executor for RowIdGenExecutor {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        &self.identity
+        &self.info.identity
     }
 }
 
@@ -166,10 +157,12 @@ mod tests {
         let (mut tx, upstream) = MockSource::channel(schema.clone(), pk_indices.clone());
         let row_id_gen_executor = Box::new(RowIdGenExecutor::new(
             ActorContext::create(233),
+            ExecutorInfo {
+                schema,
+                pk_indices,
+                identity: "RowIdGenExecutor".to_string(),
+            },
             Box::new(upstream),
-            schema,
-            pk_indices,
-            1,
             row_id_index,
             row_id_generator,
         ));

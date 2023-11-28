@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::fmt;
 use std::cmp::Ordering;
-use std::fmt::Debug;
+use std::fmt::{self, Debug, Write};
 use std::hash::Hash;
 use std::sync::Arc;
 
@@ -411,6 +410,7 @@ impl Debug for StructRef<'_> {
 
 impl ToText for StructRef<'_> {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
+        let mut raw_text = String::new();
         iter_fields_ref!(*self, it, {
             write!(f, "(")?;
             let mut is_first = true;
@@ -420,7 +420,12 @@ impl ToText for StructRef<'_> {
                 } else {
                     write!(f, ",")?;
                 }
-                ToText::write(&x, f)?;
+                // print nothing for null
+                if x.is_some() {
+                    raw_text.clear();
+                    x.write(&mut raw_text)?;
+                    quote_if_need(&raw_text, f)?;
+                }
             }
             write!(f, ")")
         })
@@ -432,6 +437,32 @@ impl ToText for StructRef<'_> {
             _ => unreachable!(),
         }
     }
+}
+
+/// Double quote a string if it contains any special characters.
+fn quote_if_need(input: &str, writer: &mut impl Write) -> std::fmt::Result {
+    if !input.is_empty() // non-empty
+        && !input.contains([
+            '"', '\\', '(', ')', ',',
+            // PostgreSQL `array_isspace` includes '\x0B' but rust
+            // [`char::is_ascii_whitespace`] does not.
+            ' ', '\t', '\n', '\r', '\x0B', '\x0C',
+        ])
+    {
+        return writer.write_str(input);
+    }
+
+    writer.write_char('"')?;
+
+    for ch in input.chars() {
+        match ch {
+            '"' => writer.write_str("\"\"")?,
+            '\\' => writer.write_str("\\\\")?,
+            _ => writer.write_char(ch)?,
+        }
+    }
+
+    writer.write_char('"')
 }
 
 #[cfg(test)]
@@ -710,5 +741,24 @@ mod tests {
             };
             assert_eq!(lhs_serialized.cmp(&rhs_serialized), order);
         }
+    }
+
+    #[test]
+    fn test_quote() {
+        #[track_caller]
+        fn test(input: &str, quoted: &str) {
+            let mut actual = String::new();
+            quote_if_need(input, &mut actual).unwrap();
+            assert_eq!(quoted, actual);
+        }
+        test("abc", "abc");
+        test("", r#""""#);
+        test(" x ", r#"" x ""#);
+        test("a b", r#""a b""#);
+        test(r#"a"bc"#, r#""a""bc""#);
+        test(r#"a\bc"#, r#""a\\bc""#);
+        test("{1}", "{1}");
+        test("{1,2}", r#""{1,2}""#);
+        test(r#"{"f": 1}"#, r#""{""f"": 1}""#);
     }
 }

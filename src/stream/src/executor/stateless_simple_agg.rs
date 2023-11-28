@@ -29,8 +29,8 @@ use crate::error::StreamResult;
 
 pub struct StatelessSimpleAggExecutor {
     _ctx: ActorContextRef,
-    pub(super) input: Box<dyn Executor>,
     pub(super) info: ExecutorInfo,
+    pub(super) input: Box<dyn Executor>,
     pub(super) aggs: Vec<BoxedAggregateFunction>,
     pub(super) agg_calls: Vec<AggCall>,
 }
@@ -124,15 +124,15 @@ impl StatelessSimpleAggExecutor {
 impl StatelessSimpleAggExecutor {
     pub fn new(
         ctx: ActorContextRef,
-        input: Box<dyn Executor>,
         info: ExecutorInfo,
+        input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
     ) -> StreamResult<Self> {
         let aggs = agg_calls.iter().map(build_retractable).try_collect()?;
         Ok(StatelessSimpleAggExecutor {
             _ctx: ctx,
-            input,
             info,
+            input,
             aggs,
             agg_calls,
         })
@@ -171,8 +171,8 @@ mod tests {
         let simple_agg = Box::new(
             StatelessSimpleAggExecutor::new(
                 ActorContext::create(123),
-                Box::new(source),
                 info,
+                Box::new(source),
                 agg_calls,
             )
             .unwrap(),
@@ -229,8 +229,8 @@ mod tests {
         let simple_agg = Box::new(
             StatelessSimpleAggExecutor::new(
                 ActorContext::create(123),
-                Box::new(source),
                 info,
+                Box::new(source),
                 agg_calls,
             )
             .unwrap(),

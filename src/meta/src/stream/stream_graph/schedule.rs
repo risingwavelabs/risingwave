@@ -104,14 +104,15 @@ crepe::crepe! {
 
     // Requirements from the facts.
     Requirement(x, d) <- ExternalReq(x, d);
-    // Requirements of `NoShuffle` edges.
+    // Requirements propagate through `NoShuffle` edges.
     Requirement(x, d) <- Edge(x, y, NoShuffle), Requirement(y, d);
     Requirement(y, d) <- Edge(x, y, NoShuffle), Requirement(x, d);
 
     // The downstream fragment of a `Simple` edge must be singleton.
     SingletonReq(y) <- Edge(_, y, Simple);
-    // The downstream fragment of a `CdcTablename` edge must be singleton.
-    SingletonReq(y) <- Edge(_, y, CdcTablename);
+    // Singleton requirements propagate through `NoShuffle` edges.
+    SingletonReq(x) <- Edge(x, y, NoShuffle), SingletonReq(y);
+    SingletonReq(y) <- Edge(x, y, NoShuffle), SingletonReq(x);
 
     // Multiple requirements conflict.
     Failed(x) <- Requirement(x, d1), Requirement(x, d2), (d1 != d2);

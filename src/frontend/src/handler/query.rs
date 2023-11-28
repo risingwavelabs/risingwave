@@ -188,7 +188,7 @@ fn gen_batch_query_plan(
         }
         (true, false) => QueryMode::Distributed,
         (false, true) => QueryMode::Local,
-        (false, false) => match session.config().get_query_mode() {
+        (false, false) => match session.config().query_mode() {
             QueryMode::Auto => determine_query_mode(batch_plan.clone()),
             QueryMode::Local => QueryMode::Local,
             QueryMode::Distributed => QueryMode::Distributed,
@@ -285,7 +285,7 @@ fn gen_batch_plan_fragmenter(
     let plan_fragmenter = BatchPlanFragmenter::new(
         worker_node_manager_reader,
         session.env().catalog_reader().clone(),
-        session.config().get_batch_parallelism(),
+        session.config().batch_parallelism().0,
         plan,
     )?;
 
@@ -401,7 +401,7 @@ async fn execute(
     // it sent. This is achieved by the `callback` in `PgResponse`.
     let callback = async move {
         // Implicitly flush the writes.
-        if session.config().get_implicit_flush() && stmt_type.is_dml() {
+        if session.config().implicit_flush() && stmt_type.is_dml() {
             do_flush(&session).await?;
         }
 

@@ -84,7 +84,7 @@ sleep 8s
 
 query II
 SELECT
- *
+ op_type, "ID", "CLASS_ID", "ITEM_ID", "ATTR_ID", "ATTR_VALUE", "ORG_ID", "UNIT_INFO", "UPD_TIME"
 FROM
  upsert_avro_json_default_key
 ORDER BY
@@ -110,7 +110,7 @@ delete id5 5 7778 7980 value10 8182 info10 2021-05-19T15:22:45.539Z
 
 query II
 SELECT
- *
+ "ID", "firstName", "lastName", "age", "height", "weight"
 FROM
  upsert_student_avro_json
 ORDER BY
@@ -135,12 +135,16 @@ select count(*) from debezium_compact;
 2
 
 query TFITT
-select * from kafka_json_schema_plain
+select
+  "dimensions", "price", "productId", "productName", "tags"
+from kafka_json_schema_plain
 ----
 (9.5,7,12) 12.5 1 An ice sculpture {cold,ice}
 
 query TFITT
-select * from kafka_json_schema_upsert order by id
+select
+  "dimensions", "id", "price", "productName", "tags"
+from kafka_json_schema_upsert order by id
 ----
 (9.5,7,12) 1 23 An ice sculpture {cold,ice}
 (9.5,7,12) 2 12.5 An ice sculpture {cold,ice}

@@ -91,6 +91,7 @@ impl Progress {
     /// Update the progress of `actor`.
     fn update(&mut self, actor: ActorId, new_state: BackfillState, upstream_total_key_count: u64) {
         self.upstream_total_key_count = upstream_total_key_count;
+        let total_actors = self.states.len();
         match self.states.remove(&actor).unwrap() {
             BackfillState::Init => {}
             BackfillState::ConsumingUpstream(_, old_consumed_rows) => {
@@ -104,8 +105,14 @@ impl Progress {
                 self.consumed_rows += new_consumed_rows;
             }
             BackfillState::Done(new_consumed_rows) => {
+                tracing::debug!("actor {} done", actor);
                 self.consumed_rows += new_consumed_rows;
                 self.done_count += 1;
+                tracing::debug!(
+                    "{} actors out of {} complete",
+                    self.done_count,
+                    total_actors,
+                );
             }
         };
         self.states.insert(actor, new_state);
@@ -263,7 +270,7 @@ impl CreateMviewProgressTracker {
     ) -> Self {
         let mut actor_map = HashMap::new();
         let mut progress_map = HashMap::new();
-        let table_map: HashMap<_, Vec<ActorId>> = table_map.into();
+        let table_map: HashMap<_, HashSet<ActorId>> = table_map.into();
         for (creating_table_id, actors) in table_map {
             // 1. Recover `BackfillState` in the tracker.
             let mut states = HashMap::new();
@@ -311,13 +318,17 @@ impl CreateMviewProgressTracker {
         }
     }
 
-    pub fn gen_ddl_progress(&self) -> Vec<DdlProgress> {
+    pub fn gen_ddl_progress(&self) -> HashMap<u32, DdlProgress> {
         self.progress_map
             .iter()
-            .map(|(table_id, (x, _))| DdlProgress {
-                id: table_id.table_id as u64,
-                statement: x.definition.clone(),
-                progress: format!("{:.2}%", x.calculate_progress() * 100.0),
+            .map(|(table_id, (x, _))| {
+                let table_id = table_id.table_id;
+                let ddl_progress = DdlProgress {
+                    id: table_id as u64,
+                    statement: x.definition.clone(),
+                    progress: format!("{:.2}%", x.calculate_progress() * 100.0),
+                };
+                (table_id, ddl_progress)
             })
             .collect()
     }

@@ -35,7 +35,6 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::generic::ScanTableType;
 use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
@@ -54,7 +53,7 @@ pub(crate) fn gen_create_index_plan(
 ) -> Result<(PlanRef, PbTable, PbIndex)> {
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
-    let search_path = session.config().get_search_path();
+    let search_path = session.config().search_path();
     let user_name = &session.auth_context().user_name;
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
@@ -325,7 +324,6 @@ fn assemble_materialize(
 
     let logical_scan = LogicalScan::create(
         table_name,
-        ScanTableType::default(),
         table_desc.clone(),
         // Index table has no indexes.
         vec![],
@@ -431,10 +429,13 @@ pub async fn handle_create_index(
             distributed_by,
         )?;
         let mut graph = build_graph(plan);
-        graph.parallelism = session
-            .config()
-            .get_streaming_parallelism()
-            .map(|parallelism| Parallelism { parallelism });
+        graph.parallelism =
+            session
+                .config()
+                .streaming_parallelism()
+                .map(|parallelism| Parallelism {
+                    parallelism: parallelism.get(),
+                });
         (graph, index_table, index)
     };
 
