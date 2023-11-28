@@ -433,7 +433,6 @@ where
                 persist_state_per_vnode(
                     barrier.epoch,
                     &mut self.state_table,
-                    false,
                     &mut backfill_state,
                     state_len,
                     vnodes.iter_vnodes(),
@@ -485,7 +484,6 @@ where
                     persist_state_per_vnode(
                         barrier.epoch,
                         &mut self.state_table,
-                        true,
                         &mut backfill_state,
                         state_len,
                         vnodes.iter_vnodes()

@@ -630,9 +630,8 @@ where
 pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: bool>(
     epoch: EpochPair,
     table: &mut StateTableInner<S, BasicSerde, IS_REPLICATED>,
-    _is_finished: bool,
     backfill_state: &mut BackfillState,
-    _state_len: usize,
+    state_len: usize,
     vnodes: impl Iterator<Item = VirtualNode>,
 ) -> StreamExecutorResult<()> {
     let mut has_progress = false;
@@ -655,8 +654,8 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
                         // value segment (without vnode) should be used for comparison
                         assert_eq!(inner, &encoded_prev_state[1..]);
                         assert_ne!(inner, &encoded_current_state[1..]);
-                        assert_eq!(old_row.len(), table.pk_indices().len() + 2);
-                        assert_eq!(encoded_current_state.len(), table.pk_indices().len() + 3);
+                        assert_eq!(old_row.len(), state_len - 1);
+                        assert_eq!(encoded_current_state.len(), state_len);
                     }
                     None => {
                         panic!("row {:#?} not found", pk);
@@ -675,7 +674,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
                 let pk: &[Datum; 1] = &[Some(vnode.to_scalar().into())];
                 let row = table.get_row(pk).await?;
                 assert!(row.is_none(), "row {:#?}", row);
-                assert_eq!(encoded_current_state.len(), table.pk_indices().len() + 3);
+                assert_eq!(encoded_current_state.len(), state_len);
             }
             table.write_record(Record::Insert {
                 new_row: &encoded_current_state[..],
