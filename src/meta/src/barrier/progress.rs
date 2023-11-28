@@ -440,6 +440,11 @@ impl CreateMviewProgressTracker {
             definition,
         );
         if *ddl_type == DdlType::Sink {
+            // First we duplicate a separate tracking job for sink.
+            // This does not need notifiers, it is solely used for
+            // tracking the backfill progress of sink.
+            // It will still be removed from progress map when
+            // backfill completes.
             let tracking_job = TrackingJob::New(TrackingCommand {
                 context: command.context.clone(),
                 notifiers: vec![],
@@ -448,6 +453,12 @@ impl CreateMviewProgressTracker {
                 .progress_map
                 .insert(creating_mv_id, (progress, tracking_job));
             assert!(old.is_none());
+
+            // We return the original tracking job immediately.
+            // This is because sink can be decoupled with backfill progress.
+            // We don't need to wait for sink to finish backfill.
+            // This still contains the notifiers, so we can tell listeners
+            // that the sink job has been created.
             Some(TrackingJob::New(command))
         } else {
             let old = self
