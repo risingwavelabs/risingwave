@@ -182,6 +182,7 @@ impl FragmentManager {
             let is_backfill = if let Some(node) = &stream_node.node_body
             && let Some(node) = node.as_stream_scan() {
                 node.stream_scan_type == StreamScanType::Backfill as i32
+                || node.stream_scan_type == StreamScanType::ArrangementBackfill as i32
             } else {
                 false
             };
