@@ -26,7 +26,7 @@ use super::AUTO_DUMP_SUFFIX;
 
 /// `HeapProfiler` automatically triggers heap profiling when memory usage is higher than the threshold.
 ///
-/// To use it, both JeMalloc's `opt.prof` and RisingWave's config `heap_profiling.enable_auto` must be set to true.
+/// To use it, both jemalloc's `opt.prof` and RisingWave's config `heap_profiling.enable_auto` must be set to true.
 pub struct HeapProfiler {
     config: HeapProfilingConfig,
     threshold_auto_dump_heap_profile: usize,
