@@ -394,7 +394,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let mut right_exclusive = false;
         let meta_offset = self.writer.data_len() as u64;
 
-        assert!(self.monotonic_deletes.is_empty() || self.monotonic_deletes.len() > 1);
+        assert!(self.monotonic_deletes.is_empty() || self.monotonic_deletes.len() > 1, "===!!!There can not be one point range!!!=== key: {:?}", self.monotonic_deletes[0]);
 
         if let Some(monotonic_delete) = self.monotonic_deletes.last() {
             assert_eq!(monotonic_delete.new_epoch, HummockEpoch::MAX);

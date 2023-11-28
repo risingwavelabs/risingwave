@@ -226,10 +226,12 @@ where
                     // If the last range tombstone equals the new key, we can not create new file because we must keep the new key in origin file.
                     need_seal_current = false;
                 } else {
-                    builder.add_monotonic_delete(MonotonicDeleteEvent {
+                    let key = MonotonicDeleteEvent {
                         event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
                         new_epoch: HummockEpoch::MAX,
-                    });
+                    };
+                    warn!("====!!!switch sstable file must add current key as end of range: {:?}", key);
+                    builder.add_monotonic_delete(key);
                 }
             }
         }
@@ -248,10 +250,12 @@ where
             // If last_range_tombstone_epoch is not MAX, it means that we cut one range-tombstone to
             // two half and add the right half as a new range to next sstable.
             if need_seal_current && last_range_tombstone_epoch != HummockEpoch::MAX {
-                builder.add_monotonic_delete(MonotonicDeleteEvent {
+                let key = MonotonicDeleteEvent {
                     event_key: PointRange::from_user_key(full_key.user_key.to_vec(), false),
                     new_epoch: last_range_tombstone_epoch,
-                });
+                };
+                warn!("====!!!switch sstable file must add current key as start of next file: {:?}", key);
+                builder.add_monotonic_delete(key);
             }
             self.current_builder = Some(builder);
         }
@@ -308,10 +312,12 @@ where
             && event.new_epoch != HummockEpoch::MAX
         {
             if builder.last_range_tombstone_epoch() != HummockEpoch::MAX {
-                builder.add_monotonic_delete(MonotonicDeleteEvent {
+                let key = MonotonicDeleteEvent {
                     event_key: event.event_key.clone(),
                     new_epoch: HummockEpoch::MAX,
-                });
+                };
+                warn!("====!!!switch sstable file must add split point range key: {:?}", key);
+                builder.add_monotonic_delete(key);
             }
             self.seal_current().await?;
         }
