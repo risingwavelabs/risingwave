@@ -27,7 +27,6 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
-    StreamScanType,
 };
 
 use super::id::GlobalFragmentIdsExt;
@@ -160,9 +159,6 @@ impl ActorBuilder {
 
             // "Leaf" node `StreamScan`.
             NodeBody::StreamScan(stream_scan) => {
-                let cdc_backfill =
-                    stream_scan.stream_scan_type == StreamScanType::CdcBackfill as i32;
-
                 let input = stream_node.get_input();
                 assert_eq!(input.len(), 2);
 
@@ -188,11 +184,7 @@ impl ActorBuilder {
                         node_body: Some(NodeBody::Merge(MergeNode {
                             upstream_actor_id,
                             upstream_fragment_id: upstreams.fragment_id.as_global_id(),
-                            upstream_dispatcher_type: if cdc_backfill {
-                                DispatcherType::CdcTablename as _
-                            } else {
-                                DispatcherType::NoShuffle as _
-                            },
+                            upstream_dispatcher_type: DispatcherType::NoShuffle as _,
                             fields: merge_node.fields.clone(),
                         })),
                         ..merge_node.clone()
@@ -200,6 +192,50 @@ impl ActorBuilder {
                     batch_plan_node.clone(),
                 ];
 
+                Ok(StreamNode {
+                    input,
+                    ..stream_node.clone()
+                })
+            }
+
+            // "Leaf" node `CdcFilter` used in multi-table cdc backfill plan:
+            // cdc_filter -> backfill -> mview
+            NodeBody::CdcFilter(node) => {
+                let input = stream_node.get_input();
+                assert_eq!(input.len(), 1);
+
+                let merge_node = &input[0];
+                assert_matches!(merge_node.node_body, Some(NodeBody::Merge(_)));
+
+                let upstream_source_id = node.upstream_source_id;
+                tracing::debug!(
+                    "rewrite leaf cdc filter node: upstream source id {}",
+                    upstream_source_id,
+                );
+
+                // Index the upstreams by the an external edge ID.
+                let upstreams = &self.upstreams[&EdgeId::UpstreamExternal {
+                    upstream_table_id: upstream_source_id.into(),
+                    downstream_fragment_id: self.fragment_id,
+                }];
+
+                // Upstream Cdc Source should be singleton.
+                let upstream_actor_id = upstreams.actors.as_global_ids();
+                assert_eq!(upstream_actor_id.len(), 1);
+
+                // rewrite the input of `CdcFilter`
+                let input = vec![
+                    // Fill the merge node body with correct upstream info.
+                    StreamNode {
+                        node_body: Some(NodeBody::Merge(MergeNode {
+                            upstream_actor_id,
+                            upstream_fragment_id: upstreams.fragment_id.as_global_id(),
+                            upstream_dispatcher_type: DispatcherType::NoShuffle as _,
+                            fields: merge_node.fields.clone(),
+                        })),
+                        ..merge_node.clone()
+                    },
+                ];
                 Ok(StreamNode {
                     input,
                     ..stream_node.clone()
@@ -360,7 +396,6 @@ impl ActorGraphBuildStateInner {
             hash_mapping: Some(downstream_actor_mapping.to_protobuf()),
             dispatcher_id: downstream_fragment_id.as_global_id() as u64,
             downstream_actor_id: downstream_actors.as_global_ids(),
-            downstream_table_name: strategy.downstream_table_name.clone(),
         }
     }
 
@@ -380,28 +415,6 @@ impl ActorGraphBuildStateInner {
             hash_mapping: None,
             dispatcher_id: downstream_fragment_id.as_global_id() as u64,
             downstream_actor_id: downstream_actors.as_global_ids(),
-            downstream_table_name: None,
-        }
-    }
-
-    /// Create a new dispatcher for cdc event dispatch.
-    fn new_cdc_dispatcher(
-        strategy: &DispatchStrategy,
-        downstream_fragment_id: GlobalFragmentId,
-        downstream_actors: &[GlobalActorId],
-    ) -> Dispatcher {
-        // dist key is the index to `_rw_table_name` column
-        assert_eq!(strategy.dist_key_indices.len(), 1);
-        assert!(strategy.downstream_table_name.is_some());
-
-        Dispatcher {
-            r#type: strategy.r#type,
-            dist_key_indices: strategy.dist_key_indices.clone(),
-            output_indices: strategy.output_indices.clone(),
-            hash_mapping: None,
-            dispatcher_id: downstream_fragment_id.as_global_id() as u64,
-            downstream_actor_id: downstream_actors.as_global_ids(),
-            downstream_table_name: strategy.downstream_table_name.clone(),
         }
     }
 
@@ -502,10 +515,7 @@ impl ActorGraphBuildStateInner {
             }
 
             // Otherwise, make m * n links between the actors.
-            DispatcherType::Hash
-            | DispatcherType::Broadcast
-            | DispatcherType::Simple
-            | DispatcherType::CdcTablename => {
+            DispatcherType::Hash | DispatcherType::Broadcast | DispatcherType::Simple => {
                 // Add dispatchers for the upstream actors.
                 let dispatcher = if let DispatcherType::Hash = dt {
                     // Transform the `ParallelUnitMapping` from the downstream distribution to the
@@ -526,12 +536,6 @@ impl ActorGraphBuildStateInner {
                         downstream.fragment_id,
                         downstream.actor_ids,
                         actor_mapping,
-                    )
-                } else if let DispatcherType::CdcTablename = dt {
-                    Self::new_cdc_dispatcher(
-                        &edge.dispatch_strategy,
-                        downstream.fragment_id,
-                        downstream.actor_ids,
                     )
                 } else {
                     Self::new_normal_dispatcher(

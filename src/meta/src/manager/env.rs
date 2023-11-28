@@ -24,6 +24,7 @@ use sea_orm::EntityTrait;
 use super::{SystemParamsManager, SystemParamsManagerRef};
 use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
 use crate::controller::SqlMetaStore;
+use crate::manager::event_log::{start_event_log_manager, EventLogMangerRef};
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
     NotificationManagerRef,
@@ -56,6 +57,8 @@ pub struct MetaSrvEnv {
     /// idle status manager.
     idle_manager: IdleManagerRef,
 
+    event_log_manager: EventLogMangerRef,
+
     /// system param manager.
     system_params_manager: SystemParamsManagerRef,
 
@@ -76,13 +79,16 @@ pub struct MetaSrvEnv {
 }
 
 /// Options shared by all meta service instances
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize)]
 pub struct MetaOpts {
     /// Whether to enable the recovery of the cluster. If disabled, the meta service will exit on
     /// abnormal cases.
     pub enable_recovery: bool,
     /// Whether to enable the scale-in feature when compute-node is removed.
     pub enable_scale_in_when_recovery: bool,
+    /// Whether to enable the auto-scaling feature when compute-node is joined.
+    /// The semantics of this configuration will be expanded in the future to control the automatic scaling of the entire cluster.
+    pub enable_automatic_parallelism_control: bool,
     /// The maximum number of barriers in-flight in the compute nodes.
     pub in_flight_barrier_nums: usize,
     /// After specified seconds of idle (no mview or flush), the process will be exited.
@@ -120,8 +126,11 @@ pub struct MetaOpts {
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
 
-    /// The prometheus endpoint for dashboard service.
+    /// The Prometheus endpoint for dashboard service.
     pub prometheus_endpoint: Option<String>,
+
+    /// The additional selector used when querying Prometheus.
+    pub prometheus_selector: Option<String>,
 
     /// The VPC id of the cluster.
     pub vpc_id: Option<String>,
@@ -169,6 +178,8 @@ pub struct MetaOpts {
 
     pub compaction_task_max_heartbeat_interval_secs: u64,
     pub compaction_config: Option<CompactionConfig>,
+    pub event_log_enabled: bool,
+    pub event_log_channel_max_size: u32,
     pub advertise_addr: String,
 }
 
@@ -178,6 +189,7 @@ impl MetaOpts {
         Self {
             enable_recovery,
             enable_scale_in_when_recovery: false,
+            enable_automatic_parallelism_control: false,
             in_flight_barrier_nums: 40,
             max_idle_ms: 0,
             compaction_deterministic_test: false,
@@ -193,6 +205,7 @@ impl MetaOpts {
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
             prometheus_endpoint: None,
+            prometheus_selector: None,
             vpc_id: None,
             security_group_id: None,
             connector_rpc_endpoint: None,
@@ -210,6 +223,8 @@ impl MetaOpts {
             partition_vnode_count: 32,
             compaction_task_max_heartbeat_interval_secs: 0,
             compaction_config: None,
+            event_log_enabled: false,
+            event_log_channel_max_size: 1,
             advertise_addr: "".to_string(),
         }
     }
@@ -264,6 +279,10 @@ impl MetaSrvEnv {
         };
 
         let connector_client = ConnectorClient::try_new(opts.connector_rpc_endpoint.as_ref()).await;
+        let event_log_manager = Arc::new(start_event_log_manager(
+            opts.event_log_enabled,
+            opts.event_log_channel_max_size,
+        ));
 
         Ok(Self {
             id_gen_manager,
@@ -272,6 +291,7 @@ impl MetaSrvEnv {
             notification_manager,
             stream_client_pool,
             idle_manager,
+            event_log_manager,
             system_params_manager,
             system_params_controller,
             cluster_id,
@@ -352,6 +372,10 @@ impl MetaSrvEnv {
     pub fn connector_client(&self) -> Option<ConnectorClient> {
         self.connector_client.clone()
     }
+
+    pub fn event_log_manager_ref(&self) -> EventLogMangerRef {
+        self.event_log_manager.clone()
+    }
 }
 
 #[cfg(any(test, feature = "test"))]
@@ -362,6 +386,8 @@ impl MetaSrvEnv {
     }
 
     pub async fn for_test_opts(opts: Arc<MetaOpts>) -> Self {
+        use crate::manager::event_log::EventLogManger;
+
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let meta_store = MemStore::default().into_ref();
         #[cfg(madsim)]
@@ -398,6 +424,8 @@ impl MetaSrvEnv {
             None
         };
 
+        let event_log_manager = Arc::new(EventLogManger::for_test());
+
         Self {
             id_gen_manager,
             meta_store,
@@ -405,6 +433,7 @@ impl MetaSrvEnv {
             notification_manager,
             stream_client_pool,
             idle_manager,
+            event_log_manager,
             system_params_manager,
             system_params_controller,
             cluster_id,

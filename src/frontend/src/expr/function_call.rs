@@ -102,7 +102,7 @@ impl FunctionCall {
     // number of arguments are checked
     // [elsewhere](crate::expr::type_inference::build_type_derive_map).
     pub fn new(func_type: ExprType, mut inputs: Vec<ExprImpl>) -> RwResult<Self> {
-        let return_type = infer_type(func_type, &mut inputs)?;
+        let return_type = infer_type(func_type.into(), &mut inputs)?;
         Ok(Self::new_unchecked(func_type, inputs, return_type))
     }
 
@@ -278,8 +278,9 @@ impl FunctionCall {
     }
 
     pub fn is_pure(&self) -> bool {
-        let mut a = ImpureAnalyzer {};
-        !a.visit_function_call(self)
+        let mut a = ImpureAnalyzer { impure: false };
+        a.visit_function_call(self);
+        !a.impure
     }
 }
 

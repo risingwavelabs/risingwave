@@ -25,7 +25,7 @@ use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tokio_retry::Retry;
 use with_options::WithOptions;
 
-use super::encoder::TimestamptzHandlingMode;
+use super::encoder::{DateHandlingMode, TimestamptzHandlingMode};
 use super::utils::chunk_to_json;
 use super::{DummySinkCommitCoordinator, SinkWriterParam};
 use crate::common::NatsCommon;
@@ -143,6 +143,7 @@ impl NatsSinkWriter {
             json_encoder: JsonEncoder::new(
                 schema,
                 None,
+                DateHandlingMode::FromCe,
                 TimestampHandlingMode::Milli,
                 TimestamptzHandlingMode::UtcWithoutSuffix,
             ),

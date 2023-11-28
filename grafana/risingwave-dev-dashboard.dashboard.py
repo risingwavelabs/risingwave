@@ -690,7 +690,7 @@ def section_streaming(outer_panels):
                     "each parallelism. The throughput of all the parallelism added up is equal to Source Throughput(rows).",
                     [
                         panels.target(
-                            f"rate({metric('partition_input_count')}[$__rate_interval])",
+                            f"rate({metric('source_partition_input_count')}[$__rate_interval])",
                             "actor={{actor_id}} source={{source_id}} partition={{partition}}",
                         )
                     ],
@@ -700,7 +700,7 @@ def section_streaming(outer_panels):
                     "The figure shows the number of bytes read by each source per second.",
                     [
                         panels.target(
-                            f"(sum by (source_id)(rate({metric('partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
+                            f"(sum by (source_id)(rate({metric('source_partition_input_bytes')}[$__rate_interval])))/(1000*1000)",
                             "source={{source_id}}",
                         )
                     ],
@@ -711,7 +711,7 @@ def section_streaming(outer_panels):
                     "each parallelism. The throughput of all the parallelism added up is equal to Source Throughput(MB/s).",
                     [
                         panels.target(
-                            f"(rate({metric('partition_input_bytes')}[$__rate_interval]))/(1000*1000)",
+                            f"(rate({metric('source_partition_input_bytes')}[$__rate_interval]))/(1000*1000)",
                             "actor={{actor_id}} source={{source_id}} partition={{partition}}",
                         )
                     ],
@@ -756,11 +756,11 @@ def section_streaming(outer_panels):
                     "Kafka Consumer Lag Size by source_id, partition and actor_id",
                     [
                         panels.target(
-                            f"{metric('high_watermark')}",
+                            f"{metric('source_kafka_high_watermark')}",
                             "source={{source_id}} partition={{partition}}",
                         ),
                         panels.target(
-                            f"{metric('latest_message_id')}",
+                            f"{metric('source_latest_message_id')}",
                             "source={{source_id}} partition={{partition}} actor_id={{actor_id}}",
                         ),
                     ],
@@ -800,8 +800,8 @@ def section_streaming(outer_panels):
                     "The figure shows the number of rows written into each materialized view per second.",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_mview_input_row_count')}[$__rate_interval])) by (actor_id, table_id) * on(actor_id, table_id) group_left(table_name) {metric('table_info')}",
-                            "mview {{table_id}} {{table_name}} - actor {{actor_id}}",
+                            f"sum(rate({metric('stream_mview_input_row_count')}[$__rate_interval])) by (fragment_id, table_id) * on(fragment_id, table_id) group_left(table_name) {metric('table_info')}",
+                            "mview {{table_id}} {{table_name}} - fragment_id {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -1019,7 +1019,7 @@ def section_streaming_actors(outer_panels):
                     "Memory usage aggregated by materialized views",
                     [
                         panels.target(
-                            f"sum({metric('stream_memory_usage')} * on(table_id, actor_id) group_left(materialized_view_id) {metric('table_info')}) by (materialized_view_id)",
+                            f"sum({metric('stream_memory_usage')} * on(table_id) group_left(materialized_view_id) {metric('table_info')}) by (materialized_view_id)",
                             "materialized view {{materialized_view_id}}",
                         ),
                     ],
@@ -1681,38 +1681,6 @@ def section_batch(outer_panels):
                         panels.target(
                             f"{metric('batch_heartbeat_worker_num')}",
                             "",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "Mem Table Size",
-                    "This metric shows the memory usage of mem_table.",
-                    [
-                        panels.target(
-                            f"sum({metric('state_store_mem_table_memory_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "mem_table size total - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"{metric('state_store_mem_table_memory_size')}",
-                            "mem_table size - table id {{table_id}} instance id {{instance_id}} {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
-                    "Mem Table Count",
-                    "This metric shows the item counts in mem_table.",
-                    [
-                        panels.target(
-                            f"sum({metric('state_store_mem_table_item_count')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "mem_table counts total - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
-                            f"{metric('state_store_mem_table_item_count')}",
-                            "mem_table count - table id {{table_id}} instance id {{instance_id}} {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),
@@ -3493,7 +3461,7 @@ def section_connector_node(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"rate({metric('connector_source_rows_received')}[$__rate_interval])",
+                            f"rate({metric('source_rows_received')}[$__rate_interval])",
                             "source={{source_type}} @ {{source_id}}",
                         ),
                     ],

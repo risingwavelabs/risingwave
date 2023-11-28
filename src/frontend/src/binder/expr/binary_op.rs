@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::bail_not_implemented;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{BinaryOperator, Expr};
@@ -186,11 +187,7 @@ impl Binder {
                 func_types.push(ExprType::Not);
                 ExprType::RegexpEq
             }
-            _ => {
-                return Err(
-                    ErrorCode::NotImplemented(format!("binary op: {:?}", op), 112.into()).into(),
-                )
-            }
+            _ => bail_not_implemented!(issue = 112, "binary op: {:?}", op),
         };
         func_types.push(final_type);
         Ok(func_types)

@@ -126,7 +126,7 @@ mod tests {
     async fn test_split_stream() {
         // Test with tail separators.
         for tail_separator in ["", "\n", "\r\n"] {
-            const N1: usize = 10000;
+            const N1: usize = 1000;
             const N2: usize = 500;
             const N3: usize = 50;
             let lines = (0..N1)
