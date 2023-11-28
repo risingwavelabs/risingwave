@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -142,14 +143,10 @@ impl Binder {
             .flatten()
             .any(|expr| expr.has_subquery())
         {
-            return Err(ErrorCode::NotImplemented("Subquery in VALUES".into(), None.into()).into());
+            bail_not_implemented!("Subquery in VALUES");
         }
         if bound_values.is_correlated(1) {
-            return Err(ErrorCode::NotImplemented(
-                "CorrelatedInputRef in VALUES".into(),
-                None.into(),
-            )
-            .into());
+            bail_not_implemented!("CorrelatedInputRef in VALUES");
         }
         Ok(bound_values)
     }

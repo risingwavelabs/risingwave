@@ -20,10 +20,11 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
     ColumnCatalog, ColumnDesc, Field, Schema, KAFKA_TIMESTAMP_COLUMN_NAME,
 };
-use risingwave_common::error::{ErrorCode, Result, RwError, TrackingIssue};
+use risingwave_common::error::Result;
 use risingwave_connector::source::{ConnectorProperties, DataType};
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::GeneratedColumnDesc;
@@ -546,10 +547,7 @@ impl ToBatch for LogicalSource {
                 &self.core.catalog.as_ref().unwrap().properties,
             )
         {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "New S3 connector for batch".to_string(),
-                TrackingIssue::from(None),
-            )));
+            bail_not_implemented!("New S3 connector for batch");
         }
         let source = self.wrap_with_optional_generated_columns_batch_proj()?;
         Ok(source)

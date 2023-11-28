@@ -14,6 +14,7 @@
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_connector::source::{extract_source_struct, SourceEncode, SourceStruct};
@@ -62,16 +63,10 @@ pub async fn handle_alter_source_column(
     let SourceStruct { encode, .. } = extract_source_struct(&catalog.info)?;
     match encode {
         SourceEncode::Avro | SourceEncode::Protobuf => {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "Alter source with schema registry".into(),
-                None.into(),
-            )));
+            bail_not_implemented!("Alter source with schema registry")
         }
         SourceEncode::Json if catalog.info.use_schema_registry => {
-            return Err(RwError::from(ErrorCode::NotImplemented(
-                "Alter source with schema registry".into(),
-                None.into(),
-            )));
+            bail_not_implemented!("Alter source with schema registry")
         }
         SourceEncode::Invalid | SourceEncode::Native => {
             return Err(RwError::from(ErrorCode::NotSupported(
