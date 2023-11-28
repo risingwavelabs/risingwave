@@ -194,7 +194,7 @@ test_sink_backfill_recovery() {
       properties.bootstrap.server = 'localhost:29092',
   ) FORMAT DEBEZIUM ENCODE JSON;"
 
-  sleep 10
+  sleep 20
 
   # Verify data matches upstream table.
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/validate_sink.slt'
