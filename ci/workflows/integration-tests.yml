@@ -118,6 +118,7 @@ steps:
           - "cassandra-and-scylladb-sink"
           - "elasticsearch-sink"
           - "redis-sink"
+          - "vector"
         format:
           - "json"
           - "protobuf"
@@ -172,5 +173,9 @@ steps:
           skip: true
         - with:
             testcase: "redis-sink"
+            format: "protobuf"
+          skip: true
+        - with:
+            testcase: "vector"
             format: "protobuf"
           skip: true
