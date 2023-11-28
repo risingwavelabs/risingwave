@@ -5,9 +5,11 @@ This demo showcases how to sink Vector's data to RisingWave. Data is generated f
 During CI, the integration test will:
 
 1. Run `docker compose up -d` and start the cluster.
-2. Run `create_table.sql` after RisingWave frontend started.
+2. After 20-30s: `create_source.sql`.
+3. After 10s: `create_mv.sql`.
+4. Check data.
 
-To connect to the Postgres outside the container via psql:
+To connect to the RisingWave outside the container via psql:
 
 ```sh
 psql -h localhost -p 4566 -d dev -U root
