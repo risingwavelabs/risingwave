@@ -29,6 +29,7 @@ use risingwave_hummock_sdk::{can_concat, HummockEpoch};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::{BloomFilterType, CompactTask, LevelType, SstableInfo};
 use tokio::sync::oneshot::Receiver;
+use tracing::warn;
 
 use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
@@ -879,6 +880,10 @@ where
                 progress_key_num = 0;
             }
         }
+    }
+
+    if let Some(key) = del_iter.last_key() {
+        warn!("the last tombstone key in input is: {:?}", key);
     }
 
     if let Some(task_progress) = task_progress.as_ref()
