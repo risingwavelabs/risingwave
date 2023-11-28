@@ -47,6 +47,8 @@ pub struct KvLogStoreWriter<LS: LocalStateStore> {
     metrics: KvLogStoreMetrics,
 
     is_paused: watch::Sender<bool>,
+
+    identity: String,
 }
 
 impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
@@ -57,6 +59,7 @@ impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
         tx: LogStoreBufferSender,
         metrics: KvLogStoreMetrics,
         is_paused: watch::Sender<bool>,
+        identity: String,
     ) -> Self {
         Self {
             _table_id: table_id,
@@ -66,6 +69,7 @@ impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
             tx,
             metrics,
             is_paused,
+            identity,
         }
     }
 }
@@ -81,6 +85,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
             .await?;
         if pause_read_on_bootstrap {
             self.pause()?;
+            info!("KvLogStore of {} paused on bootstrap", self.identity);
         }
         self.seq_id = FIRST_SEQ_ID;
         self.tx.init(epoch.curr);
@@ -170,12 +175,14 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
     }
 
     fn pause(&mut self) -> LogStoreResult<()> {
+        info!("KvLogStore of {} is paused", self.identity);
         self.is_paused
             .send(true)
             .map_err(|_| anyhow!("unable to set pause"))
     }
 
     fn resume(&mut self) -> LogStoreResult<()> {
+        info!("KvLogStore of {} is resumed", self.identity);
         self.is_paused
             .send(false)
             .map_err(|_| anyhow!("unable to set resume"))

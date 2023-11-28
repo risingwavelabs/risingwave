@@ -73,6 +73,8 @@ pub struct KvLogStoreReader<S: StateStore> {
     metrics: KvLogStoreMetrics,
 
     is_paused: watch::Receiver<bool>,
+
+    identity: String,
 }
 
 impl<S: StateStore> KvLogStoreReader<S> {
@@ -83,6 +85,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
         rx: LogStoreBufferReceiver,
         metrics: KvLogStoreMetrics,
         is_paused: watch::Receiver<bool>,
+        identity: String,
     ) -> Self {
         Self {
             table_id,
@@ -96,6 +99,7 @@ impl<S: StateStore> KvLogStoreReader<S> {
             truncate_offset: TruncateOffset::Barrier { epoch: 0 },
             metrics,
             is_paused,
+            identity,
         }
     }
 
@@ -155,6 +159,7 @@ impl<S: StateStore> LogReader for KvLogStoreReader<S> {
 
     async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
         while *self.is_paused.borrow_and_update() {
+            info!("next_item of {} get blocked by is_pause", self.identity);
             self.is_paused
                 .changed()
                 .await

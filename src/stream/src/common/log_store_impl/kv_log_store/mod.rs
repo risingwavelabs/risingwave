@@ -178,6 +178,8 @@ pub struct KvLogStoreFactory<S: StateStore> {
     max_row_count: usize,
 
     metrics: KvLogStoreMetrics,
+
+    identity: String,
 }
 
 impl<S: StateStore> KvLogStoreFactory<S> {
@@ -187,6 +189,7 @@ impl<S: StateStore> KvLogStoreFactory<S> {
         vnodes: Option<Arc<Bitmap>>,
         max_row_count: usize,
         metrics: KvLogStoreMetrics,
+        identity: impl Into<String>,
     ) -> Self {
         Self {
             state_store,
@@ -194,6 +197,7 @@ impl<S: StateStore> KvLogStoreFactory<S> {
             vnodes,
             max_row_count,
             metrics,
+            identity: identity.into(),
         }
     }
 }
@@ -229,6 +233,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             rx,
             self.metrics.clone(),
             pause_rx,
+            self.identity.clone(),
         );
 
         let writer = KvLogStoreWriter::new(
@@ -238,6 +243,7 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             tx,
             self.metrics,
             pause_tx,
+            self.identity,
         );
 
         (reader, writer)
@@ -292,6 +298,7 @@ mod tests {
             Some(Arc::new(bitmap)),
             max_row_count,
             KvLogStoreMetrics::for_test(),
+            "test",
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -385,6 +392,7 @@ mod tests {
             Some(bitmap.clone()),
             max_row_count,
             KvLogStoreMetrics::for_test(),
+            "test",
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -471,6 +479,7 @@ mod tests {
             Some(bitmap),
             max_row_count,
             KvLogStoreMetrics::for_test(),
+            "test",
         );
         let (mut reader, mut writer) = factory.build().await;
         writer
@@ -553,6 +562,7 @@ mod tests {
             Some(bitmap.clone()),
             max_row_count,
             KvLogStoreMetrics::for_test(),
+            "test",
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -663,6 +673,7 @@ mod tests {
             Some(bitmap),
             max_row_count,
             KvLogStoreMetrics::for_test(),
+            "test",
         );
         let (mut reader, mut writer) = factory.build().await;
 
@@ -754,6 +765,7 @@ mod tests {
             Some(vnodes1),
             10 * TEST_DATA_SIZE,
             KvLogStoreMetrics::for_test(),
+            "test",
         );
         let factory2 = KvLogStoreFactory::new(
             test_env.storage.clone(),
@@ -761,6 +773,7 @@ mod tests {
             Some(vnodes2),
             10 * TEST_DATA_SIZE,
             KvLogStoreMetrics::for_test(),
+            "test",
         );
         let (mut reader1, mut writer1) = factory1.build().await;
         let (mut reader2, mut writer2) = factory2.build().await;
@@ -880,6 +893,7 @@ mod tests {
             Some(vnodes),
             10 * TEST_DATA_SIZE,
             KvLogStoreMetrics::for_test(),
+            "test",
         );
         let (mut reader, mut writer) = factory.build().await;
         writer
@@ -938,6 +952,7 @@ mod tests {
             Some(Arc::new(bitmap)),
             0,
             KvLogStoreMetrics::for_test(),
+            "test",
         );
         let (mut reader, mut writer) = factory.build().await;
 
