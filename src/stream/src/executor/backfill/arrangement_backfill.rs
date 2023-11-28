@@ -479,7 +479,7 @@ where
                     // since it expects to have been initialized in previous epoch
                     // (there's no epoch before the first epoch).
                     for vnode in upstream_table.vnodes().iter_vnodes() {
-                        backfill_state.finish_progress(vnode, self.state_table.pk_indices().len());
+                        backfill_state.finish_progress(vnode, upstream_table.pk_indices().len());
                     }
 
                     persist_state_per_vnode(
