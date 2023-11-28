@@ -134,7 +134,7 @@ pub struct ConfigMap {
     streaming_enable_bushy_join: bool,
 
     /// Enable arrangement backfill for streaming queries. Defaults to false.
-    #[parameter(default = false)]
+    #[parameter(default = true)]
     streaming_enable_arrangement_backfill: bool,
 
     /// Enable join ordering for streaming and batch queries. Defaults to true.
