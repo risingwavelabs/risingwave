@@ -570,10 +570,7 @@ impl<'a> Tokenizer<'a> {
                     // match binary literal that starts with 0x
                     if s == "0" && chars.peek() == Some(&'x') {
                         chars.next();
-                        let s2 = peeking_take_while(
-                            chars,
-                            |ch| matches!(ch, '0'..='9' | 'A'..='F' | 'a'..='f'),
-                        );
+                        let s2 = peeking_take_while(chars, |ch| ch.is_ascii_hexdigit());
                         return Ok(Some(Token::HexStringLiteral(s2)));
                     }
 
@@ -1019,7 +1016,9 @@ impl<'a> Tokenizer<'a> {
         ) -> Result<(), String> {
             let mut unicode_seq: String = String::with_capacity(len);
             for _ in 0..len {
-                if let Some(c) = chars.peek() && c.is_ascii_hexdigit() {
+                if let Some(c) = chars.peek()
+                    && c.is_ascii_hexdigit()
+                {
                     unicode_seq.push(chars.next().unwrap());
                 } else {
                     break;
@@ -1063,7 +1062,9 @@ impl<'a> Tokenizer<'a> {
             let mut unicode_seq: String = String::with_capacity(3);
             unicode_seq.push(digit);
             for _ in 0..2 {
-                if let Some(c) = chars.peek() && matches!(*c, '0'..='7') {
+                if let Some(c) = chars.peek()
+                    && matches!(*c, '0'..='7')
+                {
                     unicode_seq.push(chars.next().unwrap());
                 } else {
                     break;

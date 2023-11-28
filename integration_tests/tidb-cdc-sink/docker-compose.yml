@@ -33,10 +33,6 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
-  connector-node:
-    extends:
-      file: ../../docker/docker-compose.yml
-      service: connector-node
 
   #=================== TiDB & TiCDC components ==================
   ticdc-controller:

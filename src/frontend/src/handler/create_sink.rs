@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::LazyLock;
 
+use either::Either;
 use itertools::Itertools;
 use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -188,7 +189,13 @@ pub async fn handle_create_sink(
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
 
-    session.check_relation_name_duplicated(stmt.sink_name.clone())?;
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        stmt.sink_name.clone(),
+        StatementType::CREATE_SINK,
+        stmt.if_not_exists,
+    )? {
+        return Ok(resp);
+    }
 
     let (sink, graph) = {
         let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
@@ -201,10 +208,13 @@ pub async fn handle_create_sink(
             );
         }
         let mut graph = build_graph(plan);
-        graph.parallelism = session
-            .config()
-            .get_streaming_parallelism()
-            .map(|parallelism| Parallelism { parallelism });
+        graph.parallelism =
+            session
+                .config()
+                .streaming_parallelism()
+                .map(|parallelism| Parallelism {
+                    parallelism: parallelism.get(),
+                });
         (sink, graph)
     };
 
@@ -230,6 +240,7 @@ pub async fn handle_create_sink(
 /// which transforms sqlparser AST `SourceSchemaV2` into `StreamSourceInfo`.
 fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
     use risingwave_connector::sink::catalog::{SinkEncode, SinkFormat};
+    use risingwave_connector::sink::encoder::TimestamptzHandlingMode;
     use risingwave_sqlparser::ast::{Encode as E, Format as F};
 
     let format = match value.format {
@@ -249,7 +260,11 @@ fn bind_sink_format_desc(value: ConnectorSchema) -> Result<SinkFormatDesc> {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into())
         }
     };
-    let options = WithOptions::try_from(value.row_options.as_slice())?.into_inner();
+    let mut options = WithOptions::try_from(value.row_options.as_slice())?.into_inner();
+
+    options
+        .entry(TimestamptzHandlingMode::OPTION_KEY.to_owned())
+        .or_insert(TimestamptzHandlingMode::FRONTEND_DEFAULT.to_owned());
 
     Ok(SinkFormatDesc {
         format,

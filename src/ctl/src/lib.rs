@@ -16,15 +16,17 @@
 #![feature(hash_extract_if)]
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_meta::backup_restore::RestoreOpts;
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
 };
+use crate::cmd_impl::throttle::apply_throttle;
 use crate::common::CtlContext;
 
 pub mod cmd_impl;
@@ -75,6 +77,8 @@ enum Commands {
     /// Commands for profilng the compute nodes
     #[clap(subcommand)]
     Profile(ProfileCommands),
+    #[clap(subcommand)]
+    Throttle(ThrottleCommands),
 }
 
 #[derive(clap::ValueEnum, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -156,7 +160,7 @@ enum HummockCommands {
     DisableCommitEpoch,
     /// list all Hummock key-value pairs
     ListKv {
-        #[clap(short, long = "epoch", default_value_t = u64::MAX)]
+        #[clap(short, long = "epoch", default_value_t = MAX_EPOCH)]
         epoch: u64,
 
         #[clap(short, long = "table-id")]
@@ -473,6 +477,18 @@ enum MetaCommands {
 }
 
 #[derive(Subcommand, Clone, Debug)]
+enum ThrottleCommands {
+    Source(ThrottleCommandArgs),
+    Mv(ThrottleCommandArgs),
+}
+
+#[derive(Clone, Debug, Args)]
+pub struct ThrottleCommandArgs {
+    id: u32,
+    rate: Option<u32>,
+}
+
+#[derive(Subcommand, Clone, Debug)]
 pub enum ProfileCommands {
     /// CPU profile
     Cpu {
@@ -691,6 +707,12 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 .await?
         }
         Commands::Debug(DebugCommands::Dump { common }) => cmd_impl::debug::dump(common).await?,
+        Commands::Throttle(ThrottleCommands::Source(args)) => {
+            apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Source, args).await?
+        }
+        Commands::Throttle(ThrottleCommands::Mv(args)) => {
+            apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Mv, args).await?;
+        }
     }
     Ok(())
 }

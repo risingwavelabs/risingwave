@@ -75,3 +75,14 @@ NULL
 
 statement ok
 drop materialized view mv;
+
+statement ok
+create materialized view mv as select '2020-01-01'::timestamptz;;
+
+query I
+select * from mv;
+----
+2020-01-01 00:00:00+00:00
+
+statement ok
+drop materialized view mv;

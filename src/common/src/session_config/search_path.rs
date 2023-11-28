@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{ConfigEntry, CONFIG_KEYS, SEARCH_PATH};
+use std::convert::Infallible;
+use std::str::FromStr;
+
+use super::SESSION_CONFIG_LIST_SEP;
 use crate::catalog::{DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME};
-use crate::error::RwError;
 
 pub const USER_NAME_WILD_CARD: &str = "\"$user\"";
 
@@ -50,30 +52,25 @@ impl SearchPath {
 impl Default for SearchPath {
     fn default() -> Self {
         [USER_NAME_WILD_CARD, DEFAULT_SCHEMA_NAME]
-            .as_slice()
-            .try_into()
+            .join(SESSION_CONFIG_LIST_SEP)
+            .parse()
             .unwrap()
     }
 }
 
-impl ConfigEntry for SearchPath {
-    fn entry_name() -> &'static str {
-        CONFIG_KEYS[SEARCH_PATH]
-    }
-}
+impl FromStr for SearchPath {
+    type Err = Infallible;
 
-impl TryFrom<&[&str]> for SearchPath {
-    type Error = RwError;
-
-    fn try_from(value: &[&str]) -> Result<Self, Self::Error> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let paths = s.split(SESSION_CONFIG_LIST_SEP).map(|path| path.trim());
         let mut real_path = vec![];
-        for p in value {
+        for p in paths {
             let p = p.trim();
             if !p.is_empty() {
                 real_path.push(p.to_string());
             }
         }
-        let string = real_path.join(", ");
+        let string = real_path.join(SESSION_CONFIG_LIST_SEP);
 
         let mut path = real_path.clone();
         let rw_catalog = RW_CATALOG_SCHEMA_NAME.to_string();

@@ -7,8 +7,7 @@ create table sr_pb_test with (
     connector = 'kafka',
     topic = 'sr_pb_test',
     properties.bootstrap.server = 'message_queue:29092',
-    scan.startup.mode = 'earliest',
-    message = 'test.User')
+    scan.startup.mode = 'earliest')
 FORMAT plain ENCODE protobuf(
         schema.registry = 'http://message_queue:8081',
         message = 'test.User'
@@ -20,8 +19,7 @@ create table sr_pb_test_bk with (
     connector = 'kafka',
     topic = 'sr_pb_test',
     properties.bootstrap.server = 'message_queue:29092',
-    scan.startup.mode = 'earliest',
-    message = 'test.User')
+    scan.startup.mode = 'earliest')
 FORMAT plain ENCODE protobuf(
         schema.registry = 'http://message_queue:8081,http://message_queue:8081',
         message = 'test.User'
@@ -39,10 +37,10 @@ select count(*) from sr_pb_test;
 ----
 20
 
-query II
-select min(id), max(id) from sr_pb_test;
+query IIT
+select min(id), max(id), max((sc).file_name) from sr_pb_test;
 ----
-0 19
+0 19 source/context_019.proto
 
 
 statement ok

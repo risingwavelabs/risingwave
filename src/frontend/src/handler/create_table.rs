@@ -12,45 +12,53 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
+use anyhow::anyhow;
+use either::Either;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, TableDesc, TableId, TableVersionId, INITIAL_SOURCE_VERSION_ID,
-    INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
+    CdcTableDesc, ColumnCatalog, ColumnDesc, TableId, TableVersionId, DEFAULT_SCHEMA_NAME,
+    INITIAL_SOURCE_VERSION_ID, INITIAL_TABLE_VERSION_ID, USER_COLUMN_ID_OFFSET,
 };
-use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
-use risingwave_connector::source::external::ExternalTableType;
+use risingwave_connector::source;
+use risingwave_connector::source::cdc::{CDC_SNAPSHOT_BACKFILL, CDC_SNAPSHOT_MODE_KEY};
+use risingwave_connector::source::external::{
+    CdcTableType, DATABASE_NAME_KEY, SCHEMA_NAME_KEY, TABLE_NAME_KEY,
+};
 use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
+use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{DefaultColumnDesc, GeneratedColumnDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
-    ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Format, ObjectName,
-    SourceWatermark, TableConstraint,
+    CdcTableInfo, ColumnDef, ColumnOption, ConnectorSchema, DataType as AstDataType, Format,
+    ObjectName, SourceWatermark, TableConstraint,
 };
 
 use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field, Clause};
+use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableVersion;
-use crate::catalog::{check_valid_column_name, CatalogError, ColumnId};
+use crate::catalog::{check_valid_column_name, ColumnId};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InlineNowProcTime};
 use crate::handler::create_source::{
     bind_all_columns, bind_columns_from_source, bind_source_pk, bind_source_watermark,
     check_source_schema, validate_compatibility, UPSTREAM_SOURCE_KEY,
 };
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::LogicalSource;
+use crate::optimizer::plan_node::{LogicalCdcScan, LogicalSource};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
-use crate::session::{CheckRelationError, SessionImpl};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::utils::resolve_privatelink_in_with_option;
 use crate::{Binder, TableCatalog, WithOptions};
@@ -163,11 +171,28 @@ pub fn bind_sql_columns(column_defs: &[ColumnDef]) -> Result<Vec<ColumnCatalog>>
             .clone()
             .ok_or_else(|| ErrorCode::InvalidInputSyntax("data type is not specified".into()))?;
         if let Some(collation) = collation {
-            return Err(ErrorCode::NotImplemented(
-                format!("collation \"{}\"", collation),
-                None.into(),
-            )
-            .into());
+            // PostgreSQL will limit the datatypes that collate can work on.
+            // https://www.postgresql.org/docs/16/collation.html#COLLATION-CONCEPTS
+            //   > The built-in collatable data types are `text`, `varchar`, and `char`.
+            //
+            // But we don't support real collation, we simply ignore it here.
+            if !["C", "POSIX"].contains(&collation.real_value().as_str()) {
+                return Err(ErrorCode::NotImplemented(
+                    "Collate collation other than `C` or `POSIX` is not implemented".into(),
+                    None.into(),
+                )
+                .into());
+            }
+
+            match data_type {
+                AstDataType::Text | AstDataType::Varchar | AstDataType::Char(_) => {}
+                _ => {
+                    return Err(ErrorCode::NotSupported(
+                        format!("{} is not a collatable data type", data_type),
+                        "The only built-in collatable data types are `varchar`, please check your type".into()
+                    ).into());
+                }
+            }
         }
 
         check_valid_column_name(&name.real_value())?;
@@ -461,7 +486,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let sql_pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
 
     let (columns_from_resolve_source, mut source_info) =
-        bind_columns_from_source(&source_schema, &properties).await?;
+        bind_columns_from_source(context.session_ctx(), &source_schema, &properties, false).await?;
     let columns_from_sql = bind_sql_columns(&column_defs)?;
 
     let mut columns = bind_all_columns(
@@ -514,16 +539,10 @@ pub(crate) async fn gen_create_table_plan_with_source(
         .into());
     }
 
-    let table_type = ExternalTableType::from_properties(&properties);
-    if table_type.can_backfill() && context.session_ctx().config().get_cdc_backfill() {
-        // Add a column for storing the event offset
-        let offset_column = ColumnCatalog::offset_column();
-        let _offset_index = columns.len();
-        columns.push(offset_column);
-
-        const CDC_SNAPSHOT_MODE_KEY: &str = "debezium.snapshot.mode";
+    let cdc_table_type = CdcTableType::from_properties(&properties);
+    if cdc_table_type.can_backfill() && context.session_ctx().config().cdc_backfill() {
         // debezium connector will only consume changelogs from latest offset on this mode
-        properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), "rw_cdc_backfill".into());
+        properties.insert(CDC_SNAPSHOT_MODE_KEY.into(), CDC_SNAPSHOT_BACKFILL.into());
 
         let pk_column_indices = {
             let mut id_to_idx = HashMap::new();
@@ -541,22 +560,20 @@ pub(crate) async fn gen_create_table_plan_with_source(
             .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
             .collect();
 
-        let upstream_table_desc = TableDesc {
+        let cdc_table_desc = CdcTableDesc {
             table_id: TableId::placeholder(),
+            source_id: TableId::placeholder(),
+            external_table_name: "".to_string(),
             pk: table_pk,
             columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
-            distribution_key: pk_column_indices.clone(),
             stream_key: pk_column_indices,
-            append_only,
-            retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
             value_indices: (0..columns.len()).collect_vec(),
-            read_prefix_len_hint: 0,
-            watermark_columns: Default::default(),
-            versioned: false,
+            connect_properties: Default::default(),
         };
-        tracing::debug!("upstream table desc: {:?}", upstream_table_desc);
+
+        tracing::debug!(?cdc_table_desc, "create table with source w/ backfill");
         // save external table info to `source_info`
-        source_info.upstream_table = Some(upstream_table_desc.to_protobuf());
+        source_info.external_table = Some(cdc_table_desc.to_protobuf());
     }
 
     gen_table_plan_inner(
@@ -569,6 +586,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         Some(source_info),
         definition,
         watermark_descs,
+        Some(cdc_table_type),
         append_only,
         Some(col_id_gen.into_version()),
     )
@@ -647,6 +665,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         None,
         definition,
         watermark_descs,
+        None,
         append_only,
         version,
     )
@@ -663,6 +682,7 @@ fn gen_table_plan_inner(
     source_info: Option<StreamSourceInfo>,
     definition: String,
     watermark_descs: Vec<WatermarkDesc>,
+    cdc_table_type: Option<CdcTableType>,
     append_only: bool,
     version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
                                     * TABLE` for `CREATE TABLE AS`. */
@@ -678,16 +698,28 @@ fn gen_table_plan_inner(
     let connection_id =
         resolve_privatelink_in_with_option(&mut with_options, &schema_name, &session)?;
 
+    let is_external_source = source_info.is_some();
+
     let source = source_info.map(|source_info| PbSource {
         id: TableId::placeholder().table_id,
         schema_id,
         database_id,
         name: name.clone(),
         row_id_index: row_id_index.map(|i| i as _),
-        columns: columns
-            .iter()
-            .map(|column| column.to_protobuf())
-            .collect_vec(),
+        columns: {
+            let mut source_columns = columns.clone();
+            if let Some(t) = cdc_table_type
+                && t.can_backfill()
+            {
+                // Append the offset column to be used in the cdc backfill
+                let offset_column = ColumnCatalog::offset_column();
+                source_columns.push(offset_column);
+            }
+            source_columns
+                .iter()
+                .map(|column| column.to_protobuf())
+                .collect_vec()
+        },
         pk_column_ids: pk_column_ids.iter().map(Into::into).collect_vec(),
         properties: with_options.into_inner().into_iter().collect(),
         info: Some(source_info),
@@ -748,6 +780,7 @@ fn gen_table_plan_inner(
         append_only,
         watermark_descs,
         version,
+        is_external_source,
     )?;
 
     let mut table = materialize.table().to_prost(schema_id, database_id);
@@ -757,73 +790,274 @@ fn gen_table_plan_inner(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn handle_create_table(
-    handler_args: HandlerArgs,
+pub(crate) fn gen_create_table_plan_for_cdc_source(
+    context: OptimizerContextRef,
+    source_name: ObjectName,
     table_name: ObjectName,
-    columns: Vec<ColumnDef>,
+    external_table_name: String,
+    column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
-    if_not_exists: bool,
-    source_schema: Option<ConnectorSchema>,
-    source_watermarks: Vec<SourceWatermark>,
-    append_only: bool,
-    notice: Option<String>,
-) -> Result<RwPgResponse> {
-    let session = handler_args.session.clone();
-    // TODO(st1page): refactor it
-    if let Some(notice) = notice {
-        session.notice_to_user(notice)
-    }
+    mut col_id_gen: ColumnIdGenerator,
+) -> Result<(PlanRef, PbTable)> {
+    let session = context.session_ctx().clone();
+    let db_name = session.database();
+    let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
+    let (database_id, schema_id) =
+        session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
-    if append_only {
-        session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");
-    }
+    // cdc table cannot be append-only
+    let append_only = false;
+    let source_name = source_name.real_value();
 
-    match session.check_relation_name_duplicated(table_name.clone()) {
-        Err(CheckRelationError::Catalog(CatalogError::Duplicated(_, name))) if if_not_exists => {
-            return Ok(PgResponse::builder(StatementType::CREATE_TABLE)
-                .notice(format!("relation \"{}\" already exists, skipping", name))
-                .into());
-        }
-        Err(e) => return Err(e.into()),
-        Ok(_) => {}
+    let source = {
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let schema_name = schema_name
+            .clone()
+            .unwrap_or(DEFAULT_SCHEMA_NAME.to_string());
+        let (source, _) = catalog_reader.get_source_by_name(
+            db_name,
+            SchemaPath::Name(schema_name.as_str()),
+            source_name.as_str(),
+        )?;
+        source.clone()
     };
 
-    let (graph, source, table) = {
-        let context = OptimizerContext::from_handler_args(handler_args);
-        let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
-        let col_id_gen = ColumnIdGenerator::new_initial();
+    let mut columns = bind_sql_columns(&column_defs)?;
 
-        let (plan, source, table) = match source_schema {
-            Some(source_schema) => {
+    for c in &mut columns {
+        c.column_desc.column_id = col_id_gen.generate(c.name())
+    }
+
+    let pk_names = bind_sql_pk_names(&column_defs, &constraints)?;
+    let (columns, pk_column_ids, _) = bind_pk_on_relation(columns, pk_names)?;
+
+    let definition = context.normalized_sql().to_owned();
+
+    let pk_column_indices = {
+        let mut id_to_idx = HashMap::new();
+        columns.iter().enumerate().for_each(|(idx, c)| {
+            id_to_idx.insert(c.column_id(), idx);
+        });
+        // pk column id must exist in table columns.
+        pk_column_ids
+            .iter()
+            .map(|c| id_to_idx.get(c).copied().unwrap())
+            .collect_vec()
+    };
+    let table_pk = pk_column_indices
+        .iter()
+        .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
+        .collect();
+
+    let connect_properties =
+        derive_connect_properties(source.as_ref(), external_table_name.clone())?;
+
+    let cdc_table_desc = CdcTableDesc {
+        table_id: TableId::placeholder(), // will be filled in meta node
+        source_id: source.id.into(),      // id of cdc source streaming job
+        external_table_name: external_table_name.clone(),
+        pk: table_pk,
+        columns: columns.iter().map(|c| c.column_desc.clone()).collect(),
+        stream_key: pk_column_indices,
+        value_indices: (0..columns.len()).collect_vec(),
+        connect_properties,
+    };
+
+    tracing::debug!(?cdc_table_desc, "create cdc table");
+
+    let logical_scan = LogicalCdcScan::create(
+        external_table_name,
+        Rc::new(cdc_table_desc),
+        context.clone(),
+    );
+
+    let scan_node: PlanRef = logical_scan.into();
+    let required_cols = FixedBitSet::with_capacity(columns.len());
+    let mut plan_root = PlanRoot::new(
+        scan_node,
+        RequiredDist::Any,
+        Order::any(),
+        required_cols,
+        vec![],
+    );
+
+    let materialize = plan_root.gen_table_plan(
+        context,
+        name,
+        columns,
+        definition,
+        pk_column_ids,
+        None,
+        append_only,
+        vec![],
+        Some(col_id_gen.into_version()),
+        true,
+    )?;
+
+    let mut table = materialize.table().to_prost(schema_id, database_id);
+    table.owner = session.user_id();
+    table.dependent_relations = vec![source.id];
+
+    Ok((materialize.into(), table))
+}
+
+fn derive_connect_properties(
+    source: &SourceCatalog,
+    external_table_name: String,
+) -> Result<BTreeMap<String, String>> {
+    use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR};
+    // we should remove the prefix from `full_table_name`
+    let mut connect_properties = source.properties.clone();
+    if let Some(connector) = source.properties.get(UPSTREAM_SOURCE_KEY) {
+        let table_name = match connector.as_str() {
+            MYSQL_CDC_CONNECTOR => {
+                let db_name = connect_properties.get(DATABASE_NAME_KEY).ok_or_else(|| {
+                    anyhow!("{} not found in source properties", DATABASE_NAME_KEY)
+                })?;
+
+                let prefix = format!("{}.", db_name.as_str());
+                external_table_name
+                    .strip_prefix(prefix.as_str())
+                    .ok_or_else(|| anyhow!("external table name must contain database prefix"))?
+            }
+            POSTGRES_CDC_CONNECTOR => {
+                let schema_name = connect_properties
+                    .get(SCHEMA_NAME_KEY)
+                    .ok_or_else(|| anyhow!("{} not found in source properties", SCHEMA_NAME_KEY))?;
+
+                let prefix = format!("{}.", schema_name.as_str());
+                external_table_name
+                    .strip_prefix(prefix.as_str())
+                    .ok_or_else(|| anyhow!("external table name must contain schema prefix"))?
+            }
+            _ => {
+                return Err(RwError::from(anyhow!(
+                    "connector {} is not supported for cdc table",
+                    connector
+                )));
+            }
+        };
+        connect_properties.insert(TABLE_NAME_KEY.into(), table_name.into());
+    }
+    Ok(connect_properties.into_iter().collect())
+}
+
+pub(super) async fn handle_create_table_plan(
+    context: OptimizerContext,
+    col_id_gen: ColumnIdGenerator,
+    source_schema: Option<ConnectorSchema>,
+    cdc_table_info: Option<CdcTableInfo>,
+    table_name: ObjectName,
+    column_defs: Vec<ColumnDef>,
+    constraints: Vec<TableConstraint>,
+    source_watermarks: Vec<SourceWatermark>,
+    append_only: bool,
+) -> Result<(PlanRef, Option<PbSource>, PbTable, TableJobType)> {
+    let source_schema = check_create_table_with_source(context.with_options(), source_schema)?;
+
+    let ((plan, source, table), job_type) =
+        match (source_schema, cdc_table_info.as_ref()) {
+            (Some(source_schema), None) => (
                 gen_create_table_plan_with_source(
                     context,
                     table_name.clone(),
-                    columns,
+                    column_defs,
                     constraints,
                     source_schema,
                     source_watermarks,
                     col_id_gen,
                     append_only,
                 )
-                .await?
+                .await?,
+                TableJobType::General,
+            ),
+            (None, None) => (
+                gen_create_table_plan(
+                    context,
+                    table_name.clone(),
+                    column_defs,
+                    constraints,
+                    col_id_gen,
+                    source_watermarks,
+                    append_only,
+                )?,
+                TableJobType::General,
+            ),
+
+            (None, Some(cdc_table)) => {
+                let (plan, table) = gen_create_table_plan_for_cdc_source(
+                    context.into(),
+                    cdc_table.source_name.clone(),
+                    table_name.clone(),
+                    cdc_table.external_table_name.clone(),
+                    column_defs,
+                    constraints,
+                    col_id_gen,
+                )?;
+
+                ((plan, None, table), TableJobType::SharedCdcSource)
             }
-            None => gen_create_table_plan(
-                context,
-                table_name.clone(),
-                columns,
-                constraints,
-                col_id_gen,
-                source_watermarks,
-                append_only,
-            )?,
+            (Some(_), Some(_)) => return Err(ErrorCode::NotSupported(
+                "Data format and encoding format doesn't apply to table created from a CDC source"
+                    .into(),
+                "Remove the FORMAT and ENCODE specification".into(),
+            )
+            .into()),
         };
+    Ok((plan, source, table, job_type))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn handle_create_table(
+    handler_args: HandlerArgs,
+    table_name: ObjectName,
+    column_defs: Vec<ColumnDef>,
+    constraints: Vec<TableConstraint>,
+    if_not_exists: bool,
+    source_schema: Option<ConnectorSchema>,
+    source_watermarks: Vec<SourceWatermark>,
+    append_only: bool,
+    cdc_table_info: Option<CdcTableInfo>,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session.clone();
+
+    if append_only {
+        session.notice_to_user("APPEND ONLY TABLE is currently an experimental feature.");
+    }
+
+    if let Either::Right(resp) = session.check_relation_name_duplicated(
+        table_name.clone(),
+        StatementType::CREATE_TABLE,
+        if_not_exists,
+    )? {
+        return Ok(resp);
+    }
+
+    let (graph, source, table, job_type) = {
+        let context = OptimizerContext::from_handler_args(handler_args);
+        let col_id_gen = ColumnIdGenerator::new_initial();
+        let (plan, source, table, job_type) = handle_create_table_plan(
+            context,
+            col_id_gen,
+            source_schema,
+            cdc_table_info,
+            table_name.clone(),
+            column_defs,
+            constraints,
+            source_watermarks,
+            append_only,
+        )
+        .await?;
 
         let mut graph = build_graph(plan);
-        graph.parallelism = session
-            .config()
-            .get_streaming_parallelism()
-            .map(|parallelism| Parallelism { parallelism });
-        (graph, source, table)
+        graph.parallelism =
+            session
+                .config()
+                .streaming_parallelism()
+                .map(|parallelism| Parallelism {
+                    parallelism: parallelism.get(),
+                });
+        (graph, source, table, job_type)
     };
 
     tracing::trace!(
@@ -833,7 +1067,9 @@ pub async fn handle_create_table(
     );
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.create_table(source, table, graph).await?;
+    catalog_writer
+        .create_table(source, table, graph, job_type)
+        .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
 }
@@ -855,7 +1091,7 @@ mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{
-        row_id_column_name, Field, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
+        Field, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX,
     };
     use risingwave_common::types::DataType;
 
@@ -920,9 +1156,8 @@ mod tests {
             .map(|col| (col.name(), col.data_type().clone()))
             .collect::<HashMap<&str, DataType>>();
 
-        let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
-            row_id_col_name.as_str() => DataType::Serial,
+            ROWID_PREFIX => DataType::Serial,
             "v1" => DataType::Int16,
             "v2" => DataType::new_struct(
                 vec![DataType::Int64,DataType::Float64,DataType::Float64],

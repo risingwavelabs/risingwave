@@ -27,9 +27,10 @@ use super::{
     StreamStatelessSimpleAgg, ToBatch, ToStream,
 };
 use crate::expr::{
-    AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, OrderBy,
-    WindowFunction,
+    AggCall, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
+    OrderBy, WindowFunction,
 };
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalDedup, LogicalProject,
@@ -960,6 +961,12 @@ impl ExprRewritable for LogicalAgg {
     }
 }
 
+impl ExprVisitable for LogicalAgg {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
+    }
+}
+
 impl ColPrunable for LogicalAgg {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let group_key_required_cols = self.group_key().to_bitset();
@@ -1094,11 +1101,7 @@ impl ToBatch for LogicalAgg {
         };
         let agg_plan = if self.group_key().is_empty() {
             BatchSimpleAgg::new(new_logical).into()
-        } else if self
-            .ctx()
-            .session_ctx()
-            .config()
-            .get_batch_enable_sort_agg()
+        } else if self.ctx().session_ctx().config().batch_enable_sort_agg()
             && new_logical.input_provides_order_on_group_keys()
         {
             BatchSortAgg::new(new_logical).into()

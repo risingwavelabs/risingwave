@@ -25,7 +25,9 @@ use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::util::epoch::MAX_EPOCH;
 use risingwave_hummock_sdk::key::{FullKey, PointRange, TableKey, TableKeyRange, UserKey};
+use risingwave_hummock_sdk::EpochWithGap;
 
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::iterator::{
@@ -57,7 +59,7 @@ pub type SharedBufferBatchId = u64;
 /// A shared buffer may contain data from multiple epochs,
 /// there are multiple versions for a given key (`table_key`), we put those versions into a vector
 /// and sort them in descending order, aka newest to oldest.
-pub type SharedBufferVersionedEntry = (TableKey<Bytes>, Vec<(HummockEpoch, HummockValue<Bytes>)>);
+pub type SharedBufferVersionedEntry = (TableKey<Bytes>, Vec<(EpochWithGap, HummockValue<Bytes>)>);
 type PointRangePair = (PointRange<Vec<u8>>, PointRange<Vec<u8>>);
 
 struct SharedBufferDeleteRangeMeta {
@@ -92,6 +94,7 @@ impl SharedBufferBatchInner {
     pub(crate) fn new(
         table_id: TableId,
         epoch: HummockEpoch,
+        spill_offset: u16,
         payload: Vec<SharedBufferItem>,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
         size: usize,
@@ -152,9 +155,10 @@ impl SharedBufferBatchInner {
             }
         }
         let kv_count = payload.len();
+        let epoch_with_gap = EpochWithGap::new(epoch, spill_offset);
         let items = payload
             .into_iter()
-            .map(|(k, v)| (k, vec![(epoch, v)]))
+            .map(|(k, v)| (k, vec![(epoch_with_gap, v)]))
             .collect_vec();
 
         let mut monotonic_tombstone_events = Vec::with_capacity(point_range_pairs.len() * 2);
@@ -165,7 +169,7 @@ impl SharedBufferBatchInner {
             });
             monotonic_tombstone_events.push(MonotonicDeleteEvent {
                 event_key: end_point_range,
-                new_epoch: HummockEpoch::MAX,
+                new_epoch: MAX_EPOCH,
             });
         }
 
@@ -285,7 +289,7 @@ impl SharedBufferBatchInner {
         table_key: TableKey<&[u8]>,
         read_epoch: HummockEpoch,
         read_options: &ReadOptions,
-    ) -> Option<(HummockValue<Bytes>, HummockEpoch)> {
+    ) -> Option<(HummockValue<Bytes>, EpochWithGap)> {
         // Perform binary search on table key to find the corresponding entry
         if let Ok(i) = self.payload.binary_search_by(|m| (m.0[..]).cmp(*table_key)) {
             let item = &self.payload[i];
@@ -293,7 +297,7 @@ impl SharedBufferBatchInner {
             // Scan to find the first version <= epoch
             for (e, v) in &item.1 {
                 // skip invisible versions
-                if read_epoch < *e {
+                if read_epoch < e.pure_epoch() {
                     continue;
                 }
                 return Some((v.clone(), *e));
@@ -304,7 +308,10 @@ impl SharedBufferBatchInner {
         if !read_options.ignore_range_tombstone {
             let delete_epoch = self.get_min_delete_range_epoch(UserKey::new(table_id, table_key));
             if delete_epoch <= read_epoch {
-                Some((HummockValue::Delete, delete_epoch))
+                Some((
+                    HummockValue::Delete,
+                    EpochWithGap::new_from_epoch(delete_epoch),
+                ))
             } else {
                 None
             }
@@ -321,7 +328,7 @@ impl SharedBufferBatchInner {
             },
         );
         if idx == 0 {
-            HummockEpoch::MAX
+            MAX_EPOCH
         } else {
             self.monotonic_tombstone_events[idx - 1].new_epoch
         }
@@ -365,6 +372,7 @@ impl SharedBufferBatch {
             inner: Arc::new(SharedBufferBatchInner::new(
                 table_id,
                 epoch,
+                0,
                 sorted_items,
                 vec![],
                 size,
@@ -459,7 +467,7 @@ impl SharedBufferBatch {
         table_key: TableKey<&[u8]>,
         read_epoch: HummockEpoch,
         read_options: &ReadOptions,
-    ) -> Option<(HummockValue<Bytes>, HummockEpoch)> {
+    ) -> Option<(HummockValue<Bytes>, EpochWithGap)> {
         self.inner
             .get_value(self.table_id, table_key, read_epoch, read_options)
     }
@@ -572,6 +580,7 @@ impl SharedBufferBatch {
 
     pub fn build_shared_buffer_batch(
         epoch: HummockEpoch,
+        spill_offset: u16,
         sorted_items: Vec<SharedBufferItem>,
         size: usize,
         delete_ranges: Vec<(Bound<Bytes>, Bound<Bytes>)>,
@@ -582,6 +591,7 @@ impl SharedBufferBatch {
         let inner = SharedBufferBatchInner::new(
             table_id,
             epoch,
+            spill_offset,
             sorted_items,
             delete_ranges,
             size,
@@ -658,7 +668,7 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
     }
 
     /// Return all values of the current key
-    pub(crate) fn current_versions(&self) -> &Vec<(HummockEpoch, HummockValue<Bytes>)> {
+    pub(crate) fn current_versions(&self) -> &Vec<(EpochWithGap, HummockValue<Bytes>)> {
         debug_assert!(self.current_idx < self.inner.len());
         let idx = match D::direction() {
             DirectionEnum::Forward => self.current_idx,
@@ -675,7 +685,7 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
         }
     }
 
-    pub(crate) fn current_item(&self) -> (&TableKey<Bytes>, &(HummockEpoch, HummockValue<Bytes>)) {
+    pub(crate) fn current_item(&self) -> (&TableKey<Bytes>, &(EpochWithGap, HummockValue<Bytes>)) {
         assert!(self.is_valid(), "iterator is not valid");
         let (idx, version_idx) = match D::direction() {
             DirectionEnum::Forward => (self.current_idx, self.current_version_idx),
@@ -693,39 +703,33 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
 impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<D> {
     type Direction = D;
 
-    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        async move {
-            assert!(self.is_valid());
-            match D::direction() {
-                DirectionEnum::Forward => {
-                    // If the current key has more versions, we need to advance the value index
-                    if self.current_version_idx + 1 < self.current_versions_len() {
-                        self.current_version_idx += 1;
-                    } else {
-                        self.current_idx += 1;
-                        self.current_version_idx = 0;
-                    }
-                }
-                DirectionEnum::Backward => {
-                    if self.current_version_idx > 0 {
-                        self.current_version_idx -= 1;
-                    } else {
-                        self.current_idx += 1;
-                        self.current_version_idx = self.current_versions_len() - 1;
-                    }
+    async fn next(&mut self) -> HummockResult<()> {
+        assert!(self.is_valid());
+        match D::direction() {
+            DirectionEnum::Forward => {
+                // If the current key has more versions, we need to advance the value index
+                if self.current_version_idx + 1 < self.current_versions_len() {
+                    self.current_version_idx += 1;
+                } else {
+                    self.current_idx += 1;
+                    self.current_version_idx = 0;
                 }
             }
-            Ok(())
+            DirectionEnum::Backward => {
+                if self.current_version_idx > 0 {
+                    self.current_version_idx -= 1;
+                } else {
+                    self.current_idx += 1;
+                    self.current_version_idx = self.current_versions_len() - 1;
+                }
+            }
         }
+        Ok(())
     }
 
     fn key(&self) -> FullKey<&[u8]> {
-        let (key, (epoch, _)) = self.current_item();
-        FullKey::new(self.table_id, TableKey(key), *epoch)
+        let (key, (epoch_with_gap, _)) = self.current_item();
+        FullKey::new_with_gap_epoch(self.table_id, TableKey(key), *epoch_with_gap)
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -741,91 +745,87 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
             && self.current_version_idx < self.current_versions().len() as i32
     }
 
-    fn rewind(&mut self) -> Self::RewindFuture<'_> {
-        async move {
-            self.current_idx = 0;
+    async fn rewind(&mut self) -> HummockResult<()> {
+        self.current_idx = 0;
 
-            match D::direction() {
-                DirectionEnum::Forward => {
-                    self.current_version_idx = 0;
-                }
-                DirectionEnum::Backward => {
-                    self.current_version_idx = self.current_versions_len() - 1;
-                }
+        match D::direction() {
+            DirectionEnum::Forward => {
+                self.current_version_idx = 0;
             }
-            Ok(())
+            DirectionEnum::Backward => {
+                self.current_version_idx = self.current_versions_len() - 1;
+            }
         }
+        Ok(())
     }
 
-    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
-        async move {
-            debug_assert_eq!(key.user_key.table_id, self.table_id);
-            // Perform binary search on table key because the items in SharedBufferBatch is ordered
-            // by table key.
-            let partition_point = self
-                .inner
-                .binary_search_by(|probe| probe.0[..].cmp(*key.user_key.table_key));
-            let seek_key_epoch = key.epoch;
-            match D::direction() {
-                DirectionEnum::Forward => match partition_point {
+    async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
+        debug_assert_eq!(key.user_key.table_id, self.table_id);
+        // Perform binary search on table key because the items in SharedBufferBatch is ordered
+        // by table key.
+        let partition_point = self
+            .inner
+            .binary_search_by(|probe| probe.0[..].cmp(*key.user_key.table_key));
+        let seek_key_epoch = key.epoch_with_gap;
+        match D::direction() {
+            DirectionEnum::Forward => match partition_point {
+                Ok(i) => {
+                    self.current_idx = i;
+                    // seek to the first version that is <= the seek key epoch
+                    let mut idx: i32 = 0;
+                    for (epoch_with_gap, _) in self.current_versions() {
+                        if epoch_with_gap <= &seek_key_epoch {
+                            break;
+                        }
+                        idx += 1;
+                    }
+
+                    // Move onto the next key for forward iteration if seek key epoch is smaller
+                    // than all versions
+                    if idx >= self.current_versions().len() as i32 {
+                        self.current_idx += 1;
+                        self.current_version_idx = 0;
+                    } else {
+                        self.current_version_idx = idx;
+                    }
+                }
+                Err(i) => {
+                    self.current_idx = i;
+                    self.current_version_idx = 0;
+                }
+            },
+            DirectionEnum::Backward => {
+                match partition_point {
                     Ok(i) => {
-                        self.current_idx = i;
-                        // seek to the first version that is <= the seek key epoch
-                        let mut idx: i32 = 0;
-                        for (epoch, _) in self.current_versions() {
-                            if *epoch <= seek_key_epoch {
+                        self.current_idx = self.inner.len() - i - 1;
+                        // seek from back to the first version that is >= seek_key_epoch
+                        let values = self.current_versions();
+                        let mut idx: i32 = (values.len() - 1) as i32;
+                        for (epoch_with_gap, _) in values.iter().rev() {
+                            if epoch_with_gap >= &seek_key_epoch {
                                 break;
                             }
-                            idx += 1;
+                            idx -= 1;
                         }
 
-                        // Move onto the next key for forward iteration if seek key epoch is smaller
-                        // than all versions
-                        if idx >= self.current_versions().len() as i32 {
+                        if idx < 0 {
                             self.current_idx += 1;
-                            self.current_version_idx = 0;
+                            self.current_version_idx = self.current_versions_len() - 1;
                         } else {
                             self.current_version_idx = idx;
                         }
                     }
+                    // Seek to one item before the seek partition_point:
+                    // If i == 0, the iterator will be invalidated with self.current_idx ==
+                    // self.inner.len().
                     Err(i) => {
-                        self.current_idx = i;
-                        self.current_version_idx = 0;
-                    }
-                },
-                DirectionEnum::Backward => {
-                    match partition_point {
-                        Ok(i) => {
-                            self.current_idx = self.inner.len() - i - 1;
-                            // seek from back to the first version that is >= seek_key_epoch
-                            let values = self.current_versions();
-                            let mut idx: i32 = (values.len() - 1) as i32;
-                            for (epoch, _) in values.iter().rev() {
-                                if *epoch >= seek_key_epoch {
-                                    break;
-                                }
-                                idx -= 1;
-                            }
-
-                            if idx < 0 {
-                                self.current_idx += 1;
-                                self.current_version_idx = self.current_versions_len() - 1;
-                            } else {
-                                self.current_version_idx = idx;
-                            }
-                        }
-                        // Seek to one item before the seek partition_point:
-                        // If i == 0, the iterator will be invalidated with self.current_idx ==
-                        // self.inner.len().
-                        Err(i) => {
-                            self.current_idx = self.inner.len() - i;
-                            self.current_version_idx = self.current_versions_len() - 1;
-                        }
+                        self.current_idx = self.inner.len() - i;
+                        self.current_version_idx = self.current_versions_len() - 1;
                     }
                 }
             }
-            Ok(())
         }
+        Ok(())
     }
 
     fn collect_local_statistic(&self, _stats: &mut crate::monitor::StoreLocalStatistic) {}
@@ -857,7 +857,7 @@ impl DeleteRangeIterator for SharedBufferDeleteRangeIterator {
         if self.next_idx > 0 {
             self.inner.monotonic_tombstone_events[self.next_idx - 1].new_epoch
         } else {
-            HummockEpoch::MAX
+            MAX_EPOCH
         }
     }
 
@@ -897,6 +897,7 @@ mod tests {
     use std::ops::Bound::{Excluded, Included};
 
     use risingwave_common::must_match;
+    use risingwave_common::util::epoch::MAX_EPOCH;
     use risingwave_hummock_sdk::key::map_table_key_range;
 
     use super::*;
@@ -994,6 +995,7 @@ mod tests {
 
         let batch = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
+            0,
             vec![],
             1,
             vec![
@@ -1176,6 +1178,7 @@ mod tests {
         ];
         let shared_buffer_batch = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
+            0,
             vec![],
             0,
             delete_ranges,
@@ -1189,7 +1192,7 @@ mod tests {
                 .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"aaa"),))
         );
         assert_eq!(
-            HummockEpoch::MAX,
+            MAX_EPOCH,
             shared_buffer_batch
                 .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"bbb"),))
         );
@@ -1199,7 +1202,7 @@ mod tests {
                 .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"ddd"),))
         );
         assert_eq!(
-            HummockEpoch::MAX,
+            MAX_EPOCH,
             shared_buffer_batch
                 .get_min_delete_range_epoch(UserKey::new(Default::default(), TableKey(b"eee"),))
         );
@@ -1379,7 +1382,7 @@ mod tests {
             iter.rewind().await.unwrap();
             let mut output = vec![];
             while iter.is_valid() {
-                let epoch = iter.key().epoch;
+                let epoch = iter.key().epoch_with_gap.pure_epoch();
                 if snapshot_epoch == epoch {
                     output.push((
                         iter.key().user_key.table_key.to_vec(),
@@ -1468,6 +1471,7 @@ mod tests {
         let size = SharedBufferBatch::measure_batch_size(&sorted_items1);
         let imm1 = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
+            0,
             sorted_items1,
             size,
             delete_ranges,
@@ -1513,6 +1517,7 @@ mod tests {
         let size = SharedBufferBatch::measure_batch_size(&sorted_items2);
         let imm2 = SharedBufferBatch::build_shared_buffer_batch(
             epoch,
+            0,
             sorted_items2,
             size,
             delete_ranges,

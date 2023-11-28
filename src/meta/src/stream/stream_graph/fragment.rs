@@ -21,10 +21,13 @@ use anyhow::Context;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
+use risingwave_common::catalog::{
+    generate_internal_table_name_with_type, TableId, CDC_SOURCE_COLUMN_NUM,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_pb::catalog::Table;
+use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
     Parallelism, StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
@@ -146,6 +149,12 @@ impl BuildingFragment {
                 dml_node.table_id = table_id;
                 dml_node.table_version_id = job.table_version_id().unwrap();
             }
+            NodeBody::Source(_) => {
+                // Notice: Table job has a dumb Source node, we should be careful that `has_table` should not be overwrite to `false`
+                if !has_table {
+                    has_table = job.is_source_job();
+                }
+            }
             _ => {}
         });
 
@@ -160,16 +169,28 @@ impl BuildingFragment {
         let mut table_columns = HashMap::new();
 
         stream_graph_visitor::visit_fragment(fragment, |node_body| {
-            if let NodeBody::Chain(chain_node) = node_body {
-                let table_id = chain_node.table_id.into();
-                let column_ids = chain_node.upstream_column_ids.clone();
-                table_columns
-                    .try_insert(table_id, column_ids)
-                    .expect("currently there should be no two same upstream tables in a fragment");
-            }
+            let (table_id, column_ids) = match node_body {
+                NodeBody::StreamScan(stream_scan) => (
+                    stream_scan.table_id.into(),
+                    stream_scan.upstream_column_ids.clone(),
+                ),
+                NodeBody::CdcFilter(cdc_filter) => (
+                    cdc_filter.upstream_source_id.into(),
+                    cdc_filter.upstream_column_ids.clone(),
+                ),
+                _ => return,
+            };
+            table_columns
+                .try_insert(table_id, column_ids)
+                .expect("currently there should be no two same upstream tables in a fragment");
         });
 
-        assert_eq!(table_columns.len(), fragment.upstream_table_ids.len());
+        assert_eq!(
+            table_columns.len(),
+            fragment.upstream_table_ids.len(),
+            "fragment type: {}",
+            fragment.fragment_type_mask
+        );
 
         table_columns
     }
@@ -456,7 +477,7 @@ pub(super) enum EitherFragment {
 /// - if we're going to build a mview on an existing mview, the upstream fragment containing the
 ///   `Materialize` node will be included in this structure.
 /// - if we're going to replace the plan of a table with downstream mviews, the downstream fragments
-///   containing the `Chain` nodes will be included in this structure.
+///   containing the `StreamScan` nodes will be included in this structure.
 pub struct CompleteStreamFragmentGraph {
     /// The fragment graph of the streaming job being built.
     building_graph: StreamFragmentGraph,
@@ -472,7 +493,9 @@ pub struct CompleteStreamFragmentGraph {
 }
 
 pub struct FragmentGraphUpstreamContext {
-    upstream_mview_fragments: HashMap<TableId, Fragment>,
+    /// Root fragment is the root of upstream stream graph, which can be a
+    /// mview fragment or source fragment for cdc source job
+    upstream_root_fragments: HashMap<TableId, Fragment>,
 }
 
 pub struct FragmentGraphDownstreamContext {
@@ -493,23 +516,25 @@ impl CompleteStreamFragmentGraph {
         }
     }
 
-    /// Create a new [`CompleteStreamFragmentGraph`] for MV on MV, with the upstream existing
-    /// `Materialize` fragments.
+    /// Create a new [`CompleteStreamFragmentGraph`] for MV on MV or Table on CDC Source, with the upstream existing
+    /// `Materialize` or `Source` fragments.
     pub fn with_upstreams(
         graph: StreamFragmentGraph,
-        upstream_mview_fragments: HashMap<TableId, Fragment>,
+        upstream_root_fragments: HashMap<TableId, Fragment>,
+        table_job_type: Option<TableJobType>,
     ) -> MetaResult<Self> {
         Self::build_helper(
             graph,
             Some(FragmentGraphUpstreamContext {
-                upstream_mview_fragments,
+                upstream_root_fragments,
             }),
             None,
+            table_job_type,
         )
     }
 
     /// Create a new [`CompleteStreamFragmentGraph`] for replacing an existing table, with the
-    /// downstream existing `Chain` fragments.
+    /// downstream existing `StreamScan` fragments.
     pub fn with_downstreams(
         graph: StreamFragmentGraph,
         original_table_fragment_id: FragmentId,
@@ -522,85 +547,131 @@ impl CompleteStreamFragmentGraph {
                 original_table_fragment_id,
                 downstream_fragments,
             }),
+            None,
         )
     }
 
     fn build_helper(
-        graph: StreamFragmentGraph,
+        mut graph: StreamFragmentGraph,
         upstream_ctx: Option<FragmentGraphUpstreamContext>,
         downstream_ctx: Option<FragmentGraphDownstreamContext>,
+        table_job_type: Option<TableJobType>,
     ) -> MetaResult<Self> {
         let mut extra_downstreams = HashMap::new();
         let mut extra_upstreams = HashMap::new();
         let mut existing_fragments = HashMap::new();
 
         if let Some(FragmentGraphUpstreamContext {
-            upstream_mview_fragments,
+            upstream_root_fragments,
         }) = upstream_ctx
         {
-            // Build the extra edges between the upstream `Materialize` and the downstream `Chain`
+            // Build the extra edges between the upstream `Materialize` and the downstream `StreamScan`
             // of the new materialized view.
-            for (&id, fragment) in &graph.fragments {
+            for (&id, fragment) in &mut graph.fragments {
                 for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
-                    let mview_fragment = upstream_mview_fragments
-                        .get(&upstream_table_id)
-                        .context("upstream materialized view fragment not found")?;
-                    let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
+                    let (up_fragment_id, edge) = match table_job_type.as_ref() {
+                        Some(TableJobType::SharedCdcSource) => {
+                            let source_fragment = upstream_root_fragments
+                                .get(&upstream_table_id)
+                                .context("upstream source fragment not found")?;
+                            let source_job_id = GlobalFragmentId::new(source_fragment.fragment_id);
 
-                    // Resolve the required output columns from the upstream materialized view.
-                    let output_indices = {
-                        let nodes = mview_fragment.actors[0].get_nodes().unwrap();
-                        let mview_node = nodes.get_node_body().unwrap().as_materialize().unwrap();
-                        let all_column_ids = mview_node
-                            .get_table()
-                            .unwrap()
-                            .columns
-                            .iter()
-                            .map(|c| c.column_desc.as_ref().unwrap().column_id)
-                            .collect_vec();
+                            // we traverse all fragments in the graph, and we should find out the
+                            // CdcFilter fragment and add an edge between upstream source fragment and it.
+                            assert_ne!(
+                                (fragment.fragment_type_mask & FragmentTypeFlag::CdcFilter as u32),
+                                0
+                            );
 
-                        output_columns
-                            .iter()
-                            .map(|c| {
-                                all_column_ids
+                            tracing::debug!(
+                                ?source_job_id,
+                                ?output_columns,
+                                identity = ?fragment.inner.get_node().unwrap().get_identity(),
+                                current_frag_id=?id,
+                                "CdcFilter with upstream source fragment"
+                            );
+                            let edge = StreamFragmentEdge {
+                                id: EdgeId::UpstreamExternal {
+                                    upstream_table_id,
+                                    downstream_fragment_id: id,
+                                },
+                                // We always use `NoShuffle` for the exchange between the upstream
+                                // `Source` and the downstream `StreamScan` of the new cdc table.
+                                dispatch_strategy: DispatchStrategy {
+                                    r#type: DispatcherType::NoShuffle as _,
+                                    dist_key_indices: vec![], // not used for `NoShuffle`
+                                    output_indices: (0..CDC_SOURCE_COLUMN_NUM as _).collect(),
+                                },
+                            };
+
+                            (source_job_id, edge)
+                        }
+                        _ => {
+                            // handle other kinds of streaming graph, normally MV on MV
+                            let mview_fragment = upstream_root_fragments
+                                .get(&upstream_table_id)
+                                .context("upstream materialized view fragment not found")?;
+                            let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
+
+                            // Resolve the required output columns from the upstream materialized view.
+                            let output_indices = {
+                                let nodes = mview_fragment.actors[0].get_nodes().unwrap();
+                                let mview_node =
+                                    nodes.get_node_body().unwrap().as_materialize().unwrap();
+                                let all_column_ids = mview_node
+                                    .get_table()
+                                    .unwrap()
+                                    .columns
                                     .iter()
-                                    .position(|&id| id == *c)
-                                    .map(|i| i as u32)
-                            })
-                            .collect::<Option<Vec<_>>>()
-                            .context("column not found in the upstream materialized view")?
+                                    .map(|c| c.column_desc.as_ref().unwrap().column_id)
+                                    .collect_vec();
+
+                                output_columns
+                                    .iter()
+                                    .map(|c| {
+                                        all_column_ids
+                                            .iter()
+                                            .position(|&id| id == *c)
+                                            .map(|i| i as u32)
+                                    })
+                                    .collect::<Option<Vec<_>>>()
+                                    .context("column not found in the upstream materialized view")?
+                            };
+                            let edge = StreamFragmentEdge {
+                                id: EdgeId::UpstreamExternal {
+                                    upstream_table_id,
+                                    downstream_fragment_id: id,
+                                },
+                                // We always use `NoShuffle` for the exchange between the upstream
+                                // `Materialize` and the downstream `StreamScan` of the
+                                // new materialized view.
+                                dispatch_strategy: DispatchStrategy {
+                                    r#type: DispatcherType::NoShuffle as _,
+                                    dist_key_indices: vec![], // not used for `NoShuffle`
+                                    output_indices,
+                                },
+                            };
+
+                            (mview_id, edge)
+                        }
                     };
 
-                    let edge = StreamFragmentEdge {
-                        id: EdgeId::UpstreamExternal {
-                            upstream_table_id,
-                            downstream_fragment_id: id,
-                        },
-                        // We always use `NoShuffle` for the exchange between the upstream
-                        // `Materialize` and the downstream `Chain` of the
-                        // new materialized view.
-                        dispatch_strategy: DispatchStrategy {
-                            r#type: DispatcherType::NoShuffle as _,
-                            dist_key_indices: vec![], // not used for `NoShuffle`
-                            output_indices,
-                        },
-                    };
-
+                    // put the edge into the extra edges
                     extra_downstreams
-                        .entry(mview_id)
+                        .entry(up_fragment_id)
                         .or_insert_with(HashMap::new)
                         .try_insert(id, edge.clone())
                         .unwrap();
                     extra_upstreams
                         .entry(id)
                         .or_insert_with(HashMap::new)
-                        .try_insert(mview_id, edge)
+                        .try_insert(up_fragment_id, edge)
                         .unwrap();
                 }
             }
 
             existing_fragments.extend(
-                upstream_mview_fragments
+                upstream_root_fragments
                     .into_values()
                     .map(|f| (GlobalFragmentId::new(f.fragment_id), f)),
             );
@@ -614,7 +685,7 @@ impl CompleteStreamFragmentGraph {
             let original_table_fragment_id = GlobalFragmentId::new(original_table_fragment_id);
             let table_fragment_id = GlobalFragmentId::new(graph.table_fragment_id());
 
-            // Build the extra edges between the `Materialize` and the downstream `Chain` of the
+            // Build the extra edges between the `Materialize` and the downstream `StreamScan` of the
             // existing materialized views.
             for (dispatch_strategy, fragment) in &downstream_fragments {
                 let id = GlobalFragmentId::new(fragment.fragment_id);

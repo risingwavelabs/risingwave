@@ -188,7 +188,9 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
         }
 
         // Overrides from env var.
-        if let Ok(rust_log) = std::env::var(EnvFilter::DEFAULT_ENV) && !rust_log.is_empty() {
+        if let Ok(rust_log) = std::env::var(EnvFilter::DEFAULT_ENV)
+            && !rust_log.is_empty()
+        {
             let rust_log_targets: Targets = rust_log.parse().expect("failed to parse `RUST_LOG`");
             if let Some(default_level) = rust_log_targets.default_level() {
                 filter = filter.with_default(default_level);

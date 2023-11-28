@@ -32,7 +32,8 @@ use serde::{Deserialize, Serialize};
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
-    AlterColumnOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
+    AlterColumnOperation, AlterConnectionOperation, AlterDatabaseOperation, AlterFunctionOperation,
+    AlterSchemaOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
     ReferentialAction, SourceWatermark, TableConstraint,
 };
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
@@ -858,6 +859,7 @@ pub enum ShowObject {
     Indexes { table: ObjectName },
     Cluster,
     Jobs,
+    ProcessList,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -899,6 +901,7 @@ impl fmt::Display for ShowObject {
                 write!(f, "CLUSTER")
             }
             ShowObject::Jobs => write!(f, "JOBS"),
+            ShowObject::ProcessList => write!(f, "PROCESSLIST"),
         }
     }
 }
@@ -1003,6 +1006,13 @@ impl fmt::Display for ExplainOptions {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct CdcTableInfo {
+    pub source_name: ObjectName,
+    pub external_table_name: String,
+}
+
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1084,6 +1094,8 @@ pub enum Statement {
         append_only: bool,
         /// `AS ( query )`
         query: Option<Box<Query>>,
+        /// `FROM cdc_source TABLE database_name.table_name`
+        cdc_table_info: Option<CdcTableInfo>,
     },
     /// CREATE INDEX
     CreateIndex {
@@ -1126,6 +1138,16 @@ pub enum Statement {
         append_only: bool,
         params: CreateFunctionBody,
     },
+    /// ALTER DATABASE
+    AlterDatabase {
+        name: ObjectName,
+        operation: AlterDatabaseOperation,
+    },
+    /// ALTER SCHEMA
+    AlterSchema {
+        name: ObjectName,
+        operation: AlterSchemaOperation,
+    },
     /// ALTER TABLE
     AlterTable {
         /// Table name
@@ -1157,6 +1179,19 @@ pub enum Statement {
         name: ObjectName,
         operation: AlterSourceOperation,
     },
+    /// ALTER FUNCTION
+    AlterFunction {
+        /// Function name
+        name: ObjectName,
+        args: Option<Vec<OperateFunctionArg>>,
+        operation: AlterFunctionOperation,
+    },
+    /// ALTER CONNECTION
+    AlterConnection {
+        /// Connection name
+        name: ObjectName,
+        operation: AlterConnectionOperation,
+    },
     /// DESCRIBE TABLE OR SOURCE
     Describe {
         /// Table or Source name
@@ -1176,13 +1211,16 @@ pub enum Statement {
     },
     /// CANCEL JOBS COMMAND
     CancelJobs(JobIdents),
+    /// KILL COMMAND
+    /// Kill process in the show processlist.
+    Kill(i32),
     /// DROP
     Drop(DropStatement),
     /// DROP Function
     DropFunction {
         if_exists: bool,
         /// One or more function to drop
-        func_desc: Vec<DropFunctionDesc>,
+        func_desc: Vec<FunctionDesc>,
         /// `CASCADE` or `RESTRICT`
         option: Option<ReferentialAction>,
     },
@@ -1194,7 +1232,7 @@ pub enum Statement {
     SetVariable {
         local: bool,
         variable: Ident,
-        value: Vec<SetVariableValue>,
+        value: SetVariableValue,
     },
     /// `SHOW <variable>`
     ///
@@ -1515,6 +1553,7 @@ impl fmt::Display for Statement {
                 source_watermarks,
                 append_only,
                 query,
+                cdc_table_info,
             } => {
                 // We want to allow the following options
                 // Empty column list, allowed by PostgreSQL:
@@ -1548,6 +1587,10 @@ impl fmt::Display for Statement {
                 }
                 if let Some(query) = query {
                     write!(f, " AS {}", query)?;
+                }
+                if let Some(info) = cdc_table_info {
+                    write!(f, " FROM {}", info.source_name)?;
+                    write!(f, " TABLE '{}'", info.external_table_name)?;
                 }
                 Ok(())
             }
@@ -1587,6 +1630,12 @@ impl fmt::Display for Statement {
             ),
             Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
+            Statement::AlterDatabase { name, operation } => {
+                write!(f, "ALTER DATABASE {} {}", name, operation)
+            }
+            Statement::AlterSchema { name, operation } => {
+                write!(f, "ALTER SCHEMA {} {}", name, operation)
+            }
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
             }
@@ -1601,6 +1650,16 @@ impl fmt::Display for Statement {
             }
             Statement::AlterSource { name, operation } => {
                 write!(f, "ALTER SOURCE {} {}", name, operation)
+            }
+            Statement::AlterFunction { name, args, operation } => {
+                write!(f, "ALTER FUNCTION {}", name)?;
+                if let Some(args) = args {
+                    write!(f, "({})", display_comma_separated(args))?;
+                }
+                write!(f, " {}", operation)
+            }
+            Statement::AlterConnection { name, operation } => {
+                write!(f, "ALTER CONNECTION {} {}", name, operation)
             }
             Statement::Drop(stmt) => write!(f, "DROP {}", stmt),
             Statement::DropFunction {
@@ -1632,7 +1691,6 @@ impl fmt::Display for Statement {
                     f,
                     "{name} = {value}",
                     name = variable,
-                    value = display_comma_separated(value)
                 )
             }
             Statement::ShowVariable { variable } => {
@@ -1802,6 +1860,10 @@ impl fmt::Display for Statement {
             }
             Statement::CancelJobs(jobs) => {
                 write!(f, "CANCEL JOBS {}", display_comma_separated(&jobs.0))?;
+                Ok(())
+            }
+            Statement::Kill(process_id) => {
+                write!(f, "KILL {}", process_id)?;
                 Ok(())
             }
         }
@@ -2377,12 +2439,12 @@ impl fmt::Display for DropFunctionOption {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
-pub struct DropFunctionDesc {
+pub struct FunctionDesc {
     pub name: ObjectName,
     pub args: Option<Vec<OperateFunctionArg>>,
 }
 
-impl fmt::Display for DropFunctionDesc {
+impl fmt::Display for FunctionDesc {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name)?;
         if let Some(args) = &self.args {
@@ -2592,6 +2654,7 @@ impl fmt::Display for CreateFunctionUsing {
 pub enum SetVariableValue {
     Ident(Ident),
     Literal(Value),
+    List(Vec<SetVariableValue>),
     Default,
 }
 
@@ -2601,6 +2664,11 @@ impl fmt::Display for SetVariableValue {
         match self {
             Ident(ident) => write!(f, "{}", ident),
             Literal(literal) => write!(f, "{}", literal),
+            List(list) => write!(
+                f,
+                "{}",
+                list.iter().map(|value| value.to_string()).join(", ")
+            ),
             Default => write!(f, "DEFAULT"),
         }
     }

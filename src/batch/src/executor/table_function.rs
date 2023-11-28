@@ -15,12 +15,12 @@
 use futures_async_stream::try_stream;
 use risingwave_common::array::{ArrayImpl, DataChunk};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_expr::table_function::{build_from_prost, BoxedTableFunction};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
+use crate::error::{BatchError, Result};
 use crate::executor::{BoxedDataChunkStream, Executor, ExecutorBuilder};
 use crate::task::BatchTaskContext;
 
@@ -46,7 +46,7 @@ impl Executor for TableFunctionExecutor {
 }
 
 impl TableFunctionExecutor {
-    #[try_stream(boxed, ok = DataChunk, error = RwError)]
+    #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let dummy_chunk = DataChunk::new_dummy(1);
 

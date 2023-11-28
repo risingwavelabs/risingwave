@@ -115,7 +115,7 @@ impl UdfExpression {
             DataChunk::try_from(&output).expect("failed to convert UDF output to DataChunk");
         let output = data_chunk.uncompact(vis.clone());
 
-        let Some(array) = output.columns().get(0) else {
+        let Some(array) = output.columns().first() else {
             bail!("UDF returned no columns");
         };
         if !array.data_type().equals_datatype(&self.return_type) {
@@ -150,7 +150,7 @@ impl Build for UdfExpression {
                         "",
                         DataType::from(t)
                             .try_into()
-                            .map_err(risingwave_udf::Error::Unsupported)?,
+                            .map_err(risingwave_udf::Error::unsupported)?,
                         true,
                     ))
                 })

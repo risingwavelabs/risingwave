@@ -88,9 +88,15 @@ message SinkWriterStreamResponse {
     SinkMetadata metadata = 2;
   }
 
+  message BatchWrittenResponse {
+    uint64 epoch = 1;
+    uint64 batch_id = 2;
+  }
+
   oneof response {
     StartResponse start = 1;
     CommitResponse commit = 2;
+    BatchWrittenResponse batch = 3;
   }
 }
 
@@ -148,6 +154,7 @@ message CdcMessage {
   string payload = 1;
   string partition = 2;
   string offset = 3;
+  string full_table_name = 4;
 }
 
 enum SourceType {
@@ -166,8 +173,12 @@ message GetEventStreamRequest {
 }
 
 message GetEventStreamResponse {
+  message ControlInfo {
+    bool handshake_ok = 1;
+  }
   uint64 source_id = 1;
   repeated CdcMessage events = 2;
+  ControlInfo control = 3;
 }
 
 message ValidateSourceRequest {

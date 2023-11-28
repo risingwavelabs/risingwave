@@ -143,15 +143,19 @@ impl AggregateFunction for PercentileDisc {
 
     async fn get_result(&self, state: &AggregateState) -> Result<Datum> {
         let state = &state.downcast_ref::<State>().0;
-        Ok(if let Some(fractions) = self.fractions && !state.is_empty() {
-            let idx = if fractions == 0.0 {
-                0
+        Ok(
+            if let Some(fractions) = self.fractions
+                && !state.is_empty()
+            {
+                let idx = if fractions == 0.0 {
+                    0
+                } else {
+                    f64::ceil(fractions * state.len() as f64) as usize - 1
+                };
+                Some(state[idx].clone())
             } else {
-                f64::ceil(fractions * state.len() as f64) as usize - 1
-            };
-            Some(state[idx].clone())
-        } else {
-            None
-        })
+                None
+            },
+        )
     }
 }

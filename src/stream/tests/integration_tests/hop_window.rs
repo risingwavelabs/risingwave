@@ -47,12 +47,12 @@ fn create_executor(output_indices: Vec<usize>) -> (MessageSender, BoxedMessageSt
         tx,
         HopWindowExecutor::new(
             ActorContext::create(123),
-            Box::new(source),
             ExecutorInfo {
                 schema,
                 pk_indices,
-                identity: "test".to_string(),
+                identity: "HopWindowExecutor".to_string(),
             },
+            Box::new(source),
             TIME_COL_IDX,
             window_slide,
             window_size,

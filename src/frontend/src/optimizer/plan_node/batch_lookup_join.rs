@@ -22,10 +22,11 @@ use super::batch::prelude::*;
 use super::generic::{self, GenericPlanRef};
 use super::utils::{childless_record, Distill};
 use super::ExprRewritable;
-use crate::expr::{Expr, ExprRewriter};
+use crate::expr::{Expr, ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
-    EqJoinPredicate, EqJoinPredicateDisplay, PlanBase, PlanTreeNodeUnary, ToBatchPb,
+    EqJoinPredicate, EqJoinPredicateDisplay, LogicalScan, PlanBase, PlanTreeNodeUnary, ToBatchPb,
     ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -129,6 +130,11 @@ impl Distill for BatchLookupJoin {
         if verbose {
             let data = IndicesDisplay::from_join(&self.core, &concat_schema);
             vec.push(("output", data));
+        }
+
+        if let Some(scan) = self.core.right.as_logical_scan() {
+            let scan: &LogicalScan = scan;
+            vec.push(("lookup table", Pretty::display(&scan.table_name())));
         }
 
         childless_record("BatchLookupJoin", vec)
@@ -287,5 +293,11 @@ impl ExprRewritable for BatchLookupJoin {
             ..Self::clone(self)
         }
         .into()
+    }
+}
+
+impl ExprVisitable for BatchLookupJoin {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.core.visit_exprs(v);
     }
 }

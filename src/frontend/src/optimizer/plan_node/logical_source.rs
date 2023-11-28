@@ -37,14 +37,16 @@ use super::{
     StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::stream_fs_fetch::StreamFsFetch;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamDedup,
     ToStreamContext,
 };
+use crate::optimizer::property::Distribution::HashShard;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition, IndexRewriter};
 
@@ -346,6 +348,15 @@ impl ExprRewritable for LogicalSource {
     }
 }
 
+impl ExprVisitable for LogicalSource {
+    fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        self.output_exprs
+            .iter()
+            .flatten()
+            .for_each(|e| v.visit_expr(e));
+    }
+}
+
 /// A util function to extract kafka offset timestamp range.
 ///
 /// Currently we only support limiting kafka offset timestamp range using literals, e.g. we only
@@ -571,8 +582,11 @@ impl ToStream for LogicalSource {
         }
 
         assert!(!(self.core.gen_row_id && self.core.for_table));
-        if let Some(row_id_index) = self.core.row_id_index && self.core.gen_row_id {
-            plan = StreamRowIdGen::new(plan, row_id_index).into();
+        if let Some(row_id_index) = self.core.row_id_index
+            && self.core.gen_row_id
+        {
+            plan = StreamRowIdGen::new_with_dist(plan, row_id_index, HashShard(vec![row_id_index]))
+                .into();
         }
         Ok(plan)
     }

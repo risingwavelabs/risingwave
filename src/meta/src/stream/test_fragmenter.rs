@@ -24,6 +24,7 @@ use risingwave_pb::common::{
 };
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
+use risingwave_pb::ddl_service::TableJobType;
 use risingwave_pb::expr::agg_call::Type;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan};
@@ -452,7 +453,7 @@ fn make_cluster_info() -> StreamingClusterInfo {
 async fn test_graph_builder() -> MetaResult<()> {
     let env = MetaSrvEnv::for_test().await;
     let parallel_degree = 4;
-    let job = StreamingJob::Table(None, make_materialize_table(888));
+    let job = StreamingJob::Table(None, make_materialize_table(888), TableJobType::General);
 
     let graph = make_stream_graph();
     let fragment_graph = StreamFragmentGraph::new(graph, env.id_gen_manager_ref(), &job).await?;
@@ -520,7 +521,7 @@ async fn test_graph_builder() -> MetaResult<()> {
         );
         let mut node = actor.get_nodes().unwrap();
         while !node.get_input().is_empty() {
-            node = node.get_input().get(0).unwrap();
+            node = node.get_input().first().unwrap();
         }
         match node.get_node_body().unwrap() {
             NodeBody::Merge(merge_node) => {

@@ -23,6 +23,7 @@ use risingwave_pb::catalog::{
     PbConnection, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
 
+use super::OwnedByUserCatalog;
 use crate::catalog::connection_catalog::ConnectionCatalog;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::catalog::index_catalog::IndexCatalog;
@@ -31,6 +32,7 @@ use crate::catalog::system_catalog::SystemTableCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::view_catalog::ViewCatalog;
 use crate::catalog::{ConnectionId, DatabaseId, SchemaId, SinkId, SourceId, ViewId};
+use crate::user::UserId;
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
@@ -89,6 +91,13 @@ impl SchemaCatalog {
         self.view_by_id
             .try_insert(sys_view.id, sys_view.clone())
             .unwrap();
+    }
+
+    pub fn update_self(&mut self, prost: &PbSchema) {
+        self.id = prost.id;
+        self.database_id = prost.database_id;
+        self.name = prost.name.clone();
+        self.owner = prost.owner;
     }
 
     pub fn update_table(&mut self, prost: &PbTable) -> Arc<TableCatalog> {
@@ -183,7 +192,7 @@ impl SchemaCatalog {
                     .unwrap();
                 entry.get_mut().remove(pos);
             }
-            Vacant(_entry) => unreachable!(),
+            Vacant(_entry) => (),
         };
     }
 
@@ -347,6 +356,32 @@ impl SchemaCatalog {
             .expect("function not found by argument types");
     }
 
+    pub fn update_function(&mut self, prost: &PbFunction) {
+        let name = prost.name.clone();
+        let id = prost.id.into();
+        let function = FunctionCatalog::from(prost);
+        let function_ref = Arc::new(function);
+
+        let old_function_by_id = self.function_by_id.get(&id).unwrap();
+        let old_function_by_name = self
+            .function_by_name
+            .get_mut(&old_function_by_id.name)
+            .unwrap();
+        // check if function name get updated.
+        if old_function_by_id.name != name {
+            old_function_by_name.remove(&old_function_by_id.arg_types);
+            if old_function_by_name.is_empty() {
+                self.function_by_name.remove(&old_function_by_id.name);
+            }
+        }
+
+        self.function_by_name
+            .entry(name)
+            .or_default()
+            .insert(old_function_by_id.arg_types.clone(), function_ref.clone());
+        self.function_by_id.insert(id, function_ref);
+    }
+
     pub fn create_connection(&mut self, prost: &PbConnection) {
         let name = prost.name.clone();
         let id = prost.id;
@@ -358,6 +393,22 @@ impl SchemaCatalog {
         self.connection_by_id
             .try_insert(id, connection_ref)
             .unwrap();
+    }
+
+    pub fn update_connection(&mut self, prost: &PbConnection) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let connection = ConnectionCatalog::from(prost);
+        let connection_ref = Arc::new(connection);
+
+        let old_connection = self.connection_by_id.get(&id).unwrap();
+        // check if connection name get updated.
+        if old_connection.name != name {
+            self.connection_by_name.remove(&old_connection.name);
+        }
+
+        self.connection_by_name.insert(name, connection_ref.clone());
+        self.connection_by_id.insert(id, connection_ref);
     }
 
     pub fn drop_connection(&mut self, connection_id: ConnectionId) {
@@ -440,6 +491,14 @@ impl SchemaCatalog {
         self.table_by_id.get(table_id)
     }
 
+    pub fn get_view_by_name(&self, view_name: &str) -> Option<&Arc<ViewCatalog>> {
+        self.view_by_name.get(view_name)
+    }
+
+    pub fn get_view_by_id(&self, view_id: &ViewId) -> Option<&Arc<ViewCatalog>> {
+        self.view_by_id.get(view_id)
+    }
+
     pub fn get_source_by_name(&self, source_name: &str) -> Option<&Arc<SourceCatalog>> {
         self.source_by_name.get(source_name)
     }
@@ -481,8 +540,8 @@ impl SchemaCatalog {
             .map(|table| table.name.clone())
     }
 
-    pub fn get_view_by_name(&self, view_name: &str) -> Option<&Arc<ViewCatalog>> {
-        self.view_by_name.get(view_name)
+    pub fn get_function_by_id(&self, function_id: FunctionId) -> Option<&Arc<FunctionCatalog>> {
+        self.function_by_id.get(&function_id)
     }
 
     pub fn get_function_by_name_args(
@@ -499,6 +558,13 @@ impl SchemaCatalog {
             return None;
         }
         Some(functions.values().collect())
+    }
+
+    pub fn get_connection_by_id(
+        &self,
+        connection_id: &ConnectionId,
+    ) -> Option<&Arc<ConnectionCatalog>> {
+        self.connection_by_id.get(connection_id)
     }
 
     pub fn get_connection_by_name(&self, connection_name: &str) -> Option<&Arc<ConnectionCatalog>> {
@@ -533,8 +599,10 @@ impl SchemaCatalog {
     pub fn name(&self) -> String {
         self.name.clone()
     }
+}
 
-    pub fn owner(&self) -> u32 {
+impl OwnedByUserCatalog for SchemaCatalog {
+    fn owner(&self) -> UserId {
         self.owner
     }
 }

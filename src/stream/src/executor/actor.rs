@@ -21,6 +21,7 @@ use futures::future::join_all;
 use hytra::TrAdder;
 use parking_lot::Mutex;
 use risingwave_common::error::ErrorSuppressor;
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::ExprError;
 use tokio_stream::StreamExt;
@@ -91,15 +92,12 @@ impl ActorContext {
                 self.error_suppressor.lock().max()
             );
         }
-        self.streaming_metrics
-            .user_compute_error_count
-            .with_label_values(&[
-                "ExprError",
-                &err_str,
-                executor_name,
-                &self.fragment_id.to_string(),
-            ])
-            .inc();
+        GLOBAL_ERROR_METRICS.user_compute_error.report([
+            "ExprError".to_owned(),
+            err_str,
+            executor_name.to_owned(),
+            self.fragment_id.to_string(),
+        ]);
     }
 
     pub fn store_mem_usage(&self, val: usize) {
@@ -163,6 +161,11 @@ where
     }
 
     async fn run_consumer(self) -> StreamResult<()> {
+        fail::fail_point!("start_actors_err", |_| Err(anyhow::anyhow!(
+            "intentional start_actors_err"
+        )
+        .into()));
+
         let id = self.actor_context.id;
 
         let span_name = format!("Actor {id}");
@@ -196,6 +199,11 @@ where
                 Ok(None) => break Err(anyhow!("actor exited unexpectedly").into()),
                 Err(err) => break Err(err),
             };
+
+            fail::fail_point!("collect_actors_err", id == 10, |_| Err(anyhow::anyhow!(
+                "intentional collect_actors_err"
+            )
+            .into()));
 
             // Collect barriers to local barrier manager
             self.context.lock_barrier_manager().collect(id, &barrier);
