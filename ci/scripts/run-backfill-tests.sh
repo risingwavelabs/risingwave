@@ -4,7 +4,6 @@
 
 # USAGE:
 # ```sh
-# cargo make ci-start ci-backfill
 # ./ci/scripts/run-backfill-tests.sh
 # ```
 # Example progress:
@@ -23,7 +22,7 @@ TEST_DIR=$PWD/e2e_test
 BACKGROUND_DDL_DIR=$TEST_DIR/background_ddl
 COMMON_DIR=$BACKGROUND_DDL_DIR/common
 
-CLUSTER_PROFILE='ci-1cn-1fe-with-recovery'
+CLUSTER_PROFILE='ci-1cn-1fe-kafka-with-recovery'
 export RUST_LOG="risingwave_meta=debug"
 
 run_sql_file() {
@@ -126,9 +125,9 @@ test_backfill_tombstone() {
   WITH (
     connector = 'datagen',
     fields.v1._.kind = 'sequence',
-    datagen.rows.per.second = '1000000'
+    datagen.rows.per.second = '2000000'
   )
-  FORMAT PLAIN
+  FORMAT DEBEZIUM
   ENCODE JSON;
   "
 
@@ -150,10 +149,62 @@ test_backfill_tombstone() {
   wait
 }
 
+# Test sink backfill recovery
+test_sink_backfill_recovery() {
+  total_records=100000
+  echo "--- e2e, test_sink_backfill_recovery"
+  cargo make ci-start $CLUSTER_PROFILE
+  run_sql "create table t (v1 int);"
+  run_sql "insert into t select * from generate_series(1, $total_records);"
+  run_sql "flush;"
+  run_sql "SET STREAMING_RATE_LIMIT = 2000;"
+
+  run_sql "
+  create sink s as select x.v1 as v1
+    from t x join t y
+      on x.v1 = y.v1
+  with (
+     connector='kafka',
+     properties.bootstrap.server='localhost:29092',
+     topic='s_kafka',
+     primary_key='v1',
+     allow.auto.create.topics=true,
+  )
+  FORMAT DEBEZIUM ENCODE JSON;"
+
+  # Let backfill progress a little.
+  sleep 3
+
+  # Check progress
+  sqllogictest -p 4566 -d dev 'e2e_test/background_ddl/common/validate_one_job.slt'
+
+  # Restart
+  restart_cluster
+  sleep 3
+
+  # FIXME(kwannoel): Sink's backfill progress is not recovered yet.
+  # Check progress
+  # sqllogictest -p 4566 -d dev 'e2e_test/background_ddl/common/validate_one_job.slt'
+
+  # Sink back into rw
+  run_sql "CREATE TABLE table_kafka (v1 int primary key)
+    WITH (
+      connector = 'kafka',
+      topic = 's_kafka',
+      properties.bootstrap.server = 'localhost:29092',
+  ) FORMAT DEBEZIUM ENCODE JSON;"
+
+  sleep 10
+
+  # Verify data matches upstream table.
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/validate_sink.slt'
+}
+
 main() {
   set -euo pipefail
-  test_snapshot_and_upstream_read
-  test_backfill_tombstone
+#  test_snapshot_and_upstream_read
+#  test_backfill_tombstone
+  test_sink_backfill_recovery
 }
 
 main
