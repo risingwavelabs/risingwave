@@ -18,9 +18,8 @@ use std::path::Path;
 
 use parking_lot::Once;
 use risingwave_common::config::HeapProfilingConfig;
-use tikv_jemalloc_ctl::{
-    epoch as jemalloc_epoch, opt as jemalloc_opt, prof as jemalloc_prof, stats as jemalloc_stats,
-};
+use risingwave_common::util::resource_util;
+use tikv_jemalloc_ctl::{opt as jemalloc_opt, prof as jemalloc_prof};
 use tokio::time::{self, Duration};
 
 use super::AUTO_DUMP_SUFFIX;
@@ -29,8 +28,6 @@ pub struct AutoDump {
     config: HeapProfilingConfig,
     threshold_auto_dump_heap_profile: usize,
     jemalloc_dump_mib: jemalloc_prof::dump_mib,
-    jemalloc_allocated_mib: jemalloc_stats::allocated_mib,
-    jemalloc_epoch_mib: tikv_jemalloc_ctl::epoch_mib,
     /// If jemalloc profiling is enabled
     opt_prof: bool,
 }
@@ -44,16 +41,12 @@ impl AutoDump {
         let threshold_auto_dump_heap_profile =
             (total_memory as f64 * config.threshold_auto as f64) as usize;
         let jemalloc_dump_mib = jemalloc_prof::dump::mib().unwrap();
-        let jemalloc_allocated_mib = jemalloc_stats::allocated::mib().unwrap();
-        let jemalloc_epoch_mib = jemalloc_epoch::mib().unwrap();
         let opt_prof = jemalloc_opt::prof::read().unwrap();
 
         Self {
             config,
             threshold_auto_dump_heap_profile,
             jemalloc_dump_mib,
-            jemalloc_allocated_mib,
-            jemalloc_epoch_mib,
             opt_prof,
         }
     }
@@ -80,20 +73,10 @@ impl AutoDump {
         }
     }
 
-    fn advance_jemalloc_epoch(&self, prev_jemalloc_allocated_bytes: usize) -> usize {
-        if let Err(e) = self.jemalloc_epoch_mib.advance() {
-            tracing::warn!("Jemalloc epoch advance failed! {:?}", e);
-        }
-
-        self.jemalloc_allocated_mib.read().unwrap_or_else(|e| {
-            tracing::warn!("Jemalloc read allocated failed! {:?}", e);
-            prev_jemalloc_allocated_bytes
-        })
-    }
-
     /// Start the deamon task of auto heap profiling.
     pub fn start(self) {
         if !self.config.enable_auto {
+            tracing::info!("Auto memory dump is disabled with enable_auto=false");
             return;
         }
 
@@ -105,8 +88,9 @@ impl AutoDump {
                 let mut prev_used_memory_bytes = 0;
                 loop {
                     interval.tick().await;
-                    let cur_used_memory_bytes = self.advance_jemalloc_epoch(prev_used_memory_bytes);
+                    let cur_used_memory_bytes = resource_util::memory::total_memory_used_bytes();
 
+                    // Dump heap profile when memory usage is crossing the threshold.
                     if self.opt_prof
                         && cur_used_memory_bytes > self.threshold_auto_dump_heap_profile
                         && prev_used_memory_bytes <= self.threshold_auto_dump_heap_profile
