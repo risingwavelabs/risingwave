@@ -30,6 +30,9 @@ git config --global --add safe.directory /risingwave
 
 download_and_prepare_rw "$profile" common
 
+echo "--- Generate RiseDev CI config"
+cp ci/risedev-components.ci.env risedev-components.user.env
+
 ################ TESTS
 
 ./ci/scripts/run-backfill-tests.sh
