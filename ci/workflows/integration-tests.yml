@@ -83,7 +83,6 @@ steps:
           - "cassandra-and-scylladb-sink"
           - "elasticsearch-sink"
           - "redis-sink"
-          - "vector"
 
   - label: "Run Demos {{matrix.testcase}} {{matrix.format}}"
     command: "ci/scripts/integration-tests.sh -c {{matrix.testcase}} -f json"

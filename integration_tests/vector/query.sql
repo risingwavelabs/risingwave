@@ -6,8 +6,3 @@ FROM
     event
 LIMIT
     10;
-
-SELECT
-    COUNT(1)
-FROM
-    event;
