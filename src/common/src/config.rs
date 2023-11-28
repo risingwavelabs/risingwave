@@ -1306,7 +1306,7 @@ pub mod default {
         }
 
         pub fn stream_exchange_concurrent_dispatchers() -> usize {
-            32
+            0
         }
 
         pub fn stream_dml_channel_initial_permits() -> usize {
