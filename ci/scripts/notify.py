@@ -19,7 +19,6 @@ TEST_MAP = {
     "s3-source-test-for-opendal-fs-engine": ["congyi"],
     "pulsar-source-tests": ["renjie"],
     "connector-node-integration-test": ["siyuan"],
-    "misc-check": ["tianxiao"]
 }
 
 def get_failed_tests(get_test_status, test_map):
