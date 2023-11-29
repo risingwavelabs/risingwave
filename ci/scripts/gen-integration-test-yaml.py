@@ -58,7 +58,7 @@ auto-retry: &auto-retry
     # Agent terminated because the AWS EC2 spot instance killed by AWS.
     - signal_reason: agent_stop
       limit: 3
-      
+
 steps: {pipeline_steps}
 YAML
 """
