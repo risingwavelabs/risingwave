@@ -337,7 +337,7 @@ def run_bigquery_demo():
             sql = "SELECT COUNT(*) AS count FROM `{}`".format(rel)
             print("run sql {} on Bigquery".format(sql))
             rows = subprocess.check_output(["docker", "compose", "exec", "gcloud-cli", "bq", "query", "--use_legacy_sql=false", "--format=json", sql], cwd=demo_dir)
-            rows = json.loads(rows.decode("utf-8"))[0]['count']
+            rows = int(json.loads(rows.decode("utf-8").strip())[0]['count'])
             print("{} rows in {}".format(rows, rel))
             if rows < 1:
                 failed_cases.append(rel)
