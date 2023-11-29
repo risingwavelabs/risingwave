@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::meta::PausedReason;
 use tokio::sync::oneshot;
 
-use crate::{MetaError, MetaResult};
+use crate::MetaError;
 
 /// The barrier info sent back to the caller when a barrier is injected.
 #[derive(Debug, Clone, Copy)]
@@ -35,7 +37,7 @@ pub(crate) struct Notifier {
     pub injected: Option<oneshot::Sender<BarrierInfo>>,
 
     /// Get notified when scheduled barrier is collected or failed.
-    pub collected: Option<oneshot::Sender<MetaResult<()>>>,
+    pub collected: Option<oneshot::Sender<Result<(), Arc<MetaError>>>>,
 
     /// Get notified when scheduled barrier is finished.
     pub finished: Option<oneshot::Sender<()>>,
@@ -57,7 +59,7 @@ impl Notifier {
     }
 
     /// Notify when we failed to collect a barrier. This function consumes `self`.
-    pub fn notify_collection_failed(self, err: MetaError) {
+    pub fn notify_collection_failed(self, err: Arc<MetaError>) {
         if let Some(tx) = self.collected {
             tx.send(Err(err)).ok();
         }

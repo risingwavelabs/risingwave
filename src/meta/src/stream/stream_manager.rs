@@ -263,11 +263,13 @@ impl GlobalStreamManager {
                         revert_func.await;
                     }
                     let _ = sender
-                        .send(CreatingState::Failed {
-                            reason: err.clone(),
-                        })
+                        .send(CreatingState::Failed { reason: err })
                         .await
-                        .inspect_err(|_| {
+                        .inspect_err(|send_err| {
+                            let err = match &send_err.0 {
+                                CreatingState::Failed { reason } => reason,
+                                _ => unreachable!(),
+                            };
                             tracing::warn!("failed to notify failed: {table_id}, err: {err}")
                         });
                 }

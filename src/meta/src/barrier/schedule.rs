@@ -231,7 +231,7 @@ impl BarrierScheduler {
             ..Default::default()
         };
         self.attach_notifiers(vec![notifier], checkpoint).await?;
-        rx.await.unwrap()
+        Ok(rx.await.unwrap()?)
     }
 
     /// Run multiple commands and return when they're all completely finished. It's ensured that
@@ -368,12 +368,14 @@ impl ScheduledBarriers {
     /// Mark command scheduler as blocked and abort all queued scheduled command and notify with
     /// specific reason.
     pub(super) async fn abort_and_mark_blocked(&self, reason: impl Into<String> + Copy) {
+        let reason = reason.into();
+
         let mut queue = self.inner.queue.write().await;
-        queue.mark_blocked(reason.into());
+        queue.mark_blocked(reason.clone());
         while let Some(Scheduled { notifiers, .. }) = queue.queue.pop_front() {
-            notifiers
-                .into_iter()
-                .for_each(|notify| notify.notify_collection_failed(anyhow!(reason.into()).into()))
+            notifiers.into_iter().for_each(|notify| {
+                notify.notify_collection_failed(Arc::new(anyhow!(reason.clone()).into()))
+            })
         }
     }
 
